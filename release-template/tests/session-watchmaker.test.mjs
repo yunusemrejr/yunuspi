@@ -178,3 +178,49 @@ test('watchmaker packets stay within budget and validate memos', () => {
   assert.ok(words.advice?.memo.length <= 140 && words.advice.memo.endsWith('verify…'), 'clipping ends on a word boundary');
   assert.ok(long.advice?.note, 'a clipped memo never voids the note');
 });
+
+test('a long unread run folds into a digest so quiet reviews back off instead of paying every minute', async (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'watchmaker-fold-'));
+  const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_WATCHMAKER', 'PI_OBSERVER_TOOLS'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, { PI_CODING_AGENT_DIR: cwd, PI_LLM_PREFERENCES_FILE: path.join(cwd, 'prefs.json'), PI_SUBAGENTS_ECONOMY_CONFIG: path.join(cwd, 'economy.json'), PI_PROVIDER_STATE_FILE: path.join(cwd, 'health.json'), PI_MODEL_EXCLUSIONS_PATH: path.join(cwd, 'exclusions.json') });
+  for (const key of keys.slice(5)) delete process.env[key];
+  fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
+  t.after(() => { for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value; fs.rmSync(cwd, { recursive: true, force: true }); });
+  const time = clock(), handlers = new Map(), packets = [];
+  const pi = { on: (event, fn) => { handlers.set(event, fn); }, events: { on: () => () => {} }, registerMessageRenderer: () => {}, registerCommand: () => {},
+    getActiveTools: () => [], getAllTools: () => [], sendMessage: () => {}, appendEntry: () => {} };
+  const ctx = { cwd, sessionManager: { getSessionId: () => 'watchmaker-fold', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] }, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false, ui: { setStatus: () => {} } };
+  watchmakerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }),
+    dispatch: async (_route, packet) => { packets.push(packet.text); return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] }; } });
+  const fire = (event, payload) => handlers.get(event)?.(payload, ctx);
+  fire('session_start', {});
+  fire('input', { source: 'interactive', requestId: 'req-fold', originalText: 'Refactor the fixture modules.' });
+  fire('before_agent_start', { systemPromptOptions: {} });
+  fire('message_start', { message: { role: 'user', [GUARDIAN_META]: { requestId: 'req-fold' } } });
+  const run = async (from, count, failAt) => {
+    for (let i = from; i < from + count; i++) {
+      fire('tool_execution_start', { toolCallId: `edit-${i}`, toolName: 'edit', args: { path: `src/module-${i}.ts` } });
+      await time.advance(500);
+      fire('tool_result', { toolCallId: `edit-${i}`, toolName: 'edit', input: { path: `src/module-${i}.ts` }, isError: i === failAt, content: [{ type: 'text', text: i === failAt ? 'EARLY-FAILURE old text not found' : 'edited' }] });
+    }
+  };
+  await run(0, 30, 2);
+  await time.advance(60000);
+  for (let i = 0; i < 100 && packets.length < 1; i++) await tick();
+  assert.equal(packets.length, 1);
+  assert.match(packets[0], /earlier events summarized/, 'older routine rows fold into one digest');
+  assert.match(packets[0], /EARLY-FAILURE/, 'an older failure stays verbatim');
+  assert.match(packets[0], /module-29/, 'the review keeps pace with the newest work');
+  const settle = async (count) => { for (let i = 0; i < 100 && packets.length < count; i++) await tick(); };
+  // Routine progress after quiet reviews no longer counts as a backlog, so
+  // the quiet backoff grows instead of paying for a review every minute.
+  await run(30, 20);
+  await time.advance(60000); await settle(2);
+  assert.equal(packets.length, 2, 'one quiet review holds only one interval');
+  await run(50, 20);
+  await time.advance(60000); await settle(3);
+  assert.equal(packets.length, 2, 'two quiet reviews in a row double the wait despite routine progress');
+  await time.advance(60000); await settle(3);
+  assert.equal(packets.length, 3, 'the hold is bounded; the next review still arrives');
+});

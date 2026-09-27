@@ -3271,7 +3271,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 327
+        "line": 341
       },
       {
         "name": "websearch",
@@ -3421,7 +3421,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 136,
+        "line": 140,
         "kind": "literal"
       },
       {
@@ -4093,7 +4093,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 136,
+        "line": 140,
         "kind": "literal"
       },
       {

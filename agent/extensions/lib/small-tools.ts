@@ -10,7 +10,7 @@ import {inspectUiSource} from './slop-guidance-signals.ts';
 import {parseData, executeDataQuery} from './data-query.ts';
 
 const disabled = () => process.env.PI_SMALL_TOOLS === 'off' || process.env.PI_REASONING_AIDS === 'off';
-const TEXT_LIMIT = 65536, IMAGE_LIMIT = 1048576;
+const TEXT_LIMIT = 65536, UI_LIMIT = 196608, IMAGE_LIMIT = 1048576;
 const str = (maxLength = 128) => Type.String({maxLength});
 const list = (items: any) => Type.Array(items,{maxItems:2048});
 const numbers = () => list(Type.Number({minimum:-1e100,maximum:1e100}));
@@ -112,7 +112,7 @@ export default function registerSmallTools(pi: any) {
       if (p.operation==='svg' && typeof p.text==='string') return inspectSvg(p.text);
       if (p.operation==='image' && 'text' in p) throw Error('Image inspection requires a path');
       if (p.operation==='ui' && 'text' in p) throw Error('UI inspection requires a path');
-      const data=await readArtifact(p.path,ctx?.cwd,p.operation==='image'?IMAGE_LIMIT:TEXT_LIMIT,p.operation==='image',signal);
+      const data=await readArtifact(p.path,ctx?.cwd,p.operation==='image'?IMAGE_LIMIT:p.operation==='ui'?UI_LIMIT:TEXT_LIMIT,p.operation==='image',signal);
       if(p.operation==='image') return {...inspectImage(data.bytes),fileBytes:data.fileBytes,headerPrefixOnly:data.headerOnly};
       let text: string;
       try { text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes); }

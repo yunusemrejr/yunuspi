@@ -174,3 +174,12 @@ test('todo dependency and child refusals name the blocking tasks',()=>{
  assert.match(done.op.message,/Reopen the parent before adding or reopening unfinished children/);
  assert.match(done.op.message,/#3 "Verify: build and run" \(completed\) still has unfinished #4 "Sub-verify" \(pending\)/);
 });
+test('a batch completing a dependency later in the same batch applies in dependency order',()=>{
+ const base=applyTaskMutation({tasks:[],nextId:1},'batch',{operations:[{action:'create',id:-1,subject:'Outcome'},{action:'create',id:-2,parentId:-1,subject:'Build'},{action:'create',parentId:-1,subject:'Verify',blockedBy:[-2]}]}).state;
+ // Parent first, then the blocked task, then its dependency: the stated final plan is valid.
+ const done=applyTaskMutation(base,'batch',{operations:[{action:'update',id:1,status:'completed'},{action:'update',id:3,status:'completed'},{action:'update',id:2,status:'completed'}]});
+ assert.equal(done.op.kind,'batch');assert.deepEqual(done.state.tasks.map(t=>t.status),['completed','completed','completed']);
+ // A dependency the batch never finishes still fails atomically with the real gate.
+ const stuck=applyTaskMutation(base,'batch',{operations:[{action:'update',id:3,status:'completed'},{action:'update',id:2,status:'in_progress'}]});
+ assert.equal(stuck.op.kind,'error');assert.match(stuck.op.message,/batch operation 1: Complete dependencies/);assert.equal(stuck.state,base);
+});

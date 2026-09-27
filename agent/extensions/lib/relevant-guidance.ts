@@ -759,9 +759,14 @@ export function createRelevantGuidance(pi: any) {
         const signal = callerSignal ? AbortSignal.any([callerSignal, searchController.signal]) : searchController.signal;
         const cancelled = () => ({ isError: true, content: [{ type: 'text', text: 'Skill discovery was cancelled or superseded.' }] });
         if (signal.aborted) return cancelled();
-        const group = typeof input.group === 'string' ? input.group.trim().slice(0,64) : '';
-        if (group && !CAPABILITY_GROUPS.some(candidate => candidate.id === group))
-          return {isError:true, content:[{type:'text',text:'Unknown skill group. Use skill_review({action:"browse"}) for the available group ids.'}]};
+        let group = typeof input.group === 'string' ? input.group.trim().slice(0,64) : '';
+        // A topic sent as a group ("motion", "3d") is a search term, not a
+        // failed call: search it across all groups and say so.
+        let topic = '';
+        if (group && !CAPABILITY_GROUPS.some(candidate => candidate.id === group)) {
+          topic = group; group = '';
+          input = {...input, query: [typeof input.query === 'string' ? input.query : '', topic].join(' ').trim()};
+        }
         if (input.action === 'browse' && !group && typeof input.query !== 'string') {
           const groups = groupOverview(skills.map(skill => ({name:skill.name,description:skill.description})));
           const result = {groups, note:'Browse is metadata-only. Supply group or query for a short paginated preview; search and browse never create a review obligation.'};
@@ -770,7 +775,7 @@ export function createRelevantGuidance(pi: any) {
         const query = typeof input.query === 'string' ? input.query.trim().slice(0,256) : '';
         const page = await searchSkills(query,input.limit,input.offset,group,signal);
         if (signal.aborted) return cancelled();
-        const result = {query, ...(group ? {group} : {}), ...page,
+        const result = {query, ...(group ? {group} : {}), ...(topic ? {unknownGroup:topic, groups:CAPABILITY_GROUPS.map(candidate => candidate.id)} : {}), ...page,
           nextOffset:page.remaining ? page.offset+page.results.length : null,
           next:'Read a chosen result.path with the read tool when useful. To explore tools or local ML/SLM helpers, use tool_search({}).',
           scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};

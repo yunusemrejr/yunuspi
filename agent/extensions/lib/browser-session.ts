@@ -104,10 +104,14 @@ export function registerBrowserSession(pi: any) {
   let owner: string | undefined;
   let opening = 0;
   let helping = false;
+  // Handles and aliases this owner closed are never redirected to another session.
+  const retired = new Set<string>();
   async function close(id: string) {
     const session = sessions.get(id);
     if (!session) return;
     sessions.delete(id);
+    retired.add(id);
+    if (session.alias) retired.add(session.alias);
     if (session.alias && aliases.get(session.alias) === id) aliases.delete(session.alias);
     session.closed = true;
     session.pending?.reject(Error("Browser session closed"));
@@ -234,13 +238,18 @@ export function registerBrowserSession(pi: any) {
         path.resolve(ctx.cwd);
       if (owner !== scope) {
         await closeAll();
+        retired.clear();
         owner = scope;
       }
-      const reply = (details: any, images: any[] = []) => ({
+      let resolved: { from: unknown; reason: string } | undefined;
+      const reply = (details: any, images: any[] = []) => {
+        if (resolved && details && typeof details === "object") details = { ...details, sessionResolved: resolved };
+        return {
         content: [{ type: "text", text: JSON.stringify(details) }, ...images],
         details,
         ...(details.ok === false ? { isError: true } : {}),
-      });
+        };
+      };
       const rejected = (kind: string, nextStep: string) => reply({ ok: false, failure: { stage: "validation", kind, outcome: "not-dispatched", nextStep } });
       const unknownSession = () => rejected("unknown-session", "No action was dispatched. Use a session UUID or alias returned by open in this agent; list shows its current sessions. If none exists, open with an HTTP(S) URL.");
       if (p.action !== "open" && aliases.has(p.session)) p = { ...p, session: aliases.get(p.session) };
@@ -249,6 +258,25 @@ export function registerBrowserSession(pi: any) {
       else if (p.action !== "open" && typeof p.session === "string" && p.session.length >= 8 && !sessions.has(p.session)) {
         const matches = [...sessions.keys()].filter(id => id.startsWith(p.session));
         if (matches.length === 1) p = { ...p, session: matches[0] };
+      }
+      // A handle this agent does not hold is usually a remembered alias or an
+      // omitted session. With exactly one session open it is the only possible
+      // target (never for close); with none open, a navigate naming a URL is an
+      // open. Either way the reply says what was resolved.
+      // A full UUID or a retired handle names one specific session, so it is
+      // never redirected.
+      const redirectable = p.session === undefined || (typeof p.session === "string" && !retired.has(p.session) && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(p.session));
+      if (!["open", "list", "close"].includes(p.action) && !sessions.has(p.session) && redirectable) {
+        if (sessions.size === 1) {
+          resolved = { from: p.session ?? null, reason: "only open session in this agent" };
+          p = { ...p, session: [...sessions.keys()][0] };
+        } else if (sessions.size === 0 && opening === 0 && p.action === "navigate" && typeof p.url === "string") {
+          const alias = typeof p.session === "string" && p.session.trim() && p.session.length <= 64 ? p.session : undefined;
+          const opened = await execute(_id, { action: "open", url: p.url, visible: p.visible, session: alias }, signal, _update, ctx);
+          if (!opened.isError) opened.details = { ...opened.details, sessionResolved: { from: p.session ?? null, reason: "no session was open; navigate opened one" } };
+          if (!opened.isError) opened.content = [{ type: "text", text: JSON.stringify(opened.details) }, ...opened.content.slice(1)];
+          return opened;
+        }
       }
       if (p.action === "list")
         return reply({

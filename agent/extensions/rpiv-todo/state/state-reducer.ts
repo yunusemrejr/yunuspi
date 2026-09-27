@@ -285,6 +285,8 @@ function reduceTaskMutation(
 	}
 }
 
+const ORDER_GATED = /^(?:Complete dependencies before|Complete or explicitly remove unfinished children|Reopen the parent before adding or reopening unfinished children)/;
+
 /** Atomic plan edits use the existing reducer and persisted snapshot. */
 export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
  // The schema carries `operations` alongside every action, so a
@@ -301,6 +303,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
   // caller error, not a positive-id violation: say which alias is missing and
   // how to declare it instead of failing later with a contradictory message.
   const resolveRef = (id: number): number | undefined => id < 0 ? ids[String(id)] : id;
+  const deferred: {index: number; item: TaskMutationParams & {action: "create" | "update" | "delete"}; message: string}[] = [];
   const aliasError = (field: string, id: number, index: number) => errorResult(state, `batch operation ${index+1}: ${field} ${id} matches no earlier batch alias; add "id": ${id} to the referenced create in this batch`);
   for (const [index, input] of params.operations.entries()) {
    if (!input || !["create", "update", "delete"].includes(input.action)) return errorResult(state, `batch operation ${index+1}: unsupported action`);
@@ -328,8 +331,23 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
     item[key] = deps;
    }
    const result = applyTaskMutation(next, item.action, item);
-   if (result.op.kind === "error") return errorResult(state, `batch operation ${index+1}: ${result.op.message}`);
+   if (result.op.kind === "error") {
+    // A batch states the final plan, so an update gated only by work this
+    // same batch finishes later (a dependency or child completed further
+    // down) is retried after the rest instead of failing the whole batch.
+    if (item.action === "update" && ORDER_GATED.test(result.op.message)) { deferred.push({index, item, message: result.op.message}); continue; }
+    return errorResult(state, `batch operation ${index+1}: ${result.op.message}`);
+   }
    next = result.state;
+  }
+  while (deferred.length) {
+   const waiting = deferred.splice(0);
+   for (const entry of waiting) {
+    const result = applyTaskMutation(next, "update", entry.item);
+    if (result.op.kind === "error") { entry.message = result.op.message; deferred.push(entry); }
+    else next = result.state;
+   }
+   if (deferred.length === waiting.length) return errorResult(state, `batch operation ${deferred[0].index+1}: ${deferred[0].message}`);
   }
   return {state:next, op:{kind:"batch", ids, count:params.operations.length}};
  }

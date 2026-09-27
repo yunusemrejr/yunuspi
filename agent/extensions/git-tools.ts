@@ -402,7 +402,23 @@ export default function gitTools(pi: any) {
     ) {
       const cwd =
         typeof ctx?.cwd === "string" && ctx.cwd ? ctx.cwd : process.cwd();
-      const text = await runGitInfo(params, cwd);
+      let text: string;
+      try {
+        text = await runGitInfo(params, cwd);
+      } catch (error: any) {
+        // Outside a repository there is simply no Git state: a settled fact,
+        // not a failure to retry. Other errors (including scope identity
+        // failures inside a real repository) still surface as errors.
+        const message = String(error?.message ?? "");
+        let outside = message === "Not inside a Git repository";
+        if (!outside && /^(?:Unable to establish managed Git repository identity|Git working tree required)$/.test(message))
+          outside = await git(["rev-parse", "--is-inside-work-tree"], cwd).then(() => false, (probe) => probe?.message === "Not inside a Git repository");
+        if (!outside) throw error;
+        return {
+          content: [{ type: "text", text: `No Git repository at ${cwd} or its parents, so there is no status, history or diff to inspect. If the task needs version control, run \`git init\` with bash.` }],
+          details: { action: params.action, cwd, repository: false },
+        };
+      }
       return {
         content: [{ type: "text", text }],
         details: { action: params.action, cwd },

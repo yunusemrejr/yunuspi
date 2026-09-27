@@ -336,6 +336,7 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
    return sa.length === sb.length ? -1 : n;
   } catch { return undefined; }
  };
+ const printedFor = new WeakSet();
  return async function (...args) {
   const sink = sessionObservability()[Symbol.for("yunus-pi.metrics.v1")];
   if (typeof sink !== "function") return handler.apply(this, args);
@@ -376,12 +377,20 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
     : hook === "before_provider_request"
       ? event?.payload
       : undefined;
+  // Size walks are cheap; JSON fingerprints of a whole conversation are not
+  // (tens to hundreds of ms per handler on long sessions). The sink keeps
+  // only first-seen hashes per hook key and the earliest change position, so
+  // fingerprint once per session sink and locate changes only when the
+  // handler produced or caused one. `ms` measures the handler alone.
+  const needPrint = input !== undefined && !printedFor.has(sink);
   let before, beforePrint;
   try {
-   if (input !== undefined) { before = size(input); beforePrint = fingerprint(input); }
+   if (input !== undefined) before = size(input);
+   if (needPrint) { beforePrint = fingerprint(input); printedFor.add(sink); }
   } catch {}
   let result,
-   error = false;
+   error = false,
+   handlerMs;
   try {
    result = await handler.apply(this, args);
    return result;
@@ -389,11 +398,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
    error = true;
    throw e;
   } finally {
+   handlerMs = performance.now() - started;
    try {
     const output = hook === "context" ? (result?.messages ?? input) : (result ?? input);
     const after = before === undefined ? undefined : size(output);
-    const afterPrint = before === undefined ? undefined : fingerprint(output);
-    const pos = before !== undefined ? changedAt(input, output) : undefined;
+    const afterPrint = needPrint ? fingerprint(output) : undefined;
+    const pos = before !== undefined && (output !== input || after !== before) ? changedAt(input, output) : undefined;
     const charsChanged = before !== undefined && after !== undefined ? Math.abs(after - before) : 0;
     sink("hook", {
      owner,
@@ -401,7 +411,7 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
      eventId,
      seq,
      revision: seq,
-     ms: performance.now() - started,
+     ms: handlerMs,
      at: Date.now(),
      error,
      changed: result !== undefined,
@@ -416,7 +426,7 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
        : 0,
      charsChanged,
      tokensChanged: Math.round(charsChanged / 4),
-     changedAt: Number.isSafeInteger(pos) ? pos : undefined,
+     changedAt: Number.isSafeInteger(pos) && pos >= 0 ? pos : undefined,
      beforeHash: beforePrint?.beforeHash,
      afterHash: afterPrint?.beforeHash,
      semanticHash: afterPrint?.semanticHash,

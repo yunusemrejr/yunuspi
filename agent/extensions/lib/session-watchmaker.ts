@@ -73,7 +73,7 @@ export function buildWatchmakerPacket(input: WatchmakerPacketInput): ObserverPac
   const rows = [...input.rows.filter(row => !resultIds.has(row.id)).slice(0, 28), ...resultRows];
   const evidence = [{ id: 'request', kind: 'user request', text: boundedObserverText(requestText, 600) },
     ...(input.requirements ? [{ id: 'requirements', kind: 'tracked requirements', text: boundedObserverText(input.requirements, 1200) }] : []),
-    ...rows.map(row => ({ ...row, text: boundedObserverText(row.text, TIME_KINDS.has(row.kind) || INTENT_KINDS.has(row.kind) || resultIds.has(row.id) ? 420 : 220) })),
+    ...rows.map(row => ({ ...row, text: boundedObserverText(row.text, TIME_KINDS.has(row.kind) || INTENT_KINDS.has(row.kind) || resultIds.has(row.id) || row.kind === 'event digest' ? 420 : 220) })),
     ...input.memos.slice(0, WATCHMAKER_MEMO_KEEP).map((memo, index) => ({ id: `memo-${index}`, kind: 'watchmaker memo', text: boundedObserverText(memo, WATCHMAKER_MEMO_CHARS) }))];
   const textForRanking = `${focused.slice(0, 800)} ${input.rows.map(x => `${x.tool ?? ''} ${x.text.slice(-120)}`).join(' ')}`;
   const tools = relevant(input.tools, textForRanking, 6), skills = relevant(input.skills, textForRanking, 3);

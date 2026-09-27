@@ -5,7 +5,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
 import { packetRequirements } from './lib/requirement-ledger.ts';
-import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { buildWatchmakerPacket, createWatchmakerScratchpad, watchmakerSink, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
@@ -222,7 +222,21 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       const timeEvidence = timeRows();
       for (const row of timeEvidence) journal.add({ ...row, at: now() });
       const resultIds = new Set(latestResults.map(row => row.id));
-      const evidence = [...timeEvidence, ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.filter(row => !resultIds.has(row.id)).slice(0, 8), ...latestResults];
+      // The time rows and ledger already account for every call, so an unread
+      // run longer than the window folds its older rows into one digest (older
+      // failures stay verbatim). Reading it as oldest-first chunks left the
+      // review minutes behind and a permanent backlog that defeated the quiet
+      // backoff: one paid review per minute, almost all without advice.
+      const unread = recent.filter(row => !resultIds.has(row.id)), folded = new Set<string>();
+      let queue = unread;
+      if (unread.length > 8) {
+        const newest = unread.slice(-5), older = unread.slice(0, -5);
+        const urgent = older.filter(row => ['tool error', 'guardian intervention'].includes(row.kind)).slice(-3);
+        const rest = older.filter(row => !urgent.includes(row));
+        for (const row of rest) folded.add(row.id);
+        queue = [digestObserverEvents(rest, `digest-${rest[rest.length - 1]?.id ?? 'backlog'}`), ...urgent, ...newest];
+      }
+      const evidence = [...timeEvidence, ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...queue, ...latestResults];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text), requirements: brief() || undefined });
@@ -261,8 +275,8 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
         allowTriage: !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly,
         requiresFullReview: recent.some(row => ['tool error', 'guardian intervention'].includes(row.kind)),
-        reviewed: () => { recent = recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
-        backlog: recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)).length,
+        reviewed: () => { const read = new Set(currentPacket.evidence.map(item => item.id)); recent = recent.filter(row => !read.has(row.id) && !folded.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
+        backlog: recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id) && !folded.has(row.id)).length,
         dispatched: () => {},
         applied: (advice: any) => {
           if (!owns(ctx)) return undefined;

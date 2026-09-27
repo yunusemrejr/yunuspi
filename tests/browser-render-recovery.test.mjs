@@ -99,6 +99,16 @@ test("browser validates before dispatch and resolves private aliases with compac
     assert.equal((await call({ action: "snapshot", session: "workspace" })).details.failure.outcome, "not-dispatched");
     const reopened = await call({ action: "open", session: "workspace", url });
     assert.notEqual(reopened.details.session, id);
+    // A remembered alias with exactly one open session resolves visibly; a closed UUID never redirects.
+    const guessed = await call({ action: "snapshot", session: "mailgenie" });
+    assert.equal(guessed.details.session, reopened.details.session);
+    assert.deepEqual(guessed.details.sessionResolved, { from: "mailgenie", reason: "only open session in this agent" });
+    assert.equal((await call({ action: "snapshot", session: id })).details.failure.kind, "unknown-session");
+    // With no session open, navigate to a URL opens one under the requested alias.
+    const navigated = await call({ action: "navigate", session: "late", url }, 1);
+    assert.notEqual(navigated.isError, true, JSON.stringify(navigated.details));
+    assert.equal(navigated.details.alias, "late");
+    assert.match(navigated.details.sessionResolved.reason, /navigate opened one/);
     await hooks[0].session_start();
     assert.deepEqual((await call({ action: "list" })).details.aliases, {});
   } catch (error) { unavailableBrowser(t, error); } finally {

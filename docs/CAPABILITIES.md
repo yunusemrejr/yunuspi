@@ -1136,7 +1136,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 686; literal)
 - `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 745; literal)
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
-- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 136; literal)
+- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 140; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 221; literal)
 - `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
@@ -1324,7 +1324,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 166)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 549)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1774)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 327)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 341)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3134)
 
 ### Dynamic command owners

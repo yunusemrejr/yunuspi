@@ -36,7 +36,10 @@ test('source checks identify specific component problems with independent negati
   assert.ok(!keys('ui.css','p{font-family:"Alpha",Beta,Gamma,serif}').includes('ui-font-competition'),'fallback stack is one role');
   for(const file of ['vendor/ui.css','vendor\\ui.css','ui.test.tsx','skills/example.md']) assert.equal(keys(file,pill).length,0);
   assert.equal(inspectUiSource('ui.json','{}').status,'unsupported');
-  assert.throws(()=>inspectUiSource('ui.tsx','x'.repeat(24001)),/24000/);
+  assert.throws(()=>inspectUiSource('ui.tsx','x'.repeat(196609)),/196608/);
+  // A whole stylesheet is checked in line-aligned windows; a cue past the first window is still found once.
+  const sheet=inspectUiSource('app.css','.row{margin:0}\n'.repeat(3000)+'.dot{animation:pulse 1s infinite}\n');
+  assert.equal(sheet.windows,2);assert.equal(sheet.findings.filter(f=>f.key==='ui-glow-dot').length,1);assert.match(sheet.scope,/window boundary/);
   const quiet=inspectUiSource('ui.html','<button>Save</button>');
   assert.equal(quiet.status,'inspected');assert.deepEqual(quiet.findings,[]);assert.match(quiet.scope,/No findings does not mean good design/);
 });
@@ -79,7 +82,7 @@ test('large authored files retain policy cues ahead of advisory noise without ex
 
 test('UI artifact operation uses safe workspace reads in parent and child profiles',async t=>{
   const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'ui-source-check-'));t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
-  fs.writeFileSync(path.join(cwd,'Status.tsx'),pill);fs.writeFileSync(path.join(cwd,'large.tsx'),'x'.repeat(24001));
+  fs.writeFileSync(path.join(cwd,'Status.tsx'),pill);fs.writeFileSync(path.join(cwd,'large.tsx'),'x'.repeat(196609));
   const tools=new Map();registerSmallTools({registerTool:t=>tools.set(t.name,t)});
   const call=(p,signal)=>tools.get('artifact_check').execute('check',p,signal,undefined,{cwd});
   const result=await call({operation:'ui',path:'Status.tsx'});assert.notEqual(result.isError,true);assert.equal(result.details.findings[0].key,'ui-live-pill');assert.match(result.details.sourceHash,/^[a-f0-9]{64}$/);

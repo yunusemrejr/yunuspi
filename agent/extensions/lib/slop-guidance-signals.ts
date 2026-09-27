@@ -56,11 +56,22 @@ const mutedWarmAccent = (hex: string) => {
 // design-direction.ts. Keep both in step.
 export function inspectUiSource(file: string, text: string) {
   const normalized = file.replaceAll('\\','/');
-  if (typeof text !== 'string' || text.length > 24000) throw Error('UI source check requires at most 24000 characters; inspect a complete smaller component');
+  if (typeof text !== 'string' || text.length > 196608) throw Error('UI source check requires at most 196608 characters; inspect a complete smaller component');
   const supported = UI_FILE.test(normalized) && !EXCLUDED.test(normalized);
+  // Whole stylesheets and pages exceed one 24000-character cue window: check
+  // consecutive line-aligned windows and keep the first finding per cue.
+  const windows: string[] = [];
+  for (let at = 0; at < text.length;) {
+    let end = Math.min(text.length, at + 24000);
+    if (end < text.length) { const nl = text.lastIndexOf('\n', end); if (nl > at + 12000) end = nl + 1; }
+    windows.push(text.slice(at, end)); at = end;
+  }
+  const findings: CodeSignal[] = [];
+  if (supported) for (const part of windows) for (const found of slopGuidanceSignals(normalized,part,12))
+    if (findings.length < 12 && !findings.some(prior => prior.key === found.key)) findings.push(found);
   return { sourceHash:createHash('sha256').update(text).digest('hex'), status:supported?'inspected':'unsupported',
-    findings:supported?slopGuidanceSignals(normalized,text,12):[],
-    scope:'Bounded source cues only; no CSS cascade, rendering, interaction execution or visual certification. No findings does not mean good design.',
+    findings, ...(windows.length > 1 ? {windows:windows.length} : {}),
+    scope:'Bounded source cues only; no CSS cascade, rendering, interaction execution or visual certification. No findings does not mean good design.'+(windows.length > 1 ? ' Long sources are checked in line-aligned windows, so a cue split across a window boundary can be missed.' : ''),
     next:'Inspect the complete component in its project design system, then verify rendered appearance and relevant interaction states.' };
 }
 

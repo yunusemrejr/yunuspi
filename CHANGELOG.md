@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.2 — 2026-09-27
+
+Watchmaker stops paying for a review every minute. It used to read its unread events oldest-first, eight at a time, so during active work the review fell minutes behind. The leftover backlog also reset the quiet backoff after every silent review. Measured across recent sessions, 85–100% of its reviews returned no advice and it cost more than the main model. Now it folds long unread runs into one digest row, the same way the Observer does. Older failures and guardian interventions stay verbatim, and the newest work is always shown. Routine progress therefore no longer counts as backlog, so the backoff grows after quiet reviews (up to four minutes) and the Jev/Kev triage preflight can defer routine chunks. New failures, guardian interventions and salient events still force a full review.
+
+The fixes below target the tool errors seen most in recent sessions:
+
+- **Todo batches:** a batch that completes a dependency or child later in the same batch now applies its updates in dependency order. It no longer rejects the whole batch.
+- **Browser sessions:** a guessed browser session alias resolves to the only open session, and `navigate` with no open session opens one. The result reports the resolution. Closed or unknown UUIDs still fail as `unknown-session`.
+- **`skill_review`:** an unknown `group` becomes a search topic instead of an error, and the result lists the valid groups.
+- **`git_info`:** outside a repository it reports that there is no Git state, with a hint to run `git init`, instead of failing.
+- **UI slop inspection:** `artifact_check` accepts sources up to 192 KiB. It scans them in line-aligned windows with deduplicated findings, and the result reports the window count.
+- **Hook metrics:** fingerprinting runs once per output sink, and the reported time covers only the handler.
+
 ## 0.13.1 — 2026-09-27
 
 Double mode hardening, same architecture (`A ∥ B → reconcile → one directive → normal parent execution`). The twin streams now reason through complementary lenses on the identical route, thinking level, context and evidence: A constructs the strongest solution while B independently stress-tests for hidden assumptions, failure modes, contradictory evidence, simpler alternatives and edge cases. Reconciliation must compare evidence strength, assumptions, risks and proposed tool actions side by side, choose or define the deciding evidence on disagreement, treat agreement as unproven until independently evidenced, and preserve useful minority findings; a lone surviving stream gets an explicitly adversarial review instead of ever reading as consensus.

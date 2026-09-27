@@ -75,8 +75,13 @@ test("skill_review browse exposes group counts and bounded metadata search", asy
   assert.equal(page.details.results[0].name, "video-editing");
   assert.equal(page.details.remaining, 0);
 
-  const unknown = await f.review.execute("browse", {action: "browse", group: "missing-group"});
-  assert.equal(unknown.isError, true);
+  // A topic sent as a group searches it as a query and lists the real group ids.
+  const topic = await f.review.execute("browse", {action: "browse", group: "video", limit: 5});
+  assert.equal(topic.isError, undefined);
+  assert.equal(topic.details.unknownGroup, "video");
+  assert.equal(topic.details.query, "video");
+  assert.ok(topic.details.groups.includes("media"));
+  assert.ok(topic.details.results.some(result => result.name === "video-editing"));
 });
 
 test("restored skill review targets are paginated without losing later items", async () => {

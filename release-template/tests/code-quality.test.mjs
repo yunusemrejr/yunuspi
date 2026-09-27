@@ -235,6 +235,21 @@ test("git_info review flags risky additions and drafts a commit header; blame su
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("git_info outside a repository reports no Git state instead of failing", async () => {
+  const gitTools = (await import(pathToFileURL(path.join(agentRoot, "extensions/git-tools.ts")))).default;
+  const tools = new Map();
+  gitTools({ registerTool: tool => tools.set(tool.name, tool), on() {} });
+  const dir = workspace();
+  try {
+    for (const action of ["status", "scope", "log"]) {
+      const result = await tools.get("git_info").execute("t", { action }, undefined, undefined, { cwd: dir });
+      assert.equal(result.isError, undefined);
+      assert.equal(result.details.repository, false);
+      assert.match(result.content[0].text, /No Git repository/);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("bash router points once at an installed specialist that is off the wire", async () => {
   const registerRouter = (await import(pathToFileURL(path.join(agentRoot, "extensions/bash-router.ts")))).default;
   const hooks = new Map();
