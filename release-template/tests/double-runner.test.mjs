@@ -289,6 +289,34 @@ test('one failed stream retries once, then the turn continues on the survivor', 
   assert.match(result.message.content, /provider 429/);
 });
 
+test('a stream that used its whole window is not relaunched into a shorter one', async () => {
+  const pi = makePi();
+  let clock = 0;
+  let bCalls = 0;
+  registerDoubleMode(pi, {
+    now: () => clock,
+    launch: async (_id, params) => {
+      const kind = kindOf(params);
+      if (kind === 'B') {
+        bCalls++;
+        clock += params.timeoutMs;
+        return { details: { results: [{ exitCode: 1, timedOut: true, error: `Subagent timed out after ${params.timeoutMs}ms` }] } };
+      }
+      if (kind === 'reconcile') return okResult(RECONCILED);
+      return okResult(ANALYSIS_A);
+    },
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Go.', systemPrompt: 'sys' }, ctx);
+  assert.equal(bCalls, 1, 'a shorter relaunch cannot finish what the full window could not');
+  const unavailable = pi.sends.find((send) => send.message.details.phase === 'Double stream B' && send.message.details.status === 'unavailable');
+  assert.match(unavailable?.message.details.advice ?? '', /timed out/, 'the unavailable notice names its cause');
+  assert.ok(result);
+  assert.match(result.message.content, /partial result/);
+});
+
 test('a retry that recovers produces a clean directive', async () => {
   const pi = makePi();
   let aCalls = 0;

@@ -56,6 +56,7 @@ export class ModelRuntime {
         storedProviders: new Set(),
         auth: new Map(),
     };
+    snapshotModelsRevision = -1;
     availabilityRefreshSeq = 0;
     availabilityErrorSeq = 0;
     providerAvailabilitySeq = new Map();
@@ -167,6 +168,7 @@ export class ModelRuntime {
         this.updateModelSnapshot();
     }
     updateModelSnapshot() {
+        this.snapshotModelsRevision = this.models.getModelsRevision();
         const all = [...this.models.getModels()];
         this.snapshot = {
             ...this.snapshot,
@@ -303,6 +305,11 @@ export class ModelRuntime {
         return this.snapshot.available;
     }
     getAvailableSnapshot() {
+        // A dynamic catalog can publish outside any refresh this runtime awaited
+        // (superseded or overlapping passes). Without this, a model the session
+        // itself runs on stays missing from the available list for its lifetime.
+        if (this.models.getModelsRevision() !== this.snapshotModelsRevision)
+            this.updateModelSnapshot();
         return this.snapshot.available;
     }
     getError() {

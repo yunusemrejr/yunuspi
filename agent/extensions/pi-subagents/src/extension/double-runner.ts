@@ -167,8 +167,12 @@ function detectDoubleSubstitutions(label: string, route: string, thinking: strin
 }
 
 /** Retry gate: the deadline check lives at the call site; this judges cause. */
-function isDoubleRetryable(reason: string, row: any): boolean {
-	return row?.timedOut === true || isDoubleTransientFailure(reason);
+/** A relaunch shorter than the attempt that ran out of time cannot finish
+ * what that attempt could not; it would only spend the remaining deadline. */
+function isDoubleRetryable(reason: string, row: any, elapsedMs: number, retryWindowMs: number): boolean {
+	const timedOut = row?.timedOut === true || /\btim(?:e|ed)\s?out\b/i.test(reason);
+	if (timedOut) return retryWindowMs >= elapsedMs;
+	return isDoubleTransientFailure(reason);
 }
 
 async function boundedAwait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -456,6 +460,9 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			}, () => { /* no usage to add */ });
 		};
 
+		// Each stream attempt leaves 30s of the shared deadline for reconciliation.
+		const streamWindow = () => Math.min(DOUBLE_LIMITS.streamMs, Math.max(1, Math.floor(deadlineAt - now()) - 30_000));
+
 		const runStream = async (stream: DoubleStreamId, task: string): Promise<DoubleStreamOutcome> => {
 			const startedAt = now();
 			const scopeId = stream === "A" ? "double-A" : "double-B";
@@ -478,8 +485,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
 				let work: Promise<any> | undefined;
 				try {
-					const remaining = Math.max(1, Math.floor(deadlineAt - now()));
-					const timeoutMs = Math.min(DOUBLE_LIMITS.streamMs, Math.max(1, remaining - 30_000));
+					const timeoutMs = streamWindow();
 					work = deps.launch(runId, launchParams(task, timeoutMs, DOUBLE_LIMITS.tokensPerStream, DOUBLE_LIMITS.toolsPerStream, label), signal, undefined, ctx);
 					const result = await boundedAwait(work, signal);
 					const returnedRow = rawResultRow(result);
@@ -502,12 +508,12 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 							: `${label} failed or returned no usable advisory text.${failureSuffix(result, rawRow)}`;
 						// One relaunch only when the failure is plausibly
 						// transient and enough deadline remains for it.
-						if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleRetryable(reason, rawRow)) {
+						if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleRetryable(reason, rawRow, now() - startedAt, streamWindow())) {
 							gaps.push(reason);
 							progress(label, "retrying", now() - startedAt, reason);
 							continue;
 						}
-						if (!signal.aborted) progress(label, "unavailable", now() - startedAt);
+						if (!signal.aborted) progress(label, "unavailable", now() - startedAt, reason);
 						return { stream, status: signal.aborted || !ownsSession() ? "cancelled" : "failed", text: "", gap: mergeDoubleGaps([...gaps, reason]) || reason, elapsedMs: now() - startedAt, attempts };
 					}
 					if (ownsSession()) {
@@ -539,12 +545,12 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					const reason = signal.aborted
 						? `${label} was cancelled before returning usable text.`
 						: `Double stream ${stream} unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.`;
-					if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleTransientFailure(reason)) {
+					if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleRetryable(reason, undefined, now() - startedAt, streamWindow())) {
 						gaps.push(reason);
 						progress(label, "retrying", now() - startedAt, reason);
 						continue;
 					}
-					if (!signal.aborted) progress(label, "unavailable", now() - startedAt);
+					if (!signal.aborted) progress(label, "unavailable", now() - startedAt, reason);
 					return { stream, status: signal.aborted || !ownsSession() ? "cancelled" : "failed", text: "", gap: mergeDoubleGaps([...gaps, reason]) || reason, elapsedMs: now() - startedAt, attempts };
 				}
 			}

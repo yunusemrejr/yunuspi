@@ -111,6 +111,8 @@ export interface Models {
      * are typed as `Model<Api>`; narrow with the `hasApi()` type guard.
      */
     getModel(provider: string, id: string): Model<Api> | undefined;
+    /** Increases whenever any provider's model list may have changed (publication or provider replacement). */
+    getModelsRevision(): number;
     /**
      * Refresh selected configured dynamic providers concurrently (all when `providers` is omitted).
      * Provider errors and cancellation are returned without rejecting; static, unknown, and

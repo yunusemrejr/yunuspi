@@ -28,6 +28,7 @@ class ModelsImpl {
     refreshGenerations = new Map();
     refreshControllers = new Map();
     publicationChains = new Map();
+    modelsRevision = 0;
     constructor(options) {
         this.credentials = options?.credentials ?? new InMemoryCredentialStore();
         this.modelsStore = options?.modelsStore ?? new InMemoryModelsStore();
@@ -36,16 +37,23 @@ class ModelsImpl {
     setProvider(provider) {
         this.supersedeProviderRefresh(provider.id);
         this.providers.set(provider.id, provider);
+        this.modelsRevision++;
     }
     deleteProvider(id) {
         this.supersedeProviderRefresh(id);
         this.providers.delete(id);
+        this.modelsRevision++;
     }
     clearProviders() {
         for (const id of new Set([...this.providers.keys(), ...this.refreshControllers.keys()])) {
             this.supersedeProviderRefresh(id);
         }
         this.providers.clear();
+        this.modelsRevision++;
+    }
+    /** Increases whenever any provider's model list may have changed. */
+    getModelsRevision() {
+        return this.modelsRevision;
     }
     getProviders() {
         return Array.from(this.providers.values());
@@ -110,6 +118,7 @@ class ModelsImpl {
             if (signal.aborted || this.refreshGenerations.get(providerId) !== generation)
                 return false;
             publication.update?.();
+            this.modelsRevision++;
             return true;
         })();
         const tail = queued.catch(() => { });
