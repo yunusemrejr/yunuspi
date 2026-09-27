@@ -2994,6 +2994,11 @@
         "line": 3395
       },
       {
+        "name": "double",
+        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
+        "line": 253
+      },
+      {
         "name": "effort",
         "source": "agent/extensions/thinking.ts",
         "line": 48
@@ -3881,7 +3886,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 778,
+        "line": 780,
         "kind": "definition"
       },
       {
@@ -4514,7 +4519,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          829
+          831
         ],
         "knownNames": [
           "subagent"
@@ -4633,7 +4638,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 667,
+      "sourceFiles": 669,
       "registrationSites": 81,
       "indirectRegistrationSites": 19,
       "stableRegistrationRows": 120,

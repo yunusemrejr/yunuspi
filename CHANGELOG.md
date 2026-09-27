@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0 — 2026-09-27
+
+Double mode: `/double` toggles a session mode in which every request is first analyzed by two independent streams of the currently selected model, then reconciled into one directive the normal turn executes. Both streams pin the same provider, model, thinking level and forked session context; the pin is verified rather than assumed, and a substituted stream stays usable but visibly degraded instead of passing silently. The streams are peer-aware but never see each other's reasoning; a lightweight reconciliation pass compares, challenges and commits their conclusions, proposals, risks and disagreements into a single plan. Streams investigate read-only and propose actions while only the parent executes, so no state-changing operation runs twice.
+
+Progress rows show each stream and the reconciliation starting and finishing without entering model context. Degradation is explicit throughout: one failed stream continues on the survivor with a single bounded retry, a failed reconciliation falls back to both views with a commit instruction, and two failed streams continue as a normal single turn with a warning. Both streams account through the shared subagent cost and lifecycle ledgers, so `/cost` and `/used` reflect the doubled inference. `/double status` inspects the mode, `PI_DOUBLE=off` disables it, and children never re-double. The mechanism lives in a portable core (`agent/extensions/lib/double.ts`) with no harness imports, bound to the native subagent executor by a thin adapter. Regression coverage adds the core, runner and command-registration suites.
+
 ## 0.12.4 — 2026-09-27
 
 A council brief is no longer lost partway through a long turn. The project-intelligence capsule that carries it was charged against the per-input context budget on every inference, even when unchanged, so after a few requests the budget refused it and the brief with it; one session then waited about fourteen minutes for a brief that never arrived. Unchanged capsules are now charged once. A retrieval with no matching entities, evidence or caveat injects nothing, instead of a capsule whose changing query header moved it to the tail on every tool call, broke the prompt cache and read to the model like a new prompt.

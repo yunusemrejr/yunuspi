@@ -12,11 +12,31 @@ and the main agent remains responsible for the session in every case.
 | Council | Multi-perspective reasoning for genuinely hard questions | Automatic scope council, or the supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
 | Swarm | Separable parallel investigations in one broad task | Assistance-plan swarm mode with bounded respawns | `subagent({tasks:[...],async:true})` |
 | Fusion | Competing approaches merged with provenance | Fusion-mode workers plus the deterministic fusion planner | Fusion workers plus `runs.fuse` |
+| Double | Two independent streams of the current model reconciled into one decision | Double runner with the native subagent executor | `/double`, then work normally |
 
 Findings come back concise: bounded reports with evidence and explicit gaps,
 never raw reasoning dumps. The parent verifies, decides and owns changes.
 
 Interface review reads current implementation before inspecting at most three representative captures. A test log does not qualify as an implementation read. Large native edits and current files changed through commands receive bounded source checks; rendered label dots, icon tiles and accent rails feed the same checkpoint. Unaddressed standing UI policy cues appear as `policyFindings` separately from independent reports and prevent acceptance until repaired/reviewed or explicitly dismissed with evidence. These obligations survive session resume and do not create additional review rounds. New rendered findings invalidate earlier acceptance; source edits invalidate stale rendered cues.
+
+## Double mode
+
+`/double` toggles a session mode in which every request is first analyzed by
+two independent streams of the currently selected model — same provider,
+same model, same thinking, same forked session context — and then
+reconciled into one directive the normal turn executes. The streams are
+peer-aware but never see each other's reasoning; a lightweight
+reconciliation pass compares, challenges and commits their conclusions,
+proposals, risks and disagreements into a single plan. The streams
+investigate read-only and propose actions; only the parent executes, so no
+state-changing operation runs twice.
+
+Progress rows show each stream and the reconciliation starting and
+finishing; a degraded run (a stream failed, a route substituted, no
+reconciliation) stays visible in the directive and the transcript instead
+of failing the turn. Both streams account through the shared subagent cost
+and lifecycle ledgers, so `/cost` and `/used` reflect the doubled
+inference. `PI_DOUBLE=off` disables the mode; children never re-double.
 
 ## Session-start disclosure
 
