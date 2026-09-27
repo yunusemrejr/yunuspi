@@ -67,7 +67,10 @@ const cleanText = (value: unknown): string | undefined => {
   return text || undefined;
 };
 
+/** A list also accepts one string (measured: intent sent as a sentence
+ * failed the whole direction); commas, semicolons and lines separate terms. */
 const cleanList = (value: unknown, max = MAX_ITEMS): string[] => {
+  if (typeof value === "string") value = value.split(/[,;\n]+/);
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -103,7 +106,8 @@ const cleanRecord = <T extends object>(value: unknown, keys: (keyof T)[], bools:
 export function normalizeDirection(raw: unknown): CreativeDirection {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("direction must be an object with intent, hierarchy and avoid lists");
   const input = raw as Record<string, unknown>;
-  const hierarchy = cleanRecord<CreativeHierarchy>(input.hierarchy, ["primary", "secondary", "tertiary"]);
+  // A bare hierarchy string names the focal element, as the error text asks.
+  const hierarchy = cleanRecord<CreativeHierarchy>(typeof input.hierarchy === "string" ? { primary: input.hierarchy } : input.hierarchy, ["primary", "secondary", "tertiary"]);
   if (!hierarchy.primary) throw new Error("direction.hierarchy.primary is required (the one focal element, e.g. content, product, diagram)");
   const intent = cleanList(input.intent);
   if (!intent.length) throw new Error("direction.intent needs at least one term (e.g. serious, editorial, restrained)");

@@ -98,6 +98,9 @@ export function prepareTodoArguments(args: unknown): any {
 			if (Array.isArray(parsed?.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, operations: parsed.operations }; }
 		} catch { return args; }
 	}
+	if (typeof input.operations === "string") {
+		try { const parsed = JSON.parse(input.operations); if (Array.isArray(parsed)) input = { ...input, operations: parsed }; } catch { /* Schema validation reports it. */ }
+	}
 	if (input.action === undefined && Array.isArray(input.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, action: "batch" }; }
 	if (input.action !== "batch" || !Array.isArray(input.operations)) return input === args ? args : input;
 	const operations = input.operations.map((op: any) => {

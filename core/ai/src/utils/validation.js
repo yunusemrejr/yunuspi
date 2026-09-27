@@ -280,6 +280,7 @@ export function validateToolCall(tools, toolCall) {
 export function validateToolArguments(tool, toolCall) {
     const args = structuredClone(toolCall.arguments);
     normalizeOptionalNulls(args, tool.parameters);
+    __piParseJsonContainers(args, tool.parameters);
     Value.Convert(tool.parameters, args);
     const validator = getValidator(tool.parameters);
     if (!Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
@@ -334,23 +335,52 @@ function __piValidationDetails(errors, schema) { /* PI_VALIDATION_REPAIR_DETAILS
 
 /** Free-text explanation fields whose length limit is a courtesy, not a contract. */
 const __PI_PROSE_FIELD = /^(?:reason|retryReason|description|summary|detail|note|notes|explanation|rationale|message|why|justification|context|comment|evidence)$/i;
-/** When the only failures are over-long prose fields, shorten them with an
- * explicit marker instead of rejecting the call: a rejected call costs a whole
- * model turn to retry (measured in live sessions for quality_review,
- * project_tests and project_intel). Any other error keeps the normal
+/** Numeric bounds on result-size and wait knobs are courtesies: the tool
+ * serves the nearest allowed value instead of costing a turn (measured:
+ * tool_search limit 10 against a maximum of 8). */
+const __PI_BOUND_FIELD = /^(?:limit|topK|count|max[A-Z]\w*|min[A-Z]\w*|timeoutMs|waitMs|lines|depth)$/;
+/** When every failure is mechanically repairable, repair it instead of
+ * rejecting the call: a rejected call costs a whole model turn to retry
+ * (measured in live sessions for quality_review, project_tests, project_intel,
+ * todo and tool_search). Repairs: over-long prose fields are shortened with an
+ * explicit marker; an array or object sent as a JSON string is parsed; a
+ * bounded size/wait knob is clamped. Any other error keeps the normal
  * rejection, and identifiers, paths, code and content are never touched. */
+/** Models often send an array or object argument as its JSON text. Conversion
+ * would wrap that string as a one-item array, so decode it first; the decoded
+ * value is still fully validated and non-JSON prose is left for the error. */
+function __piParseJsonContainers(args, schema) { /* PI_JSON_CONTAINER_REPAIR_V1 */
+  if (!args || typeof args !== "object" || Array.isArray(args) || !schema?.properties) return;
+  for (const [key, sub] of Object.entries(schema.properties)) {
+    const value = args[key];
+    if (typeof value === "string" && (sub?.type === "array" || sub?.type === "object") && /^\s*[\[{]/.test(value)) {
+      try {
+        const parsed = JSON.parse(value);
+        if (sub.type === "array" ? Array.isArray(parsed) : parsed && typeof parsed === "object" && !Array.isArray(parsed)) args[key] = parsed;
+      } catch { /* The schema error names the field. */ }
+    }
+    if (sub?.type === "object") __piParseJsonContainers(args[key], sub);
+  }
+}
 function __piTrimOverlongProse(args, errors) { /* PI_PROSE_LENGTH_REPAIR_V1 */
   if (!errors.length || !args || typeof args !== "object") return undefined;
   const copy = structuredClone(args);
   for (const error of errors) {
-    if (error.keyword !== "maxLength") return undefined;
-    const limit = Number(error.params?.limit);
     const segments = String(error.instancePath ?? "").split("/").slice(1).map(part => part.replace(/~1/g, "/").replace(/~0/g, "~"));
     const key = segments.at(-1);
-    if (!Number.isSafeInteger(limit) || limit < 40 || !key || !__PI_PROSE_FIELD.test(key)) return undefined;
+    if (!key) return undefined;
     let parent = copy;
     for (const part of segments.slice(0, -1)) { parent = parent?.[part]; if (parent === undefined || parent === null) return undefined; }
     const value = parent[key];
+    if ((error.keyword === "maximum" || error.keyword === "minimum") && typeof value === "number" && __PI_BOUND_FIELD.test(key)) {
+      const limit = Number(error.params?.limit);
+      if (!Number.isFinite(limit)) return undefined;
+      parent[key] = error.keyword === "maximum" ? Math.min(value, limit) : Math.max(value, limit);
+      continue;
+    }
+    if (error.keyword !== "maxLength") return undefined;
+    const limit = Number(error.params?.limit);
+    if (!Number.isSafeInteger(limit) || limit < 40 || !__PI_PROSE_FIELD.test(key)) return undefined;
     if (typeof value !== "string" || value.length <= limit) continue;
     const marker = ` … [shortened from ${value.length} characters]`;
     parent[key] = value.slice(0, Math.max(0, limit - marker.length)).trimEnd() + marker;

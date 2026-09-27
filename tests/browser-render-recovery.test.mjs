@@ -216,6 +216,10 @@ test("unreachable remote renders fail before browser launch with the navigation 
     await probeRemoteReadiness(new URL(base + "/slow"), 50);
     // A refused connection fails with the structured navigation shape...
     await assert.rejects(probeRemoteReadiness(new URL(dead), 5000), assertNavigationRefused);
+    // ...but a loopback server that binds moments after bg_run starts it is reached.
+    const late = http.createServer((req, res) => res.end("up"));
+    const bindLate = setTimeout(() => late.listen(closed, "127.0.0.1"), 600);
+    try { await probeRemoteReadiness(new URL(dead), 8000); } finally { clearTimeout(bindLate); await new Promise(resolve => late.close(resolve)); }
     // ...before any browser launch is attempted: the channel is bogus, so a
     // launch attempt would throw a startup error instead of this shape.
     process.env.PI_RENDER_BROWSER_CHANNEL = "definitely-not-a-browser";
@@ -278,4 +282,22 @@ test("missing local sources name the caller-supplied path in text output", { tim
     else process.env.PI_RENDER_BROWSER_CHANNEL = oldChannel;
     fs.rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test("common argument aliases and bare expressions reach the browser and renderer as meant", async () => {
+  const { prepareBrowserArguments } = await load("extensions/lib/browser-session.ts");
+  const { expressionBody } = await load("scripts/browser-session-runner.mjs");
+  const { localRenderPath } = await load("extensions/lib/creative-qa.ts");
+  assert.deepEqual(prepareBrowserArguments({ action: "resize", session: "s", width: 400 }), { action: "viewport", session: "s", width: 400 });
+  assert.deepEqual(prepareBrowserArguments({ action: "evaluate", session: "s", expression: "document.title" }), { action: "evaluate", session: "s", script: "document.title" });
+  assert.deepEqual(prepareBrowserArguments({ action: "evaluate", script: "a", code: "b" }), { action: "evaluate", script: "a", code: "b" }, "an explicit script wins");
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  assert.equal(expressionBody("document.title;", AsyncFunction), "return (document.title\n);");
+  assert.equal(expressionBody("await fetch('/x').then(r => r.status)", AsyncFunction), "return (await fetch('/x').then(r => r.status)\n);");
+  for (const body of ["const a = 1; return a", "a = 1; b = 2", "if (x) y()"]) assert.equal(expressionBody(body, AsyncFunction), body, "statement bodies run unchanged");
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "render-path-"));
+  const file = path.join(cwd, "page one.html");
+  assert.equal(localRenderPath("/elsewhere", pathToFileURL(file).href + "#hero"), file + "#hero", "file URLs decode instead of joining the cwd");
+  assert.equal(localRenderPath("/elsewhere", pathToFileURL(file).href + "?v=2"), file);
+  assert.equal(localRenderPath(cwd, "@page one.html"), file);
 });

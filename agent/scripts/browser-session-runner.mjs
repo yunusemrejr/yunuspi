@@ -23,6 +23,16 @@ const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
 
+/** A lone expression such as `document.title` or `document.readyState ===
+ * "complete"` is a common script shape; as a function body it returns
+ * undefined, so evaluate reports nothing and a function wait never resolves.
+ * Return it when the wrapped form parses; any statement body runs unchanged. */
+export function expressionBody(script, Ctor) {
+  const text = script.trim().replace(/;\s*$/, "");
+  if (/\breturn\b/.test(text) || /^(?:const|let|var|if|for|while|do|switch|function|class|throw|try)\b/.test(text)) return script;
+  try { new Ctor(`return (${text}\n);`); return `return (${text}\n);`; } catch { return script; }
+}
+
 /** Listen before creating any page: a popup can log before its page event. */
 export function createBrowserPageLogs(context) {
   const byPage = new WeakMap();
@@ -466,7 +476,7 @@ export async function runBrowserSession(input, output) {
             await surface.getByText(p.text, { exact: false }).first().waitFor({ state: p.state ?? "visible", timeout });
           } else if (kind === "function") {
             if (typeof p.script !== "string" || !p.script || p.script.length > 8000) throw Error("Function wait requires script (return a boolean)");
-            const handle = await surface.waitForFunction(new Function(p.script), null, { timeout, polling: 100 });
+            const handle = await surface.waitForFunction(new Function(expressionBody(p.script, Function)), null, { timeout, polling: 100 });
             await handle.dispose();
           } else if (kind === "element") {
             if (!["attached", "detached", "visible", "hidden"].includes(p.state ?? "visible")) throw Error("Invalid wait state");
@@ -499,7 +509,7 @@ export async function runBrowserSession(input, output) {
           if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
             throw Error("Invalid maxChars: use 100–64000");
           const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-          const evaluator = new AsyncFunction("element", "args", `const cap = ${capEvaluateResult.toString()}; return cap(await (async () => {${p.script}\n})(), args.maxChars);`);
+          const evaluator = new AsyncFunction("element", "args", `const cap = ${capEvaluateResult.toString()}; return cap(await (async () => {${expressionBody(p.script, AsyncFunction)}\n})(), args.maxChars);`);
           let deadline;
           try {
             const evaluation = await Promise.race([

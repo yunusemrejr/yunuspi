@@ -124,6 +124,9 @@ test('todo recovers only unambiguous batch operations that omit their action bef
  assert.equal(valid(prepared),true);
  const stringBatch=prepareTodoArguments({batch:JSON.stringify({operations:[{action:'create',id:-1,subject:'Outcome'}]})});
  assert.equal(stringBatch.action,'batch');assert.equal(valid(stringBatch),true);
+ // Recorded 2026-09-26: operations sent as a JSON string, one without its action.
+ const stringOps=prepareTodoArguments({action:'batch',operations:JSON.stringify([{id:7,status:'completed',evidence:'Rules written.'}])});
+ assert.deepEqual(stringOps.operations.map(op=>op.action),['update']);assert.equal(valid(stringOps),true);
  const implicit=prepareTodoArguments({batch:true,operations:[{action:'create',subject:'Outcome'}]});
  assert.equal(implicit.action,'batch');assert.equal('batch' in implicit,false);assert.equal(valid(implicit),true);
  const ambiguous={action:'batch',operations:[{status:'completed'}]};

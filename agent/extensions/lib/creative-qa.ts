@@ -17,6 +17,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { textPath } from "./media-process.ts";
 import { decodeImage, encodeImage } from "./design-studio.ts";
@@ -76,12 +77,24 @@ export async function qaFolder(value: unknown, cwd: string, area: string, prefix
   return output;
 }
 
+/** A local render source as a filesystem path. A `file:` URL is decoded
+ * (measured: `file:///…/fixture.html#idle` was joined onto the cwd); its
+ * fragment stays a route, and a query string is dropped because no server
+ * reads it. */
+export function localRenderPath(cwd: string, source: string): string {
+  if (/^file:/i.test(source)) {
+    const url = new URL(source), hash = url.hash;
+    url.hash = ""; url.search = "";
+    return fileURLToPath(url) + hash;
+  }
+  return path.resolve(cwd, source.replace(/^@/, ""));
+}
 /** Revision of a review source: content hash for local files (bounded),
  * so edits invalidate receipts; URLs hash to "live" and always re-verify. */
 export async function sourceRevision(source: string, cwd: string): Promise<string> {
   if (/^https?:\/\//i.test(source)) return "live";
   try {
-    const file = path.resolve(cwd, source.replace(/^@/, ""));
+    const file = localRenderPath(cwd, source).replace(/#.*$/, "");
     const stat = await fs.stat(file);
     if (!stat.isFile() || stat.size > 40 * 1024 * 1024) return `unhashed-${stat.size}`;
     return createHash("sha256").update(await fs.readFile(file)).digest("hex").slice(0, 16);

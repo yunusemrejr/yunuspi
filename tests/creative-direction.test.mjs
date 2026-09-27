@@ -39,6 +39,11 @@ test("normalizeDirection requires a focal decision and bounds lists", () => {
   assert.throws(() => creative.normalizeDirection("nope"), /must be an object/);
   const many = creative.normalizeDirection({ ...MINIMAL, intent: Array.from({ length: 20 }, (_, i) => `term-${i}`) });
   assert.equal(many.intent.length, 12);
+  const prose = creative.normalizeDirection({ intent: "calm, editorial; restrained", hierarchy: "product", avoid: "gradient text" });
+  assert.deepEqual(prose.intent, ["calm", "editorial", "restrained"], "a string list splits into terms instead of failing the direction");
+  assert.equal(prose.hierarchy.primary, "product");
+  assert.deepEqual(prose.avoid, ["gradient text"]);
+  assert.throws(() => creative.normalizeDirection({ ...MINIMAL, intent: " , ; " }), /intent/);
   const long = creative.normalizeDirection({ ...MINIMAL, name: "x".repeat(500) });
   assert.equal(long.name.length, 120);
 });

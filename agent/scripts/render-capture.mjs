@@ -58,20 +58,30 @@ export function enoentSourceHint(source, stage, error) {
 /** Bounded readiness probe for remote renders. Resolves when any HTTP
  * response (any status) proves a listener; throws the structured navigation
  * failure only when the cause chain proves no listener. Never throws on
- * timeout: a slow server proceeds to full navigation. */
+ * timeout: a slow server proceeds to full navigation. A refused loopback
+ * port gets a short grace first: most refusals in recorded sessions came
+ * right after bg_run started the dev server, which then took a second to bind. */
+export const LOOPBACK_START_GRACE_MS = 3000;
+const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)$/i;
 export async function probeRemoteReadiness(url, budgetMs, signal) {
-  const deadline = AbortSignal.timeout(Math.max(1, Math.min(5000, budgetMs)));
-  try {
-    const response = await fetch(url, {
-      redirect: "manual",
-      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
-    });
-    try { await response.body?.cancel(); } catch { /* headers already proved the listener */ }
-  } catch (error) {
-    if (signal?.aborted) throw Error("Render cancelled");
-    if (!preflightUnreachable(error)) return;
-    const failure = renderNavigationFailure(error);
-    throw Object.assign(new Error(`Render ${failure.reason} (stage: navigation). ${failure.network} ${failure.nextStep}`), { failure });
+  const started = Date.now();
+  const grace = LOOPBACK_HOST.test(url.hostname) ? Math.min(LOOPBACK_START_GRACE_MS, budgetMs / 2) : 0;
+  for (;;) {
+    const deadline = AbortSignal.timeout(Math.max(1, Math.min(5000, budgetMs - (Date.now() - started))));
+    try {
+      const response = await fetch(url, {
+        redirect: "manual",
+        signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+      });
+      try { await response.body?.cancel(); } catch { /* headers already proved the listener */ }
+      return;
+    } catch (error) {
+      if (signal?.aborted) throw Error("Render cancelled");
+      if (!preflightUnreachable(error)) return;
+      if (Date.now() - started + 200 < grace) { await new Promise(resolve => setTimeout(resolve, 200)); continue; }
+      const failure = renderNavigationFailure(error);
+      throw Object.assign(new Error(`Render ${failure.reason} (stage: navigation). ${failure.network} ${failure.nextStep}`), { failure });
+    }
   }
 }
 function boundedCaptureResult(result) {

@@ -1,5 +1,6 @@
 import {registerBrowserSession, isolatedBrowserEnvironment} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
+import { localRenderPath } from "./lib/creative-qa.ts";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -68,7 +69,7 @@ export async function captureToFile(params: { source: string; width: number; hei
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-render-"));
     await fs.chmod(tempRoot, 0o700);
     const staged = path.join(tempRoot, "capture.png");
-    const source = /^https?:\/\//i.test(params.source) ? params.source : path.resolve(cwd, params.source.replace(/^@/, ""));
+    const source = /^https?:\/\//i.test(params.source) ? params.source : localRenderPath(cwd, params.source);
     const { includeState, ...rest } = params;
     const details = JSON.parse((await runCapture({ ...rest, source, output: includeState ? "both" : "image", rawBytes: true }, staged, tempRoot, cwd, signal)).trim());
     if (!details.output) throw new Error("Render produced no image");
@@ -183,7 +184,7 @@ export default function (pi: any) {
         if (!/^https?:\/\//i.test(p.source))
           p = {
             ...p,
-            source: path.resolve(ctx.cwd, p.source.replace(/^@/, "")),
+            source: localRenderPath(ctx.cwd, p.source),
           };
         const captureResult = await runCapture(p, stagedOutput, tempRoot, ctx.cwd, signal);
         const details = JSON.parse(captureResult.trim());
