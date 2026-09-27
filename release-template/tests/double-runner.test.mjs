@@ -106,7 +106,7 @@ test('the /double command toggles, reports status and persists within the sessio
   const command = pi.commands.get('double');
   assert.ok(command, 'double command is registered');
   await command.handler('', ctx);
-  assert.match(pi.notifies.at(-1).text, /Double mode: ON\n2× openrouter\/glm-5\.3-flash/);
+  assert.match(pi.notifies.at(-1).text, /Double mode: ON\nTwin first-pass \(A ∥ B\) \+ reconcile · openrouter\/glm-5\.3-flash/);
   await command.handler('', ctx);
   assert.equal(pi.notifies.at(-1).text, 'Double mode: OFF');
   await command.handler('status', ctx);
@@ -226,6 +226,44 @@ test('a silently substituted stream stays usable but visibly degraded', async ()
   assert.match(result.message.content, /partial result/);
   assert.match(result.message.content, /other\/sneaky instead of the pinned openrouter\/glm-5\.3-flash/);
   assert.ok(pi.sends.some((send) => send.message.details.status === 'ready · partial'));
+});
+
+test('a substituted reconciliation stays usable but degrades the directive', async () => {
+  const pi = makePi();
+  registerDoubleMode(pi, {
+    launch: async (_id, params) => kindOf(params) === 'reconcile'
+      ? okResult(RECONCILED, { model: 'other/sneaky' })
+      : kindOf(params) === 'A' ? okResult(ANALYSIS_A) : okResult(ANALYSIS_B),
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Go.', systemPrompt: 'sys' }, ctx);
+  assert.ok(result);
+  assert.match(result.message.content, /partial result/);
+  assert.match(result.message.content, /Double reconciliation ran on other\/sneaky/);
+  assert.ok(pi.sends.some((send) => send.message.details.status === 'completed · route substituted'));
+});
+
+test('a deterministic failure never retries', async () => {
+  const pi = makePi();
+  let bCalls = 0;
+  registerDoubleMode(pi, {
+    launch: async (_id, params) => {
+      const kind = kindOf(params);
+      if (kind === 'B') { bCalls++; return failResult('Tool budget blocked: no calls remain'); }
+      if (kind === 'reconcile') return okResult(RECONCILED);
+      return okResult(ANALYSIS_A);
+    },
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Go.', systemPrompt: 'sys' }, ctx);
+  assert.equal(bCalls, 1, 'deterministic failure runs once');
+  assert.ok(!pi.sends.some((send) => send.message.details.status === 'retrying'), 'no retry announced');
+  assert.ok(result);
+  assert.match(result.message.content, /partial result/);
 });
 
 test('one failed stream retries once, then the turn continues on the survivor', async () => {

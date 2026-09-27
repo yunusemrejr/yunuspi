@@ -1269,7 +1269,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1840)
 - /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1421)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3395)
-- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 253)
+- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 296)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 48)
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1806)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)

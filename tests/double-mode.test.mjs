@@ -7,7 +7,8 @@ const root=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(dir=>fs.existsSync(path.join(dir,'extensions/lib/double.ts')));
 const lib=await import(pathToFileURL(path.join(agent,'extensions/lib/double.ts')));
 const {doubleRouteLabel,formatDoubleStatus,parseDoubleCommandArgs,boundDoubleText,mergeDoubleGaps,
-  buildDoubleStreamTask,packageDoubleStreams,buildDoubleReconcileTask,buildDoubleDirective,DOUBLE_RECOMMENDED_LIMITS}=lib;
+  buildDoubleStreamTask,packageDoubleStreams,buildDoubleReconcileTask,buildDoubleDirective,DOUBLE_RECOMMENDED_LIMITS,
+  isDoubleTransientFailure}=lib;
 
 const outcome=(stream,text,status='complete',extra={})=>({stream,status,text,...extra});
 
@@ -18,10 +19,11 @@ test('route label pins provider and model and rejects empty identity',()=>{
     assert.throws(()=>doubleRouteLabel(bad),/provider and id/);
 });
 
-test('status line shows the doubled route when on and nothing else when off',()=>{
+test('status line names the twin first-pass streams plus reconcile, never a bare 2x total',()=>{
   assert.equal(formatDoubleStatus(false),'Double mode: OFF');
   assert.equal(formatDoubleStatus(false,{provider:'p',id:'m'}),'Double mode: OFF');
-  assert.equal(formatDoubleStatus(true,{provider:'openrouter',id:'glm-5.3-flash'}),'Double mode: ON\n2× openrouter/glm-5.3-flash');
+  assert.equal(formatDoubleStatus(true,{provider:'openrouter',id:'glm-5.3-flash'}),
+    'Double mode: ON\nTwin first-pass (A ∥ B) + reconcile · openrouter/glm-5.3-flash');
   assert.equal(formatDoubleStatus(true),'Double mode: ON');
   assert.equal(formatDoubleStatus(true,{provider:'',id:''}),'Double mode: ON');
 });
@@ -75,8 +77,17 @@ test('stream briefs are peer-aware but carry no peer content',()=>{
   assert.match(withCtx.task,/Working directory: \/work/);
   assert.match(withCtx.task,/Available tools: read, grep/);
   assert.match(withCtx.task,/Available skills: plan/);
-  // Same request and context: the two briefs differ only in stream identity.
-  const norm=(text,self,peer)=>text.replaceAll(`instance ${self}`,'instance X').replaceAll(`(${peer})`,'(X)').replaceAll(`what ${peer} concluded`,'what X concluded');
+  // Same request, context, headings and rules; only the complementary lens differs.
+  assert.match(a.task,/construct the strongest solution or interpretation/);
+  assert.match(b.task,/independently stress-test the request/);
+  for(const probe of ['hidden assumptions','failure modes','contradictory evidence','simpler alternatives','architectural weaknesses','edge cases'])
+    assert.match(b.task,new RegExp(probe));
+  assert.doesNotMatch(a.task,/independently stress-test the request/);
+  assert.doesNotMatch(b.task,/construct the strongest solution or interpretation/);
+  const norm=(text,self,peer)=>text
+    .replace(/Your angle as instance [AB]:[^]*?you never see its output\./,'LENS')
+    .replaceAll(`instance ${self}`,'instance X').replaceAll(`(${peer})`,'(X)')
+    .replaceAll(`what ${peer} concluded`,'what X concluded');
   assert.equal(norm(a.task,'A','B'),norm(b.task,'B','A'));
   assert.equal(buildDoubleStreamTask({stream:'A',task:'x'.repeat(100),maxTaskChars:10}).truncated,true);
   assert.throws(()=>buildDoubleStreamTask({stream:'C',task:'t'}),/stream/);
@@ -118,9 +129,13 @@ test('reconcile task compares, challenges and commits; single survivor is challe
   assert.match(both.task,/Reconciliation —/);
   const lone=buildDoubleReconcileTask({task:'Ship it.',outcomeA:outcome('A','Plan A.'),
     outcomeB:outcome('B','','failed',{gap:'B crashed.'})});
-  assert.match(lone.task,/Challenge it as a skeptic/);
-  assert.match(lone.task,/Do not treat one view as consensus/);
+  assert.match(lone.task,/Adversarially review/);
+  assert.match(lone.task,/never consensus/);
   assert.match(lone.task,/B crashed/);
+  assert.match(both.task,/evidence strength/);
+  assert.match(both.task,/choose the better-supported side or define exactly what evidence/);
+  assert.match(both.task,/Agreement is not proof/);
+  assert.match(both.task,/minority findings/);
   assert.throws(()=>buildDoubleReconcileTask({task:'t',outcomeA:outcome('A','','failed'),
     outcomeB:outcome('B','','failed')}),/at least one stream/);
   assert.throws(()=>buildDoubleReconcileTask({task:'  ',outcomeA:outcome('A','a'),outcomeB:outcome('B','b')}),/non-empty/);
@@ -148,6 +163,25 @@ test('directive is singular: reconciled when possible, honest fallback otherwise
     outcomeB:outcome('B','b'),maxDirectiveChars:60});
   assert.ok(bounded.directive.length<=60);
   assert.throws(()=>buildDoubleDirective({ref:{provider:'',id:''},outcomeA:outcome('A','a'),outcomeB:outcome('B','b')}),/provider and id/);
+});
+
+test('retry gate admits plausibly transient failures, never deterministic ones',()=>{
+  for(const reason of ['HTTP 503 Service Unavailable','429 rate limit exceeded','timeout after 150000ms',
+    'socket hang up','Model overloaded, try again','ECONNRESET','deadline exceeded','temporarily unavailable'])
+    assert.equal(isDoubleTransientFailure(reason),true,reason);
+  for(const reason of ['Tool budget blocked','Capability ceiling excludes required tool','Unknown model foo/bar',
+    'Invalid params','Permission denied','429 quota exceeded for this key','',undefined,42])
+    assert.equal(isDoubleTransientFailure(reason),false,String(reason));
+});
+
+test('a reconciliation gap of its own degrades the directive',()=>{
+  const ref={provider:'p',id:'m'};
+  const degraded=buildDoubleDirective({ref,reconcileText:'Directive — do X.',
+    reconcileGap:'Double reconciliation ran on other/m instead of p/m.',
+    outcomeA:outcome('A','a'),outcomeB:outcome('B','b')});
+  assert.equal(degraded.degraded,true);
+  assert.match(degraded.directive,/partial result/);
+  assert.match(degraded.directive,/ran on other\/m instead/);
 });
 
 test('recommended limits stay lightweight for the reconcile stage',()=>{

@@ -11,6 +11,7 @@ import {
 DOUBLE_RECOMMENDED_LIMITS,
 	doubleRouteLabel,
 	formatDoubleStatus,
+	isDoubleTransientFailure,
 	mergeDoubleGaps,
 	packageDoubleStreams,
 	parseDoubleCommandArgs,
@@ -69,8 +70,15 @@ export const DOUBLE_LIMITS = Object.freeze({
 	maxDirectiveChars: DOUBLE_RECOMMENDED_LIMITS.maxDirectiveChars,
 });
 
-/** Deliberately narrow: streams investigate and propose, the parent executes. */
-const DOUBLE_READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "git_info"];
+/**
+ * Deliberately narrow: streams investigate and propose, the parent executes.
+ * Intersected with the read-only automatic-free-assistant tool list, so the
+ * effective child tools are exactly these five. denyExtensions stays false
+ * because git_info is extension-provided; the agent itself carries no
+ * bash/edit/write/commit tools, git authority is read-only, and "subagent"
+ * is absent so children cannot nest or re-enter Double.
+ */
+export const DOUBLE_READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "git_info"];
 
 export interface DoubleRunnerDeps {
 	launch: Launch;
@@ -126,6 +134,41 @@ function failureSuffix(result: any, row: any): string {
 		.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
 		.map((value) => value.replace(/\s+/g, " ").trim().slice(0, 180))[0];
 	return excerpt ? ` Underlying failure: ${excerpt}` : "";
+}
+
+const FORK_THINKING_DOWNGRADE_MARKER = "fork context forced thinking off";
+
+/**
+ * Same-route verification, not assumption: compares the pinned route and
+ * thinking level against what a Double pass actually returned. A substituted
+ * pass stays usable but visibly degraded — the gap survives into progress,
+ * status and the final directive header.
+ */
+function detectDoubleSubstitutions(label: string, route: string, thinking: string | undefined, result: any, row: any): { kinds: string[]; gap: string } {
+	const gaps: string[] = [];
+	const kinds: string[] = [];
+	if (typeof row?.model === "string" && row.model !== route) {
+		kinds.push("route");
+		gaps.push(`${label} ran on ${row.model} instead of the pinned ${route}; its analysis is still independent.`);
+	}
+	const forcedThinkingOff = Array.isArray(result?.content)
+		&& result.content.some((part: any) => part?.type === "text" && typeof part.text === "string" && part.text.includes(FORK_THINKING_DOWNGRADE_MARKER));
+	const returnedThinking = typeof row?.thinking === "string" ? row.thinking : undefined;
+	if (thinking !== undefined) {
+		if (forcedThinkingOff) {
+			kinds.push("thinking");
+			gaps.push(`${label} ran with thinking off instead of the pinned level ${thinking} (fork transcript sanitized); its analysis is still independent.`);
+		} else if (returnedThinking !== undefined && returnedThinking !== thinking) {
+			kinds.push("thinking");
+			gaps.push(`${label} ran with thinking ${returnedThinking} instead of the pinned level ${thinking}; its analysis is still independent.`);
+		}
+	}
+	return { kinds, gap: mergeDoubleGaps(gaps) };
+}
+
+/** Retry gate: the deadline check lives at the call site; this judges cause. */
+function isDoubleRetryable(reason: string, row: any): boolean {
+	return row?.timedOut === true || isDoubleTransientFailure(reason);
 }
 
 async function boundedAwait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -251,7 +294,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	};
 
 	pi.registerCommand("double", {
-		description: "Toggle Double mode: two independent streams of the current model reconciled into one decision",
+		description: "Toggle Double mode: twin first-pass streams (A ∥ B) of the current model + one reconcile pass, committed into a single directive",
 		argumentHint: "[on|off|status]",
 		handler(args: string, ctx: any) {
 			let intent: "toggle" | "on" | "off" | "status";
@@ -319,6 +362,9 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			const level = pi.getThinkingLevel?.();
 			if (typeof level === "string" && level.trim()) thinking = level.trim();
 		} catch { /* the child falls back to its default thinking */ }
+		// The pinned route is provider + model + thinking; verification below
+		// compares each pass against this same triple.
+		if (thinking) ref.thinking = thinking;
 
 		// One shared packet for both streams: immutable context is prepared
 		// once, so the two launches differ only in their stream identity.
@@ -441,9 +487,6 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					};
 					const row = resultRow(result) ? rawRow : undefined;
 					const text = row ? cleanBody(row, DOUBLE_LIMITS.maxStreamChars) : "";
-					// Same-route pinning is verified, not assumed: a silently
-					// substituted stream stays usable but visibly degraded.
-					const ranRoute = typeof rawRow?.model === "string" && rawRow.model !== route ? rawRow.model : undefined;
 					if (!row || !text) {
 						const state = signal.aborted || !ownsSession() ? "stopped" : "failed";
 						if (ownsSession()) {
@@ -453,8 +496,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 						const reason = signal.aborted
 							? `${label} was cancelled before returning usable text.`
 							: `${label} failed or returned no usable advisory text.${failureSuffix(result, rawRow)}`;
-						if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt) {
+						// One relaunch only when the failure is plausibly
+						// transient and enough deadline remains for it.
+						if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleRetryable(reason, rawRow)) {
 							gaps.push(reason);
+							progress(label, "retrying", now() - startedAt, reason);
 							continue;
 						}
 						if (!signal.aborted) progress(label, "unavailable", now() - startedAt);
@@ -464,15 +510,17 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 						appendLifecycle(pi, runId, "completed", row);
 						appendCost(pi, sessionFile, runId, row, "completed");
 					}
-					progress(label, "completed", now() - startedAt, text);
-					// Usable text on the wrong route is partial, not complete:
-					// the gap must survive packaging into the directive.
-					const status: DoubleStreamStatus = ranRoute ? "partial" : "complete";
+					// Same-route pinning is verified, not assumed: a
+					// substituted stream stays usable but visibly degraded.
+					// The gap must survive packaging into the directive.
+					const substituted = detectDoubleSubstitutions(label, route, thinking, result, rawRow);
+					const status: DoubleStreamStatus = substituted.kinds.length ? "partial" : "complete";
+					progress(label, substituted.kinds.length ? `completed · ${substituted.kinds.join("+")} substituted` : "completed", now() - startedAt, text);
 					return {
 						stream,
 						status,
 						text,
-						...(ranRoute ? { gap: `${label} ran on ${ranRoute} instead of the pinned ${route}; its analysis is still independent.` } : {}),
+						...(substituted.gap ? { gap: substituted.gap } : {}),
 						elapsedMs: now() - startedAt,
 						attempts,
 					};
@@ -487,8 +535,9 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					const reason = signal.aborted
 						? `${label} was cancelled before returning usable text.`
 						: `Double stream ${stream} unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.`;
-					if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt) {
+					if (attempt === 1 && !signal.aborted && ownsSession() && now() + 15_000 < deadlineAt && isDoubleTransientFailure(reason)) {
 						gaps.push(reason);
+						progress(label, "retrying", now() - startedAt, reason);
 						continue;
 					}
 					if (!signal.aborted) progress(label, "unavailable", now() - startedAt);
@@ -498,24 +547,25 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			return { stream, status: "failed", text: "", gap: mergeDoubleGaps(gaps) || `${label} produced no usable text.`, elapsedMs: now() - startedAt, attempts };
 		};
 
-		const runReconcile = async (outcomeA: DoubleStreamOutcome, outcomeB: DoubleStreamOutcome): Promise<string> => {
+		const runReconcile = async (outcomeA: DoubleStreamOutcome, outcomeB: DoubleStreamOutcome): Promise<{ text: string; gap: string }> => {
 			let reconcileTask: string;
 			try {
 				reconcileTask = buildDoubleReconcileTask({ task: prompt, outcomeA, outcomeB, maxTaskChars: DOUBLE_LIMITS.maxTaskChars, maxStreamTextChars: DOUBLE_LIMITS.maxStreamChars }).task;
 			} catch {
-				return "";
+				return { text: "", gap: "" };
 			}
 			const startedAt = now();
+			const label = "Double reconciliation";
 			progress("Reconciliation", "started");
 			setStatus("Double · reconciling A ∥ B");
 			const runId = `double-reconcile-${randomUUID()}`;
-			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1, label: "Double reconciliation", scopeId: "double-reconcile", model: route };
+			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1, label, scopeId: "double-reconcile", model: route };
 			if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
 			let work: Promise<any> | undefined;
 			try {
 				const remaining = Math.max(1, Math.floor(deadlineAt - now()));
 				const timeoutMs = Math.min(DOUBLE_LIMITS.synthesisMs, remaining);
-				work = deps.launch(runId, launchParams(reconcileTask, timeoutMs, DOUBLE_LIMITS.tokensReconcile, DOUBLE_LIMITS.toolsReconcile, "Double reconciliation"), signal, undefined, ctx);
+				work = deps.launch(runId, launchParams(reconcileTask, timeoutMs, DOUBLE_LIMITS.tokensReconcile, DOUBLE_LIMITS.toolsReconcile, label), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				const returnedRow = rawResultRow(result);
 				const rawRow = {
@@ -531,8 +581,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					appendLifecycle(pi, runId, state, rawRow ?? row);
 					appendCost(pi, sessionFile, runId, rawRow ?? row, state);
 				}
-				progress("Reconciliation", row && text ? "completed" : "unavailable", now() - startedAt, text || undefined);
-				return text;
+				// Reconciliation is verified like the streams: same pinned
+				// route and thinking, or a gap that degrades the directive.
+				const substituted = row && text ? detectDoubleSubstitutions(label, route, thinking, result, rawRow) : { kinds: [] as string[], gap: "" };
+				progress("Reconciliation", row && text ? (substituted.kinds.length ? `completed · ${substituted.kinds.join("+")} substituted` : "completed") : "unavailable", now() - startedAt, text || undefined);
+				return { text, gap: substituted.gap };
 			} catch (error) {
 				if (ownsSession()) {
 					const failed = { ...identity, exitCode: 1, error: error instanceof Error ? error.message : "Double reconciliation failed" };
@@ -542,7 +595,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					if (signal.aborted && work) settleLate(runId, identity, work);
 				}
 				if (!signal.aborted) progress("Reconciliation", "unavailable", now() - startedAt);
-				return "";
+				return { text: "", gap: "" };
 			}
 		};
 
@@ -568,14 +621,15 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				return undefined;
 			}
 			setStatus("Double · reconciling A ∥ B");
-			const reconcileText = signal.aborted || !ownsSession() ? "" : await runReconcile(outcomeA, outcomeB);
+			const reconciled = signal.aborted || !ownsSession() ? { text: "", gap: "" } : await runReconcile(outcomeA, outcomeB);
 			if (!ownsSession()) return undefined;
 			let directive: string;
 			let degraded: boolean;
 			try {
 				({ directive, degraded } = buildDoubleDirective({
 					ref,
-					...(reconcileText ? { reconcileText } : {}),
+					...(reconciled.text ? { reconcileText: reconciled.text } : {}),
+					...(reconciled.gap ? { reconcileGap: reconciled.gap } : {}),
 					outcomeA,
 					outcomeB,
 					maxDirectiveChars: DOUBLE_LIMITS.maxDirectiveChars,

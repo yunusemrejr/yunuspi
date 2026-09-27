@@ -86,7 +86,7 @@ export function formatDoubleStatus(enabled: boolean, ref?: DoubleModelRef | null
 	if (!enabled) return "Double mode: OFF";
 	if (ref) {
 		try {
-			return `Double mode: ON\n2× ${doubleRouteLabel(ref)}`;
+			return `Double mode: ON\nTwin first-pass (A ∥ B) + reconcile · ${doubleRouteLabel(ref)}`;
 		} catch {
 			/* fall through to the unlabelled ON state */
 		}
@@ -133,6 +133,20 @@ export function mergeDoubleGaps(gaps: unknown): string {
 	return [...new Set(gaps.map((gap) => typeof gap === "string" ? gap.trim() : "").filter(Boolean))].join(" ");
 }
 
+const DOUBLE_TRANSIENT_MARKERS = /\b(timeout|timed?\s?out|deadline\s?exceeded|429|502|503|504|econnreset|etimedout|eai_again|socket\s?hang\s?up|overloaded|over\s?capacity|capacity|rate[\s-]?limit|temporar\w+|transient|try\s?again|service\s?unavailable|server\s?error|internal\s?error|connection\s?(reset|refused|aborted)|network\s?(error|failure)|fetch\s?failed)\b/i;
+const DOUBLE_DETERMINISTIC_MARKERS = /\b(budget|blocked|denied|deny|permission|forbidden|unauthorized|unauthenticated|invalid|not\s?found|no\s?such|unknown\s?model|capability|ceiling|excluded|excludes|validation|schema|auth|api\s?key|quota\s?exceeded|insufficient)\b/i;
+
+/**
+ * Heuristic retry gate: true only when a failure reason reads as plausibly
+ * transient (overload, rate limit, timeout, network blip) rather than
+ * deterministic (budget, permissions, validation, unknown model). Pure
+ * string judgment — the host adapter still owns deadline and row-flag checks.
+ */
+export function isDoubleTransientFailure(reason: unknown): boolean {
+	if (typeof reason !== "string" || !reason.trim()) return false;
+	return DOUBLE_TRANSIENT_MARKERS.test(reason) && !DOUBLE_DETERMINISTIC_MARKERS.test(reason);
+}
+
 function contextBlock(context: DoubleSharedContext | undefined, maxChars: number): { text: string; truncated: boolean } {
 	if (!context || typeof context !== "object") return { text: "[none supplied]", truncated: false };
 	const lines: string[] = [];
@@ -163,8 +177,16 @@ export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string;
 	const peer = brief.stream === "A" ? "B" : "A";
 	const task = boundDoubleText(brief.task, brief.maxTaskChars ?? DOUBLE_RECOMMENDED_LIMITS.maxTaskChars);
 	const context = contextBlock(brief.context, brief.maxContextChars ?? DOUBLE_RECOMMENDED_LIMITS.maxContextChars);
+	// Complementary lenses on the SAME task, evidence, model and context.
+	// A constructs the strongest affirmative case; B independently attacks
+	// the problem for what a conventional pass overlooks. Same headings,
+	// same rules, same read-only ceiling — only the reasoning angle differs.
+	const lens = brief.stream === "A"
+		? "Your angle as instance A: construct the strongest solution or interpretation. Build the best-supported reading of the request, the most coherent plan that follows from it, and the concrete actions it implies. Ground every claim in evidence you actually observed; where the request is ambiguous, commit to the most defensible reading and say why. Your peer (B) independently stress-tests the same request from its own angle; you never see its output."
+		: "Your angle as instance B: independently stress-test the request. Hunt for what a conventional first pass would overlook: hidden assumptions, failure modes, contradictory evidence, simpler alternatives, architectural weaknesses, edge cases, and reasons the obvious reading might be wrong. You answer the same request from the same evidence and context — you just attack it from the skeptical side. Your peer (A) independently constructs the strongest affirmative case; you never see its output.";
 	const sections = [
-		`You are Double instance ${brief.stream} of one agent answering the request below. Another instance (${peer}) is analyzing the same request independently, at the same time, on the same model. Work from your own reading only: do not guess what ${peer} concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.`,
+		`You are Double instance ${brief.stream} of one agent answering the request below. Another instance (${peer}) is analyzing the same request independently, at the same time, on the same model, thinking level and evidence. Work from your own reading only: do not guess what ${peer} concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.`,
+		lens,
 		"Request (authoritative; preserve its explicit references and constraints exactly):",
 		task.text || "[empty task]",
 		"Shared session context (prepared once for both instances):",
@@ -275,8 +297,8 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		return `${body.text}${body.truncated ? "\n[Stream text bounded; omitted middle unknown.]" : ""}`;
 	};
 	const survivor = !packaged.bothUsable
-		? `Only stream ${packaged.usable[0]} is usable. Challenge it as a skeptic: name unsupported assumptions, state what evidence could decide the open points, and say what the absent view would most plausibly have raised. Do not treat one view as consensus or as a second opinion.`
-		: "The reconciler must compare and challenge both analyses explicitly; agreement is not proof and disagreement must remain visible until resolved.";
+		? `Only stream ${packaged.usable[0]} is usable — this is one view, never consensus. Adversarially review it: actively try to refute its key claims, name unsupported assumptions, state what evidence could decide the open points, and say what the absent view would most plausibly have raised against it. Carry every surviving warning into the directive.`
+		: "Compare and challenge both analyses explicitly; agreement is not proof and disagreement must remain visible until resolved. Preserve useful minority findings even when the majority path wins: name which minority points survive into the directive and why.";
 	const sections = [
 		"You are reconciling two independent first-pass analyses (A and B) of one request into ONE authoritative directive for the agent that acts next. A and B ran concurrently on the same model without seeing each other; treat them as competing or complementary reasoning paths, not votes.",
 		"Original request:",
@@ -293,8 +315,8 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		].join("\n"),
 		[
 			"Compare, then challenge, then reconcile, then commit:",
-			"1. Compare — agreements, contradictions, missing considerations, alternative strategies, tool-use differences.",
-			"2. Challenge — for each contradiction or risky proposal: stronger evidence versus weaker assumptions, detected mistakes, uncertainty, unresolved questions. Do not average disagreements away; decide what evidence would settle each and take the safer reading when evidence is absent.",
+			"1. Compare — agreements, contradictions, evidence strength behind each claim (observed versus assumed), assumptions, risks, unresolved questions, and proposed tool actions side by side. Note missing considerations and alternative strategies either stream overlooked.",
+			"2. Challenge — for each contradiction or risky proposal: weigh stronger evidence against weaker assumptions, name detected mistakes, and either choose the better-supported side or define exactly what evidence would decide it. Agreement is not proof: re-check each agreement for shared blind spots and independent evidence. Do not average disagreements away; take the safer reading when evidence is absent. Preserve useful minority findings instead of silently dropping them.",
 			`3. Reconcile — one coherent next action: the plan, the exact tool actions or edits to authorize (in order), what each stream got right or wrong in one line each, and what remains uncertain. ${survivor}`,
 			"4. Commit — write the directive as imperative instructions the acting agent executes directly. One path only; leave no either/or open unless the request itself is a question with genuinely open options.",
 		].join("\n"),
@@ -302,7 +324,7 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		[
 			"Output exactly two sections:",
 			"Directive — the imperative unified plan, actions, or answer guidance.",
-			"Reconciliation — agreements; contradictions and how each was resolved; open questions.",
+			"Reconciliation — agreements and the independent evidence behind each; contradictions and how each was resolved (or what evidence would resolve it); minority findings preserved; open questions.",
 		].join("\n"),
 	];
 	return { task: sections.join("\n\n"), truncated: task.truncated };
@@ -311,6 +333,8 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 export interface DoubleDirectiveInput {
 	ref: DoubleModelRef;
 	reconcileText?: string;
+	/** Gap carried by the reconciliation pass itself (e.g. route substitution). Forces degraded. */
+	reconcileGap?: string;
 	outcomeA: DoubleStreamOutcome;
 	outcomeB: DoubleStreamOutcome;
 	maxDirectiveChars?: number;
@@ -330,10 +354,11 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 	const route = doubleRouteLabel(input.ref);
 	const max = input.maxDirectiveChars ?? DOUBLE_RECOMMENDED_LIMITS.maxDirectiveChars;
 	const reconcileText = typeof input.reconcileText === "string" ? input.reconcileText.trim() : "";
-	const degraded = !reconcileText || !packaged.bothUsable || packaged.gaps.length > 0
+	const reconcileGap = typeof input.reconcileGap === "string" ? input.reconcileGap.trim() : "";
+	const degraded = !reconcileText || !packaged.bothUsable || packaged.gaps.length > 0 || Boolean(reconcileGap)
 		|| input.outcomeA.status !== "complete" || input.outcomeB.status !== "complete";
 	const header = degraded
-		? `[Double ${route}: partial result — ${mergeDoubleGaps(packaged.gaps) || "reconciliation did not complete"}. Commit to one authoritative path below; challenge every surviving claim instead of rubber-stamping it.]`
+		? `[Double ${route}: partial result — ${mergeDoubleGaps([...packaged.gaps, reconcileGap]) || "reconciliation did not complete"}. Commit to one authoritative path below; challenge every surviving claim instead of rubber-stamping it.]`
 		: `[Double ${route}: two independent analyses reconciled into one directive. Execute this as the single authoritative plan for the request; do not re-run both analyses.]`;
 	const body = reconcileText || [
 		"No reconciled directive is available; the independent views follow. Compare and challenge them, then commit to exactly one execution path.",
