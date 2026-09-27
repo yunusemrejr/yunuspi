@@ -289,7 +289,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			pi.appendEntry(DOUBLE_MODE_ENTRY, { enabled: next, at: now() });
 		} catch { /* in-memory state still governs this session */ }
 		try {
-			ctx?.ui?.notify?.(formatDoubleStatus(next, modelRefOf(ctx?.model)), "info");
+			// Streams start at a prompt; turning Double on mid-run changes nothing
+			// until then (measured: a session enabled it mid-task and never ran it).
+			let busy = false;
+			try { busy = next && ctx?.isIdle?.() === false; } catch { /* idle state is optional */ }
+			ctx?.ui?.notify?.(formatDoubleStatus(next, modelRefOf(ctx?.model)) + (busy ? "\nStarts with your next prompt; the running turn continues single." : ""), "info");
 		} catch { /* notification is optional */ }
 	};
 
