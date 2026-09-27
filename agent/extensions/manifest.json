@@ -83,6 +83,7 @@
     "design-studio.ts",
     "desktop-session.ts",
     "diagnostic-provenance.ts",
+    "double.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
     "expert-brief.ts",

@@ -4976,6 +4976,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/double.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/effort-policy.mjs",
         "exists": true
       },
