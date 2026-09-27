@@ -113,3 +113,12 @@ test("creative hook rules bind the QA loop", () => {
   assert.equal(hooks.matchHook("svg_inspect", {})?.key, "art-qa-evidence");
   assert.equal(hooks.matchHook("creative_compare", {})?.key, "art-qa-evidence");
 });
+
+test("qaFolder creates a missing workspace output folder instead of failing with ENOENT", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-folder-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const output = await qa.qaFolder("build/ui-review/pass1", dir, "ui-review", "matrix");
+  assert.ok(fs.statSync(output).isDirectory());
+  assert.equal(path.dirname(output), path.join(fs.realpathSync(dir), "build/ui-review/pass1"));
+  await assert.rejects(() => qa.qaFolder("../outside", dir, "ui-review", "matrix"), /inside the current workspace/);
+});

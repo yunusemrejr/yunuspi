@@ -138,6 +138,15 @@ test('todo recovers only unambiguous batch operations that omit their action bef
  const both={action:'update',id:5,taskId:9};assert.equal(prepareTodoArguments(both),both,'an explicit id is never replaced by taskId');
 });
 
+test('subagent recovers tasks and chain sent as JSON strings',async()=>{
+ const {prepareSubagentArguments}=await import(pathToFileURL(path.join(release,'agent/extensions/pi-subagents/src/extension/index.ts')).href);
+ const tasks=[{agent:'worker',task:'Audit'}];
+ assert.deepEqual(prepareSubagentArguments({tasks:JSON.stringify(tasks)}).tasks,tasks);
+ assert.deepEqual(prepareSubagentArguments({chain:JSON.stringify(tasks)}).chain,tasks);
+ const bad={tasks:'[not json'};assert.equal(prepareSubagentArguments(bad),bad,'undecodable strings are left for validation');
+ const ok={agent:'worker',task:'x'};assert.equal(prepareSubagentArguments(ok),ok);
+});
+
 test('todo dependency and child refusals name the blocking tasks',()=>{
  const empty={tasks:[],nextId:1};
  const made=applyTaskMutation(empty,'batch',{operations:[

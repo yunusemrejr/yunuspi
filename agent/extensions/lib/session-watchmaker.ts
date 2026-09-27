@@ -132,9 +132,14 @@ export function validateWatchmakerAdvice(text: string, packet: ObserverPacket, e
     else if (!json.startsWith('{') && json.includes('{') && json.lastIndexOf('}') > json.indexOf('{')) json = json.slice(json.indexOf('{'), json.lastIndexOf('}') + 1);
     const parsed = JSON.parse(json);
     if (typeof parsed?.memo === 'string' && parsed.memo.trim()) {
-      const memo = parsed.memo.replace(/\s+/g, ' ').trim();
+      let memo = parsed.memo.replace(/\s+/g, ' ').trim();
+      // Models overshoot the limit on most memos; a clipped memo keeps the
+      // paid carry-over that rejecting it (every other chunk) threw away.
+      if (memo.length > WATCHMAKER_MEMO_CHARS) {
+        const cut = memo.slice(0, WATCHMAKER_MEMO_CHARS - 1);
+        memo = `${(cut.lastIndexOf(' ') > WATCHMAKER_MEMO_CHARS / 2 ? cut.slice(0, cut.lastIndexOf(' ')) : cut).replace(/[\s,;:.-]+$/, '')}…`;
+      }
       if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(parsed.memo)) advice.memoRejected = 'memo contains control characters';
-      else if (memo.length > WATCHMAKER_MEMO_CHARS) advice.memoRejected = `memo exceeds ${WATCHMAKER_MEMO_CHARS} characters`;
       else {
         const leak = packet.evidence
           .filter(row => row.kind === 'user request' || row.kind === 'earlier user prompt')

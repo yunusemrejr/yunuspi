@@ -65,10 +65,13 @@ export async function qaFolder(value: unknown, cwd: string, area: string, prefix
     await fs.writeFile(path.join(parent, ".gitignore"), "*\n", { flag: "wx" }).catch(() => {});
   } else parent = canonicalMutationPath(textPath(value), root);
   if (!containsPath(root, parent)) throw new Error("Output directory must be inside the current workspace");
-  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory must already exist");
   const output = path.join(parent, `${prefix}-${randomBytes(5).toString("hex")}`);
   const denial = selfMutationDenial(output, root);
   if (denial) throw new Error(denial);
+  // A missing workspace folder is created rather than failing the capture
+  // with a raw ENOENT the agent then has to diagnose and retry.
+  await fs.mkdir(parent, { recursive: true });
+  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory is not a directory");
   await fs.mkdir(output, { mode: 0o700 });
   return output;
 }

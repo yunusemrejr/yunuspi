@@ -52,6 +52,9 @@ export interface ChildBreakerPolicy {
 	/** Per-child spend ceiling. The only hard spend wall: stop a runaway child
 	 *  before it burns "tens of dollars for no reason". */
 	maxCostUsd: number;
+	/** Tool calls a child may still make after the wrap-up steer at
+	 *  `maxToolCalls`, so it can return its findings instead of losing them. */
+	wrapUpGraceToolCalls: number;
 }
 
 /**
@@ -68,6 +71,7 @@ export const DEFAULT_CHILD_BREAKER_POLICY: ChildBreakerPolicy = {
 	maxTurns: 400,
 	staleActivityMs: 20 * 60_000,
 	maxCostUsd: 15,
+	wrapUpGraceToolCalls: 12,
 };
 
 export interface ChildBreakerObservation {
@@ -88,10 +92,12 @@ export interface ChildBreakerObservation {
 	terminal?: boolean;
 	/** A stop/timeout already requested — a second opinion is noise. */
 	stopRequested?: boolean;
+	/** The tool-call wrap-up steer was already sent to this child. */
+	wrapUpRequested?: boolean;
 }
 
 export type ChildBreakerVerdict =
-	| { tripped: false }
+	| { tripped: false; wrapUp?: { detail: string } }
 	| { tripped: true; reason: ChildBreakerReason; detail: string; evidence: Record<string, number | string> };
 
 function num(value: unknown): number {
@@ -115,6 +121,7 @@ export function resolveChildBreakerPolicy(env: NodeJS.ProcessEnv = process.env, 
 		maxCostUsd: Number.isFinite(Number(env.PI_SUBAGENT_MAX_CHILD_COST_USD)) && Number(env.PI_SUBAGENT_MAX_CHILD_COST_USD) > 0
 			? Number(env.PI_SUBAGENT_MAX_CHILD_COST_USD)
 			: base.maxCostUsd,
+		wrapUpGraceToolCalls: positiveIntEnv(env.PI_SUBAGENT_WRAP_UP_GRACE_TOOLS, base.wrapUpGraceToolCalls),
 	};
 }
 
@@ -153,12 +160,18 @@ export function evaluateChildBreakers(
 			evidence: { turns: num(observation.turns), limit: policy.maxTurns },
 		};
 	}
-	if (policy.maxToolCalls > 0 && num(observation.toolCalls) >= policy.maxToolCalls) {
+	// The tool-call budget is soft first: the child is steered to finish and
+	// report what it has, and is only stopped if it keeps going past the grace.
+	const hardToolLimit = policy.maxToolCalls + (observation.wrapUpRequested ? Math.max(0, policy.wrapUpGraceToolCalls) : 0);
+	if (policy.maxToolCalls > 0 && num(observation.toolCalls) >= hardToolLimit) {
+		if (!observation.wrapUpRequested && policy.wrapUpGraceToolCalls > 0) {
+			return { tripped: false, wrapUp: { detail: `Child reached ${num(observation.toolCalls)} tool calls (budget ${policy.maxToolCalls}).` } };
+		}
 		return {
 			tripped: true,
 			reason: "excessive_tool_calls",
-			detail: `Child reached ${num(observation.toolCalls)} tool calls (limit ${policy.maxToolCalls}).`,
-			evidence: { toolCalls: num(observation.toolCalls), limit: policy.maxToolCalls },
+			detail: `Child reached ${num(observation.toolCalls)} tool calls (limit ${hardToolLimit}${observation.wrapUpRequested ? " after the wrap-up request" : ""}).`,
+			evidence: { toolCalls: num(observation.toolCalls), limit: hardToolLimit },
 		};
 	}
 	if (policy.maxCostUsd > 0 && num(observation.costUsd) >= policy.maxCostUsd) {

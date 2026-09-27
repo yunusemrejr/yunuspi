@@ -137,6 +137,22 @@ test('project context keeps unchanged evidence anchored across synthetic tool re
   assert.deepEqual(repeated.messages, next.messages, 'reprocessing wire context cannot duplicate the capsule');
 }));
 
+test('an unchanged capsule is not re-charged per inference, so long turns keep it', () => fixture(async ({ open }) => {
+  const session = open('long-turn');
+  await session.call(read);
+  const context = messages => session.hooks.get('context')({ messages }, session.ctx);
+  let messages = [{ role: 'user', content: 'Inspect the README' }];
+  const first = await context(messages);
+  const capsule = first.messages.find(m => m.customType === 'project-intelligence-context');
+  // The budget charges the capsule body (shorter than the rendered header+body).
+  const renders = Math.ceil(12000 / (capsule.content.length / 4));
+  for (let i = 0; i < renders; i++) {
+    messages = [...messages, { role: 'assistant', content: [{ type: 'toolCall', id: `c${i}`, name: 'read', arguments: { path: 'README.md' } }] }, { role: 'toolResult', toolCallId: `c${i}`, content: [{ type: 'text', text: 'ok' }] }];
+    const out = await context(messages);
+    assert.ok(out?.messages.some(m => m.customType === 'project-intelligence-context'), `render ${i + 1} of ${renders} still carries the capsule`);
+  }
+}));
+
 test('automatic graph context follows a different indexed target at the same revision and drops unrelated evidence on failure', () => fixture(async ({ open, cwd }) => {
   for (const target of ['alpha', 'beta']) {
     await fs.writeFile(path.join(cwd, `${target}.js`), `import { value } from './${target}-dependency.js';\nexport { value };\n`);

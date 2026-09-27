@@ -3100,7 +3100,7 @@ async function runSubagent(
 		const step = requiredStatusStep(statusPayload, index);
 		if (step.status === "stopped") return;
 		step.status = "stopped";
-		step.error = stopMessage;
+		step.error = childStopMessage(index);
 		step.exitCode = 1;
 		step.stopped = true;
 		step.stopRequested = true;
@@ -3117,7 +3117,8 @@ async function runSubagent(
 	};
 	const childStopResult = (index: number, agent: string, context?: "fresh" | "fork"): SingleStepResult => {
 		markChildStopped(index);
-		return stoppedStepResult(agent, context, requiredStatusStep(statusPayload, index).sessionName);
+		const message = childStopMessage(index);
+		return { ...stoppedStepResult(agent, context, requiredStatusStep(statusPayload, index).sessionName), output: message, error: message };
 	};
 	const stopChildStep = (request: StopRequest): void => {
 		if (request.targetIndex === undefined) {
@@ -3286,6 +3287,13 @@ async function runSubagent(
 		exitCode: 1,
 		timedOut: true,
 	});
+	// A breaker stop keeps whatever the child already reported; a user stop
+	// keeps the established terse result.
+	const stoppedChildOutput = (index: number, output: string | undefined): string => {
+		const message = childStopMessage(index);
+		const partial = output?.trim();
+		return message !== stopMessage && partial && partial !== stopMessage ? `${partial}\n\n[${message}]` : message;
+	};
 	const stoppedStepResult = (agent: string, context?: "fresh" | "fork", sessionName?: string): SingleStepResult => omitUndefinedProperties({
 		agent,
 		sessionName,
@@ -3367,7 +3375,12 @@ async function runSubagent(
 		lastProgressAt: number;
 		costUsd: number;
 		tripped?: ChildBreakerReason;
+		wrapUpRequested?: boolean;
 	}>();
+	// Why a child was stopped when it was not the user: shown instead of the
+	// generic user-stop text so the parent never misreads a breaker as a human.
+	const childStopMessages = new Map<number, string>();
+	const childStopMessage = (index: number): string => (stopped ? undefined : childStopMessages.get(index)) ?? stopMessage;
 	const childBreakerPolicy = resolveChildBreakerPolicy();
 	const breakerStateFor = (index: number, now: number) => {
 		let state = childBreakerStates.get(index);
@@ -3412,6 +3425,7 @@ async function runSubagent(
 			message: detail,
 		}));
 		console.warn(`[pi-subagents] child ${step.agent ?? index} breaker tripped (${reason}): ${detail}`);
+		childStopMessages.set(index, `Subagent stopped by the ${reason.replaceAll("_", " ")} breaker, not by the user: ${detail}`);
 		// Stop only this child: successful siblings keep their work and the
 		// tripped child becomes terminal instead of holding the group open.
 		stopChildStep({ type: "stop", targetIndex: index, childId: step.childId ?? childStopTargetId(index) });
@@ -3433,8 +3447,21 @@ async function runSubagent(
 				...(step.toolCount !== undefined ? { toolCalls: step.toolCount } : {}),
 				costUsd: state.costUsd,
 				stopRequested: step.stopRequested === true,
+				wrapUpRequested: state.wrapUpRequested === true,
 			}, childBreakerPolicy);
 			if (verdict.tripped) tripChildBreaker(index, verdict.reason, verdict.detail, now);
+			else if (verdict.wrapUp && !state.wrapUpRequested) {
+				state.wrapUpRequested = true;
+				appendJsonl(eventsPath, JSON.stringify({ type: "subagent.step.wrap_up_requested", ts: now, runId: id, stepIndex: index, agent: step.agent, message: verdict.wrapUp.detail }));
+				deliverSteerRequest({
+					type: "steer",
+					id: `breaker-wrap-up-${id}-${index}`,
+					ts: now,
+					targetIndex: index,
+					source: "breaker",
+					message: `Tool-call budget reached (${verdict.wrapUp.detail}). Stop exploring now: write any required output files and return your final answer with the findings you already have, marking gaps explicitly. You have at most ${childBreakerPolicy.wrapUpGraceToolCalls} more tool calls before this child is stopped.`,
+				});
+			}
 		}
 	};
 	const pendingToolResults: Array<{ tool: string; path?: string; mutates: boolean; startedAt?: number } | undefined> = initialStatusSteps.map(() => undefined);
@@ -4595,7 +4622,7 @@ async function runSubagent(
 					};
 					refreshUsageBudget();
 				}
-				setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
+				setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? childStopMessage(fi) : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptPath", singleResult.transcriptPath ?? requiredStatusStep(statusPayload, fi).transcriptPath);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptError", singleResult.transcriptError);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "agentContract", singleResult.agentContract);
@@ -4625,7 +4652,7 @@ async function runSubagent(
 		}));
 		if (stopped || childStopped) appendTerminalChildStatusEvent(fi, taskEndTime);
 		if (singleResult.exitCode !== 0 && failFast && !childStopped) aborted = true;
-				return stopped || childStopped ? { ...singleResult, output: stopMessage, error: stopMessage, exitCode: 1, interrupted: false, timedOut: false, stopped: true, skipped: false } : timedOut ? { ...singleResult, output: singleResult.output || (timeoutMessage ?? "Subagent timed out."), error: singleResult.error ?? timeoutMessage ?? "Subagent timed out.", exitCode: 1, interrupted: false, timedOut: true, skipped: false } : { ...singleResult, skipped: false };
+				return stopped || childStopped ? { ...singleResult, output: stoppedChildOutput(fi, singleResult.output), error: childStopMessage(fi), exitCode: 1, interrupted: false, timedOut: false, stopped: true, skipped: false } : timedOut ? { ...singleResult, output: singleResult.output || (timeoutMessage ?? "Subagent timed out."), error: singleResult.error ?? timeoutMessage ?? "Subagent timed out.", exitCode: 1, interrupted: false, timedOut: true, skipped: false } : { ...singleResult, skipped: false };
 			}, globalSemaphore);
 
 			flatIndex += dynamicSteps.length;
@@ -4996,7 +5023,7 @@ async function runSubagent(
 							};
 							refreshUsageBudget();
 						}
-						setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
+						setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? childStopMessage(fi) : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptPath", singleResult.transcriptPath ?? requiredStatusStep(statusPayload, fi).transcriptPath);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptError", singleResult.transcriptError);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "agentContract", singleResult.agentContract);
@@ -5040,7 +5067,7 @@ async function runSubagent(
 						}
 
 						if (singleResult.exitCode !== 0 && failFast && !childStopped) aborted = true;
-						return stopped || childStopped ? { ...singleResult, output: stopMessage, error: stopMessage, exitCode: 1, interrupted: false, timedOut: false, stopped: true, skipped: false } : timedOut ? { ...singleResult, output: singleResult.output || (timeoutMessage ?? "Subagent timed out."), error: singleResult.error ?? timeoutMessage ?? "Subagent timed out.", exitCode: 1, interrupted: false, timedOut: true, skipped: false } : { ...singleResult, skipped: false };
+						return stopped || childStopped ? { ...singleResult, output: stoppedChildOutput(fi, singleResult.output), error: childStopMessage(fi), exitCode: 1, interrupted: false, timedOut: false, stopped: true, skipped: false } : timedOut ? { ...singleResult, output: singleResult.output || (timeoutMessage ?? "Subagent timed out."), error: singleResult.error ?? timeoutMessage ?? "Subagent timed out.", exitCode: 1, interrupted: false, timedOut: true, skipped: false } : { ...singleResult, skipped: false };
 					},
 					globalSemaphore,
 				);
@@ -5340,9 +5367,9 @@ async function runSubagent(
 				launchContractDigest: singleResult.launchContractDigest,
 				launchResolvedExtensions: singleResult.launchResolvedExtensions,
 				runtimeAcknowledgedExtensions: singleResult.runtimeAcknowledgedExtensions,
-				output: stopped || childStopped ? stopMessage : timedOut ? singleResult.output || (timeoutMessage ?? "Subagent timed out.") : singleResult.output,
+				output: stopped || childStopped ? stoppedChildOutput(flatIndex, singleResult.output) : timedOut ? singleResult.output || (timeoutMessage ?? "Subagent timed out.") : singleResult.output,
 				outputState: singleResult.outputState,
-				error: stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error,
+				error: stopped || childStopped ? childStopMessage(flatIndex) : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error,
 				protocolError: singleResult.protocolError,
 				success: !stopped && !childStopped && !timedOut && singleResult.interrupted !== true && singleResult.exitCode === 0,
 				exitCode: stopped || childStopped ? 1 : timedOut ? 1 : singleResult.interrupted === true ? 0 : singleResult.exitCode,
@@ -5437,7 +5464,7 @@ async function runSubagent(
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "modelAttempts", singleResult.modelAttempts);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "contextOverflow", singleResult.contextOverflow);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "totalCost", singleResult.totalCost);
-			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "error", stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
+			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "error", stopped || childStopped ? childStopMessage(flatIndex) : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "transcriptPath", singleResult.transcriptPath ?? requiredStatusStep(statusPayload, flatIndex).transcriptPath);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "transcriptError", singleResult.transcriptError);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "agentContract", singleResult.agentContract);

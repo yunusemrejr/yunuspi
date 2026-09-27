@@ -588,6 +588,9 @@ export function agentBrief(snapshot, options = {}) {
   }
   if (result.truncated) lines.push(omitted);
   result.summary=lines.join('\n');
+  // Nothing matched and nothing to caution: callers may skip injecting a
+  // capsule whose only content is the changing query header.
+  if (!roots.length && !candidates.length && !options.caveat) result.empty=true;
   // Keep warnings intact even if supplied keys fill the header allowance.
   if (JSON.stringify(result).length > maxChars) {
     result.truncated=true;

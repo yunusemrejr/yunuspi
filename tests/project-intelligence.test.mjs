@@ -71,10 +71,11 @@ test("agent briefs preserve directed dependencies, exact keys and provenance wit
   assert.match(brief.summary, /inferred.*@file:src/);
   assert.match(brief.summary, /incoming.*consumers.*outgoing.*dependencies/i);
   assert.equal(brief.revision, 7);
-  assert.match(
-    agentBrief(graph, { focus: "missing.ts" }).summary,
-    /No matching entities/,
-  );
+  const missing = agentBrief(graph, { focus: "missing.ts" });
+  assert.match(missing.summary, /No matching entities/);
+  assert.equal(missing.empty, true, "an evidence-free brief is marked empty so it is not injected");
+  assert.equal(brief.empty, undefined);
+  assert.equal(agentBrief(graph, { focus: "missing.ts", caveat: "Index is stale" }).empty, undefined, "a caveat is still worth injecting");
   const crowded = {
     ...graph,
     edges: Array.from({ length: 40 }, (_, i) => ({

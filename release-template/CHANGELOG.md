@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.4 — 2026-09-27
+
+A council brief is no longer lost partway through a long turn. The project-intelligence capsule that carries it was charged against the per-input context budget on every inference, even when unchanged, so after a few requests the budget refused it and the brief with it; one session then waited about fourteen minutes for a brief that never arrived. Unchanged capsules are now charged once. A retrieval with no matching entities, evidence or caveat injects nothing, instead of a capsule whose changing query header moved it to the tail on every tool call, broke the prompt cache and read to the model like a new prompt.
+
+A subagent that reaches its tool-call cap is first asked to wrap up and gets a short grace (`PI_SUBAGENT_WRAP_UP_GRACE_TOOLS`, default 12) before the breaker stops it, so its findings are reported rather than cut off. A breaker stop now says which breaker stopped the child and that the user did not, and keeps the partial output.
+
+Observer advice is discarded only when all of its cited evidence is changed task, TODO or child state; otherwise it is delivered with a caveat, so paid reviews are not thrown away. A Watchmaker memo that is slightly too long is clipped at a word boundary instead of rejected.
+
+Tool argument recovery: `ui_explore` creates a missing output folder inside the workspace (paths outside it are still refused), `expert_director` accepts taste fields sent beside `action` instead of nested, and `subagent` accepts `tasks` or `chain` sent as a JSON string. Each of these failed repeatedly in recent sessions. Regression coverage extends the existing suites.
+
 ## 0.12.3 — 2026-09-27
 
 Watchmaker uses recent completed results when assessing progress, labels repetition spans separately from execution time, qualifies advice when newer results arrive, and discards advice whose cited task state has changed. Potentially stale memos are not persisted. Councils cancelled by a follow-up persist terminal state and can later attach actual child usage without delivering obsolete advice. Verified shell reads of skills consume the existing guidance receipt, preventing repeated hints; unknown background handles explain the correct task registry.

@@ -382,7 +382,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         const cited = currentPacket.evidence.filter(row => advice?.evidence?.includes(row.id));
         const changed = cited.filter(row => row.kind === 'current state' && capturedStates.get(row.id) !== currentStates.get(row.id)).map(row => row.id);
         const concrete = (advice?.evidence ?? []).some((id: string) => ['tool result', 'tool error'].includes(currentPacket.evidence.find(row => row.id === id)?.kind ?? journal.get(id)?.kind ?? ''));
-        if (!concrete && changed.some(id => ['todo-state', 'child-state', 'harness-runs'].includes(id))) return false;
+        // Plan/child state alone is a moving premise; advice resting on nothing
+        // else is void once it changed. Advice that also cites the request
+        // profile, requirements or other rows is delivered with the caveat
+        // below (discarding it wasted 9 of 9 paid reviews in one session).
+        if (!concrete && changed.some(id => ['todo-state', 'child-state', 'harness-runs'].includes(id))
+          && (advice?.evidence ?? []).every((id: string) => changed.includes(id) || id === 'request')) return false;
         // Discard only when the premise is gone: advice about running work
         // whose every cited command has finished, or routing advice after the
         // child state it weighed changed. Todo/child/completed-tool rows change

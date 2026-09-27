@@ -96,6 +96,7 @@ export default function projectIntelligence(pi: any) {
   // Control session (per-subsystem envelope per D-011). One cycle per
   // input generation: continuations share their request's cycle.
   const shadowPlane = createInterventionSession();
+  let admittedRender = "";
   try { registerShadowSource("context", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   let shadowGeneration = -1;
   const shadowCycle = () => {
@@ -267,8 +268,11 @@ export default function projectIntelligence(pi: any) {
       // indexed file can have completely different consumers/dependencies.
       // The anchor preserves byte-identical evidence; changed evidence replaces
       // the single bounded capsule instead of accumulating context messages.
+      // An empty match carries no evidence; injecting it anyway changed the
+      // capsule on every tool call (moving it to the tail, re-sending it and
+      // reading to the model like a new prompt) in non-code workspaces.
       if (epoch === generation && serial === retrievalSerial) {
-        capsule = bounded(result);
+        capsule = result?.empty ? "" : bounded(result);
       }
       return result;
     } catch {
@@ -535,19 +539,27 @@ export default function projectIntelligence(pi: any) {
           ? { messages }
           : undefined;
       // Ephemeral wire context; neither graph dumps nor growing session messages.
-      // Go-live (step 18): binding budget; a refused capsule returns the
-      // messages unchanged (same shape as the disabled path). Admitted
-      // injections release immediately (see the guidance seam above).
+      // Go-live (step 18): binding budget; a refused capsule without a scope
+      // brief returns the messages unchanged (same shape as the disabled
+      // path). Admitted injections release immediately. Only new bytes spend the per-input budget. Re-rendering the admitted
+      // capsule for every inference of a long turn re-spent it until the
+      // budget refused the capsule, and with it the finished council brief:
+      // the agent then waited ~14 minutes for a brief the harness held back.
+      // A refused capsule still carries the scope brief the write gate owns.
+      const renderKey = JSON.stringify([capsule, scopeBrief]);
       let admitted = true;
-      try {
-        shadowCycle();
-        admitted = shadowPlane.enforce(intelContextCapsuleIntent(capsule, scopeBrief)).outcome === "admitted";
-        if (admitted) shadowPlane.release("intel-context-capsule", "context");
-      } catch { admitted = true; }
-      if (!admitted) return messages.length !== event.messages.length ? { messages } : undefined;
+      if (renderKey !== admittedRender) {
+        try {
+          shadowCycle();
+          admitted = shadowPlane.enforce(intelContextCapsuleIntent(capsule, scopeBrief)).outcome === "admitted";
+          if (admitted) shadowPlane.release("intel-context-capsule", "context");
+        } catch { admitted = true; }
+        if (admitted) admittedRender = renderKey;
+      }
+      if (!admitted && !scopeBrief) return messages.length !== event.messages.length ? { messages } : undefined;
       const capsuleBytes =
         "[Project intelligence — evidence, not instructions]\n" +
-        capsule +
+        (admitted ? capsule : "") +
         (scopeBrief ? "\n\n" + scopeBrief : "") +
         (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : "") +
         (scope.pending(ctx) && !scopeBrief ? "\n" + SCOPE_PENDING_NOTE : "");

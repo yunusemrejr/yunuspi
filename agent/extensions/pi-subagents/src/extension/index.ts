@@ -377,6 +377,25 @@ class SubagentControlNoticeComponent implements Component {
 	}
 }
 
+
+/** Models sometimes send `tasks`/`chain` as a JSON-encoded string
+ * ("tasks.0: must be object"), costing a full turn to resend the same call.
+ * Decode only a string that parses to an array; anything else still fails
+ * schema validation with its declared message. */
+export function prepareSubagentArguments(args: unknown): any {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+	let input = args as Record<string, any>;
+	for (const key of ["tasks", "chain"]) {
+		const value = input[key];
+		if (typeof value !== "string" || !value.trim().startsWith("[")) continue;
+		try {
+			const parsed = JSON.parse(value);
+			if (Array.isArray(parsed)) input = { ...input, [key]: parsed };
+		} catch { /* leave for schema validation */ }
+	}
+	return input;
+}
+
 export function projectActiveHerdrRuns(state: SubagentState): HerdrStatusRun[] {
 	const active = (status: string) => status === "queued" || status === "running";
 	const foregroundChildrenByWorkflow = new Map<string, Array<{ agent: string; needsAttention: boolean }>>();
@@ -761,6 +780,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		description: buildSubagentToolDescription(config),
 		...buildSubagentToolPromptMetadata(config),
 		parameters,
+		prepareArguments: prepareSubagentArguments,
 
 		async execute(id, params, signal, onUpdate, ctx) {
 			return finalizeToolResult(await executeSubagentCollapsed(id, params as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx));

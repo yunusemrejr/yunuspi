@@ -172,7 +172,9 @@ test('watchmaker packets stay within budget and validate memos', () => {
   const good = validateWatchmakerAdvice(JSON.stringify({ note: 'Run the build once.', evidence: ['request'], tools: [], skills: [], memo: 'build once beats reading twice' }), packet);
   assert.equal(good.advice?.memo, 'build once beats reading twice');
   const long = validateWatchmakerAdvice(JSON.stringify({ note: 'Run the build once.', evidence: ['request'], tools: [], skills: [], memo: 'x'.repeat(200) }), packet);
-  assert.equal(long.advice?.memo, undefined);
-  assert.match(long.advice?.memoRejected ?? '', /exceeds 140/);
-  assert.ok(long.advice?.note, 'a rejected memo never voids the note');
+  assert.equal(long.advice?.memo, `${'x'.repeat(139)}…`, 'an overlong memo is clipped, not discarded');
+  assert.equal(long.advice?.memoRejected, undefined);
+  const words = validateWatchmakerAdvice(JSON.stringify({ note: 'Run the build once.', evidence: ['request'], tools: [], skills: [], memo: 'build once then verify '.repeat(10) }), packet);
+  assert.ok(words.advice?.memo.length <= 140 && words.advice.memo.endsWith('verify…'), 'clipping ends on a word boundary');
+  assert.ok(long.advice?.note, 'a clipped memo never voids the note');
 });

@@ -3016,7 +3016,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 894
+        "line": 906
       },
       {
         "name": "harness-backup",
@@ -3116,7 +3116,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 561
+        "line": 566
       },
       {
         "name": "or-provider",
@@ -3718,7 +3718,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 770,
+        "line": 782,
         "kind": "literal"
       },
       {
@@ -3881,7 +3881,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 759,
+        "line": 778,
         "kind": "definition"
       },
       {
@@ -4232,7 +4232,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 770,
+        "line": 782,
         "kind": "literal"
       },
       {
@@ -4514,7 +4514,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          809
+          829
         ],
         "knownNames": [
           "subagent"

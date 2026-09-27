@@ -150,7 +150,8 @@ export default function expertDirector(pi: any) {
         return { content: [{ type: "text", text: JSON.stringify(data).slice(0, 4000) }], details: data };
       }
       if (action === "taste") {
-        const t = params.taste ?? {};
+        // Models often send the taste fields flat beside action; accept both.
+        const t = params.taste ?? params;
         const scope: TasteScope = t.scope === "project" ? "project" : "user";
         const pid = projectId(ctx);
         if (t.op === "list") {

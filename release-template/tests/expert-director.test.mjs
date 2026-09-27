@@ -257,6 +257,8 @@ test('expert_director tool registers five actions with bounded outputs',async t=
   assert.equal(recorded.details.recorded.confidence,.9);
   const listed=await call('taste',{taste:{op:'list',domains:['svg-iconography']}});
   assert.ok(listed.details.preferences.some(p=>p.text==='Prefer geometric icon grids'));
+  const flat=await call('taste',{op:'forget',selector:'Prefer geometric icon grids'});
+  assert.equal(flat.details.forgotten.text,'Prefer geometric icon grids','taste fields sent flat beside action are accepted');
   const status=await call('status');
   assert.equal(status.details.packs.length,16);
   process.env.PI_SUBAGENT_CHILD='1';
