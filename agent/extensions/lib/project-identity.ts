@@ -22,7 +22,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 export type ProjectIdBasis = "explicit" | "git-remote" | "generated";
@@ -223,7 +223,7 @@ export function findExplicitId(cwd: string): { id: string; dir: string } | undef
   let dir = path.resolve(cwd);
   for (let guard = 0; guard < 64; guard++) {
     const candidate = path.join(dir, PROJECT_ID_FILE);
-    try {
+    if (!isTempRoot(dir)) try {
       const stat = fs.lstatSync(candidate);
       if (stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= 1024) {
         const first = fs.readFileSync(candidate, "utf-8").split("\n", 1)[0]?.trim() ?? "";
@@ -329,6 +329,20 @@ export function findMarkerRoot(cwd: string): string | undefined {
   return undefined;
 }
 
+/** World-writable temp roots: an id file there was planted by whichever
+ * process last ran in them, so it never anchors the projects beneath. */
+function isTempRoot(dir: string): boolean {
+  return [tmpdir(), "/tmp", "/var/tmp"].some((root) => path.resolve(root) === dir);
+}
+
+/** Directories shared by unrelated work. A generated id is never written
+ * into them (measured: one session run in /tmp gave every anchorless temp
+ * project the same identity and memory DB); they use a registry alias. */
+function isSharedRoot(dir: string): boolean {
+  if (dir === path.parse(dir).root || isTempRoot(dir)) return true;
+  try { return dir === path.resolve(homedir()); } catch { return false; }
+}
+
 /** One directory's winning anchor (explicit beats git at the same level). */
 export interface ProjectAnchor {
   dir: string;
@@ -346,7 +360,7 @@ export function findProjectAnchors(cwd: string, env: Env = process.env, maxAncho
   for (let guard = 0; guard < 64 && anchors.length < maxAnchors; guard++) {
     let explicitId: string | undefined;
     const candidate = path.join(dir, PROJECT_ID_FILE);
-    try {
+    if (!isTempRoot(dir)) try {
       const stat = fs.lstatSync(candidate);
       if (stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= 1024) {
         const first = fs.readFileSync(candidate, "utf-8").split("\n", 1)[0]?.trim() ?? "";
@@ -379,7 +393,7 @@ export interface ResolveProjectOptions {
 
 function resolveGenerated(cwd: string, anchorDir: string, opts: ResolveProjectOptions, env: Env, now: string): ProjectChainLink {
   const autoWrite = opts.autoWrite ?? !["off", "0"].includes((env.PI_PROJECT_ID_AUTO ?? "on").toLowerCase());
-  if (autoWrite) {
+  if (autoWrite && !isSharedRoot(path.resolve(anchorDir))) {
     const generated = `prj_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
     try {
       fs.writeFileSync(path.join(anchorDir, PROJECT_ID_FILE), `${generated}\n`, { flag: "wx" });

@@ -2996,7 +2996,7 @@
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 300
+        "line": 304
       },
       {
         "name": "effort",

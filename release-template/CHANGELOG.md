@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.13.3 — 2026-09-27
+
+**Session-owned processes.** A session that was killed, or whose terminal closed before its shutdown handlers ran, used to leave its processes running: detached browsers, desktops, renders, background tasks and long bash jobs. Now each YunusPi process that starts such a group writes an owner record. The record holds the owner's start identity and one `pgid identity` line per group. The owner also starts one detached reaper (`scripts/process-owner.sh reap`). Once the owner is gone, the reaper stops only the recorded groups whose leader identity still matches. Only direct children that lead their own group are recorded, so a recycled or foreign pid is never signalled. This replaces managed bash's per-job watchdog.
+
+**Local model on demand.** The local model service used to hold about 1.1 GB at all times. It is no longer enabled at boot. Sessions start it on demand, and the owner records act as its leases. Its guard stops it 90 seconds after the last live owner disappears, so one session exiting never stops the model while another is using it. A refused connection while the service warms up reports the model as unavailable without tripping the breaker.
+
+**`/double` on dynamic catalogs.** A catalog published after the runtime's last snapshot, such as OrcaRouter's, never reached the available-model list. Every subagent, including both `/double` streams, then rejected the session's own active model within milliseconds. The model registry now keeps a publication revision, and the runtime reconciles its available list when it reads it. A timed-out stream is no longer relaunched into a window shorter than the one it already exhausted. An unavailable stream shows its cause in the progress row. Enabling `/double` in the middle of a run now says when the mode takes effect.
+
+**Project memory isolation.** A session started in `/tmp` wrote a generated project id into `/tmp` itself. Every later project beneath it that had no Git remote, id file or project marker inherited that id, so unrelated temporary projects shared one vector-memory database. Generated ids are no longer written into the filesystem root, the home directory or the temp roots, which fall back to a path alias in the registry. An id file found in a world-writable temp root no longer anchors the projects beneath it.
+
+**Tool argument recovery.** Each change below replaces an error that cost a turn in recent sessions:
+
+- **Validator:** JSON-string arrays and objects are decoded. Result bounds over the limit are clamped: `limit`, `topK`, `max*`/`min*`, `timeoutMs` and `depth`.
+- **`browser_session`:**
+  - `resize`/`set_viewport` and the `expression`/`code`/`js` aliases are mapped to their real names.
+  - A bare `evaluate` or `wait` expression returns its value.
+  - `open` without a URL starts a blank tab that a later `navigate` fills.
+- **`render_see`:**
+  - `file:` URLs are decoded.
+  - A local page keeps its `?query` as well as its `#route`; literal filenames still take precedence.
+  - Loopback renders wait up to 3 seconds for a server that `bg_run` just started.
+  - A WebGL page that is already served over HTTP now gets advice to open that URL in `browser_session`.
+- **`creative_direct`:** accepts string `intent`/`avoid` lists and a bare `hierarchy`.
+
 ## 0.13.2 — 2026-09-27
 
 Watchmaker stops paying for a review every minute. It used to read its unread events oldest-first, eight at a time, so during active work the review fell minutes behind. The leftover backlog also reset the quiet backoff after every silent review. Measured across recent sessions, 85–100% of its reviews returned no advice and it cost more than the main model. Now it folds long unread runs into one digest row, the same way the Observer does. Older failures and guardian interventions stay verbatim, and the newest work is always shown. Routine progress therefore no longer counts as backlog, so the backoff grows after quiet reviews (up to four minutes) and the Jev/Kev triage preflight can defer routine chunks. New failures, guardian interventions and salient events still force a full review.

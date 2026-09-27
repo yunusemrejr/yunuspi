@@ -200,7 +200,7 @@ export function registerBrowserSession(pi: any) {
       reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "request_help: concise question for the user about a blocking challenge; do not ask for passwords" })),
       button: Type.Optional(Type.Union(["left", "right", "middle"].map(value => Type.Literal(value)))),
       clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })),
-      url: Type.Optional(Type.String({ maxLength: 8192, description: "HTTP(S), including localhost; for wait kind:url, an exact URL or Playwright glob. Storage isolation does not imply network isolation." })),
+      url: Type.Optional(Type.String({ maxLength: 8192, description: "HTTP(S), including localhost (open without url starts a blank tab); for wait kind:url, an exact URL or Playwright glob. Storage isolation does not imply network isolation." })),
       selector: Type.Optional(Type.String({ maxLength: 256 })),
       role: Type.Optional(Type.String({ maxLength: 50 })),
       name: Type.Optional(Type.String({ maxLength: 256 })),
@@ -328,9 +328,11 @@ export function registerBrowserSession(pi: any) {
       }
       let id = p.session;
       if (p.action === "open") {
-        if (typeof p.url !== "string" || !p.url.trim())
-          return rejected("missing-url", "open requires an HTTP(S) URL, including localhost. For a local file, use render_see with its path, or serve its directory over HTTP for browser interaction.");
-        try {
+        // Without a URL, open starts a blank tab to navigate later (measured:
+        // models open an alias first, and rejecting that cost a turn).
+        if (p.url !== undefined && (typeof p.url !== "string" || !p.url.trim()))
+          return rejected("missing-url", "open takes an HTTP(S) URL, including localhost, or no url for a blank tab. For a local file, use render_see with its path, or serve its directory over HTTP for browser interaction.");
+        if (p.url !== undefined) try {
           const url = new URL(p.url);
           if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw Error();
         } catch {

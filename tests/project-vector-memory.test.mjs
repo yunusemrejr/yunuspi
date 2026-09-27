@@ -169,6 +169,21 @@ test('disabled auto-write still aliases the real path in the registry', (t) => {
   assert.equal(second.id, first.id);
 });
 
+test('shared roots never receive a generated id file, and a planted temp-root id anchors nothing', (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const shared = os.tmpdir(), marker = path.join(shared, '.pi-project-id');
+  const existed = fs.existsSync(marker);
+  const identity = resolveProjectIdentity(shared, {}, testEnv(dir));
+  assert.equal(identity.basis, 'generated');
+  assert.equal(fs.existsSync(marker), existed);
+  // Whatever sits in the temp root, a project beneath it resolves on its own.
+  const work = path.join(dir, 'w');
+  fs.mkdirSync(work);
+  assert.equal(findExplicitId(work), undefined);
+  assert.deepEqual(findProjectAnchors(work, testEnv(dir)), []);
+});
+
 // ---------------------------------------------------------------------------
 // vector store
 // ---------------------------------------------------------------------------

@@ -66,13 +66,20 @@ test("browser validates before dispatch and resolves private aliases with compac
   const call = (p, owner = 0) => tools[owner].execute("fixture", p, undefined, undefined, ctx);
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
-    for (const p of [{ action: "open", session: "workspace" }, { action: "open", session: "workspace", url: "file:///tmp/fixture.html" }, { action: "fill", session: "missing", text: "fixture" }]) {
+    for (const p of [{ action: "open", session: "workspace", url: " " }, { action: "open", session: "workspace", url: "file:///tmp/fixture.html" }, { action: "fill", session: "missing", text: "fixture" }]) {
       const result = await call(p);
       assert.equal(result.isError, true);
       assert.equal(result.details.failure.outcome, "not-dispatched");
       assert.doesNotMatch(result.details.failure.nextStep, /reconcile|timeout/i);
     }
     assert.deepEqual((await call({ action: "list" })).details.sessions, []);
+    // Open without a URL starts a blank tab that a later navigate fills.
+    const blank = await call({ action: "open", session: "blank" });
+    assert.notEqual(blank.isError, true, JSON.stringify(blank.details));
+    const filledIn = await call({ action: "navigate", session: "blank", url });
+    assert.equal(filledIn.details.session, blank.details.session);
+    assert.match(JSON.stringify(filledIn.details), /Alias fixture|Ready/);
+    assert.equal((await call({ action: "close", session: "blank" })).details.closed, true);
     const opened = await call({ action: "open", session: "workspace", url });
     assert.notEqual(opened.isError, true, JSON.stringify(opened.details));
     const id = opened.details.session;

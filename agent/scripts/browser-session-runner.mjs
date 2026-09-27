@@ -161,7 +161,7 @@ export async function runBrowserSession(input, output) {
         }
         if (!browser) {
           if (action !== "open") throw Error("Open the browser session first");
-          browserUrl(p.url);
+          if (p.url !== undefined) browserUrl(p.url);
           if (p.visible && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) throw Error("Visible browser requires a desktop display; omit visible for screenshots and text-based human help");
           stage = "launch";
           browser = await chromium.launch({
@@ -362,7 +362,9 @@ export async function runBrowserSession(input, output) {
         };
         let result;
         stage = action;
-        if (["open", "navigate", "new_tab"].includes(action)) {
+        if (action === "open" && p.url === undefined) {
+          record("blank-tab");
+        } else if (["open", "navigate", "new_tab"].includes(action)) {
           stage = "navigation";
           const response = await page.goto(browserUrl(p.url), {
             waitUntil: "domcontentloaded",

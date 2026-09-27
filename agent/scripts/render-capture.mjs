@@ -693,7 +693,7 @@ export async function renderCapture(p, output, signal) {
     if (outputMode !== "image") {
       const reason = signal?.aborted ? "cancelled"
         : /Unsupported GPU\/WebGL/.test(String(e.message))
-        ? "unsupported GPU/WebGL page; serve the app over HTTP and use browser_session for WebGL-capable inspection"
+        ? `unsupported GPU/WebGL page; ${/^https?:\/\//i.test(p.source) ? `open ${p.source} in browser_session` : "serve it over HTTP and open it in browser_session"} for WebGL-capable inspection`
         : /ERR_CONNECTION_(?:REFUSED|RESET|CLOSED|TIMED_OUT)|ERR_NAME_NOT_RESOLVED|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED/.test(String(e.message))
           ? "navigation unreachable; check the server task and HTTP URL"
           : /strict mode violation/.test(String(e.message))
