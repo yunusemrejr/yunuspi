@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -89,7 +90,7 @@ test('generated artifacts require decoded pixels and failed publication removes 
   bytes = await picture();
   const result = await images.imageGenerateRun({ prompt: 'Synthetic plate' }, cwd, undefined, undefined, fixtureEnv);
   assert.equal(result.decodeVerified, true); assert.equal(result.asset.width, 8); assert.equal(result.asset.height, 8);
-  assert.deepEqual(fs.readFileSync(path.join(cwd, result.file)), bytes);
+  assertSameBytes(fs.readFileSync(path.join(cwd, result.file)), bytes);
   assert.doesNotMatch(fs.readFileSync(path.join(cwd, result.dir, 'receipt.json'), 'utf8'), /TEST_image_fixture_only/);
   const broken = workspace(t);
   fs.mkdirSync(path.join(broken, '.pi/assets/registry.json'), { recursive: true });

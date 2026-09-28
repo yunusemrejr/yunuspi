@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { assertSameBytes } from "./bytes.mjs";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find((p) => fs.existsSync(path.join(p, "extensions/lib/video-studio.ts")));
@@ -45,7 +46,7 @@ test("template pins exact dependency versions and local fonts", () => {
   const remotion = Object.entries(pkg.dependencies).filter(([name]) => name === "remotion" || name.startsWith("@remotion/")).map(([, v]) => v);
   assert.equal(new Set(remotion).size, 1, "all Remotion packages share one version");
   const fonts = fs.readFileSync(path.join(template, "src/fonts.ts"), "utf8");
-  for (const family of ["inter", "fraunces", "jetbrains-mono"]) assert.match(fonts, new RegExp(`@fontsource/${family}/`));
+  for (const family of ["bricolage-grotesque", "hanken-grotesk", "ibm-plex-mono"]) assert.match(fonts, new RegExp(`@fontsource/${family}/`));
   assert.match(fonts, /delayRender/, "rendering waits for fonts");
   for (const file of fs.readdirSync(path.join(template, "src/primitives"))) {
     const source = fs.readFileSync(path.join(template, "src/primitives", file), "utf8");
@@ -269,7 +270,7 @@ test("procedural audio is deterministic and within level bounds", { skip: !hasNu
     const render = (spec, out) => JSON.parse(execFileSync("python3", [synth, (fs.writeFileSync(path.join(root, "s.json"), JSON.stringify(spec)), path.join(root, "s.json")), path.join(root, out)], { encoding: "utf8" }));
     const music = { kind: "music", seconds: 4, bpm: 90, key: "A", mode: "minor", seed: 3 };
     const first = render(music, "a.wav"), second = render(music, "b.wav");
-    assert.deepEqual(fs.readFileSync(path.join(root, "a.wav")), fs.readFileSync(path.join(root, "b.wav")), "same seed, same bytes");
+    assertSameBytes(fs.readFileSync(path.join(root, "a.wav")), fs.readFileSync(path.join(root, "b.wav")), "same seed, same bytes");
     assert.equal(first.seconds, 4);
     assert.ok(first.peakDbfs <= -0.9 && Math.abs(first.rmsDbfs + 20) < 1.5, JSON.stringify(first));
     assert.deepEqual(second, { ...first, output: path.join(root, "b.wav") });
@@ -287,11 +288,11 @@ test("video requests route to the direction skill without catching players or ed
   assert.ok(route("procedural-audio").intent.test("add background music and a whoosh"));
 });
 
-test("video studio registers five lazily discovered tools", async () => {
+test("video studio registers six lazily discovered tools", async () => {
   const tools = [];
   const extension = await import(pathToFileURL(path.join(agent, "extensions/video-studio.ts")).href);
   extension.default({ registerTool: (tool) => tools.push(tool) });
-  assert.deepEqual(tools.map((t) => t.name).sort(), ["audio_synth", "narration_tts", "video_project", "video_qa", "video_render"]);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["audio_synth", "narration_tts", "video_assets", "video_project", "video_qa", "video_render"]);
   const { CORE_TOOLS } = await import(pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts")).href);
   for (const tool of tools) {
     assert.equal(CORE_TOOLS.has(tool.name), false, `${tool.name} stays off-wire until tool_search enables it`);
@@ -340,7 +341,7 @@ test("timeline validation covers transitions and captions; the template wires bo
   const messages = studio.validateVideoSpec(spec, new Set(["A"]), () => true).issues.map(i => i.message).join("\n");
   assert.match(messages, /transition\.type must be/); assert.match(messages, /transition\.seconds must be 0\.05\.\.3/); assert.match(messages, /captions must be an object with enabled/);
   const main = fs.readFileSync(path.join(template, "src/Main.tsx"), "utf8");
-  assert.match(main, /<Entry transition=\{scene\.transition\}>/, "scene transitions are rendered, not only declared");
+  assert.match(main, /<Layer entry=\{scene\.transition\} exit=\{scenes\[i \+ 1\]\?\.transition\}/, "scene transitions are rendered, not only declared");
   assert.match(main, /spec\.captions\?\.enabled/);
   const pkg = JSON.parse(fs.readFileSync(path.join(template, "package.json"), "utf8"));
   assert.equal(pkg.dependencies["@remotion/media-utils"], pkg.dependencies.remotion, "audio-reactive primitives use the pinned Remotion version");

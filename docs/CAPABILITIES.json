@@ -3436,7 +3436,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 38,
+        "line": 57,
         "kind": "factory"
       },
       {
@@ -3751,7 +3751,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 34,
+        "line": 53,
         "kind": "factory"
       },
       {
@@ -4014,6 +4014,12 @@
         "kind": "factory"
       },
       {
+        "name": "video_assets",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 47,
+        "kind": "factory"
+      },
+      {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
         "line": 276,
@@ -4028,19 +4034,19 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 22,
+        "line": 25,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 30,
+        "line": 43,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 26,
+        "line": 39,
         "kind": "factory"
       },
       {
@@ -4696,11 +4702,12 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          11
+          14
         ],
         "knownNames": [
           "audio_synth",
           "narration_tts",
+          "video_assets",
           "video_project",
           "video_qa",
           "video_render"
@@ -4708,11 +4715,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 675,
+      "sourceFiles": 679,
       "registrationSites": 82,
       "indirectRegistrationSites": 19,
-      "stableRegistrationRows": 121,
-      "uniqueStableTools": 120,
+      "stableRegistrationRows": 122,
+      "uniqueStableTools": 121,
       "dynamicOwnerCount": 15,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5226,6 +5233,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/memory-guard.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/memory-redaction.ts",
         "exists": true
       },
@@ -5547,6 +5558,18 @@
       },
       {
         "path": "agent/extensions/lib/utility-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-assets.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-looks.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-publish.ts",
         "exists": true
       },
       {
@@ -6452,6 +6475,12 @@
         "source": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "signals": [
           "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/video-assets.ts",
+        "signals": [
+          "wrapper/adapter"
         ]
       },
       {

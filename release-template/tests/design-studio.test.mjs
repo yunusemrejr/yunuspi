@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const agentRoot = [path.join(root, "agent"), path.resolve(root, "..")].find(candidate => fs.existsSync(path.join(candidate, "extensions/lib/design-studio.ts")));
@@ -198,7 +199,7 @@ test("image_crop serves every region from one decode without cross-talk", async 
   assert.deepEqual(cut.assets[0].pixels, cut.assets[1].pixels);
   const [a, b] = await Promise.all(cut.assets.map(asset => studio.decodeImage(fs.readFileSync(path.join(work, asset.file)))));
   assert.equal(a.width, 120); assert.equal(a.height, 80);
-  assert.deepEqual(Buffer.from(a.data), Buffer.from(b.data), "identical keyed regions decode identically: no target mutates the shared decode");
+  assertSameBytes(Buffer.from(a.data), Buffer.from(b.data), "identical keyed regions decode identically: no target mutates the shared decode");
 });
 
 test("image_trace vectorizes flat marks faithfully and flags photographs", async () => {
@@ -306,7 +307,7 @@ test("image_create synthesizes deterministic plates and rejects bad inputs", asy
   const checker = synth.synthChecker(4, 4, 2, [255, 255, 255], [0, 0, 0]);
   assert.deepEqual([pixel(checker, 0, 0), pixel(checker, 2, 0), pixel(checker, 0, 2), pixel(checker, 2, 2)], [[255, 255, 255], [0, 0, 0], [0, 0, 0], [255, 255, 255]]);
   const grain = synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7);
-  assert.deepEqual(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7).data), "same seed renders same bytes");
+  assertSameBytes(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7).data), "same seed renders same bytes");
   assert.notDeepEqual(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 8).data), "seeds diverge");
   assert.ok(pixel(grain, 3, 9).every(v => v >= 104 && v <= 152), "mono grain stays inside base ± strength");
   assert.equal(new Set([pixel(grain, 3, 9), pixel(grain, 20, 20)].flat()).size > 1, true, "grain varies across pixels");
@@ -373,7 +374,7 @@ test("image_create synthesizes deterministic plates with bounded parameters", as
   const second = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#ff0000" }, work);
   assert.equal(first.format, "png"); assert.deepEqual(first.pixels, { width: 8, height: 8 });
   assert.deepEqual(first.design, { color: "#ff0000" });
-  assert.deepEqual(fs.readFileSync(path.join(work, first.file)), fs.readFileSync(path.join(work, second.file)), "same inputs render the same bytes");
+  assertSameBytes(fs.readFileSync(path.join(work, first.file)), fs.readFileSync(path.join(work, second.file)), "same inputs render the same bytes");
   await assert.rejects(synth.imageCreate({ op: "solid", width: 5000, height: 8 }, work), /width/);
   await assert.rejects(synth.imageCreate({ op: "photo", width: 8, height: 8 }, work), /op must be one of/);
 });

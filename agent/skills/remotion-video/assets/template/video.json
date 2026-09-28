@@ -4,17 +4,28 @@
   "fps": 30,
   "width": 1920,
   "height": 1080,
+  "look": "paper-lab",
   "theme": {
-    "background": "#0b0f17",
-    "surface": "#151c29",
-    "ink": "#eef2f8",
-    "muted": "#8b97aa",
-    "accent": "#5eead4",
-    "accent2": "#f5b544",
-    "danger": "#f87171",
-    "display": "Fraunces",
-    "text": "Inter",
-    "mono": "JetBrains Mono"
+    "background": "#E7ECF0",
+    "surface": "#F5F8FA",
+    "ink": "#0D1922",
+    "muted": "#41535F",
+    "accent": "#C8321A",
+    "accent2": "#1F4FD1",
+    "danger": "#A8231B",
+    "display": "Bricolage Grotesque",
+    "text": "Hanken Grotesk",
+    "mono": "IBM Plex Mono",
+    "backdrop": "rules",
+    "displayWeight": 800,
+    "displayTracking": -0.025,
+    "caption": "solid"
+  },
+  "publish": {
+    "intent": "publish",
+    "platforms": [
+      "youtube"
+    ]
   },
   "audio": {
     "music": null,
@@ -65,7 +76,7 @@
       },
       "cues": {
         "network": 0.2,
-        "signal": 2.0,
+        "signal": 2,
         "label": 3.2
       },
       "transition": {

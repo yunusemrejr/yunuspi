@@ -8,7 +8,7 @@ export const Counter: React.FC<{ to: number; from?: number; progress: number; pr
   const theme = useTheme();
   const p = Math.min(1, Math.max(0, progress));
   const value = from + (to - from) * p;
-  const text = decimals > 0 ? value.toFixed(decimals) : String(Math.round(value).replace(/\B(?=(\d{3})+(?!\d))/g, ","));
+  const text = decimals > 0 ? value.toFixed(decimals) : String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (
     <span style={{ fontFamily: theme.mono, fontWeight: 700, fontSize: size, color: theme.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "0" }}>
       {prefix}{text}{suffix}

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0 — 2026-09-29
+
+**Heavy work can no longer take the machine down.** Sessions that edited the harness kept dying: the kernel killed a node process holding 34 GB. The cause was a test, not a render. Comparing two differing WAV files with `assert.deepEqual` builds a diff that grows without bound, so one failing byte comparison exhausted RAM. Binary comparisons in the tests now go through `tests/bytes.mjs`, which reports sizes and hashes instead.
+
+**Renders, narration and music synthesis run under a memory watchdog.** `lib/memory-guard.ts` sums the resident memory of a child's whole process tree once a second and kills it when it passes its budget (half of free memory, kept between 1.5 and 12 GB; `YUNUSPI_VIDEO_MEMORY_MB` overrides) or when the host drops under 1 GB free. The tool returns an error that says to lower the resolution, render by scene or range, or shorten the audio. Render workers are also sized to memory: about 300 MB plus 200 MB per output megapixel each, so a 4K render runs fewer Chrome tabs in parallel instead of exhausting RAM.
+
+**Code-first video studio, finished.** Six tools now carry a vague prompt to a verified film: `video_project` (art-directed looks derived from the subject, vertical/square/landscape formats, publish or personal intent, brand, calls to action, optional 3D), `video_assets` (license-tracked photographs, footage and CC0 3D models), `video_render` (stills, preview, final with loudness mastering, captions, chapters and a description draft, and a thumbnail mode), `video_qa`, `narration_tts` (styles, word-level timing, more voices) and `audio_synth` (arranged music with drums, melody and an intensity arc, sound design, band-limited sfx). The `code-first-video` skill documents the new tools and the memory-safe way to iterate.
+
+**Tests.** The template font, tool-count and transition assertions match the redesigned template, an unknown sound name is rejected before any directory is created, and the drum test describes the current style-driven arrangement.
+
 ## 0.14.1 — 2026-09-28
 
 **`/goal` no longer freezes the session.** Setting a goal printed "Goal … set" and then nothing happened: no working indicator, no turn, and the editor stopped reacting to input. The command held the input queue while its handler ran, and the handler's kickoff message waited in that same queue for the handler to finish, so neither could proceed. Extension commands now release the input queue before their handler runs, because they drive their own turns. This fixes every command that sends a message, not only `/goal`. `/goal` also returns as soon as the kickoff is queued instead of waiting for the whole run, and reports a kickoff failure instead of discarding it. A regression test reproduces the deadlock.

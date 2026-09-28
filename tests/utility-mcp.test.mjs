@@ -10,6 +10,7 @@ import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertSameBytes } from "./bytes.mjs";
 const template = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')].find(p => fs.existsSync(path.join(p, 'extensions/utility-tools.ts')));
 const mod = name => import(pathToFileURL(path.join(agent, 'extensions/lib', name)));
@@ -111,7 +112,7 @@ test('SQLite tables/schema/describe/query/explain, pagination and parameter bind
   assert.deepEqual(a.rows, [[2, 'beta']]); assert.equal(a.truncated, true); assert.equal(a.input_hash, b.input_hash);
   assert.deepEqual((await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: 'SELECT value FROM items WHERE id=?', params: [3] })).rows, [['gamma']]);
   assert.ok((await call('sqlite_probe', { path: 'data.sqlite', action: 'explain', sql: 'SELECT * FROM items WHERE id=1' })).rows.length);
-  assert.deepEqual(fs.readFileSync(path.join(root, 'data.sqlite')), bytes);
+  assertSameBytes(fs.readFileSync(path.join(root, 'data.sqlite')), bytes);
   assert.equal((await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: "SELECT datetime('now')" })).cacheable, false);
   assert.equal((await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: 'PRAGMA database_list' })).rows[0][2], path.join(root, 'data.sqlite'));
 });

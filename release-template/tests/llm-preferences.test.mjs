@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
+import { assertSameBytes } from "./bytes.mjs";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-llm-prefs-"));
 process.env.PI_CODING_AGENT_DIR = root;
@@ -434,7 +435,7 @@ test("strict editor saves are atomic, conflict-checked, and preserve unknown JSO
   const rejected = await prefs.saveLlmPreferencesDocument(nested, saved.revision, invalid);
   assert.equal(rejected.ok, false);
   assert.match(rejected.reason, /unknown model alias/);
-  assert.deepEqual(fs.readFileSync(nested), beforeBadSave, "strict validation rejects the write without replacing valid JSON");
+  assertSameBytes(fs.readFileSync(nested), beforeBadSave, "strict validation rejects the write without replacing valid JSON");
 
   const changed = structuredClone(initial);
   changed.preferences.subagents.push({ provider: "openrouter", model: "org/second", provider_options: { routing: "pinned", order: ["together"] } });
@@ -451,7 +452,7 @@ test("strict editor saves are atomic, conflict-checked, and preserve unknown JSO
   const manualBytes = fs.readFileSync(nested);
   const conflict = await prefs.saveLlmPreferencesDocument(nested, currentRevision, changed);
   assert.equal(conflict.conflict, true);
-  assert.deepEqual(fs.readFileSync(nested), manualBytes, "a stale GUI revision leaves manual edits untouched");
+  assertSameBytes(fs.readFileSync(nested), manualBytes, "a stale GUI revision leaves manual edits untouched");
   const restored = await prefs.saveLlmPreferencesDocument(nested, prefs.readLlmPreferencesDocument(nested).revision, undefined, { restoreBackup: true });
   assert.equal(restored.ok, true, restored.reason);
   assert.deepEqual(JSON.parse(fs.readFileSync(nested, "utf8")), initial);

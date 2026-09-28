@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { transform } from 'esbuild';
+import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(import.meta.dirname, '..');
 function* files(directory) {
@@ -30,10 +31,10 @@ test('release templates retain current tests, installer, and public safeguards',
     const names = [...files(source)].map(file => path.relative(source, file)).sort();
     assert.deepEqual([...files(template)].map(file => path.relative(template, file)).sort(), names, directory);
     for (const name of names)
-      assert.deepEqual(fs.readFileSync(path.join(template, name)), fs.readFileSync(path.join(source, name)), `${directory}/${name}`);
+      assertSameBytes(fs.readFileSync(path.join(template, name)), fs.readFileSync(path.join(source, name)), `${directory}/${name}`);
   }
   for (const name of ['package.json', 'package-lock.json', '.gitignore', 'AGENTS.md'])
-    assert.deepEqual(fs.readFileSync(path.join(root, 'release-template', name)), fs.readFileSync(path.join(root, name)), name);
+    assertSameBytes(fs.readFileSync(path.join(root, 'release-template', name)), fs.readFileSync(path.join(root, name)), name);
 });
 
 

@@ -9,6 +9,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -169,7 +170,7 @@ test("download retries same-size corruption from zero instead of resuming poison
     return new Response(ranges.length === 1 ? Buffer.alloc(body.length) : body);
   }, null, 1);
   assert.deepEqual(ranges, [undefined, undefined]);
-  assert.deepEqual(fs.readFileSync(dest), body);
+  assertSameBytes(fs.readFileSync(dest), body);
 });
 
 test("download resumes only matching Content-Range responses", async () => {
@@ -179,7 +180,7 @@ test("download resumes only matching Content-Range responses", async () => {
     assert.equal(options.headers.Range, "bytes=5-");
     return new Response(body.subarray(5), { status: 206, headers: { "content-range": `bytes 5-${body.length - 1}/${body.length}` } });
   }, null, 1);
-  assert.deepEqual(fs.readFileSync(dest), body);
+  assertSameBytes(fs.readFileSync(dest), body);
 });
 
 test("download rejects mismatched ranges then retries cleanly", async () => {
@@ -191,7 +192,7 @@ test("download rejects mismatched ranges then retries cleanly", async () => {
     return attempts === 1 ? new Response(body.subarray(5), { status: 206, headers: { "content-range": "bytes 0-15/21" } }) : new Response(body);
   }, null, 1);
   assert.equal(attempts, 2);
-  assert.deepEqual(fs.readFileSync(dest), body);
+  assertSameBytes(fs.readFileSync(dest), body);
 });
 
 

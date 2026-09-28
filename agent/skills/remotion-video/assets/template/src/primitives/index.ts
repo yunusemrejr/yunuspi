@@ -17,3 +17,5 @@ export { LowerThird } from "./LowerThird";
 export { Counter } from "./Counter";
 export { ProgressBar } from "./ProgressBar";
 export { Callout } from "./Callout";
+export { MediaFrame, Clip, type MediaProps } from "./MediaFrame";
+export { BrandBug, CtaLayer, FollowButton, LikeButton, PromptChip, ctaVariant } from "./Cta";

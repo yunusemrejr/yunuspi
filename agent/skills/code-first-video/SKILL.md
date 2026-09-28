@@ -18,6 +18,13 @@ Move through the phases in order and do not skip a gate. Read [production pipeli
 7. **Narration and audio.** `narration_tts` voices each scene and writes measured durations back into the timeline. `audio_synth` creates the music bed and sparse sound accents. Read [narration and sound](references/narration-and-sound.md).
 8. **Sync review, final render, final QA.** Re-time cues to the narration's key words, then `video_render mode:"final"` and `video_qa` with `dir` set. Fix every error and review the contact sheet before delivery.
 
+Tools beyond the core loop, used when the video calls for them:
+- `video_project action:"init"` also takes `topic`, `look` (an art-directed palette, type pair, backdrop, voice and music that fit the subject), `format` (landscape, vertical, square), `intent` (publish or personal) and `platforms`; `action:"look"` swaps the look later, `action:"cta"` places like, follow, comment and share moments, `action:"feature" feature:"3d"` adds the optional three.js `Model3D` primitive.
+- `video_assets` finds and fetches license-tracked photographs, footage and CC0 3D models (Openverse, Wikimedia Commons, Poly Haven) into `public/assets`, records each license in `assets.json` and adds required credits to `video.json`. Use it when a real photograph or model beats a drawn one; never take media from elsewhere without its license.
+- `video_render mode:"thumbnail"` renders the 1280x720 cover from `publish.thumbnail`; `mode:"final"` masters the audio to delivery loudness and writes captions, chapters and a description draft. `audio_synth kind:"sound_design"` places sound accents from the timeline.
+
+Render within the machine's memory: iterate at `preview` scale or a small `width`/`height`, render a `scene` or `from`/`to` range instead of the whole film while iterating, and keep procedural music to the length the video needs. The harness stops any render or synthesis that outgrows its memory budget and says so; when that happens lower the resolution or render in ranges rather than retrying the same request.
+
 See the [worked example](assets/example-attention/README.md) for a complete small project and the defects its review rounds caught.
 
 A successful render, a passing `video_qa` or a clean type check is never evidence that the video looks or sounds good. Only viewed frames, watched motion and measured, listened-to audio are.

@@ -10,7 +10,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
 import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
+import { memoryBudgetMb, watchMemory } from "./memory-guard.ts";
 import { ownProcessGroup } from "./process-owner.ts";
+import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lookById, suggestLook } from "./video-looks.ts";
+import { chapterList, descriptionDraft, formatChapters, isPublishing, planCtas, publishFindings, validatePublishSpec } from "./video-publish.ts";
 // The template's caption timing is the single source for burned-in captions
 // and sidecar subtitles; it is plain TypeScript with no Remotion imports.
 import { captionChunks, captionPace, estimateSeconds, toSrt, toVtt } from "../../skills/remotion-video/assets/template/src/captions.ts";
@@ -19,11 +22,23 @@ const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname),
 export const VIDEO_PATHS = {
   template: path.join(AGENT_ROOT, "skills/remotion-video/assets/template"),
   runner: path.join(AGENT_ROOT, "scripts/video-render.mjs"),
+  optional: path.join(AGENT_ROOT, "skills/remotion-video/assets/optional"),
   synth: path.join(AGENT_ROOT, "skills/procedural-audio/scripts/synth.py"),
+  narrate: path.join(AGENT_ROOT, "skills/code-first-video/scripts/narrate.py"),
 };
 const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 const piperHome = () => path.join(agentDir(), "local-models", "piper");
 const acquireRender = createRenderQueue(4);
+/** Render workers for one project: half the cores (Remotion's own rule), but never more Chrome tabs than the
+ * memory budget holds. A worker costs roughly 300 MB plus 200 MB per output megapixel (software GL), so 4K
+ * renders run fewer in parallel instead of exhausting RAM. YUNUSPI_VIDEO_CONCURRENCY overrides. */
+export const renderConcurrency = (width = 1920, height = 1080, scale = 1, budgetMb = memoryBudgetMb()) => {
+  const override = Number(process.env.YUNUSPI_VIDEO_CONCURRENCY);
+  if (Number.isInteger(override) && override > 0) return override;
+  const workerMb = 300 + 200 * ((width * scale) * (height * scale)) / 1e6;
+  const byMemory = Math.floor((budgetMb - 1500) / workerMb);
+  return Math.max(1, Math.min(Math.max(2, Math.floor(os.availableParallelism() / 2)), byMemory));
+};
 
 /** Pinned local voices (rhasspy/piper-voices tag v1.0.0, MIT/CC-BY per voice card). */
 export const PIPER_VOICES: Record<string, { files: Array<{ name: string; url: string; sha256: string; bytes: number }>; note: string }> = {
@@ -35,17 +50,43 @@ export const PIPER_VOICES: Record<string, { files: Array<{ name: string; url: st
     { name: "en_US-lessac-medium.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx", sha256: "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f", bytes: 63201294 },
     { name: "en_US-lessac-medium.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json", sha256: "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0", bytes: 4885 },
   ] },
+  "en_US-amy-medium": { note: "US English female, medium quality (≈63 MB)", files: [
+    { name: "en_US-amy-medium.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx", sha256: "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18", bytes: 63201294 },
+    { name: "en_US-amy-medium.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json", sha256: "95a23eb4d42909d38df73bb9ac7f45f597dbfcde2d1bf9526fdeaf5466977d77", bytes: 4882 },
+  ] },
+  "en_US-lessac-high": { note: "US English female, high quality (≈114 MB)", files: [
+    { name: "en_US-lessac-high.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx", sha256: "4cabf7c3a638017137f34a1516522032d4fe3f38228a843cc9b764ddcbcd9e09", bytes: 113895201 },
+    { name: "en_US-lessac-high.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/high/en_US-lessac-high.onnx.json", sha256: "db42b97d9859f257bc1561b8ed980e7fb2398402050a74ddd6cbec931a92412f", bytes: 4883 },
+  ] },
+  "en_GB-jenny_dioco-medium": { note: "British English female, medium quality (≈63 MB)", files: [
+    { name: "en_GB-jenny_dioco-medium.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx", sha256: "469c630d209e139dd392a66bf4abde4ab86390a0269c1e47b4e5d7ce81526b01", bytes: 63201294 },
+    { name: "en_GB-jenny_dioco-medium.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx.json", sha256: "a9a7a93a317c9a3cb6563e37eb057df9ef09c06188a8a4341b0fcb58cba54dd4", bytes: 4895 },
+  ] },
+  "en_GB-northern_english_male-medium": { note: "Northern English male, medium quality (≈63 MB)", files: [
+    { name: "en_GB-northern_english_male-medium.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx", sha256: "57a219ae8e638873db7d18893304be5069c42868f392bb95c3ff17f0690d0689", bytes: 63201294 },
+    { name: "en_GB-northern_english_male-medium.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium.onnx.json", sha256: "69557ed3d974463453e9b0c09dd99a7ed0e52b8b87b64b357dbeeb2540a97d47", bytes: 4847 },
+  ] },
   "en_GB-alan-medium": { note: "British English male, medium quality (≈63 MB)", files: [
     { name: "en_GB-alan-medium.onnx", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/alan/medium/en_GB-alan-medium.onnx", sha256: "0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330", bytes: 63201294 },
     { name: "en_GB-alan-medium.onnx.json", url: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json", sha256: "c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e", bytes: 4888 },
   ] },
 };
-const PIPER_PACKAGE = "piper-tts==1.8.0";
+/** Alignments need the onnx wheel; both install as binary wheels only. */
+const PIPER_PACKAGES = ["piper-tts==1.8.0", "onnx==1.23.0"];
+/** Pace and variability per delivery style (Piper length/noise scales). */
+export const VOICE_STYLES: Record<string, { length: number; noise: number; noiseW: number; sentence: number; paragraph: number }> = {
+  documentary: { length: 1.36, noise: 0.667, noiseW: 0.8, sentence: 0.42, paragraph: 0.85 },
+  calm: { length: 1.5, noise: 0.6, noiseW: 0.7, sentence: 0.5, paragraph: 1.0 },
+  energetic: { length: 1.18, noise: 0.75, noiseW: 0.9, sentence: 0.3, paragraph: 0.6 },
+  intimate: { length: 1.42, noise: 0.55, noiseW: 0.6, sentence: 0.46, paragraph: 0.9 },
+};
+/** Integrated loudness each narrated scene is set to before mixing. */
+const NARRATION_LUFS = -18;
 
 // ───────────────────────────── pure helpers ─────────────────────────────
 
 export type Issue = { severity: "error" | "warn" | "info"; scene?: string; message: string };
-export type TimedScene = { id: string; component: string; seconds: number; start: number; end: number; narrationAudio?: string | null; narrationOffset?: number; narrationSeconds?: number | null; narration?: string | null; cues?: Record<string, number> };
+export type TimedScene = { id: string; component: string; seconds: number; start: number; end: number; narrationAudio?: string | null; narrationOffset?: number; narrationSeconds?: number | null; narration?: string | null; narrationWords?: Array<{ w: string; s: number; e: number }>; cues?: Record<string, number>; cueWords?: Record<string, string>; chapter?: string; energy?: number; transition?: { type: string; seconds?: number } };
 
 const words = (text: unknown) => typeof text === "string" ? text.trim().split(/\s+/).filter(Boolean).length : 0;
 const validSceneId = (id: unknown): id is string => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(id);
@@ -84,6 +125,20 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     for (const [name, value] of Object.entries(raw.cues ?? {})) {
       if (typeof value !== "number" || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
     }
+    if (raw.chapter !== undefined && (typeof raw.chapter !== "string" || !raw.chapter.trim() || raw.chapter.length > 60)) err("chapter must be a title of at most 60 characters", id);
+    if (raw.cueWords !== undefined) {
+      const tokens = typeof raw.narration === "string" ? raw.narration.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [] : [];
+      for (const [name, word] of Object.entries(raw.cueWords ?? {})) {
+        if (typeof word !== "string" || !word.trim()) { err(`cueWords.${name} must name a spoken word`, id); continue; }
+        if (!(name in (raw.cues ?? {}))) err(`cueWords.${name} needs a placeholder cue of the same name in cues (narration_tts overwrites it with the time of the word; scenes read cues before narration exists)`, id);
+        const [text] = word.toLowerCase().split("#");
+        if (tokens.length && !tokens.includes(text.replace(/[^\p{L}\p{N}']/gu, ""))) err(`cueWords.${name} = "${word}" does not occur in the narration`, id);
+      }
+    }
+    if (Array.isArray(raw.narrationWords) && typeof raw.narration === "string") {
+      const spoken = raw.narration.trim().split(/\s+/);
+      if (raw.narrationWords.length !== spoken.length || raw.narrationWords.some((entry: any, i: number) => entry?.w !== spoken[i])) warn("narrationWords no longer match the narration text; re-run narration_tts for this scene so captions and cues use measured timing", id);
+    }
     if (raw.transition !== undefined) {
       const kind = raw.transition?.type, length = raw.transition?.seconds ?? 0.5;
       if (!["fade", "slide", "slideup", "slidedown", "wipe", "zoom", "blur", "none"].includes(kind)) err('transition.type must be fade, slide, slideup, slidedown, wipe, zoom, blur or none', id);
@@ -110,7 +165,7 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     // Match src/timeline.ts: Remotion rounds each scene to whole frames before
     // summing them. Rounding only the total drifts for fractional durations.
     const duration = Number.isInteger(spec.fps) && spec.fps > 0 ? Math.max(1, Math.round(seconds * spec.fps)) / spec.fps : seconds;
-    scenes.push({ id, component: raw.component, seconds: duration, start: at, end: at + duration, narration: raw.narration ?? null, narrationAudio: raw.narrationAudio ?? null, narrationOffset: offset, narrationSeconds: raw.narrationSeconds ?? null, cues: raw.cues ?? {} });
+    scenes.push({ id, component: raw.component, seconds: duration, start: at, end: at + duration, narration: raw.narration ?? null, narrationAudio: raw.narrationAudio ?? null, narrationOffset: offset, narrationSeconds: raw.narrationSeconds ?? null, narrationWords: raw.narrationWords, cues: raw.cues ?? {}, cueWords: raw.cueWords, chapter: raw.chapter, energy: raw.energy, transition: raw.transition });
     at += duration;
   }
   if (at > 1800) err(`total duration ${at.toFixed(1)}s exceeds 30 minutes`);
@@ -231,7 +286,7 @@ export function qaFindings(metrics: QaMetrics, info: { duration: number; videoDu
   if (info.videoDuration !== undefined && info.audioDuration !== undefined && Math.abs(info.videoDuration - info.audioDuration) > 0.1) add("error", `Audio (${info.audioDuration.toFixed(2)}s) and video (${info.videoDuration.toFixed(2)}s) durations differ; check sync.`);
   for (const b of metrics.black) {
     // Video edges and sub-second scene entrances (content still building) are expected.
-    const entrance = b.end - b.start < 1 && scenes.some((s) => Math.abs(s.start - b.start) < 0.1);
+    const entrance = b.end - b.start < 1 && scenes.some((s) => b.start >= s.start - 0.1 && b.start < s.start + 1.2);
     const edge = b.start < 0.6 || b.end > info.duration - 0.6 || entrance;
     if (!edge) add("warn", `Frame is almost entirely background ${b.start.toFixed(2)}–${b.end.toFixed(2)}s (≥98% near-black pixels): an empty composition or unintended gap unless it is a deliberate beat.`, sceneAt(b.start));
   }
@@ -262,9 +317,11 @@ export function qaFindings(metrics: QaMetrics, info: { duration: number; videoDu
 type Progress = (text: string) => void;
 /** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
  * whole process group on abort. Returns stdout/stderr tails. */
-async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
+async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
   options.signal?.throwIfAborted();
-  const target = options.guard === false ? { command, args } : guardedCommand(command, args);
+  // Heavy local work yields to whatever the person is doing at the keyboard.
+  const niced = options.nice ? { command: "nice", args: ["-n", String(options.nice), command, ...args] } : { command, args };
+  const target = options.guard === false ? niced : guardedCommand(niced.command, niced.args);
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...options.env } });
     ownProcessGroup(child.pid);
@@ -273,12 +330,18 @@ async function runGuarded(command: string, args: string[], options: { cwd: strin
     const kill = () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already exited */ } };
     const timer = setTimeout(() => { kill(); finish(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs);
     timer.unref?.();
+    const stopWatching = watchMemory(child.pid!, options.memoryMb ?? memoryBudgetMb(), (message, pids) => {
+      kill();
+      for (const pid of pids) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      finish(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
+    });
     const abort = () => { kill(); finish(new Error("Video operation cancelled")); };
     options.signal?.addEventListener("abort", abort, { once: true });
     function finish(error?: Error) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      stopWatching();
       options.signal?.removeEventListener("abort", abort);
       error ? reject(error) : resolve({ stdout, stderr });
     }
@@ -307,7 +370,7 @@ function throttled(progress: Progress | undefined, ms = 2500): Progress {
 
 // ───────────────────────────── project helpers ─────────────────────────────
 
-async function projectDir(value: unknown, cwd: string, mustExist = true): Promise<string> {
+export async function projectDir(value: unknown, cwd: string, mustExist = true): Promise<string> {
   if (typeof value !== "string" || !value.trim() || /[\x00-\x1f]/.test(value)) throw new Error("dir must be a local project directory");
   const root = await fs.realpath(cwd);
   const dir = canonicalMutationPath(value, root);
@@ -317,13 +380,13 @@ async function projectDir(value: unknown, cwd: string, mustExist = true): Promis
   return dir;
 }
 
-async function readSpec(dir: string) {
+export async function readSpec(dir: string) {
   return JSON.parse(await fs.readFile(path.join(dir, "video.json"), "utf8"));
 }
 
 /** Project-owned output paths must remain inside the physical project, even
  * when an output directory or existing output file is a symbolic link. */
-function projectWritePath(dir: string, ...parts: string[]): string {
+export function projectWritePath(dir: string, ...parts: string[]): string {
   const target = canonicalMutationPath(path.join(dir, ...parts));
   if (!containsPath(dir, target)) throw new Error(`Video output must stay inside the project: ${parts.join("/")}`);
   const denial = selfMutationDenial(target, dir);
@@ -339,7 +402,10 @@ async function inspectProject(dir: string) {
   const spec = await readSpec(dir);
   const components = await registeredComponents(dir);
   const result = validateVideoSpec(spec, components, (p) => typeof p === "string" && !p.includes("..") && existsSync(path.join(dir, "public", p)));
-  return { spec, components, ...result };
+  const structural = validatePublishSpec(spec, result.seconds);
+  const design = lintDesign(spec).map(({ severity, message }) => ({ severity, message: `Design: ${message}` }));
+  const audience = structural.some((i) => i.severity === "error") ? [] : publishFindings(spec, result.scenes, result.seconds);
+  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...audience] };
 }
 
 function browserExecutable(): string | undefined {
@@ -371,31 +437,89 @@ async function npmInstall(dir: string, signal: AbortSignal | undefined, progress
 
 // ───────────────────────────── tool operations ─────────────────────────────
 
+const FORMATS: Record<string, [number, number]> = { landscape: [1920, 1080], vertical: [1080, 1920], square: [1080, 1080] };
+
+/** Write a look into the project: theme, fonts.ts and the fontsource dependencies. Returns true when packages changed. */
+async function applyLook(dir: string, spec: any, look: (typeof LOOKS)[number]): Promise<boolean> {
+  spec.look = look.id;
+  spec.theme = { ...look.theme };
+  await fs.writeFile(path.join(dir, "src/fonts.ts"), fontsSource(look.fonts));
+  const pkgPath = path.join(dir, "package.json");
+  const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
+  const before = JSON.stringify(pkg.dependencies);
+  const kept = Object.entries(pkg.dependencies).filter(([name]) => !name.startsWith("@fontsource/"));
+  pkg.dependencies = Object.fromEntries([...kept, ...Object.entries(fontDependencies(look.fonts))].sort(([a], [b]) => a.localeCompare(b)));
+  await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  return before !== JSON.stringify(pkg.dependencies);
+}
+const writeSpec = (dir: string, spec: any) => fs.writeFile(path.join(dir, "video.json"), JSON.stringify(spec, null, 2) + "\n");
+
 export async function videoProject(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const action = params.action ?? "check";
   if (action === "init") {
     const dir = await projectDir(params.dir, cwd, false);
     if (existsSync(dir)) throw new Error(`${dir} already exists; choose a new project directory`);
     if (!containsPath(await fs.realpath(cwd), dir)) throw new Error("Create video projects inside the current workspace");
+    if (params.look !== undefined && !lookById(params.look)) throw new Error(`look must be one of ${LOOKS.map((l) => l.id).join(", ")}`);
     await fs.cp(VIDEO_PATHS.template, dir, { recursive: true, errorOnExist: true });
     const spec = await readSpec(dir);
     spec.title = typeof params.title === "string" && params.title.trim() ? params.title.trim().slice(0, 120) : spec.title;
+    const look = lookById(params.look) ?? suggestLook(`${params.topic ?? ""} ${params.title ?? ""}`);
+    await applyLook(dir, spec, look);
+    const [width, height] = FORMATS[params.format ?? "landscape"] ?? FORMATS.landscape;
+    Object.assign(spec, { width, height });
     for (const key of ["fps", "width", "height"]) if (params[key] !== undefined) spec[key] = params[key];
-    await fs.writeFile(path.join(dir, "video.json"), JSON.stringify(spec, null, 2) + "\n");
+    const brand = Object.fromEntries(["name", "handle", "website", "tagline", "logo"].flatMap((key) => typeof params.brand?.[key] === "string" && params.brand[key].trim() ? [[key, params.brand[key].trim()]] : []));
+    if (Object.keys(brand).length) spec.brand = brand;
+    const intent = params.intent === "personal" ? "personal" : "publish";
+    const platforms = Array.isArray(params.platforms) && params.platforms.length ? params.platforms : params.format === "vertical" ? ["shorts"] : ["youtube"];
+    spec.publish = { intent, platforms, ...(intent === "publish" && spec.brand ? { cta: { enabled: true } } : {}) };
+    if (intent === "personal") spec.captions = { ...spec.captions, enabled: params.captions === true };
+    await writeSpec(dir, spec);
     if (params.install !== false) await npmInstall(dir, signal, progress);
     return {
-      project: dir, installed: params.install !== false,
-      files: ["video.json (master timeline: scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry)", "src/primitives/* (Stage, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch)", "src/motion.ts, src/timing.ts (beat/loop helpers), src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx)"],
-      next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding", "Replace video.json scenes; build scene components from primitives", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", "narration_tts synthesize → audio_synth music/sfx → video_render preview → video_render final → video_qa"],
-      note: "The two template scenes are mechanical examples; replace them with components designed for this video.",
+      project: dir, installed: params.install !== false, look: { id: look.id, why: look.why, fits: look.fits, voice: look.audio.voice, music: look.audio.music },
+      intent, platforms, size: `${spec.width}x${spec.height}`,
+      files: ["video.json (master timeline: look, brand, publish, scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry: TitleCard, DiagramScene, OutroScene)", "src/primitives/* (Stage, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, MediaFrame, Clip, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch, BrandBug, CtaLayer)", "src/motion.ts, src/timing.ts (beat/loop helpers), src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx), public/assets/ (fetched media)"],
+      next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding; open on the payoff, not a title card", "Replace video.json scenes; build scene components from primitives (scenes do not fade themselves: transitions in video.json own entry and exit)", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", `narration_tts synthesize (voice ${look.audio.voice.voice}, style ${look.audio.voice.style}) → audio_synth music (${look.audio.music.style}, ${look.audio.music.bpm} bpm, ${look.audio.music.key} ${look.audio.music.mode}) and kind sound_design → video_project action:"cta" if a brand is set → video_render preview → final → video_qa`],
+      note: "The template scenes are mechanical examples with placeholder text; replace them with components designed for this video. The look is a starting identity derived from the subject: change it with action look, or adjust theme colors and fonts if the subject calls for something else.",
     };
   }
   const dir = await projectDir(params.dir, cwd);
   if (action === "install") { await npmInstall(dir, signal, progress); return { project: dir, installed: true }; }
-  if (action !== "check") throw new Error("action must be init, check or install");
+  if (action === "look") {
+    const look = lookById(params.look);
+    if (!look) throw new Error(`look must be one of ${LOOKS.map((l) => `${l.id} (${l.fits})`).join("; ")}`);
+    const spec = await readSpec(dir);
+    const changed = await applyLook(dir, spec, look);
+    await writeSpec(dir, spec);
+    if (changed && params.install !== false) await npmInstall(dir, signal, progress);
+    return { project: dir, look: look.id, why: look.why, fontsChanged: changed, voice: look.audio.voice, music: look.audio.music, note: "Theme, src/fonts.ts and font packages were replaced. Scene code that hard-codes colors or font families must be updated to use useTheme()." };
+  }
+  if (action === "cta") {
+    const spec = await readSpec(dir);
+    if (!isPublishing(spec)) throw new Error("publish.intent is personal; calls to action are not wanted");
+    const { scenes, seconds } = await inspectProject(dir);
+    spec.publish = { ...spec.publish, intent: "publish", cta: planCtas(scenes, seconds, spec.publish?.cta, { commentPrompt: params.commentPrompt, sharePrompt: params.sharePrompt }) };
+    await writeSpec(dir, spec);
+    const single = (spec.publish.platforms ?? ["youtube"]).length === 1 && ["youtube", "shorts"].includes(spec.publish.platforms[0]);
+    return { project: dir, cta: spec.publish.cta, variant: single ? "youtube (Subscribe, bell)" : "generic (Follow, Like)", note: "Moments are placed at scene boundaries after the viewer has had value. Edit publish.cta.<kind>.at to move one; set a kind to null to drop it; publish.cta.enabled false removes all." };
+  }
+  if (action === "feature") {
+    if (params.feature !== "3d") throw new Error('feature must be "3d"');
+    // three.js is opt-in: about 40 MB of packages that only 3D scenes need.
+    await fs.copyFile(path.join(VIDEO_PATHS.optional, "three/Model3D.tsx"), projectWritePath(dir, "src", "primitives", "Model3D.tsx"));
+    const pkgPath = path.join(dir, "package.json");
+    const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
+    pkg.dependencies = Object.fromEntries(Object.entries({ ...pkg.dependencies, "@react-three/fiber": "9.8.1", "@remotion/three": "4.0.527", three: "0.186.1" }).sort(([a], [b]) => a.localeCompare(b)));
+    await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    if (params.install !== false) await npmInstall(dir, signal, progress);
+    return { project: dir, feature: "3d", primitive: 'import { Model3D } from "../primitives/Model3D";', use: '<Model3D src="assets/models/<id>/<id>.gltf" width={900} height={700} turns={0.5} />', note: "Software GL renders each frame on the CPU; keep models at 1k textures and the canvas near the size it is shown." };
+  }
+  if (action !== "check") throw new Error("action must be init, check, install, look, cta or feature");
   const { spec, issues, scenes, seconds, components } = await inspectProject(dir);
   return {
-    project: dir, title: spec.title, fps: spec.fps, size: `${spec.width}x${spec.height}`, seconds: Number(seconds.toFixed(2)),
+    project: dir, title: spec.title, look: spec.look ?? null, intent: spec.publish?.intent ?? "publish", fps: spec.fps, size: `${spec.width}x${spec.height}`, seconds: Number(seconds.toFixed(2)),
     installed: existsSync(path.join(dir, "node_modules/@remotion/renderer")),
     components: [...components],
     scenes: scenes.map((s) => ({ id: s.id, component: s.component, start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)), narration: s.narrationAudio ? `${s.narrationSeconds ?? "?"}s audio` : s.narration ? "text only" : "none" })),
@@ -423,12 +547,12 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
   const { spec, issues, scenes } = await inspectProject(dir);
   const blocking = issues.filter((i) => i.severity === "error");
   const mode = params.mode ?? "stills";
-  if (blocking.length && mode !== "stills") throw new Error(`Fix timeline errors first: ${blocking.map((i) => `${i.scene ? `[${i.scene}] ` : ""}${i.message}`).join("; ")}`);
+  if (blocking.length && mode !== "stills" && mode !== "thumbnail") throw new Error(`Fix timeline errors first: ${blocking.map((i) => `${i.scene ? `[${i.scene}] ` : ""}${i.message}`).join("; ")}`);
   const release = await acquireRender(signal);
   const report = throttled(progress);
   try {
     const out = await freshOut(dir, mode);
-    const request: any = { project: dir, outDir: out, mode, composition: "Main", browserExecutable: browserExecutable() };
+    const request: any = { project: dir, outDir: out, mode, composition: "Main", browserExecutable: browserExecutable(), concurrency: renderConcurrency(spec.width, spec.height) };
     if (mode === "stills") {
       const plan = planStillFrames(scenes, spec.fps, { scene: params.scene, count: params.count, times: params.times });
       request.frames = plan.map((p) => p.frame);
@@ -437,6 +561,15 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
       const sheet = await contactSheet(stills.map((s: any) => ({ path: s.path, label: s.label })), path.join(out, "contact-sheet.png"), signal);
       return { mode, contactSheet: sheet, stills, bundleCached: result.bundleCached, timelineIssues: issues,
         review: "Open contact-sheet.png (and full-size stills where detail matters) with the read tool and judge it: hierarchy, clipping, text size/density, spacing rhythm, contrast, empty or overcrowded composition, consistency with neighbouring scenes. A successful render is not visual approval." };
+    }
+    if (mode === "thumbnail") {
+      if (!spec.publish?.thumbnail) throw new Error('Set publish.thumbnail {text, image?} in video.json first (three or four words; wrap the emphasised word in asterisks)');
+      const result = await runRenderer(dir, { ...request, mode: "stills", composition: "thumbnail", frames: [0] }, signal, report, 300_000);
+      const png = result.stills[0].path;
+      // Platforms cap covers at 2 MB; a high-quality JPEG is the safe delivery format.
+      const jpg = path.join(out, "thumbnail.jpg");
+      await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", "-i", png, "-q:v", "2", jpg], signal, 30_000);
+      return { mode, thumbnail: jpg, png, size: `${result.width}x${result.height}`, bytes: (await fs.stat(jpg)).size, review: "Open the image with the read tool and shrink your judgement to a phone: can the claim be read in one second at 160 px wide, is there one focal point, does the emphasised word carry the hook?" };
     }
     if (mode === "preview" || mode === "final") {
       const fps = spec.fps;
@@ -451,10 +584,13 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
         request.range = [from, to];
       }
       request.scale = mode === "preview" ? (params.scale ?? 0.5) : (params.scale ?? 1);
+      request.concurrency = renderConcurrency(spec.width, spec.height, request.scale);
       request.crf = params.crf;
       const frames = request.range ? request.range[1] - request.range[0] + 1 : total;
       const timeoutMs = Math.min(3_600_000, 120_000 + frames * (mode === "final" ? 600 : 250));
       const result = await runRenderer(dir, request, signal, report, timeoutMs);
+      let mastered: { before: number; after: number } | undefined;
+      if (mode === "final" && params.master !== false && !request.muted && (await probe(result.output, signal)).streams?.some((st: any) => st.codec_type === "audio")) mastered = await masterFinal(result.output, targetLoudness(spec), signal);
       const info = await probe(result.output, signal);
       await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(result.output, 0), "-f", "null", "-"], signal, timeoutMs);
       // Sidecar subtitles use the same timing as the burned-in captions.
@@ -465,14 +601,42 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
         if (track.length) {
           await fs.writeFile(path.join(out, "captions.srt"), toSrt(track), { flag: "wx" });
           await fs.writeFile(path.join(out, "captions.vtt"), toVtt(track), { flag: "wx" });
-          captions = { srt: path.join(out, "captions.srt"), vtt: path.join(out, "captions.vtt"), cues: track.length, timing: "estimated from narration length and syllables, not speech-aligned" };
+          captions = { srt: path.join(out, "captions.srt"), vtt: path.join(out, "captions.vtt"), cues: track.length, timing: scenes.some((sc) => sc.narrationWords?.length) ? "measured word timings where narration_tts stored them, estimated elsewhere" : "estimated from narration length and syllables, not speech-aligned" };
         }
       }
-      return { mode, output: result.output, ...(captions ? { captions } : {}), frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
+      let publish: any;
+      if (mode === "final" && !request.range && isPublishing(spec)) {
+        const chapters = chapterList(scenes);
+        await fs.writeFile(path.join(out, "description.md"), descriptionDraft(spec, chapters), { flag: "wx" });
+        if (chapters.length) await fs.writeFile(path.join(out, "chapters.txt"), formatChapters(chapters) + "\n", { flag: "wx" });
+        publish = { description: path.join(out, "description.md"), ...(chapters.length ? { chapters: path.join(out, "chapters.txt") } : {}), note: "description.md is a skeleton: write the hook line and add links. Chapters follow the YouTube rules (first at 0:00, three or more, each at least 10 s)." };
+      }
+      return { mode, output: result.output, ...(mastered ? { loudness: { mixLufs: mastered.before, deliveredLufs: mastered.after, note: "audio normalized to delivery loudness (video stream copied)" } } : {}), ...(captions ? { captions } : {}), ...(publish ? { publish } : {}), frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
         review: mode === "final" ? "Run video_qa on this file, then inspect its contact sheet and listen-check narration timing before delivery." : "Watch the motion: extract frames around transitions with video_frames, or check timing against cues in video.json. Stills cannot show pacing, easing or transitions." };
     }
-    throw new Error("mode must be stills, preview or final");
+    throw new Error("mode must be stills, preview, final or thumbnail");
   } finally { release(); }
+}
+
+/** Delivery loudness per platform: feeds normalize to about -14 LUFS, and
+ * anything quieter is not raised, so a quiet mix loses to its neighbours. */
+export const targetLoudness = (spec: any): number => (isPublishing(spec) && (spec?.publish?.platforms ?? ["youtube"]).length ? -14 : -16);
+
+/** Two-pass EBU R128 normalization of the audio stream (video is copied, not
+ * re-encoded), so the final file lands on the delivery loudness whatever
+ * balance the mix started with. Returns the measured before-values. */
+async function masterFinal(file: string, target: number, signal?: AbortSignal): Promise<{ before: number; after: number }> {
+  const filter = `loudnorm=I=${target}:TP=-2.2:LRA=11`;
+  const first = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, 0), "-vn", "-af", `${filter}:print_format=json`, "-f", "null", "-"], signal, 600_000);
+  const json = /\{[^{}]*"input_i"[^{}]*\}/.exec(first.stderr)?.[0];
+  if (!json) throw new Error("Loudness measurement produced no result");
+  const m = JSON.parse(json);
+  const pass = `${filter}:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
+  const mastered = `${file}.mastered.mp4`;
+  await fs.rm(mastered, { force: true });
+  await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputArgs(file, 0), "-map", "0:v", "-c:v", "copy", "-map", "0:a", "-af", pass, "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", mastered], signal, 600_000);
+  await fs.rename(mastered, file);
+  return { before: Number(m.input_i), after: target };
 }
 
 async function runRenderer(dir: string, request: any, signal: AbortSignal | undefined, report: Progress, timeoutMs: number) {
@@ -481,7 +645,7 @@ async function runRenderer(dir: string, request: any, signal: AbortSignal | unde
   await fs.writeFile(requestPath, JSON.stringify(request));
   let result: any;
   await runGuarded(process.execPath, [VIDEO_PATHS.runner, requestPath], {
-    cwd: dir, signal, timeoutMs,
+    cwd: dir, signal, timeoutMs, nice: 10,
     onLine: (line) => {
       if (line.startsWith("VIDEO_RENDER_RESULT ")) result = JSON.parse(line.slice(20));
       else if (line.startsWith("VIDEO_RENDER_PROGRESS ")) {
@@ -502,10 +666,11 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   const audio = info.streams?.find((s: any) => s.codec_type === "audio");
   const duration = Number(info.format?.duration);
   if (!Number.isFinite(duration) || duration <= 0) throw new Error("Unknown video duration");
-  const targetLufs = typeof params.targetLufs === "number" ? params.targetLufs : -16;
   let scenes: TimedScene[] = [];
   let timelineIssues: Issue[] = [];
-  if (params.dir) { const project = await inspectProject(await projectDir(params.dir, cwd)); scenes = project.scenes; timelineIssues = project.issues; }
+  let platformTarget = -16;
+  if (params.dir) { const project = await inspectProject(await projectDir(params.dir, cwd)); scenes = project.scenes; timelineIssues = project.issues; platformTarget = targetLoudness(project.spec); }
+  const targetLufs = typeof params.targetLufs === "number" ? params.targetLufs : platformTarget;
   progress?.("Analyzing picture and sound (black/freeze detection, silence, EBU R128 loudness)…");
   const analysis = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, 0), "-map", "0:v:0", "-vf", "blackdetect=d=0.25:pix_th=0.08,freezedetect=n=0.002:d=1.5",
     ...(audio ? ["-map", "0:a:0", "-af", "silencedetect=noise=-50dB:d=1.2,ebur128=peak=true:framelog=info"] : []),
@@ -593,10 +758,14 @@ async function download(url: string, dest: string, expected: string, signal?: Ab
   } finally { await fs.rm(partial, { force: true }); }
 }
 
+async function piperHasAlignment(): Promise<boolean> {
+  if (!existsSync(piperPython())) return false;
+  return runGuarded(piperPython(), ["-c", "import piper, onnx"], { cwd: piperHome(), timeoutMs: 60_000, guard: false }).then(() => true, () => false);
+}
 async function piperStatus() {
   const installed = existsSync(piperPython());
   const voices = Object.fromEntries(Object.entries(PIPER_VOICES).map(([name, v]) => [name, { installed: voiceFiles(name).every((f) => existsSync(f.path)), note: v.note }]));
-  return { engine: "piper", package: PIPER_PACKAGE, installed, home: piperHome(), voices };
+  return { engine: "piper", packages: PIPER_PACKAGES, installed, wordAlignment: await piperHasAlignment(), styles: Object.keys(VOICE_STYLES), home: piperHome(), voices };
 }
 
 export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
@@ -608,9 +777,11 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     if (!existsSync(piperPython())) {
       progress?.("Creating the Piper virtual environment…");
       await runGuarded("python3", ["-m", "venv", path.join(piperHome(), "venv")], { cwd: piperHome(), signal, timeoutMs: 120_000, guard: false });
-      progress?.(`Installing ${PIPER_PACKAGE} (binary wheels only)…`);
+    }
+    if (!await piperHasAlignment()) {
+      progress?.(`Installing ${PIPER_PACKAGES.join(" and ")} (binary wheels only)…`);
       // Wheels only: no package build scripts run during installation.
-      await runGuarded(piperPython(), ["-m", "pip", "install", "--quiet", "--only-binary=:all:", PIPER_PACKAGE], { cwd: piperHome(), signal, timeoutMs: 600_000, guard: false });
+      await runGuarded(piperPython(), ["-m", "pip", "install", "--quiet", "--only-binary=:all:", ...PIPER_PACKAGES], { cwd: piperHome(), signal, timeoutMs: 600_000, guard: false });
     }
     for (const file of voiceFiles(voice)) {
       if (existsSync(file.path) && await sha256(file.path) === file.sha256) continue;
@@ -637,55 +808,158 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
   const outDir = projectWritePath(dir, "public", "audio", "narration");
   if (!existsSync(piperPython()) || !voiceFiles(voice).every((f) => existsSync(f.path))) throw new Error(`Piper voice ${voice} is not installed; run narration_tts action:"install" voice:"${voice}" (downloads a pinned local model once)`);
   // Piper voices default to ~200+ wpm. speed 1 is calibrated to a documentary
-  // pace (~150-170 wpm); lower is slower. Sentence pauses stay fixed.
-  const lengthScale = 1.2 / (typeof params.speed === "number" ? Math.min(1.5, Math.max(0.6, params.speed)) : 1);
+  // pace (~150-170 wpm); lower is slower. The style sets pace and variability.
+  const styleName = params.style ?? lookById(spec.look)?.audio.voice.style ?? "documentary";
+  const style = VOICE_STYLES[styleName] ?? VOICE_STYLES.documentary;
+  const speed = typeof params.speed === "number" ? Math.min(1.5, Math.max(0.6, params.speed)) : 1;
   await fs.mkdir(outDir, { recursive: true });
-  const results: any[] = [];
-  for (const scene of selected) {
+  const jobs = selected.flatMap((scene: any) => {
     const text = typeof scene.narration === "string" ? scene.narration.trim() : "";
-    if (!text) continue;
-    progress?.(`Narrating ${scene.id}…`);
+    if (!text) return [];
+    const display = text.replace(/\s+/g, " ");
     const spoken = applyLexicon(text, lexicon);
-    const textPath = projectWritePath(dir, "public", "audio", "narration", `.${scene.id}.txt`);
+    return [{ scene, text, display, spoken, counts: display.split(" ").map((token) => spokenWordCount(token, lexicon)) }];
+  });
+  if (!jobs.length) return { voice, narrated: [], note: "No selected scene has narration text." };
+  const requestPath = projectWritePath(dir, "public", "audio", "narration", ".request.json");
+  await fs.writeFile(requestPath, JSON.stringify({ model: voiceFiles(voice)[0].path, outDir, threads: Math.max(2, Math.floor(os.availableParallelism() / 3)), lengthScale: style.length / speed, noiseScale: style.noise, noiseW: style.noiseW, sentenceSilence: style.sentence, paragraphSilence: style.paragraph,
+    scenes: jobs.map((job) => ({ id: job.scene.id, text: job.spoken.text, display: job.display, counts: job.counts })) }));
+  let result: any;
+  try {
+    await runGuarded(piperPython(), ["-I", VIDEO_PATHS.narrate, requestPath], { cwd: dir, signal, timeoutMs: 900_000, nice: 10, onLine: (line) => {
+      if (line.startsWith("NARRATE_RESULT ")) result = JSON.parse(line.slice(15));
+      else if (line.startsWith("NARRATE_PROGRESS ")) progress?.(`Narrating ${line.slice(17)}…`);
+    } });
+  } finally { await fs.rm(requestPath, { force: true }); }
+  if (!result) throw new Error("Narration produced no result");
+  const results: any[] = [];
+  const lead = typeof params.cueLead === "number" ? params.cueLead : 0.08;
+  for (const job of jobs) {
+    const { scene } = job;
+    const made = result.scenes.find((s: any) => s.id === job.scene.id);
     const wav = projectWritePath(dir, "public", "audio", "narration", `${scene.id}.wav`);
-    await fs.writeFile(textPath, spoken.text + "\n");
-    try {
-      await runGuarded(piperPython(), ["-m", "piper", "-m", voiceFiles(voice)[0].path, "-f", wav, "--length-scale", String(lengthScale), "--sentence-silence", "0.45", "-i", textPath], { cwd: dir, signal, timeoutMs: 300_000 });
-    } finally { await fs.rm(textPath, { force: true }); }
+    const mastered = await masterNarration(made.raw, wav, signal);
     const seconds = Number((await probe(wav, signal)).format?.duration);
-    const sentences = await sentenceOnsets(wav, text, signal);
-    scene.narrationSeconds = Number(seconds.toFixed(3));
     const offset = scene.narrationOffset ?? 0.4;
     scene.narrationOffset = offset;
+    scene.narrationSeconds = Number(seconds.toFixed(3));
     scene.narrationAudio = `audio/narration/${scene.id}.wav`;
+    scene.narrationWords = made.words;
+    const recued = resolveCueWords(scene, offset, lead);
     const needed = Number((offset + seconds + (params.tailSeconds ?? 0.8)).toFixed(2));
     let adjusted: number | undefined;
     if (params.fitScenes === true && needed > scene.seconds) { adjusted = needed; scene.seconds = needed; }
-    results.push({ scene: scene.id, audio: scene.narrationAudio, seconds: scene.narrationSeconds,
-      sentences: sentences.map((sentence) => ({ ...sentence, at: Number((sentence.at + offset).toFixed(2)) })), words: words(text), syllablesPerSecond: Number((syllables(text) / seconds).toFixed(2)), sceneSeconds: scene.seconds, ...(spoken.edits ? { lexiconEdits: spoken.edits } : {}), ...(adjusted ? { lengthenedTo: adjusted } : needed > scene.seconds ? { overrun: Number((needed - scene.seconds).toFixed(2)) } : {}) });
+    results.push({ scene: scene.id, audio: scene.narrationAudio, seconds: scene.narrationSeconds, words: words(job.text), timing: made.exact ? "measured" : "estimated", syllablesPerSecond: Number((syllables(job.text) / seconds).toFixed(2)), loudnessLufs: mastered.lufs, sceneSeconds: scene.seconds,
+      ...(recued.length ? { cues: recued } : {}), ...(job.spoken.edits ? { lexiconEdits: job.spoken.edits } : {}), ...(adjusted ? { lengthenedTo: adjusted } : needed > scene.seconds ? { overrun: Number((needed - scene.seconds).toFixed(2)) } : {}) });
+    await fs.rm(made.raw, { force: true });
   }
   await fs.writeFile(specPath, JSON.stringify(spec, null, 2) + "\n");
-  return { voice, narrated: results, note: "Durations are measured from the synthesized audio and written to video.json. Cues are scene-relative seconds: re-time cues to the narration's key words, then render stills/previews again. Listen-check pronunciation of names and acronyms (spell them phonetically in the narration text if needed)." };
+  return { voice, style: styleName, aligned: result.aligned, narrated: results, note: result.aligned
+    ? "Word timings are measured from the synthesized speech and drive captions. Cues named in cueWords were re-timed to their spoken word; other cues are unchanged (scene-relative seconds) so re-time them to the narration if they should follow it. Listen-check pronunciation of names and acronyms (respell them in the lexicon)."
+    : "Piper's alignment support is missing, so caption timing is estimated. Run narration_tts action:install once to add it." };
 }
 
-/** Scene-relative start of each sentence, from the fixed pauses Piper inserts
- * between sentences. Falls back to evenly scaled estimates when the pause
- * count does not match the sentence count. */
-async function sentenceOnsets(wav: string, text: string, signal?: AbortSignal): Promise<Array<{ text: string; at: number }>> {
-  const sentences = text.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
-  const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(wav, 0), "-af", "silencedetect=noise=-40dB:d=0.3", "-f", "null", "-"], signal, 60_000);
-  const ends = [...r.stderr.matchAll(/silence_end:\s*([\d.]+)/g)].map((m) => Number(m[1]));
-  const onsets = [0, ...ends].slice(0, sentences.length);
-  if (onsets.length === sentences.length) return sentences.map((sentence, i) => ({ text: sentence, at: onsets[i] }));
-  const total = sentences.reduce((sum, sentence) => sum + syllables(sentence), 0) || 1;
-  const duration = Number((await probe(wav, signal)).format?.duration) || 0;
-  let at = 0;
-  return sentences.map((sentence) => { const start = at; at += duration * syllables(sentence) / total; return { text: sentence, at: Number(start.toFixed(2)), estimated: true } as any; });
+/** Spoken words a display token produces: exact when the lexicon respells it,
+ * unknown (null) where the engine expands it (digits, hyphenated compounds, dotted abbreviations). */
+function spokenWordCount(token: string, lexicon: Array<[string, string]>): number | null {
+  const respelled = applyLexicon(token, lexicon);
+  if (respelled.edits) return respelled.text.trim().split(/\s+/).length;
+  return /\d|[-–—/]|\w\.\w/.test(token) ? null : 1;
+}
+
+/** Point every cue named in cueWords at the measured start of its word (a
+ * "word#2" suffix picks the second occurrence), a short lead before it so the
+ * visual lands as the word is heard. Returns what moved. */
+export function resolveCueWords(scene: any, offset: number, lead: number): Array<{ cue: string; word: string; from: number | null; to: number }> {
+  const moved: Array<{ cue: string; word: string; from: number | null; to: number }> = [];
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+  for (const [name, target] of Object.entries<string>(scene.cueWords ?? {})) {
+    const [text, nth] = String(target).split("#");
+    const hits = (scene.narrationWords ?? []).filter((w: any) => norm(w.w) === norm(text));
+    const hit = hits[Math.max(0, Number(nth ?? 1) - 1)];
+    if (!hit) continue;
+    const to = Number(Math.min(scene.seconds - 0.05, Math.max(0, offset + hit.s - lead)).toFixed(2));
+    moved.push({ cue: name, word: target, from: scene.cues?.[name] ?? null, to });
+    scene.cues = { ...scene.cues, [name]: to };
+  }
+  return moved;
+}
+
+/** Narration polish: rumble filter, gentle compression, a touch of presence,
+ * then a gain that lands each scene at the same integrated loudness so the
+ * mix does not jump between scenes. 48 kHz mono. */
+async function masterNarration(input: string, output: string, signal?: AbortSignal): Promise<{ lufs: number }> {
+  const chain = "highpass=f=75,acompressor=threshold=-21dB:ratio=2.2:attack=6:release=140,equalizer=f=3000:t=q:w=1.1:g=1.5,aresample=48000";
+  const measured = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(input, 0), "-af", `${chain},ebur128=peak=true`, "-f", "null", "-"], signal, 60_000);
+  const lufs = Number(/I:\s*(-?[\d.]+) LUFS/.exec(measured.stderr.slice(measured.stderr.lastIndexOf("Summary:")))?.[1]);
+  const gain = Number.isFinite(lufs) ? Math.max(-12, Math.min(18, NARRATION_LUFS - lufs)) : 0;
+  // The shared FFmpeg flags refuse to overwrite; a re-synthesized scene replaces its old file.
+  await fs.rm(output, { force: true });
+  await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputArgs(input, 0), "-af", `${chain},volume=${gain.toFixed(2)}dB,alimiter=limit=0.9`, "-ac", "1", output], signal, 60_000);
+  return { lufs: Number((Number.isFinite(lufs) ? lufs + gain : NARRATION_LUFS).toFixed(1)) };
 }
 
 // ───────────────────────────── procedural audio ─────────────────────────────
 
-export const SFX_TYPES = ["whoosh", "riser", "downlifter", "impact", "tick", "pop", "chime"];
+export const SFX_TYPES = ["whoosh", "riser", "downlifter", "impact", "tick", "pop", "chime", "swell"];
+/** Relative volume of each sound when the harness places it (under narration). */
+const SFX_VOLUME: Record<string, number> = { whoosh: 0.3, swell: 0.26, riser: 0.28, impact: 0.42, pop: 0.26, chime: 0.28, tick: 0.2, downlifter: 0.26 };
+
+/** Music intensity that follows the video: the shape of a good edit (a strong
+ * opening, room under explanation, a build into the last third, a resolve),
+ * bent by any per-scene `energy` (0..1) the author set. */
+export function autoIntensity(scenes: TimedScene[], seconds: number): Array<[number, number]> {
+  const arc: Array<[number, number]> = [[0, 0.3], [0.15, 0.62], [0.5, 0.58], [0.8, 0.88], [1, 0.35]].map(([p, v]) => [Number((p * seconds).toFixed(2)), v] as [number, number]);
+  const points = new Map<number, number>(arc);
+  for (const scene of scenes as any[]) {
+    const mid = Number(((scene.start + scene.end) / 2).toFixed(2));
+    if (typeof scene.energy === "number") points.set(mid, Math.min(1, Math.max(0, scene.energy)));
+    else if (scene.component === "OutroScene") points.set(Number(scene.start.toFixed(2)), 0.35);
+  }
+  return [...points.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+type SoundEvent = { type: string; at: number; volume: number; seconds?: number; pitch?: number; note: string };
+/** Where sound belongs in this timeline: a whoosh through each moving
+ * transition, a riser into and an impact on each reveal cue, a chime on
+ * resolutions and a soft pop when a like or follow lands. Nothing else. */
+export function planSoundDesign(spec: any, scenes: TimedScene[], seconds: number): SoundEvent[] {
+  const events: SoundEvent[] = [];
+  const push = (event: SoundEvent) => { if (event.at >= 0 && event.at < seconds - 0.05) events.push({ ...event, at: Number(event.at.toFixed(2)) }); };
+  scenes.forEach((scene, i) => {
+    const t = Number(scene.transition?.seconds ?? 0.5), kind = scene.transition?.type;
+    if (i > 0 && kind && ["slide", "slideup", "slidedown", "wipe", "zoom"].includes(kind)) push({ type: "whoosh", at: scene.start - 0.12, seconds: Math.min(1.1, Math.max(0.5, t * 1.5)), pitch: i % 2 ? 0.85 : 1.05, volume: SFX_VOLUME.whoosh, note: `${kind} into ${scene.id}` });
+    else if (i > 0 && kind === "blur") push({ type: "swell", at: scene.start - 0.3, seconds: 1.4, volume: SFX_VOLUME.swell, note: `blur into ${scene.id}` });
+    for (const [name, value] of Object.entries(scene.cues ?? {})) {
+      const at = scene.start + value;
+      if (/^(hit|reveal|drop|slam|impact|punch)/i.test(name)) {
+        if (value >= 1.4) push({ type: "riser", at: at - 1.5, seconds: 1.5, volume: SFX_VOLUME.riser, note: `into ${scene.id}.${name}` });
+        push({ type: "impact", at, volume: SFX_VOLUME.impact, note: `${scene.id}.${name}` });
+      } else if (/^(chime|win|done|success|resolve|answer)/i.test(name)) push({ type: "chime", at, volume: SFX_VOLUME.chime, note: `${scene.id}.${name}` });
+      else if (/^(pop|badge|stamp)/i.test(name)) push({ type: "pop", at, volume: SFX_VOLUME.pop, note: `${scene.id}.${name}` });
+    }
+  });
+  if (isPublishing(spec) && spec.publish?.cta?.enabled !== false) {
+    const cta = spec.publish?.cta ?? {};
+    if (cta.like) push({ type: "pop", at: cta.like.at + 0.28 * (cta.like.seconds ?? 3.4), volume: SFX_VOLUME.pop, note: "like press" });
+    if (cta.follow) push({ type: "pop", at: cta.follow.at + 0.4 * (cta.follow.seconds ?? 4.2), volume: SFX_VOLUME.pop, note: "follow press" });
+    const outro = scenes.find((s) => s.component === "OutroScene");
+    if (outro && typeof outro.cues?.follow === "number") push({ type: "pop", at: outro.start + outro.cues.follow + 0.4 * 5, volume: SFX_VOLUME.pop, note: "outro follow press" });
+  }
+  // A whoosh and an impact inside 0.6 s of each other read as one gesture; keep the first of any crowd.
+  events.sort((a, b) => a.at - b.at);
+  return events.filter((event, i) => !events.slice(0, i).some((prior) => Math.abs(prior.at - event.at) < 0.6 && prior.type === event.type));
+}
+
+async function synthRun(dir: string, spec: any, name: string, signal?: AbortSignal) {
+  const specPath = projectWritePath(dir, "public", "audio", `.${name}.json`);
+  const output = projectWritePath(dir, "public", "audio", `${name}.wav`);
+  await fs.writeFile(specPath, JSON.stringify(spec));
+  try {
+    const result = await runGuarded("python3", ["-I", VIDEO_PATHS.synth, specPath, output], { cwd: dir, signal, timeoutMs: 300_000, nice: 10, env: { OMP_NUM_THREADS: "2", OPENBLAS_NUM_THREADS: "2" } });
+    return { stats: JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "{}"), output, publicPath: `audio/${name}.wav` };
+  } finally { await fs.rm(specPath, { force: true }); }
+}
 
 export async function audioSynth(params: any, cwd: string, signal?: AbortSignal) {
   const dir = await projectDir(params.dir, cwd);
@@ -695,23 +969,54 @@ export async function audioSynth(params: any, cwd: string, signal?: AbortSignal)
     params = { ...params, type: SFX_TYPES.find(type => typeof params.name === "string" && (params.name === type || params.name.startsWith(`${type}-`))) };
     if (!params.type) throw new Error(`kind sfx needs type: one of ${SFX_TYPES.join(", ")} (name only sets the file name)`);
   }
+  await fs.mkdir(projectWritePath(dir, "public", "audio"), { recursive: true });
+  if (params.kind === "sound_design") return soundDesign(dir, signal);
   const name = typeof params.name === "string" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(params.name) ? params.name : params.kind === "music" ? "music" : `sfx-${params.type}`;
   const spec: any = { kind: params.kind, seed: params.seed ?? 7 };
+  let project: any;
   if (params.kind === "music") {
-    const { seconds } = await inspectProject(dir);
-    Object.assign(spec, { seconds: params.seconds ?? Math.ceil(seconds + 1), bpm: params.bpm, key: params.key, mode: params.mode, progression: params.progression, barsPerChord: params.barsPerChord, layers: params.layers, intensity: params.intensity });
+    project = await inspectProject(dir);
+    const look = lookById(project.spec.look)?.audio.music;
+    const intensity = params.intensity === "auto" || params.intensity === undefined ? autoIntensity(project.scenes, project.seconds) : params.intensity;
+    Object.assign(spec, { seconds: params.seconds ?? Math.ceil(project.seconds + 1), style: params.style ?? look?.style, bpm: params.bpm ?? look?.bpm, key: params.key ?? look?.key, mode: params.mode ?? look?.mode,
+      progression: params.progression, barsPerChord: params.barsPerChord, layers: params.layers, intensity, swing: params.swing, drumPattern: params.drumPattern, melodyVoice: params.melodyVoice });
   } else if (params.kind === "sfx") Object.assign(spec, { type: params.type, seconds: params.seconds, pitch: params.pitch });
-  else throw new Error("kind must be music or sfx");
+  else throw new Error("kind must be music, sfx or sound_design");
   for (const key of Object.keys(spec)) if (spec[key] === undefined) delete spec[key];
-  const outDir = projectWritePath(dir, "public", "audio");
-  await fs.mkdir(outDir, { recursive: true });
-  const specPath = projectWritePath(dir, "public", "audio", `.${name}.json`);
-  const output = projectWritePath(dir, "public", "audio", `${name}.wav`);
-  await fs.writeFile(specPath, JSON.stringify(spec));
-  try {
-    const result = await runGuarded("python3", ["-I", VIDEO_PATHS.synth, specPath, output], { cwd: dir, signal, timeoutMs: 300_000 });
-    const stats = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "{}");
-    return { ...stats, output, publicPath: `audio/${name}.wav`, spec,
-      next: params.kind === "music" ? 'Set video.json audio.music to publicPath. Music ducks automatically under narration windows; check balance with video_qa.' : 'Add {"src": publicPath, "at": seconds} to video.json audio.sfx at the visual event it punctuates. Use sound sparingly: one accent per idea, not per animation.' };
-  } finally { await fs.rm(specPath, { force: true }); }
+  const made = await synthRun(dir, spec, name, signal);
+  if (params.kind === "music") {
+    // The grid rides beside the audio so visuals can lock to bars and entries.
+    const { downbeats, chords, layerEntries, ...stats } = made.stats;
+    const gridPath = projectWritePath(dir, "public", "audio", `${name}.grid.json`);
+    await fs.writeFile(gridPath, JSON.stringify({ bpm: stats.bpm, barSeconds: stats.barSeconds, downbeats, chords, layerEntries, endsAt: stats.endsAt }));
+    if (params.wire !== false) {
+      const next = await readSpec(dir);
+      next.audio = { ...next.audio, music: made.publicPath, musicBpm: stats.bpm };
+      await fs.writeFile(path.join(dir, "video.json"), JSON.stringify(next, null, 2) + "\n");
+    }
+    return { ...stats, output: made.output, publicPath: made.publicPath, grid: `audio/${name}.grid.json`, bars: downbeats.length, chords: chords.length, layerEntries, wired: params.wire !== false,
+      next: "video.json audio.music and audio.musicBpm are set. Music ducks automatically under narration windows and builds with the intensity arc (scene `energy` values bend it). Run audio_synth kind sound_design to place transition and cue sounds, then check the mix with video_qa." };
+  }
+  return { ...made.stats, output: made.output, publicPath: made.publicPath, spec,
+    next: 'Add {"src": publicPath, "at": seconds} to video.json audio.sfx at the visual event it punctuates. Use sound sparingly: one accent per idea, not per animation.' };
+}
+
+/** Generate the sounds a timeline calls for and place them in video.json
+ * audio.sfx, replacing only earlier automatic placements. */
+async function soundDesign(dir: string, signal?: AbortSignal) {
+  const { spec, scenes, seconds } = await inspectProject(dir);
+  const events = planSoundDesign(spec, scenes, seconds);
+  const files = new Map<string, string>();
+  for (const event of events) {
+    const key = `${event.type}-${event.pitch ?? 1}-${event.seconds ?? 0}`;
+    if (files.has(key)) continue;
+    const name = `sd-${event.type}${event.pitch ? `-${Math.round(event.pitch * 100)}` : ""}${event.seconds ? `-${Math.round(event.seconds * 100)}` : ""}`;
+    const made = await synthRun(dir, { kind: "sfx", type: event.type, seed: 11 + files.size, ...(event.seconds ? { seconds: event.seconds } : {}), ...(event.pitch ? { pitch: event.pitch } : {}) }, name, signal);
+    files.set(key, made.publicPath);
+  }
+  const placed = events.map((event) => ({ src: files.get(`${event.type}-${event.pitch ?? 1}-${event.seconds ?? 0}`)!, at: event.at, volume: event.volume, auto: true }));
+  const next = await readSpec(dir);
+  next.audio = { ...next.audio, sfx: [...(next.audio?.sfx ?? []).filter((s: any) => !s.auto), ...placed] };
+  await fs.writeFile(path.join(dir, "video.json"), JSON.stringify(next, null, 2) + "\n");
+  return { placed: events.map((e) => ({ at: e.at, type: e.type, why: e.note })), files: files.size, note: "Placements are marked auto: true in video.json audio.sfx; re-running replaces only those, so hand-placed sounds stay. Sounds sit 10+ dB under narration; remove any you cannot tie to a visual event." };
 }

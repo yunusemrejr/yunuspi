@@ -40,6 +40,16 @@ export function rng(seed: number) {
     return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
   };
 }
+/** Relative luminance 0..1 of a #rrggbb color. */
+export function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [16, 8, 0].map((s) => { const v = ((n >> s) & 255) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+/** Readable text colour on a filled background. */
+export const onColor = (bg: string): string => (luminance(bg) > 0.35 ? "#111111" : "#FFFFFF");
+/** Light grounds need dark overlays and no black vignette; dark grounds the reverse. */
+export const useTone = (): "light" | "dark" => (luminance(useTheme().background) > 0.4 ? "light" : "dark");
 export function mix(a: string, b: string, t: number): string {
   const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
   const ch = (p: number, s: number) => (p >> s) & 255;

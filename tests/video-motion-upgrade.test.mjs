@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { assertDifferentBytes, assertSameBytes } from "./bytes.mjs";
 
 const repo = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find((p) => fs.existsSync(path.join(p, "extensions/lib/video-studio.ts")));
@@ -87,7 +88,7 @@ test("pronunciation lexicon validates, orders longest-first and applies literall
   assert.throws(() => studio.validateLexicon({ a: " ".repeat(129) }), /pronunciations must be/);
 });
 
-test("procedural drums default off, stay deterministic and keep old bytes", { skip: !hasNumpy }, () => {
+test("procedural drums follow the style arrangement, can be removed and stay deterministic", { skip: !hasNumpy }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "synth-drums-"));
   try {
     const synth = path.join(agent, "skills/procedural-audio/scripts/synth.py");
@@ -97,13 +98,16 @@ test("procedural drums default off, stay deterministic and keep old bytes", { sk
       return JSON.parse(execFileSync("python3", [synth, specPath, path.join(root, out)], { encoding: "utf8" }));
     };
     const bed = { kind: "music", seconds: 4, bpm: 90, key: "A", mode: "minor", seed: 3 };
+    const wav = (name) => fs.readFileSync(path.join(root, name));
     render(bed, "plain.wav");
+    render(bed, "plain-again.wav");
+    assertSameBytes(wav("plain.wav"), wav("plain-again.wav"), "same seed, same bytes");
     render({ ...bed, layers: { drums: 0 } }, "nodrums.wav");
-    assert.deepEqual(fs.readFileSync(path.join(root, "plain.wav")), fs.readFileSync(path.join(root, "nodrums.wav")), "drums:0 renders the historical bytes");
+    assertDifferentBytes(wav("nodrums.wav"), wav("plain.wav"), "the style's own drum arrangement is audible until layers.drums removes it");
     const first = render({ ...bed, layers: { drums: 0.4 } }, "drums-a.wav");
     render({ ...bed, layers: { drums: 0.4 } }, "drums-b.wav");
-    assert.deepEqual(fs.readFileSync(path.join(root, "drums-a.wav")), fs.readFileSync(path.join(root, "drums-b.wav")), "same seed, same bytes");
-    assert.notDeepEqual(fs.readFileSync(path.join(root, "drums-a.wav")), fs.readFileSync(path.join(root, "plain.wav")), "drums are audible in the mix");
+    assertSameBytes(wav("drums-a.wav"), wav("drums-b.wav"), "same seed, same bytes");
+    assertDifferentBytes(wav("drums-a.wav"), wav("nodrums.wav"), "drums are audible in the mix");
     assert.ok(first.peakDbfs <= -0.9, JSON.stringify(first));
     for (const type of ["downlifter", "pop"]) {
       const sfx = render({ kind: "sfx", type }, `${type}.wav`);

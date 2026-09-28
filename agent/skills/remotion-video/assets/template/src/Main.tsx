@@ -3,25 +3,39 @@ import { AbsoluteFill, Audio, interpolate, Sequence, staticFile, useCurrentFrame
 import { estimateSeconds } from "./captions";
 import { ease } from "./motion";
 import { Captions } from "./primitives/Captions";
+import { BrandBug, CtaLayer } from "./primitives/Cta";
 import { scenes as registry } from "./scenes";
 import { Canvas, ThemeProvider } from "./theme";
 import { narrationWindows, spec, timeline, toFrames, type SceneSpec, type TimedScene } from "./timeline";
 
-/** Entry transition over the first `seconds` of a scene (default 0.5 s). */
-const Entry: React.FC<{ transition?: SceneSpec["transition"]; children: React.ReactNode }> = ({ transition, children }) => {
+type Transition = SceneSpec["transition"];
+const transitionFrames = (transition: Transition) => (transition && transition.type !== "none" ? Math.max(1, Math.round((transition.seconds ?? 0.5) * spec.fps)) : 0);
+
+/** Style of an incoming (p 0→1) or outgoing (p 0→1 as it leaves) scene. The
+ * outgoing scene stays mounted underneath for the overlap, so a transition is
+ * a real crossfade or hand-off, not a dip through the background. */
+function transitionStyle(kind: NonNullable<Transition>["type"], p: number, leaving: boolean): React.CSSProperties {
+  const o = leaving ? 1 - p : p;
+  switch (kind) {
+    case "fade": return { opacity: o };
+    case "slide": return leaving ? { opacity: o, transform: `translateX(${-p * 8}%)` } : { opacity: p, transform: `translateX(${(1 - p) * 8}%)` };
+    case "slideup": return leaving ? { opacity: o, transform: `translateY(${-p * 8}%)` } : { opacity: p, transform: `translateY(${(1 - p) * 8}%)` };
+    case "slidedown": return leaving ? { opacity: o, transform: `translateY(${p * 8}%)` } : { opacity: p, transform: `translateY(${(p - 1) * 8}%)` };
+    case "wipe": return leaving ? {} : { clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` };
+    case "zoom": return leaving ? { opacity: o, transform: `scale(${1 + 0.05 * p})` } : { opacity: p, transform: `scale(${1.08 - 0.08 * p})` };
+    default: return leaving ? { opacity: o, filter: `blur(${p * 10}px)` } : { opacity: Math.min(1, p * 1.5), filter: `blur(${(1 - p) * 16}px)` };
+  }
+}
+
+/** Applies the scene's entry transition over its first frames and the next
+ * scene's transition (as an exit) over the frames it stays mounted past its
+ * natural end. Scenes do not fade themselves; this is the one owner. */
+const Layer: React.FC<{ entry: Transition; exit: Transition; naturalFrames: number; children: React.ReactNode }> = ({ entry, exit, naturalFrames, children }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  if (!transition || transition.type === "none") return <>{children}</>;
-  const frames = Math.max(1, Math.round((transition.seconds ?? 0.5) * fps));
-  const p = interpolate(frame, [0, frames], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ease.out });
-  const style: React.CSSProperties =
-    transition.type === "fade" ? { opacity: p }
-    : transition.type === "slide" ? { opacity: p, transform: `translateX(${(1 - p) * 8}%)` }
-    : transition.type === "slideup" ? { opacity: p, transform: `translateY(${(1 - p) * 8}%)` }
-    : transition.type === "slidedown" ? { opacity: p, transform: `translateY(${(p - 1) * 8}%)` }
-    : transition.type === "wipe" ? { clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` }
-    : transition.type === "zoom" ? { opacity: p, transform: `scale(${1.08 - 0.08 * p})` }
-    : { opacity: Math.min(1, p * 1.5), filter: `blur(${(1 - p) * 16}px)` };
+  const inFrames = transitionFrames(entry), outFrames = transitionFrames(exit);
+  let style: React.CSSProperties = {};
+  if (inFrames && entry) style = transitionStyle(entry.type, interpolate(frame, [0, inFrames], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ease.out }), false);
+  if (outFrames && exit && frame >= naturalFrames) style = transitionStyle(exit.type, interpolate(frame, [naturalFrames, naturalFrames + outFrames], [0, 1], { extrapolateRight: "clamp", easing: ease.inOut }), true);
   return <AbsoluteFill style={style}>{children}</AbsoluteFill>;
 };
 
@@ -42,18 +56,21 @@ function musicVolume(frame: number): number {
 
 export const Main: React.FC = () => {
   const { scenes, durationInFrames } = timeline();
+  // The end screen carries the full brand; the corner mark steps aside for it.
+  const outro = scenes.find((scene) => scene.component === "OutroScene");
+  const outroStart = outro ? outro.startSeconds : undefined;
   return (
     <ThemeProvider>
       <AbsoluteFill style={{ background: spec.theme.background }}>
         <Canvas>
-          {scenes.map((scene) => (
-            <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationInFrames} name={scene.id}>
-              <Entry transition={scene.transition}>
+          {scenes.map((scene, i) => (
+            <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationInFrames + transitionFrames(scenes[i + 1]?.transition)} name={scene.id}>
+              <Layer entry={scene.transition} exit={scenes[i + 1]?.transition} naturalFrames={scene.durationInFrames}>
                 <SceneView scene={scene} />
-              </Entry>
+              </Layer>
               {spec.captions?.enabled && scene.narration ? (
                 <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`captions:${scene.id}`}>
-                  <Captions text={scene.narration} seconds={scene.narrationSeconds ?? estimateSeconds(scene.narration)} style={spec.captions.style} maxWords={spec.captions.maxWords} position={spec.captions.position} />
+                  <Captions text={scene.narration} seconds={scene.narrationSeconds ?? estimateSeconds(scene.narration)} words={scene.narrationWords} style={spec.captions.style} maxWords={spec.captions.maxWords} position={spec.captions.position} />
                 </Sequence>
               ) : null}
               {scene.narrationAudio ? (
@@ -63,6 +80,8 @@ export const Main: React.FC = () => {
               ) : null}
             </Sequence>
           ))}
+          <BrandBug endsAt={outroStart} />
+          <CtaLayer />
         </Canvas>
         {spec.audio.music ? <Audio src={staticFile(spec.audio.music)} volume={musicVolume} endAt={durationInFrames} /> : null}
         {spec.audio.sfx.map((sfx, i) => (

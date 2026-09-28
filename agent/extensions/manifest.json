@@ -128,6 +128,7 @@
     "local-models.ts",
     "media-process.ts",
     "media-timeline.ts",
+    "memory-guard.ts",
     "memory-redaction.ts",
     "metrics-panel.ts",
     "mini-preprocessor.ts",
@@ -209,6 +210,9 @@
     "tool-discovery.ts",
     "ui-doctrine.ts",
     "utility-client.ts",
+    "video-assets.ts",
+    "video-looks.ts",
+    "video-publish.ts",
     "video-studio.ts",
     "workspace-write-lease.ts",
     "worktree-checkpoint.ts"

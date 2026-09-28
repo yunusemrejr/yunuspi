@@ -1,6 +1,8 @@
-// Narration captions without a speech aligner. Words are timed by syllable
-// weight across the measured narration length, with pauses at punctuation,
-// then grouped into short chunks a viewer can read at a glance. Pure and
+// Narration captions. Words carry the timings measured from the synthesized
+// speech when narration_tts stored them (narrationWords); otherwise they are
+// timed by syllable weight across the narration length with pauses at
+// punctuation. Words are then grouped into short chunks a viewer can read at
+// a glance. Pure and
 // deterministic: the same text and length always give the same captions, so
 // stills, previews, the final render and the SRT/VTT sidecars agree.
 
@@ -30,10 +32,15 @@ export function captionPace(text: string, seconds: number): number | null {
   return Math.round((chars / seconds) * 10) / 10;
 }
 
-/** Start and end seconds (relative to the narration start) for each word. */
-export function timeWords(text: string, seconds: number): CaptionWord[] {
+/** Start and end seconds (relative to the narration start) for each word:
+ * the measured timings when given, otherwise a syllable-weighted estimate. */
+export type MeasuredWord = { w: string; s: number; e: number };
+export function timeWords(text: string, seconds: number, measured?: MeasuredWord[]): CaptionWord[] {
   const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
   if (!words.length || !(seconds > 0)) return [];
+  // Timings measured from the synthesized speech beat any estimate; they only
+  // apply while they still describe exactly this text.
+  if (measured && measured.length === words.length && measured.every((m, i) => m.w === words[i])) return measured.map((m) => ({ word: m.w, start: round(m.s), end: round(m.e) }));
   const units = words.map((word) => {
     const speak = syllables(word) + 0.5;
     const pause = /[.!?…]["')\]]*$/.test(word) ? 2.4 : /[,;:—–-]["')\]]*$/.test(word) ? 1.2 : 0;
@@ -53,8 +60,8 @@ export function timeWords(text: string, seconds: number): CaptionWord[] {
 /** Group timed words into chunks of at most `maxWords` words and `maxChars`
  * characters, breaking early at sentence ends and at clause breaks once a
  * chunk has three words. Each chunk stays up until the next begins. */
-export function captionChunks(text: string, seconds: number, maxWords = 7, maxChars = 42): CaptionChunk[] {
-  const words = timeWords(text, seconds);
+export function captionChunks(text: string, seconds: number, maxWords = 7, maxChars = 42, measured?: MeasuredWord[]): CaptionChunk[] {
+  const words = timeWords(text, seconds, measured);
   const chunks: CaptionChunk[] = [];
   let current: CaptionWord[] = [];
   const flush = () => {
