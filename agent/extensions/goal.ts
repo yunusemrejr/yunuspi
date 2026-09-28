@@ -103,6 +103,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			try {
 				const command = parseGoalArgs(args);
 				const notify = (text: string, level: "info" | "warning" = "info") => ctx.ui?.notify?.(text, level);
+				// The kickoff starts a full agent run; the command must return immediately so
+				// the editor and working indicator stay live while that run streams.
+				const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state)))
+					.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 				switch (command.kind) {
 					case "status": return notify(goalSummary(goal));
 					case "set": {
@@ -111,7 +115,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 						refused.clear();
 						persist(next, ctx);
 						notify(`Goal ${next.id} set with ${next.criteria.length} criteria. The session keeps working until each has evidence. /goal shows progress.`);
-						await pi.sendUserMessage(goalKickoff(next));
+						kickoff(next);
 						return;
 					}
 					case "criteria":
@@ -128,7 +132,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				const rearmed: GoalState = { ...goal, status: "active", nudges: 0, stalls: 0, progressMark: "", note: undefined, updatedAt: now };
 				persist(rearmed, ctx);
 				notify(`Goal ${rearmed.id} resumed.`);
-				await pi.sendUserMessage(goalKickoff(rearmed));
+				kickoff(rearmed);
 			} catch (error) {
 				ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
 			}

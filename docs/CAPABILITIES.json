@@ -3631,7 +3631,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 139,
+        "line": 143,
         "kind": "literal"
       },
       {
@@ -4229,7 +4229,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 139,
+        "line": 143,
         "kind": "literal"
       },
       {

@@ -1112,6 +1112,10 @@ export class InteractiveMode {
             const lastSegment = segments[segments.length - 1];
             if (segments.length > 1 && (lastSegment === "index.ts" || lastSegment === "index.js")) {
                 segments.pop();
+                // A package's built entry (pkg/dist/index.js) is named after the package, not its build folder.
+                if (segments.length > 1 && (segments[segments.length - 1] === "dist" || segments[segments.length - 1] === "build")) {
+                    segments.pop();
+                }
             }
             return {
                 path: extension.path,

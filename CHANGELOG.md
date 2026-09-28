@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.1 — 2026-09-28
+
+**`/goal` no longer freezes the session.** Setting a goal printed "Goal … set" and then nothing happened: no working indicator, no turn, and the editor stopped reacting to input. The command held the input queue while its handler ran, and the handler's kickoff message waited in that same queue for the handler to finish, so neither could proceed. Extension commands now release the input queue before their handler runs, because they drive their own turns. This fixes every command that sends a message, not only `/goal`. `/goal` also returns as soon as the kickoff is queued instead of waiting for the whole run, and reports a kickoff failure instead of discarding it. A regression test reproduces the deadlock.
+
+**The loaded-extensions list names `pi-lens` correctly.** An extension whose entry is a built `dist/index.js` was listed as `dist`; it is now listed under its package name.
+
 ## 0.14.0 — 2026-09-28
 
 **`/goal` gives important tasks a definition of done.** `/goal <what you want done>` turns the demand into numbered acceptance criteria (your list items and directives, plus a mandatory end-to-end verification criterion), stages a `goal` tool, and starts the work. The criteria ride the context every turn and are saved as snapshots on the session branch, so compaction, resume and fork keep them. A criterion only counts when the agent records what it observed (command and result, file and line, screenshot finding); a bare "done" is refused. `goal complete` is refused while criteria are open or files changed after the last passing check, once per distinct set of gaps; repeating the call is a recorded waiver, so you are never deadlocked. When the agent settles with criteria open, the harness sends one continuation naming them. Loops are bounded by construction: at most six continuations, a stop at the second continuation in a row that records no new evidence, a pause on interrupt, and no continuation while your messages are queued. `/goal` shows progress; `pause`, `resume`, `retry`, `done`, `clear` and `criteria a; b` manage it. Earlier goal trackers were retired because they inferred goals; this one exists only when asked. `PI_GOAL=0` disables it. See `docs/GOAL.md`.

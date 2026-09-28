@@ -330,3 +330,36 @@ test("the registered /run command retains multiline task text and accepts whites
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an extension command that awaits a nested prompt does not deadlock on the input queue", async () => {
+  const session = Object.create(AgentSession.prototype);
+  const ran = [];
+  const errors = [];
+  Object.assign(session, {
+    sessionManager: { getSessionId: () => "fixture" }, _pendingInputControllers: new Set(), _inputQueueTail: Promise.resolve(),
+    _extensionRunner: {
+      getCommand: (name) => ({
+        outer: { handler: async () => { ran.push("outer"); await session.prompt("/inner"); ran.push("outer-done"); } },
+        inner: { handler: async () => { ran.push("inner"); } },
+      })[name],
+      createCommandContext: () => ({}),
+      emitError: (error) => errors.push(error),
+    },
+  });
+  const outcome = await Promise.race([
+    session.prompt("/outer").then(() => "settled"),
+    new Promise((resolve) => setTimeout(() => resolve("deadlocked"), 1000)),
+  ]);
+  assert.equal(outcome, "settled");
+  assert.deepEqual(ran, ["outer", "inner", "outer-done"]);
+  assert.deepEqual(errors, []);
+});
+
+test("loaded-extension labels name a built package entry after its package", () => {
+  const mode = Object.create(InteractiveMode.prototype);
+  const root = "/opt/fixture/extensions";
+  const labels = mode.getCompactExtensionLabels([
+    `${root}/goal.ts`, `${root}/pi-lens/dist/index.js`, `${root}/pi-lens/fork-resources.ts`, `${root}/pi-memory/index.ts`, `${root}/pi-subagents/fork-resources.ts`,
+  ].map((path) => ({ path, sourceInfo: { source: "local", scope: "user" } })));
+  assert.deepEqual(labels, ["goal.ts", "pi-lens", "pi-lens/fork-resources.ts", "pi-memory", "pi-subagents/fork-resources.ts"]);
+});
