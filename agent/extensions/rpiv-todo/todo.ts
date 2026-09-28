@@ -130,6 +130,10 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
 		prepareArguments: prepareTodoArguments,
+		// Completing the plan is gated on verification receipts at preflight. A
+		// barrier lets a sibling quality_review/project_tests call in the same
+		// message settle first, so the gate never refuses on pre-batch state.
+		executionMode: "sequential",
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const result = applyTaskMutation(

@@ -191,3 +191,11 @@ test('a batch completing a dependency later in the same batch applies in depende
  const stuck=applyTaskMutation(base,'batch',{operations:[{action:'update',id:3,status:'completed'},{action:'update',id:2,status:'in_progress'}]});
  assert.equal(stuck.op.kind,'error');assert.match(stuck.op.message,/batch operation 1: Complete dependencies/);assert.equal(stuck.state,base);
 });
+
+test('todo is a sequential barrier so its completion gate sees sibling verification results',async()=>{
+ // Live 2026-09-27: quality_review assess and the plan-closing todo shared one
+ // message; the todo preflight ran first and refused on stale review state.
+ const {registerTodoTool}=await load('todo.ts');const tools={};
+ registerTodoTool({registerTool(t){tools[t.name]=t},on(){},events:{on(){return ()=>{}}}});
+ assert.equal(tools.todo.executionMode,'sequential');
+});

@@ -1555,3 +1555,21 @@ test('review parent receipts compact duplicate findings while inspect retains fu
   assert.deepEqual(compact.reports.map(report => report.evidence), full.reports.map(report => report.evidence));
   assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length);
 });
+
+test("work after an accepted revision keeps one review round instead of forcing a waiver", async (t) => {
+ // Live 2026-09-27: both rounds went to revision 1; after it was accepted the
+ // session built a new feature (r4-r12) that could never be reviewed.
+ const f = await fixture(t);
+ await f.mutate();
+ await f.tool({ action: "review" });
+ await f.mutate("src/value.js", "export const value=2;");
+ await f.tool({ action: "review" });
+ assert.equal(f.state().rounds, 2);
+ await f.tool({ action: "assess", disposition: "accepted", reason: "Reviewed current source and relevant test results; no blocking defects." });
+ await f.mutate("src/value.js", "export const value=3;");
+ assert.equal(f.state().status, "pending", "new work after acceptance is reviewable");
+ await f.tool({ action: "review" });
+ assert.equal(f.calls.length, 3);
+ await f.mutate("src/value.js", "export const value=4;");
+ assert.equal(f.state().status, "budget_exhausted", "unaccepted repair churn still exhausts the budget");
+});

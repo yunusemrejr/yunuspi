@@ -42,6 +42,14 @@ test('self-match advice ignores redirections and terminating pkill (host safety 
  assert.equal(advice?.replacement,"pgrep -f '[c]om.mailgenie.Main'");
 });
 
+test('a plain self-matching pgrep pattern is rewritten in place instead of refused', () => {
+ assert.equal(selfMatchingSignal("pgrep -f com.mailgenie.Main 2>/dev/null")?.rewritten,"pgrep -f '[c]om.mailgenie.Main' 2>/dev/null");
+ assert.equal(selfMatchingSignal('sleep 1; pgrep -af "node server.js" || echo none')?.rewritten,"sleep 1; pgrep -af '[n]ode server.js' || echo none");
+ assert.equal(selfMatchingSignal('pgrep -u root -f sshd')?.rewritten,"pgrep -u root -f '[s]shd'");
+ const anchored=selfMatchingSignal("pgrep -f '^node'");
+ assert.ok(anchored&&anchored.rewritten===undefined,'regex syntax at the start keeps the refusal');
+});
+
 test('an empty curl response piped into a JSON parser gets its cause named', async () => {
  const {emptyJsonPipeHint}=await jiti.import('../agent/extensions/lib/bash-routing.ts');
  const failure=[{type:'text',text:'Traceback (most recent call last):\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'}];

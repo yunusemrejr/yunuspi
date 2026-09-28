@@ -335,7 +335,10 @@ helper `spanAdvisory` tests P(present) ≥ 0.80 with deterministic corroboration
 it is not a production intervention path. Changing the shadow flag alone
 does not connect scores to Guardian, Observer or Watchmaker.
 
-Transport is OpenRouter chat completions, default route
+Transport is the OpenRouter decisions endpoint (Span is a decisions model;
+chat completions refuses it): the bounded trace is the state and each
+catalog signal is one plain `noul` question, so P(yes) becomes
+present/absent and `notObservable` stays 0. The default route is
 `respan/span-01-lite` with paid `respan/span-01` fallback when the Lite
 route itself is missing (never on auth, quota, timeout, or malformed
 answers). Slugs are configuration resolved against the live registry;

@@ -31,7 +31,7 @@ import { readJournalQuotaEvents } from "../runs/shared/quota-journal.ts";
 import { fetchEndpoints, rankRecoveryEndpoints, endpointRecoveryRouting, type Endpoint } from "../runs/shared/openrouter-endpoints.ts";
 import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, readHealth } from "../runs/shared/provider-health.ts";
 import { normalizeReviewPath, parseReviewReport, REVIEW_REPORT_INSTRUCTIONS } from '../shared/quality-review-report.ts';
-import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
+import { asReviewsEnvelope, extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
 import { askJev, tooShort } from "../../../lib/jev-client.ts";
 import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
@@ -456,7 +456,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				if (body && body.length <= 30000) {
 					// Reviewer models often wrap the terminal JSON in prose or a fence.
 					// Extract one complete envelope without repairing truncated output.
-					parsed = extractJsonEnvelope(body);
+					parsed = asReviewsEnvelope(extractJsonEnvelope(body));
 					parseFailed = parsed === undefined;
 				}
 				const assignedEnvelopeComplete = Boolean(parsed && Array.isArray(parsed.reviews) && assigned.every((a:any) => parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id).length === 1));

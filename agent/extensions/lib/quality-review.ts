@@ -249,6 +249,10 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     for (const file of files) patterns.delete(file);
     for (const file of patterns.keys()) if (file.startsWith('render:')) patterns.delete(file);
     const all = [...new Set([...changed,...files])]; scopeOverflow ||= all.length > 128;
+    // An accepted revision closes its review cycle. Work that follows it keeps
+    // one round so it can be reviewed instead of closing on a forced waiver;
+    // automatic admission stays under the per-request escalation budget.
+    if (disposition === 'accepted') rounds = Math.min(rounds, REVIEW_LIMITS.rounds - 1);
     // The workspace revision is shared with project tests: one tree, one number.
     revision = options.revision ? options.revision.advance(token) : revision + 1; changed = all.slice(-128); disposition = ''; reason = ''; delivered = ''; save();
     return true;

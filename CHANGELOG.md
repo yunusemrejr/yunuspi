@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.7 — 2026-09-28
+
+**The Span behavior sensor works.** OpenRouter serves `respan/span-01-lite` only through its decisions endpoint and refuses chat completions with a 400, so every Span evaluation failed and recorded `unavailable`. That was 13 of 13 in recent sessions, with no success. The sensor now sends the bounded trace as the decisions state, with one plain `noul` question per catalog signal. Span answers only that question type, so P(yes) becomes present/absent. A live check on a repeated-failure trace flagged the loop and the premature completion at 0.97 each, took 1.7 s and cost nothing. Scores stay shadow-only, as before.
+
+**Paid reviewer reports are no longer discarded on malformed JSON.** In one live session, two paid quality reviews were thrown away as "did not contain a reviews array":
+- One contained invalid escapes (`\u夕暮れ\u`).
+- The other was missing its closing `]}`.
+
+Stray backslashes are now read as literal characters, and one report (or a bare array of reports) is wrapped as the envelope. Nothing is invented: text without an aspect report stays rejected.
+
+**Work after an accepted revision can be reviewed.** Both review rounds could be spent on the first revision. Later feature work in the same request then could only close on a forced waiver. Accepting a revision now leaves one round for the work that follows. Automatic admission still stays within the per-request budget.
+
+**Closing the last todo no longer races a verification in the same batch.** A todo call that completes the plan was checked for verification receipts before a sibling `quality_review` or `project_tests` call in the same message had settled. It was refused, which cost a turn. `todo` now runs as a sequential barrier, so earlier calls settle first.
+
+**A self-matching `pgrep -f` is rewritten instead of refused.** `pgrep -f name` matches its own shell, so the router used to refuse it and spend a turn. A plain pattern is now rewritten in place to the equivalent bracket form, `pgrep -f '[n]ame'`. Patterns that start with regex syntax or contain quotes are still refused, with the fix named. pgrep's pattern is its last positional argument, so `-u root -f sshd` no longer treats `root` as the pattern.
+
+**Clearer Double failure notes.** An unavailable Double stream used to cite the child's JSON watchdog status line as its "underlying failure". It now names the classified exit, for example `process-signal (exit 129)` when the user interrupts.
+
 ## 0.13.6 — 2026-09-28
 
 **`/double` streams no longer fail on a stale model exclusion.** A 595-second provider-gate cooldown was recorded as a 24-hour model exclusion, so every explicit same-route `/double` stream failed for a day. Transient failures (rate limits, 429, 5xx, timeouts, connection errors, provider cooldowns) now exclude a route only for their stated wait, clamped between 30 seconds and 15 minutes. Durable failures (auth, quota, unknown model) keep 24 hours. Stores written before this release heal on load.

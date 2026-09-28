@@ -461,7 +461,7 @@ export function emptyJsonPipeHint(command: unknown, content: unknown): string | 
  * The bracket form `pkill -f '[c]hrome'` keeps the pattern from appearing
  * literally in the command line and is the copyable safe replacement.
  */
-export function selfMatchingSignal(command: string): { reason: string; replacement: string } | null {
+export function selfMatchingSignal(command: string): { reason: string; replacement: string; rewritten?: string } | null {
   // Only pgrep: a terminating pkill is blocked by host-operation safety with
   // the owned-task path, so a self-match advisory there is noise.
   if (typeof command !== "string" || !/\bpgrep\b/.test(command)) return null;
@@ -473,7 +473,7 @@ export function selfMatchingSignal(command: string): { reason: string; replaceme
     const args = tokenizeSimple(argText) ?? argText.split(/\s+/).filter(Boolean);
     const hasFullMatch = args.some((a) => a === "-f" || /^-[A-Za-z]*f$/.test(a) || a === "--full");
     if (!hasFullMatch) continue;
-    const pattern = args.find((a) => !a.startsWith("-"));
+    const pattern = args.findLast((a) => !a.startsWith("-"));
     if (!pattern) continue;
     const literal = pattern.replace(/^['"]|['"]$/g, "");
     // A bracket expression (e.g. [c]hrome) does not appear literally, so pkill
@@ -481,9 +481,19 @@ export function selfMatchingSignal(command: string): { reason: string; replaceme
     if (/\[[^\]]*\]/.test(literal)) continue;
     if (!command.includes(literal)) continue;
     const escaped = literal.length > 0 ? `[${literal[0]}]${literal.slice(1)}` : literal;
+    // The bracket form matches the same processes, so a plain pattern is
+    // rewritten in place instead of spending a turn on a refusal. Patterns
+    // whose first character is regex syntax or that carry quotes are not.
+    const start = match.index! + match[0].length - match[2].length;
+    let at = command.indexOf(pattern, start), end = at + pattern.length;
+    if (at > 0 && /['"]/.test(command[at - 1]) && command[end] === command[at - 1]) { at--; end++; }
+    const rewritten = /^[A-Za-z0-9_]/.test(literal) && !/['"\\$`]/.test(literal)
+      && at >= start && end <= start + match[2].length
+      ? `${command.slice(0, at)}'${escaped}'${command.slice(end)}` : undefined;
     return {
       reason: `\`${tool} -f ${literal}\` also matches this shell's own command line and can terminate the command (exit 137). Use the bracket form so the pattern is not literal in the command line.`,
       replacement: `${tool} -f '${escaped}'`,
+      rewritten,
     };
   }
   return null;

@@ -13,8 +13,11 @@
  * - It starts in shadow mode (PI_SPAN_SHADOW=1 default): evaluations are
  *   recorded, measured and benchmarked, but no consumer may act on them.
  *
- * Transport is an injected scorer. The default OpenRouter scorer resolves
- * the configured Span slugs; unknown/unlisted slugs degrade to
+ * Transport is an injected scorer. The default OpenRouter scorer sends the
+ * bounded trace to the decisions endpoint (Span is a decisions model and is
+ * refused by chat/completions) with one yes/no question per signal; Span
+ * answers only those, so its P(yes) becomes present/absent and
+ * notObservable stays 0. Unknown/unlisted slugs degrade to
  * "route-unavailable" instead of inventing a model identity. Every paid
  * call is ledgered as a `span-usage-v1` session entry (same contract as
  * `jev-usage-v1`) so cost and metrics treat Span like any other route.
@@ -24,12 +27,11 @@ import { createHash } from "node:crypto";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
 import { beginHarnessActivity } from "../harness-activity.ts";
-import { openRouterKey } from "../jev-client.ts";
+import { JEV_DECISIONS_URL, openRouterKey } from "../jev-client.ts";
 
 export const SPAN_USAGE_ENTRY = "span-usage-v1";
 export const SPAN_DEFAULT_MODEL = "respan/span-01-lite";
 export const SPAN_DEFAULT_FALLBACK = "respan/span-01";
-export const SPAN_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 export const SPAN_REQUEST_TIMEOUT_MS = 20_000;
 export const SPAN_MAX_TRACE_EVENTS = 48;
 export const SPAN_MAX_EVENT_CHARS = 400;
@@ -188,13 +190,9 @@ export function parseSpanScores(raw: unknown): Record<string, SpanSignalScores> 
   return Object.keys(out).length ? out : undefined;
 }
 
+/** The bounded trace a scorer judges; the signal catalog travels as questions. */
 export function spanPrompt(trace: SpanTrace): string {
-  const lines = trace.events.map((event) => `- [${event.kind}] ${event.text}`);
-  const catalog = SPAN_CATALOG.map((signal) => `${signal.id}: ${signal.description}`).join("\n");
-  const prompt =
-    `Score each behavior signal against the recent session trace. Reply with JSON only: ` +
-    `{"<signal-id>":{"present":0..1,"absent":0..1,"notObservable":0..1}} with probabilities summing to 1. ` +
-    `Use notObservable when the trace cannot show the signal. Signals:\n${catalog}\nTrace:\n${lines.join("\n")}`;
+  const prompt = `Recent agent session trace:\n${trace.events.map((event) => `- [${event.kind}] ${event.text}`).join("\n")}`;
   if (prompt.length <= SPAN_MAX_INPUT_CHARS) return prompt;
   const keep = SPAN_MAX_INPUT_CHARS - 120;
   const head = Math.ceil(keep * 0.35);
@@ -376,7 +374,7 @@ export function openRouterSpanScorer(opts: OpenRouterSpanScorerOptions = {}): Sp
     signal?.addEventListener("abort", onAbort, { once: true });
     const started = Date.now();
     try {
-      const response = await fetchImpl(SPAN_CHAT_URL, {
+      const response = await fetchImpl(JEV_DECISIONS_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${key}`,
@@ -384,12 +382,13 @@ export function openRouterSpanScorer(opts: OpenRouterSpanScorerOptions = {}): Sp
           "HTTP-Referer": "https://github.com/yunusemrejr/yunuspi",
           "X-Title": "yunuspi-span-sensor",
         },
+        // Respan accepts only noul questions with plain-string instructions.
         body: JSON.stringify({
           model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0,
-          max_tokens: 1200,
-          response_format: { type: "json_object" },
+          state: prompt,
+          questions: Object.fromEntries(SPAN_CATALOG.map((signal) => [signal.id, {
+            type: "noul", instructions: `${signal.label}: ${signal.description} Does the trace show this behavior?`,
+          }])),
         }),
         signal: controller.signal,
       });
@@ -400,16 +399,20 @@ export function openRouterSpanScorer(opts: OpenRouterSpanScorerOptions = {}): Sp
         throw err;
       }
       const body = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-        usage?: { prompt_tokens?: number; cost?: number };
+        answers?: Record<string, { type?: string; noul?: unknown }>;
+        usage?: { input_tokens?: number; cost?: number };
       };
       controller.signal.throwIfAborted();
-      const text = body.choices?.[0]?.message?.content;
-      if (typeof text !== "string" || !text.trim()) throw Error("span: malformed answers");
+      const scores: Record<string, SpanSignalScores> = {};
+      for (const [id, answer] of Object.entries(body?.answers ?? {})) {
+        const present = SPAN_SIGNAL_IDS.has(id) && answer?.type === "noul" ? clamp01(answer.noul) : undefined;
+        if (present !== undefined) scores[id] = { present, absent: 1 - present, notObservable: 0 };
+      }
+      if (!Object.keys(scores).length) throw Error("span: malformed answers");
       return {
-        text,
+        text: JSON.stringify(scores),
         model,
-        inputTokens: typeof body.usage?.prompt_tokens === "number" ? body.usage.prompt_tokens : undefined,
+        inputTokens: typeof body.usage?.input_tokens === "number" ? body.usage.input_tokens : undefined,
         costUsd: typeof body.usage?.cost === "number" ? body.usage.cost : undefined,
         ms: Date.now() - started,
       };

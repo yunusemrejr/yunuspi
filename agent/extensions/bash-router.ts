@@ -195,10 +195,15 @@ export default function bashRouter(pi: any) {
           recordActivity("observed", "bash", "bash");
           const command = event.input?.command;
           if (typeof command !== "string") return;
-          // A `pkill -f <text>` whose pattern is literal in this command also
-          // matches the shell running it; kill it before that becomes exit 137.
+          // A `pgrep -f <text>` whose pattern is literal in this command also
+          // matches the shell running it. A plain pattern is rewritten to the
+          // equivalent bracket form; anything else is refused with the fix.
           const selfMatch = selfMatchingSignal(command);
-          if (selfMatch) {
+          if (selfMatch?.rewritten) {
+               event.input.command = selfMatch.rewritten;
+               emit("rewrite", "bash", "self-match-signal", 1);
+               recordActivity("rewritten", "bash", "self-match-signal");
+          } else if (selfMatch) {
                emit("block", "bash", "self-match-signal", 1);
                recordActivity("blocked", "bash", "self-match-signal");
                return {

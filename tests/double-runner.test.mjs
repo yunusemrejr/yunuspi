@@ -317,6 +317,28 @@ test('a stream that used its whole window is not relaunched into a shorter one',
   assert.match(result.message.content, /partial result/);
 });
 
+test('an unavailable stream names its classified exit instead of child watchdog telemetry', async () => {
+  const pi = makePi();
+  registerDoubleMode(pi, {
+    launch: async (_id, params) => {
+      const kind = kindOf(params);
+      if (kind === 'B') return {
+        content: [{ type: 'text', text: '{"type":"subagent.watchdog.status","runId":"r","phase":"idle"}' }],
+        details: { results: [{ exitCode: 129, error: 'child-error', cause: { category: 'process-signal' } }] },
+      };
+      if (kind === 'reconcile') return okResult(RECONCILED);
+      return okResult(ANALYSIS_A);
+    },
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Go.', systemPrompt: 'sys' }, ctx);
+  const advice = pi.sends.find((send) => send.message.details.phase === 'Double stream B' && send.message.details.status === 'unavailable')?.message.details.advice ?? '';
+  assert.match(advice, /Underlying failure: process-signal \(exit 129\)/);
+  assert.doesNotMatch(advice, /watchdog/);
+});
+
 test('a retry that recovers produces a clean directive', async () => {
   const pi = makePi();
   let aCalls = 0;

@@ -82,7 +82,7 @@ test("scoring caches by fingerprint and skips trivial/disabled traces", async ()
     let calls = 0;
     const scorer = async (prompt) => {
       calls++;
-      assert.ok(prompt.includes("repeated-failure-loop"));
+      assert.ok(prompt.startsWith("Recent agent session trace:") && !prompt.includes("repeated-failure-loop"), "the catalog travels as questions, not in the state");
       return { text: JSON.stringify(scoresFor(["repeated-failure-loop"])), model: "mock", inputTokens: 10, ms: 5 };
     };
     const trace = traceFrom(fixtures.traces[0].events);
@@ -153,6 +153,26 @@ test("malformed scorer output degrades to a skip", async () => {
   }
 });
 
+test("Span is asked through the decisions endpoint with one plain noul question per signal", async () => {
+  let request;
+  const fetchImpl = async (url, opts) => {
+    request = { url, body: JSON.parse(opts.body) };
+    return { ok: true, json: async () => ({ answers: Object.fromEntries(SPAN_CATALOG.map((s) => [s.id, { type: "noul", noul: 0.1 }])), usage: { input_tokens: 9, cost: 0 } }) };
+  };
+  const answer = await openRouterSpanScorer({ fetchImpl, key: () => "k" })("- [error] bash failed", {});
+  assert.match(request.url, /\/api\/alpha\/decisions$/, "chat/completions refuses decisions models");
+  assert.equal(request.body.state, "- [error] bash failed");
+  assert.deepEqual(Object.keys(request.body.questions), SPAN_CATALOG.map((s) => s.id));
+  for (const question of Object.values(request.body.questions)) {
+    assert.equal(question.type, "noul");
+    assert.equal(typeof question.instructions, "string");
+    assert.equal(question.criteria, undefined, "Respan rejects non-string criteria");
+  }
+  assert.equal(Object.keys(parseSpanScores(JSON.parse(answer.text))).length, SPAN_CATALOG.length);
+  assert.equal(answer.inputTokens, 9);
+  assert.equal(answer.costUsd, 0);
+});
+
 test("paid fallback runs only for a missing Lite route", async () => {
   const seen = [];
   const fetchImpl = async (url, opts) => {
@@ -163,12 +183,13 @@ test("paid fallback runs only for a missing Lite route", async () => {
     }
     return {
       ok: true,
-      json: async () => ({ choices: [{ message: { content: JSON.stringify(scoresFor([])) } }], usage: { prompt_tokens: 5 } }),
+      json: async () => ({ answers: { "scope-drift": { type: "noul", noul: 0.25 } }, usage: { input_tokens: 5 } }),
     };
   };
   const scorer = openRouterSpanScorer({ fetchImpl, key: () => "k" });
   const answer = await scorer("trace", {});
   assert.equal(answer.model, "respan/span-01");
+  assert.deepEqual(parseSpanScores(JSON.parse(answer.text)), { "scope-drift": { present: 0.25, absent: 0.75, notObservable: 0 } });
   assert.deepEqual(seen, ["respan/span-01-lite", "respan/span-01"]);
 
   // Auth failures never trigger the paid fallback.

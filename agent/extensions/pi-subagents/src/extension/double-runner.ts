@@ -130,8 +130,11 @@ function failureSuffix(result: any, row: any): string {
 	const contentText = Array.isArray(result?.content)
 		? result.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n")
 		: undefined;
-	const excerpt = [result?.error, result?.message, result?.details?.error, contentText, typeof row?.error === "string" ? row.error : undefined]
-		.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+	// Child watchdog telemetry is JSON, not a cause; the classified exit is.
+	const category = typeof row?.cause?.category === "string" && row.cause.category !== "unknown" ? row.cause.category : undefined;
+	const classified = category ? `${category}${Number.isInteger(row?.exitCode) ? ` (exit ${row.exitCode})` : ""}` : undefined;
+	const excerpt = [result?.error, result?.message, result?.details?.error, contentText, classified, typeof row?.error === "string" ? row.error : undefined]
+		.filter((value): value is string => typeof value === "string" && value.trim().length > 0 && !/^\s*\{"type":"subagent\./.test(value))
 		.map((value) => value.replace(/\s+/g, " ").trim().slice(0, 180))[0];
 	return excerpt ? ` Underlying failure: ${excerpt}` : "";
 }

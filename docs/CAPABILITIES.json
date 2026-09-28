@@ -2996,7 +2996,7 @@
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 304
+        "line": 307
       },
       {
         "name": "effort",
@@ -3295,7 +3295,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          168
+          177
         ]
       }
     ],
@@ -3783,7 +3783,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 713,
+        "line": 717,
         "kind": "literal"
       },
       {
@@ -4297,7 +4297,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 713,
+        "line": 717,
         "kind": "literal"
       },
       {
@@ -4589,7 +4589,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          119
+          124
         ],
         "knownNames": [
           "todo"
