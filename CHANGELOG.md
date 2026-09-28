@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.9 — 2026-09-28
+
+**Interface work now starts from an embedded design doctrine.** Unconstrained models converge on the same two looks: the indigo/purple SaaS page, then the cream/terracotta editorial page that reacted against it. The new `design-slop-prevention` skill ships inside the harness and explains the mechanism, lists the tells of both generations, and gives a nine-step procedure. It includes the swap test: if another company's logo and headline can replace yours and the page still works, the design is slop. It is a second layer on top of `anti-ai-slop` and the UI checklist, aimed at the choice of palette, typeface, layout and copy before any code is written.
+
+**Jev decides when to demand it.** A new typed decision, `ui-work`, judges whether a request is interface work at a few hundred input tokens instead of a model turn. UI vocabulary and UI files frame the question; Jev settles the ambiguous middle in both directions. Live probe: "make the checkout less confusing" scored 0.88 and "add a dark mode toggle" 0.86, while "fix the page fault handler", "add a CLI flag" and "website scraper" scored 0.02–0.18. When the answer is yes, the agent must read the skill:
+- a reminder rides the context until it is read;
+- a UI file write is refused at most twice per request until then, so ignoring the reminder cannot loop or stall;
+- one read clears it for the session;
+- subagents launched without a skill catalog still get the installed path, and the reminder tells the parent to pass it along when delegating interface work.
+
+An unavailable or unsure judge keeps the heuristic: strong UI vocabulary still counts, weak vocabulary does not. Writing a `.tsx`, `.html`, `.css` or GUI-toolkit file settles it without any judge. The web-design expert pack lists the skill and requires the swap test at convergence.
+
+**Jev spares the change-scope council for small edits.** The council is a paid, up-to-four-minute, three-reviewer run started by a regex cue. In a probe of eight small edits that pass the cue ("refactor `parseDate` to use early returns", "fix the modal overflow on mobile"), six triggered it. A new typed decision, `scope-council-need`, asks whether the request is a small self-contained change with no design choice or earlier preference at stake. Small edits scored 0.43–0.84 and open redesign or refactor work 0.04–0.23. The veto needs 0.7, so it can only skip the council, never add one. Open visual briefs are never vetoed, and uncertainty, a 2.5-second timeout or an unavailable judge keeps the council. A skip is recorded as a `scope-deliberation-v1` receipt with status `skipped-by-jev`.
+
+**Runaway shell writers are capped.** An unbounded writer (ffmpeg with `apad`) once filled the SSD. Shell commands now run under a 32 GiB per-file cap (`ulimit -f`), and a disk watcher stops a command that consumes more than 40 GiB or pushes free space under a 10 GiB reserve, including one that has been detached. `PI_MAX_FILE_GB`, `PI_DISK_BUDGET_GB` and `PI_DISK_RESERVE_GB` tune the limits; 0 disables one.
+
 ## 0.13.8 — 2026-09-28
 
 **A reply-only prompt gets a reply, not a work session.** The live smoke check ("Reply with exactly: OK") ran for over three minutes. It loaded the maintenance skill, made todos, ran bash, and sent 28k-token turns. The prompt analyser and the Observer had both read the request as trivial. Three first-turn nudges still told the model to orient, plan and do maintenance:

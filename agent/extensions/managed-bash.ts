@@ -28,6 +28,7 @@
 import { spawn } from "node:child_process";
 import { guardedCommand } from "./lib/self-mutation-guard.ts";
 import { ownProcessGroup } from "./lib/process-owner.ts";
+import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "./lib/disk-guard.ts";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
@@ -241,8 +242,11 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				);
 			}
 			const shellConfig = getShellConfig();
+			// WHY: an unbounded writer (ffmpeg apad) once filled the SSD; cap single files in-shell.
+			const diskLimits = getDiskLimits();
+			const shellCommand = fileSizeLimitPrefix(diskLimits) + command;
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
-			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command]);
+			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, shellCommand]);
 			const child = spawn(
 				guarded.command,
 				guarded.args,
@@ -256,7 +260,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			);
 			if (commandFromStdin) {
 				child.stdin?.on("error", () => {});
-				child.stdin?.end(command);
+				child.stdin?.end(shellCommand);
 			}
 
 			const job: Job = {
@@ -297,6 +301,16 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					pendingOutput.add(task);
 				} catch (error) { outputError ??= error; if (child.pid) killTree(child.pid); }
 			};
+
+			// Keeps watching after detach: a backgrounded runaway writer is the same danger.
+			const stopDiskWatch = watchDisk(cwd, diskLimits, reason => {
+				if (job.state !== "running") return;
+				job.err.append(Buffer.from(`\n[managed bash] stopped by disk guard: ${reason}\n`));
+				if (!detached) outputError ??= new Error(`disk-guard:${reason}`);
+				job.state = "failed";
+				job.endedAt = Date.now();
+				if (child.pid) killTree(child.pid);
+			});
 
 			const feed = (data: Buffer) => {
 				job.out.append(data);
@@ -359,6 +373,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			return await new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				let settled = false;
 				const onExit = (code: number | null, sig: NodeJS.Signals | null) => {
+					stopDiskWatch();
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
 					if (cancelTimer) clearTimeout(cancelTimer);
@@ -419,6 +434,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					await Promise.all(pendingOutput);
 					onExit(code, child.signalCode);
 				}).catch((err) => {
+					stopDiskWatch();
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
 					// WHY a failed spawn must not leave a live job: reject AND settle the job

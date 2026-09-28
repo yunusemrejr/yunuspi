@@ -300,3 +300,22 @@ test('the mutation wait is bounded; a late complete brief still gates the next m
   release();await task;
   assert.equal(lifecycle.unseen(ctx),true,'the late complete brief gates the following mutation');
 });
+
+test('Jev spares a paid council only for a confident precise edit; open work, uncertainty and slow judges keep it',async()=>{
+  const judgeAt=(noul,delay=0)=>async()=>{if(delay)await new Promise(r=>setTimeout(r,delay));return {ok:true,answers:{precise:{noul}},usage:{inputTokens:200,cached:false}};};
+  const run=async(judge,text=prompt)=>{
+    let calls=0;const receipts=[];
+    const lifecycle=createScopeDeliberation({appendEntry:(type,data)=>receipts.push({type,data})},{history:async()=>history,runner:async()=>{calls++;return result;},judge});
+    await lifecycle.start({prompt:text},context(),'graph');
+    return {calls,receipts,brief:lifecycle.context(context())};
+  };
+  const vetoed=await run(judgeAt(0.85));
+  assert.equal(vetoed.calls,0,'a confident small-edit verdict spares the council');
+  assert.equal(vetoed.brief,'');
+  assert.equal(vetoed.receipts.at(-1).data.status,'skipped-by-jev','the skip is on the record');
+  for(const noul of [0.05,0.23,0.69]) assert.equal((await run(judgeAt(noul))).calls,1,`score ${noul} keeps the council`);
+  assert.equal((await run(async()=>({ok:false,skipped:'breaker'}))).calls,1,'an unavailable judge keeps the council');
+  assert.equal((await run(async()=>{throw new Error('boom');})).calls,1,'a failing judge keeps the council');
+  assert.equal((await run(judgeAt(0.95,3000))).calls,1,'a slow judge is not waited for beyond its bound');
+  assert.equal((await run(judgeAt(0.95),'Build a new landing page for my bakery')).calls,1,'an open visual brief is never vetoed');
+});

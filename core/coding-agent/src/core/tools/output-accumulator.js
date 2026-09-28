@@ -7,6 +7,12 @@ function defaultTempFilePath(prefix) {
     const id = randomBytes(8).toString("hex");
     return join(tmpdir(), `${prefix}-${id}.log`);
 }
+// A command printing forever (`yes`, a followed log) must not fill the disk or
+// the tmpfs behind os.tmpdir(): full-output capture stops past this size.
+const DEFAULT_MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+function formatMiB(bytes) {
+    return `${Math.round(bytes / (1024 * 1024))} MiB`;
+}
 function byteLength(text) {
     return Buffer.byteLength(text, "utf-8");
 }
@@ -37,6 +43,8 @@ export class OutputAccumulator {
     tempFilePath;
     tempFileStream;
     tempFileOpened = false;
+    capturedBytes = 0;
+    maxCaptureBytes;
     captureError;
     headText = "";
     outputMode;
@@ -47,6 +55,7 @@ export class OutputAccumulator {
         this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
         this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
         this.outputMode = options.outputMode ?? "tail";
+        this.maxCaptureBytes = options.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
     }
     append(data) {
         if (this.finished) {
@@ -62,6 +71,11 @@ export class OutputAccumulator {
             // adapter ignoring backpressure must not create an unbounded queue.
             if (stream.writableLength + data.length > 2 * 1024 * 1024) {
                 this.failCapture("producer ignored output backpressure", stream);
+                return;
+            }
+            this.capturedBytes += data.length;
+            if (this.capturedBytes > this.maxCaptureBytes) {
+                this.failCapture(`output exceeded the ${formatMiB(this.maxCaptureBytes)} capture cap`, stream);
                 return;
             }
             if (!stream.write(data)) return this.waitForDrain(stream);
@@ -209,6 +223,7 @@ export class OutputAccumulator {
         stream.on("error", (error) => this.failCapture(error.code ?? "write failed", stream));
         this.tempFileStream = stream;
         for (const chunk of this.rawChunks) {
+            this.capturedBytes += chunk.length;
             stream.write(chunk);
         }
         this.rawChunks = [];

@@ -69,7 +69,7 @@ export const UI_PREFLIGHT_TELLS: readonly string[] = [
   "glowing dot markers before labels or chips",
   "colored left rails on cards",
   "icons inside tinted tiles",
-  "the indigo-to-purple gradient palette or muddy orange/brass/brown default accents",
+  "the indigo-to-purple gradient palette, the cream-and-terracotta editorial look with an oversized italic serif, or muddy orange/brass/brown default accents",
   "generic lightbulb branding",
   "ad hoc hard-coded hues instead of a small token set",
   "suppressed focus outlines without a visible replacement",
@@ -84,6 +84,7 @@ export const UI_PREFLIGHT_TELLS: readonly string[] = [
   "emoji in headings, buttons or navigation",
   "decorative terminal output or pseudo-telemetry",
   "images without alt text and icon-only buttons without names",
+  "invented stats, logos or testimonials",
 ];
 
 export function designDirectionGuidance(brief: DesignBrief | undefined): string {
@@ -95,7 +96,7 @@ export function designDirectionGuidance(brief: DesignBrief | undefined): string 
 			: "- This request leaves major decisions to you. Before committing, run a brief thought experiment: list 2–3 materially different approaches, weigh them against the stated constraints and likely user intent, and record why the chosen one wins. Prefer the approach a demanding expert would pick, not merely the easiest.");
 	}
 	if (brief.contextReferences.length) lines.push(`- Context-only references: ${brief.contextReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Use them for what the user named (links, credit, deployment, conventions); they are not design sources — do not borrow their fonts, palette, layout or copy${brief.visualDesign ? "; the new work needs its own identity" : ""}.`);
-	if (brief.visualDesign) lines.push(`- Decide against these generated-UI tells while choosing the direction, not after building it: ${UI_PREFLIGHT_TELLS.join("; ")}.`);
+	if (brief.visualDesign) lines.push(`- Decide against these generated-UI tells while choosing the direction, not after building it (the design-slop-prevention skill explains why and gives the swap test): ${UI_PREFLIGHT_TELLS.join("; ")}.`);
 	if (brief.styleReferences.length) lines.push(`- Explicit style references: ${brief.styleReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Learn their principles; do not copy them wholesale.`);
 	return lines.join("\n").slice(0, 2000);
 }

@@ -359,7 +359,27 @@ Observer/Watchmaker admission and focus, quality-review aspect
 selection (add-only: Jev may suggest aspects, never remove the
 deterministic set), memory classification/admission, delegation
 topology, recovery strategy, verification method, evidence relevance,
-and shortlist-based tool/skill routing.
+and shortlist-based tool/skill routing. Two decisions run live rather than
+in shadow because each degrades to the previous behavior when the judge
+abstains:
+
+- `ui-work` decides whether a request is interface work. Deterministic
+  cues frame it (UI vocabulary in the request, a UI file being written);
+  Jev settles the ambiguous middle in both directions ("page fault" and
+  "website scraper" are not interface work, "make checkout less
+  confusing" is), at a few hundred input tokens instead of a model turn.
+  Bars are 0.7 to accept and 0.25 to reject; the live probe scored real
+  interface requests 0.78–0.98 and non-visual look-alikes 0.02–0.18.
+  When it says yes, `relevant-guidance` demands the embedded
+  `design-slop-prevention` skill (see
+  [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md)).
+- `scope-council-need` may veto only a heuristic yes for the change-scope
+  council, and only when the request is confidently a small self-contained
+  edit (score at least 0.7; probed small edits 0.43–0.84, open
+  redesign/refactor work 0.04–0.23). Open visual briefs are never
+  vetoed, and uncertainty, a timeout (2.5 s) or an unavailable judge keeps
+  the council. A skipped council is recorded as a `scope-deliberation-v1`
+  receipt with status `skipped-by-jev`.
 
 Deterministic code still owns permissions, safety, completion, and
 final decisions; a typed decision only refines an ambiguous choice the
@@ -367,7 +387,7 @@ owner framed, and every verdict degrades to unknown (caller keeps its
 heuristic). New production uses start in shadow mode — judged,
 measured, and agreement-recorded via `ml.jev.shadow` health events, but
 never applied — until calibration evidence justifies influence.
-Currently shadow-wired: requirement closure at ledger settle time,
+Currently shadow-wired (besides the two live decisions above): requirement closure at ledger settle time,
 review aspects per review round, and recovery strategy per recovery
 episode. The remaining registry entries are defined, barred, and
 tested, with production call sites staged behind the same shadow

@@ -1,5 +1,6 @@
 import { isPersistentService, servicePort, taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
+import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "../../../lib/disk-guard.ts";
 import { ownProcessGroup } from "../../../lib/process-owner.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -1041,6 +1042,10 @@ export class BackgroundTaskRegistry {
             WIN32_CMD_PI_TELEMETRY_UNAVAILABLE_REASON;
         }
       }
+      // WHY: an unbounded writer (ffmpeg apad) once filled the SSD; cap single files in-shell.
+      const diskLimits = getDiskLimits(this.env);
+      if (baseInvocation.dialect === "posix")
+        commandToSpawn = fileSizeLimitPrefix(diskLimits, this.platform) + commandToSpawn;
       const invocation =
         commandToSpawn === normalizedCommand
           ? baseInvocation
@@ -1060,6 +1065,17 @@ export class BackgroundTaskRegistry {
       task.child = child;
       task.pid = child.pid;
       if (this.platform !== "win32") ownProcessGroup(child.pid);
+      task.stopDiskWatch = watchDisk(ctx.cwd, diskLimits, (reason) => {
+        if (task.status !== "running") return;
+        task.killKind = "disk_guard";
+        task.error = `Stopped by disk guard: ${reason}. Bound the writer before rerunning and delete the partial output.`;
+        this.writeNotice(task, `\n[background task disk guard: ${reason}]\n`, true);
+        try {
+          this.requestKill(task, "SIGTERM");
+        } catch (error) {
+          this.recordKillFailure(task, error);
+        }
+      });
 
       child.stdout?.on("data", (data) => {
         this.appendChildOutput(task, data, "stdout");
@@ -1107,6 +1123,9 @@ export class BackgroundTaskRegistry {
           error =
             task.error ??
             `Output exceeded cap of ${formatSize(this.maxOutputBytes)}`;
+        } else if (task.killKind === "disk_guard") {
+          status = "failed";
+          error = task.error ?? "Stopped by disk guard";
         } else if (code === 0 && signalName === null) { /* PI_BG_SIGNAL_STATUS_BOUND */
           status = "completed";
         } else {
@@ -2155,6 +2174,7 @@ export class BackgroundTaskRegistry {
     if (task.finalized) return;
     task.finalized = true;
     if (task.timeoutHandle) clearTimeout(task.timeoutHandle);
+    task.stopDiskWatch?.();
     if (task.killEscalationTimer !== undefined) {
       clearTimeout(task.killEscalationTimer);
       task.killEscalationTimer = undefined;

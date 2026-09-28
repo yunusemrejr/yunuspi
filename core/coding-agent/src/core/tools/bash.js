@@ -4,6 +4,7 @@ import { access as fsAccess } from "node:fs/promises";
 import { spawn } from "child_process";
 import { Type } from "typebox";
 import { waitForChildProcess } from "../../utils/child-process.js";
+import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "../../utils/disk-guard.js";
 import { getShellConfig, getShellEnv, killProcessTree, trackDetachedChildPid, untrackDetachedChildPid, } from "../../utils/shell.js";
 import { getExperimentalToolSampling } from "../experimental.js";
 import { OutputAccumulator } from "./output-accumulator.js";
@@ -52,6 +53,9 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
             // Stop can arrive while asynchronous cwd validation is pending.
             if (signal?.aborted) throw new Error("aborted");
             const commandFromStdin = shellConfig.commandTransport === "stdin";
+            // Disk safety: cap any single file and stop a runaway writer before it fills the disk.
+            const diskLimits = getDiskLimits();
+            if (shellName !== "powershell") command = fileSizeLimitPrefix(diskLimits) + command;
             const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
                 cwd,
                 detached: process.platform !== "win32",
@@ -66,7 +70,13 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
             if (child.pid)
                 trackDetachedChildPid(child.pid);
             let timedOut = false;
+            let diskGuardReason;
             let timeoutHandle;
+            const stopDiskWatch = watchDisk(cwd, diskLimits, (reason) => {
+                diskGuardReason = reason;
+                if (child.pid)
+                    killProcessTree(child.pid);
+            });
             const pendingOutput = new Set();
             let outputError;
             const forward = (data) => {
@@ -114,12 +124,15 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 // on inherited stdio handles held by detached descendants.
                 const exitCode = await waitForChildProcess(child, {
                     isOutputBackpressured: () => pendingOutput.size > 0,
-                    isCancelled: () => signal?.aborted || timedOut || outputError !== undefined,
+                    isCancelled: () => signal?.aborted || timedOut || diskGuardReason !== undefined || outputError !== undefined,
                 });
                 await Promise.all(pendingOutput);
                 if (outputError) throw outputError;
                 if (signal?.aborted) {
                     throw new Error("aborted");
+                }
+                if (diskGuardReason) {
+                    throw new Error(`disk-guard:${diskGuardReason}`);
                 }
                 if (timedOut) {
                     throw new Error(`timeout:${timeout}`);
@@ -127,6 +140,7 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 return { exitCode };
             }
             finally {
+                stopDiskWatch();
                 if (child.pid)
                     untrackDetachedChildPid(child.pid);
                 if (timeoutHandle)
@@ -289,6 +303,11 @@ export function createShellToolDefinition(cwd, config, options) {
                     const { text } = formatOutput(snapshot, "");
                     if (err instanceof Error && err.message === "aborted") {
                         throw new Error(appendStatus(text, "Command aborted"));
+                    }
+                    if (err instanceof Error && err.message.startsWith("disk-guard:")) {
+                        throw new Error(appendStatus(text, `Command stopped by disk guard: ${err.message.slice("disk-guard:".length)}. ` +
+                            "Something wrote far more data than intended (unbounded loop, infinite stream such as ffmpeg apad/aevalsrc " +
+                            "without a duration, runaway log). Bound it before rerunning and delete the partial output."));
                     }
                     if (err instanceof Error && err.message.startsWith("timeout:")) {
                         const timeoutSecs = err.message.split(":")[1];

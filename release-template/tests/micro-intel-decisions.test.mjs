@@ -24,14 +24,14 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
     return { ok: true, answers, usage };
   };
 
-test("registry names all thirteen decision types with owners", () => {
+test("registry names all fifteen decision types with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
     "claim-verification", "delegation-topology", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "requirement-closure", "review-aspects",
-    "tool-intent-alignment", "tool-skill-shortlist", "verification-method",
-    "watchmaker-admission",
+    "scope-council-need", "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
+    "verification-method", "watchmaker-admission",
   ]);
   for (const spec of Object.values(TYPED_DECISIONS)) {
     assert.ok(spec.site && spec.owner && spec.maxStateChars > 0);
@@ -204,4 +204,22 @@ test('review admission needs both novelty and progress evidence; cancelled or un
     assert.equal(result.reason, 'aborted');
     assert.equal(metricsMod.microMetrics().snapshot().helpers.jev.accepted, 0);
   } finally { metricsMod.resetMicroMetrics(); }
+});
+
+test("scope-council-need vetoes only a confident small edit; everything else keeps the council", () => {
+  const interpret = TYPED_DECISIONS["scope-council-need"].interpret;
+  assert.equal(interpret({ precise: { noul: 0.84 } }).verdict.precise, true);
+  assert.equal(interpret({ precise: { noul: 0.7 } }).verdict.precise, true);
+  assert.equal(interpret({ precise: { noul: 0.69 } }).ok, false);
+  assert.equal(interpret({ precise: { noul: 0.23 } }).ok, false, "the highest measured open-work score never vetoes");
+  assert.equal(interpret({ precise: { noul: NaN } }).ok, false);
+  assert.equal(interpret({}).ok, false);
+});
+
+test("ui-work bars fit the measured spread and abstain in between", () => {
+  const interpret = TYPED_DECISIONS["ui-work"].interpret;
+  assert.equal(interpret({ supported: { noul: 0.78 } }).verdict.supported, true, "a lower real interface score still counts");
+  assert.equal(interpret({ supported: { noul: 0.18 } }).verdict.supported, false);
+  assert.equal(interpret({ supported: { noul: 0.5 } }).ok, false);
+  assert.equal(interpret({}).ok, false);
 });

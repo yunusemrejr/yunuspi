@@ -22,6 +22,7 @@ import { failureCategory } from "./session-diagnostics.ts";
 import { multiStageRetrieve } from "./micro-intelligence/retrieval.ts";
 import { needleRank } from "./needle-runtime.ts";
 import { askJev } from "./jev-client.ts";
+import { createUiDoctrine, UI_DOCTRINE_SKILL, UI_DOCTRINE_CONTEXT } from "./ui-doctrine.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
@@ -618,6 +619,17 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
+  // The embedded design-slop skill is demanded whenever the agent is doing
+  // interface work (Jev-settled for requests, deterministic for UI files).
+  // Independent of skill-review mode: this is a standing doctrine, not a
+  // per-task route, and it clears itself the moment the skill is read.
+  const uiDoctrine = createUiDoctrine({
+    skillFile: () => skills.find(skill => skill.name === UI_DOCTRINE_SKILL)?.file,
+    isRead: file => read.has(file),
+    judge: (site, state, questions, options) => askJev(site, state, questions, { signal: options?.signal, pi }),
+    onActive: () => skillHint("Interface work", [UI_DOCTRINE_SKILL], /^design-slop/i, true, 95),
+  });
+  const uiDoctrineAnchor = createContextAnchor();
   // Identical state is not re-appended: 19 byte-identical snapshots per
   // session read as repeated deliveries and bloated the transcript.
   let lastPersisted = "";
@@ -727,12 +739,16 @@ export function createRelevantGuidance(pi: any) {
   // Keep unresolved reads and applicable checks on the wire. A delivered hint
   // must not disappear forever, and this must not enqueue extra model turns.
   pi.on?.('context', (event: any, ctx: any) => {
-    const messages = event.messages.filter((m: any) => m.customType !== REVIEW_CONTEXT);
+    let messages = event.messages.filter((m: any) => m.customType !== REVIEW_CONTEXT && m.customType !== UI_DOCTRINE_CONTEXT);
+    // The design-slop demand stays on the wire until the skill is read, in
+    // every review mode.
+    const uiText = enabled() && !(ctx && ctx.cwd !== cwd) ? uiDoctrine.contextText() : undefined;
+    if (uiText) messages = uiDoctrineAnchor(messages,{role:'custom',customType:UI_DOCTRINE_CONTEXT,content:uiText,display:false,timestamp:0},requestNumber);
     if (!reviewEnabled() || ctx && ctx.cwd !== cwd)
-      return messages.length !== event.messages.length ? {messages} : undefined;
+      return messages.length !== event.messages.length || uiText ? {messages} : undefined;
     const status = reviewStatus().filter(s => s.status !== 'deferred');
     const selected = [...status.filter(s => s.status === 'needs_review').slice(0,3), ...status.filter(s => s.status === 'read').slice(-2)];
-    if (!selected.length) return messages.length !== event.messages.length ? {messages} : undefined;
+    if (!selected.length) return messages.length !== event.messages.length || uiText ? {messages} : undefined;
     const text = ['[Applicable skills]', 'Read relevant SKILL.md files before using their workflow; apply the listed checks and retain result evidence. A suggestion is not a read, and a read is not proof of application.',
       ...selected.map(s => `${s.status === 'read' ? 'Apply (read)' : 'Read required'}: ${JSON.stringify(s.path)} — ${s.reason}`),
       tools().has('skill_review') ? 'Use skill_review inspect for all targets; defer only with a task-specific reason. User instructions take precedence.' : 'If a skill does not apply or cannot be read, state the task-specific reason. User instructions take precedence.',
@@ -797,6 +813,10 @@ export function createRelevantGuidance(pi: any) {
   });
   return {
     beforeToolCall(event: any) {
+      if (enabled() && !readOnlyPrompt && (event.toolName === 'edit' || event.toolName === 'write') && typeof event.input?.path === 'string') {
+        const reason = uiDoctrine.gate(checkpointPath(event.input.path, cwd), typeof event.input.content === 'string' ? event.input.content : undefined);
+        if (reason) return { block: true, reason };
+      }
       if (!reviewEnabled()) return;
       const shellRead = event.toolName === 'bash' && typeof event.input?.command === 'string' ? classifyBashCommand(event.input.command)?.readTarget : undefined;
       if (shellRead && skills.some(skill => skill.file === checkpointPath(shellRead.path, cwd))) return;
@@ -865,7 +885,7 @@ export function createRelevantGuidance(pi: any) {
       matchingPrompt = requestDisabled = false;
       readOnlyPrompt = false;
       advisoryDiscoveryDelivered.clear();
-      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear(); lastPersisted = ""; contextOffersThisRequest = [];
+      uiDoctrine.reset(); cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear(); lastPersisted = ""; contextOffersThisRequest = [];
       context = []; extensions = new Set(); skillIndex = null; skillFingerprint = ''; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
@@ -998,6 +1018,8 @@ export function createRelevantGuidance(pi: any) {
       const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
       if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); focusEpoch++; }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
+      if (!readOnlyPrompt && !requestDisabled) uiDoctrine.observePrompt(taskPrompt, { keep: continuation });
+      else uiDoctrine.cancel();
       // Precision order (action intent + file/domain evidence) picks the
       // surfaced three; .sort() by raw priority would undo it. Advisory:
       // routedSkills() above still sees every candidate.
@@ -1171,6 +1193,7 @@ export function createRelevantGuidance(pi: any) {
       if ((name !== "project_report" || input.view === "workspace") && (name !== "subagent" || !input.action)) used.add(name);
       const shellRead = name === 'bash' && typeof input.command === 'string' ? classifyBashCommand(input.command)?.readTarget : undefined;
       const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : shellRead ? checkpointPath(shellRead.path, cwd) : "";
+      if (name === "read" && file && event.isError !== true) uiDoctrine.noteRead(file);
       const knownSkillRead = name === "read" && file && skills.some(s => s.file === file);
       const shellSkillRead = shellRead && skills.some(skill => skill.file === file)
         && event.details?.execution?.exitCode === 0 && event.details?.deduplicated !== true
@@ -1214,6 +1237,7 @@ export function createRelevantGuidance(pi: any) {
         }
         contextSkill(52);
         if (uiFile.test(file)) uiHints();
+        if (name !== 'read') uiDoctrine.observeFile(file, typeof input.content === 'string' ? input.content : undefined);
         if (/\.(?:csv|tsv|parquet|jsonl)$/i.test(file) || /(?:^|\/)(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(file)) precision();
         const language = /\.(php|py|rs|go)$/i.exec(file)?.[1]?.toLowerCase();
         if (language) {

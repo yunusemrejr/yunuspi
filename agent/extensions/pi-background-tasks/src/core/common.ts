@@ -18,7 +18,7 @@ export const TERMINAL_TASK_STATUS_VALUES = [
 
 export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUS_VALUES)[number];
-export type KillKind = "user" | "timeout" | "output_cap" | "shutdown";
+export type KillKind = "user" | "timeout" | "output_cap" | "disk_guard" | "shutdown";
 
 export type JsonObject = Readonly<Record<PropertyKey, unknown>>;
 
@@ -82,6 +82,7 @@ export interface BgTask extends Omit<BgTaskSnapshot, "name"> {
   child?: BackgroundTaskChildProcess | undefined;
   stream?: WriteStream | undefined;
   timeoutHandle?: NodeJS.Timeout | undefined;
+  stopDiskWatch?: (() => void) | undefined;
   killKind?: KillKind | undefined;
   killSignalSent?: boolean | undefined;
   killEscalationTimer?: NodeJS.Timeout | undefined;

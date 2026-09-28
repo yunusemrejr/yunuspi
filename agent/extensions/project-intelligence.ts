@@ -35,6 +35,7 @@ import { createInterventionSession } from "./lib/intervention-session.ts";
 import { intelContextCapsuleIntent, intelSystemGuidanceIntent } from "./lib/intervention-intents.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { collectScopeHistory } from "./lib/project-intelligence/scope-history.mjs";
+import { askJev } from "./lib/jev-client.ts";
 import {
   captureWorkflowContext,
   conversationContext,
@@ -91,6 +92,8 @@ export default function projectIntelligence(pi: any) {
       }),
     workflow: (ctx: any, signal: AbortSignal) =>
       captureWorkflowContext(identity, conversationContext(ctx), signal),
+    judge: (site, state, questions, options) =>
+      askJev(site, state, questions, { pi, signal: options?.signal }),
   });
   const anchorContext = createContextAnchor();
   // Control session (per-subsystem envelope per D-011). One cycle per

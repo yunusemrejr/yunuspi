@@ -3,6 +3,8 @@ export interface OutputAccumulatorOptions {
     maxLines?: number;
     maxBytes?: number;
     tempFilePrefix?: string;
+    /** Stop full-output capture past this many raw bytes (default 64 MiB). */
+    maxCaptureBytes?: number;
     outputMode?: "tail" | "head-tail";
 }
 export interface OutputSnapshot {
@@ -39,6 +41,8 @@ export declare class OutputAccumulator {
     private tempFilePath;
     private tempFileStream;
     private tempFileOpened;
+    private capturedBytes;
+    private maxCaptureBytes;
     constructor(options?: OutputAccumulatorOptions);
     /** Producers should await a returned promise before delivering more data. */
     append(data: Buffer): void | Promise<void>;

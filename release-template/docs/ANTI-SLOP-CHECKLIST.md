@@ -8,6 +8,27 @@ for websites: it is the most specific rule set.
 
 Standing UI constraints also reject generic lightbulb branding, muddy orange/brass/brown default palettes, decorative colored dots before labels, and boxed icon badges. Necessary state and explicitly requested branding are contextual exceptions with evidence. A generated source comment asserting brand ownership is insufficient. Visual/3D/motion upgrades require baseline-versus-final inspection of the relevant states, not merely a new asset or passing tests.
 
+## Embedded design doctrine
+
+The `design-slop-prevention` skill (`agent/skills/design-slop-prevention/SKILL.md`)
+explains why an unconstrained model converges on the same two looks
+(indigo/purple SaaS, then the cream/terracotta editorial reaction to it),
+lists the tells of both generations and gives the nine-step procedure that
+avoids them: ground every choice in the subject, ban both default palettes
+unless the user asked for one, pick deliberate neutrals and a type pairing
+that would not be reused elsewhere, use only real content, and run the swap
+test before shipping. It ships inside the harness; nothing is fetched.
+
+The harness demands it instead of hoping it is found. Jev judges whether a
+request is interface work (typed decision `ui-work`), a UI file being written
+settles it deterministically, and the demand then rides the context until the
+skill is read: a reminder message, plus at most two refused UI writes per
+request so an agent that ignores it cannot loop. One read clears it for the
+session. Subagents launched without a skill catalog still learn the installed
+path. The expert-director web-design pack lists the skill, and the pre-build
+design-direction guidance names the cream/terracotta default among the tells.
+The rest of this checklist stays the most specific rule set for websites.
+
 ## Core principle
 
 Every visible element must justify its existence through one or more of these:

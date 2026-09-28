@@ -3021,7 +3021,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 906
+        "line": 909
       },
       {
         "name": "harness-backup",
@@ -3384,7 +3384,7 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 570,
+        "line": 586,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -3717,13 +3717,13 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 598,
+        "line": 614,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 782,
+        "line": 785,
         "kind": "literal"
       },
       {
@@ -3849,7 +3849,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 745,
+        "line": 764,
         "kind": "literal"
       },
       {
@@ -4231,13 +4231,13 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 598,
+        "line": 614,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 782,
+        "line": 785,
         "kind": "literal"
       },
       {
@@ -4351,7 +4351,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 745,
+        "line": 764,
         "kind": "literal"
       },
       {
@@ -4459,7 +4459,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          573
+          589
         ],
         "knownNames": [
           "bash",
@@ -4638,7 +4638,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 670,
+      "sourceFiles": 672,
       "registrationSites": 81,
       "indirectRegistrationSites": 19,
       "stableRegistrationRows": 120,
@@ -4973,6 +4973,10 @@
       },
       {
         "path": "agent/extensions/lib/diagnostic-provenance.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/disk-guard.ts",
         "exists": true
       },
       {
@@ -5453,6 +5457,10 @@
       },
       {
         "path": "agent/extensions/lib/tool-discovery.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/ui-doctrine.ts",
         "exists": true
       },
       {
@@ -6806,6 +6814,10 @@
       {
         "name": "debugging",
         "path": "agent/skills/debugging/SKILL.md"
+      },
+      {
+        "name": "design-slop-prevention",
+        "path": "agent/skills/design-slop-prevention/SKILL.md"
       },
       {
         "name": "design-systems",

@@ -3,6 +3,8 @@ import { safeText } from './project-intelligence/privacy.mjs';
 import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { heuristicDesignBrief } from './design-direction.ts';
+import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
+import type { JudgeFn } from './micro-intelligence/review.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
 /** contextWaitMs bounds how long the first inference waits for a council: a
@@ -16,6 +18,8 @@ export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1
  * next mutation instead, so no edit is chosen blind. graceMs lets the runner
  * return its own partial result at the shared deadline before this owner's
  * timer discards everything. */
+/** Jev answers in about half a second; a slow judge must not delay the council it may spare. */
+const SCOPE_JEV_WAIT_MS = 2500;
 export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200, contextWaitMs: 15000, mutationWaitMs: 30000, graceMs: 5000 });
 /** One owner for the automatic-council policy so the lifecycle, the registered
  * runner and the published documentation cannot disagree about when it is
@@ -145,7 +149,7 @@ function councilBrief(result: any): string {
 /** The project-intelligence extension owns this state and supplies its existing
  * graph. Every new user input invalidates the prior council; only one ephemeral
  * brief is kept, with no extra memory database or transcript injection. */
-export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
+export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number; judge?: JudgeFn }) {
   let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined, contextWaited:Promise<void>|undefined;
   let inputText='';
   let key='', brief='', review='', owner='', councilStatus='', seen=false, stopped=false, pausedSerial=-1, turnSerial=-1, wakeOnly=false, evaluated=false, statusContext:any, workflow:any;
@@ -256,6 +260,21 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       status('Determining change scope from project history');
       const operation=(async()=>{
         let history:any={evidence:[],incomplete:true,coverage:'History unavailable.'}, result:any;
+        // The regex trigger is a cheap routing cue. Jev may veto it for a small
+        // self-contained edit at a strict bar, sparing a paid multi-reviewer council; an open
+        // visual brief, a timeout or any uncertainty keeps the council.
+        if(options.judge && councilMode(request)==='scope'){
+          let timer:ReturnType<typeof setTimeout>|undefined;
+          const verdict=await Promise.race([
+            askTypedDecision('scope-council-need',{state:{request:request.slice(0,2000)}},{judge:options.judge,signal}),
+            new Promise<undefined>(resolve=>{timer=setTimeout(()=>resolve(undefined),SCOPE_JEV_WAIT_MS);timer.unref?.();}),
+          ]).catch(()=>undefined).finally(()=>clearTimeout(timer));
+          if(!current())return;
+          if(verdict?.ok && (verdict.verdict as any)?.precise===true){
+            try{pi.appendEntry?.('scope-deliberation-v1',{requestHash:nextKey,status:'skipped-by-jev',evidenceCount:0,incomplete:false});}catch{}
+            return;
+          }
+        }
         try {
           const packet=await boundedAwait(Promise.all([
             options.history({cwd:ctx.cwd,currentSessionId:ctx.sessionManager?.getSessionId?.(),prompt:request,branch,signal}),
