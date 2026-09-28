@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { hostOperationRisk } from "./lib/host-operation-safety.ts";
+import { isDirectReplyPrompt } from "./lib/intent-context.ts";
 import {
 	getAgentDir,
 	type ExtensionAPI,
@@ -1583,8 +1584,8 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		maintenanceReminded = false;
 	});
-	pi.on("before_agent_start", () => {
-		if (!SELF_MUTATION_ALLOWED || maintenanceReminded) return;
+	pi.on("before_agent_start", (event) => {
+		if (!SELF_MUTATION_ALLOWED || maintenanceReminded || isDirectReplyPrompt(event.prompt)) return;
 		maintenanceReminded = true;
 		return {
 			message: {

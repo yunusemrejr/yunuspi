@@ -27,6 +27,7 @@ import type { KeyId } from "@yunuspi/tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.js";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
 import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
+import { isDirectReplyPrompt } from "../lib/intent-context.ts";
 import { getState } from "./state/store.js";
 import { replayFromBranch } from "./state/replay.js";
 import {
@@ -170,9 +171,10 @@ export default function (
 	// A compact orientation on user turns/recovery, never a deterministic planner.
 	const planInputs = new Set<string>();
 	pi.on("input", (event, ctx) => { if (event.source !== "extension") planInputs.add(sid(ctx)); });
-	pi.on("before_agent_start", (_event, ctx) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		if (!planInputs.has(sid(ctx)) || process.env.PI_ACTION_PLAN === "off" || !pi.getActiveTools().includes("todo")) return;
 		planInputs.delete(sid(ctx));
+		if (isDirectReplyPrompt(event.prompt)) return;
 		const tasks = getState(sid(ctx)).tasks;
 		return {message:{customType:"todo-plan", display:false, content:PLAN_GUIDANCE + "\n" + renderPlan(tasks, "frontier", 1600)}};
 	});

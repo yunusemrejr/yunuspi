@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 const release=path.resolve(import.meta.dirname,'..');
 const agent=fs.existsSync(path.join(release,'agent'))?path.join(release,'agent'):path.resolve(release,'..');
 const load=name=>import(pathToFileURL(path.join(agent,'extensions',name)));
-const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence,isPromptPivot}=await load('lib/intent-context.ts');
+const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence,isPromptPivot,isDirectReplyPrompt}=await load('lib/intent-context.ts');
 const {scopeRequest}=await load('lib/scope-deliberation.ts');
 const {agentBrief}=await load('lib/project-intelligence/query.mjs');
 const {discoverContinuity}=await load('lib/project-intelligence/continuity.mjs');
@@ -122,4 +122,17 @@ test('changing a tool or presentation choice retains the task and its constraint
   assert.equal(isPromptPivot(history.at(-1).message.content),true);
   assert.doesNotMatch(helperIntentEvidence('Continue.',history),/invoice|keyboard/);
   assert.match(helperIntentEvidence('Continue.',history),/migration plan/);
+});
+
+test('a reply-only prompt skips planning, orientation and maintenance nudges without consuming them',async()=>{
+  for (const prompt of ['Reply with exactly: OK','respond only with yes or no','Please just answer with exactly the version number','Say nothing but "ready"'])
+    assert.equal(isDirectReplyPrompt(prompt),true,prompt);
+  for (const prompt of ['Fix the failing tests','Reply only after the tests pass','Reply with exactly: OK\nthen refactor the router','Output only the diff when you are done refactoring the parser and every test in the suite passes locally on this machine again please',undefined,'Say hi'])
+    assert.equal(isDirectReplyPrompt(prompt),false,String(prompt));
+  const {SELF_MUTATION_ALLOWED}=await load('lib/self-mutation-guard.ts');
+  if (!SELF_MUTATION_ALLOWED) return;
+  const hooks=[];(await load('filesystem-safety.ts')).default(new Proxy({on:(n,f)=>n==='before_agent_start'&&hooks.push(f),events:{on:()=>()=>{},emit(){}}},{get:(t,p)=>p in t?t[p]:()=>{}}));
+  const types=async prompt=>(await Promise.all(hooks.map(f=>f({prompt},{})))).map(o=>o?.message?.customType).filter(Boolean);
+  assert.deepEqual(await types('Reply with exactly: OK'),[]);
+  assert.deepEqual(await types('Fix the failing tests'),['harness-maintenance-safety'],'the skipped prompt left the one maintenance note for real work');
 });

@@ -27,6 +27,17 @@ export function isPromptRefusal(prompt: string): boolean {
   return refusal.test(intentText(prompt.slice(0, 1024)));
 }
 
+/** A one-line request whose whole deliverable is the reply text ("Reply with
+ * exactly: OK"). Planning, orientation and maintenance nudges have nothing to
+ * act on there and only invite tool calls; they wait for the next prompt. */
+const directReply = /^(?:please\s+)?(?:just\s+|only\s+)?(?:reply|respond|answer|say|print|output|echo)(?:\s+back)?(?:\s+with)?\s+(?:exactly|only|just|nothing but)\b/i;
+const sequencedWork = /\b(?:after|once|when|until|if|then|before|while|done)\b/i;
+export function isDirectReplyPrompt(prompt: unknown): boolean {
+  if (typeof prompt !== 'string') return false;
+  const text = intentText(prompt.slice(0, 1024)).trim();
+  return text.length <= 160 && !text.includes('\n') && directReply.test(text) && !sequencedWork.test(text);
+}
+
 /** Only a retrieval cue, never a claim that a task or authorization continues. */
 export function isReferentialFollowup(prompt: string): boolean {
   const text = intentText(prompt.slice(0,1024)).trim();

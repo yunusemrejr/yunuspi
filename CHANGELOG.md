@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.8 — 2026-09-28
+
+**A reply-only prompt gets a reply, not a work session.** The live smoke check ("Reply with exactly: OK") ran for over three minutes. It loaded the maintenance skill, made todos, ran bash, and sent 28k-token turns. The prompt analyser and the Observer had both read the request as trivial. Three first-turn nudges still told the model to orient, plan and do maintenance:
+- the harness orientation;
+- the todo-plan guidance;
+- the harness-maintenance note.
+
+A single-line request whose whole deliverable is the reply text ("reply/respond/answer/say/print/output with exactly/only …", with no follow-on work) now skips all three. It does not use up their once-per-session delivery, so the next real request still gets them.
+
 ## 0.13.7 — 2026-09-28
 
 **The Span behavior sensor works.** OpenRouter serves `respan/span-01-lite` only through its decisions endpoint and refuses chat completions with a 400, so every Span evaluation failed and recorded `unavailable`. That was 13 of 13 in recent sessions, with no success. The sensor now sends the bounded trace as the decisions state, with one plain `noul` question per catalog signal. Span answers only that question type, so P(yes) becomes present/absent. A live check on a repeated-failure trace flagged the loop and the premature completion at 0.97 each, took 1.7 s and cost nothing. Scores stay shadow-only, as before.

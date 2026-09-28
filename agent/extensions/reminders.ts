@@ -132,6 +132,7 @@ import {
 	hasOrientationReceipt,
 	markOrientationDelivered,
 } from "./lib/harness-orientation.ts";
+import { isDirectReplyPrompt } from "./lib/intent-context.ts";
 import {
 	acquireWorkspaceWriterLease,
 	readWorkspaceGitState,
@@ -825,6 +826,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const humanFirstPrompt =
 				process.env.PI_SUBAGENT_CHILD !== "1" &&
 				pendingHumanPrompts.has(sid) &&
+				!isDirectReplyPrompt(_event.prompt) &&
 				!hasOrientationReceipt(sid);
 			if (pendingHumanPrompts.has(sid)) pendingHumanPrompts.delete(sid);
 			const orientation =
