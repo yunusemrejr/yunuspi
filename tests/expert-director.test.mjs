@@ -257,6 +257,10 @@ test('expert_director tool registers five actions with bounded outputs',async t=
   assert.equal(recorded.details.recorded.confidence,.9);
   const listed=await call('taste',{taste:{op:'list',domains:['svg-iconography']}});
   assert.ok(listed.details.preferences.some(p=>p.text==='Prefer geometric icon grids'));
+  // The real validator strips undeclared fields, so flat taste fields must be in the schema.
+  const {validateToolArguments}=await import(pathToFileURL(path.join(root,'core/ai/dist/utils/validation.js')));
+  const validated=validateToolArguments(tools.get('expert_director'),{name:'expert_director',arguments:{action:'taste',op:'record',text:'Smoke test preference for geometric grids',domains:['svg-iconography']}});
+  assert.equal(validated.op,'record');assert.equal(validated.text,'Smoke test preference for geometric grids');
   const flat=await call('taste',{op:'forget',selector:'Prefer geometric icon grids'});
   assert.equal(flat.details.forgotten.text,'Prefer geometric icon grids','taste fields sent flat beside action are accepted');
   const status=await call('status');

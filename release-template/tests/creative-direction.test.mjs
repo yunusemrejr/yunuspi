@@ -85,3 +85,25 @@ test("parseDirectionFile degrades corrupt briefs to undefined", () => {
   assert.equal(creative.parseDirectionFile(JSON.stringify({ format: "other" })), undefined);
   assert.equal(creative.parseDirectionFile(JSON.stringify({ format: "yunuspi-creative-direction-v1" })), undefined);
 });
+
+test("normalizeDirection accepts the shapes models actually send", () => {
+  const direction = creative.normalizeDirection({
+    intent: { terms: ["editorial", "restrained"] },
+    focalHierarchy: ["Signal strip at the top", "KPI blocks", "genie companion"],
+    hierarchy: undefined,
+  });
+  assert.deepEqual(direction.intent, ["editorial", "restrained"]);
+  assert.deepEqual(direction.hierarchy, { primary: "Signal strip at the top", secondary: "KPI blocks", tertiary: "genie companion" });
+  const listed = creative.normalizeDirection({ intent: "calm", hierarchy: { primary: "content", secondary: ["cards", "stamps"] } });
+  assert.equal(listed.hierarchy.secondary, "cards; stamps");
+  assert.throws(() => creative.normalizeDirection({ intent: "calm" }), /hierarchy\.primary/);
+});
+
+test("a JSON-encoded container that does not parse gets an actionable validation message", async () => {
+  const { validateToolArguments } = await import(pathToFileURL(path.join(root, "core/ai/dist/utils/validation.js")).href);
+  const { Type } = await import("typebox");
+  const tool = { name: "t", parameters: Type.Object({ tasks: Type.Array(Type.Object({ task: Type.String() })) }) };
+  const broken = '[{"task": "unescaped "quote" inside"}]';
+  assert.throws(() => validateToolArguments(tool, { name: "t", arguments: { tasks: broken } }), /"tasks" was sent as a string that is not valid JSON/);
+  assert.deepEqual(validateToolArguments(tool, { name: "t", arguments: { tasks: '[{"task":"ok"}]' } }).tasks, [{ task: "ok" }]);
+});

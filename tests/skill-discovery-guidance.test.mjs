@@ -25,6 +25,9 @@ function fixture(optIn=true){
  const finish=()=>calls.at(-1).resolve(JSON.stringify({suggestions:[{name:'spatial-balance',reason:'Observed styles and markup need composition proportion checks.'}]}));
  start();return {g,ctx,file,calls,hooks,registered,start,read,observe,finish,wakes:()=>wake,cleanup(){hooks.agent_end?.();if(previous===undefined)delete globalThis[RUNNER];else globalThis[RUNNER]=previous;for(const [key,value]of env)if(value===undefined)delete process.env[key];else process.env[key]=value;fs.rmSync(dir,{recursive:true,force:true});}};
 }
+// Writing interface files is separately gated by the design-slop doctrine (its own tests own that gate); discovery must add none.
+const ungated=result=>/design-slop doctrine/.test(result?.reason??'')?undefined:result;
+
 test('actual guidance delivers async advice through bounded candidates, without wakes or new review requirements',async()=>{
  const f=fixture();try{
   f.observe();assert.equal(f.calls.length,0,'observation does not synchronously dispatch or wait for inference');await tick();assert.equal(f.calls.length,1);
@@ -34,7 +37,7 @@ test('actual guidance delivers async advice through bounded candidates, without 
   assert.ok(workflow?.text.includes(f.file),'advice retains a directly readable catalog path');
   assert.match(workflow.text,/Observed styles and markup need composition proportion checks/,'task-specific discovery evidence survives delivery');
   assert.match(workflow.text,/optional|if useful/i);assert.ok(workflow.text.length<800);assert.ok(candidates.length<=2);assert.equal(f.wakes(),0);
-  assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined);
+  assert.equal(ungated(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}})),undefined,'discovery leaves ordinary work open');
   const status=await f.registered.skill_review.execute('inspect',{action:'inspect'});assert.equal(status.details.skills.length,0,'advisory suggestion is not a mandatory review target');
   f.g.commit(candidates);assert.equal(f.g.candidates().some(h=>h.discovery==='workflow'),false,'delivered suggestion does not repeat');
  }finally{f.cleanup();}
@@ -58,7 +61,7 @@ test('default advisory discovery uses one bounded background request without wak
  const f=fixture(false);try{
   f.read('ui/world.css');await tick();assert.equal(f.calls.length,0,'one observation is insufficient');
   f.read('ui/index.html');await tick();assert.equal(f.calls.length,1,'discovery is enabled without an opt-in environment variable');
-  assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined,'discovery never gates normal work');
+  assert.equal(ungated(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}})),undefined,'discovery never gates normal work');
   f.finish();await tick();f.observe();await tick();assert.equal(f.calls.length,1,'additional observations do not launch repeated helper requests');
   assert.equal(f.wakes(),0);
  }finally{f.cleanup();}

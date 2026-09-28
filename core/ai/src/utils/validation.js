@@ -280,7 +280,8 @@ export function validateToolCall(tools, toolCall) {
 export function validateToolArguments(tool, toolCall) {
     const args = structuredClone(toolCall.arguments);
     normalizeOptionalNulls(args, tool.parameters);
-    __piParseJsonContainers(args, tool.parameters);
+    const jsonFailures = [];
+    __piParseJsonContainers(args, tool.parameters, jsonFailures);
     Value.Convert(tool.parameters, args);
     const validator = getValidator(tool.parameters);
     if (!Object.getOwnPropertySymbols(tool.parameters).includes(TYPEBOX_KIND)) {
@@ -304,7 +305,7 @@ export function validateToolArguments(tool, toolCall) {
     if (repaired && validator.Check(repaired)) {
         return repaired;
     }
-    const errors = __piValidationDetails(validator.Errors(args),tool.parameters);
+    const errors = __piValidationDetails(validator.Errors(args),tool.parameters) + jsonFailures.map(line => "\n" + line).join("");
     const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${__piArgumentEcho(toolCall.arguments)}`;
     throw new Error(errorMessage);
 }
@@ -349,7 +350,7 @@ const __PI_BOUND_FIELD = /^(?:limit|topK|count|max[A-Z]\w*|min[A-Z]\w*|timeoutMs
 /** Models often send an array or object argument as its JSON text. Conversion
  * would wrap that string as a one-item array, so decode it first; the decoded
  * value is still fully validated and non-JSON prose is left for the error. */
-function __piParseJsonContainers(args, schema) { /* PI_JSON_CONTAINER_REPAIR_V1 */
+function __piParseJsonContainers(args, schema, failures = []) { /* PI_JSON_CONTAINER_REPAIR_V1 */
   if (!args || typeof args !== "object" || Array.isArray(args) || !schema?.properties) return;
   for (const [key, sub] of Object.entries(schema.properties)) {
     const value = args[key];
@@ -357,9 +358,12 @@ function __piParseJsonContainers(args, schema) { /* PI_JSON_CONTAINER_REPAIR_V1 
       try {
         const parsed = JSON.parse(value);
         if (sub.type === "array" ? Array.isArray(parsed) : parsed && typeof parsed === "object" && !Array.isArray(parsed)) args[key] = parsed;
-      } catch { /* The schema error names the field. */ }
+      } catch (error) {
+        // Retrying the identical string cannot succeed; say what is wrong with it (measured: three identical 12 KB retries).
+        failures.push("Argument \"" + key + "\" was sent as a string that is not valid JSON (" + String(error?.message ?? error).slice(0, 80) + "). Send it as a real " + sub.type + " value, not a JSON-encoded string, and escape quotes or newlines inside text fields.");
+      }
     }
-    if (sub?.type === "object") __piParseJsonContainers(args[key], sub);
+    if (sub?.type === "object") __piParseJsonContainers(args[key], sub, failures);
   }
 }
 function __piTrimOverlongProse(args, errors) { /* PI_PROSE_LENGTH_REPAIR_V1 */

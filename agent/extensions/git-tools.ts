@@ -71,11 +71,16 @@ async function git(args: string[], cwd: string, allowCodes: number[] = [0]): Pro
   }
 }
 
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+/** A fresh repository has no HEAD: log and show have nothing to read and review compares against the empty tree. */
+const hasCommits = async (cwd: string) => (await git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd, [0, 1])).trim() !== "";
+
 /** Pre-commit review evidence: what changed, by kind, with risk flags from
  * the added lines and a draft conventional-commit header. Read-only. */
 export async function reviewChanges(params: GitInfoParams & { untracked?: boolean }, cwd: string): Promise<any> {
   const revision = validateRevision(params.revision), filePath = validatePath(params.path);
-  const target = params.staged ? ["--cached"] : revision ? [revision] : ["HEAD"];
+  const unborn = !params.staged && !revision && !(await hasCommits(cwd));
+  const target = params.staged ? ["--cached"] : revision ? [revision] : [unborn ? EMPTY_TREE : "HEAD"];
   const scope = filePath ? ["--", filePath] : [];
   const numstat = await git(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", "-M", ...target, ...scope], cwd);
   const untracked = params.staged || revision || params.untracked === false ? [] : (await git(["ls-files", "--others", "--exclude-standard", ...scope], cwd)).split("\n").filter(Boolean);
@@ -141,7 +146,7 @@ export async function reviewChanges(params: GitInfoParams & { untracked?: boolea
   for (const f of files) { const parts = f.file.split("/"); const dir = parts.length > 2 ? parts.slice(0, 2).join("/") : parts.length > 1 ? parts[0] : ""; if (dir) dirs.set(dir, (dirs.get(dir) ?? 0) + f.added + f.deleted + 1); }
   const top = [...dirs].sort((a, b) => b[1] - a[1])[0]?.[0]?.split("/").pop();
   return {
-    target: params.staged ? "staged" : revision ?? "working tree vs HEAD",
+    target: params.staged ? "staged" : revision ?? (unborn ? "working tree vs empty tree (no commits yet)" : "working tree vs HEAD"),
     files: files.length, untracked: untracked.length, added: files.reduce((n, f) => n + f.added, 0), deleted: files.reduce((n, f) => n + f.deleted, 0), byKind,
     largest: [...files].sort((a, b) => b.added + b.deleted - a.added - a.deleted).slice(0, 8).map(f => `${f.file} +${f.added} -${f.deleted}${(f as any).untracked ? " (new)" : ""}`),
     risks: [...new Set(risks)].slice(0, 30), whitespace, todosAdded: todos,
@@ -272,6 +277,7 @@ export async function runGitInfo(
       break;
     }
     case "log":
+      if (!(await hasCommits(cwd))) return "No commits yet on this branch.";
       args = [
         "log",
         "--no-color",
@@ -283,6 +289,7 @@ export async function runGitInfo(
       if (filePath) args.push("--", filePath);
       break;
     case "show": {
+      if (!revision && !(await hasCommits(cwd))) return "No commits yet on this branch.";
       const patch = params.patch !== false;
       args = [
         "show",

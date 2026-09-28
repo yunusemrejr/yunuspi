@@ -237,6 +237,9 @@ export function qaFindings(metrics: QaMetrics, info: { duration: number; videoDu
   }
   // Short holds under narration are normal reading time; long ones stall.
   for (const f of metrics.freeze) if (f.end - f.start >= 4) add("warn", `Picture is static for ${(f.end - f.start).toFixed(1)}s (${f.start.toFixed(1)}–${f.end.toFixed(1)}s); give the hold a purpose or add motion that advances the idea.`, sceneAt(f.start));
+  // Several short holds can add up to a slideshow that no single hold flags.
+  const held = metrics.freeze.reduce((sum, f) => sum + Math.max(0, Math.min(f.end, info.duration) - f.start), 0);
+  if (info.duration >= 6 && held / info.duration >= 0.35) add("warn", `${Math.round((held / info.duration) * 100)}% of the runtime (${held.toFixed(1)}s of ${info.duration.toFixed(1)}s) is static in holds of 1.5s or more; add motion that advances each idea, or cut the holds.`);
   if (info.hasAudio) {
     for (const s of metrics.silence) if (s.start > 0.5 && s.end < info.duration - 0.5 && s.end - s.start >= 1.5) add("warn", `Audio is silent ${s.start.toFixed(1)}–${s.end.toFixed(1)}s; add room tone or music under visual-only beats.`, sceneAt(s.start));
     if (metrics.integratedLufs !== null && Math.abs(metrics.integratedLufs - info.targetLufs) > 2) add("warn", `Integrated loudness ${metrics.integratedLufs} LUFS is off target ${info.targetLufs} LUFS; adjust narration/music gain (or normalize the mix).`);

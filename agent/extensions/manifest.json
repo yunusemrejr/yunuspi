@@ -47,7 +47,8 @@
     "video-studio.ts",
     "expert-director.ts",
     "task-state.ts",
-    "art-direction.ts"
+    "art-direction.ts",
+    "goal.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -66,6 +67,7 @@
     "code-guidance-signals.ts",
     "code-lexical-mask.ts",
     "code-quality.ts",
+    "code-structure.ts",
     "compact-tool-json.ts",
     "compaction-policy.ts",
     "completion-gate.ts",
@@ -95,6 +97,7 @@
     "expert-taste.ts",
     "fail-policy.ts",
     "git-authority.ts",
+    "goal-state.ts",
     "guidance-topics-domains.ts",
     "guidance-topics-systems.ts",
     "guidance-topics.ts",

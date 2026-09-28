@@ -62,6 +62,9 @@ export interface CreativeDirection {
 }
 
 const cleanText = (value: unknown): string | undefined => {
+  // A list where one string is expected (measured: hierarchy.secondary sent as
+  // an array) keeps every entry instead of dropping the field.
+  if (Array.isArray(value)) value = value.filter((entry) => typeof entry === "string").join("; ");
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim().slice(0, MAX_TEXT);
   return text || undefined;
@@ -70,6 +73,11 @@ const cleanText = (value: unknown): string | undefined => {
 /** A list also accepts one string (measured: intent sent as a sentence
  * failed the whole direction); commas, semicolons and lines separate terms. */
 const cleanList = (value: unknown, max = MAX_ITEMS): string[] => {
+  // {terms:[…]} and similar wrappers (measured) carry the list under a common key.
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const wrapped = value as Record<string, unknown>;
+    value = wrapped.terms ?? wrapped.words ?? wrapped.keywords ?? wrapped.values ?? wrapped.list ?? Object.values(wrapped);
+  }
   if (typeof value === "string") value = value.split(/[,;\n]+/);
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -107,7 +115,9 @@ export function normalizeDirection(raw: unknown): CreativeDirection {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("direction must be an object with intent, hierarchy and avoid lists");
   const input = raw as Record<string, unknown>;
   // A bare hierarchy string names the focal element, as the error text asks.
-  const hierarchy = cleanRecord<CreativeHierarchy>(typeof input.hierarchy === "string" ? { primary: input.hierarchy } : input.hierarchy, ["primary", "secondary", "tertiary"]);
+  // A ranked list (measured as focalHierarchy) reads as primary, secondary, tertiary.
+  const ranked = (value: unknown) => Array.isArray(value) ? { primary: value[0], secondary: value[1], tertiary: value[2] } : typeof value === "string" ? { primary: value } : value;
+  const hierarchy = cleanRecord<CreativeHierarchy>(ranked(input.hierarchy ?? input.focalHierarchy ?? input.focal), ["primary", "secondary", "tertiary"]);
   if (!hierarchy.primary) throw new Error("direction.hierarchy.primary is required (the one focal element, e.g. content, product, diagram)");
   const intent = cleanList(input.intent);
   if (!intent.length) throw new Error("direction.intent needs at least one term (e.g. serious, editorial, restrained)");

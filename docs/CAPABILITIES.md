@@ -103,7 +103,7 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
+**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/goal`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
 
 **Options:**
 
@@ -281,7 +281,7 @@ Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, call
 
 #### code-quality
 
-Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity; edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.
+Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.
 
 **Entrypoints:** `code_quality`
 
@@ -289,14 +289,14 @@ Measure duplication, code slop, prose quality and complexity without installing 
 
 **Options:**
 
-- `operation`: Measurement to run. Values: `duplicates`, `slop`, `prose`, `complexity`.
+- `operation`: Measurement to run. Values: `duplicates`, `slop`, `prose`, `complexity`, `structure`.
 - `paths`: Files or directories inside the workspace; default is the workspace root.
 - `changed|base`: Focus on files changed against a revision plus untracked files.
 - `mode|minTokens|minLines`: Clone matching: renamed (identifiers and literals ignored) or exact, and size thresholds.
 
 **Related records:** `source-intelligence`, `quality-review`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
+**Source:** [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 
 **Documentation:** [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 
@@ -794,6 +794,28 @@ Maintain a durable hierarchical plan with dependencies, execution annotations, f
 
 **Documentation:** [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
 
+#### goal-tracking
+
+Set a /goal for work that matters: the demand becomes numbered acceptance criteria that only count with observed evidence, stay in context every turn, survive resume and compaction, and keep the session working while any remain open. Completion is refused while criteria lack evidence or files changed since the last passing check; continuations are bounded and stop at the first one that records no new evidence, and an interrupt pauses the goal instead of fighting the user.
+
+**Entrypoints:** `goal`, `goal-anchor`
+
+**Catalog tool pointers:** `goal`
+
+**Commands:** `/goal`
+
+**Options:**
+
+- `action`: Evidence and lifecycle step. Values: `status`, `met`, `waive`, `criteria`, `blocked`, `complete`.
+- `id|evidence`: Criterion id and what was observed (command and result, file and line, screenshot finding).
+- `PI_GOAL`: Disable the goal system when set to 0. Values: `0`.
+
+**Related records:** `todo-planning`, `session-coordination`
+
+**Source:** [`agent/extensions/goal.ts`](../agent/extensions/goal.ts), [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts), [`agent/extensions/lib/completion-gate.ts`](../agent/extensions/lib/completion-gate.ts)
+
+**Documentation:** [`docs/GOAL.md`](GOAL.md)
+
 ### project
 
 #### project-intelligence
@@ -1160,7 +1182,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
-- `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 367; literal)
+- `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 374; literal)
+- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 139; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 495; literal)
 - `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 313; factory)
@@ -1207,7 +1230,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 815; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1869; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 376; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 764; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 761; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
@@ -1221,7 +1244,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 254; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 121; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 283; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 285; literal)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 211; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 276; factory)
@@ -1273,6 +1296,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 48)
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1806)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
+- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 100)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3437)
 - /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 909)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
@@ -1432,6 +1456,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
+- [`agent/extensions/goal.ts`](../agent/extensions/goal.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
 - [`agent/extensions/health-log.ts`](../agent/extensions/health-log.ts)
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts)
@@ -1484,6 +1509,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/code-guidance-signals.ts`](../agent/extensions/lib/code-guidance-signals.ts)
 - [`agent/extensions/lib/code-lexical-mask.ts`](../agent/extensions/lib/code-lexical-mask.ts)
 - [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts)
+- [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts)
 - [`agent/extensions/lib/compact-tool-json.ts`](../agent/extensions/lib/compact-tool-json.ts)
 - [`agent/extensions/lib/compaction-policy.ts`](../agent/extensions/lib/compaction-policy.ts)
 - [`agent/extensions/lib/completion-gate.ts`](../agent/extensions/lib/completion-gate.ts)
@@ -1513,6 +1539,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
 - [`agent/extensions/lib/fail-policy.ts`](../agent/extensions/lib/fail-policy.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
+- [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
 - [`agent/extensions/lib/guidance-topics-domains.ts`](../agent/extensions/lib/guidance-topics-domains.ts)
 - [`agent/extensions/lib/guidance-topics-systems.ts`](../agent/extensions/lib/guidance-topics-systems.ts)
 - [`agent/extensions/lib/guidance-topics.ts`](../agent/extensions/lib/guidance-topics.ts)
@@ -1974,6 +2001,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
+- [`docs/GOAL.md`](GOAL.md)
 - [`docs/GUARDIAN-IMPLEMENTATION-AUDIT.md`](GUARDIAN-IMPLEMENTATION-AUDIT.md)
 - [`docs/GUARDIAN-INTELLIGENCE.md`](GUARDIAN-INTELLIGENCE.md)
 - [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)

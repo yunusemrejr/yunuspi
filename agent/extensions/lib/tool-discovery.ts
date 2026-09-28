@@ -106,6 +106,8 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
+  // The /goal command marks its own kickoff and continuation messages.
+  { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
   { pattern: /\b(?:refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality', 'git_info'] },
   { pattern: /\b(?:commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit)\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with

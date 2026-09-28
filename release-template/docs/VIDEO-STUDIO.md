@@ -8,7 +8,7 @@ The workflow lives in skills. `code-first-video` covers direction: research, nar
 | --- | --- |
 | `video_project` | `init` scaffolds a project with reusable primitives (network, matrix, graph, chart, history timeline, code, particles, typography, kinetic text) and finishing layers (narration captions, audio-reactive spectrum, film grain, light leaks, camera moves, glitch) and installs pinned dependencies; `check` validates timing, cues, narration fit, transitions, captions, component registry and assets; `install` repairs dependencies |
 | `video_render` | `stills` renders representative frames and a labelled contact sheet; `preview` renders a low-resolution scene or range; `final` renders full-quality H.264/AAC with decode verification and writes `captions.srt` and `captions.vtt` when scenes have narration. Bundles are content-hash cached and renders are queued |
-| `video_qa` | Black and frozen stretches, audio/video drift, silence gaps, EBU R128 loudness, peak and range, per-scene narration audibility and a scene contact sheet for visual review |
+| `video_qa` | Black and frozen stretches (single holds of 4 s or more, and a runtime that is 35% or more static in holds of 1.5 s or more), audio/video drift, silence gaps, EBU R128 loudness, peak and range, per-scene narration audibility and a scene contact sheet for visual review |
 | `narration_tts` | Local Piper neural narration: explicit one-time install of a pinned engine and checksum-verified voice; per-scene synthesis writing measured durations back to the timeline |
 | `audio_synth` | Seeded numpy music beds (chord progression, intensity automation) and sound effects (whoosh, riser, impact, tick, chime) |
 

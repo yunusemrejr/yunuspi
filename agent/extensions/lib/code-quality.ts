@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { analyzeStructure } from "./code-structure.ts";
 import { createHash } from "node:crypto";
 
 const exec = promisify(execFile);
@@ -629,7 +630,7 @@ const compactFinding = (file: string) => (f: Finding) => ({ file, line: f.line, 
 /** Run one code_quality operation. Results are bounded, located and advisory. */
 export async function codeQuality(params: any, cwd: string, signal?: AbortSignal, parserFor?: (ext: string) => Promise<any>) {
   const operation = params.operation;
-  if (!["duplicates", "slop", "prose", "complexity"].includes(operation)) throw new Error("operation must be duplicates, slop, prose or complexity");
+  if (!["duplicates", "slop", "prose", "complexity", "structure"].includes(operation)) throw new Error("operation must be duplicates, slop, prose, complexity or structure");
   const limit = Math.max(1, Math.min(80, Number.isInteger(params.limit) ? params.limit : 25));
   const changed = params.changed === true ? await changedFiles(cwd, params.base ?? "HEAD", signal) : undefined;
   const accept = operation === "prose" ? PROSE : CODE;
@@ -648,6 +649,14 @@ export async function codeQuality(params: any, cwd: string, signal?: AbortSignal
       byFile: report.byFile.slice(0, 10),
       note: "Token clones (renamed mode ignores identifier and literal differences). Extract a shared function, component or constant when the copies must change together; leave coincidental or deliberately independent code alone (tests, generated code, protocol tables).",
     };
+  }
+  if (operation === "structure") {
+    // The whole graph is needed to know who imports whom, so index the requested scope and ignore changed-only focus.
+    const scope = await collectSources(cwd, inputs.length ? inputs : ["."], CODE, { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 });
+    const manifest = await fs.readFile(path.join(cwd, "package.json"), "utf8").then((text) => JSON.parse(text), () => undefined);
+    const report = analyzeStructure(scope.files, manifest, !inputs.length, limit);
+    return { operation, scope: { files: report.files, edges: report.edges, skipped: scope.skipped, truncated: scope.truncated }, ...report, files: undefined, edges: undefined,
+      note: "Lexical import graph (JS/TS relative imports, Python packages). Cycles are worth breaking when the files must load in a fixed order; orphans are candidates for deletion or missing wiring, not proof of dead code; large files and hotspots are candidates for splitting. Aliases and dynamic imports are not resolved." };
   }
   const targets = changed ? changed.filter(accept) : [];
   const scope = await collectSources(cwd, changed ? (targets.length ? targets : []) : inputs.length ? inputs : ["."], accept, { files: operation === "prose" ? 200 : 400, bytes: 12 * 1024 * 1024, fileBytes: 512 * 1024 });

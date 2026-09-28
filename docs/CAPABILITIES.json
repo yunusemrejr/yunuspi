@@ -1084,6 +1084,7 @@
         "obs",
         "effort",
         "reminder",
+        "goal",
         "graph",
         "provider",
         "or-provider",
@@ -1412,6 +1413,56 @@
         "agent/extensions/rpiv-todo/state/plan.ts"
       ],
       "doc": "docs/ACTION-PLANS.md"
+    },
+    {
+      "id": "goal-tracking",
+      "group": "planning",
+      "summary": "Set a /goal for work that matters: the demand becomes numbered acceptance criteria that only count with observed evidence, stay in context every turn, survive resume and compaction, and keep the session working while any remain open. Completion is refused while criteria lack evidence or files changed since the last passing check; continuations are bounded and stop at the first one that records no new evidence, and an interrupt pauses the goal instead of fighting the user.",
+      "entrypoints": [
+        "goal",
+        "goal-anchor"
+      ],
+      "tools": [
+        "goal"
+      ],
+      "commands": [
+        "goal"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "status",
+            "met",
+            "waive",
+            "criteria",
+            "blocked",
+            "complete"
+          ],
+          "summary": "Evidence and lifecycle step."
+        },
+        {
+          "name": "id|evidence",
+          "summary": "Criterion id and what was observed (command and result, file and line, screenshot finding)."
+        },
+        {
+          "name": "PI_GOAL",
+          "values": [
+            "0"
+          ],
+          "summary": "Disable the goal system when set to 0."
+        }
+      ],
+      "related": [
+        "todo-planning",
+        "session-coordination"
+      ],
+      "sourceFiles": [
+        "agent/extensions/goal.ts",
+        "agent/extensions/lib/goal-state.ts",
+        "agent/extensions/lib/completion-gate.ts"
+      ],
+      "doc": "docs/GOAL.md"
     },
     {
       "id": "background-tasks",
@@ -2015,7 +2066,7 @@
     {
       "id": "code-quality",
       "group": "engineering",
-      "summary": "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity; edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.",
+      "summary": "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.",
       "entrypoints": [
         "code_quality"
       ],
@@ -2033,7 +2084,8 @@
             "duplicates",
             "slop",
             "prose",
-            "complexity"
+            "complexity",
+            "structure"
           ],
           "summary": "Measurement to run."
         },
@@ -2058,6 +2110,7 @@
       "sourceFiles": [
         "agent/extensions/code-quality.ts",
         "agent/extensions/lib/code-quality.ts",
+        "agent/extensions/lib/code-structure.ts",
         "agent/extensions/lib/source-check.ts",
         "agent/extensions/git-tools.ts"
       ],
@@ -3014,6 +3067,11 @@
         "line": 72
       },
       {
+        "name": "goal",
+        "source": "agent/extensions/goal.ts",
+        "line": 100
+      },
+      {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 3437
@@ -3567,7 +3625,13 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 367,
+        "line": 374,
+        "kind": "literal"
+      },
+      {
+        "name": "goal",
+        "source": "agent/extensions/goal.ts",
+        "line": 139,
         "kind": "literal"
       },
       {
@@ -3849,7 +3913,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 764,
+        "line": 761,
         "kind": "literal"
       },
       {
@@ -3934,7 +3998,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 283,
+        "line": 285,
         "kind": "literal"
       },
       {
@@ -4159,7 +4223,13 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 367,
+        "line": 374,
+        "kind": "literal"
+      },
+      {
+        "name": "goal",
+        "source": "agent/extensions/goal.ts",
+        "line": 139,
         "kind": "literal"
       },
       {
@@ -4351,7 +4421,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 764,
+        "line": 761,
         "kind": "literal"
       },
       {
@@ -4381,7 +4451,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 283,
+        "line": 285,
         "kind": "literal"
       },
       {
@@ -4638,11 +4708,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 672,
-      "registrationSites": 81,
+      "sourceFiles": 675,
+      "registrationSites": 82,
       "indirectRegistrationSites": 19,
-      "stableRegistrationRows": 120,
-      "uniqueStableTools": 119,
+      "stableRegistrationRows": 121,
+      "uniqueStableTools": 120,
       "dynamicOwnerCount": 15,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4707,6 +4777,10 @@
       },
       {
         "path": "agent/extensions/git-tools.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/goal.ts",
         "exists": true
       },
       {
@@ -4908,6 +4982,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/code-structure.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/compact-tool-json.ts",
         "exists": true
       },
@@ -5021,6 +5099,10 @@
       },
       {
         "path": "agent/extensions/lib/git-authority.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/goal-state.ts",
         "exists": true
       },
       {
@@ -7392,6 +7474,10 @@
       {
         "name": "EXPERT-DIRECTOR.md",
         "path": "docs/EXPERT-DIRECTOR.md"
+      },
+      {
+        "name": "GOAL.md",
+        "path": "docs/GOAL.md"
       },
       {
         "name": "GUARDIAN-IMPLEMENTATION-AUDIT.md",

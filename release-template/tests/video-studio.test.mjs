@@ -238,6 +238,15 @@ test("QA parsing and findings separate defects from intentional structure", () =
   assert.match(studio.qaFindings(studio.parseQaLog("", 5), { duration: 5, hasAudio: false, targetLufs: -16 }, scenes).map((f) => f.message).join(), /no audio stream/);
 });
 
+test("several short holds that add up to a slideshow are flagged even when none is long", () => {
+  const holds = { black: [], silence: [], momentary: [], integratedLufs: null, truePeak: null, loudnessRange: null, freeze: [{ start: 2.5, end: 4.67 }, { start: 5.43, end: 7.03 }, { start: 9.1, end: 11.7 }] };
+  const messages = studio.qaFindings(holds, { duration: 12, hasAudio: false, targetLufs: -16 }, []).map((f) => f.message).join("\n");
+  assert.match(messages, /5\d% of the runtime .* is static/);
+  assert.doesNotMatch(messages, /Picture is static for/, "no single hold crosses the per-hold threshold");
+  const lively = { ...holds, freeze: [{ start: 2, end: 3.6 }] };
+  assert.doesNotMatch(studio.qaFindings(lively, { duration: 12, hasAudio: false, targetLufs: -16 }, []).map((f) => f.message).join(), /of the runtime/);
+});
+
 test("video_qa measures a real render and produces a contact sheet", { skip: !hasFfmpeg }, async () => {
   const root = fs.mkdtempSync(path.join(fs.existsSync("/var/tmp") ? "/var/tmp" : os.tmpdir(), "video-qa-"));
   try {

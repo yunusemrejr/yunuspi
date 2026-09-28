@@ -9,13 +9,13 @@ export default function codeQualityTools(pi: any) {
   pi.registerTool({
     name: "code_quality",
     label: "Code quality",
-    description: "Measure code and prose quality without installing anything or running project code. duplicates: token clone detection across files or a whole tree (renamed mode catches copies with different names and constants), clone classes, duplicated-line share; with changed:true reports only clones touching files changed against base (DRY check for a branch). slop: placeholders and elided code, debug leftovers, swallowed errors, redundant booleans, commented-out code, type escapes, repeated literals, unused imports. prose: stock AI-sounding phrases with replacements, readability, sentence length, passive voice, hedges, fillers, dash density for Markdown/text/HTML. complexity: per-function cyclomatic complexity, length, nesting, parameters and async-without-await for JS/TS/Python. Advisory findings with file:line.",
+    description: "Measure code and prose quality without installing anything or running project code. duplicates: token clone detection across files or a whole tree (renamed mode catches copies with different names and constants), clone classes, duplicated-line share; with changed:true reports only clones touching files changed against base (DRY check for a branch). slop: placeholders and elided code, debug leftovers, swallowed errors, redundant booleans, commented-out code, type escapes, repeated literals, unused imports. prose: stock AI-sounding phrases with replacements, readability, sentence length, passive voice, hedges, fillers, dash density for Markdown/text/HTML. complexity: per-function cyclomatic complexity, length, nesting, parameters and async-without-await for JS/TS/Python. structure: import-graph health across the tree (JS/TS/Python): import cycles, modules nothing imports, fan-in/fan-out hotspots, files over 600 lines, and dependencies imported but undeclared or declared but unused. Advisory findings with file:line.",
     promptSnippet: "Find duplicated code, code slop, prose slop and complexity hotspots",
     promptGuidelines: [
       "Before claiming a refactor or feature is clean, run code_quality duplicates with changed:true to catch copy-pasted logic, and slop on the changed files.",
     ],
     parameters: Type.Object({
-      operation: choices(["duplicates", "slop", "prose", "complexity"]),
+      operation: choices(["duplicates", "slop", "prose", "complexity", "structure"]),
       paths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 64, description: "Files or directories inside the workspace; default is the workspace root" })),
       changed: Type.Optional(Type.Boolean({ description: "Focus on files changed against base plus untracked files" })),
       base: Type.Optional(Type.String({ minLength: 1, maxLength: 120, description: "Base revision for changed (default HEAD)" })),

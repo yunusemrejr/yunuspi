@@ -84,6 +84,12 @@ export default function expertDirector(pi: any) {
         evidenceCurrent: Type.Optional(Type.Boolean()),
         unavailable: Type.Optional(Type.Array(Type.String({ maxLength: 120 }), { maxItems: 12 })),
       })),
+      // Models send the taste fields flat beside action (measured: 7 rejected calls), so the flat forms are declared and survive validation.
+      op: Type.Optional(choices(["record", "list", "forget"])),
+      text: Type.Optional(Type.String({ maxLength: 200 })),
+      scope: Type.Optional(choices(["user", "project"])),
+      provenance: Type.Optional(choices(["explicit", "accepted", "rejected"])),
+      selector: Type.Optional(Type.String({ maxLength: 200 })),
       taste: Type.Optional(Type.Object({
         op: choices(["record", "list", "forget"]),
         text: Type.Optional(Type.String({ maxLength: 200 })),
@@ -151,7 +157,7 @@ export default function expertDirector(pi: any) {
       }
       if (action === "taste") {
         // Models often send the taste fields flat beside action; accept both.
-        const t = params.taste ?? params;
+        const t = { ...params, ...(params.taste ?? {}) };
         const scope: TasteScope = t.scope === "project" ? "project" : "user";
         const pid = projectId(ctx);
         if (t.op === "list") {

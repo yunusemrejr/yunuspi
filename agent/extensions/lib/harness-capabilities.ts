@@ -526,7 +526,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		summary: "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
 		entrypoints: ["pi.getCommands", "registerCommand"],
 		commands: [
-			"cost", "self", "metrics", "obs", "effort", "reminder", "graph", "provider", "or-provider", "models",
+			"cost", "self", "metrics", "obs", "effort", "reminder", "goal", "graph", "provider", "or-provider", "models",
 			"todos", "memory-prime", "bg", "tasks", "bg-tasks", "bg-clear", "bg-update", "jobs", "logs", "kill",
 			"subagents", "run", "subagents-doctor", "subagents-inspect-rpc", "subagents-refine", "subagents-fleet",
 			"subagents-detach", "subagents-stop", "subagents-steer", "subagents-models", "subagents-profiles",
@@ -632,6 +632,22 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"agent/extensions/rpiv-todo/state/plan.ts",
 		],
 		doc: "agent/public-template/docs/ACTION-PLANS.md",
+	}),
+	capability({
+		id: "goal-tracking",
+		group: "planning",
+		summary: "Set a /goal for work that matters: the demand becomes numbered acceptance criteria that only count with observed evidence, stay in context every turn, survive resume and compaction, and keep the session working while any remain open. Completion is refused while criteria lack evidence or files changed since the last passing check; continuations are bounded and stop at the first one that records no new evidence, and an interrupt pauses the goal instead of fighting the user.",
+		entrypoints: ["goal", "goal-anchor"],
+		tools: ["goal"],
+		commands: ["goal"],
+		options: [
+			option("action", "Evidence and lifecycle step.", ["status", "met", "waive", "criteria", "blocked", "complete"]),
+			option("id|evidence", "Criterion id and what was observed (command and result, file and line, screenshot finding)."),
+			option("PI_GOAL", "Disable the goal system when set to 0.", ["0"]),
+		],
+		related: ["todo-planning", "session-coordination"],
+		sourceFiles: ["agent/extensions/goal.ts", "agent/extensions/lib/goal-state.ts", "agent/extensions/lib/completion-gate.ts"],
+		doc: "agent/public-template/docs/GOAL.md",
 	}),
 	capability({
 		id: "background-tasks",
@@ -831,17 +847,17 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "code-quality",
 		group: "engineering",
-		summary: "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity; edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.",
+		summary: "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.",
 		entrypoints: ["code_quality"],
 		tools: ["code_quality", "syntax_check", "git_info", "lsp_diagnostics", "lens_diagnostics"],
 		options: [
-			option("operation", "Measurement to run.", ["duplicates", "slop", "prose", "complexity"]),
+			option("operation", "Measurement to run.", ["duplicates", "slop", "prose", "complexity", "structure"]),
 			option("paths", "Files or directories inside the workspace; default is the workspace root."),
 			option("changed|base", "Focus on files changed against a revision plus untracked files."),
 			option("mode|minTokens|minLines", "Clone matching: renamed (identifiers and literals ignored) or exact, and size thresholds."),
 		],
 		related: ["source-intelligence", "quality-review", "artifact-numeric-checks"],
-		sourceFiles: ["agent/extensions/code-quality.ts", "agent/extensions/lib/code-quality.ts", "agent/extensions/lib/source-check.ts", "agent/extensions/git-tools.ts"],
+		sourceFiles: ["agent/extensions/code-quality.ts", "agent/extensions/lib/code-quality.ts", "agent/extensions/lib/code-structure.ts", "agent/extensions/lib/source-check.ts", "agent/extensions/git-tools.ts"],
 		doc: "agent/public-template/docs/CODE-QUALITY.md",
 	}),
 	capability({

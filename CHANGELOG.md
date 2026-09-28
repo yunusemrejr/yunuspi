@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 — 2026-09-28
+
+**`/goal` gives important tasks a definition of done.** `/goal <what you want done>` turns the demand into numbered acceptance criteria (your list items and directives, plus a mandatory end-to-end verification criterion), stages a `goal` tool, and starts the work. The criteria ride the context every turn and are saved as snapshots on the session branch, so compaction, resume and fork keep them. A criterion only counts when the agent records what it observed (command and result, file and line, screenshot finding); a bare "done" is refused. `goal complete` is refused while criteria are open or files changed after the last passing check, once per distinct set of gaps; repeating the call is a recorded waiver, so you are never deadlocked. When the agent settles with criteria open, the harness sends one continuation naming them. Loops are bounded by construction: at most six continuations, a stop at the second continuation in a row that records no new evidence, a pause on interrupt, and no continuation while your messages are queued. `/goal` shows progress; `pause`, `resume`, `retry`, `done`, `clear` and `criteria a; b` manage it. Earlier goal trackers were retired because they inferred goals; this one exists only when asked. `PI_GOAL=0` disables it. See `docs/GOAL.md`.
+
+**Tool mistakes that cost real turns now recover or explain themselves.** From recent session transcripts:
+- `git_info review` and `log` failed with a git error in a repository with no commits, exactly when the first commit needs its review. Review now compares against the empty tree, and log and show say "No commits yet".
+- `creative_direct` rejected 21 calls because models send `focalHierarchy` as a ranked list, `intent` as `{terms:[…]}` and array-valued `secondary`. All three shapes are accepted.
+- `expert_director taste` rejected 7 calls: the fields models send flat beside `action` were stripped by schema validation, so the documented flat form never worked. They are declared now.
+- A JSON-encoded array that does not parse (for example `subagent tasks` with an unescaped quote) produced "tasks.0: must be object", and the model resent the identical 12 KB payload three times. The error now says the argument is a string that is not valid JSON, and how to send it.
+
+**`code_quality structure` checks the import graph.** Runtime import cycles (type-only imports are ignored), modules nothing imports, the most imported and most importing files, files over 600 lines, and packages imported but undeclared or declared but unused. It reads JS/TS and Python without running anything, and is meant as evidence for a decision, not a verdict.
+
+**Video QA no longer passes a slideshow.** A rendered video that was static for 53% of its runtime in three 2-second holds passed automated QA because no single hold reached 4 seconds. QA now also warns when 35% or more of a video of six seconds or longer is static in holds of 1.5 seconds or more. The full pipeline (scaffold, check, stills, music and sound effects, final render, QA) was run end to end for this release.
+
 ## 0.13.9 — 2026-09-28
 
 **Interface work now starts from an embedded design doctrine.** Unconstrained models converge on the same two looks: the indigo/purple SaaS page, then the cream/terracotta editorial page that reacted against it. The new `design-slop-prevention` skill ships inside the harness and explains the mechanism, lists the tells of both generations, and gives a nine-step procedure. It includes the swap test: if another company's logo and headline can replace yours and the page still works, the design is slop. It is a second layer on top of `anti-ai-slop` and the UI checklist, aimed at the choice of palette, typeface, layout and copy before any code is written.
