@@ -52,6 +52,21 @@ test('criteria replacement keeps settled records and always keeps verification',
  assert.equal(new Set(goal.criteria.map(c=>c.id)).size,goal.criteria.length,'ids stay unique');
 });
 
+test('a full criteria list still keeps the verification criterion',()=>{
+ let goal=gs.createGoal('Ship the exporter');
+ goal=met(goal,'C1');
+ goal=gs.setCriteria(goal,Array.from({length:gs.MAX_CRITERIA-1},(_,i)=>`refined requirement ${i+1}`));
+ assert.equal(goal.criteria.length,gs.MAX_CRITERIA);
+ assert.equal(goal.criteria.at(-1).id,'V','verification survives a list that fills the cap');
+ assert.equal(goal.criteria.filter(c=>c.status==='open').length,gs.MAX_CRITERIA-1);
+ // Even when settled records alone overflow the cap, verification outranks them.
+ const crowded={...goal,criteria:goal.criteria.map(c=>c.id==='V'?{...c,status:'open'}:{...c,status:'met',evidence:'npm test: 12 passed, exit 0'})};
+ const trimmed=gs.setCriteria(crowded,['one more requirement']);
+ assert.ok(trimmed.criteria.length<=gs.MAX_CRITERIA,`capped at ${gs.MAX_CRITERIA}, got ${trimmed.criteria.length}`);
+ assert.equal(trimmed.criteria.at(-1).id,'V','verification outranks trimmed settled records');
+ assert.equal(new Set(trimmed.criteria.map(c=>c.id)).size,trimmed.criteria.length,'ids stay unique when the list is trimmed');
+});
+
 test('completion is refused once for open criteria and unverified writes, then becomes a recorded waiver',()=>{
  const goal=gs.createGoal('Ship the exporter');
  const refused=new Set();
@@ -175,4 +190,24 @@ test('an interrupt pauses the goal and blocked reports reach the user without an
  await h.emit('agent_settled');
  assert.equal(h.sent.length,2,'a blocked goal waits for the user');
  assert.match(h.notes.at(-1).text,/Goal blocked/);
+});
+
+test('a background run settles its own debt: starting one verifies nothing, finishing green does',async()=>{
+ // Each assertion needs its own goal: a refused completion keys the gate, and a
+ // second identical call is a deliberate recorded waiver rather than a re-refusal.
+ async function settled(command,details){
+  const h=harness();
+  await h.commands.goal.handler('Ship the exporter',h.ctx);
+  for(const criterion of h.entries.at(-1).data.criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+  await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+  if(command!==null)await h.emit('tool_result',{toolName:'bg_run',input:{command}});
+  if(details)await h.emit('message_end',{message:{role:'custom',customType:'background-task-notification',details}});
+  return h.call({action:'complete'});
+ }
+ assert.match(await settled('pnpm test',null),/1 file change/,'a launched background run leaves the debt intact');
+ assert.match(await settled('pnpm test',{status:'failed',exitCode:1,command:'pnpm test'}),/1 file change/,'a failed background run is not verification');
+ assert.match(await settled('pnpm test',{status:'killed',command:'pnpm test'}),/1 file change/,'a killed background run is not verification');
+ assert.match(await settled('pnpm test',{status:'completed',exitCode:0,command:'pnpm test'}),/Goal achieved/,'a green background check clears the debt');
+ assert.match(await settled('npm install',{status:'completed',exitCode:0,command:'npm install'}),/1 file change/,'an unrelated green background job is not verification');
+ assert.match(await settled('pnpm test',{status:'completed',exitCode:0,command:'pnpm test'}),/Goal achieved/);
 });

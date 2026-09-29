@@ -342,3 +342,38 @@ test('diagnostics surface dangling, stale, orphaned, unlinked, and uncovered sta
   assert.equal(diag.orphanedChildren.length, 1);
   assert.equal(diag.claimsWithoutCoverage.length, 1);
 });
+
+test('a passing check is recognised across package managers, but only in command position', () => {
+  // Every package manager family earns a receipt on the same terms, so a pnpm/yarn/bun
+  // project can clear the goal completion gate exactly like an npm one.
+  for (const command of [
+    'npm test', 'npm run typecheck', 'npm run check:public', 'npm t', 'npm run build',
+    'pnpm test', 'pnpm run test', 'yarn test', 'yarn run typecheck', 'bun test', 'bun run test',
+    'vitest run', 'jest', 'node --test tests/', 'deno test', 'tox', 'mypy', 'ruff',
+    'go test ./...', 'go build ./...', 'cargo test', 'dotnet test', 'swift test',
+    'mvn test', './gradlew test', 'make test', 'just test', 'composer test', 'phpunit',
+    'python -m pytest', 'python3 -m pytest', 'python3.11 -m unittest',
+    'cd /tmp && tsc --noEmit', 'cd /tmp && npm test', 'NODE_ENV=test pnpm test', 'CI=1 yarn lint',
+    './node_modules/.bin/vitest run', 'npm test | tee out.log', 'make test; echo done',
+  ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
+
+  // A runner merely named in a path or a message is not a check: the unanchored
+  // `tsc\b` used to clear the goal's unverified-write debt on these.
+  for (const command of [
+    'ls -la', 'git status', 'git commit -m "fix tsc types"', 'cat tsc-config.json',
+    'grep tsc README.md', 'echo "run npm test"', 'cat package.json', 'git log --grep test',
+    'node script.js', 'deno run main.ts', 'npm install', 'npm ci', 'rm -rf node_modules',
+  ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
+});
+
+test('a launched background suite is an attempt, not yet a passing check', () => {
+  const kinds = (events) => events.map((e) => e.entity?.kind).filter(Boolean);
+  const launch = ingest.bashResultEvents(ctx(), { command: 'pnpm test', toolCallId: 'bg1', failed: false, pending: true });
+  assert.ok(kinds(launch).includes('attempt'), 'the launch is still recorded');
+  assert.equal(kinds(launch).filter((k) => k === 'evidence' || k === 'failure').length, 0, 'no fact is minted before a result exists');
+  // Once the command reports, the same call shape records the real outcome.
+  const green = ingest.bashResultEvents({ ...ctx(), ts: 2000 }, { command: 'pnpm test', toolCallId: 'bg2', failed: false });
+  assert.equal(kinds(green).filter((k) => k === 'evidence').length, 1);
+  const red = ingest.bashResultEvents({ ...ctx(), ts: 3000 }, { command: 'pnpm test', toolCallId: 'bg3', failed: true, excerpt: 'TypeError: boom' });
+  assert.equal(kinds(red).filter((k) => k === 'failure').length, 1);
+});

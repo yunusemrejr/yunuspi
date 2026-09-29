@@ -302,17 +302,48 @@ export function fileWriteEvents(
 	];
 }
 
-const TEST_COMMAND =
-	/\b(?:npm (?:run )?(?:test|tests|check|lint|typecheck)\b|npm t\b|npx (?:vitest|jest|tsc|eslint)\b|pytest\b|python3? -m pytest\b|cargo test\b|go test\b|node --test\b|dotnet test\b|ruff\b|mypy\b|tsc\b)/;
+/**
+ * A test-like command is one whose whole point is to check the build, so a
+ * passing run of it is evidence and clears the goal's unverified-write debt.
+ * Two rules make that safe:
+ *
+ * - Package managers are one family. A pnpm/yarn/bun project must earn a
+ *   receipt on the same terms as an npm one; when only `npm` matched, those
+ *   projects could never clear the completion gate and the session wedged.
+ * - Every alternative is anchored to *command position* — start of line or
+ *   after a shell separator, behind an optional env prefix. The old unanchored
+ *   `tsc\b` matched `cat tsc-config.json` and `git commit -m "fix tsc types"`,
+ *   which cleared the debt without running anything.
+ */
+const COMMAND = String.raw`(?:^|\|\||&&|[;&|])\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:\S*\/)?`;
+const PM = String.raw`(?:npm|pnpm|yarn|bun)`;
+const TASK = String.raw`(?:test|tests|check|lint|typecheck|build)\b`;
+const RUNNER = String.raw`(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|phpunit)\b`;
+const TASK_TOOL = String.raw`(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)\s+${TASK}`;
+const TEST_COMMAND = new RegExp(
+	`${COMMAND}(?:` +
+		`${PM} (?:run )?${TASK}` +
+		`|${PM} t\\b` +
+		`|(?:npx|pnpm dlx|bunx|yarn dlx) ${RUNNER}` +
+		`|${RUNNER}` +
+		`|${TASK_TOOL}` +
+		`|deno (?:test|check|lint|fmt)\\b` +
+		`|python3?(?:\\.\\d+)? -m (?:pytest|unittest|tox|ruff|mypy)\\b` +
+		`|node --test\\b` +
+		`)`,
+);
 
 export function isTestLikeCommand(command: string): boolean {
 	return TEST_COMMAND.test(String(command ?? ""));
 }
 
-/** Bash results become attempt/evidence/failure entities with family keys. */
+/** Bash results become attempt/evidence/failure entities with family keys.
+ * `pending` marks a launch whose command has not produced a result yet (`bg_run`
+ * returns a task id immediately), so a check command is recorded as an attempt
+ * without minting a passing-check fact that nothing has confirmed. */
 export function bashResultEvents(
 	ctx: IngestContext,
-	input: { command?: unknown; toolCallId?: string; failed: boolean; excerpt?: string },
+	input: { command?: unknown; toolCallId?: string; failed: boolean; excerpt?: string; pending?: boolean },
 ): TaskEvent[] {
 	const command = typeof input.command === "string" ? input.command : "";
 	const callId = typeof input.toolCallId === "string" && input.toolCallId ? input.toolCallId : stableId([command, ctx.ts]);
@@ -342,7 +373,7 @@ export function bashResultEvents(
 			family,
 		}, `failure:${ctx.taskId}:${callId}`));
 		events.push(linkEvent(ctx, failureId, attemptId, "caused-by"));
-	} else if (isTestLikeCommand(command)) {
+	} else if (isTestLikeCommand(command) && !input.pending) {
 		const evidenceId = `evi-${stableId([ctx.taskId, callId])}`;
 		events.push(upsertEvent(ctx, {
 			id: evidenceId,

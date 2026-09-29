@@ -73,14 +73,28 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	pi.on("message_end", (event) => {
 		if (event.message.role === "assistant") lastStop = event.message.stopReason;
+		else if ((event.message as any).customType === "background-task-notification") settleBackgroundCheck((event.message as any).details);
 	});
+
+	/**
+	 * A background run settles its own debt. `bg_run` returns a task id at once, so
+	 * clearing on the call cleared the debt before a single test had run — a failing
+	 * background suite then still left the goal free to close. The terminal receipt
+	 * carries the original command and the real exit state, so verify there instead.
+	 */
+	const settleBackgroundCheck = (details: any) => {
+		if (!goalIsLive(goal) || !details || details.status !== "completed" || details.signal) return;
+		const exit = details.exitCode;
+		if (typeof exit === "number" && exit !== 0) return;
+		if (isTestLikeCommand(String(details.command ?? ""))) unverifiedWrites = 0;
+	};
 
 	pi.on("tool_result", (event: { toolName?: string; input?: Record<string, unknown>; isError?: boolean }) => {
 		if (!goalIsLive(goal) || event.isError) return;
 		const name = event.toolName ?? "";
 		if (WRITE_TOOLS.has(name)) unverifiedWrites++;
 		else if (VERIFY_TOOLS.has(name)) unverifiedWrites = 0;
-		else if ((name === "bash" || name === "bg_run") && isTestLikeCommand(String(event.input?.command ?? ""))) unverifiedWrites = 0;
+		else if (name === "bash" && isTestLikeCommand(String(event.input?.command ?? ""))) unverifiedWrites = 0;
 	});
 
 	// One continuation per settled run; bounded and stall-aware inside stopGate.

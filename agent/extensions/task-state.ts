@@ -295,6 +295,9 @@ export default function taskStateExtension(pi: ExtensionAPI): void {
 						toolCallId: event.toolCallId,
 						failed: event.isError === true,
 						excerpt: excerptOf(event),
+						// bg_run hands back a task id before the command has produced any
+						// result, so a suite it launches is not yet a passing check.
+						pending: name === "bg_run" && event.isError !== true,
 					}));
 				}
 			} else if (name === "todo") {

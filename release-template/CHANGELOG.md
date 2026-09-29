@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.1 — 2026-09-29
+
+**A goal could quietly lose its end-to-end verification criterion.** `goal criteria` replaces the open criteria with your list, and the mandatory "check the real artifact" criterion was appended *last* and then trimmed to the cap. A long enough replacement list cut it off — exactly when the list filled up and the check mattered most. A goal in that state could be closed with every criterion satisfied and nothing ever checked end to end. The verification slot is now reserved before the trim.
+
+**pnpm, yarn and bun projects could never clear the goal completion gate.** Only `npm` was recognised as a package manager and only under `npx` were the bare runners recognised, so on a pnpm or bun project no passing run of the test suite registered as verification. After any file edit, `goal complete` stayed refused for the rest of the session and the only way out was the deliberate repeat-to-waive path meant for a user override. Package managers are now one family, and the common build and test entry points (`make`, `just`, `mvn`, `gradlew`, `go build`, `cargo`, `dotnet`, `composer`, `tox`, `deno`, `python -m unittest`, bare `vitest`/`jest`, `npm run build`) are recognised alongside them.
+
+**A command that merely mentioned a checker was treated as a check.** The old pattern matched `tsc` anywhere in the line, so `cat tsc-config.json` and `git commit -m "fix tsc types"` both cleared the goal's unverified-change debt without a single test running. Every alternative is now anchored to command position — the start of the line or after a shell separator, behind an optional environment prefix — so `cd /tmp && tsc --noEmit` still counts and a filename or a commit message does not.
+
+**A background test run no longer counts as verification before it has run.** `bg_run` returns a task id immediately, but the goal and task-state ledgers were clearing verification debt — and recording a passing check — the moment it was called. A suite launched in the background and left to fail still left the goal free to close. Both now settle on the terminal receipt: the debt clears and the passing check is recorded when the task reports `completed` with a zero exit, and a failed or killed run verifies nothing. A launch is still recorded as an attempt.
+
 ## 0.16.0 — 2026-09-29
 
 **Static audits that run without being asked.** A new `code_audit` tool and a new `review` action on `svg_inspect` find the defects a careful reviewer would raise, from source text alone: nothing runs, nothing is installed, no model is called.

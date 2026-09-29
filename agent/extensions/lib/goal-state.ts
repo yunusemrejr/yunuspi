@@ -111,7 +111,11 @@ export function setCriteria(goal: GoalState, items: readonly string[], now = Dat
 		known.add(text.toLowerCase());
 		added.push({ id: `C${++counter}`, text, status: "open" });
 	}
-	const criteria = [...settled, ...added, verify].slice(0, MAX_CRITERIA);
+	// `verify` is last, so a plain slice dropped it exactly when the list filled up —
+	// the one moment the end-to-end check matters most. Reserve its slot up front.
+	const room = MAX_CRITERIA - 1;
+	const kept = settled.slice(0, room);
+	const criteria = [...kept, ...added.slice(0, room - kept.length), verify];
 	return { ...goal, criteria, updatedAt: now };
 }
 
