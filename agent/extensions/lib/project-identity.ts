@@ -520,6 +520,6 @@ export function findDescendantProjects(root: string, env: Env = process.env, lim
     below.sort((a, b) => a.length - b.length || (a < b ? -1 : 1));
     out.push({ id: entry.id, slug: entry.slug, basis: entry.basis, root: below[0] });
   }
-  out.sort((a, b) => a.root.length - b.root.length || (a.root < b ? -1 : 1));
+  out.sort((a, b) => a.root.length - b.root.length || (a.root < b.root ? -1 : 1));
   return out.slice(0, Math.max(1, Math.min(32, limit)));
 }

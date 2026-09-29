@@ -610,8 +610,8 @@ export function readMemoryChunk(store: ProjectVectorStore, id: string, opts: Mem
     atoms: atoms.map((atom) => ({
       id: atom.id,
       ordinal: atom.ordinal,
-      charStart: atom.charStart,
-      charEnd: atom.charEnd,
+      charStart: atom.char_start,
+      charEnd: atom.char_end,
       sourceStart: atom.source_start,
       sourceEnd: atom.source_end,
       embedded: atom.has_embedding ? atom.embedder : "",
@@ -636,7 +636,7 @@ export function formatMemoryRead(detail: MemoryReadDetail, projectId: string): s
   ];
   if (chunk.title) lines.push(`Title: ${chunk.title}`);
   if (chunk.concepts.length) lines.push(`Concepts: ${chunk.concepts.join(", ")}`);
-  if (detail.matchedAtom) lines.push(`Matched fragment: ${detail.matchedAtom.id} (atom ${detail.matchedAtom.ordinal}, chars ${detail.matchedAtom.charStart}–${detail.matchedAtom.charEnd})`);
+  if (detail.matchedAtom) lines.push(`Matched fragment: ${detail.matchedAtom.id} (atom ${detail.matchedAtom.ordinal}, chars ${detail.matchedAtom.char_start}–${detail.matchedAtom.char_end})`);
   if (detail.includeSource) {
     lines.push("");
     lines.push(chunk.text.length > MEMORY_READ_CHARS ? `${chunk.text.slice(0, MEMORY_READ_CHARS)}\n[… ${chunk.text.length} characters total]` : chunk.text);

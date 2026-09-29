@@ -845,6 +845,28 @@ test('retrieveFamily merges relatives with weights and provenance', async (t) =>
   await assert.rejects(() => retrieveFamily([], 'lorem ipsum family', { rerank: false }), /at least one store/);
 });
 
+test('descendant projects of equal depth are listed in path order', async (t) => {
+  // Both registration orders: a comparator that ignores the second path only
+  // ever reverses its input, so one order alone cannot expose it.
+  for (const order of [['cc', 'bb', 'aa'], ['aa', 'bb', 'cc']]) {
+    const dir = tmpRoot();
+    cleanup(t, dir);
+    const big = path.join(dir, 'big');
+    fs.mkdirSync(big, { recursive: true });
+    fs.writeFileSync(path.join(big, '.pi-project-id'), 'ord-parent\n');
+    const env = testEnv(dir);
+    for (const name of order) {
+      const sub = path.join(big, name);
+      fs.mkdirSync(sub, { recursive: true });
+      fs.writeFileSync(path.join(sub, '.pi-project-id'), `ord-${name}\n`);
+      const pi = fakePi();
+      piVectorMemory(pi, { env, embedder: testEmbedder(16) });
+      await pi.tools.get('project_memory_remember').execute(name, { text: `Ordering fixture memory for ${name}.`, type: 'decision' }, undefined, undefined, fakeCtx(sub));
+    }
+    assert.deepEqual(findDescendantProjects(big, env).map((d) => d.id), ['ord-aa', 'ord-bb', 'ord-cc'], order.join());
+  }
+});
+
 test('parent sees child memories and vice versa; project scope isolates', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);
@@ -1096,6 +1118,12 @@ test('readMemoryChunk expands one memory with atoms, siblings and history', asyn
   assert.ok(rendered.includes('dynamic confidence scoring'));
   assert.ok(rendered.includes('Atoms (1 retrieval units)'));
   assert.ok(rendered.includes(`supersedes [${old.ids[0]}]`));
+  // Atom character spans come from the stored char_start/char_end columns.
+  assert.equal(typeof detail.atoms[0].charStart, 'number');
+  assert.equal(typeof detail.atoms[0].charEnd, 'number');
+  assert.ok(detail.atoms[0].charEnd > detail.atoms[0].charStart);
+  assert.doesNotMatch(rendered, /undefined/);
+  assert.doesNotMatch(formatMemoryRead(viaAtom, 'prj_read'), /undefined/);
 });
 
 test('read expansion shows adjacent source blocks', async (t) => {

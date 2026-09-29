@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.3 — 2026-09-29
+
+**Reading a memory no longer prints `chars undefined–undefined`.** The memory read view showed each retrieval unit's character span, and the matched fragment line, from properties the stored records do not have (`charStart`/`charEnd`; the store uses `char_start`/`char_end`). Every read of an atom, and every "Matched fragment" line, rendered the span as `undefined–undefined`, so the evidence trail pointed nowhere. The spans now come from the stored columns.
+
+**Sub-projects at the same depth are ordered by path.** The tie-break that orders descendant projects compared a path to the whole project record instead of its path, so it never returned "before" and simply reversed whatever order the registry happened to hold. Which sub-project came first, and which survived the eight-project cap, then depended on registration order. Equal-depth descendants are now sorted by path.
+
 ## 0.16.2 — 2026-09-29
 
 **A background suite now records its result when it actually finishes.** 0.16.1 stopped a launched `bg_run` from claiming a pass before it ran, which left the ledger honest but silent — nothing ever recorded the outcome either. A `<background-task-notification>` receipt now settles it: a suite that reports `completed` with a zero exit records the passing check, a failed or killed one records the failure, and a receipt for a command that is not a check changes nothing.
