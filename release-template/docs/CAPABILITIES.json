@@ -3143,7 +3143,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 100
+        "line": 114
       },
       {
         "name": "google-account",
@@ -3711,7 +3711,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 143,
+        "line": 157,
         "kind": "literal"
       },
       {
@@ -4321,7 +4321,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 143,
+        "line": 157,
         "kind": "literal"
       },
       {
