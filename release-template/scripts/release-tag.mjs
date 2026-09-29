@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+/** Tag the current commit for release only after GitHub has finished the main
+ * safety run for that exact commit. The release job verifies the same run, so
+ * a tag pushed while main is still running fails and has to be recreated.
+ * Usage: node scripts/release-tag.mjs [--timeout-minutes N]
+ * Run it after pushing main; it creates the annotated tag vX.Y.Z from
+ * package.json (never moving an existing one) and pushes it. */
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** 'passed', 'failed', 'pending' or 'missing' for the newest main push run of a commit. */
+export function safetyState(runs, sha) {
+  const mine = (Array.isArray(runs) ? runs : []).filter(run => run?.head_sha === sha && run.head_branch === 'main' && run.event === 'push')
+    .sort((a, b) => b.id - a.id)[0];
+  if (!mine) return 'missing';
+  if (mine.status !== 'completed') return 'pending';
+  return mine.conclusion === 'success' ? 'passed' : 'failed';
+}
+
+async function main() {
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const timeoutIndex = process.argv.indexOf('--timeout-minutes');
+  const limit = Number(timeoutIndex > 0 ? process.argv[timeoutIndex + 1] : 25);
+  if (!Number.isFinite(limit) || limit <= 0 || limit > 120) throw Error('Expected --timeout-minutes between 1 and 120');
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, tag = `v${version}`;
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Only stable versions are tagged');
+  if (git('status', '--porcelain')) throw Error('The working tree has uncommitted changes; commit and push main first');
+  git('fetch', '--quiet', 'origin', 'main');
+  const sha = git('rev-parse', 'HEAD');
+  if (git('rev-parse', 'origin/main') !== sha) throw Error('HEAD is not the pushed tip of origin/main; push main first');
+  const match = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(git('remote', 'get-url', 'origin'));
+  if (!match) throw Error('origin is not a GitHub repository');
+  const query = new URLSearchParams({ branch: 'main', event: 'push', head_sha: sha, per_page: '20' });
+  const url = `https://api.github.com/repos/${match[1]}/actions/workflows/public-safety.yml/runs?${query}`;
+  const deadline = Date.now() + limit * 60_000;
+  for (;;) {
+    const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(30_000) });
+    if (response.status !== 200) throw Error(`GitHub run lookup failed (${response.status})`);
+    const state = safetyState((await response.json()).workflow_runs, sha);
+    if (state === 'passed') break;
+    if (state === 'failed') throw Error(`The main safety run failed for ${sha.slice(0, 7)}; fix it before tagging`);
+    if (Date.now() > deadline) throw Error(`The main safety run is still ${state} after ${limit} minutes; rerun later`);
+    console.error(`main safety run ${state}; waiting`);
+    await new Promise(resolve => setTimeout(resolve, 20_000));
+  }
+  const existing = git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`);
+  if (existing) throw Error(`${tag} already exists on origin; release tags are never moved`);
+  git('tag', '-a', tag, '-m', `YunusPi ${version}`);
+  git('push', 'origin', tag);
+  console.log(JSON.stringify({ tag, sha, repository: match[1] }));
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(error => { console.error(error.message); process.exitCode = 1; });
