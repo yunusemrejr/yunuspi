@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.2 — 2026-09-29
+
+**A background suite now records its result when it actually finishes.** 0.16.1 stopped a launched `bg_run` from claiming a pass before it ran, which left the ledger honest but silent — nothing ever recorded the outcome either. A `<background-task-notification>` receipt now settles it: a suite that reports `completed` with a zero exit records the passing check, a failed or killed one records the failure, and a receipt for a command that is not a check changes nothing.
+
+**A continuation that could not be sent is no longer swallowed.** The harness told you the goal was continuing, and if the nudge never left it the session just looked stalled — criteria open, no explanation for either. A failed send is now reported with the reason and pointed at `/goal resume`, matching what `/goal` already did for its own kickoff.
+
 ## 0.16.1 — 2026-09-29
 
 **A goal could quietly lose its end-to-end verification criterion.** `goal criteria` replaces the open criteria with your list, and the mandatory "check the real artifact" criterion was appended *last* and then trimmed to the cap. A long enough replacement list cut it off — exactly when the list filled up and the check mattered most. A goal in that state could be closed with every criterion satisfied and nothing ever checked end to end. The verification slot is now reserved before the trim.

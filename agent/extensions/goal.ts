@@ -106,7 +106,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			if (decision.notice) ctx.ui?.notify?.(decision.notice.text, decision.notice.level);
 			if (decision.nudge) {
 				ctx.ui?.notify?.(`Goal ${decision.goal.id}: continuing (${decision.goal.nudges}) — ${decision.goal.criteria.filter((c) => c.status === "open").length} criteria open.`, "info");
-				void Promise.resolve(pi.sendUserMessage(decision.nudge)).catch(() => undefined);
+				// The kickoff reports a failed send; the continuation must too. A nudge that
+				// never left the harness told the user work was continuing, then looked like a
+				// silent stall with criteria still open and no explanation for either.
+				void Promise.resolve(pi.sendUserMessage(decision.nudge)).catch((error: unknown) =>
+					ctx.ui?.notify?.(`Goal ${decision.goal.id}: could not continue (${error instanceof Error ? error.message : String(error)}). ${decision.goal.criteria.filter((c) => c.status === "open").length} criteria are still open; /goal resume restarts it.`, "warning"));
 			}
 		} catch { /* a gate failure must never wedge the session */ }
 	});

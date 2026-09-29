@@ -389,3 +389,26 @@ test('/metrics report exposes task-state usage', () => {
   assert.ok(missing, 'metrics still reports when no graph exists');
   assert.match(missing, /no graph state|unavailable/);
 });
+
+test('a background suite records its outcome only when the terminal receipt arrives', async () => {
+  clearTaskStateServices();
+  const h = taskHarness('sid-bg-check');
+  await h.emit('session_start');
+  await h.emit('input', { source: 'interactive', text: 'Run the suite in the background.' });
+  // The launch says nothing about the result, so nothing may be claimed from it.
+  await h.emit('tool_result', { toolName: 'bg_run', toolCallId: 'bg-call', input: { command: 'pnpm test' }, content: [{ type: 'text', text: 'task id bg_1' }], isError: false });
+  const run = async (params) => (await h.tools.get('task_state').execute('x', params, undefined, undefined, h.ctx)).details.text;
+  assert.match(await run({ action: 'evidence' }), /none recorded|nothing recorded/i, 'a launch alone is not a passing check');
+
+  // A red receipt records a failure, still not a pass.
+  await h.emit('message_end', { message: { role: 'custom', customType: 'background-task-notification', details: { id: 'bg_1', command: 'pnpm test', status: 'failed', exitCode: 1 } } });
+  assert.match(await run({ action: 'failures' }), /pnpm test/, 'the red suite is recorded as a failure');
+
+  // A green receipt is the first thing that may be called a passing check.
+  await h.emit('message_end', { message: { role: 'custom', customType: 'background-task-notification', details: { id: 'bg_2', command: 'pnpm test', status: 'completed', exitCode: 0 } } });
+  assert.match(await run({ action: 'evidence' }), /pnpm test/, 'the green suite is recorded once it actually passed');
+
+  // A receipt for a command that is not a check changes nothing.
+  await h.emit('message_end', { message: { role: 'custom', customType: 'background-task-notification', details: { id: 'bg_3', command: 'npm install', status: 'completed', exitCode: 0 } } });
+  assert.doesNotMatch(await run({ action: 'evidence' }), /npm install/, 'an unrelated job is not a check');
+});

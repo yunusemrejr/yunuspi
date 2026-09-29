@@ -136,14 +136,14 @@ test('persisted snapshots restore the latest goal on a branch',()=>{
  assert.equal(gs.restoreGoal([{type:'custom',customType:'other',data:a}]),undefined);
 });
 
-function harness(){
+function harness({failSend=false}={}){
  const handlers={},commands={},tools={},entries=[],sent=[],notes=[];
  const pi={
   on:(name,fn)=>{(handlers[name]??=[]).push(fn);},
   registerCommand:(name,options)=>{commands[name]=options;},
   registerTool:(tool)=>{tools[tool.name]=tool;},
   appendEntry:(customType,data)=>{entries.push({type:'custom',customType,data});},
-  sendUserMessage:async(text)=>{sent.push(text);},
+  sendUserMessage:async(text)=>{if(failSend)throw new Error('input queue closed');sent.push(text);},
   getActiveTools:()=>['read'],setActiveTools:()=>{},
  };
  const ctx={ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries},hasPendingMessages:()=>false};
@@ -240,4 +240,19 @@ test('a spent waiver does not carry over to a later, unrelated gap',async()=>{
  await h2.emit('tool_result',{toolName:'bash',input:{command:'npm test'}});
  await h2.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
  assert.match(await h2.call({action:'complete'}),/1 file change/,'the spent waiver does not re-open the gate');
+});
+
+test('a continuation that cannot be sent is reported, not swallowed',async()=>{
+ const h=harness({failSend:true});
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ assert.equal(h.sent.length,0,'the kickoff itself failed too, and reported it');
+ assert.match(h.notes.at(-1).text,/Goal kickoff failed: input queue closed/);
+ await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});
+ await h.emit('agent_settled');
+ // The run settled with criteria open, so the harness claimed it was continuing.
+ assert.ok(h.notes.some(n=>/continuing \(1\)/.test(n.text)),'the harness announced the continuation');
+ // The claim must be followed by the truth: the nudge never left the harness.
+ assert.match(h.notes.at(-1).text,/could not continue \(input queue closed\)/);
+ assert.match(h.notes.at(-1).text,/criteria are still open; \/goal resume restarts it/);
+ assert.equal(h.entries.at(-1).data.nudges,1,'the attempt is still counted, and the stall gate still bounds it');
 });

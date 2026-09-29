@@ -335,4 +335,29 @@ export default function taskStateExtension(pi: ExtensionAPI): void {
 			/* tool results must never fail because of the graph */
 		}
 	});
+
+	// A background suite is an attempt until it reports. bg_run returns a task id
+	// immediately, so the launch cannot say whether it passed — the terminal
+	// receipt can, and that is where the evidence belongs.
+	pi.on("message_end", (event: { message?: Record<string, unknown> }, ctx: ExtensionContext) => {
+		try {
+			const message = event.message;
+			if ((message?.customType as string | undefined) !== "background-task-notification") return;
+			const details = message?.details as Record<string, unknown> | undefined;
+			const command = typeof details?.command === "string" ? details.command : "";
+			if (!details || !isTestLikeCommand(command)) return;
+			const service = serviceFor(ctx);
+			if (!service) return;
+			const graph = service.graph();
+			const exit = details.exitCode;
+			const failed = details.status === "failed" || details.status === "killed"
+				|| !!details.signal || (typeof exit === "number" && exit !== 0);
+			service.apply(bashResultEvents(
+				{ sessionId: graph.sessionId, taskId: graph.taskId, ts: Date.now() },
+				{ command, toolCallId: `bg-${String(details.id ?? Date.now())}`, failed, excerpt: typeof details.error === "string" ? details.error : undefined },
+			));
+		} catch {
+			/* a background receipt must never fail because of the graph */
+		}
+	});
 }
