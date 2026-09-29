@@ -10,6 +10,8 @@
 
 **A background test run no longer counts as verification before it has run.** `bg_run` returns a task id immediately, but the goal and task-state ledgers were clearing verification debt — and recording a passing check — the moment it was called. A suite launched in the background and left to fail still left the goal free to close. Both now settle on the terminal receipt: the debt clears and the passing check is recorded when the task reports `completed` with a zero exit, and a failed or killed run verifies nothing. A launch is still recorded as an attempt.
 
+**An old waiver could silently approve a later, unrelated change.** The completion gate refuses once per distinct set of gaps and treats a repeat of that same call as the deliberate "ship anyway" it asks for. The refusal was remembered for the rest of the session, so any later gap of the same shape inherited it: refuse once over one unverified edit, take the waiver, and the next unrelated unverified edit of the same size closed the goal with nothing checked. A waiver is now spent by the call that uses it, so the next gap of the same shape is refused again. Only an immediate repeat waives, which is what the refusal asks for.
+
 ## 0.16.0 — 2026-09-29
 
 **Static audits that run without being asked.** A new `code_audit` tool and a new `review` action on `svg_inspect` find the defects a careful reviewer would raise, from source text alone: nothing runs, nothing is installed, no model is called.

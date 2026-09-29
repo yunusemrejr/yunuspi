@@ -195,7 +195,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");
 					}
-					const done = complete(goal, decision.waived);
+					// A waiver is spent by the call that used it. The refusal keys on the
+				// shape of the gaps, so keeping a spent key for the whole session let
+				// any later gap of the same shape auto-waive — a fresh unverified edit
+				// then closed the goal as though the user had approved that one too.
+				if (decision.waived) refused.delete(decision.key);
+				const done = complete(goal, decision.waived);
 					persist(done, ctx);
 					ctx.ui?.notify?.(`Goal ${done.id} achieved${decision.waived ? " with recorded waiver" : ""}.`, "info");
 					return text(`Goal achieved${decision.waived ? " with a recorded waiver; name each unresolved item in the final report" : ""}. Give the user a short evidence-based summary.`);

@@ -211,3 +211,33 @@ test('a background run settles its own debt: starting one verifies nothing, fini
  assert.match(await settled('npm install',{status:'completed',exitCode:0,command:'npm install'}),/1 file change/,'an unrelated green background job is not verification');
  assert.match(await settled('pnpm test',{status:'completed',exitCode:0,command:'pnpm test'}),/Goal achieved/);
 });
+
+test('a spent waiver does not carry over to a later, unrelated gap',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ const state=()=>h.entries.at(-1).data;
+ for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ // One edit, refused, then deliberately waived: the documented "repeat the call" path.
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ assert.match(await h.call({action:'complete'}),/1 file change/);
+ assert.match(await h.call({action:'complete'}),/recorded waiver/);
+ assert.equal(state().status,'achieved');
+ // A later goal in the same session must refuse a fresh unverified edit, not inherit it.
+ await h.commands.goal.handler('Ship the importer',h.ctx);
+ for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'b.ts'}});
+ assert.match(await h.call({action:'complete'}),/1 file change/,'a fresh unverified edit is refused, not waived by an older approval');
+ // And within one goal, a second gap of the same shape after re-verification is also fresh.
+ const h2=harness();
+ await h2.commands.goal.handler('Ship the exporter',h2.ctx);
+ for(const criterion of h2.entries.at(-1).data.criteria)await h2.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ await h2.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ assert.match(await h2.call({action:'complete'}),/1 file change/);
+ assert.match(await h2.call({action:'complete'}),/recorded waiver/);
+ // Resume re-arms the same goal; a fresh unverified edit must refuse again rather
+ // than inherit the waiver that closed it.
+ await h2.commands.goal.handler('resume',h2.ctx);
+ await h2.emit('tool_result',{toolName:'bash',input:{command:'npm test'}});
+ await h2.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ assert.match(await h2.call({action:'complete'}),/1 file change/,'the spent waiver does not re-open the gate');
+});
