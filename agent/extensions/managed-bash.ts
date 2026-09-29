@@ -41,6 +41,7 @@ import {
 import { Type } from "typebox";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { choices } from "./lib/tool-schema.ts";
 /** Foreground grace period used by bounded internal capture helpers. */
 const GRACE_MS = 4000;
 /** Node setTimeout() upper bound; delays above this clamp to 1ms (see resolveTimeoutMs). */
@@ -498,20 +499,7 @@ export async function runManagedCommand(
 }
 
 const processSchema = Type.Object({
-	action: Type.Union(
-		[
-			Type.Literal("list"),
-			Type.Literal("status"),
-			Type.Literal("output"),
-			Type.Literal("wait"),
-			Type.Literal("kill"),
-			Type.Literal("remove"),
-		],
-		{
-			description:
-				"list: internal managed helper jobs. status: one helper's state. output: tail stdout/stderr. wait: block briefly for exit. kill: terminate (SIGTERM→SIGKILL; force=true skips TERM). remove: forget a finished helper. Explicit bg_run tasks use bg_status/bg_logs/bg_kill.",
-		},
-	),
+	action: choices(["list", "status", "output", "wait", "kill", "remove"], "list: internal managed helper jobs. status: one helper's state. output: tail stdout/stderr. wait: block briefly for exit. kill: terminate (SIGTERM→SIGKILL; force=true skips TERM). remove: forget a finished helper. Explicit bg_run tasks use bg_status/bg_logs/bg_kill."),
 	id: Type.Optional(
 		Type.String({ description: "Job id (required for everything except list)" }),
 	),

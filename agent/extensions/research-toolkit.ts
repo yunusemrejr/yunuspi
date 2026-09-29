@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
 
+import { choices } from "./lib/tool-schema.ts";
 const MAX_STR = (maxLength: number) => Type.String({ maxLength });
 const bounded = (value: unknown, limit: number): string =>
   typeof value === "string" ? value.trim().slice(0, limit) : "";
@@ -63,12 +64,7 @@ export default function registerResearchToolkit(pi: any) {
       "Use research_toolkit to plan angles or normalize one lead/company/source with provenance (sourceUrl, retrievedAt, hash). Retrieve with web tools, verify primary sources, never fabricate contacts.",
     ],
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("plan"),
-        Type.Literal("lead"),
-        Type.Literal("company"),
-        Type.Literal("source"),
-      ]),
+      action: choices(["plan", "lead", "company", "source"]),
       goal: Type.Optional(MAX_STR(500)),
       context: Type.Optional(MAX_STR(500)),
       name: Type.Optional(MAX_STR(200)),

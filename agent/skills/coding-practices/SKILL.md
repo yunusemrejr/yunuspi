@@ -168,3 +168,6 @@ Concrete best-coding-practices with before/after examples — naming, function d
 
 ## Recovering an exact-text edit
 Read the current target region before constructing `oldText`; use verbatim text, not remembered or reconstructed formatting. A search result or another agent's summary may locate the code but does not replace the read required by the edit tool. After a rejected batch, check whether the tool reports no changes or partial changes. Retry the full corrected batch only when nothing applied; otherwise retry only failed edits. Re-read after formatters or concurrent changes, preserve unrelated work, and never bypass a failed exact match with a broad whole-file overwrite. Compaction does not make remembered source authoritative.
+
+## Tooling
+`code_audit` with `domains:["patterns","efficiency"]` reports mutable defaults, bare `except`, thrown strings, boolean traps, nested ternaries, quadratic `reduce`, I/O inside loops and other patterns from this skill; `code_quality` covers duplication, slop, complexity and import structure. Both run cheaply on the changed files (`changed:true`) before you call a change clean.

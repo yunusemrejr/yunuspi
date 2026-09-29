@@ -18,6 +18,7 @@ import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
 import { registerShadowSource } from './intervention-registry.ts';
+import { choices } from "./tool-schema.ts";
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
 
@@ -54,7 +55,7 @@ export function reviewAspects(files: string[], task = '', history: any[] = [], p
   // file shape: "redesign the API" must not buy an interface review.
   const authProse = /\b(?:login|logout|sign-?in|sign-?up|signup|password|passkey|oauth|sso)\b/i.test(prose);
   if (/auth|permission|security|migration|schema|\.sql\b/i.test(names) || /\b(?:security|authentication|authorization)\b/i.test(prose) ||
-    signal('quality-trust-boundary', 'quality-auth-content', 'quality-html-boundary', 'quality-data-change') ||
+    signal('quality-trust-boundary', 'quality-auth-content', 'quality-html-boundary', 'quality-data-change', 'audit-security') ||
     (authProse && codeFile)) selected.add('security');
   const uiFile = /\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names);
   const uiSignal = patterns.some(p => typeof p?.key === 'string' && p.key.startsWith('ui-'));
@@ -66,7 +67,7 @@ export function reviewAspects(files: string[], task = '', history: any[] = [], p
   if ((uiFile || uiSignal) && /\bredesign\b|\brestyle\b|styling|stylesheet|\btheme\b|dark mode|\blayout\b/i.test(prose)) selected.add('interface');
   if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
   if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose) ||
-    signal('quality-fanout') ||
+    signal('quality-fanout', 'audit-runtime') ||
     (codeFile && /\b(?:deadlock|race condition|backpressure|latency|throughput|timeouts?|slow query|n\+1)\b/i.test(prose))) selected.add('runtime');
   if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release|publish|artifact/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
   if (!selected.size && files.length) selected.add('correctness');
@@ -715,7 +716,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   pi.on?.('session_compact', () => { noted = ''; });
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
-    parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
+    parameters:Type.Object({action:choices(['inspect','review','assess']),disposition:Type.Optional(choices(['accepted', 'blocked'])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
     async execute(_id: string, params: any, signal: any, update: any, ctx: any) {
       const ticket = generation;
       const rawRetryReason = typeof params.retryReason === 'string' ? params.retryReason.trim() : '';

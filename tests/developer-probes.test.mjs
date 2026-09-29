@@ -153,8 +153,8 @@ test('journal metadata uses forward cursor pages and never returns body or host 
 
 test('native sys tool exposes and validates both new actions',async()=>{
  let tool;registerSys({registerTool:value=>{tool=value;}});
- assert.ok(tool.parameters.properties.action.anyOf.some(row=>row.const==='service_detail'));
- assert.ok(tool.parameters.properties.action.anyOf.some(row=>row.const==='journal'));
+ assert.ok(tool.parameters.properties.action.enum.includes('service_detail'));
+ assert.ok(tool.parameters.properties.action.enum.includes('journal'));
  const invalid=await tool.execute('fixture',{action:'journal',unit:'--all'});assert.equal(invalid.isError,true);
  const wrong=await tool.execute('fixture',{action:'host',unit:'example.service'});assert.equal(wrong.isError,true);
 });

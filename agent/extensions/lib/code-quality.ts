@@ -545,7 +545,7 @@ const GENERATED = /(?:\.min\.[a-z]+|\.bundle\.js|\.generated\.[a-z]+|-lock\.json
 export interface Collected { files: SourceFile[]; skipped: number; truncated: boolean; }
 /** Collect supported source files under explicit paths, inside the workspace,
  * without following symlinks, within file-count and byte budgets. */
-export async function collectSources(cwd: string, inputs: string[], accept: (file: string) => boolean, budget = { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 }): Promise<Collected> {
+export async function collectSources(cwd: string, inputs: string[], accept: (file: string) => boolean, budget: { files: number; bytes: number; fileBytes: number; avgLine?: number } = { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 }): Promise<Collected> {
   const root = await fs.realpath(cwd);
   const files: SourceFile[] = [];
   let bytes = 0, skipped = 0, truncated = false;
@@ -559,7 +559,7 @@ export async function collectSources(cwd: string, inputs: string[], accept: (fil
     if (source === undefined || source.includes("\0")) { skipped++; return; }
     // Minified or data-like files: very long average lines.
     const newlines = (source.match(/\n/g) ?? []).length + 1;
-    if (source.length / newlines > 400) { skipped++; return; }
+    if (source.length / newlines > (budget.avgLine ?? 400)) { skipped++; return; }
     bytes += stat.size;
     files.push({ path: path.relative(root, abs) || path.basename(abs), source });
   };

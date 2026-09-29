@@ -30,6 +30,7 @@ import { Agent, request } from "undici";
 import { Type } from "typebox";
 import { lookupWithAbort, validateRemoteUrl, type Lookup, type LookupAddress } from "./pi-web-access/ssrf-protection.ts";
 
+import { choices } from "./lib/tool-schema.ts";
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 const URL_LIMIT = 2048;
 const BODY_LIMIT = 65536;
@@ -503,7 +504,7 @@ export default function httpTools(pi: any) {
     ],
     parameters: Type.Object({
       url: Type.String({ minLength: 1, maxLength: URL_LIMIT }),
-      method: Type.Optional(Type.Union(METHODS.map((m) => Type.Literal(m)))),
+      method: Type.Optional(choices(METHODS)),
       headers: Type.Optional(
         Type.Record(Type.String(), Type.String({ maxLength: 1024 })),
       ),

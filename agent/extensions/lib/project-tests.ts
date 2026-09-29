@@ -10,6 +10,7 @@ import { tokenizeSimple } from './bash-routing.ts';
 import { registerContinuationSource } from './continuation-notice.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
 
+import { choices } from "./tool-schema.ts";
 const ENTRY = 'project-test-checkpoint-v1';
 /** pi-background-tasks' terminal publication channel (extension-api.ts). */
 const BG_TERMINAL_CHANNEL = 'pi-background-tasks:terminal:v1';
@@ -654,8 +655,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
     description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
-    parameters: Type.Object({ action: Type.Union([Type.Literal('inspect'), Type.Literal('assess')]),
-      disposition: Type.Optional(Type.Union([Type.Literal('required'), Type.Literal('not_needed'), Type.Literal('blocked')])),
+    parameters: Type.Object({ action: choices(['inspect', 'assess']),
+      disposition: Type.Optional(choices(['required', 'not_needed', 'blocked'])),
       reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 })),
       commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test. Put explanations in reason, never append prose or parenthetical notes. Inspect returns the exact planned commands and their receipts.' }), { maxItems: 8 })) }),
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {

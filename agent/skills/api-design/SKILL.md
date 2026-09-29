@@ -80,3 +80,6 @@ Use **RFC 9457 Problem Details** (`application/problem+json`):
 ## Detailed coverage
 
 Designing public & internal APIs — REST conventions that matter, HTTP semantics done right, error model (RFC 9457), pagination, idempotency, versioning & deprecation, authz at the API, webhooks, OpenAPI discipline, and when to use GraphQL/gRPC/SSE instead. Use when designing any API, reviewing an endpoint, or fixing a broken API contract.
+
+## Tooling
+`code_audit` with `domains:["backend","security"]` checks handlers for the failures that break an API under load or attack: missing outbound timeouts, N+1 queries, whole request bodies written to models, stack traces returned to clients, blocking calls in handlers, async Express routes without error forwarding, and a database client created per request.

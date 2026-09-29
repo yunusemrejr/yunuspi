@@ -25,3 +25,6 @@ Read `references/patterns.md`, then inspect the complete component and the exist
 
 ## Authored component defaults
 Remove decorative LIVE pills with blinking or pulsing dots by default, in every form: `animate-ping`/`animate-pulse` spans, blink/pulse/glow keyframe loops, haloed dots, and literal `●`/`•`/emoji prefixes before status words. Remove eyebrow pills above headings and invented static status labels (`BETA`, `NEW`, `AI ACTIVE`) unless a real fact stands behind them. Prefer quiet, truthful status; verify required live data across stale/offline/error states. Use available `artifact_check {operation:"ui",path:...}` for source cues, then rendered and interaction evidence. User requirements and intentional functional status systems take precedence. See `references/patterns.md` for typography, color, placement and review decisions.
+
+## Tooling
+`code_audit` with `domains:["ui"]` runs these cues over a whole tree together with source-level accessibility checks (alt text, focus outlines, zoom, tiny text, click handlers on non-interactive elements). Rendered verification stays with `render_see` and `design_audit`.

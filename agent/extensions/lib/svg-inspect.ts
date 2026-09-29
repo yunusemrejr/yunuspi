@@ -88,7 +88,10 @@ export function tokenizeSvg(xml: string): Tag[] {
       if (!key || key === "/" || attrs[key] !== undefined) continue;
       let value = attr[2] ?? "";
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-      attrs[key] = value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&apos;/g, "'").slice(0, 4096);
+      // Geometry attributes keep their full data: truncating a long `d` at 4096 characters cut real paths mid-number,
+      // so node counts, bounds and padding described a fragment. The document itself is already bounded (4 MB).
+      const limit = key === "d" || key === "points" ? 2_000_000 : 4096;
+      attrs[key] = value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&apos;/g, "'").slice(0, limit);
     }
     tags.push({ name: name.toLowerCase(), attrs, selfClosing: selfClosing === "/", closing: closing === "/" });
   }
@@ -598,7 +601,7 @@ export function compareSvgSet(measures: readonly SvgMeasure[]): { summary: strin
 
 const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
 
-async function readSvg(file: string, cwd: string): Promise<{ xml: string; resolved: string }> {
+export async function readSvg(file: string, cwd: string): Promise<{ xml: string; resolved: string }> {
   const root = realRoot(cwd);
   const candidate = path.resolve(cwd, file.replace(/^@/, ""));
   const resolved = await fs.realpath(candidate).catch(() => {

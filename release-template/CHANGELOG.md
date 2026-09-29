@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.16.0 — 2026-09-29
+
+**Static audits that run without being asked.** A new `code_audit` tool and a new `review` action on `svg_inspect` find the defects a careful reviewer would raise, from source text alone: nothing runs, nothing is installed, no model is called.
+- `code_audit` checks security (injection into SQL and shell, secrets in provider formats, `eval`, HTML sinks, unsafe deserialization, disabled TLS, open CORS with credentials, cookie flags, JWT misuse, path traversal, open redirects, SSRF), backend engineering (outbound calls without timeouts, N+1 queries, whole request bodies written to models, stack traces sent to clients, blocking calls in handlers and `async def`, async Express 4 routes without error forwarding, a database client per request), efficiency (quadratic `reduce`, I/O inside loops, non-passive scroll listeners, render-blocking scripts), coding patterns (mutable defaults, bare `except`, thrown strings, boolean traps) and UI source (alt text, focus outlines, blocked zoom, tiny text, click handlers on `div`s, plus the design-slop cues). It reads JS/TS, Python, Go, PHP, shell, CSS, HTML, JSX/Vue/Svelte and config files, over paths, the workspace or `changed: true`.
+- `svg_inspect` gained a `review` action instead of a second SVG tool, so measurements and verdicts come from one owner. Each file gets a score and verdict with fixes: art clipped by the viewBox (strokes included), no viewBox, hard-coded colours where `currentColor` belongs, node bloat, circles drawn as paths, embedded rasters, live text, filter cost, accessibility, active content, duplicate ids and broken references. `optimize: true` writes a lossless cleaned copy to a fresh git-ignored folder, only after the measurements agree (same paths, nodes and bounds). A messy Inkscape export went from 1,112 to 266 bytes; the original is never modified. Icon-set consistency stays in the existing set review.
+
+Agents do not have to remember either one. After every `write` or `edit`, the security, backend, efficiency and UI-source rules run on the changed span and the edit result carries at most two findings, once per finding per session, with the fix. A saved `.svg` gets the same treatment on top of the existing structural check. Security and runtime cues promote the `security` and `runtime` review aspects, and requests that mention security, backends, endpoints, authentication, N+1, performance audits or coding patterns stage `code_audit`, and SVGs, icons or vector logos stage `svg_inspect`, on the first model turn. High-severity rules were tuned on this repository's own source: `db.exec` is not a shell, joined placeholders and constants are not SQL injection, and a `request` parameter alone does not make a function an HTTP handler.
+
+**Smaller tool schemas.** Eight extensions each defined their own `choices()` helper, and about fifty other sites built enums as `Type.Union` of `Type.Literal`s, which serializes every value as its own `anyOf` object on every model turn. They now share one helper (`lib/tool-schema.ts`) that emits `{type:"string",enum:[…]}`. Across the existing tools this removed about 11,000 characters of schema (7%), and enums are now valid on providers that reject `anyOf` of constants.
+
+**`svg_inspect` no longer measures a fragment of long paths.** Attribute values were cut at 4,096 characters, so a `d` longer than that (any traced or illustrated SVG) lost its tail mid-number: node counts, bounds, padding and centre described part of the drawing. Path and polygon data are now kept whole (the document is still bounded at 4 MB).
+
+**`bg_run` no longer rejects ordinary commands.** Omitting `isAgent` cost a turn in four of the last four days of sessions, always for a server or script. It is now inferred as `false` unless the command launches an agent CLI (`claude`, `codex`, `pi`, `yunuspi` and similar), which still requires an explicit answer.
+
+**Skills know the tools.** `svg-assessment`, `custom-svg`, `web-security`, `api-design`, `coding-practices` and `ui-antipattern-review` end with a short note on when to run `code_audit` or `svg_inspect` review and what they cannot judge. See `docs/CODE-AUDIT.md`.
+
+## 0.15.0 — 2026-09-29
+
+**Heavy work can no longer take the machine down.** Sessions that edited the harness kept dying: the kernel killed a node process holding 34 GB. The cause was a test, not a render. Comparing two differing WAV files with `assert.deepEqual` builds a diff that grows without bound, so one failing byte comparison exhausted RAM. Binary comparisons in the tests now go through `tests/bytes.mjs`, which reports sizes and hashes instead.
+
+**Renders, narration and music synthesis run under a memory watchdog.** `lib/memory-guard.ts` sums the resident memory of a child's whole process tree once a second and kills it when it passes its budget (half of free memory, kept between 1.5 and 12 GB; `YUNUSPI_VIDEO_MEMORY_MB` overrides) or when the host drops under 1 GB free. The tool returns an error that says to lower the resolution, render by scene or range, or shorten the audio. Render workers are also sized to memory: about 300 MB plus 200 MB per output megapixel each, so a 4K render runs fewer Chrome tabs in parallel instead of exhausting RAM.
+
+**Code-first video studio, finished.** Six tools now carry a vague prompt to a verified film: `video_project` (art-directed looks derived from the subject, vertical/square/landscape formats, publish or personal intent, brand, calls to action, optional 3D), `video_assets` (license-tracked photographs, footage and CC0 3D models), `video_render` (stills, preview, final with loudness mastering, captions, chapters and a description draft, and a thumbnail mode), `video_qa`, `narration_tts` (styles, word-level timing, more voices) and `audio_synth` (arranged music with drums, melody and an intensity arc, sound design, band-limited sfx). The `code-first-video` skill documents the new tools and the memory-safe way to iterate.
+
+**Tests.** The template font, tool-count and transition assertions match the redesigned template, an unknown sound name is rejected before any directory is created, and the drum test describes the current style-driven arrangement.
+
+## 0.14.1 — 2026-09-28
+
+**`/goal` no longer freezes the session.** Setting a goal printed "Goal … set" and then nothing happened: no working indicator, no turn, and the editor stopped reacting to input. The command held the input queue while its handler ran, and the handler's kickoff message waited in that same queue for the handler to finish, so neither could proceed. Extension commands now release the input queue before their handler runs, because they drive their own turns. This fixes every command that sends a message, not only `/goal`. `/goal` also returns as soon as the kickoff is queued instead of waiting for the whole run, and reports a kickoff failure instead of discarding it. A regression test reproduces the deadlock.
+
+**The loaded-extensions list names `pi-lens` correctly.** An extension whose entry is a built `dist/index.js` was listed as `dist`; it is now listed under its package name.
+
+## 0.14.0 — 2026-09-28
+
+**`/goal` gives important tasks a definition of done.** `/goal <what you want done>` turns the demand into numbered acceptance criteria (your list items and directives, plus a mandatory end-to-end verification criterion), stages a `goal` tool, and starts the work. The criteria ride the context every turn and are saved as snapshots on the session branch, so compaction, resume and fork keep them. A criterion only counts when the agent records what it observed (command and result, file and line, screenshot finding); a bare "done" is refused. `goal complete` is refused while criteria are open or files changed after the last passing check, once per distinct set of gaps; repeating the call is a recorded waiver, so you are never deadlocked. When the agent settles with criteria open, the harness sends one continuation naming them. Loops are bounded by construction: at most six continuations, a stop at the second continuation in a row that records no new evidence, a pause on interrupt, and no continuation while your messages are queued. `/goal` shows progress; `pause`, `resume`, `retry`, `done`, `clear` and `criteria a; b` manage it. Earlier goal trackers were retired because they inferred goals; this one exists only when asked. `PI_GOAL=0` disables it. See `docs/GOAL.md`.
+
+**Tool mistakes that cost real turns now recover or explain themselves.** From recent session transcripts:
+- `git_info review` and `log` failed with a git error in a repository with no commits, exactly when the first commit needs its review. Review now compares against the empty tree, and log and show say "No commits yet".
+- `creative_direct` rejected 21 calls because models send `focalHierarchy` as a ranked list, `intent` as `{terms:[…]}` and array-valued `secondary`. All three shapes are accepted.
+- `expert_director taste` rejected 7 calls: the fields models send flat beside `action` were stripped by schema validation, so the documented flat form never worked. They are declared now.
+- A JSON-encoded array that does not parse (for example `subagent tasks` with an unescaped quote) produced "tasks.0: must be object", and the model resent the identical 12 KB payload three times. The error now says the argument is a string that is not valid JSON, and how to send it.
+
+**`code_quality structure` checks the import graph.** Runtime import cycles (type-only imports are ignored), modules nothing imports, the most imported and most importing files, files over 600 lines, and packages imported but undeclared or declared but unused. It reads JS/TS and Python without running anything, and is meant as evidence for a decision, not a verdict.
+
+**Video QA no longer passes a slideshow.** A rendered video that was static for 53% of its runtime in three 2-second holds passed automated QA because no single hold reached 4 seconds. QA now also warns when 35% or more of a video of six seconds or longer is static in holds of 1.5 seconds or more. The full pipeline (scaffold, check, stills, music and sound effects, final render, QA) was run end to end for this release.
+
+## 0.13.9 — 2026-09-28
+
+**Interface work now starts from an embedded design doctrine.** Unconstrained models converge on the same two looks: the indigo/purple SaaS page, then the cream/terracotta editorial page that reacted against it. The new `design-slop-prevention` skill ships inside the harness and explains the mechanism, lists the tells of both generations, and gives a nine-step procedure. It includes the swap test: if another company's logo and headline can replace yours and the page still works, the design is slop. It is a second layer on top of `anti-ai-slop` and the UI checklist, aimed at the choice of palette, typeface, layout and copy before any code is written.
+
+**Jev decides when to demand it.** A new typed decision, `ui-work`, judges whether a request is interface work at a few hundred input tokens instead of a model turn. UI vocabulary and UI files frame the question; Jev settles the ambiguous middle in both directions. Live probe: "make the checkout less confusing" scored 0.88 and "add a dark mode toggle" 0.86, while "fix the page fault handler", "add a CLI flag" and "website scraper" scored 0.02–0.18. When the answer is yes, the agent must read the skill:
+- a reminder rides the context until it is read;
+- a UI file write is refused at most twice per request until then, so ignoring the reminder cannot loop or stall;
+- one read clears it for the session;
+- subagents launched without a skill catalog still get the installed path, and the reminder tells the parent to pass it along when delegating interface work.
+
+An unavailable or unsure judge keeps the heuristic: strong UI vocabulary still counts, weak vocabulary does not. Writing a `.tsx`, `.html`, `.css` or GUI-toolkit file settles it without any judge. The web-design expert pack lists the skill and requires the swap test at convergence.
+
+**Jev spares the change-scope council for small edits.** The council is a paid, up-to-four-minute, three-reviewer run started by a regex cue. In a probe of eight small edits that pass the cue ("refactor `parseDate` to use early returns", "fix the modal overflow on mobile"), six triggered it. A new typed decision, `scope-council-need`, asks whether the request is a small self-contained change with no design choice or earlier preference at stake. Small edits scored 0.43–0.84 and open redesign or refactor work 0.04–0.23. The veto needs 0.7, so it can only skip the council, never add one. Open visual briefs are never vetoed, and uncertainty, a 2.5-second timeout or an unavailable judge keeps the council. A skip is recorded as a `scope-deliberation-v1` receipt with status `skipped-by-jev`.
+
+**Runaway shell writers are capped.** An unbounded writer (ffmpeg with `apad`) once filled the SSD. Shell commands now run under a 32 GiB per-file cap (`ulimit -f`), and a disk watcher stops a command that consumes more than 40 GiB or pushes free space under a 10 GiB reserve, including one that has been detached. `PI_MAX_FILE_GB`, `PI_DISK_BUDGET_GB` and `PI_DISK_RESERVE_GB` tune the limits; 0 disables one.
+
+## 0.13.8 — 2026-09-28
+
+**A reply-only prompt gets a reply, not a work session.** The live smoke check ("Reply with exactly: OK") ran for over three minutes. It loaded the maintenance skill, made todos, ran bash, and sent 28k-token turns. The prompt analyser and the Observer had both read the request as trivial. Three first-turn nudges still told the model to orient, plan and do maintenance:
+- the harness orientation;
+- the todo-plan guidance;
+- the harness-maintenance note.
+
+A single-line request whose whole deliverable is the reply text ("reply/respond/answer/say/print/output with exactly/only …", with no follow-on work) now skips all three. It does not use up their once-per-session delivery, so the next real request still gets them.
+
+## 0.13.7 — 2026-09-28
+
+**The Span behavior sensor works.** OpenRouter serves `respan/span-01-lite` only through its decisions endpoint and refuses chat completions with a 400, so every Span evaluation failed and recorded `unavailable`. That was 13 of 13 in recent sessions, with no success. The sensor now sends the bounded trace as the decisions state, with one plain `noul` question per catalog signal. Span answers only that question type, so P(yes) becomes present/absent. A live check on a repeated-failure trace flagged the loop and the premature completion at 0.97 each, took 1.7 s and cost nothing. Scores stay shadow-only, as before.
+
+**Paid reviewer reports are no longer discarded on malformed JSON.** In one live session, two paid quality reviews were thrown away as "did not contain a reviews array":
+- One contained invalid escapes (`\u夕暮れ\u`).
+- The other was missing its closing `]}`.
+
+Stray backslashes are now read as literal characters, and one report (or a bare array of reports) is wrapped as the envelope. Nothing is invented: text without an aspect report stays rejected.
+
+**Work after an accepted revision can be reviewed.** Both review rounds could be spent on the first revision. Later feature work in the same request then could only close on a forced waiver. Accepting a revision now leaves one round for the work that follows. Automatic admission still stays within the per-request budget.
+
+**Closing the last todo no longer races a verification in the same batch.** A todo call that completes the plan was checked for verification receipts before a sibling `quality_review` or `project_tests` call in the same message had settled. It was refused, which cost a turn. `todo` now runs as a sequential barrier, so earlier calls settle first.
+
+**A self-matching `pgrep -f` is rewritten instead of refused.** `pgrep -f name` matches its own shell, so the router used to refuse it and spend a turn. A plain pattern is now rewritten in place to the equivalent bracket form, `pgrep -f '[n]ame'`. Patterns that start with regex syntax or contain quotes are still refused, with the fix named. pgrep's pattern is its last positional argument, so `-u root -f sshd` no longer treats `root` as the pattern.
+
+**Clearer Double failure notes.** An unavailable Double stream used to cite the child's JSON watchdog status line as its "underlying failure". It now names the classified exit, for example `process-signal (exit 129)` when the user interrupts.
+
 ## 0.13.6 — 2026-09-28
 
 **`/double` streams no longer fail on a stale model exclusion.** A 595-second provider-gate cooldown was recorded as a 24-hour model exclusion, so every explicit same-route `/double` stream failed for a day. Transient failures (rate limits, 429, 5xx, timeouts, connection errors, provider cooldowns) now exclude a route only for their stated wait, clamped between 30 seconds and 15 minutes. Durable failures (auth, quota, unknown model) keep 24 hours. Stores written before this release heal on load.

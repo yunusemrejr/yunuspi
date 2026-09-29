@@ -5,9 +5,9 @@ import { audioSynth, narrationTts, PIPER_VOICES, SFX_TYPES, VOICE_STYLES, videoP
 import { LOOKS } from "./lib/video-looks.ts";
 import { videoAssets } from "./lib/video-assets.ts";
 import { PLATFORMS } from "./lib/video-publish.ts";
+import { choices } from "./lib/tool-schema.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
-const choices = (values: string[], description?: string) => Type.Union(values.map((value) => Type.Literal(value)), description ? { description } : {});
 
 export default function videoStudio(pi: any) {
   function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void) => Promise<any>, deadlineMs: number) {

@@ -5,8 +5,8 @@ import path from "node:path";
 import { Type } from "typebox";
 import { createDesktopManager } from "./lib/desktop-session.ts";
 import { canonicalMutationPath, containsPath } from "./lib/self-mutation-guard.ts";
+import { choices } from "./lib/tool-schema.ts";
 
-const choices = (values: string[]) => Type.Union(values.map((value) => Type.Literal(value)));
 
 export default function desktopSession(pi: any) {
   const manager = createDesktopManager();

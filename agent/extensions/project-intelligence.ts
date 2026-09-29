@@ -41,6 +41,7 @@ import {
   conversationContext,
   reviewWorkflowBrief,
 } from "./lib/project-intelligence/workflow-context.mjs";
+import { choices } from "./lib/tool-schema.ts";
 const enabled = () => process.env.PI_PROJECT_INTELLIGENCE !== "off";
 const KEY = "project-intelligence-context";
 const MUTATING = new Set(["write", "edit", "bulk_edit"]);
@@ -788,8 +789,7 @@ export default function projectIntelligence(pi: any) {
     description:
       "Persistent evidence-backed project knowledge. Query relevant architecture/history; impact finds consumers/dependents before changes or removals. Record durable discoveries (inferences, not automatic proof); concurrent contradictory sources remain visible. refresh rescans changed evidence; inspect returns entity declarations, confidence and versioned provenance, or a source and its current version; update replaces an agent record with expectedVersion. history can filter sourceId. Use focus (ID or exact key), hops, types/relations and maxChars to control retrieval. Data stays local and project-scoped.",
     parameters: Type.Object({
-      action: Type.Union(
-        [
+      action: choices([
           "query",
           "impact",
           "inspect",
@@ -799,14 +799,11 @@ export default function projectIntelligence(pi: any) {
           "refresh",
           "health",
           "history",
-        ].map((x) => Type.Literal(x)),
-      ),
+        ]),
       query: Type.Optional(Type.String({ maxLength: 1000 })),
       focus: Type.Optional(Type.String({ maxLength: 256 })),
       direction: Type.Optional(
-        Type.Union(
-          ["incoming", "outgoing", "both"].map((x) => Type.Literal(x)),
-        ),
+        choices(["incoming", "outgoing", "both"]),
       ),
       hops: Type.Optional(Type.Integer({ minimum: 0, maximum: 6 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 40 })),
@@ -833,16 +830,12 @@ export default function projectIntelligence(pi: any) {
             }),
           ),
           status: Type.Optional(
-            Type.Union(
-              ["inferred", "assumed", "historical", "temporary"].map((x) =>
-                Type.Literal(x),
-              ),
-            ),
+            choices(["inferred", "assumed", "historical", "temporary"]),
           ),
           confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
           exclusive: Type.Optional(Type.Boolean()),
           scope: Type.Optional(
-            Type.Union([Type.Literal("shared"), Type.Literal("checkout")]),
+            choices(["shared", "checkout"]),
           ),
           sourceFile: Type.Optional(Type.String()),
           quote: Type.Optional(Type.String({ maxLength: 600 })),

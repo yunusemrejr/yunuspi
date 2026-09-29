@@ -16,6 +16,7 @@ import {
   type TasteProvenance, type TasteScope,
 } from "./lib/expert-taste.ts";
 import { resolveProjectIdentity } from "./lib/project-identity.ts";
+import { choices } from "./lib/tool-schema.ts";
 
 const ENTRY = "expert-director-v1";
 const INSPECT_KEY = Symbol.for("yunus-pi.micro.inspect.v1");
@@ -24,7 +25,6 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
   try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
 }
 
-const choices = (values: string[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const strList = (maxItems: number, maxLength: number) =>
   Type.Optional(Type.Array(Type.String({ maxLength }), { maxItems }));
 

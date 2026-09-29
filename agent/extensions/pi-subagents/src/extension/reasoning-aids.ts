@@ -1,5 +1,6 @@
 import {Type} from 'typebox';
 import {dependencyPlan,decisionFrontier,coverageSelect} from '../runs/shared/reasoning-aids.ts';
+import { choices } from "../../../lib/tool-schema.ts";
 export default function(pi:any) {
   if(process.env.PI_REASONING_AIDS==='off' && process.env.PI_SUBAGENT_CHILD!=='1')return;
   const ID=Type.String({minLength:1,maxLength:64});
@@ -17,6 +18,6 @@ export default function(pi:any) {
     });
   }
   register('dependency_plan','Calculate dependency layers and a cycle witness from known tasks. Use for multi-step ordering; does not run tasks, replace todo state or establish safe parallelism.',Type.Object({tasks:array(Type.Object({id:ID,after:Type.Optional(array(ID,16))},{additionalProperties:false}),64,1)},{additionalProperties:false}),p=>dependencyPlan(p.tasks));
-  register('decision_frontier','Prune numerically dominated options without inventing weights. Use for measured cost/latency/quality tradeoffs. Values follow criteria order; unknown data must be gathered first.',Type.Object({criteria:array(Type.Object({id:ID,goal:Type.Union([Type.Literal('min'),Type.Literal('max')])},{additionalProperties:false}),8,1),options:array(Type.Object({id:ID,values:array(Type.Number({minimum:-1e12,maximum:1e12}),8,1)},{additionalProperties:false}),32,1)},{additionalProperties:false}),p=>decisionFrontier(p.criteria,p.options));
+  register('decision_frontier','Prune numerically dominated options without inventing weights. Use for measured cost/latency/quality tradeoffs. Values follow criteria order; unknown data must be gathered first.',Type.Object({criteria:array(Type.Object({id:ID,goal:choices(['min', 'max'])},{additionalProperties:false}),8,1),options:array(Type.Object({id:ID,values:array(Type.Number({minimum:-1e12,maximum:1e12}),8,1)},{additionalProperties:false}),32,1)},{additionalProperties:false}),p=>decisionFrontier(p.criteria,p.options));
   register('coverage_select','Suggest a compact check set covering stated requirements using greedy coverage/cost. No optimality or execution claim. Keep mandatory checks; no need for this on a simple task.',Type.Object({requirements:array(ID,64,1),candidates:array(Type.Object({id:ID,covers:array(ID,64),cost:Type.Optional(Type.Number({minimum:1e-9,maximum:1e9}))},{additionalProperties:false}),64)},{additionalProperties:false}),p=>coverageSelect(p.requirements,p.candidates));
 }

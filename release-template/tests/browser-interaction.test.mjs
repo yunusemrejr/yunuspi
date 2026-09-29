@@ -135,7 +135,8 @@ test("tool surface registers the new actions and parameters", async () => {
   const actions = tool.parameters.enum ?? tool.parameters.anyOf?.flatMap((entry) => entry.enum ?? []);
   const actionSchema = tool.parameters.properties?.action;
   const names = new Set(
-    actionSchema?.anyOf?.flatMap((entry) => (entry.const !== undefined ? [entry.const] : entry.enum ?? [])) ??
+    actionSchema?.enum ??
+      actionSchema?.anyOf?.flatMap((entry) => (entry.const !== undefined ? [entry.const] : entry.enum ?? [])) ??
       actions ??
       [],
   );

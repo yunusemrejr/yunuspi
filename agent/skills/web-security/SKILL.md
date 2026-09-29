@@ -92,3 +92,6 @@ Home-rolled crypto or auth (the ceiling of DIY is: Argon2id + vetted session lib
 ## Detailed coverage
 
 Practical web-app security without over-engineering or lockout — risk-tiering first (so a static site doesn't get mTLS and a payments API doesn't get "we'll add auth later"), the OWASP top 10 as concrete implementation notes (XSS, CSRF, injection, SSRF, IDOR, upload abuse), auth/session done right (passwords, 2FA/passkeys, JWT vs session), a CSP that doesn't brick the site (report-only → enforce), rate limiting, dependency/supply-chain basics, and the explicit "do not over-engineer" list. Use when hardening any web app, reviewing auth/CSP/headers, or deciding how much security a system actually needs.
+
+## Tooling
+`code_audit` with `domains:["security"]` finds the source-level cues this skill describes: injection sinks, secrets, unsafe deserialization, disabled TLS, open CORS with credentials, weak cookie flags, JWT misuse, path traversal, open redirects and SSRF. The same rules run after every edit. They are cues without data-flow analysis: confirm each by tracing the value from its untrusted source to the sink.

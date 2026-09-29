@@ -27,14 +27,15 @@ import {
 } from "./lib/creative-qa.ts";
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
+import { svgReviewRun } from "./lib/svg-analysis.ts";
 import { normalizeAssetInput, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
 import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
 import { captureToFile } from "./render-and-wait.ts";
 import { sniffImage } from "./lib/design-studio.ts";
+import { choices } from "./lib/tool-schema.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
-const choices = (values: string[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const strList = (maxItems: number, maxLength: number) => Type.Array(Type.String({ maxLength }), { maxItems });
 const IMAGE_ATTACH_CAP = 1_100_000;
 
@@ -242,15 +243,20 @@ export default function artDirection(pi: any) {
 
   // ── svg_inspect ──
   register("svg_inspect",
-    "Measure SVG engineering: viewBox, bounds, stroke language, fills, defs (gradients, filters incl. default regions, masks, clipPaths), id collisions, unresolved fragment refs, transform stacks, accessibility, path complexity and optical center/padding/mass proxies. paths (2..24 files) adds set-consistency review flagging the sibling that drifted (stroke, corners, mass, center, padding, canvas). matrix rasterizes representative sizes with ink-coverage proxies for legibility judgment. Bounds apply translate/scale only; rotation stays approximate and is disclosed.",
+    "Measure SVG engineering: viewBox, bounds, stroke language, fills, defs (gradients, filters incl. default regions, masks, clipPaths), id collisions, unresolved fragment refs, transform stacks, accessibility, path complexity and optical center/padding/mass proxies. paths (2..24 files) adds set-consistency review flagging the sibling that drifted (stroke, corners, mass, center, padding, canvas). action review gives each file a score and verdict with fixes (clipped art, missing viewBox, hard-coded colour where currentColor belongs, node bloat, primitives drawn as paths, embedded rasters, live text, active content, size potential); optimize:true also writes a lossless cleaned copy to a fresh git-ignored folder after verifying shapes and bounds are unchanged (originals untouched). matrix rasterizes representative sizes with ink-coverage proxies for legibility judgment. Bounds apply translate/scale only; rotation stays approximate and is disclosed. Runs automatically on saved .svg files.",
     Type.Object({
-      action: Type.Optional(choices(["inspect", "matrix"])),
+      action: Type.Optional(choices(["inspect", "review", "matrix"])),
       path: Type.Optional(localPath),
-      paths: Type.Optional(Type.Array(localPath, { minItems: 2, maxItems: 24 })),
+      paths: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 24 })),
       sizes: Type.Optional(Type.Array(Type.Integer({ minimum: 8, maximum: 1024 }), { minItems: 1, maxItems: 6 })),
+      kind: Type.Optional(choices(["icon", "logo", "illustration"], "review: override the inferred kind")),
+      optimize: Type.Optional(Type.Boolean({ description: "review: write verified lossless copies" })),
+      precision: Type.Optional(Type.Integer({ minimum: 0, maximum: 6, description: "review optimize: path decimals kept (default 3)" })),
+      outputDir: Type.Optional(localPath),
     }),
     async (params, ctx, signal) => {
       const { state } = sessionOf(ctx);
+      if (params.action === "review") return { result: await svgReviewRun(params, ctx.cwd as string) };
       if (params.action === "matrix") {
         if (typeof params.path !== "string" || !params.path) throw new Error("svg_inspect matrix needs path");
         return { result: await svgMatrixRun({ path: params.path, sizes: params.sizes }, ctx.cwd as string, signal, capture) };

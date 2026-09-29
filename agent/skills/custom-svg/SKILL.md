@@ -52,3 +52,6 @@ description: Hand-crafting SVG — drawing paths, building icon sets, gradients,
 - Strokes not set `vector-effect="non-scaling-stroke"` when the icon scales wildly.
 - `100%` sizes without aspect-ratio context → layout collapse; give the container `aspect-ratio` or explicit box.
 - Forgetting that `filter: drop-shadow()` (CSS) on the svg element is cheaper and crisper than an SVG filter for simple cases.
+
+## Checking what you made
+Run `svg_inspect` with `action:"review"` on a finished SVG: it flags clipped art, a missing viewBox, hard-coded icon colours, bloat and unsafe content, and `optimize:true` writes a verified smaller copy. Then render it and look.

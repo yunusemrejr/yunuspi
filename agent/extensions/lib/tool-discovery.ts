@@ -10,6 +10,7 @@ import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillRoutes } from './skill-routing.ts';
 
+import { choices } from "./tool-schema.ts";
 /** Multi-stage re-rank: large shortlists go straight to batched Jev;
  * small shortlists try local ranking before uncertain Jev validation.
  * Single candidates, trivial queries and
@@ -109,6 +110,9 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] 
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
   { pattern: /\b(?:refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality', 'git_info'] },
+  // Security, backend, efficiency and UI-source audits: staged for work that ships to users or handles untrusted input.
+  { pattern: /\b(?:security (?:audit|review|hardening|scan)|audit (?:the |this |my )?(?:code|backend|api|app|security)|vulnerabilit\w*|owasp|injection|xss|csrf|ssrf|hardcoded (?:secrets?|credentials?)|leaked? (?:secrets?|keys?)|(?:rest|http|graphql|backend|server-side|web) (?:api|service|server)s?|backend (?:code|engineering|service)s?|endpoints?|middleware|n\+1|slow quer(?:y|ies)|rate limit\w*|authentication|authorization|auth (?:flow|system|middleware)|login (?:flow|system)|sql (?:query|queries|injection)|performance (?:audit|review|bugs?|issues?)|coding (?:patterns?|best practices?)|anti-?patterns?|accessibility (?:audit|review|issues?))\b/i, tools: ['code_audit'] },
+  { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect'] },
   { pattern: /\b(?:commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit)\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with
   // the first turn instead of waiting for a late discovery heuristic.
@@ -290,11 +294,7 @@ export function registerToolDiscovery(pi: any) {
       'When browser/screenshot/DOM work, web research, structured-data reads, or past-session/memory questions need a capability that is not active, call tool_search with enable:true: the right tool is usually already installed but off-wire.',
     ],
     parameters:Type.Object({
-      kind:Type.Optional(Type.Union([
-        Type.Literal('tools'),
-        Type.Literal('capabilities'),
-        Type.Literal('commands'),
-      ],{description:'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.'})),
+      kind:Type.Optional(choices(['tools','capabilities','commands'],'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.')),
       group:Type.Optional(Type.String({maxLength:64,description:'Group id from the overview; optional filter.'})),
       enable:Type.Optional(Type.Boolean({description:'Enable query matches explicitly. Exact names enable by default.'})),
       query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot or symbol references.'})),

@@ -114,3 +114,6 @@ The rule of thumb: **inline for the UI, `<img>` for the inert art, sprite for th
 - *The "user-uploaded logo" corrupts the page / runs JS* → inlined untrusted SVG → `<img src>` (frozen) or DOMPurify-SVG; never raw-inline.
 - *The sprite works until the SPA route renders an icon twice* → the `symbol`/`use` with a static `id` → per-instance `id`s or inline-from-build.
 - *"Can I use an icon font?"* → the 2025 answer is no (per the table) → the inline/sprite/mask, with the a11y the font can't give.
+
+## Tooling
+`svg_inspect` with `action:"review"` runs the file side of this checklist mechanically: geometry against the viewBox, `currentColor`, node bloat, primitives drawn as paths, embedded rasters, live text, filter cost, accessibility and active content; `inspect` on several files compares an icon set. `optimize:true` writes a verified lossless copy (same shapes and bounds) and never touches the original. It cannot judge optical weight or metaphor: render the SVG at its real sizes and apply the design side above.

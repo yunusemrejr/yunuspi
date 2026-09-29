@@ -150,7 +150,7 @@ export const EXPERT_PACKS: Record<ExpertDomainId, DoctrinePack> = {
     ],
     dimensions: ["silhouette", "geometry consistency", "stroke language", "small-size behavior", "set coherence", "hygiene"],
     checks: [
-      { tool: "svg_inspect", what: "Geometry, refs, transforms and set-consistency review." },
+      { tool: "svg_inspect", what: "Geometry, refs, transforms and set-consistency review; action review scores theming, bloat and safety." },
       { tool: "artifact_check", op: "svg", what: "Reference integrity, ids, active content, cost cues." },
       { tool: "code_quality", op: "duplicates", what: "Copy-pasted defs shared across icon files." },
     ],

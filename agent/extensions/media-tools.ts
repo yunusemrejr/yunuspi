@@ -6,6 +6,7 @@ import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, prob
 import { composeMusic } from "./lib/music-score.ts";
 import { sceneCapabilities, sceneCreate, sceneRender } from "./lib/scene-studio.ts";
 import { audioMix, videoCompose, VIDEO_TRANSITIONS } from "./lib/media-timeline.ts";
+import { choices } from "./lib/tool-schema.ts";
 export { sceneCreate, sceneRender, audioMix, videoCompose };
 
 export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) {
@@ -239,7 +240,6 @@ export async function imageOcr(params: any, cwd: string, signal?: AbortSignal) {
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const windowSchema = { start: Type.Optional(Type.Number({ minimum: 0, maximum: 86400 })), duration: Type.Optional(Type.Number({ minimum: 0.05, maximum: 600, description: "Window seconds; default 30, maximum 600" })) };
 const outputSchema = { outputDir: Type.Optional(localPath) };
-const choices = (values: string[]) => Type.Union(values.map(v => Type.Literal(v)));
 
 export default function mediaTools(pi: any) {
   function register(name: string, description: string, parameters: any, handler: any) {
@@ -260,7 +260,7 @@ export default function mediaTools(pi: any) {
   register("media_edit", "Create a bounded SDR H.264/AAC clip, extract WAV audio, or perform measured two-pass loudness normalization to WAV. Default first 30 seconds, maximum 600. Fresh output folder; probe and decode validation included. For long/complex edits use FFmpeg through existing background tools.", Type.Object({ action: choices(["clip", "audio", "normalize"]), path: localPath, ...windowSchema, width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), crf: Type.Optional(Type.Integer({ minimum: 0, maximum: 40 })), sampleRate: Type.Optional(Type.Integer({ minimum: 8000, maximum: 96000 })), targetLufs: Type.Optional(Type.Number({ minimum: -36, maximum: -5 })), ...outputSchema }), mediaEdit);
   const note = Type.Object({ pitch: Type.Integer({ minimum: 0, maximum: 127 }), start: Type.Number({ minimum: 0, maximum: 256 }), duration: Type.Number({ minimum: 1 / 480, maximum: 256 }), velocity: Type.Optional(Type.Integer({ minimum: 1, maximum: 127 })) });
   const scoreTrack = Type.Object({ name: Type.Optional(Type.String({ maxLength: 64 })), program: Type.Optional(Type.Integer({ minimum: 0, maximum: 127 })), waveform: Type.Optional(choices(["sine", "triangle", "square", "saw"])), pan: Type.Optional(Type.Number({ minimum: -1, maximum: 1, description: "Stereo position, -1 left to +1 right; applies when score stereo is true" })), notes: Type.Array(note, { minItems: 1, maxItems: 1024 }) });
-  register("music_compose", "Render an explicit score to editable type-1 MIDI, JSON and a sine/triangle/square/saw WAV audition without external dependencies (mono, or stereo:true for a panned mix). Compose notes yourself, then call this tool. All beats are quarter notes, MIDI programs are zero-based. Maximum 8 tracks, 1024 notes, 120 seconds; no same-pitch overlap within a track.", Type.Object({ score: Type.Object({ bpm: Type.Optional(Type.Number({ minimum: 30, maximum: 300 })), beats: Type.Optional(Type.Number({ minimum: 1, maximum: 256 })), numerator: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 })), denominator: Type.Optional(Type.Union([2, 4, 8, 16].map(v => Type.Literal(v)))), stereo: Type.Optional(Type.Boolean()), tracks: Type.Array(scoreTrack, { minItems: 1, maxItems: 8 }) }), ...outputSchema }), composeMusic);
+  register("music_compose", "Render an explicit score to editable type-1 MIDI, JSON and a sine/triangle/square/saw WAV audition without external dependencies (mono, or stereo:true for a panned mix). Compose notes yourself, then call this tool. All beats are quarter notes, MIDI programs are zero-based. Maximum 8 tracks, 1024 notes, 120 seconds; no same-pitch overlap within a track.", Type.Object({ score: Type.Object({ bpm: Type.Optional(Type.Number({ minimum: 30, maximum: 300 })), beats: Type.Optional(Type.Number({ minimum: 1, maximum: 256 })), numerator: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 })), denominator: Type.Optional(choices([2, 4, 8, 16])), stereo: Type.Optional(Type.Boolean()), tracks: Type.Array(scoreTrack, { minItems: 1, maxItems: 8 }) }), ...outputSchema }), composeMusic);
   const vector = Type.Array(Type.Number({ minimum: -1000, maximum: 1000 }), { minItems: 3, maxItems: 3 });
   const positionVector = Type.Array(Type.Number({ minimum: -100, maximum: 100 }), { minItems: 3, maxItems: 3 });
   const scaleVector = Type.Array(Type.Number({ minimum: 0.01, maximum: 40 }), { minItems: 3, maxItems: 3 });

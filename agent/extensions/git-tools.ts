@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { Type } from "typebox";
 import { managedGitEnv, MANAGED_GIT_ARGS, managedRepositoryIdentity } from "./pi-subagents/src/runs/shared/git-command.ts";
 
+import { choices } from "./lib/tool-schema.ts";
 const execFileP = promisify(execFile);
 const MAX_OUTPUT = 32768;
 const MAX_FILES = 100;
@@ -383,16 +384,7 @@ export default function gitTools(pi: any) {
       "Before committing, run git_info review and resolve its risk flags (secrets, conflict markers, focused tests, debug statements, lockfile drift).",
     ],
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("scope"),
-        Type.Literal("status"),
-        Type.Literal("diff"),
-        Type.Literal("log"),
-        Type.Literal("show"),
-        Type.Literal("branch"),
-        Type.Literal("review"),
-        Type.Literal("blame"),
-      ]),
+      action: choices(["scope", "status", "diff", "log", "show", "branch", "review", "blame"]),
       range: Type.Optional(Type.String({ maxLength: 32, description: 'blame line range, e.g. "40,80" or "40,+20"' })),
       path: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
       revision: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),

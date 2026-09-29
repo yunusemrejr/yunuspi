@@ -63,6 +63,7 @@ The capability index explains entry points, supported options, related abilities
 | --- | --- |
 | Understand and change code | Symbol, AST and language-server inspection; scoped context; batch edits; syntax diagnostics; review evidence; snapshots. [Source checks](docs/SKILLS-AND-CHECKS.md) |
 | Keep code clean | Clone and DRY detection, code-slop and prose checks, complexity, pre-commit review and blame, and a commit guard for secrets and conflict markers. [Code quality](docs/CODE-QUALITY.md) |
+| Audit for defects | Static security, backend, efficiency, pattern and UI-source audits that also run after every edit, and SVG analysis (clipped art, theming, bloat, icon-set consistency) with a verified lossless optimizer. [Static audits](docs/CODE-AUDIT.md) |
 | Build from a design | Mockup and screenshot analysis into bands, blocks, palette, type scale and tokens; asset cutting and SVG tracing; rendered visual comparison against the reference. [Design studio](docs/DESIGN-STUDIO.md) |
 | Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
 | Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, Double mode for two-stream reconciled reasoning, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) · [Reviews and councils](docs/REVIEWS-AND-COUNCILS.md) |

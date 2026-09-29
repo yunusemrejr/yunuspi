@@ -6,10 +6,10 @@ import { Type } from "typebox";
 import { imageAnalyze, imageCrop, imageTrace, visualDiff } from "./lib/design-studio.ts";
 import { imageCreate, SYNTH_OPS } from "./lib/image-synth.ts";
 import { captureToFile } from "./render-and-wait.ts";
+import { choices } from "./lib/tool-schema.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const url = Type.String({ minLength: 8, maxLength: 2048, pattern: "^https?://" });
-const choices = (values: string[]) => Type.Union(values.map(value => Type.Literal(value)));
 const box = Type.Object({ x: Type.Number({ minimum: 0 }), y: Type.Number({ minimum: 0 }), width: Type.Number({ minimum: 1 }), height: Type.Number({ minimum: 1 }) });
 const source = { path: Type.Optional(localPath), url: Type.Optional(url) };
 const outputDir = Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Existing workspace folder for a fresh artifact subfolder; default .pi/design (git-ignored)" }));

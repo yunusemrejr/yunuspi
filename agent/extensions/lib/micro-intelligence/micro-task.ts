@@ -18,6 +18,7 @@ import { createRouterShadow } from './router-shadow.ts';
 import { MICRO_WORKER_COST_CAP_USD, MICRO_WORKER_MAX_INPUT_CHARS, MICRO_WORKER_MAX_OUTPUT_TOKENS, MICRO_WORKER_PRICE_CAP_PER_M_USD,
   microWorkerCandidates, microWorkerEnabled, runMicroWorker, type MicroWorkerKind } from './micro-worker.ts';
 
+import { choices } from "../tool-schema.ts";
 const KINDS: readonly MicroWorkerKind[] = ['error-hypothesis', 'finding-consolidation', 'handoff-brief', 'structured-extraction', 'inspection-targets', 'patch-compare', 'source-glance'];
 const requirements = { minContextWindow: 8192, minOutputTokens: MICRO_WORKER_MAX_OUTPUT_TOKENS, reasoning: false, inputModalities: ['text'], toolCalling: false };
 const routeOf = (model: any): string => `${model.provider}/${model.id}`;
@@ -47,8 +48,8 @@ export function registerMicroTask(pi: any, options: { sessionSignal?: () => Abor
     label: 'Micro task',
     description: 'Run one bounded advisory task through a cheap qualified model: error hypotheses, finding consolidation, handoff brief, structured extraction, inspection targets, patch comparison or source glance. action=analyze ranks and optionally categorizes 2–16 supplied items in one typed Jev/Kev request through OpenRouter under the configured PI_JEV bounded-input policy; optional reference defines the expected behavior and criteria asks up to four additional yes/no dimensions (64 questions total). Returns soft scores, category distributions and IDs/source references without repeating evidence; scores are advisory, not calibrated task accuracy. No tools or writes. Automatically measures unknown native routes with three synthetic checks before using your input. action=route compares a model suggestion with currentChoice over candidates without changing the selected model. status inspects routes without inference; qualify refreshes evidence. Native run/route private input requires the exact current session model and endpoint, a loopback endpoint or an operator-allowlisted route.',
     parameters: Type.Object({
-      action: Type.Optional(Type.Union([Type.Literal('run'), Type.Literal('status'), Type.Literal('qualify'), Type.Literal('route'), Type.Literal('analyze')])),
-      kind: Type.Optional(Type.Union(KINDS.map(kind => Type.Literal(kind)))),
+      action: Type.Optional(choices(['run', 'status', 'qualify', 'route', 'analyze'])),
+      kind: Type.Optional(choices(KINDS)),
       input: Type.Optional(Type.String({ minLength: 8, maxLength: MICRO_WORKER_MAX_INPUT_CHARS })),
       model: Type.Optional(Type.String({ maxLength: 256, description: 'Native run/route/qualify only: exact provider/model route. Omit to use configured routes, the current qualified route or the existing economical selector.' })),
       privateInput: Type.Optional(Type.Boolean({ description: 'Native run/route only: defaults true. Set false only for public or synthetic input. analyze follows the configured PI_JEV OpenRouter policy.' })),

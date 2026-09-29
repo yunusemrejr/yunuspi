@@ -173,21 +173,26 @@ const BgKillParams = Type.Object({
 
 type BgRunParamsValue = Static<typeof BgRunParams>;
 
+/** A command that starts an LLM agent CLI. Only these make an omitted isAgent
+ * ambiguous; scripts, tests, servers and builds are never agent processes. */
+const AGENT_CLI = /(?:^|[\s;&|(])(?:claude|codex|gemini|opencode|aider|goose|amp|qwen|crush|droid|cursor-agent|copilot|pi|yunuspi)(?=\s|$)/;
 /** Normalize model-authored bg_run arguments before schema validation. A
- * declared service is a server or watcher, never an LLM process, so its
- * omitted isAgent is unambiguous; every other omission still fails with the
- * declared contract. `service` must survive preparation: execute owns the
- * UI-only completion policy for services the model declared explicitly. */
+ * declared service is a server or watcher, never an LLM process, and neither
+ * is a command that does not launch an agent CLI, so an omitted isAgent is
+ * unambiguous for both (measured: four rejected calls in four days for
+ * ordinary server starts). A command that launches an agent CLI still fails
+ * with the declared contract. `service` must survive preparation: execute owns
+ * the UI-only completion policy for services the model declared explicitly. */
 export function prepareBgRunArguments(args: unknown): BgRunParamsValue {
   if (!args || typeof args !== "object")
     throw new Error("bg_run arguments must be an object");
   const input = args as BgToolArgumentRecord;
   if (typeof input.command !== "string")
     throw new Error("bg_run requires command string");
-  const isAgent = typeof input.isAgent === "boolean" ? input.isAgent : input.service === true ? false : undefined;
+  const isAgent = typeof input.isAgent === "boolean" ? input.isAgent : input.service === true || !AGENT_CLI.test(input.command) ? false : undefined;
   if (isAgent === undefined) {
     throw new Error(
-      "bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
+      "bg_run requires isAgent boolean for a command that launches an agent CLI. Set true for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
     );
   }
   const prepared: BgRunParamsValue = {

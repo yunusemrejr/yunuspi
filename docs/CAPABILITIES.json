@@ -2118,6 +2118,80 @@
       "commands": []
     },
     {
+      "id": "static-audits",
+      "group": "engineering",
+      "summary": "Audit source and SVG files for defects a review would raise, without running anything or calling a model. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
+      "entrypoints": [
+        "code_audit",
+        "svg_inspect"
+      ],
+      "tools": [
+        "code_audit",
+        "svg_inspect",
+        "code_quality",
+        "artifact_check"
+      ],
+      "options": [
+        {
+          "name": "code_audit.domains",
+          "values": [
+            "security",
+            "backend",
+            "efficiency",
+            "patterns",
+            "ui"
+          ],
+          "summary": "Rule families to run; default all."
+        },
+        {
+          "name": "code_audit.paths|changed|base",
+          "summary": "Files or directories, or the current diff against a revision."
+        },
+        {
+          "name": "code_audit.minSeverity|limit",
+          "summary": "Lowest severity reported and result count."
+        },
+        {
+          "name": "svg_inspect.action",
+          "values": [
+            "inspect",
+            "review",
+            "matrix"
+          ],
+          "summary": "inspect measures, review scores with fixes, matrix rasterizes sizes."
+        },
+        {
+          "name": "svg_inspect.kind",
+          "values": [
+            "icon",
+            "logo",
+            "illustration"
+          ],
+          "summary": "review: override icon/logo/illustration inference."
+        },
+        {
+          "name": "svg_inspect.optimize|precision|outputDir",
+          "summary": "review: write verified lossless copies into a fresh git-ignored folder; the original is untouched."
+        }
+      ],
+      "related": [
+        "code-quality",
+        "artifact-numeric-checks",
+        "quality-review",
+        "design-studio"
+      ],
+      "sourceFiles": [
+        "agent/extensions/code-audit.ts",
+        "agent/extensions/art-direction.ts",
+        "agent/extensions/lib/code-audit.ts",
+        "agent/extensions/lib/svg-analysis.ts",
+        "agent/extensions/lib/source-check.ts",
+        "agent/extensions/lib/small-tools.ts"
+      ],
+      "doc": "docs/CODE-AUDIT.md",
+      "commands": []
+    },
+    {
       "id": "artifact-numeric-checks",
       "group": "engineering",
       "summary": "Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.",
@@ -3004,22 +3078,22 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 523
+        "line": 528
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 565
+        "line": 570
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 557
+        "line": 562
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 573
+        "line": 578
       },
       {
         "name": "catalog-status",
@@ -3079,7 +3153,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 909
+        "line": 902
       },
       {
         "name": "harness-backup",
@@ -3094,12 +3168,12 @@
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 603
+        "line": 608
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 650
+        "line": 655
       },
       {
         "name": "lens-allow-edit",
@@ -3154,7 +3228,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 618
+        "line": 623
       },
       {
         "name": "memory-prime",
@@ -3319,7 +3393,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 549
+        "line": 554
       },
       {
         "name": "used",
@@ -3406,13 +3480,13 @@
       {
         "name": "artifact_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 105,
+        "line": 115,
         "kind": "factory"
       },
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 269,
+        "line": 275,
         "kind": "factory"
       },
       {
@@ -3442,32 +3516,32 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 586,
+        "line": 574,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 822,
+        "line": 827,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 776,
+        "line": 781,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 686,
+        "line": 691,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 745,
+        "line": 750,
         "kind": "literal"
       },
       {
@@ -3479,7 +3553,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 154,
+        "line": 155,
         "kind": "literal"
       },
       {
@@ -3498,6 +3572,12 @@
         "name": "claim_check",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "code_audit",
+        "source": "agent/extensions/code-audit.ts",
+        "line": 16,
         "kind": "literal"
       },
       {
@@ -3545,37 +3625,37 @@
       {
         "name": "coverage_select",
         "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 21,
+        "line": 22,
         "kind": "factory"
       },
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 354,
+        "line": 360,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 134,
+        "line": 135,
         "kind": "factory"
       },
       {
         "name": "data_query",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 127,
+        "line": 137,
         "kind": "factory"
       },
       {
         "name": "decision_frontier",
         "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 20,
+        "line": 21,
         "kind": "factory"
       },
       {
         "name": "dependency_plan",
         "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 19,
+        "line": 20,
         "kind": "factory"
       },
       {
@@ -3625,7 +3705,7 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 374,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -3643,13 +3723,13 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 495,
+        "line": 496,
         "kind": "literal"
       },
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 313,
+        "line": 319,
         "kind": "factory"
       },
       {
@@ -3673,7 +3753,7 @@
       {
         "name": "math_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 92,
+        "line": 102,
         "kind": "factory"
       },
       {
@@ -3733,13 +3813,13 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 45,
+        "line": 46,
         "kind": "literal"
       },
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 223,
+        "line": 224,
         "kind": "factory"
       },
       {
@@ -3781,13 +3861,13 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 614,
+        "line": 602,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 785,
+        "line": 786,
         "kind": "literal"
       },
       {
@@ -3847,7 +3927,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 717,
+        "line": 718,
         "kind": "literal"
       },
       {
@@ -3859,7 +3939,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 57,
+        "line": 58,
         "kind": "literal"
       },
       {
@@ -3895,7 +3975,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 815,
+        "line": 816,
         "kind": "literal"
       },
       {
@@ -3913,7 +3993,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 761,
+        "line": 762,
         "kind": "literal"
       },
       {
@@ -3962,7 +4042,7 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 244,
+        "line": 245,
         "kind": "factory"
       },
       {
@@ -3974,13 +4054,13 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 262,
+        "line": 273,
         "kind": "literal"
       },
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 254,
+        "line": 255,
         "kind": "literal"
       },
       {
@@ -3998,19 +4078,19 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 285,
+        "line": 289,
         "kind": "literal"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 211,
+        "line": 212,
         "kind": "factory"
       },
       {
         "name": "value_convert",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 123,
+        "line": 133,
         "kind": "factory"
       },
       {
@@ -4052,7 +4132,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 175,
+        "line": 176,
         "kind": "factory"
       },
       {
@@ -4076,7 +4156,7 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 69,
+        "line": 70,
         "kind": "literal"
       },
       {
@@ -4139,31 +4219,31 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 822,
+        "line": 827,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 776,
+        "line": 781,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 686,
+        "line": 691,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 745,
+        "line": 750,
         "kind": "literal"
       },
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 154,
+        "line": 155,
         "kind": "literal"
       },
       {
@@ -4182,6 +4262,12 @@
         "name": "claim_check",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "code_audit",
+        "source": "agent/extensions/code-audit.ts",
+        "line": 16,
         "kind": "literal"
       },
       {
@@ -4229,7 +4315,7 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 374,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -4247,7 +4333,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 495,
+        "line": 496,
         "kind": "literal"
       },
       {
@@ -4295,7 +4381,7 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 45,
+        "line": 46,
         "kind": "literal"
       },
       {
@@ -4307,13 +4393,13 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 614,
+        "line": 602,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 785,
+        "line": 786,
         "kind": "literal"
       },
       {
@@ -4373,7 +4459,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 717,
+        "line": 718,
         "kind": "literal"
       },
       {
@@ -4385,7 +4471,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 57,
+        "line": 58,
         "kind": "literal"
       },
       {
@@ -4409,7 +4495,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 815,
+        "line": 816,
         "kind": "literal"
       },
       {
@@ -4427,7 +4513,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 761,
+        "line": 762,
         "kind": "literal"
       },
       {
@@ -4439,13 +4525,13 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 262,
+        "line": 273,
         "kind": "literal"
       },
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 254,
+        "line": 255,
         "kind": "literal"
       },
       {
@@ -4457,7 +4543,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 285,
+        "line": 289,
         "kind": "literal"
       },
       {
@@ -4475,7 +4561,7 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 69,
+        "line": 70,
         "kind": "literal"
       },
       {
@@ -4492,7 +4578,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          102
+          103
         ],
         "knownNames": [
           "asset_register",
@@ -4520,7 +4606,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          75
+          85
         ],
         "knownNames": [
           "artifact_check",
@@ -4535,7 +4621,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          589
+          577
         ],
         "knownNames": [
           "bash",
@@ -4607,7 +4693,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          8
+          9
         ],
         "knownNames": [
           "coverage_select",
@@ -4715,11 +4801,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 679,
-      "registrationSites": 82,
+      "sourceFiles": 683,
+      "registrationSites": 83,
       "indirectRegistrationSites": 19,
-      "stableRegistrationRows": 122,
-      "uniqueStableTools": 121,
+      "stableRegistrationRows": 123,
+      "uniqueStableTools": 122,
       "dynamicOwnerCount": 15,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4752,6 +4838,10 @@
       },
       {
         "path": "agent/extensions/checkpoints.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/code-audit.ts",
         "exists": true
       },
       {
@@ -4974,6 +5064,10 @@
       },
       {
         "path": "agent/extensions/lib/ci-awareness.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/code-audit.ts",
         "exists": true
       },
       {
@@ -5529,6 +5623,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/svg-analysis.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/svg-check.ts",
         "exists": true
       },
@@ -5550,6 +5648,10 @@
       },
       {
         "path": "agent/extensions/lib/tool-discovery.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/tool-schema.ts",
         "exists": true
       },
       {
@@ -6334,6 +6436,12 @@
       },
       {
         "source": "agent/extensions/http-tools.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/code-audit.ts",
         "signals": [
           "wrapper/adapter"
         ]
@@ -7463,6 +7571,10 @@
       {
         "name": "CHANGE-SCOPE.md",
         "path": "docs/CHANGE-SCOPE.md"
+      },
+      {
+        "name": "CODE-AUDIT.md",
+        "path": "docs/CODE-AUDIT.md"
       },
       {
         "name": "CODE-QUALITY.md",

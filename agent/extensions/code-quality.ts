@@ -2,8 +2,8 @@
  * explicit paths, directories or the files changed against a revision. */
 import { Type } from "typebox";
 import { codeQuality } from "./lib/code-quality.ts";
+import { choices } from "./lib/tool-schema.ts";
 
-const choices = (values: string[]) => Type.Union(values.map(value => Type.Literal(value)));
 
 export default function codeQualityTools(pi: any) {
   pi.registerTool({

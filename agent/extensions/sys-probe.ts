@@ -26,6 +26,7 @@ import {
   type ServiceRow,
 } from "./lib/sys-probe.ts";
 
+import { choices } from "./lib/tool-schema.ts";
 const execFileP = promisify(execFile);
 const COMMANDS = ["listeners", "services", "service_detail", "journal", "processes", "host", "devices"] as const;
 const TOOLCHAINS = ["arduino-cli", "pio", "platformio", "esptool", "esptool.py", "idf.py", "openocd", "arm-none-eabi-gcc", "cmake", "ninja", "python3", "ssh", "rsync", "docker", "podman"];
@@ -263,15 +264,7 @@ export default function sysProbe(pi: any) {
       "Before host or hardware changes, inspect sys_probe host/devices and preserve the active machine, connectivity and session; presence is not authorization or target identity.",
     ],
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("listeners"),
-        Type.Literal("services"),
-        Type.Literal("service_detail"),
-        Type.Literal("journal"),
-        Type.Literal("processes"),
-        Type.Literal("host"),
-        Type.Literal("devices"),
-      ]),
+      action: choices(["listeners", "services", "service_detail", "journal", "processes", "host", "devices"]),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
       unit: Type.Optional(Type.String({minLength:1,maxLength:240,description:'One exact systemd unit, e.g. example.service; required for service_detail/journal. No patterns.'})),
       user: Type.Optional(Type.Boolean({description:'Inspect current user manager/journal instead of system; service_detail/journal only.'})),

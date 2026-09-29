@@ -28,6 +28,7 @@ import { guidanceHintIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
 import { classifyBashCommand } from "./bash-routing.ts";
 
+import { choices } from "./tool-schema.ts";
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
 const MAX_PENDING = 32;
@@ -762,7 +763,7 @@ export function createRelevantGuidance(pi: any) {
     name: 'skill_review', label: 'Skill review',
     description: 'Browse compact groups or search the bounded installed skill catalogue, and inspect applicable task/file skill status. Read a selected SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Browse/search are advisory and never create a review obligation.',
     parameters: Type.Object({
-      action: Type.Union([Type.Literal('browse'), Type.Literal('inspect'), Type.Literal('defer'), Type.Literal('search')]),
+      action: choices(['browse', 'inspect', 'defer', 'search']),
       skill: Type.Optional(Type.String({maxLength:512})),
       reason: Type.Optional(Type.String({minLength:12,maxLength:240,description:"Concise task-specific rationale, 12–240 characters; do not paste a review report."})),
       group: Type.Optional(Type.String({maxLength:64,description:'Group id from browse; optional search filter.'})),

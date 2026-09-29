@@ -177,5 +177,9 @@ test('bg_run preparation keeps a declared service and infers only its unambiguou
   assert.equal(service.service, true, 'an explicit service flag reaches execute and its UI-only completion policy');
   assert.equal(service.isAgent, false, 'a declared server is never an LLM process');
   assert.equal(prepare({ command: 'pi -p "x"', name: 'child', isAgent: true, service: false }).service, false);
-  assert.throws(() => prepare({ command: 'npm test', name: 'tests' }), /requires isAgent boolean/, 'ambiguous omissions keep the declared contract');
+  assert.equal(prepare({ command: 'npm test', name: 'tests' }).isAgent, false, 'an ordinary command never needs the flag');
+  assert.equal(prepare({ command: 'cd app && ./run.sh --port 8799 --no-open', name: 'app' }).isAgent, false);
+  assert.equal(prepare({ command: 'python3 -m http.server 8000', name: 'files' }).isAgent, false);
+  for (const command of ['claude -p "fix it"', 'cd repo && codex exec "x"', 'pi -p "x"', 'yunuspi --print y'])
+    assert.throws(() => prepare({ command, name: 'child' }), /requires isAgent boolean/, `a launched agent CLI keeps the declared contract: ${command}`);
 });

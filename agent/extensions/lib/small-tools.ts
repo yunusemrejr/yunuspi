@@ -6,6 +6,7 @@ import path from 'node:path';
 import {numericCheck} from './numeric-checks.ts';
 import {inspectText, inspectImage, convertValue} from './artifact-checks.ts';
 import {inspectSvg} from './svg-check.ts';
+import {reviewSvg} from './svg-analysis.ts';
 import {inspectUiSource} from './slop-guidance-signals.ts';
 import {parseData, executeDataQuery} from './data-query.ts';
 
@@ -64,6 +65,15 @@ export default function registerSmallTools(pi: any) {
       const result=await inspectSvg(source),errors=result.findings.filter(f=>f.severity==='error');
       svgCheck={status:result.status,path:file,sourceHash:result.sourceHash,counts:result.counts,errorCount:errors.reduce((n,f)=>n+f.count,0),findingKeys:errors.slice(0,3).map(f=>f.key),scope:'source-only'};
       if(errors.length)annotation=('[svg-check] Saved SVG source needs review: '+errors.slice(0,3).map(f=>`${f.key}: ${f.message}`).join(' ')+' Inspect the complete file; rendered appearance remains unverified.').slice(0,600);
+      // Review findings (clipped art, missing viewBox, hard-coded icon colour, bloat, active content) share the
+      // receipt's 600-character budget: they fill what the structural note leaves, and never add noise beyond it.
+      const quality=reviewSvg(source,{name:file}).findings.filter(f=>f.severity!=='low'&&!errors.some(e=>e.key===f.rule)).slice(0,2);
+      const room=600-annotation.length-(annotation?1:0);
+      if(quality.length&&room>=140){
+        const review='[svg-review] '+quality.map(f=>`${f.rule}: ${f.message} ${f.fix}`).join(' ');
+        const hint=' svg_inspect({action:"review"}) has the full report.';
+        annotation=(annotation+(annotation?' ':'')+(review.length+hint.length<=room?review+hint:review.slice(0,Math.max(0,room-hint.length-1)).trimEnd()+'…'+hint)).slice(0,600);
+      }
     }catch{
       // An unavailable/oversize/unstable file is not a successful check. Keep
       // original mutation success intact and never echo filesystem diagnostics.

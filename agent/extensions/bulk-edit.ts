@@ -224,7 +224,7 @@ export default function bulkEdit(pi: any) {
       "Use bulk_edit (preview, then apply with its token) instead of `sed -i` or `perl -pi` for multi-file replacements.",
     ],
     parameters: Type.Object({
-      action: Type.Union([Type.Literal("preview"), Type.Literal("apply")]),
+      action: Type.Unsafe<string>({ type: "string", enum: ["preview", "apply"] }),
       pattern: Type.String({ minLength: 1, maxLength: 200 }),
       replacement: Type.String({ maxLength: 1000 }),
       glob: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
