@@ -117,6 +117,8 @@ yunuspi
 | StepFun Step Plan (China) | `STEPFUN_STEP_PLAN_API_KEY` | `stepfun-step-plan` |
 | StepFun Step Plan (International) | `STEPFUN_AI_STEP_PLAN_API_KEY` | `stepfun-ai-step-plan` |
 
+MiniMax Token Plan subscription keys (`sk-cp-…`) use the same `minimax` / `minimax-cn` provider ids and endpoints as pay-as-you-go keys — no separate provider entry is needed. The catalog carries all eight Token Plan models (M3 plus the M2.7 / M2.5 / M2.1 families).
+
 Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/env-api-keys.ts).
 
 #### Auth File
