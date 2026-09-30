@@ -10,7 +10,7 @@ import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
-import { currentExecutionProfile, adaptiveExecutionEnabled } from './adaptive-execution.ts';
+import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
 
 import { choices } from "./tool-schema.ts";
 /** Multi-stage re-rank: large shortlists go straight to batched Jev;
@@ -99,6 +99,13 @@ export const CORE_TOOLS = new Set([
   // work through bg_run/bg_status/bg_logs/bg_kill; keep the quartet with bg_wait.
   'bg_run','bg_status','bg_logs','bg_kill',
 ]);
+/** Direct work keeps verification, discovery and bash's background dependencies.
+ * All other capabilities remain discoverable under the same host ceiling. */
+export const DIRECT_CORE_TOOLS = new Set([
+  'read','bash','edit','write','grep','find','ls','tool_search',
+  'quality_review','project_tests','checkpoint_read','skill_review',
+  'bg_run','bg_status','bg_logs','bg_kill','bg_wait',
+]);
 /** Prompts that unmistakably need a specialized studio stage its tools for
  * the first model turn: one schema bundle instead of a discovery round trip
  * the agent may not think to make. Intents come from the skill routing table
@@ -112,6 +119,11 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
+  { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['web_probe'] },
+  { pattern: /\b(?:network|dns|tcp|tls|https?)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|connectivity|failure|refused|timeout)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:network|dns|tcp|tls|https?)\b/i, tools: ['net_probe'] },
+  { pattern: /\b(?:linux|systemd|cgroup|memory pressure|disk pressure|listening port|service unit)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|failure|resource|unavailable|slow)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:linux|systemd|cgroup|service unit)\b/i, tools: ['sys_probe'] },
+  { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
+  { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['motion_inspect', 'media_info'] },
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
   { pattern: /\b(?:code_quality|refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality'] },
@@ -237,7 +249,7 @@ export function registerToolDiscovery(pi: any) {
     || typeof pi.getActiveTools !== 'function') return;
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
   let generation = 0, manager: any;
-  let automatic = new Set<string>(), explicitSelections = new Set<string>();
+  let automatic = new Set<string>(), explicitSelections = new Set<string>(), usedCore = new Set<string>(), namedCore = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
   let pendingInput: { id: string; signal?: AbortSignal } | undefined;
   let sessionController = new AbortController();
@@ -260,6 +272,21 @@ export function registerToolDiscovery(pi: any) {
     applyActive(expected);
     wireDirty = !same(expected, flushed);
   };
+  const stageCore = (tier: string, prompt = '') => {
+    if (!adaptiveExecutionEnabled()) return;
+    const base = tier === 'direct' ? DIRECT_CORE_TOOLS : CORE_TOOLS;
+    for (const name of CORE_TOOLS) {
+      if (!allowed.has(name)) continue;
+      // Explicit calls and named requests survive simplification in a todo.
+      if (new RegExp(`\\b${name}\\b`).test(prompt)) namedCore.add(name);
+      if (base.has(name) || explicitSelections.has(name) || usedCore.has(name) || automatic.has(name) || namedCore.has(name)) expected.add(name);
+      else expected.delete(name);
+    }
+    wireDirty = !same(expected, flushed);
+  };
+  pi.on('tool_call', (event: any, ctx: any) => {
+    if (owner && identity(ctx) === owner && CORE_TOOLS.has(event.toolName) && expected.has(event.toolName)) usedCore.add(event.toolName);
+  });
   const initialize = (_event: any, ctx: any) => {
     invalidate();
     // Explicit CLI tool selections belong to the caller, including --no-tools.
@@ -276,7 +303,7 @@ export function registerToolDiscovery(pi: any) {
     manager = ctx.sessionManager;
     pendingInput = undefined; acceptedInput = ''; started = false;
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
-    explicitSelections = new Set(remembered); automatic.clear();
+    explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
     wireDirty = false;
     applyActive(expected);
@@ -303,7 +330,7 @@ export function registerToolDiscovery(pi: any) {
         // still owns its current pipelines and studio stages.
         if (nextTask) {
           for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name)) expected.delete(name);
-          automatic.clear(); wireDirty = !same(expected, flushed);
+          automatic.clear(); usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:String(event?.prompt ?? '')}).tier, String(event?.prompt ?? '')); wireDirty = !same(expected, flushed);
           acceptedInput = pendingInput?.id ?? ''; started = true;
         }
         const images = Array.isArray(event?.images) ? event.images.length : 0;
@@ -328,6 +355,7 @@ export function registerToolDiscovery(pi: any) {
       const names = event.names.filter((name: string) => allowed.has(name) && !expected.has(name));
       for (const name of names) automatic.add(name);
       if (names.length) { expected = new Set([...expected, ...names]); wireDirty = true; }
+      if (typeof event.tier === 'string') stageCore(event.tier);
       if (event.beforeStart) flushPending();
     } catch { /* no schema changes on uncertain access */ }
   });

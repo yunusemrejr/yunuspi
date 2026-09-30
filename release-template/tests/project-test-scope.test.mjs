@@ -291,3 +291,19 @@ test('project tests and quality review share one workspace revision per change',
  revision.seed(7);assert.equal(revision.current,7,'restored revisions seed the shared counter');
  revision.seed(3);assert.equal(revision.current,7,'seeding never moves it backwards');
 });
+
+test('native diagnostics follow current tree receipts without a temporary log or extra run',async t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'native-diagnostics-')),tools={},ctx={cwd};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the parser'});
+ const mutate=async n=>{fs.writeFileSync(path.join(cwd,'value.js'),`export const value=${n};`);await api.result({toolName:'write',toolCallId:'write'+n,input:{path:'value.js'},isError:false},ctx);};
+ const assess=()=>tools.project_tests.execute('a',{action:'assess',disposition:'required',commands:['node --test'],reason:'Existing check covers the changed behavior.'},undefined,undefined,ctx);
+ await mutate(1);await assess();
+ const event={toolName:'bash',toolCallId:'run',input:{command:'node --test'}};await api.call(event,ctx);
+ await api.result({...event,isError:false,details:{execution:{exitCode:0}},content:[{type:'text',text:'# tests 2\n# pass 2\n# fail 0'}]},ctx);
+ const out=await assess();const compact=JSON.parse(out.content[0].text);
+ assert.equal(out.details.projectTests.need,null);assert.equal(compact.plannedChecks[0].callId,'run');assert.match(compact.plannedChecks[0].diagnostics.text,/# pass 2/);
+ await mutate(2);await assess();assert.notEqual(api.snapshot().need,null);assert.equal(api.snapshot().plannedChecks[0].diagnostics,undefined,'new bytes cannot reuse old diagnostic evidence');
+ assert.deepEqual(fs.readdirSync(cwd),['value.js'],'no temporary evidence file is manufactured');
+});

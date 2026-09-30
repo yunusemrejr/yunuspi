@@ -1,9 +1,9 @@
 import type { CodeSignal } from './code-guidance-signals.ts';
 import { createHash } from 'node:crypto';
-import { proseReport } from './code-quality.ts';
+import { proseReport, metricHasBasis } from './code-quality.ts';
 
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|php)$/i;
-export const UI_POLICY_KEYS = new Set(['ui-dot-marker', 'ui-icon-tile', 'ui-accent-rail', 'ui-bulb-brand', 'ui-stock-warm-palette', 'ui-live-pill', 'ui-eyebrow-pill', 'ui-glow-dot', 'ui-fake-status-label']);
+export const UI_POLICY_KEYS = new Set(['ui-dot-marker', 'ui-icon-tile', 'ui-accent-rail', 'ui-bulb-brand', 'ui-stock-warm-palette', 'ui-stock-palette', 'ui-stock-editorial', 'ui-live-pill', 'ui-eyebrow-pill', 'ui-glow-dot', 'ui-fake-status-label']);
 export const UI_DESIGN_POLICY = 'Existing UI constraints apply even when the prompt does not repeat them: no decorative colored dots before labels, glowing/pulsing/blinking status dots, animated LIVE-style pills, eyebrow pills or badge clusters above headings, invented status labels (BETA/NEW/LIVE/AI ACTIVE without backing state), boxed icon badges, ornamental accent rails, generic lightbulb branding, or muddy orange/brass/brown default palettes. Necessary state indicators, real subject matter and explicitly requested branding are contextual exceptions requiring evidence, not blanket exemptions. Preserve or improve existing visual identity, illustration/3D craft and motion; a replacement or a successful screenshot alone is not evidence of improvement. For visual upgrades compare baseline and final captures at the same viewport and relevant animation states. Treat violations of these constraints as blocking, not optional taste polish.';
 const EXCLUDED = /(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|__fixtures__|skills|references)\/|\.(?:min|generated|test|spec)\.|(?:^|\/)SKILL\.md$/i;
 /** Docs-shaped paths document internals legitimately; leakage cues skip them. */
@@ -29,10 +29,28 @@ const PILL_CLASS = 'rounded-full|rounded-\\[9999px\\]|rounded-\\[50%\\]|\\b(?:st
 const MOTION_CLASS = 'animate-(?:ping|pulse)|\\banimation\\b[^;]{0,80}\\binfinite\\b|blink\\w*|puls(?:e|ing)[-_ ]?(?:dot|animation)?|\\bglow\\b.{0,40}\\binfinite\\b|infinite.{0,40}\\bglow\\b';
 const TOUR = /guided tour|product tour|onboarding tour|welcome modal|take (?:the|a) tour|walkthrough (?:modal|overlay)/i;
 const AI_WIDGET = /\bask ai\b|ai (?:assistant|chatbot)|ai chat\b|chat with (?:our )?ai/i;
-const METRIC_BASIS = /measured|study|survey|benchmark|tested|based on|report|data|customers|teams/i;
 /** The default AI-product palette: indigo/violet into purple/pink gradients,
  * as Tailwind stops or the stock hexes. A brand may own it; most do not. */
 const STOCK_PALETTE = /\bfrom-(?:indigo|violet|purple|blue)-[3-7]00\b[^"'`\n]{0,80}\b(?:via|to)-(?:purple|fuchsia|pink|violet)-[3-7]00\b|(?:linear|radial|conic)-gradient\([^)]{0,160}#(?:6366f1|4f46e5|7c3aed|8b5cf6|a855f7)\b[^)]{0,160}#(?:a855f7|ec4899|d946ef|db2777|c026d3|8b5cf6)\b/i;
+const CREAM_GROUND = /(?:background(?:-color)?|--(?:[\w-]*-)?(?:background|ground|surface|paper))\s*:\s*(?:#([\da-f]{6})\b|(ivory|floralwhite|oldlace|linen)\b)/gi;
+function hasCreamGround(text: string): boolean {
+  return [...text.matchAll(CREAM_GROUND)].some(match => {
+    if (match[2]) return true;
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(match[1].slice(i, i + 2), 16));
+    return r >= 235 && g >= 228 && b >= 200 && r >= g && g > b && r - b >= 10 && r - b <= 50;
+  });
+}
+const CURSIVE_DISPLAY = /font-family\s*:[^;}\n]{0,120}(?:\bcursive\b|\b(?:Dancing Script|Great Vibes|Allura|Pacifico|Caveat)\b)|\bfont-(?:script|handwriting|cursive)\b/i;
+/** External supplied direction can contextualize a stock style. A comment
+ * inside source never exempts it; a negative brief keeps the cue active. */
+function allowsStockStyle(key: string, direction: string): boolean {
+  return direction.split(/[.!?\n;]/).some(sentence => {
+    if (/\b(?:avoid|no|never|without|do not|don'?t|remove|reject)\b/i.test(sentence)) return false;
+    if (!/\b(?:use|keep|retain|preserve|supplied|requested|brand)\b/i.test(sentence)) return false;
+    return key === 'ui-stock-palette' && /\b(?:purple|violet|indigo|pink)\b/i.test(sentence) && /gradient/i.test(sentence)
+      || key === 'ui-stock-editorial' && /\b(?:cream|ivory|linen)\b/i.test(sentence) && /\b(?:cursive|script|handwritten|handwriting)\b/i.test(sentence);
+  });
+}
 /** Section families of the stock landing template, in its usual order. */
 const TEMPLATE_SECTIONS = [/trusted by|used by|loved by|as seen (?:in|on)|our (?:clients|partners)/i, /\bfeatures?\b|why (?:choose|us)|what we offer|benefits/i, /how it works|in (?:three|3) (?:simple )?steps|get started in/i, /testimonials?|what (?:our )?(?:customers|clients|users) say|reviews/i, /pricing|plans?\b/i, /\bfaq\b|frequently asked/i, /ready to (?:get started|begin|join)|get started today|join (?:thousands|us)|start your (?:free )?trial/i];
 const wordRe = (w: string) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i');
@@ -54,7 +72,7 @@ const mutedWarmAccent = (hex: string) => {
 /** Explicit tool check shares the edit-hook policy; absence of cues is not a pass. */
 // Condensed pre-build form of these UI signals: UI_PREFLIGHT_TELLS in
 // design-direction.ts. Keep both in step.
-export function inspectUiSource(file: string, text: string) {
+export function inspectUiSource(file: string, text: string, options: { direction?: string } = {}) {
   const normalized = file.replaceAll('\\','/');
   if (typeof text !== 'string' || text.length > 196608) throw Error('UI source check requires at most 196608 characters; inspect a complete smaller component');
   const supported = UI_FILE.test(normalized) && !EXCLUDED.test(normalized);
@@ -67,7 +85,7 @@ export function inspectUiSource(file: string, text: string) {
     windows.push(text.slice(at, end)); at = end;
   }
   const findings: CodeSignal[] = [];
-  if (supported) for (const part of windows) for (const found of slopGuidanceSignals(normalized,part,12))
+  if (supported) for (const part of windows) for (const found of slopGuidanceSignals(normalized,part,12).filter(f => !allowsStockStyle(f.key, options.direction ?? '')))
     if (findings.length < 12 && !findings.some(prior => prior.key === found.key)) findings.push(found);
   return { sourceHash:createHash('sha256').update(text).digest('hex'), status:supported?'inspected':'unsupported',
     findings, ...(windows.length > 1 ? {windows:windows.length} : {}),
@@ -254,7 +272,9 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     // Color: stock palette and unsystematic hue sprawl (explicit hex outside
     // custom-property definitions; a token system reuses a few values).
     if (STOCK_PALETTE.test(text))
-      out.push({key:'ui-stock-palette',skill:'colors',check:'The default AI-product palette (indigo or violet into purple or pink gradients) occurs. Derive color from this brand and content (logo, photography, existing tokens) as a value ramp with one accent; keep the gradient only if the brand already owns it.'});
+      out.push({key:'ui-stock-palette',skill:'colors',check:'A stock indigo/violet into purple/pink gradient occurs. Verify the supplied brand and user direction before revising it; a requested gradient remains valid. Avoid selecting this generic SaaS palette as an unrequested default.'});
+    if (hasCreamGround(text) && CURSIVE_DISPLAY.test(text))
+      out.push({key:'ui-stock-editorial',skill:'fonts',check:'A cream/ivory ground combines with cursive display type, a stock editorial default. Derive type and color from the product and supplied direction; a requested editorial brand remains valid. Compare actual rendered hierarchy and readability before replacing it.'});
     const hexes = new Set((text.replace(/--[\w-]+\s*:[^;}\n]*/g,' ').match(/#(?:[\da-f]{6}|[\da-f]{3})\b/gi) ?? []).map(h=>h.toLowerCase()));
     if (hexes.size >= 12 && (text.match(/var\(--/g) ?? []).length < 3)
       out.push({key:'ui-hue-sprawl',skill:'color-theory',check:`${hexes.size} distinct hard-coded colors occur without custom properties. Define a small token set (ground, surface, text, muted text, accent, states) and reuse it; ad hoc near-duplicates read as unplanned.`});
@@ -366,7 +386,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     let metricBare = false;
     for (const match of visible.matchAll(/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d+(?:[.,]\d+)?\s*[kKmM]\+\s+(?:users|customers|teams|companies|downloads|members)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b/gi)) {
       const at = match.index ?? 0;
-      if (!METRIC_BASIS.test(visible.slice(Math.max(0,at-300),at+match[0].length+300))) { metricBare = true; break; }
+      if (!metricHasBasis(visible.slice(Math.max(0,at-300),at+match[0].length+300))) { metricBare = true; break; }
     }
     // Chatbot prose tells, measured by the shared prose checker (stock
     // phrases, em-dash density, triads, repeated openers) on real copy only.

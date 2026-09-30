@@ -1,7 +1,7 @@
 /** Launch-scoped harness maintenance authority. Never derive authority from tool cwd. */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 export function canonicalMutationPath(
@@ -61,13 +61,28 @@ export function containsPath(parent: string, child: string): boolean {
       !path.isAbsolute(relative))
   );
 }
-export const HARNESS_ROOT = canonicalMutationPath(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+/** Installed module location owns scope; custom --target names are agent roots,
+ * not children of an implicitly trusted parent harness. */
+export const AGENT_ROOT = canonicalMutationPath(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
 );
+export function maintenanceRootForAgent(agent: string, home = homedir()): string | undefined {
+  const actual = canonicalMutationPath(agent), userHome = canonicalMutationPath(home);
+  const broad = [path.parse(actual).root, "/tmp", "/var/tmp", tmpdir(), userHome].map(value => canonicalMutationPath(value));
+  const dedicated = (root: string) =>
+    !broad.includes(root) &&
+    !containsPath(root, userHome);
+  if (!dedicated(actual)) return undefined;
+  const parent = path.dirname(actual);
+  return path.basename(actual) === "agent" && dedicated(parent) ? parent : actual;
+}
+const maintenanceRoot = maintenanceRootForAgent(AGENT_ROOT);
+export const HARNESS_ROOT = maintenanceRoot ?? AGENT_ROOT;
 const INITIAL_CWD = canonicalMutationPath(process.cwd());
 export const SELF_MUTATION_ALLOWED =
   process.env.PI_HARNESS_MUTATION_DENIED !== "1" &&
   process.env.PI_SUBAGENT_CHILD !== "1" &&
+  maintenanceRoot !== undefined &&
   containsPath(HARNESS_ROOT, INITIAL_CWD);
 // Children inherit denial even if they change cwd or import another copy of this module.
 if (!SELF_MUTATION_ALLOWED) process.env.PI_HARNESS_MUTATION_DENIED = "1";
@@ -76,16 +91,18 @@ if (!SELF_MUTATION_ALLOWED) process.env.PI_HARNESS_MUTATION_DENIED = "1";
  * from the tool cwd or project settings. Preserve both symlink entries and
  * referents, including absent destinations where an installer could add skills.
  */
-export function discoverMutationRoots(harness: string, home: string): string[] {
-  const agent = path.join(harness, "agent"),
+export function discoverMutationRoots(harness: string, home: string, agentDirectory = path.join(harness, "agent")): string[] {
+  const agent = canonicalMutationPath(agentDirectory),
     roots = new Set<string>();
+  if (!containsPath(canonicalMutationPath(harness), agent))
+    throw new Error("Agent directory must be inside the protected installation scope");
   const skillTrees: string[] = [];
   const addPath = (input: string, base = agent): string => {
     const raw = input.replace(/^~(?=\/|$)/, home);
     const physical = canonicalMutationPath(raw, base);
     if (
-      ["/", "/tmp", "/var/tmp", home].some((root) => physical === root) ||
-      containsPath(physical, home)
+      [path.parse(physical).root, "/tmp", "/var/tmp", tmpdir(), home].some((root) => physical === canonicalMutationPath(root)) ||
+      containsPath(physical, canonicalMutationPath(home))
     )
       throw new Error(
         "Global skill scope is too broad; configure explicit skill directories in a maintenance session",
@@ -177,7 +194,7 @@ let rootDiscoveryFailed = false;
 export const PROTECTED_MUTATION_ROOTS: readonly string[] = Object.freeze(
   (() => {
     try {
-      return discoverMutationRoots(HARNESS_ROOT, homedir());
+      return discoverMutationRoots(HARNESS_ROOT, homedir(), AGENT_ROOT);
     } catch {
       rootDiscoveryFailed = true;
       return [HARNESS_ROOT];
@@ -187,7 +204,7 @@ export const PROTECTED_MUTATION_ROOTS: readonly string[] = Object.freeze(
 const discoveryFailure =
   "Unable to determine protected global skill paths. Use a harness maintenance session to check settings.json and skill-directory permissions; no unguarded mutation was allowed.";
 const maintenanceSkill = [
-  path.join(HARNESS_ROOT, "agent/skills/harness-self-maintenance/SKILL.md"),
+  path.join(AGENT_ROOT, "skills/harness-self-maintenance/SKILL.md"),
   path.join(homedir(), "skills/harness-self-maintenance/SKILL.md"),
 ].find((candidate) => fs.existsSync(candidate));
 export const SELF_MUTATION_GUIDANCE = `Harness maintenance: inspect ${maintenanceSkill ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
@@ -209,7 +226,7 @@ export function selfMutationDenial(
     // writes are its documented fallback. Memory is runtime data, not harness
     // code/config — everything else under the harness root stays
     // maintenance-only.
-    if (containsPath(path.join(HARNESS_ROOT, "agent", "memory"), resolved))
+    if (containsPath(path.join(AGENT_ROOT, "memory"), resolved))
       return;
     const memoryOverride = process.env.PI_MEMORY_DIR?.trim();
     if (memoryOverride) {
@@ -286,7 +303,7 @@ export function guardedCommand(
     command: "/usr/bin/python3",
     args: [
       "-I",
-      path.join(HARNESS_ROOT, "agent/scripts/harness-readonly-exec.py"),
+      path.join(AGENT_ROOT, "scripts/harness-readonly-exec.py"),
       HARNESS_ROOT,
       ...PROTECTED_MUTATION_ROOTS.filter(
         (root) => root !== HARNESS_ROOT,

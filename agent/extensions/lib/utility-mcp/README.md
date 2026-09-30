@@ -23,7 +23,7 @@ explicitly load the extension and router and permit these read-only tools.
 | `coverage_probe` | Existing artifacts, uncovered evidence and Git line intersections |
 | `contract_diff` | JSON/YAML file or inline payload structural changes; schema mode |
 | `env_audit` | Names referenced in explicit sources versus example/deployment configs |
-| `net_probe` | `dns`, one `tcp` connection, one `tls` handshake, passive `ssh` banner |
+| `net_probe` | One-call `diagnose` ladder, `dns`, one `tcp` connection, one `tls` handshake, passive `ssh` banner |
 | `workspace_search` | Literal file/folder or UTF-8 content search under an explicit root |
 | `local_mail_search` / `local_mail_read` | Explicit Maildir/mbox search and exact message reading |
 | `ssh_plan` | Safe explicit-target argv plan, without connecting or reading SSH config |
@@ -69,9 +69,18 @@ explicitly load the extension and router and permit these read-only tools.
   labeled inferred. Scalar values are omitted. Environment auditing is static,
   recognizes common language forms and defaults, reports unresolved dynamic
   references and never reads process environment values or follows `env_file`.
-- Network results are live and never cached. Certificate validation errors stay
-  visible even though the inspection handshake permits an untrusted certificate
-  so its subject/SAN/issuer/expiry can be returned. No HTTP bytes are sent.
+- Network results are live and never cached. `diagnose` uses one selected DNS
+  address and one connection, retaining DNS/TCP/TLS/HTTP phase evidence and a
+  bounded next check. TCP is the default. HTTP/HTTPS require an explicit public
+  pathname; the sole application request is fixed `HEAD` with `Host` and
+  `Connection: close`. No custom method, headers, credentials, query, response
+  body, proxy or redirects. HTTPS stops before application bytes on certificate
+  trust/hostname failure; built-in Node roots are used. Standalone `tls` keeps
+  subject/SAN/issuer/expiry and validation errors visible without HTTP traffic.
+  Connecting to unspecified, link-local/metadata, multicast or broadcast targets
+  is blocked after DNS too, including mapped IPv6. No range, retry or enumeration.
+  Diagnosis has one 4.5-second budget; legacy DNS lookup is bounded. Native MCP
+  cancellation terminates its disposable worker; direct calls accept a signal.
 - Workspace search caps traversal at 5,000 entries, content at 16 MiB per call
   and 1 MiB per file, and matches at 1,000. Hidden paths require an explicit
   option. Skipped paths and incomplete scans are reported; no match is not proof
@@ -109,6 +118,10 @@ in the private tree, or `node --test tests/utility-mcp.test.mjs` in a public exp
 Fixtures are temporary and include real SQLite/WAL, Git, ZIP/TAR and localhost
 TCP/TLS cases. `tests/operation-tools.test.mjs` covers actual MCP/native discovery,
 Maildir/mbox, stale pages, MIME encodings, path boundaries, SSH banners and cancellation. DNS record formatting has a deterministic resolver fixture.
+`tests/system-network-diagnosis.test.mjs` adds real loopback HTTP/TLS/refusal,
+timeouts, cancellation, one-connection counts, header/secret bounds and actual
+Linux resource/PID/port inspection. The existing `sys_probe` owns local Linux
+diagnosis; see [its scope and examples](../../../../docs/SYSTEM-NETWORK-DIAGNOSIS.md).
 
 Protocol framing follows the [MCP stdio specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
 SQLite enforcement uses its [authorizer and progress APIs](https://docs.python.org/3/library/sqlite3.html).

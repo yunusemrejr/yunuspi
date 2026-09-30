@@ -44,7 +44,9 @@ test("infinite loops, concurrency and owners are flagged", () => {
     descriptor({ target: "div.c", properties: ["opacity", "transform"] }),
   ]);
   assert.deepEqual(owners.transformOwners, ["div.a", "div.b", "div.c"]);
-  assert.ok(owners.findings.some((f) => f.id === "transform-owners"));
+  assert.ok(!owners.findings.some((f) => f.id === "transform-owners"), "different elements are not competing owners");
+  const shared = motion.analyzeMotionTimeline([descriptor({ target: "div.a", properties: ["transform"] }), descriptor({ target: "div.a", properties: ["transform"] })]);
+  assert.ok(shared.findings.some(f => f.id === "transform-owners"));
 });
 
 test("layout-triggering properties and duration soup are flagged", () => {
@@ -56,15 +58,19 @@ test("layout-triggering properties and duration soup are flagged", () => {
   assert.ok(soup.findings.some((f) => f.id === "duration-soup"));
 });
 
-test("reduced-motion parity distinguishes ignored from partial", () => {
+test("reduced-motion inventory preserves uncertainty and recognizes altered timing", () => {
   const full = [descriptor({}), descriptor({ target: "div.b" })];
   const ignored = motion.analyzeMotionTimeline(full, { reduced: full });
-  assert.equal(ignored.reducedMotion.ignored, true);
+  assert.equal(ignored.reducedMotion.ignored, false);
+  assert.equal(ignored.reducedMotion.unchangedInventory, true);
   const fail = ignored.findings.find((f) => f.id === "reduced-motion");
-  assert.equal(fail.severity, "FAIL");
+  assert.equal(fail.severity, "WARN");
   const partial = motion.analyzeMotionTimeline(full, { reduced: [descriptor({})] });
   assert.equal(partial.reducedMotion.ignored, false);
   assert.equal(partial.findings.find((f) => f.id === "reduced-motion").severity, "WARN");
+  const shortened = motion.analyzeMotionTimeline(full, { reduced: full.map(d => ({ ...d, durationMs: 50 })) });
+  assert.equal(shortened.reducedMotion.unchangedInventory, false);
+  assert.equal(shortened.findings.some(f => f.severity === 'FAIL'), false);
   const calm = motion.analyzeMotionTimeline(full, { reduced: [] });
   assert.ok(!calm.findings.some((f) => f.id === "reduced-motion"));
 });
@@ -85,4 +91,9 @@ test("renderMotionTimeline draws finite bars and infinite continuations", () => 
   assert.match(text, /Motion timeline/);
   assert.match(text, /div\.title/);
   assert.match(text, /div\.loop.*→.*∞/);
+});
+
+test("touching intervals and zero-iteration animations do not inflate concurrency", () => {
+  const analysis = motion.analyzeMotionTimeline([descriptor({ durationMs: 100 }), descriptor({ durationMs: 100, delayMs: 100 }), descriptor({ iterations: 0 })]);
+  assert.equal(analysis.maxConcurrent, 1);
 });

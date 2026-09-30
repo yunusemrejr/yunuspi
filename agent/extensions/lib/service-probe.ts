@@ -15,9 +15,13 @@ const nativeRun: Runner = async (binary,args,signal) => {
     return result.stdout;
   } catch (error:any) {
     signal?.throwIfAborted();
-    if(error?.code==='ENOENT')throw Error('System inspection command is unavailable');
-    if(error?.killed || error?.signal || error?.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER')throw Error('System inspection exceeded its time or output limit');
-    throw Error('System inspection failed; the service manager or journal may be unavailable or inaccessible');
+    if(error?.code==='ENOENT')throw Object.assign(Error('System inspection command is unavailable'),{inspectionCode:'unavailable'});
+    if(['EACCES','EPERM'].includes(error?.code))throw Object.assign(Error('System inspection permission denied'),{inspectionCode:'permission_denied'});
+    if(error?.killed || error?.signal || error?.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER')throw Object.assign(Error('System inspection exceeded its time or output limit'),{inspectionCode:'limit'});
+    const stderr=String(error?.stderr??'');
+    if(/(?:Permission denied|Access denied)/i.test(stderr))throw Object.assign(Error('System inspection permission denied'),{inspectionCode:'permission_denied'});
+    if(/(?:not been booted with systemd|Failed to connect to .*bus.*(?:No such file|No medium|Host is down))/i.test(stderr))throw Object.assign(Error('Service manager is unavailable in this environment'),{inspectionCode:'manager_unavailable'});
+    throw Object.assign(Error('System inspection failed; no permission or availability conclusion established'),{inspectionCode:'inspection_failed'});
   }
 };
 

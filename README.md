@@ -16,6 +16,8 @@ Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0
 
 Sessions combine an independent observer, timing reviewer, expert-domain guidance, project memory, local inference, bounded remote helpers and optional Double reasoning. Design, browser, desktop, media and coding tools share evidence and lifecycle controls; the capability index exposes their entry points when needed. [What changed](CHANGELOG.md) · [Intelligence architecture](docs/MICRO-INTELLIGENCE.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md) · [Adaptive execution](docs/ADAPTIVE-EXECUTION.md) · [Development pipelines](docs/TASK-PIPELINES.md)
 
+Version 0.18 adds a smaller direct-task tool set, compact assurance receipts with native test diagnostics, optional bounded JEV writing/design triage, more precise SEO checks, decoded motion and local glTF/GLB preflight, and explicit-target network/Linux diagnosis. See the [verification report](docs/RELEASE-0.18.0-VERIFICATION.md) for measured results and limits.
+
 ## How a session works
 
 Start `yunuspi` in your project directory, choose an available model, and describe the work normally. You do not need to select a workflow or browse a catalog before every task.

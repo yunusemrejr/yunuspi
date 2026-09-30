@@ -23,6 +23,7 @@ import type { CreativeDirection } from "./creative-direction.ts";
 export interface AnimationDescriptor {
   index: number;
   kind: string;
+  playState: string;
   target: string;
   durationMs: number | null;
   delayMs: number;
@@ -46,6 +47,8 @@ const LAYOUT_PROPS = new Set([
   "font-size", "line-height",
 ]);
 
+const propertyName = (p: string) => p.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`).toLowerCase();
+
 const sanitizeDescriptors = (raw: unknown): AnimationDescriptor[] => {
   if (!Array.isArray(raw)) return [];
   const out: AnimationDescriptor[] = [];
@@ -55,10 +58,11 @@ const sanitizeDescriptors = (raw: unknown): AnimationDescriptor[] => {
     const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
     const durationMs = num(e.durationMs);
     const delayMs = num(e.delayMs) ?? 0;
-    const iterations = e.iterations === "infinite" ? "infinite" as const : Math.max(1, Math.floor(Number(e.iterations) || 1));
+    const iterations = e.iterations === "infinite" ? "infinite" as const : Math.max(0, Math.min(10_000, typeof e.iterations === "number" && Number.isFinite(e.iterations) ? e.iterations : 1));
     out.push({
       index: out.length,
       kind: String(e.kind ?? "unknown").slice(0, 32),
+      playState: ["running", "paused", "finished", "idle"].includes(String(e.playState)) ? String(e.playState) : "unknown",
       target: String(e.target ?? "?").slice(0, 120),
       durationMs: durationMs === null ? null : Math.max(0, Math.min(600_000, durationMs)),
       delayMs: Math.max(-600_000, Math.min(600_000, delayMs)),
@@ -95,13 +99,13 @@ export interface TimelineAnalysis {
   distinctDurations: number[];
   transformOwners: string[];
   layoutAnimations: string[];
-  reducedMotion: { full: number; reduced: number; ignored: boolean };
+  reducedMotion: { full: number; reduced: number; ignored: boolean; unchangedInventory: boolean };
   findings: MotionFinding[];
 }
 
-/** Deterministic timeline analysis. Pure. Reduced-motion "ignored" is set
- * only when the reduced pass reports the same live animations as the full
- * pass; anything subtler stays a WARN for rendered judgment. */
+/** Deterministic timeline analysis. Pure. Reduced-motion inventory parity is advisory; blocking ignored-preference
+ * findings require retained infinite transform timing and changing reduced
+ * pixels from the capture runner. */
 export function analyzeMotionTimeline(raw: unknown, options: { reduced?: unknown; direction?: CreativeDirection } = {}): TimelineAnalysis {
   const descriptors = sanitizeDescriptors(raw);
   const reduced = sanitizeDescriptors(options.reduced);
@@ -114,13 +118,13 @@ export function analyzeMotionTimeline(raw: unknown, options: { reduced?: unknown
     if (d.endMs === null) { events.push([start, 1]); }
     else if (d.endMs > start) { events.push([start, 1], [d.endMs, -1]); }
   }
-  events.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   let running = 0, maxConcurrent = 0;
   for (const [, delta] of events) { running += delta; maxConcurrent = Math.max(maxConcurrent, running); }
 
   const infinite = descriptors.filter((d) => d.iterations === "infinite");
   const transformOwners = [...new Set(descriptors.filter((d) => d.properties.includes("transform") || d.properties.includes("translate") || d.properties.includes("rotate") || d.properties.includes("scale")).map((d) => d.target))];
-  const layoutAnimations = descriptors.filter((d) => d.properties.some((p) => LAYOUT_PROPS.has(p.toLowerCase()))).map((d) => `${d.target} (${d.properties.filter((p) => LAYOUT_PROPS.has(p.toLowerCase())).join(", ")})`);
+  const layoutAnimations = descriptors.filter((d) => d.properties.some((p) => LAYOUT_PROPS.has(propertyName(p)))).map((d) => `${d.target} (${d.properties.filter((p) => LAYOUT_PROPS.has(propertyName(p))).join(", ")})`);
   const distinctDurations = [...new Set(descriptors.map((d) => d.durationMs).filter((v): v is number => v !== null).map((v) => Math.round(v)))].sort((a, b) => a - b);
 
   if (infinite.length) {
@@ -133,24 +137,26 @@ export function analyzeMotionTimeline(raw: unknown, options: { reduced?: unknown
     if (continuous === false) findings.push({ severity: "WARN", id: "direction-continuous", detail: "direction forbids continuous motion but infinite animations run", evidence: infinite.slice(0, 3).map((d) => d.target) });
   }
   if (maxConcurrent > 12) findings.push({ severity: "WARN", id: "too-many-concurrent", detail: `${maxConcurrent} concurrent moving elements at peak; entrances compete instead of guiding the eye`, evidence: [`peak concurrency ${maxConcurrent} across ${descriptors.length} animations`] });
-  if (transformOwners.length >= 3) findings.push({ severity: "WARN", id: "transform-owners", detail: `${transformOwners.length} animation owners touch transform: ${transformOwners.slice(0, 5).join("; ")}`, evidence: transformOwners.slice(0, 8) });
+  const possibleCollisions = transformOwners.filter(target => descriptors.filter(d => d.target === target && d.properties.some(p => ["transform", "translate", "rotate", "scale"].includes(p))).length > 1);
+  if (possibleCollisions.length) findings.push({ severity: "WARN", id: "transform-owners", detail: "Multiple transform animations share target labels; inspect overlapping property owners. Labels may identify separate elements with the same classes.", evidence: possibleCollisions.slice(0, 8) });
   if (layoutAnimations.length) findings.push({ severity: "WARN", id: "layout-props", detail: `${layoutAnimations.length} animation(s) drive layout-triggering properties (jank risk): ${layoutAnimations.slice(0, 4).join("; ")}`, evidence: layoutAnimations.slice(0, 8) });
   if (distinctDurations.length > 6) findings.push({ severity: "WARN", id: "duration-soup", detail: `${distinctDurations.length} distinct durations (${distinctDurations.slice(0, 8).join(", ")}ms…) — no shared timing scale`, evidence: distinctDurations.slice(0, 12).map((v) => `${v}ms`) });
 
-  const ignored = descriptors.length > 0 && reduced.length === descriptors.length;
-  if (descriptors.length > 0 && reduced.length > 0) {
-    findings.push({
-      severity: ignored ? "FAIL" : "WARN", id: "reduced-motion",
-      detail: ignored
-        ? `prefers-reduced-motion ignored: all ${descriptors.length} animation(s) still run under reduce`
-        : `${reduced.length} of ${descriptors.length} animation(s) still run under prefers-reduced-motion — verify the calm equivalent covers them`,
-      evidence: reduced.slice(0, 6).map((d) => `${d.target} kind=${d.kind}`),
-    });
-  }
+  const signature = (items: AnimationDescriptor[]) => items.map(d => JSON.stringify([d.target, d.kind, d.playState, d.durationMs, d.delayMs, d.iterations, d.playbackRate, [...d.properties].sort()])).sort().join("|");
+  const unchangedInventory = descriptors.length > 0 && signature(descriptors) === signature(reduced);
+  // Inventory parity alone cannot establish that reduction is ignored: opacity,
+  // shorter duration, paused timelines and static summaries can retain animations.
+  const ignored = false;
+  if (reduced.some(d => d.durationMs === null || d.durationMs > 80)) findings.push({
+    severity: "WARN", id: "reduced-motion", detail: unchangedInventory
+      ? "Reduced-motion inventory retains equivalent animation timing; compare actual reduced-state pixels before calling the preference ignored."
+      : "Reduced-motion retains animations; verify the calm equivalent, useful controls and message in rendered frames.",
+    evidence: reduced.slice(0, 6).map(d => `${d.target} duration=${d.durationMs ?? "?"}ms`),
+  });
   return {
     count: descriptors.length, infinite: infinite.length, maxConcurrent, distinctDurations,
     transformOwners, layoutAnimations,
-    reducedMotion: { full: descriptors.length, reduced: reduced.length, ignored },
+    reducedMotion: { full: descriptors.length, reduced: reduced.length, ignored, unchangedInventory },
     findings,
   };
 }
@@ -180,13 +186,17 @@ export async function motionInspectRun(
   const full = await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, includeState: true, animationInventory: true }, probeFile, cwd, signal);
   const fullInventory: unknown = full?.animationInventory ?? full?.conditions?.animationSample?.descriptors ?? [];
   let reducedInventory: unknown = [];
+  let reducedPass: "disabled" | "checked" | "failed" = params.reducedMotion === false ? "disabled" : "failed";
+  let reducedError: string | undefined;
   if (params.reducedMotion !== false) {
     try {
       const reducedFile = path.join(dir, "inventory-reduced.png");
       const receipt = await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, includeState: true, animationInventory: true, reducedMotion: "reduce" }, reducedFile, cwd, signal);
+      reducedPass = "checked";
       reducedInventory = receipt?.animationInventory ?? receipt?.conditions?.animationSample?.descriptors ?? [];
     } catch (error: any) {
       if (signal?.aborted) throw error;
+      reducedError = String(error?.message ?? error).slice(0, 200);
     }
   }
   const analysis = analyzeMotionTimeline(fullInventory, { reduced: reducedInventory, direction });
@@ -221,18 +231,44 @@ export async function motionInspectRun(
   });
 
   const temporal: MotionFinding[] = [];
+  if (reducedPass === "failed") temporal.push({ severity: "WARN", id: "reduced-motion-unverified", detail: "Reduced-motion capture failed; preference handling remains unknown.", evidence: [reducedError ?? "capture unavailable"] });
+  let reducedPixels: { changedShare: number; meanDelta: number; files: string[] } | undefined;
+  if (reducedPass === "checked" && analysis.count > 0) {
+    const reducedFrames: Array<{ file: string; img: Rgba }> = [];
+    for (const timeMs of [0, Math.min(durationMs, 333)]) {
+      const dest = path.join(dir, `reduce-${timeMs}.png`);
+      await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, animationTimeMs: timeMs, reducedMotion: "reduce" }, dest, cwd, signal);
+      reducedFrames.push({ file: relative(cwd, dest), img: await decodeImage(await fs.readFile(dest), { maxWidth: 960, maxPixels: 4_000_000 }, signal) });
+    }
+    const { comparison } = compareImages(reducedFrames[0].img, reducedFrames[1].img);
+    reducedPixels = { changedShare: Math.round(comparison.changed * 10_000) / 10_000, meanDelta: Math.round(comparison.meanDelta * 100) / 100, files: reducedFrames.map(f => f.file) };
+    const retainedInfiniteTransform = sanitizeDescriptors(reducedInventory).some(d => d.iterations === "infinite" && d.playState === "running" && d.playbackRate !== 0 && d.properties.some(p => ["transform", "translate", "rotate", "scale"].includes(p)));
+    if (analysis.reducedMotion.unchangedInventory && retainedInfiniteTransform && comparison.changed > .002 && comparison.meanDelta > .4) {
+      analysis.reducedMotion.ignored = true;
+      temporal.push({ severity: "FAIL", id: "reduced-motion-moving-loop", detail: "Equivalent infinite transform animations retain visible pixel changes under reduce. Provide a static state or explicit playback control and recheck.", evidence: reducedPixels.files });
+    }
+  }
   const dead = samples.filter((s) => s.flag === "dead");
   const jumps = samples.filter((s) => s.flag === "jump");
-  if (analysis.count > 0 && dead.length >= Math.ceil((samples.length - 1) / 2)) temporal.push({ severity: "WARN", id: "dead-time", detail: `${dead.length} of ${samples.length - 1} sampled intervals show no pixel change — dead time or animation outside the sampled clock (JS/rAF, scroll)`, evidence: dead.slice(0, 5).map((s) => `t=${s.timeMs}ms Δ=${s.meanDelta}`) });
-  for (const jump of jumps.slice(0, 3)) temporal.push({ severity: "WARN", id: "jump", detail: `t=${jump.timeMs}ms: large ${(jump.changedShare! * 100).toFixed(1)}% discontinuity — likely jump cut rather than intentional motion; verify against frames`, evidence: [jump.file] });
-  if (analysis.infinite > 0 && frames.length >= 2) {
-    const first = frames[0].img, last = frames[frames.length - 1].img;
-    const h = Math.min(first.height, last.height);
-    const { comparison } = compareImages(
-      { width: first.width, height: h, data: first.data.subarray(0, first.width * h * 4) },
-      { width: last.width, height: h, data: last.data.subarray(0, last.width * h * 4) },
-    );
-    if (comparison.changed > 0.02) temporal.push({ severity: "WARN", id: "loop-seam", detail: `first/last sampled frames differ (${(comparison.changed * 100).toFixed(1)}% changed) — loop seam or non-looping content inside an infinite run`, evidence: [frames[0].file, frames[frames.length - 1].file] });
+  if (analysis.count > 0 && dead.length >= Math.ceil((samples.length - 1) / 2)) temporal.push({ severity: "WARN", id: "dead-time", detail: `${dead.length} of ${samples.length - 1} sampled intervals show no pixel change — same loop phase, an intentional hold or animation outside the sampled clock (JS/rAF, scroll); inspect playback`, evidence: dead.slice(0, 5).map((s) => `t=${s.timeMs}ms Δ=${s.meanDelta}`) });
+  for (const jump of jumps.slice(0, 3)) temporal.push({ severity: "WARN", id: "jump", detail: `t=${jump.timeMs}ms: large ${(jump.changedShare! * 100).toFixed(1)}% difference between sparse frames; motion and intentional cuts can both explain it, so inspect playback`, evidence: [jump.file] });
+  // A random run endpoint is not a loop boundary. Seek the explicit local
+  // period only when every infinite animation shares a known duration/offset.
+  const loops = sanitizeDescriptors(fullInventory).filter(d => d.iterations === "infinite");
+  const period = loops[0]?.durationMs;
+  let loopBoundary: { periodMs: number; files: string[]; changedShare: number } | undefined;
+  if (loops.length && period && loops.every(d => d.durationMs === period && d.delayMs === 0) && period <= 60_000) {
+    const loopFrames: Array<{ file: string; img: Rgba }> = [];
+    for (const timeMs of [0, period]) {
+      const dest = path.join(dir, `loop-${timeMs}.png`);
+      await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, animationTimeMs: timeMs }, dest, cwd, signal);
+      loopFrames.push({ file: relative(cwd, dest), img: await decodeImage(await fs.readFile(dest), { maxWidth: 960, maxPixels: 4_000_000 }, signal) });
+    }
+    const { comparison } = compareImages(loopFrames[0].img, loopFrames[1].img);
+    loopBoundary = { periodMs: period, files: loopFrames.map(f => f.file), changedShare: Math.round(comparison.changed * 10_000) / 10_000 };
+    // Sampling exactly at the restart establishes endpoint parity, not velocity
+    // continuity or a near-boundary jump. Report this narrow fact accurately.
+    if (comparison.changed > .02) temporal.push({ severity: "WARN", id: "loop-endpoint-parity", detail: "Frames at 0 and one known local loop period differ; finite content or unstable page state may explain it. Inspect the boundary in playback.", evidence: loopBoundary.files });
   }
 
   const strip = composeRow(frames.map((f) => f.img), 8);
@@ -242,11 +278,12 @@ export async function motionInspectRun(
   const findings = [...analysis.findings, ...temporal];
   const report = {
     source: params.source, revision: await sourceRevision(params.source, cwd), at: new Date().toISOString(),
-    dir: relative(cwd, dir), durationMs, sampledClock: "CSS/WAAPI document timeline only; JS/rAF, scroll timelines, frames and not-yet-created animations are invisible to sampling",
+    dir: relative(cwd, dir), durationMs, sampledClock: "CSS/WAAPI document timeline only; JS/rAF, scroll timelines, frames and not-yet-created animations are invisible to sampling; each animation is sought to its own local time",
     inventory: { count: analysis.count, infinite: analysis.infinite, maxConcurrent: analysis.maxConcurrent, distinctDurationsMs: analysis.distinctDurations, transformOwners: analysis.transformOwners, layoutAnimations: analysis.layoutAnimations, reducedMotion: analysis.reducedMotion },
     timeline: renderMotionTimeline(sanitizeDescriptors(fullInventory), durationMs),
     descriptors: sanitizeDescriptors(fullInventory).slice(0, 40),
     samples: samples.map((s) => ({ ...s })),
+    reducedPass, reducedPixels: reducedPixels ?? null, loopBoundary: loopBoundary ?? null,
     sequence: relative(cwd, stripPath),
     findings,
     blocking: findings.filter((f) => f.severity === "FAIL").length,

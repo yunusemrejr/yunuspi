@@ -6,8 +6,8 @@ export function redactSecrets(text: string, env: Record<string, string | undefin
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted]')
     .replace(/\b(?:authorization|proxy-authorization)\s*[:=]\s*[^\r\n]+/gi, 'authorization: [redacted]')
     .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9+/_=.-]+/gi, '[redacted]')
-    .replace(/(["']?(?:[\w-]*(?:api[_-]?key|password|passwd|secret|token|credentials?))["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\n]+)/gi, '$1[redacted]')
-    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@');
+    .replace(/(["']?(?:[\w-]*(?:api[_-]?key|password|passwd|secret|token|credentials?|(?:proxy-)?authorization|auth))["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;&}\n]+)/gi, '$1[redacted]')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@');
   const secrets = [...Object.entries(env).filter(([name, value]) => SECRET_NAME.test(name) && typeof value === 'string' && value.length >= 4).map(([, value]) => value!), ...extra.filter(value => value.length >= 4)];
   for (const secret of new Set(secrets)) safe = safe.replaceAll(secret, '[redacted]');
   return safe;

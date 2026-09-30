@@ -1,7 +1,8 @@
 /** Dependency-free code quality measurements: token clone detection (DRY),
  * code "slop" patterns, prose quality and function complexity. Pure functions
  * over source text plus one bounded workspace walker. No project code runs,
- * nothing is installed, no model is called. Every result is advisory
+ * nothing is installed. Optional remote context triage retains local findings.
+ * Every result is advisory
  * evidence with locations; intentional repetition and style are allowed. */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { analyzeStructure } from "./code-structure.ts";
 import { createHash } from "node:crypto";
+import { refineQuality, protectedQualityText, type RefinementCandidate } from "./quality-refinement.ts";
 
 const exec = promisify(execFile);
 
@@ -446,13 +448,38 @@ export interface ProseReport {
   words: number; sentences: number; averageSentence: number; longSentences: number; readingEase: number; grade: number;
   emDashesPer100: number; hedgesPer100: number; fillersPer100: number; passiveShare: number; exclamations: number;
   findings: Finding[]; phrases: Array<{ phrase: string; count: number; try: string }>;
+  coverage: { language: "english-heuristic"; excluded: string[]; findings: number; reported: number };
 }
+/** Keep line positions while excluding code, quoted source and non-reader HTML. */
+export function proseText(text: string): string {
+  const blank = (value: string) => value.replace(/[^\n]/g, " ");
+  let fence = "", width = 0;
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, blank)
+    .replace(/<(script|style|pre|code|template)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->/gi, blank)
+    .split("\n").map(line => {
+      const edge = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+      if (fence) { if (edge && edge[1][0] === fence && edge[1].length >= width && /^\s*$/.test(line.slice(edge[0].length))) fence = ""; return blank(line); }
+      if (edge) { fence = edge[1][0]; width = edge[1].length; return blank(line); }
+      return /^\s*>/.test(line) || /^(?: {4}|\t)\S/.test(line) ? blank(line) : line;
+    }).join("\n").replace(/`[^`\n]*`/g, blank).replace(/<[^>\n]+>/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, blank);
+}
+function technicalPhrase(line: string, at: number, phrase: string): boolean {
+  // These have ordinary technical meanings; a word ban would damage precision.
+  const nearby = line.slice(Math.max(0, at - 70), at + phrase.length + 90);
+  return /^(?:robust)$/i.test(phrase) && /robust\s+(?:standard errors?|regression|statistics?|estimat\w*|optimization|control)/i.test(nearby)
+    || /^leverage$/i.test(phrase) && /(?:hat matrix|diagonal|debt|equity|financial leverage|operating leverage)/i.test(nearby)
+    || /^(?:256[- ]bit)$/i.test(phrase) && /(?:AES|cipher|encrypt\w*|keys?|SHA|hash)/i.test(nearby)
+    || /(?:word|phrase|term|replace|avoid|quot\w*)\s+["“']?$/.test(line.slice(0, at).toLowerCase());
+}
+const METRIC_CLAIM = /\b\d+(?:\.\d+)?\s*(?:x|×)\s+(?:faster|slower|better|cheaper|more|less)\b|\b\d{1,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d+(?:[.,]\d+)?\s*[kKmM]\+\s+(?:users|customers|teams|companies|downloads|members)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b(?!\d)/i;
+const METRIC_BASIS = /\b(?:measured|benchmark(?:ed)?|tested|study|survey|report)\b[^.!?\n]{0,110}\b(?:on|against|with|using|of|by|from|in)\b|\b(?:n\s*=\s*\d+|sample\s+(?:size|of)\s+\d+|\d+\s+(?:verified\s+)?reviews?\s+(?:on|from)|as of\s+\w+\s+\d{4})\b/i;
+export const metricHasBasis = (text: string) => METRIC_BASIS.test(text);
 /** Prose measurements and stock-phrase findings for Markdown, text or copy.
  * Code blocks, inline code, URLs, front matter and HTML tags are skipped. */
 export function proseReport(text: string): ProseReport {
-  const cleaned = text.replace(/^---\n[\s\S]*?\n---\n/, m => m.replace(/[^\n]/g, " ")).replace(/```[\s\S]*?```/g, m => m.replace(/[^\n]/g, " ")).replace(/`[^`\n]*`/g, " ")
-    .replace(/<[^>\n]+>/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  const lines = cleaned.split("\n");
+  const cleaned = proseText(text);
+  const lines = cleaned.split("\n"), rawLines = text.split("\n");
   const body = lines.filter(line => !/^\s*(?:#|\||[-*+] \[.\])/.test(line)).join("\n");
   const words = body.match(/[A-Za-z][A-Za-z'’-]*/g) ?? [];
   const sentences = body.split(/(?<=[.!?])\s+|\n{2,}/).map(s => s.trim()).filter(s => /[A-Za-z]{2}/.test(s));
@@ -462,34 +489,38 @@ export function proseReport(text: string): ProseReport {
   const per100 = (n: number) => Math.round(n / Math.max(1, words.length) * 1000) / 10;
   const passive = sentences.filter(s => /\b(?:is|are|was|were|be|been|being)\s+(?:\w+ly\s+)?\w+(?:ed|en)\b/i.test(s)).length;
   const findings: Finding[] = [], phrases = new Map<string, { count: number; try: string }>();
+  let findingCount = 0;
+  const add = (finding: Finding) => { findingCount++; if (findings.length < 60) findings.push(finding); };
   lines.forEach((line, i) => {
     for (const [pattern, suggestion] of PROSE_PATTERNS) for (const match of line.matchAll(pattern)) {
+      if (technicalPhrase(line, match.index!, match[0])) continue;
       const key = match[0].toLowerCase();
       const row = phrases.get(key) ?? { count: 0, try: suggestion }; row.count++; phrases.set(key, row);
-      if (findings.length < 40) findings.push({ rule: "stock-phrase", line: i + 1, message: `"${match[0]}" → ${suggestion}`, excerpt: line.trim().slice(0, 140) });
+      add({ rule: "stock-phrase", line: i + 1, message: `"${match[0]}" → ${suggestion}`, excerpt: line.trim().slice(0, 140) });
     }
-    if (/^#{1,3}\s+(?:introduction|conclusion|final thoughts|key takeaways|wrapping up|in summary)\s*$/i.test(line.trim())) findings.push({ rule: "boilerplate-heading", line: i + 1, message: "Generic section heading: name what the section says." });
-    if (/^#{1,3}\s+(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*$/i.test(line.trim()) || /<h[12]\b[^>]*>\s*(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*</i.test(line)) findings.push({ rule: "transparency-heading", line: i + 1, message: "Meta heading about the site itself: cut unless this page documents those subjects." });
-    if (/^#{1,3}\s+(?:\p{Extended_Pictographic}\s*)?(?:introducing|announcing|meet)\b/iu.test(line.trim()) || /<h[12]\b[^>]*>\s*(?:introducing|announcing|meet)\b/i.test(line)) findings.push({ rule: "slop-label", line: i + 1, message: "Eyebrow-style label heading (Introducing/Announcing/Meet X): the heading must state the point; cut the kicker." });
-    if (/^#{1,3}\s+(?:AI-[Pp]owered|Next-Gen(?:eration)?|Smart|Unified|Seamless|Cutting-Edge)\s+[A-Z]/.test(line.trim())) findings.push({ rule: "slop-label", line: i + 1, message: "Adjective-stacked label heading (AI-Powered/Smart/Unified X): name the concrete capability instead." });
-    if (/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d+(?:[.,]\d+)?\s*[kKmM]\+\s+(?:users|customers|teams|companies|downloads|members)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b(?!\d)/i.test(line) && !/measured|study|survey|benchmark|tested|based on|report|data|customers|teams/i.test(lines.slice(Math.max(0, i - 2), i + 3).join("\n"))) findings.push({ rule: "metric-without-basis", line: i + 1, message: "Metric claim without a nearby basis: add measured-where/on-what/against-what, or cut the number." });
-    if (/^\s*[-*]\s*(?:\p{Extended_Pictographic})/u.test(line)) findings.push({ rule: "emoji-bullet", line: i + 1, message: "Emoji as bullet decoration: plain bullets read as more credible." });
-    if (/^#{1,6}\s+.*\p{Extended_Pictographic}/u.test(line)) findings.push({ rule: "emoji-heading", line: i + 1, message: "Emoji in a heading: words carry the meaning; cut unless the brand owns it." });
+    if (/^#{1,3}\s+(?:introduction|conclusion|final thoughts|key takeaways|wrapping up|in summary)\s*$/i.test(line.trim())) add({ rule: "boilerplate-heading", line: i + 1, message: "Generic section heading: name what the section says." });
+    if (/^#{1,3}\s+(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*$/i.test(line.trim()) || /<h[12]\b[^>]*>\s*(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*</i.test(line)) add({ rule: "transparency-heading", line: i + 1, message: "Meta heading about the site itself: cut unless this page documents those subjects." });
+    if (/^#{1,3}\s+(?:\p{Extended_Pictographic}\s*)?(?:introducing|announcing|meet)\b/iu.test(line.trim()) || /<h[12]\b[^>]*>\s*(?:introducing|announcing|meet)\b/i.test(line)) add({ rule: "slop-label", line: i + 1, message: "Eyebrow-style label heading (Introducing/Announcing/Meet X): the heading must state the point; cut the kicker." });
+    if (/^#{1,3}\s+(?:AI-[Pp]owered|Next-Gen(?:eration)?|Smart|Unified|Seamless|Cutting-Edge)\s+[A-Z]/.test(line.trim())) add({ rule: "slop-label", line: i + 1, message: "Adjective-stacked label heading (AI-Powered/Smart/Unified X): name the concrete capability instead." });
+    if (METRIC_CLAIM.test(line) && !METRIC_BASIS.test(lines.slice(Math.max(0, i - 1), i + 2).join("\n")) && !/\[[^\]]+\]\(https?:\/\//i.test(rawLines.slice(Math.max(0, i - 1), i + 2).join("\n"))) add({ rule: "metric-without-basis", line: i + 1, message: "Metric claim without a nearby measurement or source: state the sample, date and comparison, or cut the number. A source mention is a cue, not verified evidence.", excerpt: line.trim().slice(0, 140) });
+    if (/^\s*[-*]\s*(?:\p{Extended_Pictographic})/u.test(line)) add({ rule: "emoji-bullet", line: i + 1, message: "Emoji as bullet decoration: plain bullets read as more credible." });
+    if (/^#{1,6}\s+.*\p{Extended_Pictographic}/u.test(line)) add({ rule: "emoji-heading", line: i + 1, message: "Emoji in a heading: words carry the meaning; cut unless the brand owns it." });
   });
   const triads = (body.match(/\b\w+(?: \w+)?, \w+(?: \w+)?,? and \w+/g) ?? []).length;
-  if (sentences.length >= 6 && triads / sentences.length > 0.3) findings.push({ rule: "rule-of-three", line: 1, message: `${triads} "X, Y and Z" triads in ${sentences.length} sentences: vary rhythm; not every list has three items.` });
+  if (sentences.length >= 6 && triads / sentences.length > 0.3) add({ rule: "rule-of-three", line: 1, message: `${triads} "X, Y and Z" triads in ${sentences.length} sentences: vary rhythm; not every list has three items.` });
   const openers = new Map<string, number>();
   for (const s of sentences) { const first = s.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, ""); if (first) openers.set(first, (openers.get(first) ?? 0) + 1); }
-  for (const [word, count] of openers) if (count >= 4 && count / sentences.length > 0.2 && !["the", "a", "i"].includes(word)) findings.push({ rule: "repeated-opener", line: 1, message: `${count} sentences start with "${word}": vary openings.` });
+  for (const [word, count] of openers) if (count >= 4 && count / sentences.length > 0.2 && !["the", "a", "i"].includes(word)) add({ rule: "repeated-opener", line: 1, message: `${count} sentences start with "${word}": vary openings.` });
   const dashes = (body.match(/—|\s--\s/g) ?? []).length;
-  if (words.length >= 150 && dashes / words.length * 100 > 1.2) findings.push({ rule: "dash-density", line: 1, message: `${dashes} em dashes in ${words.length} words: use commas, colons or full stops for most of them.` });
-  lengths.forEach((n, i) => { if (n > 38 && findings.length < 60) findings.push({ rule: "long-sentence", line: Math.max(1, lines.findIndex(line => line.includes(sentences[i].slice(0, 30))) + 1), message: `${n}-word sentence: split it.` }); });
+  if (words.length >= 150 && dashes / words.length * 100 > 1.2) add({ rule: "dash-density", line: 1, message: `${dashes} em dashes in ${words.length} words: use commas, colons or full stops for most of them.` });
+  lengths.forEach((n, i) => { if (n > 38) add({ rule: "long-sentence", line: Math.max(1, lines.findIndex(line => line.includes(sentences[i].slice(0, 30))) + 1), message: `${n}-word sentence: split it.` }); });
   return {
     words: words.length, sentences: sentences.length, averageSentence: Math.round(perSentence * 10) / 10, longSentences: lengths.filter(n => n > 30).length,
     readingEase: Math.round(206.835 - 1.015 * perSentence - 84.6 * perWord), grade: Math.max(0, Math.round((0.39 * perSentence + 11.8 * perWord - 15.59) * 10) / 10),
     emDashesPer100: per100(dashes), hedgesPer100: per100((body.match(HEDGES) ?? []).length), fillersPer100: per100((body.match(FILLERS) ?? []).length),
     passiveShare: Math.round(passive / Math.max(1, sentences.length) * 100), exclamations: (body.match(/!(?=\s|$)/g) ?? []).length,
     findings, phrases: [...phrases].map(([phrase, row]) => ({ phrase, ...row })).sort((a, b) => b.count - a.count).slice(0, 15),
+    coverage: { language: "english-heuristic", excluded: ["code", "quoted-source", "front-matter", "non-reader-html"], findings: Math.max(findingCount, findings.length), reported: findings.length },
   };
 }
 
@@ -628,7 +659,7 @@ const PROSE = (file: string) => /\.(?:md|mdx|markdown|txt|rst|adoc|html?)$/i.tes
 const compactFinding = (file: string) => (f: Finding) => ({ file, line: f.line, rule: f.rule, message: f.message, ...(f.excerpt ? { excerpt: f.excerpt } : {}) });
 
 /** Run one code_quality operation. Results are bounded, located and advisory. */
-export async function codeQuality(params: any, cwd: string, signal?: AbortSignal, parserFor?: (ext: string) => Promise<any>) {
+export async function codeQuality(params: any, cwd: string, signal?: AbortSignal, parserFor?: (ext: string) => Promise<any>, refinement: { pi?: unknown; judge?: any } = {}) {
   const operation = params.operation;
   if (!["duplicates", "slop", "prose", "complexity", "structure"].includes(operation)) throw new Error("operation must be duplicates, slop, prose, complexity or structure");
   const limit = Math.max(1, Math.min(80, Number.isInteger(params.limit) ? params.limit : 25));
@@ -662,14 +693,21 @@ export async function codeQuality(params: any, cwd: string, signal?: AbortSignal
   const scope = await collectSources(cwd, changed ? (targets.length ? targets : []) : inputs.length ? inputs : ["."], accept, { files: operation === "prose" ? 200 : 400, bytes: 12 * 1024 * 1024, fileBytes: 512 * 1024 });
   if (changed && !targets.length) return { operation, changed: 0, note: "No changed files of this kind against the base revision." };
   if (operation === "prose") {
-    const files = scope.files.map(file => ({ file: file.path, report: proseReport(file.source) })).filter(row => row.report.words >= 30);
+    const files = scope.files.map(file => ({ file: file.path, report: proseReport(file.source) })).filter(row => row.report.words > 0 || row.report.findings.length > 0);
     const worst = [...files].sort((a, b) => b.report.findings.length / Math.max(1, b.report.words) - a.report.findings.length / Math.max(1, a.report.words));
+    const readerLines = new Map(scope.files.map(file => [file.path, proseText(file.source).split("\n")]));
+    const protectedSources = new Set(scope.files.filter(file => protectedQualityText(file.source)).map(file => file.path));
+    const candidates: RefinementCandidate[] = worst.flatMap(({ file, report }) => report.findings.map((f, i) => ({ id: `${file}:${f.line}:${i}`, file, rule: f.rule, line: f.line,
+      protected: protectedSources.has(file), evidence: readerLines.get(file)!.slice(Math.max(0, f.line - 2), f.line + 1).join("\n") })));
+    const semantic = await refineQuality(candidates, { ...refinement, semantic: params.semantic, direction: params.direction, protectedPaths: params.protectedPaths, signal });
     return {
-      operation, scope: { files: files.length, skipped: scope.skipped, truncated: scope.truncated },
+      operation, scope: { files: scope.files.length, analyzed: files.length, skipped: scope.skipped, truncated: scope.truncated },
+      counts: { total: files.reduce((n, row) => n + row.report.coverage.findings, 0), reportedFiles: Math.min(worst.length, limit), omittedFiles: Math.max(0, worst.length - limit) },
       files: worst.slice(0, limit).map(({ file, report }) => ({ file, words: report.words, readingEase: report.readingEase, grade: report.grade, averageSentence: report.averageSentence, longSentences: report.longSentences,
         passivePercent: report.passiveShare, hedgesPer100: report.hedgesPer100, fillersPer100: report.fillersPer100, emDashesPer100: report.emDashesPer100, exclamations: report.exclamations,
-        phrases: report.phrases.slice(0, 8), findings: report.findings.slice(0, 12).map(compactFinding(file)) })),
-      note: "Reading ease: 60–70 is plain English, below 30 is dense. Stock phrases are replaced with specific claims, not synonyms. This measures prose patterns, not authorship or correctness.",
+        phrases: report.phrases.slice(0, 8), findings: report.findings.slice(0, 12).map(compactFinding(file)), coverage: { ...report.coverage, reported: Math.min(12, report.findings.length) } })),
+      semantic,
+      note: "English readability and style cues only; preserve technical terms, deliberate voice and necessary uncertainty. Code, quotes and non-reader HTML are excluded. Source mentions are not verified evidence. No authorship or correctness verdict.",
     };
   }
   if (operation === "slop") {
@@ -703,4 +741,17 @@ export async function codeQuality(params: any, cwd: string, signal?: AbortSignal
     hotspots: rows.slice(0, limit).map(r => ({ at: `${r.file}:${r.line}`, name: r.name, cyclomatic: r.cyclomatic, lines: r.lines, nesting: r.nesting, params: r.params })),
     findings: findings.slice(0, limit),
     note: "JS/TS/Python via tree-sitter. Cyclomatic counts decision points; thresholds (12, 80 lines, nesting 4, 5 params) mark candidates for splitting, not defects." };
+}
+
+/** Default result projection omits duplicated excerpts and reading counters;
+ * the tool's detailed view retains the complete bounded measurements. */
+export function compactQualityReport(report: any) {
+  const compact = (f: any) => ({ at: `${f.file}:${f.line}`, rule: f.rule, message: f.message });
+  if (report.operation === 'prose') return { operation: report.operation, scope: report.scope, counts: report.counts,
+    files: report.files?.map((row: any) => ({ file: row.file, words: row.words, readingEase: row.readingEase,
+      counts: { total: row.coverage.findings, reported: row.findings.length, omitted: Math.max(0, row.coverage.findings - row.findings.length) },
+      findings: row.findings.map(compact) })), semantic: report.semantic, note: report.note };
+  if (report.findings) return { ...report, findings: report.findings.map(compact) };
+  if (report.operation === 'duplicates') return { ...report, clones: undefined, byFile: undefined };
+  return report;
 }

@@ -8,6 +8,8 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { inspectGltf, stageGltfBundle } from "./gltf-inspect.ts";
+import { registerAsset } from "./asset-registry.ts";
 import { inputFile } from "./media-process.ts";
 import { decodeImage, encodeImage, probeImage } from "./design-studio.ts";
 import { projectDir, projectWritePath, readSpec } from "./video-studio.ts";
@@ -89,6 +91,8 @@ const extensionOf = (type: string, url: string) => {
   return ({ "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg", "video/mp4": ".mp4", "video/webm": ".webm", "model/gltf-binary": ".glb" } as Record<string, string>)[type] ?? "";
 };
 
+const modelSummary = (m: any) => ({ format: m.format, bytes: m.bytes, sha256: m.sha256, bundleSha256: m.bundleSha256, counts: m.counts, meshLocalBounds: m.meshLocalBounds, boundsComplete: m.boundsComplete, animationClips: m.animationClips, extensionsRequired: m.extensionsRequired, warnings: m.warnings, rendered: false });
+
 async function sha256(file: string) { return createHash("sha256").update(await fs.readFile(file)).digest("hex"); }
 
 /** Shrink oversized images (a 6000 px photograph costs decode time in every
@@ -124,11 +128,11 @@ async function download(url: string, dest: string, signal: AbortSignal | undefin
   const { fetchBinary } = await import("../http-tools.ts");
   const got = await fetchBinary({ url, maxBytes, timeoutMs: 120_000, accept }, signal);
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.writeFile(dest, got.bytes);
+  await fs.writeFile(dest, got.bytes, { flag: "wx" });
   return got;
 }
 
-async function fetchPolyHaven(dir: string, params: any, signal?: AbortSignal, progress?: Progress) {
+async function fetchPolyHaven(dir: string, params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const id = String(params.id ?? "");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new Error("id must be a Poly Haven asset id (from search)");
   const files = await getJson(`https://api.polyhaven.com/files/${id}`, signal);
@@ -149,8 +153,10 @@ async function fetchPolyHaven(dir: string, params: any, signal?: AbortSignal, pr
       if (total > 90 * 1024 * 1024) throw new Error("Model exceeds 90 MB; try resolution 1k");
     }
     const file = `${root}/${id}.gltf`;
-    await record(dir, { file, kind: "model", bytes: total, resolution, ...base });
-    return { file, kind: "model", license: "CC0", bytes: total, use: `Model3D src="${file}" (run video_project action:"feature" feature:"3d" once if the project has no 3D support)` };
+    const inspected = await inspectGltf(projectWritePath(dir, "public", file), signal);
+    await record(dir, { file, kind: "model", bytes: total, resolution, ...base, model: modelSummary(inspected), sha256: inspected.sha256 });
+    const registered = (await registerAsset({ path: projectWritePath(dir, "public", file), role: "product-shot", kind: "authored", description: base.title, license: base.license, creator: base.creator, licenseUrl: base.licenseUrl, sourceUrl: base.page, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record;
+    return { file, kind: "model", license: "CC0", bytes: total, assetId: registered.id, model: modelSummary(inspected), use: `Model3D src="${file}" (run video_project action:"feature" feature:"3d" once if the project has no 3D support)` };
   }
   const tex = files.Diffuse?.[resolution === "1k" ? "2k" : resolution]?.jpg ?? files.Diffuse?.["1k"]?.jpg;
   if (!tex) throw new Error(`${id} has neither a glTF model nor a diffuse texture`);
@@ -170,18 +176,27 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
   const dir = await projectDir(params.dir, cwd);
   const manifestPath = projectWritePath(dir, "public", "assets", "assets.json");
   if (action === "list") return { assets: existsSync(manifestPath) ? JSON.parse(await fs.readFile(manifestPath, "utf8")) : [], credits: (await readSpec(dir)).publish?.credits ?? [] };
-  if (action === "fetch" && params.source === "polyhaven") return fetchPolyHaven(dir, params, signal, progress);
+  if (action === "fetch" && params.source === "polyhaven") return fetchPolyHaven(dir, params, cwd, signal, progress);
   if (action !== "fetch" && action !== "import") throw new Error("action must be search, fetch, import or list");
   const isImport = action === "import";
   let title = String(params.title ?? "").trim(), url = String(params.url ?? ""), staged: string;
   const name = slug(params.name ?? title ?? "asset");
+  let model: any;
   if (isImport) {
     const source = await inputFile(params.path, cwd);
     const ext = path.extname(source).toLowerCase();
     if (![...IMAGE_EXT, ...VIDEO_EXT, ...MODEL_EXT, ".mp3", ".wav"].includes(ext)) throw new Error(`Unsupported file type ${ext}`);
-    staged = projectWritePath(dir, "public", "assets", `${name || slug(path.basename(source, ext))}${ext}`);
-    await fs.mkdir(path.dirname(staged), { recursive: true });
-    await fs.copyFile(source, staged);
+    if (MODEL_EXT.has(ext)) {
+      const modelDir = projectWritePath(dir, "public", "assets", "models", name || slug(path.basename(source, ext)));
+      await fs.mkdir(path.dirname(modelDir), { recursive: true });
+      const imported = await stageGltfBundle(source, modelDir, signal);
+      staged = imported.path; model = imported.report;
+    } else {
+      staged = projectWritePath(dir, "public", "assets", `${name || slug(path.basename(source, ext))}${ext}`);
+      const stat = await fs.stat(source); if (stat.size > 64 * 1024 * 1024) throw new Error("Local media import exceeds 64 MiB");
+      await fs.mkdir(path.dirname(staged), { recursive: true });
+      await fs.copyFile(source, staged, fs.constants.COPYFILE_EXCL);
+    }
     title ||= path.basename(source);
   } else {
     if (!url) throw new Error("fetch needs a url from a search hit (or source polyhaven with id)");
@@ -191,16 +206,18 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
     const ext = extensionOf(got.contentType, got.url);
     if (!ext) { await fs.rm(dest, { force: true }); throw new Error(`Unrecognized media type ${got.contentType}`); }
     staged = projectWritePath(dir, "public", "assets", `${name}${ext}`);
-    await fs.rename(dest, staged);
+    try { await fs.link(dest, staged); } finally { await fs.rm(dest, { force: true }); }
     title ||= name;
   }
   const ext = path.extname(staged).toLowerCase();
   const kind = IMAGE_EXT.has(ext) ? "image" : VIDEO_EXT.has(ext) ? "video" : MODEL_EXT.has(ext) ? "model" : "audio";
+  if (kind === "model" && !model) model = await inspectGltf(staged, signal);
   const dims = kind === "image" ? await fitImage(staged, signal) : {};
   const license = String(params.license ?? (isImport ? "user-supplied" : "unknown"));
   const attributionRequired = params.attributionRequired ?? (!isImport && license !== "unknown" && needsCredit(license));
-  const file = `assets/${path.basename(staged)}`;
-  await record(dir, { file, kind, title, creator: params.creator ?? (isImport ? "" : "unknown"), license, licenseUrl: params.licenseUrl, attributionRequired, source: isImport ? "local" : (params.source ?? new URL(url).host), page: params.page, ...dims, bytes: (await fs.stat(staged)).size, sha256: await sha256(staged), fetchedAt: new Date().toISOString() });
-  return { file, kind, ...dims, license, attributionRequired, ...(license === "unknown" ? { warning: "License unknown: pass license, creator and page from the search hit. Do not publish media whose license you cannot state." } : {}),
-    use: kind === "video" ? `Clip src="${file}"` : kind === "image" ? `MediaFrame src="${file}" motion="push"` : `Model3D src="${file}"` };
+  const file = path.relative(path.join(dir, "public"), staged);
+  await record(dir, { file, kind, title, creator: params.creator ?? (isImport ? "" : "unknown"), license, licenseUrl: params.licenseUrl, attributionRequired, source: isImport ? "local" : (params.source ?? new URL(url).host), page: params.page, ...dims, ...(model ? { model: modelSummary(model) } : {}), bytes: model?.bytes ?? (await fs.stat(staged)).size, sha256: await sha256(staged), fetchedAt: new Date().toISOString() });
+  const registered = (await fs.stat(staged)).size <= 40 * 1024 * 1024 ? (await registerAsset({ path: staged, kind: "authored", role: kind === "model" ? "product-shot" : "editorial-support", description: title, license, sourceUrl: params.page ?? (!isImport ? url : undefined), creator: params.creator, licenseUrl: params.licenseUrl, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record : undefined;
+  return { file, kind, ...dims, license, attributionRequired, assetId: registered?.id ?? null, ...(model ? { model: modelSummary(model) } : {}), ...(license === "unknown" ? { warning: "License unknown: pass license, creator and page from the search hit. Do not publish media whose license you cannot state." } : {}),
+    use: kind === "video" ? `Clip src="${file}"` : kind === "image" ? `MediaFrame src="${file}" motion="push"` : kind === "model" ? `Model3D src="${file}" (video_project feature 3d uses the existing Three.js renderer; inspect actual stills/playback)` : `video.json audio track path="${file}"` };
 }

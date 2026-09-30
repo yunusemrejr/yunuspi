@@ -224,7 +224,11 @@
     "adaptive-execution.ts",
     "task-pipelines.ts",
     "audio-studio.ts",
-    "media-pipeline.ts"
+    "media-pipeline.ts",
+    "assurance-output.ts",
+    "gltf-inspect.ts",
+    "quality-refinement.ts",
+    "video-motion.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

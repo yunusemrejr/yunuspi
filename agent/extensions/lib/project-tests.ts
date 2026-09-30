@@ -1,3 +1,4 @@
+import { projectTestOutput, testDiagnostics } from './assurance-output.ts';
 /** The checkpoints owner's project-test lifecycle. Models decide coverage and
  * write tests; the harness owns change revisions, execution receipts, stale
  * evidence and bounded continuation. There is no autonomous script executor. */
@@ -15,7 +16,7 @@ const ENTRY = 'project-test-checkpoint-v1';
 /** pi-background-tasks' terminal publication channel (extension-api.ts). */
 const BG_TERMINAL_CHANNEL = 'pi-background-tasks:terminal:v1';
 const MAX_FOLLOWUPS = 2;
-type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string };
+type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string; diagnostics?: ReturnType<typeof testDiagnostics> };
 type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[] };
 type ChangeAttribution = { status: 'current_session' | 'another_session' | 'unattributed'; sessionId?: string; detail?: string };
 type State = { root: string; revision: number; changed: string[]; attribution: Record<string, ChangeAttribution>; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
@@ -386,7 +387,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const summary = () => ({ ...state, attribution: attributionSummary(), plannedChecks: (state.assessment?.checks ?? []).map(check => {
     const receipt = currentProjectCheck(state, check.key);
-    return { command: check.label, outcome: receipt?.outcome ?? ([...state.checks, ...state.evidence].some(c => c.key === check.key) ? 'stale' : 'missing'), ...(receipt ? { callId: receipt.callId } : {}) };
+    return { command: check.label, outcome: receipt?.outcome ?? ([...state.checks, ...state.evidence].some(c => c.key === check.key) ? 'stale' : 'missing'), ...(receipt ? { callId: receipt.callId, ...(receipt.diagnostics ? { diagnostics: receipt.diagnostics } : {}) } : {}) };
   }), disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
     evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit. Receipts are bound to the observed source tree hash; reuse across scopes requires an identical tree.' });
   /** One unresolved-verification item shared by the rendered warning line and
@@ -419,8 +420,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
             : '');
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
-  const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string }; observeOnly?: boolean }, callId: string, outcome: Check['outcome'], handle?: string) => {
-    const receipt = { ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}) };
+  const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string }; observeOnly?: boolean }, callId: string, outcome: Check['outcome'], handle?: string, diagnostics?: ReturnType<typeof testDiagnostics>) => {
+    const receipt = { ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}), ...(diagnostics ? { diagnostics } : {}) };
     // A newer failed/running/unknown receipt must retire an older reusable
     // pass before live checks are discarded at a later scope boundary.
     state.evidence = state.evidence.filter(c => c.key !== receipt.key || Boolean(receipt.tree && c.tree !== receipt.tree));
@@ -604,7 +605,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           const noTests = /\bno tests? (?:found|ran|collected|to run)|\btests? (?:are )?skipped\b|\b(?:tests?|pass|passed|passing)\s*[:=]?\s*0\b|\b(?:Ran 0 tests?|0 passing)\b/i.test(text);
           const exit = event.details?.execution?.exitCode ?? event.details?.exitCode ?? event.details?.exit_code;
           const failed = event.isError || typeof exit === 'number' && exit !== 0 || !!(event.details?.execution?.signal ?? event.details?.signal);
-          receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed');
+          receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed', undefined, testDiagnostics(text));
         }
       }
       if (event.toolName === 'process') { await scan(ctx, completesOwnedCheck(event.details?.managedJob)); terminal(event.details?.managedJob); }
@@ -660,7 +661,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
     description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
-    parameters: Type.Object({ action: choices(['inspect', 'assess']),
+    parameters: Type.Object({ action: choices(['inspect', 'assess']), view: Type.Optional(choices(['compact', 'detailed'])),
       disposition: Type.Optional(choices(['required', 'not_needed', 'blocked'])),
       reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 })),
       commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test. Put explanations in reason, never append prose or parenthetical notes. Inspect returns the exact planned commands and their receipts.' }), { maxItems: 8 })) }),
@@ -698,7 +699,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
       const splitNote = params.action === 'assess' && (params.commands ?? []).length && (params.commands ?? []).length !== (state.assessment?.checks?.length ?? 0)
         ? `Chained commands were split into ${state.assessment?.checks?.length} planned checks; run each exactly as planned: ${JSON.stringify(state.assessment?.checks?.map((check: any) => check.label))}.\n` : '';
-      return { content: [{ type: 'text', text: splitNote + JSON.stringify(summary()) }], details: { revision: state.revision, need: projectTestNeed(state) } };
+      const data = summary();
+      return { content: [{ type: 'text', text: splitNote + JSON.stringify(projectTestOutput(data, params.view === 'detailed')) }], details: { revision: state.revision, need: projectTestNeed(state), projectTests: data } };
     },
   });
   return api;

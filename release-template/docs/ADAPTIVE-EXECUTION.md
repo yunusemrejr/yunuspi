@@ -126,3 +126,24 @@ are estimates from UTF-8 bytes divided by four. Local replay timing measures
 scheduler evaluation only. This benchmark does not measure live model latency,
 provider billing or end-to-end task completion; paired live CLI experiments
 must report those separately.
+
+## Tool exposure and assurance output in 0.18
+
+Direct work stages a smaller core schema set while keeping file tools, discovery,
+project verification, quality assessment and the complete bash background handle
+family. Observed escalation restores the standard set at the next tool boundary.
+Explicit discoveries, named core tools and core tools already used in the current
+task survive simplification; caller tool restrictions and explicit CLI selections
+remain authoritative. `PI_ADAPTIVE_EXECUTION=off` retains the standard set.
+
+`project_tests` and `quality_review` return compact views by default;
+`view:"detailed"` retrieves full retained state. Native snapshots, source hashes,
+stale-evidence rejection and independent review requirements are unchanged.
+Observed foreground test receipts retain bounded head/tail diagnostics with
+explicit omission or protected-material withholding. Reviewers receive the current
+planned receipts directly, so a test-only review needs no temporary log artifact.
+Actual visual/interaction captures remain necessary for those claims.
+
+CI runs `tool-efficiency-bench.mjs` to enforce the deterministic schema-count and
+output-size contracts while preserving required checks and blockers. Its fixture
+byte counts are prompt-overhead bounds, not estimates of model latency or billing.

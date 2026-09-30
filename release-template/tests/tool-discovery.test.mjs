@@ -15,7 +15,7 @@ const { registerToolDiscovery } = await import(
 process.env.PI_JEV = "off";
 process.env.PI_NEEDLE = "off";
 function fixture(extraTools = []) {
- const hooks = {},
+ const hooks = {}, events = {},
   entries = [],
   defs = new Map();
  let active = [
@@ -82,6 +82,7 @@ function fixture(extraTools = []) {
   sessionManager: { getSessionId: () => "session-a", getBranch: () => entries },
  };
  const api = {
+  events: {on: (name, fn) => events[name] = fn},
   on: (name, fn) => {
    hooks[name] = fn;
   },
@@ -106,6 +107,7 @@ function fixture(extraTools = []) {
  hooks.session_start?.({}, ctx);
  return {
   hooks,
+  events,
   entries,
   defs,
   api,
@@ -646,4 +648,39 @@ test('a delayed rerank cannot activate old tools after a session switch',async()
   assert.ok(!f.active().includes('bravo_tool'));
   assert.ok(!f.entries.some(e=>['harness-tool-activation-v1','jev-usage-v1'].includes(e.customType)));
  }finally{process.env.PI_JEV='off';if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey;resetJevClient();configureJevClient({fetchImpl:(...args)=>globalThis.fetch(...args)});}
+});
+
+
+test('direct schemas shrink without dropping checks, explicit choices or host restrictions', async () => {
+ const {CORE_TOOLS,DIRECT_CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const f=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ f.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, f.ctx);
+ assert.ok(f.active().length < CORE_TOOLS.size);
+ for(const name of DIRECT_CORE_TOOLS)assert.ok(f.active().includes(name),name);
+ assert.ok(!f.active().includes('subagent'));
+ await f.call({names:['subagent'],enable:true});f.hooks.turn_end();
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
+ assert.ok(f.active().includes('subagent'),'explicit discovery survives simplification');
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'complex',names:[],beforeStart:true});
+ assert.ok(f.active().includes('todo'),'observed escalation restores proportionate tools');
+ f.hooks.tool_call({toolName:'todo'},f.ctx);
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
+ assert.ok(f.active().includes('todo'),'a used coordination tool survives a mechanical todo');
+ f.api.setActiveTools(['read','tool_search']);
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'critical',names:[],beforeStart:true});
+ assert.deepEqual(f.active(),['read','tool_search'],'schema routing never expands a host restriction');
+});
+
+test('named core tools and adaptive opt-out retain caller intent', () => {
+ const f=fixture();
+ f.hooks.before_agent_start({prompt:'Use session_self to inspect this session.'}, f.ctx);
+ assert.ok(f.active().includes('session_self'));
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
+ assert.ok(f.active().includes('session_self'),'following native adaptive event retains explicit named intent');
+ f.hooks.input({source:'interactive',text:'Correct a typo',requestId:'next'});
+ f.hooks.before_agent_start({prompt:'Correct a typo'},f.ctx);
+ assert.ok(!f.active().includes('session_self'),'new accepted input retires prior named-only selection');
+ const prior=process.env.PI_ADAPTIVE_EXECUTION;process.env.PI_ADAPTIVE_EXECUTION='off';
+ try{const g=fixture();g.hooks.before_agent_start({prompt:'One-line typo'},g.ctx);assert.ok(g.active().includes('subagent'));}
+ finally{if(prior===undefined)delete process.env.PI_ADAPTIVE_EXECUTION;else process.env.PI_ADAPTIVE_EXECUTION=prior;}
 });

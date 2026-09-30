@@ -7,6 +7,7 @@ import { composeMusic } from "./lib/music-score.ts";
 import { sceneCapabilities, sceneCreate, sceneRender } from "./lib/scene-studio.ts";
 import { audioMix, videoCompose, VIDEO_TRANSITIONS } from "./lib/media-timeline.ts";
 import { mediaPipeline } from "./lib/media-pipeline.ts";
+import { videoMotion } from "./lib/video-motion.ts";
 import { choices } from "./lib/tool-schema.ts";
 export { sceneCreate, sceneRender, audioMix, videoCompose, mediaPipeline };
 
@@ -39,7 +40,8 @@ export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) 
     await Promise.all(detail);
     return { ...binaries, musicCompose: { available: true, engine: "built-in MIDI writer and sine/triangle audition synth" }, sceneStudio: sceneCapabilities() };
   }
-  if (!["probe", "scenes"].includes(action)) throw new Error("action must be probe, capabilities or scenes");
+  if (action === "motion") return videoMotion(params, cwd, signal);
+  if (!["probe", "scenes"].includes(action)) throw new Error("action must be probe, capabilities, scenes or motion");
   const file = await inputFile(params.path, cwd), info = await probe(file, signal);
   if (action === "probe") return { path: file, ...info };
   requireStream(info, "video");
@@ -254,7 +256,7 @@ export default function mediaTools(pi: any) {
       },
     });
   }
-  register("media_info", "Probe local media streams, check installed FFmpeg/Tesseract capabilities or find approximate scene cuts in a bounded window. No uploads. Probe is the default action.", Type.Object({ action: Type.Optional(choices(["probe", "capabilities", "scenes"])), path: Type.Optional(localPath), ...windowSchema, threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })) }), mediaInfo);
+  register("media_info", "Probe streams, capabilities or scene cuts. motion decodes every frame in up to 30 seconds/1800 frames without resampling: original timestamp cadence, low-change holds and optional last→first loop boundary. expectedFps checks the export clock. Compact technical evidence; pixel change cannot approve motion aesthetics. No uploads. Probe is the default action.", Type.Object({ action: Type.Optional(choices(["probe", "capabilities", "scenes", "motion"])), path: Type.Optional(localPath), ...windowSchema, threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })), loop: Type.Optional(Type.Boolean({ description: "motion: compare last→first decoded frames; window must cover the intended loop" })), expectedFps: Type.Optional(Type.Number({ minimum: 1, maximum: 120, description: "motion: requested export clock; differing cadence becomes a failure" })) }), mediaInfo);
   register("video_frames", "Extract 1..12 PNG frames at explicit seconds or evenly spaced timestamps (default 6). Returns frame paths and timing manifest. contactSheet:true also writes one tiled contact-sheet.png with a cell map: inspect that single image first instead of opening every frame. Fresh output folder inside cwd; originals preserved. Use read/vision to inspect returned images, or image_ocr for printed text in them.", Type.Object({ path: localPath, times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 86400 }), { minItems: 1, maxItems: 12 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), contactSheet: Type.Optional(Type.Boolean()), ...outputSchema }), videoFrames);
   register("image_ocr", "Extract printed text from a local image or PDF with on-device Tesseract (default English, see media_info capabilities for installed languages). Text only: it cannot judge layout, color, composition or meaning — use a vision model for those. Fast local path for text questions; no uploads, no delegation.", Type.Object({ path: localPath, language: Type.Optional(Type.String({ minLength: 3, maxLength: 31, pattern: "^[A-Za-z]{2,3}([+][A-Za-z]{2,3})*$" })), psm: Type.Optional(Type.Integer({ minimum: 0, maximum: 13 })), maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 100000 })) }), imageOcr);
   register("audio_analyze", "Measure windowed LUFS, true/sample peak, RMS, DC offset and silence; optionally render a spectrum PNG. Default first 30 seconds, maximum 600. Numeric evidence, no speech transcription or music recognition.", Type.Object({ path: localPath, ...windowSchema, silenceDb: Type.Optional(Type.Number({ minimum: -100, maximum: -1 })), silenceDuration: Type.Optional(Type.Number({ minimum: 0.05, maximum: 10 })), spectrum: Type.Optional(Type.Boolean()), ...outputSchema }), audioAnalyze);

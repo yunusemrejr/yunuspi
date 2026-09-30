@@ -165,7 +165,7 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       try { pi.appendEntry("subagent-lifecycle-v1", { runId, mode: "single", state: status, results: [{...identity,status,runId:result.runId}] }); } catch {}
       try {
         if (status === "running") pi.appendEntry("subagent-cost-v1", { runId, results: [result] });
-        else if (sessionFile) persistSubagentCost(pi, { currentSessionId: sessionFile, completionOwnerId: runId }, {
+        else persistSubagentCost(pi, { currentSessionId: sessionFile, completionOwnerId: runId }, {
           sessionId: sessionFile, completionOwnerId: runId, runId, mode: "single", state: status,
           results: [result],
         });

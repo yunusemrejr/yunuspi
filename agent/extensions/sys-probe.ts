@@ -14,6 +14,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { Type } from "typebox";
 import { serviceProbe, type ServiceProbeOptions } from './lib/service-probe.ts';
+import { systemDiagnose } from './lib/utility-mcp/system-probe.mjs';
 import {
   parsePsTop,
   parseServiceList,
@@ -28,7 +29,7 @@ import {
 
 import { choices } from "./lib/tool-schema.ts";
 const execFileP = promisify(execFile);
-const COMMANDS = ["listeners", "services", "service_detail", "journal", "processes", "host", "devices"] as const;
+const COMMANDS = ["listeners", "services", "service_detail", "journal", "processes", "host", "devices", "diagnose"] as const;
 const TOOLCHAINS = ["arduino-cli", "pio", "platformio", "esptool", "esptool.py", "idf.py", "openocd", "arm-none-eabi-gcc", "cmake", "ninja", "python3", "ssh", "rsync", "docker", "podman"];
 type Facts = { action: string; rows: (Listener | ServiceRow | ProcessRow | Record<string, unknown>)[]; truncated?: boolean; guidance?: string[]; warnings?: string[] };
 
@@ -214,10 +215,12 @@ export async function runSysProbe(
   action: string,
   limit: number,
   signal?: AbortSignal,
-  options: ServiceProbeOptions = {},
+  options: ServiceProbeOptions & { pid?: number; port?: number } = {},
 ): Promise<Facts> {
   signal?.throwIfAborted();
   limit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 200) : 100;
+  if (action === 'diagnose') return systemDiagnose(options, signal, {service: (value: ServiceProbeOptions, boundedSignal: AbortSignal) => serviceProbe('service_detail', 1, value, boundedSignal)});
+  if (options.pid !== undefined || options.port !== undefined) throw Error('pid/port apply only to diagnose');
   if (action === 'service_detail' || action === 'journal') return serviceProbe(action,limit,options,signal);
   if (['unit','user','cursor','lookbackSeconds'].some(key => (options as any)[key] !== undefined)) throw Error('Unit, manager and journal options apply only to service_detail/journal');
   if (action === "host") return hostFacts(signal);
@@ -256,22 +259,24 @@ export default function sysProbe(pi: any) {
     name: "sys_probe",
     label: "System Probe",
     description:
-      "Read-only Linux facts: host, devices, listeners, services, processes; service_detail inspects one exact systemd unit, journal pages its metadata using an optional cursor. Journal messages and service commands/environment are never returned. Bounded metadata; never starts, restarts or changes services or hardware.",
+      "Read-only Linux facts. diagnose combines resource/pressure/cgroup evidence with optional explicit PID, TCP port and systemd unit in one bounded call, retaining unavailable/permission/partial facts and proposed checks without applying fixes. Existing host/devices/listeners/services/processes/service_detail/journal actions remain. No commands, environment values, journal bodies or mutations.",
     promptSnippet:
       "Inspect host/session dependencies, hardware nodes, ports, services or processes",
     promptGuidelines: [
-      "Use sys_probe instead of parsing `ss`, `systemctl` or `ps` output in bash.",
+      "Use sys_probe diagnose for one-call local troubleshooting; supply only the relevant explicit pid, port or unit. Use narrower actions for detailed follow-up.",
       "Before host or hardware changes, inspect sys_probe host/devices and preserve the active machine, connectivity and session; presence is not authorization or target identity.",
     ],
     parameters: Type.Object({
-      action: choices(["listeners", "services", "service_detail", "journal", "processes", "host", "devices"]),
+      action: choices(["listeners", "services", "service_detail", "journal", "processes", "host", "devices", "diagnose"]),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
-      unit: Type.Optional(Type.String({minLength:1,maxLength:240,description:'One exact systemd unit, e.g. example.service; required for service_detail/journal. No patterns.'})),
-      user: Type.Optional(Type.Boolean({description:'Inspect current user manager/journal instead of system; service_detail/journal only.'})),
+      pid: Type.Optional(Type.Integer({ minimum: 1, maximum: 2147483647, description: 'diagnose only: one explicit PID; no command/environment reads.' })),
+      port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535, description: 'diagnose only: one local TCP listener port; no connection made.' })),
+      unit: Type.Optional(Type.String({minLength:1,maxLength:240,description:'One exact systemd unit, e.g. example.service; required for service_detail/journal, optional for diagnose. No patterns.'})),
+      user: Type.Optional(Type.Boolean({description:'Inspect current user manager/journal instead of system; explicit unit only.'})),
       cursor: Type.Optional(Type.String({minLength:1,maxLength:1024,description:'journal only: next_cursor from a previous page; results begin after it.'})),
       lookbackSeconds: Type.Optional(Type.Integer({minimum:1,maximum:86400,description:'journal only: bounded recent window. Defaults to 3600 for first page; cursor pages retain no implicit time filter.'})),
     }),
-    async execute(_id: any, params: { action: string; limit?: number } & ServiceProbeOptions, signal?: AbortSignal) {
+    async execute(_id: any, params: { action: string; limit?: number; pid?: number; port?: number } & ServiceProbeOptions, signal?: AbortSignal) {
       try {
         const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 200);
         const deadline = AbortSignal.timeout(5000);

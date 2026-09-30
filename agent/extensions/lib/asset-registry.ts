@@ -17,7 +17,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { containsPath, realRoot } from "./path-safety.ts";
+import { containsPath, realRoot, resolveWithinRoot } from "./path-safety.ts";
 
 export const ASSET_REGISTRY_VERSION = 1;
 const MAX_ASSETS = 500;
@@ -71,6 +71,10 @@ export interface AssetRecord {
   license: string | null;
   description: string;
   createdAt: number;
+  sourceUrl?: string | null;
+  creator?: string | null;
+  licenseUrl?: string | null;
+  model?: { format: string; bytes: number; counts: Record<string, number>; extensionsRequired: string[]; warnings: string[] };
 }
 
 export interface AssetRegistry {
@@ -123,9 +127,31 @@ const sanitizeRecord = (raw: unknown): AssetRecord | undefined => {
     usage: Array.isArray(r.usage) ? r.usage.filter((v): v is string => typeof v === "string").map((v) => v.slice(0, 1024)).slice(0, 64) : [],
     license: typeof r.license === "string" ? r.license.slice(0, 256) : null,
     description: typeof r.description === "string" ? r.description.slice(0, MAX_TEXT) : "",
+    sourceUrl: cleanText(r.sourceUrl, 1024) || null, creator: cleanText(r.creator, 200) || null, licenseUrl: cleanText(r.licenseUrl, 1024) || null,
+    ...(r.model && typeof r.model === "object" ? { model: normalizeModelSummary(r.model) } : {}),
     createdAt: typeof r.createdAt === "number" && Number.isFinite(r.createdAt) ? r.createdAt : Date.now(),
   };
 };
+
+
+function normalizeModelSummary(raw: any): NonNullable<AssetRecord['model']> {
+  const counts: Record<string, number> = {};
+  for (const key of ['meshes', 'nodes', 'scenes', 'primitives', 'vertices', 'triangles', 'materials', 'textures', 'animations']) if (Number.isSafeInteger(raw.counts?.[key]) && raw.counts[key] >= 0) counts[key] = raw.counts[key];
+  return { format: 'glTF 2.0', bytes: Number.isSafeInteger(raw.bytes) && raw.bytes >= 0 ? raw.bytes : 0, counts, extensionsRequired: cleanList(raw.extensionsRequired, 32), warnings: cleanList(raw.warnings, 12) };
+}
+
+/** Read-only current-file evidence; cached registrations never prove resources are still present. */
+export async function inspectAsset(params: { path: string }, cwd: string, signal?: AbortSignal) {
+  const file = resolveWithinRoot(cwd, params.path, 'Asset path');
+  if (/\.(gltf|glb)$/i.test(file)) {
+    const { inspectGltf } = await import('./gltf-inspect.ts');
+    return { file: path.relative(realRoot(cwd), file), ...await inspectGltf(file, signal) };
+  }
+  const stat = await fs.stat(file);
+  if (!stat.isFile() || stat.size > 40 * 1024 * 1024) throw new Error('Asset must be a regular file under 40 MiB');
+  const bytes = await fs.readFile(file);
+  return { file: path.relative(realRoot(cwd), file), bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), ...sniffDimensions(bytes), note: 'Header dimensions only; decode, appearance, license and playback remain unverified.' };
+}
 
 export function registryFile(cwd: string): string {
   return path.join(cwd, ".pi", "assets", "registry.json");
@@ -235,7 +261,8 @@ export async function registerAsset(
   const stat = await fs.stat(resolved);
   if (!stat.isFile() || stat.size > 40 * 1024 * 1024) throw new Error("Asset must be a regular file under 40 MiB");
   const bytes = await fs.readFile(resolved);
-  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+  const inspectedModel = /\.(gltf|glb)$/i.test(resolved) ? await inspectAsset({ path: resolved }, root) : undefined;
+  const hash = (inspectedModel && "bundleSha256" in inspectedModel ? inspectedModel.bundleSha256 : createHash("sha256").update(bytes).digest("hex")).slice(0, 16);
   const input = normalizeAssetInput(params);
   const registry = await readRegistry(root);
   const duplicate = registry.assets.find((a) => a.hash === hash);
@@ -252,6 +279,7 @@ export async function registerAsset(
       palette = measured.fills.filter((f) => /^#[0-9a-fA-F]{6}$/.test(f)).slice(0, 8);
     } catch { /* measurement is advisory; registration still records the file */ }
   }
+  const model = inspectedModel ? normalizeModelSummary(inspectedModel) : undefined;
   const record: AssetRecord = {
     id: input.id ?? `asset-${hash.slice(0, 8)}`,
     role: input.role, file: path.relative(root, resolved) || path.basename(resolved),
@@ -260,6 +288,8 @@ export async function registerAsset(
     sourceImage: typeof params.sourceImage === "string" ? params.sourceImage.slice(0, 1024) : null,
     parent: input.parent && registry.assets.some((a) => a.id === input.parent) ? input.parent : null,
     variants: [], usage: input.usage, license: input.license, description: input.description, createdAt: Date.now(),
+    sourceUrl: cleanText(params.sourceUrl, 1024) || null, creator: cleanText(params.creator, 200) || null, licenseUrl: cleanText(params.licenseUrl, 1024) || null,
+    ...(model ? { model } : {}),
   };
   if (record.parent) {
     const parent = registry.assets.find((a) => a.id === record.parent)!;
@@ -310,7 +340,7 @@ export function searchAssets(registry: AssetRegistry, params: AssetQuery): Asset
     if (parent && record.parent !== parent) continue;
     let score = 0;
     if (terms.length) {
-      const haystack = `${record.description} ${record.prompt ?? ""} ${record.file} ${record.id} ${record.role}`.toLowerCase();
+      const haystack = `${record.description} ${record.prompt ?? ""} ${record.file} ${record.id} ${record.role} ${record.model ? "3d model gltf glb" : ""}`.toLowerCase();
       const hits = terms.filter((t) => haystack.includes(t));
       if (!hits.length) continue;
       score += hits.length * 10;

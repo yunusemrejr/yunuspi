@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.0 — 2026-09-30
+
+**Direct work carries fewer schemas; assurance carries less repeated text.** Adaptive routing stages 17 core tool names for direct work instead of 30, restores coordination on observed escalation, and retains explicit/named/used tools and caller ceilings. Compact verification and review views retain actionable gaps and findings; full native state remains available. Current source-bound test receipts include bounded, protected-material-aware diagnostics for independent reviewers, avoiding unnecessary temporary evidence logs. Source changes and changed/deleted supplied captures still invalidate old evidence.
+
+**Quality checks distinguish prose from code and examples.** Writing checks exclude scripts, styles, JSON-LD and quoted technical examples, inspect short copy without loading syntax parsers, and require actual basis for metric claims. Ambiguous prose/design cues may receive one bounded cached JEV batch; judgments are annotations and never remove findings, certify pixels or authorize actions. Detailed output is available on request. SEO checks distinguish crawl evidence, canonical hints and indexing uncertainty, handle crawler-scoped noindex, validate hreflang/structured-data structure, and keep robots throttling/server failures unknown.
+
+**Motion and 3D inspection use actual local evidence.** Motion review compares transforms within the same element, recognizes active reduced-motion playback and measures loop seams only for verified periods. Bounded decoded-video inspection reports timestamps, movement, freezes and explicit coverage limits. Local glTF/GLB preflight validates contained resources, geometry/index/accessor/node structure, mesh-local decoded bounds and animation times; imports retain required resources and provenance. Inspection remains separate from rendered appearance and interaction quality.
+
+**Nonpersistent scouts record terminal usage.** A completed skill scout in `--no-session` print mode now emits its final usage receipt. Session identity and completion ownership still prevent late results from crossing sessions.
+
+**Custom installation scope is contained.** A custom `--target` no longer treats its parent temporary directory as the maintenance harness. Canonical root/home/temp paths cannot grant maintenance authority; settings, shared skills, memory exemptions and the namespace wrapper use the actual installed agent directory. Real isolation regressions cover sibling denial and legitimate maintenance.
+
+**Network and Linux diagnosis share existing tools.** One explicit-target network diagnosis reuses one connection across DNS/TCP/TLS and optional HEAD phases, preserves TLS trust failures and stops before sending HTTP on an untrusted connection. Linux diagnosis reads bounded proc/pressure/cgroup facts and optional exact PID, listener or unit facts. Cancellation, permission, unavailable and partial results are explicit; checks make no configuration changes or broad network scans.
+
+CI now checks concise-tool/evidence bounds alongside scheduler dispatch and the complete strict distribution suite. See [verification and measurements](docs/RELEASE-0.18.0-VERIFICATION.md), [media preflight](docs/MEDIA-PREFLIGHT.md), [system/network diagnosis](docs/SYSTEM-NETWORK-DIAGNOSIS.md), [code quality](docs/CODE-QUALITY.md) and [SEO checks](docs/CODE-QUALITY.md#static-seo-checks).
+
 ## 0.17.0 — 2026-09-30
 
 **Execution support now follows the work.** A shared, deterministic policy selects task, subtask and native todo support, reassesses real failures, lowers support after current substantive verification, and bounds automatic helpers, councils, reviews, Observer, Watchmaker, local ranking and JEV. Direct work skips remote prompt interpretation, skill scouts and periodic reviewers. Native child scheduling and reasoning defaults adapt to their own briefs; explicit model, concurrency, thinking and delegation constraints stay authoritative. Completed assurance remains evidence for the current source revision, with no synthetic passes or acceptance.

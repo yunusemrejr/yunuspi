@@ -1,6 +1,6 @@
 # Static audits: `code_audit` and `svg_inspect review`
 
-Two read-only checks that find the defects a careful reviewer would raise, from source text alone: `code_audit` for source files and the `review` action of `svg_inspect` for SVG. Nothing runs, nothing is installed, no model is called, so they cost no tokens beyond their (compact) results. The same rules also run **automatically** after every `write` or `edit`, so an agent that never asks for an audit still hears about a SQL injection or a clipped icon on the edit that introduced it.
+Two read-only checks inspect source text: `code_audit` for source files and the `review` action of `svg_inspect` for SVG. No project code runs and nothing is installed. Local audit rules also run automatically after `write` and `edit`. The explicit audit can add bounded semantic context to ambiguous design cues; automated edit checks remain local.
 
 ## `code_audit`
 
@@ -15,6 +15,10 @@ Domains (default all):
 | `ui` | Missing `alt`, blocked zoom, removed focus outlines, positive `tabindex`, click handlers on non-interactive elements, missing `lang`/viewport, autoplay with sound, text under 12px, `100vh`, plus the design-slop cues from the `design-slop-prevention` doctrine |
 
 Scope is explicit paths, the whole workspace, or `changed: true` (files changed against `base` plus untracked). Results carry `at: file:line`, severity, rule id and the offending line; each rule's message and fix are listed once under `rules`. Test, fixture, example, script and vendored paths are skipped, except for provider-format credentials, which are reported everywhere.
+
+`view:"compact"` is the default; `view:"detailed"` retains bounded findings with their messages and fixes. `omitted` distinguishes report limits from an empty audit. Whole-file design cues use a file location rather than inventing a line. Stock indigo/purple/pink gradients and cream/ivory plus cursive display combinations trigger context checks; plain white, ordinary serif type and supplied brand choices are not automatically defects. Supplied positive `direction` takes precedence over those stock-style defaults; source comments cannot grant an exemption.
+
+With `PI_JEV` enabled, at most eight ambiguous design cues can share a cached Jev/Kev request under a four-second caller deadline. Relevant source declarations are supplied instead of arbitrary opening lines. `semantic:false` disables it; `protectedPaths`, confidential/protected markers and credential-like content withhold excerpts. Offline or invalid responses retain all local findings. Context choices cannot suppress security findings, certify rendered design or authorize an action. See [CODE-QUALITY.md](CODE-QUALITY.md) for limits and static SEO coverage.
 
 These are cues, not verdicts: there is no data-flow analysis, so trusted input and admin scripts will occasionally trigger them. No findings does not mean secure or fast.
 

@@ -41,7 +41,7 @@ export function robotsVerdict(robots: string, path: string, agent = 'googlebot')
   const groups: Array<{ agents: string[]; rules: Array<{ allow: boolean; pattern: string }> }> = [];
   const sitemaps: string[] = [];
   let open = false;
-  for (const raw of robots.split(/\r?\n/)) {
+  for (const raw of robots.split(/\r\n|\n|\r/)) {
     const line = raw.replace(/#.*/, '').trim();
     const match = /^([A-Za-z-]+)\s*:\s*(.*)$/.exec(line);
     if (!match) continue;
@@ -58,27 +58,61 @@ export function robotsVerdict(robots: string, path: string, agent = 'googlebot')
   }
   const named = groups.filter(g => g.agents.includes(agent));
   const rules = (named.length ? named : groups.filter(g => g.agents.includes('*'))).flatMap(g => g.rules);
-  // `*` is any run of characters and a trailing `$` anchors the end; all else is literal.
-  const matches = (pattern: string) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\\\$$/, '$')}`).test(path);
-  const winner = rules.filter(r => matches(r.pattern)).sort((a, b) => b.pattern.length - a.pattern.length || Number(b.allow) - Number(a.allow))[0];
+  // Match literal segments without a backtracking regex. Repeated wildcard
+  // patterns in untrusted robots.txt must not stall a session.
+  const normalize = (value: string) => value.replace(/[^\x00-\x7f]/gu, c => encodeURIComponent(c))
+    .replace(/%([\da-f]{2})/gi, (_m, hex) => { const c = String.fromCharCode(parseInt(hex, 16)); return /[A-Za-z0-9._~-]/.test(c) ? c : `%${hex.toUpperCase()}`; });
+  const target = normalize(path);
+  const matches = (value: string) => {
+    const anchored = value.endsWith('$'), pattern = normalize(anchored ? value.slice(0, -1) : value);
+    const parts = pattern.split(/\*+/), first = parts.shift()!;
+    if (!target.startsWith(first)) return false;
+    let at = first.length;
+    if (!parts.length) return !anchored || at === target.length;
+    const last = parts.pop()!;
+    for (const part of parts) { const found = target.indexOf(part, at); if (found < 0) return false; at = found + part.length; }
+    if (anchored) return target.endsWith(last) && target.length - last.length >= at;
+    return target.indexOf(last, at) >= 0;
+  };
+  const specificity = (pattern: string) => Buffer.byteLength(normalize(pattern.replace(/\*/g, '').replace(/\$$/, '')));
+  const winner = rules.filter(r => matches(r.pattern)).sort((a, b) => specificity(b.pattern) - specificity(a.pattern) || Number(b.allow) - Number(a.allow))[0];
   return { allowed: !winner || winner.allow, rule: winner ? `${winner.allow ? 'Allow' : 'Disallow'}: ${winner.pattern}` : null, sitemaps };
 }
 
 /** On-page search signals from the raw document (before scripts are stripped,
  * since JSON-LD lives in script tags). Findings are checks, not rankings. */
-function seoSignals(document: any, finalUrl: string, base: string, headers: Headers, truncated: boolean) {
+export function seoSignals(document: any, finalUrl: string, base: string, headers: Headers, truncated: boolean, status = 200) {
   const meta = (key: string) => short(document.querySelector(`meta[name="${key}" i],meta[property="${key}" i]`)?.getAttribute('content'), 4096);
   // An empty href would resolve to the page itself; absent stays absent.
-  const resolve = (href: string | null | undefined) => href?.trim() ? httpUrl(href.trim(), base) ?? null : null;
+  const resolve = (href: string | null | undefined) => {
+    const value = href?.trim() ? httpUrl(href.trim(), base) : undefined;
+    return value && value.length <= 1024 ? value : null;
+  };
   const title = short(document.title, 4096), description = meta('description');
-  const canonical = resolve(document.querySelector('link[rel~="canonical" i]')?.getAttribute('href'));
-  const robots = [meta('robots'), meta('googlebot'), short(headers.get('x-robots-tag'), 200)].filter(Boolean).join(', ');
+  const canonicalElements = Array.from(document.querySelectorAll('link[rel~="canonical" i]')) as any[];
+  const canonicalUrls = canonicalElements.filter(el => document.head?.contains(el)).map(el => resolve(el.getAttribute('href')));
+  const headerCanonicals = [...(headers.get('link') ?? '').slice(0, 16000).matchAll(/<([^>]+)>\s*;\s*rel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^,;\s]+))/gi)]
+    .filter(match => (match[2] ?? match[3] ?? match[4] ?? '').split(/\s+/).includes('canonical')).map(match => resolve(match[1]));
+  const canonical = canonicalUrls[0] ?? headerCanonicals[0] ?? null;
+  const robotsMeta = Array.from(document.querySelectorAll('meta[name="robots" i],meta[name="googlebot" i]')).map((el: any) => short(el.getAttribute('content'), 1024));
+  const rawHeaderRobots = short(headers.get('x-robots-tag'), 2048);
+  const robots = [...robotsMeta, rawHeaderRobots].filter(Boolean).join(', ');
+  let headerAgent = '*';
+  const headerDirectives = rawHeaderRobots.split(',').flatMap(part => {
+    const scoped = /^\s*([\w-]+)\s*:\s*(.*)$/.exec(part);
+    if (scoped && !/^(?:max-snippet|max-image-preview|max-video-preview|unavailable_after)$/i.test(scoped[1])) { headerAgent = scoped[1].toLowerCase(); part = scoped[2]; }
+    return headerAgent === '*' || headerAgent === 'googlebot' ? [part.trim()] : [];
+  });
+  const effectiveRobots = [...robotsMeta.join(',').split(','), ...headerDirectives].map(value => value.trim().toLowerCase());
+  const noindex = effectiveRobots.some(value => value === 'noindex' || value === 'none');
   const hreflang = Array.from(document.querySelectorAll('link[rel~="alternate" i][hreflang]')).slice(0, 12).map((el: any) => ({ lang: short(el.getAttribute('hreflang'), 20), url: resolve(el.getAttribute('href')) }));
-  const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json" i]')).map((el: any) => {
+  const jsonLdBlocks = Array.from(document.querySelectorAll('script[type="application/ld+json" i]'));
+  const jsonLd = jsonLdBlocks.slice(0, 24).map((el: any) => {
     try {
       const value = JSON.parse(el.textContent ?? '');
       const nodes = [value, ...(Array.isArray(value?.['@graph']) ? value['@graph'] : [])].flat();
-      return { types: nodes.flatMap((n: any) => n?.['@type'] ?? []).map(String).slice(0, 6) };
+      return { types: nodes.flatMap((n: any) => n?.['@type'] ?? []).filter((type: any) => typeof type === 'string').slice(0, 6).map((type: string) => short(type, 80)),
+        ...(!value || typeof value !== 'object' ? { invalidShape: true } : {}) };
     } catch { return { invalid: true }; }
   });
   const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((el: any) => ({ level: Number(el.localName[1]), text: short(el.textContent, 90) }));
@@ -88,34 +122,61 @@ function seoSignals(document: any, finalUrl: string, base: string, headers: Head
   const missingAlt = images.filter((el: any) => !el.hasAttribute('alt')).length;
   const og = { title: Boolean(meta('og:title')), description: Boolean(meta('og:description')), image: resolve(meta('og:image')), type: meta('og:type') || null, twitterCard: meta('twitter:card') || null };
   const bare = (url: string) => url.replace(/#.*$/, '');
+  const allCanonicals = [...canonicalUrls, ...headerCanonicals].filter(Boolean) as string[];
+  const invalidHreflang = hreflang.filter(item => {
+    if (!item.url || !item.lang) return true;
+    if (item.lang.toLowerCase() === 'x-default') return false;
+    try { Intl.getCanonicalLocales(item.lang); return false; } catch { return true; }
+  });
+  const duplicateHreflang = hreflang.some((item, i) => hreflang.findIndex(other => other.lang.toLowerCase() === item.lang.toLowerCase()) !== i);
   const findings = [
-    !title ? 'missing <title>' : (title.length < 15 || title.length > 60) && `title is ${title.length} characters; about 15-60 shows whole in results`,
-    !description ? 'missing meta description' : (description.length < 50 || description.length > 160) && `meta description is ${description.length} characters; about 50-160 is shown`,
-    !canonical ? 'no canonical link' : bare(canonical) !== bare(finalUrl) && 'canonical points to another URL; this page will not be indexed as itself',
-    /noindex/i.test(robots) && `robots directive blocks indexing (${robots})`,
-    !truncated && h1.length !== 1 && `${h1.length} h1 elements; use exactly one that names the page`,
+    (status < 200 || status >= 300) && `HTTP ${status}: this response does not establish an indexable successful page`,
+    !title ? 'missing <title>' : (title.length < 15 || title.length > 60) && `title is ${title.length} characters; inspect clarity and rendered title width, not a fixed character limit`,
+    document.querySelectorAll('title').length > 1 && 'multiple title elements; choose one descriptive page title',
+    !description ? 'missing meta description' : (description.length < 50 || description.length > 160) && `meta description is ${description.length} characters; inspect specificity and snippet width; search may use page content instead`,
+    document.querySelectorAll('meta[name="description" i]').length > 1 && 'multiple meta descriptions; keep one page-specific description',
+    !canonical ? 'no canonical link; verify the intended preferred URL' : bare(canonical) !== bare(finalUrl) && 'canonical points to another URL; verify the intended consolidation (a signal, not an indexing guarantee)',
+    canonicalElements.some(el => !document.head?.contains(el)) && 'canonical link outside head; move the intended HTML canonical into head',
+    allCanonicals.length > 1 && 'multiple canonical declarations; verify they agree and keep one intended target per method',
+    new Set(allCanonicals.map(bare)).size > 1 && 'conflicting canonical targets',
+    noindex && `robots directive blocks indexing for Googlebot if fetched (${short(robots, 200)})`,
+    !truncated && h1.length === 0 && '0 h1 elements; verify a clear main page heading',
+    h1.length > 1 && `${h1.length} h1 elements; inspect the page outline and main heading (multiple h1 elements are not an indexing block)`,
     skipped > 0 && `heading level skips from h${headings[skipped - 1].level} to h${headings[skipped].level} ("${headings[skipped].text}")`,
     !document.documentElement?.getAttribute('lang') && 'missing <html lang>',
-    !document.querySelector('meta[name="viewport" i]') && 'missing viewport meta (mobile-first indexing)',
+    !document.querySelector('meta[name="viewport" i]') && 'missing viewport meta; verify mobile rendering',
     jsonLd.some(block => 'invalid' in block) && 'a JSON-LD block does not parse',
+    jsonLd.some(block => 'invalidShape' in block) && 'a JSON-LD block is not an object or array; syntax alone does not establish valid structured data',
+    invalidHreflang.length > 0 && `${invalidHreflang.length} hreflang entries have an invalid language tag or HTTP(S) target`,
+    duplicateHreflang && 'duplicate hreflang language declarations; verify one intended URL per locale',
     missingAlt > 0 && `${missingAlt} of ${images.length} images have no alt attribute`,
-    !og.image && 'no og:image; shared links render without a preview',
+    !og.image && 'no og:image; verify the intended sharing preview',
     truncated && 'page is over 1 MiB: heading and image counts cover only its start',
   ].filter(Boolean);
-  return { title: short(title), titleLength: title.length, description: short(description), descriptionLength: description.length, canonical, robots: robots || null, lang: document.documentElement?.getAttribute('lang') ?? null, hreflang, openGraph: og, jsonLd, h1: h1.map(h => h.text).slice(0, 3), headingCount: headings.length, images: images.length, missingAlt, findings };
+  return { title: short(title), titleLength: title.length, description: short(description), descriptionLength: description.length, canonical, canonicalCount: allCanonicals.length,
+    robots: robots || null, noindex, indexability: noindex || status < 200 || status >= 300 ? 'blocked-by-observed-signal' : 'unverified',
+    lang: document.documentElement?.getAttribute('lang') ?? null, hreflang, openGraph: og, jsonLd, h1: h1.map(h => h.text).slice(0, 3), headingCount: headings.length, images: images.length, missingAlt, findings,
+    coverage: { document: truncated ? 'partial-static-html' : 'static-html', jsonLdBlocks: jsonLdBlocks.length, jsonLdReported: jsonLd.length, linksFollowed: 0, rendered: false, targetUrlLimit: 1024 },
+    note: 'Observed source signals only; no rendered content, canonical-target, hreflang-reciprocity, rich-result eligibility, search-index or ranking verification.' };
+}
+
+export function compactWebProbe(result: any) {
+  if (!result.seo) return result;
+  return { requestedUrl: result.requestedUrl, finalUrl: result.finalUrl, status: result.status, contentType: result.contentType,
+    sampledBytes: result.sampledBytes, truncated: result.truncated, signals: result.signals, seo: result.seo, nextStep: result.nextStep };
 }
 
 async function robotsCheck(finalUrl: string, signal: AbortSignal, fetcher: typeof fetch, remote: any) {
   const url = new URL('/robots.txt', finalUrl);
   try {
     const response = await fetchRemoteUrl(url.href, { signal }, { ...remote, fetch: fetcher });
-    if (response.status >= 400 && response.status < 500) { await response.body?.cancel(); return { url: url.href, status: response.status, allowed: true, note: 'no robots.txt: crawling is allowed' }; }
-    if (!response.ok) { await response.body?.cancel(); return { url: url.href, status: response.status, allowed: false, note: 'server error on robots.txt: Google treats the whole site as disallowed until it recovers' }; }
+    if (response.status >= 400 && response.status < 500 && response.status !== 429) { await response.body?.cancel(); return { url: url.href, status: response.status, allowed: true, note: 'robots.txt client error (except 429): Google assumes no crawl restrictions' }; }
+    if (!response.ok) { await response.body?.cancel(); return { url: url.href, status: response.status, allowed: null, note: 'robots.txt unavailable or rate limited: Google may pause crawling or use cached rules; crawler cache/history is unknown' }; }
     const { text, truncated } = await readCapped(response, 256 * 1024);
-    const target = new URL(finalUrl);
-    return { url: url.href, status: response.status, ...robotsVerdict(text, target.pathname + target.search), ...(truncated ? { note: 'robots.txt over 256 KiB; later rules unread' } : {}) };
+    const target = new URL(finalUrl), verdict = robotsVerdict(text, target.pathname + target.search);
+    return { url: url.href, status: response.status, ...verdict, ...(truncated ? { allowed: null, partialRuleVerdict: verdict.allowed, note: 'robots.txt over 256 KiB; later rules unread, whole-file verdict unknown' } : {}) };
   } catch (error) {
-    return { url: url.href, error: short(error instanceof Error ? error.message : String(error), 200) };
+    return { url: url.href, allowed: null, error: short(error instanceof Error ? error.message : String(error), 200) };
   }
 }
 
@@ -159,7 +220,7 @@ export async function probePage(url: string, signal?: AbortSignal, fetcher: type
   const challengeHint = /cf-chl-|anomaly-modal|g-recaptcha|h-captcha|verify you are human/i.test(html);
   const passwordField = Array.from(document.querySelectorAll('input')).some(el => el.getAttribute('type')?.toLowerCase() === 'password');
   const base = httpUrl(document.querySelector('base[href]')?.getAttribute('href') ?? '', finalUrl) ?? finalUrl;
-  const seo = options.seo ? { ...seoSignals(document, finalUrl, base, response.headers, truncated), robotsTxt: await robotsCheck(finalUrl, combinedSignal, fetcher, remote) } : undefined;
+  const seo = options.seo ? { ...seoSignals(document, finalUrl, base, response.headers, truncated, response.status), robotsTxt: await robotsCheck(finalUrl, combinedSignal, fetcher, remote) } : undefined;
   // Static exclusions only: CSS/computed visibility requires the rendered browser.
   for (const el of document.querySelectorAll('script,style,noscript,template,[hidden]')) el.remove();
   for (const el of document.querySelectorAll('[aria-hidden]'))
@@ -215,11 +276,12 @@ export function registerWebProbe(pi: ExtensionAPI) {
     name: 'web_probe', label: 'Web Probe',
     description: 'Read-only reconnaissance before a complicated web task: one bounded GET returns status/final URL/content type, title, links, form field names and browser handoff hints. seo:true adds on-page search checks (title/description length, canonical, robots meta and X-Robots-Tag, hreflang, Open Graph, JSON-LD validity and types, h1 and heading outline, image alt) and the robots.txt verdict for the URL with its sitemaps. No browser dependency, cookies, scripts, form submission or file writes. HTML capped at 64 KiB (1 MiB with seo); total timeout 10s. Heuristic hints are not proof; a browser session may have different login state.',
     promptGuidelines: ['Use web_probe when a page fails or before complex interaction; use web_search for discovery, fetch_content for reading, and an available browser/Playwright tool for interaction. Avoid repeating unchanged probes.'],
-    parameters: Type.Object({ url: Type.String({ minLength: 1, maxLength: 8192 }), proxy: Type.Optional(Type.String({ description: 'Existing web extension HTTP(S) proxy override; empty string forces direct access.' })), seo: Type.Optional(Type.Boolean()) }),
+    parameters: Type.Object({ url: Type.String({ minLength: 1, maxLength: 8192 }), proxy: Type.Optional(Type.String({ description: 'Existing web extension HTTP(S) proxy override; empty string forces direct access.' })), seo: Type.Optional(Type.Boolean()), view: Type.Optional(Type.Union([Type.Literal('compact'), Type.Literal('detailed')])) }),
     async execute(_id, params, signal) {
       try {
         const result = await runWithProxy(params.proxy, () => probePage(params.url, signal, fetch, { seo: params.seo }));
-        let text = JSON.stringify(result, null, 2);
+        const compact = params.view !== 'detailed' ? compactWebProbe(result) : result;
+        let text = JSON.stringify(compact);
         if (Buffer.byteLength(text) > 24_000) {
           text = JSON.stringify({ ...result, links: undefined, forms: undefined, buttons: undefined, textPreview: undefined, note: 'Page map omitted to keep output bounded; inspect a browser snapshot for controls.' }, null, 2);
         }

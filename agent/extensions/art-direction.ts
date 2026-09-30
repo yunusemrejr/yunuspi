@@ -28,7 +28,7 @@ import {
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
-import { normalizeAssetInput, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
+import { normalizeAssetInput, inspectAsset, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
 import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
 import { captureToFile } from "./render-and-wait.ts";
@@ -222,7 +222,7 @@ export default function artDirection(pi: any) {
 
   // ── motion_inspect ──
   register("motion_inspect",
-    "Inspect running motion as a system: enumerate main-frame CSS/WAAPI animations (target, timing, iterations, animated properties), render an ASCII timeline, and flag concurrency, transform-owner collisions, layout-property animation, duration soup, infinite loops and ignored prefers-reduced-motion. Temporal QA samples deterministic clock frames across the run and reports dead time, jump cuts and loop seams with frame evidence. JS/rAF, scroll timelines and cross-frame choreography are out of scope and reported unknown.",
+    "Inspect running motion as a system: enumerate main-frame CSS/WAAPI animations (target, timing, iterations, animated properties), render an ASCII timeline, and flag concurrency, transform-owner collisions, layout-property animation, duration soup, infinite loops and possible shared-target transform owners. Temporal QA samples animation-local clock frames; reduced-motion failures require unchanged infinite transform timing plus actual moving reduced-state pixels. Known equal-period loops get endpoint-parity evidence; arbitrary first/last samples cannot prove seams. Encoded-video cadence/loop QA uses media_info action motion. JS/rAF, scroll timelines and cross-frame choreography are out of scope and reported unknown.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
       width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
@@ -273,9 +273,9 @@ export default function artDirection(pi: any) {
 
   // ── asset_register ──
   register("asset_register",
-    "Record and reuse creative assets with provenance: role (hero-focal, editorial-support, diagram, texture, icon, illustration, background, product-shot, avatar), source kind, prompt, parent/variant chains, usage, license and description in workspace .pi/assets/registry.json. register validates inside-workspace files, hashes, header-sniffs dimensions and dedupes by content; search filters by role/kind/parent with lexical and palette-near matching; usage links an asset to its placement. Generation tools register automatically.",
+    "Record and reuse creative assets with provenance: role (hero-focal, editorial-support, diagram, texture, icon, illustration, background, product-shot, avatar), source kind, prompt, parent/variant chains, usage, license and description in workspace .pi/assets/registry.json. register validates inside-workspace files, hashes, header-sniffs dimensions and dedupes by content; search filters by role/kind/parent with lexical and palette-near matching; usage links an asset to its placement. inspect is read-only current-file evidence: local glTF/GLB resource containment and budgets, decoded mesh-local bounds/animation times, counts and required loaders; it does not render or approve art. sourceUrl/creator/licenseUrl preserve provenance. Generation tools register automatically.",
     Type.Object({
-      action: choices(["register", "get", "search", "usage"]),
+      action: choices(["register", "get", "search", "usage", "inspect"]),
       path: Type.Optional(localPath),
       id: Type.Optional(Type.String({ maxLength: 64 })),
       role: Type.Optional(choices(["hero-focal", "editorial-support", "diagram", "texture", "icon", "illustration", "background", "product-shot", "avatar", "generic"])),
@@ -289,9 +289,11 @@ export default function artDirection(pi: any) {
       paletteNear: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$", maxLength: 7 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
       sourceImage: Type.Optional(Type.String({ maxLength: 1024 })),
+      sourceUrl: Type.Optional(Type.String({ maxLength: 1024 })), creator: Type.Optional(Type.String({ maxLength: 200 })), licenseUrl: Type.Optional(Type.String({ maxLength: 1024 })),
     }),
-    async (params, ctx) => {
+    async (params, ctx, signal) => {
       const cwd = ctx.cwd as string;
+      if (params.action === "inspect") { if (typeof params.path !== "string") throw new Error("asset_register inspect needs path"); return { result: await inspectAsset({ path: params.path }, cwd, signal) }; }
       if (params.action === "register") {
         if (isChild()) throw new Error("asset_register register is parent-only; children stay read-only.");
         normalizeAssetInput(params);

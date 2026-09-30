@@ -104,7 +104,7 @@ export default function adaptiveWorkflows(pi: any) {
     thinking.update(execution.profile(), ctx);
     scopes.set(scope, { selection, revision, task: scopes.get(scope)?.task ?? task });
     try { pi.appendEntry?.('adaptive-execution-v1', { scope, revision, ...execution.profile(), pipelines: selection.ids }); } catch { /* diagnostics */ }
-    try { pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, beforeStart, names: automaticNames() }); } catch { /* optional discovery host */ }
+    try { pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, beforeStart, tier: execution.profile().tier, names: automaticNames() }); } catch { /* optional discovery host */ }
   };
   pi.events?.on?.('project-source-observed', (event: any) => {
     if (!enabled() || !owns(event?.ctx)) return;
@@ -224,7 +224,7 @@ export default function adaptiveWorkflows(pi: any) {
     let nativeTests: any;
     if (event.toolName === 'project_tests' && !failed && ['inspect', 'assess'].includes(event.input?.action)) {
       try {
-        const parsed = JSON.parse(text.slice(text.indexOf('{')));
+        const parsed = event.details?.projectTests ?? JSON.parse(text.slice(text.indexOf('{')));
         if (!parsed.disabled && !parsed.paused && !parsed.optedOut && parsed.revision === event.details?.revision && parsed.need === event.details?.need) nativeTests = parsed;
       } catch { /* No structured native receipt means no indexed success. */ }
     }

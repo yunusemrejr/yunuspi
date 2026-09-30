@@ -1201,7 +1201,8 @@
             "services",
             "processes",
             "service_detail",
-            "journal"
+            "journal",
+            "diagnose"
           ],
           "summary": "Read host resources, network/power/session metadata or device candidates without opening devices."
         },
@@ -2120,7 +2121,7 @@
     {
       "id": "static-audits",
       "group": "engineering",
-      "summary": "Audit source and SVG files for defects a review would raise, without running anything or calling a model. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
+      "summary": "Audit source and SVG files with local deterministic rules. Explicit quality tools may batch ambiguous prose/UI findings through bounded cached JEV triage; edit hooks remain local and findings never become automatic approvals. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
       "entrypoints": [
         "code_audit",
         "svg_inspect"
@@ -2578,7 +2579,7 @@
     {
       "id": "art-direction",
       "group": "web_media",
-      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples temporal frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
       "entrypoints": [
         "creative_direct",
         "visual_review",
@@ -2646,6 +2647,8 @@
         "agent/extensions/lib/motion-inspect.ts",
         "agent/extensions/lib/svg-inspect.ts",
         "agent/extensions/lib/asset-registry.ts",
+        "agent/extensions/lib/gltf-inspect.ts",
+        "agent/extensions/lib/video-motion.ts",
         "agent/extensions/lib/image-generate.ts",
         "agent/scripts/render-capture.mjs"
       ],
@@ -2789,9 +2792,10 @@
           "name": "sys_probe.action",
           "values": [
             "service_detail",
-            "journal"
+            "journal",
+            "diagnose"
           ],
-          "summary": "Inspect systemd unit fields or metadata-only journal pages."
+          "summary": "Inspect exact units/journals or bounded proc/pressure/cgroup resources plus explicit PID/port diagnosis."
         }
       ],
       "related": [
@@ -3498,13 +3502,13 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 260,
+        "line": 262,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 282,
+        "line": 284,
         "kind": "factory"
       },
       {
@@ -3577,7 +3581,7 @@
       {
         "name": "code_audit",
         "source": "agent/extensions/code-audit.ts",
-        "line": 16,
+        "line": 23,
         "kind": "literal"
       },
       {
@@ -3631,7 +3635,7 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 360,
+        "line": 362,
         "kind": "factory"
       },
       {
@@ -3729,13 +3733,13 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 319,
+        "line": 321,
         "kind": "factory"
       },
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 259,
+        "line": 261,
         "kind": "factory"
       },
       {
@@ -3759,19 +3763,19 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 261,
+        "line": 263,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 257,
+        "line": 259,
         "kind": "factory"
       },
       {
         "name": "media_pipeline",
         "source": "agent/extensions/media-tools.ts",
-        "line": 283,
+        "line": 285,
         "kind": "factory"
       },
       {
@@ -3831,7 +3835,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 265,
+        "line": 267,
         "kind": "factory"
       },
       {
@@ -3933,7 +3937,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 754,
+        "line": 755,
         "kind": "literal"
       },
       {
@@ -3957,13 +3961,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 275,
+        "line": 277,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 276,
+        "line": 278,
         "kind": "factory"
       },
       {
@@ -4066,7 +4070,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 255,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -4090,7 +4094,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 334,
+        "line": 362,
         "kind": "literal"
       },
       {
@@ -4114,13 +4118,13 @@
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 281,
+        "line": 283,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 258,
+        "line": 260,
         "kind": "factory"
       },
       {
@@ -4162,7 +4166,7 @@
       {
         "name": "web_probe",
         "source": "agent/extensions/pi-web-access/web-probe.ts",
-        "line": 214,
+        "line": 275,
         "kind": "literal"
       },
       {
@@ -4279,7 +4283,7 @@
       {
         "name": "code_audit",
         "source": "agent/extensions/code-audit.ts",
-        "line": 16,
+        "line": 23,
         "kind": "literal"
       },
       {
@@ -4471,7 +4475,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 754,
+        "line": 755,
         "kind": "literal"
       },
       {
@@ -4543,7 +4547,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 255,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -4561,7 +4565,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 334,
+        "line": 362,
         "kind": "literal"
       },
       {
@@ -4573,7 +4577,7 @@
       {
         "name": "web_probe",
         "source": "agent/extensions/pi-web-access/web-probe.ts",
-        "line": 214,
+        "line": 275,
         "kind": "literal"
       },
       {
@@ -4652,7 +4656,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          247
+          249
         ],
         "knownNames": [
           "audio_analyze",
@@ -4820,7 +4824,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 689,
+      "sourceFiles": 694,
       "registrationSites": 84,
       "indirectRegistrationSites": 19,
       "stableRegistrationRows": 125,
@@ -5054,6 +5058,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/assurance-output.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/audio-studio.ts",
         "exists": true
       },
@@ -5231,6 +5239,10 @@
       },
       {
         "path": "agent/extensions/lib/git-authority.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/gltf-inspect.ts",
         "exists": true
       },
       {
@@ -5490,6 +5502,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/quality-refinement.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/quality-review-owner.ts",
         "exists": true
       },
@@ -5707,6 +5723,10 @@
       },
       {
         "path": "agent/extensions/lib/video-looks.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-motion.ts",
         "exists": true
       },
       {
@@ -6607,6 +6627,12 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/utility-mcp/system-probe.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/utility-mcp/web-assets.mjs",
         "signals": [
           "MCP"
@@ -6899,6 +6925,12 @@
         ]
       },
       {
+        "source": "agent/extensions/pi-web-access/web-probe.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/project-intelligence.ts",
         "signals": [
           "wrapper/adapter"
@@ -6913,6 +6945,7 @@
       {
         "source": "agent/extensions/sys-probe.ts",
         "signals": [
+          "MCP",
           "wrapper/adapter"
         ]
       },
@@ -7700,6 +7733,10 @@
         "path": "docs/LOCAL-INTELLIGENCE.md"
       },
       {
+        "name": "MEDIA-PREFLIGHT.md",
+        "path": "docs/MEDIA-PREFLIGHT.md"
+      },
+      {
         "name": "MICRO-INTELLIGENCE.md",
         "path": "docs/MICRO-INTELLIGENCE.md"
       },
@@ -7752,6 +7789,10 @@
         "path": "docs/RELEASE-0.17.0-VERIFICATION.md"
       },
       {
+        "name": "RELEASE-0.18.0-VERIFICATION.md",
+        "path": "docs/RELEASE-0.18.0-VERIFICATION.md"
+      },
+      {
         "name": "REVIEWS-AND-COUNCILS.md",
         "path": "docs/REVIEWS-AND-COUNCILS.md"
       },
@@ -7790,6 +7831,10 @@
       {
         "name": "SUBAGENT-CONTRACTS.md",
         "path": "docs/SUBAGENT-CONTRACTS.md"
+      },
+      {
+        "name": "SYSTEM-NETWORK-DIAGNOSIS.md",
+        "path": "docs/SYSTEM-NETWORK-DIAGNOSIS.md"
       },
       {
         "name": "TASK-PIPELINES.md",

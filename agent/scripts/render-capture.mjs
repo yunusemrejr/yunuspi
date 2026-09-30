@@ -519,6 +519,7 @@ export async function renderCapture(p, output, signal) {
               const rawDuration = timing.duration === "auto" ? NaN : Number(timing.duration);
               return {
                 index, kind: String(animation.constructor?.name ?? "Animation").slice(0, 32),
+                playState: ["running", "paused", "finished", "idle"].includes(animation.playState) ? animation.playState : "unknown",
                 target: label.slice(0, 120),
                 durationMs: Number.isFinite(rawDuration) ? rawDuration : null,
                 delayMs: Number.isFinite(Number(timing.delay)) ? Number(timing.delay) : 0,

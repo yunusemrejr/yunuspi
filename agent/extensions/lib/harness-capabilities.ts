@@ -563,7 +563,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		entrypoints: ["sys_probe", "sandbox_run", "filesystem-safety", "harness:mutation-preflight"],
 		tools: ["sys_probe", "sandbox_run", "git_info"],
 		options: [
-			option("sys_probe.action", "Read host resources, network/power/session metadata or device candidates without opening devices.", ["host", "devices", "listeners", "services", "processes", "service_detail", "journal"]),
+			option("sys_probe.action", "Read host resources, network/power/session metadata or device candidates without opening devices.", ["host", "devices", "listeners", "services", "processes", "service_detail", "journal", "diagnose"]),
 			option("command", "Inline sandbox Bash script."),
 			option("files[].path", "Relative disposable destination."),
 			option("files[].content|source", "Exactly one inline fixture or project source."),
@@ -863,7 +863,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "static-audits",
 		group: "engineering",
-		summary: "Audit source and SVG files for defects a review would raise, without running anything or calling a model. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
+		summary: "Audit source and SVG files with local deterministic rules. Explicit quality tools may batch ambiguous prose/UI findings through bounded cached JEV triage; edit hooks remain local and findings never become automatic approvals. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
 		entrypoints: ["code_audit", "svg_inspect"],
 		tools: ["code_audit", "svg_inspect", "code_quality", "artifact_check"],
 		options: [
@@ -975,7 +975,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "art-direction",
 		group: "web_media",
-		summary: "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples temporal frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+		summary: "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
 		entrypoints: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_inspect", "asset_register", "image_generate", "creative_compare"],
 		tools: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_inspect", "asset_register", "image_generate", "creative_compare", "render_see", "design_audit", "image_analyze", "visual_diff"],
 		options: [
@@ -988,7 +988,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("prompt|negative|aspect|size|seed", "Generation brief: prompt plus direction/role constraints; configured backend required."),
 		],
 		related: ["design-studio", "rendered-design-review", "creative-studio", "video-studio"],
-		sourceFiles: ["agent/extensions/art-direction.ts", "agent/extensions/lib/creative-direction.ts", "agent/extensions/lib/creative-qa.ts", "agent/extensions/lib/motion-inspect.ts", "agent/extensions/lib/svg-inspect.ts", "agent/extensions/lib/asset-registry.ts", "agent/extensions/lib/image-generate.ts", "agent/scripts/render-capture.mjs"],
+		sourceFiles: ["agent/extensions/art-direction.ts", "agent/extensions/lib/creative-direction.ts", "agent/extensions/lib/creative-qa.ts", "agent/extensions/lib/motion-inspect.ts", "agent/extensions/lib/svg-inspect.ts", "agent/extensions/lib/asset-registry.ts", "agent/extensions/lib/gltf-inspect.ts", "agent/extensions/lib/video-motion.ts", "agent/extensions/lib/image-generate.ts", "agent/scripts/render-capture.mjs"],
 		doc: "agent/public-template/docs/ART-DIRECTION.md",
 	}),
 	capability({
@@ -1025,7 +1025,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		summary: "Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset references for hosting, and Ubuntu unit/journal metadata without running workflows, publishing sites or mutating services. Source-backed findings with explicit unresolved expressions.",
 		entrypoints: ["workflow_probe", "web_asset_check", "sys_probe"],
 		tools: ["workflow_probe", "web_asset_check", "sys_probe", "git_info", "package_probe", "env_audit"],
-		options: [option("path|project", "Explicit workflow YAML and project root."), option("files|asset_root|public_path", "Explicit HTML/CSS/manifest sources and hosting asset boundary."), option("sys_probe.action", "Inspect systemd unit fields or metadata-only journal pages.", ["service_detail", "journal"])],
+		options: [option("path|project", "Explicit workflow YAML and project root."), option("files|asset_root|public_path", "Explicit HTML/CSS/manifest sources and hosting asset boundary."), option("sys_probe.action", "Inspect exact units/journals or bounded proc/pressure/cgroup resources plus explicit PID/port diagnosis.", ["service_detail", "journal", "diagnose"])],
 		related: ["source-intelligence", "safety-bounds", "rendered-design-review"],
 		sourceFiles: ["agent/extensions/lib/utility-mcp/catalog.mjs", "agent/extensions/sys-probe.ts"],
 		doc: "agent/public-template/docs/ASYNC-AND-STUDIO.md",

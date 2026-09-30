@@ -100,6 +100,64 @@ test("maintenance authority is latched at original process launch", () => {
   f.close();
  }
 });
+test("custom-named copied installation owns only its actual root, settings, memory and wrapper", () => {
+ const f = fixture();
+ try {
+  const custom = path.join(f.root, "custom-runtime"), lib = path.join(custom, "extensions/lib");
+  const skills = path.join(f.root, "shared-skills"), localSkills = path.join(custom, "relative-skills");
+  const maintenance = path.join(custom, "skills/harness-self-maintenance/SKILL.md");
+  fs.mkdirSync(lib, { recursive: true }); fs.mkdirSync(skills); fs.mkdirSync(localSkills);
+  fs.mkdirSync(path.dirname(maintenance), { recursive: true }); fs.writeFileSync(maintenance, "fixture maintenance guidance");
+  fs.mkdirSync(path.join(custom, "scripts"));
+  fs.copyFileSync(path.join(agent, "extensions/lib/self-mutation-guard.ts"), path.join(lib, "self-mutation-guard.ts"));
+  fs.copyFileSync(wrapper, path.join(custom, "scripts/harness-readonly-exec.py"));
+  fs.writeFileSync(path.join(custom, "settings.json"), JSON.stringify({ skills: ["../shared-skills", "+relative-skills"] }));
+  // A sibling's settings do not own installation protection or authority.
+  fs.writeFileSync(path.join(f.project, "settings.json"), JSON.stringify({ skills: ["/"] }));
+  const copied = pathToFileURL(path.join(lib, "self-mutation-guard.ts")).href;
+  const inspect = (cwd, extra = {}, change = false) => {
+   const result = node(cwd, `const g=await import(${JSON.stringify(copied)});${change ? `process.chdir(${JSON.stringify(custom)});` : ""}console.log(JSON.stringify({agent:g.AGENT_ROOT,root:g.HARNESS_ROOT,allowed:g.SELF_MUTATION_ALLOWED,denied:!!g.selfMutationDenial(${JSON.stringify(path.join(custom, "new-file"))},process.cwd()),sharedDenied:!!g.selfMutationDenial(${JSON.stringify(path.join(skills, "new-file"))},process.cwd()),localMemoryDenied:!!g.selfMutationDenial(${JSON.stringify(path.join(custom, "memory/note"))},process.cwd()),projectDenied:!!g.selfMutationDenial(${JSON.stringify(path.join(f.project, "ordinary"))},process.cwd()),guidance:g.SELF_MUTATION_GUIDANCE,wrapped:g.guardedCommand('/bin/true',[])}));`, extra);
+   assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
+  };
+  for (const cwd of [f.project, f.root, TEMP_BASE, os.homedir(), path.parse(custom).root]) {
+   const result = inspect(cwd);
+   assert.equal(result.root, custom); assert.equal(result.agent, custom); assert.equal(result.allowed, false, cwd);
+   assert.equal(result.denied, true); assert.equal(result.sharedDenied, true); assert.equal(result.projectDenied, false);
+   assert.equal(result.localMemoryDenied, false);
+   assert.ok(result.guidance.includes(maintenance));
+   assert.equal(result.wrapped.args[1], path.join(custom, "scripts/harness-readonly-exec.py"));
+   assert.equal(result.wrapped.args[2], custom); assert.ok(result.wrapped.args.includes(skills));
+  }
+  assert.equal(inspect(f.project, {}, true).allowed, false, "changing cwd does not grant authority");
+  assert.equal(inspect(custom).allowed, true, "actual installation launch retains maintenance authority");
+  assert.equal(inspect(lib).allowed, true, "installation descendant is authorized");
+  assert.equal(inspect(custom, { PI_SUBAGENT_CHILD: "1" }).allowed, false);
+  assert.equal(inspect(custom, { PI_HARNESS_MUTATION_DENIED: "1" }).allowed, false);
+ } finally { f.close(); }
+});
+test("maintenance root selection rejects broad scopes and retains safe default parents", () => {
+ const f = fixture();
+ try {
+  const result = node(f.project, `const g=await import(${JSON.stringify(moduleUrl)});console.log(JSON.stringify({broad:${JSON.stringify(["/", "/tmp", "/var/tmp", os.homedir()])}.map(p=>g.maintenanceRootForAgent(p)),default:g.maintenanceRootForAgent(${JSON.stringify(path.join(f.protectedDir, "agent"))}),tempAgent:g.maintenanceRootForAgent('/tmp/agent'),homeAgent:g.maintenanceRootForAgent(${JSON.stringify(path.join(os.homedir(), "agent"))})}));`);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(value.broad, [null, null, null, null]); assert.equal(value.default, f.protectedDir);
+  assert.equal(value.tempAgent, "/tmp/agent"); assert.equal(value.homeAgent, path.join(os.homedir(), "agent"));
+ } finally { f.close(); }
+});
+test("explicit agent directory discovers custom global skill config without a synthetic agent child", () => {
+ const f = fixture();
+ try {
+  const custom = path.join(f.root, "named-install"), home = path.join(f.root, "home");
+  const global = path.join(f.root, "configured-skills"), wrong = path.join(f.root, "wrong-nested-skills");
+  fs.mkdirSync(path.join(custom, "agent"), { recursive: true }); fs.mkdirSync(home);
+  fs.writeFileSync(path.join(custom, "settings.json"), JSON.stringify({ skills: ["../configured-skills"] }));
+  fs.writeFileSync(path.join(custom, "agent/settings.json"), JSON.stringify({ skills: [wrong] }));
+  const result = node(f.project, `const g=await import(${JSON.stringify(moduleUrl)});const roots=g.discoverMutationRoots(${JSON.stringify(custom)},${JSON.stringify(home)},${JSON.stringify(custom)});console.log(JSON.stringify({global:roots.some(r=>g.containsPath(r,${JSON.stringify(global)})),wrong:roots.some(r=>g.containsPath(r,${JSON.stringify(wrong)})),codex:roots.some(r=>g.containsPath(r,${JSON.stringify(path.join(home, ".codex/skills"))})),roots}));`);
+  assert.equal(result.status, 0, result.stderr); const value = JSON.parse(result.stdout);
+  assert.equal(value.global, true); assert.equal(value.wrong, false); assert.equal(value.codex, true);
+ } finally { f.close(); }
+});
 test("project tool guidance advertises executable native orchestration", () => {
  const f = fixture();
  try {

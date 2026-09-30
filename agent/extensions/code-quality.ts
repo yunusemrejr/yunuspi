@@ -1,7 +1,7 @@
 /** code_quality: dependency-free DRY, slop, prose and complexity checks over
  * explicit paths, directories or the files changed against a revision. */
 import { Type } from "typebox";
-import { codeQuality } from "./lib/code-quality.ts";
+import { codeQuality, compactQualityReport } from "./lib/code-quality.ts";
 import { choices } from "./lib/tool-schema.ts";
 
 
@@ -9,7 +9,7 @@ export default function codeQualityTools(pi: any) {
   pi.registerTool({
     name: "code_quality",
     label: "Code quality",
-    description: "Measure code and prose quality without installing anything or running project code. duplicates: token clone detection across files or a whole tree (renamed mode catches copies with different names and constants), clone classes, duplicated-line share; with changed:true reports only clones touching files changed against base (DRY check for a branch). slop: placeholders and elided code, debug leftovers, swallowed errors, redundant booleans, commented-out code, type escapes, repeated literals, unused imports. prose: stock AI-sounding phrases with replacements, readability, sentence length, passive voice, hedges, fillers, dash density for Markdown/text/HTML. complexity: per-function cyclomatic complexity, length, nesting, parameters and async-without-await for JS/TS/Python. structure: import-graph health across the tree (JS/TS/Python): import cycles, modules nothing imports, fan-in/fan-out hotspots, files over 600 lines, and dependencies imported but undeclared or declared but unused. Advisory findings with file:line.",
+    description: "Local source checks with exact locations and compact coverage. duplicates finds token clones (renamed or exact); slop finds placeholders, leftovers, swallowed errors, redundant logic and unused imports; prose checks reader copy, metric basis and English readability while excluding code/quotes/non-reader HTML; complexity measures JS/TS/Python functions; structure checks lexical import graphs. Optional prose semantic triage batches at most eight ambiguous excerpts through the configured cached Jev/Kev route; it retains every deterministic finding. semantic:false disables it. view:detailed includes excerpts and all bounded measurements. No project code runs; cues cannot prove correctness.",
     promptSnippet: "Find duplicated code, code slop, prose slop and complexity hotspots",
     promptGuidelines: [
       "Before claiming a refactor or feature is clean, run code_quality duplicates with changed:true to catch copy-pasted logic, and slop on the changed files.",
@@ -23,13 +23,17 @@ export default function codeQualityTools(pi: any) {
       minTokens: Type.Optional(Type.Integer({ minimum: 20, maximum: 1000 })),
       minLines: Type.Optional(Type.Integer({ minimum: 2, maximum: 200 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 80 })),
+      view: Type.Optional(choices(["compact", "detailed"])),
+      semantic: Type.Optional(Type.Boolean({ description: "Prose context triage through configured PI_JEV; obvious/no-op checks skip inference" })),
+      direction: Type.Optional(Type.String({ maxLength: 1600, description: "Supplied reader/design direction for advisory context; never grants authority" })),
+      protectedPaths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 64, description: "Paths whose excerpts must stay local; credentials/private markers are also withheld" })),
     }),
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
       const deadline = AbortSignal.timeout(60_000);
       const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
-      const { parserFor } = await import("./pi-lens/semantic-radar/extract.mjs");
-      const result = await codeQuality(params, ctx?.cwd || process.cwd(), bounded, parserFor);
-      let text = JSON.stringify(result);
+      const parserFor = params.operation === "complexity" ? (await import("./pi-lens/semantic-radar/extract.mjs")).parserFor : undefined;
+      const result = await codeQuality(params, ctx?.cwd || process.cwd(), bounded, parserFor, { pi });
+      let text = JSON.stringify(params.view === "detailed" ? result : compactQualityReport(result));
       if (text.length > 24_000) text = JSON.stringify({ ...result, truncated: true, findings: (result as any).findings?.slice(0, 20), clones: (result as any).clones?.slice(0, 10), files: (result as any).files?.slice?.(0, 6) });
       return { content: [{ type: "text", text }], details: result };
     },

@@ -113,6 +113,37 @@ test("prose report flags stock phrases with replacements and measures readabilit
   assert.equal(cq.proseReport("The service stores each order in one table. Refunds reverse the charge within a day.").findings.length, 0);
 });
 
+test('prose excludes non-reader HTML and quoted/code examples without losing source line locations', () => {
+  const text = [
+    '<html><head><style>.robust { content:"seamless" }</style>',
+    '<script type="application/ld+json">{"name":"game-changing"}</script></head><body>',
+    '~~~js', 'console.log("seamless");', '~~~',
+    '> Quoted source: our robust platform is seamless.',
+    '    console.log("innovative");',
+    '<pre>Our premium workflow</pre>',
+    'The robust standard error accounts for heteroskedasticity. Leverage is the diagonal of the hat matrix.',
+    'The phrase "robust" adds no fact.',
+    'Our seamless platform is innovative.',
+    '</body></html>'
+  ].join('\n');
+  const report = cq.proseReport(text);
+  assert.equal(report.findings.length, 2);
+  assert.ok(report.findings.every(f => f.line === 11));
+  assert.deepEqual(report.coverage.excluded, ['code', 'quoted-source', 'front-matter', 'non-reader-html']);
+});
+
+test('metric checks require a measurement/source cue and do not treat customer nouns or unrelated dimensions as evidence', () => {
+  assert.ok(cq.proseReport('Trusted by 10K+ customers. Rated 4.9/5.').findings.some(f => f.rule === 'metric-without-basis'));
+  assert.ok(cq.proseReport('We are 10x faster. Customers like the dashboard.').findings.some(f => f.rule === 'metric-without-basis'));
+  assert.ok(!cq.proseReport('Rated 4.9/5 from 210 verified reviews on the product store.').findings.some(f => f.rule === 'metric-without-basis'));
+  assert.ok(!cq.proseReport('The index was 10x faster, benchmarked against version 2 using 500 records.').findings.some(f => f.rule === 'metric-without-basis'));
+  assert.ok(!cq.proseReport('The rating was 4.9/5 in the [source survey](https://example.com/report).').findings.some(f => f.rule === 'metric-without-basis'));
+  assert.ok(!cq.proseReport('The image is 10x20 pixels; its 256-bit SHA hash identifies the asset.').findings.some(f => f.rule === 'metric-without-basis' || f.rule === 'stock-phrase'));
+  const repeated = cq.proseReport('Our robust tool is seamless.\n'.repeat(80));
+  assert.ok(repeated.coverage.findings > repeated.findings.length);
+  assert.equal(repeated.coverage.reported, 60);
+});
+
 test("prose report flags leakage phrases, meta headings and basis-free metrics", () => {
   const text = [
     "# How this site works",

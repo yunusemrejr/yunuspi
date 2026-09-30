@@ -8,6 +8,7 @@ import path from "node:path";
 import { codeLexicalMask } from "./code-lexical-mask.ts";
 import { collectSources, changedFiles, type SourceFile } from "./code-quality.ts";
 import { inspectUiSource } from "./slop-guidance-signals.ts";
+import { refineQuality, qualityNeedsContext, qualityExcerpt, protectedQualityText } from "./quality-refinement.ts";
 
 export type Domain = "security" | "backend" | "efficiency" | "patterns" | "ui";
 export type Severity = "high" | "medium" | "low";
@@ -420,16 +421,16 @@ export function auditSource(file: string, source: string, options: { domains?: D
 }
 
 /** Whole-file UI source cues (design-slop doctrine) expressed as audit findings. */
-export function uiSlopFindings(file: string, source: string): AuditFinding[] {
+export function uiSlopFindings(file: string, source: string, direction?: string): AuditFinding[] {
   try {
-    return inspectUiSource(file, source).findings.map(f => ({ domain: "ui" as const, rule: f.key, severity: "medium" as const, line: 0, message: f.check.slice(0, 260), fix: "See the ui-antipattern-review and design-slop-prevention skills; verify by rendering." }));
+    return inspectUiSource(file, source, { direction }).findings.map(f => ({ domain: "ui" as const, rule: f.key, severity: "medium" as const, line: 0, message: f.check.slice(0, 260), fix: "Check supplied direction and complete component; verify by rendering and interaction." }));
   } catch { return []; }
 }
 
-export interface AuditReport { domains: Domain[]; scope: { files: number; skipped: number; truncated: boolean }; counts: { total: number; bySeverity: Record<Severity, number>; byRule: Record<string, number> }; findings: Array<AuditFinding & { file: string }>; note: string; }
+export interface AuditReport { domains: Domain[]; scope: { files: number; skipped: number; truncated: boolean }; counts: { total: number; bySeverity: Record<Severity, number>; byRule: Record<string, number> }; findings: Array<AuditFinding & { file: string }>; semantic?: Awaited<ReturnType<typeof refineQuality>>; omitted?: number; note: string; }
 
 /** Run an audit over explicit paths, a directory or the files changed against a revision. */
-export async function codeAudit(params: any, cwd: string, signal?: AbortSignal): Promise<AuditReport> {
+export async function codeAudit(params: any, cwd: string, signal?: AbortSignal, refinement: { pi?: unknown; judge?: any } = {}): Promise<AuditReport> {
   const domains = (Array.isArray(params.domains) && params.domains.length ? params.domains : DOMAINS).filter((d: string): d is Domain => (DOMAINS as string[]).includes(d));
   if (!domains.length) throw new Error(`domains must be from ${DOMAINS.join(", ")}`);
   const minSeverity: Severity = ["high", "medium", "low"].includes(params.minSeverity) ? params.minSeverity : "low";
@@ -442,11 +443,16 @@ export async function codeAudit(params: any, cwd: string, signal?: AbortSignal):
   for (const file of scope.files as SourceFile[]) {
     signal?.throwIfAborted();
     for (const f of auditSource(file.path, file.source, { domains, minSeverity })) findings.push({ ...f, file: file.path });
-    if (domains.includes("ui") && rank.medium >= rank[minSeverity]) for (const f of uiSlopFindings(file.path, file.source)) findings.push({ ...f, file: file.path });
+    if (domains.includes("ui") && rank.medium >= rank[minSeverity]) for (const f of uiSlopFindings(file.path, file.source, params.direction)) findings.push({ ...f, file: file.path });
   }
   findings.sort((a, b) => rank[b.severity] - rank[a.severity] || a.file.localeCompare(b.file) || a.line - b.line);
   const counts = { total: findings.length, bySeverity: { high: 0, medium: 0, low: 0 } as Record<Severity, number>, byRule: {} as Record<string, number> };
   for (const f of findings) { counts.bySeverity[f.severity]++; counts.byRule[f.rule] = (counts.byRule[f.rule] ?? 0) + 1; }
-  return { domains, scope: { files: scope.files.length, skipped: scope.skipped, truncated: scope.truncated }, counts, findings: findings.slice(0, limit),
+  const sourceByPath = new Map(scope.files.map(file => [file.path, file.source]));
+  const protectedSources = new Set(scope.files.filter(file => protectedQualityText(file.source)).map(file => file.path));
+  const semantic = await refineQuality(findings.filter(f => qualityNeedsContext(f.rule)).map((f, i) => ({ id: `${f.file}:${f.line}:${i}`, file: f.file, line: f.line, rule: f.rule,
+    protected: protectedSources.has(f.file), evidence: qualityExcerpt(f.rule, sourceByPath.get(f.file)!, f.line) })),
+    { ...refinement, semantic: params.semantic, direction: params.direction, protectedPaths: params.protectedPaths, signal });
+  return { domains, scope: { files: scope.files.length, skipped: scope.skipped, truncated: scope.truncated }, counts, findings: findings.slice(0, limit), omitted: Math.max(0, findings.length - limit), semantic,
     note: "Static cues from source text only: no data-flow analysis, no execution. Each finding names the fix; keep intentional cases (trusted input, admin scripts) and verify the rest by reproducing the failure or by a test. No findings does not mean secure or fast." };
 }

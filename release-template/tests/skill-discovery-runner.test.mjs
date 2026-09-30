@@ -140,6 +140,41 @@ test('one tool-free fresh helper shares the existing assistance budget and leave
   assert.ok(!JSON.stringify(f.entries).includes(request.brief));
 });
 
+test('a nonpersistent session records completed scout usage and its native run identity', async () => {
+  const f = fixture({ launch: async () => ({ details: { runId: 'nonpersistent-native-scout', results: [{
+    exitCode: 0, output: '{"skills":[]}', usage: { input: 24, output: 6, cacheRead: 10, cacheWrite: 0, cost: 0, turns: 1 }
+  }] } }) });
+  f.ctx.sessionManager.getSessionFile = () => undefined;
+  assert.equal(await f.runner({ brief: 'Select useful supplied skill identifiers.' }, f.ctx), '{"skills":[]}');
+  const lifecycle = f.entries.filter(entry => entry.type === 'subagent-lifecycle-v1');
+  assert.deepEqual(lifecycle.map(entry => entry.data.state), ['running', 'completed']);
+  const costs = f.entries.filter(entry => entry.type === 'subagent-cost-v1');
+  assert.equal(costs.length, 2, 'running metadata is followed by a terminal cost receipt even without a session file');
+  const row = costs[1].data.results[0];
+  assert.equal(row.status, 'completed');
+  assert.equal(row.runId, 'nonpersistent-native-scout');
+  assert.equal(row.usage.input, 24);
+  assert.equal(row.usage.output, 6);
+  assert.equal(row.usage.cacheRead, 10);
+  assert.equal(row.usage.turns, 1);
+});
+
+test('a late session identity change still withholds nonpersistent scout completion and usage', async () => {
+  let complete;
+  const f = fixture({ launch: () => new Promise(resolve => { complete = resolve; }) });
+  f.ctx.sessionManager.getSessionFile = () => undefined;
+  const work = f.runner({ brief: 'Select useful supplied skill identifiers.' }, f.ctx);
+  assert.equal(typeof complete, 'function', 'the old session launched the scout');
+  f.ctx.sessionManager.getSessionId = () => 'replacement-session';
+  complete(result('{"skills":[]}'));
+  assert.equal(await work, undefined);
+  assert.deepEqual(f.entries.filter(entry => entry.type === 'subagent-lifecycle-v1').map(entry => entry.data.state), ['running']);
+  const costs = f.entries.filter(entry => entry.type === 'subagent-cost-v1');
+  assert.equal(costs.length, 1);
+  assert.equal(costs[0].data.results[0].status, 'running');
+  assert.equal(costs[0].data.results[0].usage, undefined, 'late usage does not cross the session ownership boundary');
+});
+
 test('tool-free discovery admits text-only free capacity without weakening ordinary assistance', async () => {
   const textModel = { ...model, id: 'free/text-only' };
   const plan = { mode: 'subagent', roles: ['Select a supplied skill'], reason: 'fixture', deadlineMs: 25000, maxCostUsd: .001 };
