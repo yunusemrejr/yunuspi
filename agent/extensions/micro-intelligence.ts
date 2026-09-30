@@ -1,5 +1,5 @@
 import { sessionObservability } from './lib/session-observability.ts';
-/** Request-init micro-intelligence and mandatory user-prompt understanding.
+/** Request-init micro-intelligence and proportionate user-prompt understanding.
  * Only core-provenanced interactive/RPC prompts enter this path. */
 import { completeSimple } from "@yunuspi/ai/compat";
 import { clampThinkingLevel } from "@yunuspi/ai";
@@ -38,6 +38,7 @@ import {
 } from "./lib/prompt-interpretation.ts";
 import type { PromptAnalysisAttempt, PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
 import { packetRequirements } from "./lib/requirement-ledger.ts";
+import { classifyExecution, currentExecutionProfile, adaptiveExecutionEnabled } from "./lib/adaptive-execution.ts";
 import { resolvePromptAnalysisPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
 import { loadModelEconomyConfig } from "./pi-subagents/src/runs/shared/model-economy.ts";
 import { selectAffordableModel } from "./pi-subagents/src/runs/shared/model-selection.ts";
@@ -548,7 +549,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     reset(ctx, event?.reason);
     try { ctx.ui?.setStatus?.("prompt-analysis", undefined); } catch { /* optional UI */ }
     resetMicroMetrics();
-    try { deps.warmup(); } catch { /* warmup is optional */ }
+    // Semantic workers start only when an active request needs them.
   });
   // before_* events are cancellable. Reset only once the operation commits or
   // the old runtime shuts down; a veto must preserve the current task state.
@@ -577,8 +578,10 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       /* Trace recording never affects the tool. */
     }
   });
-  pi.on("agent_end", () => {
+  pi.on("agent_end", (_event: any, ctx: any) => {
     try {
+      const execution = currentExecutionProfile(ctx);
+      if (adaptiveExecutionEnabled() && execution?.tier === 'direct') return;
       if (!spanEnabled() || spanFlight || Date.now() - spanLastAt < SPAN_MIN_INTERVAL_MS) return;
       if (spanCollector.trace.events.length < 3) return;
       const trace = { events: [...spanCollector.trace.events] };
@@ -696,6 +699,14 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       // Needle worker at the moment tool and skill ranking needed it.
 
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
+      const execution = classifyExecution({ task: prompt });
+      const priorNeedsAnalysis = priorAnalysis && classifyExecution({ task: priorAnalysis.taskLabel }).features.localLm;
+      if (adaptiveExecutionEnabled() && !execution.features.localLm && !priorNeedsAnalysis) {
+        // Reuse the literal fallback, preserving constraints and provenance
+        // without presenting it as a model judgment or spending a turn.
+        selected.routes = [];
+        metrics.skip('llm', 'direct-task');
+      } else try { deps.warmup(); } catch { /* optional */ }
       const attempts: PromptAnalysisAttempt[] = [];
       let progress: { attempt: number; route: string; recovery?: string; startedAt: number; timeoutMs: number } | undefined;
       const showProgress = () => {

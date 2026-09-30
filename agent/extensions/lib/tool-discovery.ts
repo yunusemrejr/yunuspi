@@ -9,6 +9,8 @@ import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillRoutes } from './skill-routing.ts';
+import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
+import { currentExecutionProfile, adaptiveExecutionEnabled } from './adaptive-execution.ts';
 
 import { choices } from "./tool-schema.ts";
 /** Multi-stage re-rank: large shortlists go straight to batched Jev;
@@ -24,9 +26,12 @@ async function rerankWithJev<T>(
   textOf: (item: T) => string,
   pi: unknown,
   signal?: AbortSignal,
+  ctx?: any,
 ): Promise<{ matches: T[]; info?: { mark: string; top: string; confidence: number } } | undefined> {
   try {
     if (tooShort(query, 3) || matches.length < 2) return undefined;
+    const profile = currentExecutionProfile(ctx);
+    if (adaptiveExecutionEnabled() && profile && !profile.features.localLm && !profile.features.jev) return undefined;
     // A named capability is already an unambiguous selection. Semantic
     // ranking cannot improve it and must not demote it or spend inference.
     const identity = (text: string) => text.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
@@ -57,7 +62,7 @@ const DISCOVERY_PAGE = 8;
 export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
   const selected = new Set<string>(), recent = new Set<string>(), pending = new Map<string,string>();
   for (const entry of entries) {
-    if (entry.type === 'custom' && entry.customType === RECEIPT && Array.isArray(entry.data?.names))
+    if (entry.type === 'custom' && entry.customType === RECEIPT && entry.data?.reason !== 'intent' && Array.isArray(entry.data?.names))
       for (const name of entry.data.names)
         if (typeof name === 'string' && allowed.has(name) && !CORE_TOOLS.has(name)) selected.add(name);
   }
@@ -101,7 +106,7 @@ export const CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
@@ -109,11 +114,11 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
-  { pattern: /\b(?:refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality', 'git_info'] },
+  { pattern: /\b(?:code_quality|refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality'] },
   // Security, backend, efficiency and UI-source audits: staged for work that ships to users or handles untrusted input.
   { pattern: /\b(?:security (?:audit|review|hardening|scan)|audit (?:the |this |my )?(?:code|backend|api|app|security)|vulnerabilit\w*|owasp|injection|xss|csrf|ssrf|hardcoded (?:secrets?|credentials?)|leaked? (?:secrets?|keys?)|(?:rest|http|graphql|backend|server-side|web) (?:api|service|server)s?|backend (?:code|engineering|service)s?|endpoints?|middleware|n\+1|slow quer(?:y|ies)|rate limit\w*|authentication|authorization|auth (?:flow|system|middleware)|login (?:flow|system)|sql (?:query|queries|injection)|performance (?:audit|review|bugs?|issues?)|coding (?:patterns?|best practices?)|anti-?patterns?|accessibility (?:audit|review|issues?))\b/i, tools: ['code_audit'] },
   { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect'] },
-  { pattern: /\b(?:commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit)\b/i, tools: ['git_info'] },
+  { pattern: /\b(?:git(?:hub)?|commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit|repository history|release (?:process|pipeline|version|tag))\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with
   // the first turn instead of waiting for a late discovery heuristic.
   { pattern: /\b(?:(?:re-?design|restyle|re-?skin|revamp|remake|moderni[sz]e|beautify|polish|improve|fix|build|create|make|update|rework)\w*\s+(?:[\w'-]+\s+){0,3}(?:user interfaces?|ui|ux|front-?end|web ?(?:app|page|site)s?|landing pages?|websites?|dashboards?|layouts?|css|themes?|mascots?|animations?|visuals?)|(?:user interface|ui|ux|front-?end|visual) (?:re-?design|overhaul|polish|revamp|refresh))\b/i, tools: ['browser_session', 'render_see'] },
@@ -132,7 +137,13 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
     const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
-  for (const bundle of DIRECT_BUNDLES) if (segments.some(part => bundle.pattern.test(part))) for (const name of bundle.tools) out.add(name);
+  for (const bundle of DIRECT_BUNDLES) if (segments.some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
+  if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(text)) out.add('music_compose');
+  if (/\bmix\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(text)) out.add('audio_mix');
+  if (/\b(?:trim|denoise|normalize)\b[^\n]{0,60}\b(?:audio|sound|music)\b/i.test(text)) out.add('media_edit');
+  if (/\b(?:soundtrack|ducking|voice and music)\b|\bmix\b[^\n]{0,80}\b(?:master|normaliz|video)\w*\b|\b(?:music|audio)\b[^\n]{0,80}\b(?:pipeline|workflow)\b/i.test(text)) out.add('media_pipeline');
+  const pipeline = selectTaskPipelines({ prompt: !adaptiveExecutionEnabled() ? '' : text });
+  for (const name of automaticPipelineTools(pipeline, { prompt: text })) out.add(name);
   return [...out];
 }
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
@@ -225,7 +236,10 @@ export function registerToolDiscovery(pi: any) {
     || typeof pi.getAllTools !== 'function' || typeof pi.setActiveTools !== 'function'
     || typeof pi.getActiveTools !== 'function') return;
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
-  let generation = 0;
+  let generation = 0, manager: any;
+  let automatic = new Set<string>(), explicitSelections = new Set<string>();
+  let inputSequence = 0, acceptedInput = '', started = false;
+  let pendingInput: { id: string; signal?: AbortSignal } | undefined;
   let sessionController = new AbortController();
   const invalidate = () => { generation++; sessionController.abort(); sessionController = new AbortController(); };
   const identity = (ctx: any) => JSON.stringify([ctx.cwd,ctx.sessionManager?.getSessionId?.()]);
@@ -259,7 +273,10 @@ export function registerToolDiscovery(pi: any) {
     allowed = owner && same(flushed,new Set(current))
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
+    manager = ctx.sessionManager;
+    pendingInput = undefined; acceptedInput = ''; started = false;
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
+    explicitSelections = new Set(remembered); automatic.clear();
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
     wireDirty = false;
     applyActive(expected);
@@ -270,13 +287,29 @@ export function registerToolDiscovery(pi: any) {
   // turn_end precedes the owned core's next-turn context snapshot. turn_start
   // would be too late; mutating in execute would split a parallel tool batch.
   pi.on('turn_end', flushPending);
+  pi.on('input', (event: any) => {
+    if (!['interactive', 'rpc'].includes(event.source)) return;
+    const text = typeof event.originalText === 'string' ? event.originalText : event.text;
+    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, signal: event.signal };
+  });
   pi.on('before_agent_start', (event: any, ctx: any) => {
     // Stage strong-intent studio bundles only while discovery owns the wire.
     try {
       if (owner && identity(ctx) === owner && same(flushed, new Set(pi.getActiveTools()))) {
+        if (pendingInput?.signal?.aborted) { flushPending(); return; }
+        const nextTask = !started || Boolean(pendingInput && pendingInput.id !== acceptedInput);
+        // Release inferred schemas on the next task, preserving deliberate
+        // discoveries and the original safety/tool ceiling. A continuation
+        // still owns its current pipelines and studio stages.
+        if (nextTask) {
+          for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name)) expected.delete(name);
+          automatic.clear(); wireDirty = !same(expected, flushed);
+          acceptedInput = pendingInput?.id ?? ''; started = true;
+        }
         const images = Array.isArray(event?.images) ? event.images.length : 0;
         const names = intentBundleTools(event?.prompt, images).filter(name => allowed.has(name) && !expected.has(name));
         if (names.length) {
+          for (const name of names) automatic.add(name);
           expected = new Set([...expected, ...names]);
           wireDirty = true;
           try { pi.appendEntry?.(RECEIPT, {names, reason: 'intent'}); } catch { /* restoration only */ }
@@ -286,6 +319,18 @@ export function registerToolDiscovery(pi: any) {
     flushPending();
   });
   pi.on('agent_end', flushPending);
+  pi.events?.on?.('adaptive-pipeline-selection', (event: any) => {
+    if (!adaptiveExecutionEnabled() || !owner || event.sessionManager !== manager || !Array.isArray(event.names)) return;
+    // Discovery remains the sole wire owner. Automatic selection can expose
+    // schemas only from the caller's original tool ceiling.
+    try {
+      if (!same(flushed, new Set(pi.getActiveTools()))) return;
+      const names = event.names.filter((name: string) => allowed.has(name) && !expected.has(name));
+      for (const name of names) automatic.add(name);
+      if (names.length) { expected = new Set([...expected, ...names]); wireDirty = true; }
+      if (event.beforeStart) flushPending();
+    } catch { /* no schema changes on uncertain access */ }
+  });
   pi.registerTool({
     name:'tool_search',label:'Find tools',
     description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
@@ -346,6 +391,7 @@ export function registerToolDiscovery(pi: any) {
           const wanted = new Set<string>();
           for (const record of records) for (const name of record?.tools ?? []) if (typeof name === 'string' && visible.has(name)) wanted.add(name);
           const added = [...wanted].filter(name => !expected.has(name));
+          for (const name of wanted) { explicitSelections.add(name); automatic.delete(name); }
           if (added.length) {
             expected = new Set([...expected, ...added]);
             wireDirty = true;
@@ -372,7 +418,7 @@ export function registerToolDiscovery(pi: any) {
         if (query) {
           const reranked = await rerankWithJev('capability', query, page.results,
             (record: any) => String(record?.id ?? ''),
-            (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi, signal);
+            (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi, signal, ctx);
           if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) { ranked = reranked.matches; if (reranked.info) jevRank = reranked.info; }
         }
@@ -430,7 +476,7 @@ export function registerToolDiscovery(pi: any) {
           matches = searchCapabilityMetadata(sourceFiltered, query);
           const reranked = await rerankWithJev('command', query, matches,
             (command: any) => String(command?.name ?? ''),
-            (command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`, pi, signal);
+            (command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`, pi, signal, ctx);
           if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) {
             matches = reranked.matches;
@@ -475,7 +521,7 @@ export function registerToolDiscovery(pi: any) {
         if (!explicit.length) {
           const reranked = await rerankWithJev('tool', query, matches,
             (tool: any) => String(tool?.name ?? ''),
-            (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi, signal);
+            (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi, signal, ctx);
           if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) { matches = reranked.matches; if (reranked.info) (matches as any).jevRank = reranked.info; }
         }
@@ -484,6 +530,7 @@ export function registerToolDiscovery(pi: any) {
       const limit = pageLimit(input.limit,explicit.length || 3);
       const selected = matches.slice(offset,offset+limit);
       const activate = input.enable === true || (explicit.length > 0 && input.enable !== false);
+      if (activate) for (const tool of selected) { explicitSelections.add(tool.name); automatic.delete(tool.name); }
       const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
       if (added.length) {
         expected = new Set([...expected,...added]);

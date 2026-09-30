@@ -1,6 +1,7 @@
 import type { AgentTool } from "@yunuspi/agent-core";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
+import type { DocumentMutationEvidence } from "../guardian/guardian-prose.js";
 declare const writeSchema: Type.TObject<{
     path: Type.TString;
     content: Type.TString;
@@ -10,6 +11,7 @@ export declare const writeToolSystemPromptContribution: {
     readonly guidelines: readonly ["Use write only for new files or complete rewrites."];
 };
 export type WriteToolInput = Static<typeof writeSchema>;
+export interface WriteToolDetails { documentMutation?: DocumentMutationEvidence }
 /**
  * Pluggable operations for the write tool.
  * Override these to delegate file writing to remote systems (for example SSH).
@@ -24,6 +26,6 @@ export interface WriteToolOptions {
     /** Custom operations for file writing. Default: local filesystem */
     operations?: WriteOperations;
 }
-export declare function createWriteToolDefinition(cwd: string, options?: WriteToolOptions): ToolDefinition<typeof writeSchema, undefined>;
+export declare function createWriteToolDefinition(cwd: string, options?: WriteToolOptions): ToolDefinition<typeof writeSchema, WriteToolDetails | undefined>;
 export declare function createWriteTool(cwd: string, options?: WriteToolOptions): AgentTool<typeof writeSchema>;
 export {};

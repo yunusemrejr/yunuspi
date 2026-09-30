@@ -15,10 +15,10 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => s
 const { audioMix, videoCompose, VIDEO_TRANSITIONS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/media-timeline.ts')));
 const { default: register } = await import(pathToFileURL(path.join(agent, 'extensions/media-tools.ts')));
 
-test('media tools retain their existing surface and expose four focused studio operations', () => {
+test('media tools retain their surface and expose focused studio and pipeline operations', () => {
   const tools = new Map(); register({ registerTool: def => tools.set(def.name, def) });
-  for (const name of ['media_info', 'video_frames', 'image_ocr', 'audio_analyze', 'media_edit', 'music_compose', 'scene_create', 'scene_render', 'video_compose', 'audio_mix']) assert.ok(tools.has(name));
-  assert.equal(tools.size, 10);
+  for (const name of ['media_info', 'video_frames', 'image_ocr', 'audio_analyze', 'media_edit', 'music_compose', 'scene_create', 'scene_render', 'video_compose', 'audio_mix', 'media_pipeline']) assert.ok(tools.has(name));
+  assert.equal(tools.size, 11);
   const validate = (name, args) => validateToolArguments(tools.get(name), { type: 'toolCall', id: 'schema', name, arguments: args });
   assert.doesNotThrow(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 1 / 60 }], fps: 60 }));
   assert.equal(VIDEO_TRANSITIONS.length, 16);

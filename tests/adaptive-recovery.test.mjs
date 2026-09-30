@@ -43,7 +43,7 @@ async function fixture({model=base,models=[base,{...base,provider:'direct',baseU
 try {
  // Optional semantic preparation only sees usable skill references and never
  // spends a request when the subagent consumer is unavailable.
- const skillPrompt='Audit the README documentation and release notes for this repository';
+ const skillPrompt='Audit cross-file compatibility of README documentation and release notes across independent packages';
  const skillCatalog=names=>names.map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
  const availableNames=['github-readme-authoring','github-release-notes','evidence-first-engineering'];
  const judgedSkills=[];
@@ -51,6 +51,11 @@ try {
  let prepared=await fixture({prompt:skillPrompt,judge});
  await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(availableNames)});
  assert.equal(judgedSkills.length,0,'no semantic call without the subagent consumer');
+ await prepared.emit('session_shutdown');
+ const directPrompt='Correct teh to the in README.md and stop';
+ prepared=await fixture({prompt:directPrompt,judge,activeTools:['read','subagent']});
+ await prepared.emit('before_agent_start',{prompt:directPrompt,systemPrompt:skillCatalog(availableNames)});
+ assert.equal(judgedSkills.length,0,'a bounded direct task needs no remote skill ranking');
  await prepared.emit('session_shutdown');
  prepared=await fixture({prompt:skillPrompt,judge,activeTools:['read','subagent']});
  await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['evidence-first-engineering'])});

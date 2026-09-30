@@ -20,6 +20,7 @@ delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
 const { default: microIntelligence, settleMicroAnalyses } = await import('../agent/extensions/micro-intelligence.ts');
 const { clearLlmPreferencesCache } = await import('../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
+const { default: adaptiveWorkflows } = await import('../agent/extensions/adaptive-workflows.ts');
 
 const model = (id) => ({ id, provider: 'audit-fixture', name: id, api: 'openai-completions', baseUrl: 'http://localhost:1',
   contextWindow: 65_536, maxTokens: 4096, reasoning: false, input: ['text'],
@@ -42,7 +43,13 @@ function preferences(order) {
   }));
   clearLlmPreferencesCache();
 }
-async function fixture(t, { afterInput, complete } = {}) {
+async function fixture(t, { afterInput, complete, adaptive = false } = {}) {
+  const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
+  process.env.PI_ADAPTIVE_EXECUTION = adaptive ? 'on' : 'off';
+  t.after(() => {
+    if (priorAdaptive === undefined) delete process.env.PI_ADAPTIVE_EXECUTION;
+    else process.env.PI_ADAPTIVE_EXECUTION = priorAdaptive;
+  });
   const calls = [], errors = [], notices = [], events = [];
   const runtime = await ModelRuntime.create({ authPath: path.join(directory, 'auth.json'), modelsPath: null, refreshOnCreate: false });
   const stream = (selected, context, options) => {
@@ -64,6 +71,7 @@ async function fixture(t, { afterInput, complete } = {}) {
   eventBus.on('guardian:prompt-analysis:v1', (event) => events.push(event));
   const extension = await loadExtensionFromFactory((pi) => {
     microIntelligence(pi, { classify: () => undefined, warmup() {} });
+    if (adaptive) adaptiveWorkflows(pi);
     if (afterInput) pi.on('input', afterInput);
   }, directory, eventBus, extensionRuntime, '<prompt-audit>');
   const loader = {
@@ -220,6 +228,29 @@ test('abort while the first turn awaits analysis cancels it and prevents any lat
   assert.equal(f.calls.at(-2).options.maxTokens, 768);
   assert.equal(f.events.length, 1, 'only the fresh request publishes an advisory');
   assert.equal(downstreamCalls, 2);
+  assert.deepEqual(f.errors, []);
+});
+
+
+test('adaptive SDK dispatch skips helpers and auxiliary context for a direct task while retaining complex analysis', async t => {
+  preferences(['third']);
+  const f = await fixture(t, { adaptive: true });
+  const direct = 'What is the capital of France? Preserve this literal request.';
+  await f.session.prompt(direct);
+  assert.deepEqual(f.calls.map(call => call.id), ['main'], 'a factual task dispatches only the main model');
+  const firstMessages = f.calls[0].context.messages;
+  assert.ok(firstMessages.some(message => message.role === 'user' && message.content.some(part => part.text === direct)));
+  assert.ok(!firstMessages.some(message => message.customType === 'prompt-analysis-context' || message.content?.some?.(part => /Auxiliary interpretation \(advisory only|Request identity:/.test(part.text ?? ''))), 'a skipped helper contributes no auxiliary model context');
+  const directAnalysis = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
+  assert.equal(directAnalysis.details.attempts.length, 0, 'deterministic bookkeeping must not be presented as an inference attempt');
+  const complex = 'Investigate cross-file race conditions and compare architectural alternatives in the Node.js parser.';
+  await f.session.prompt(complex);
+  assert.deepEqual(f.calls.map(call => call.id), ['main', 'third', 'main']);
+  const complexMessages = f.calls.at(-1).context.messages;
+  assert.ok(complexMessages.some(message => message.role === 'user' && message.content.some(part => part.text === complex)));
+  assert.ok(complexMessages.some(message => message.content?.some?.(part => part.text?.includes('Auxiliary interpretation (advisory only'))));
+  const analyzed = f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').at(-1);
+  assert.deepEqual(analyzed.details.attempts.map(attempt => attempt.outcome), ['complete']);
   assert.deepEqual(f.errors, []);
 });
 

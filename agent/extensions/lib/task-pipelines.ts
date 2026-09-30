@@ -1,0 +1,249 @@
+import { createHash } from 'node:crypto';
+import { classifyExecution, type ExecutionProfile } from './adaptive-execution.ts';
+
+export type TaskPipelineId = 'php' | 'node' | 'frontend-js' | 'vanilla-frontend' | 'react-cdn' | 'react-node' |
+  'go' | 'rust' | 'java' | 'python' | 'python-flask' | 'bash' | 'c' | 'cpp' | 'linux-native' |
+  'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy';
+export type PipelinePhase = 'discovery' | 'implementation' | 'validation' | 'delivery';
+export type PipelineEvidenceKind = 'inspection' | 'artifact' | 'execution' | 'assessment' | 'pixels' | 'interaction' | 'evaluation' | 'remote' | 'live';
+export type PipelineStage = {
+  id: string;
+  phase: PipelinePhase;
+  check: string;
+  evidenceKinds: PipelineEvidenceKind[];
+  dependsOn: string[];
+  tools: string[];
+};
+export type PipelineSelection = {
+  ids: TaskPipelineId[];
+  fingerprint: string;
+  skills: string[];
+  tools: string[];
+  stages: PipelineStage[];
+};
+export type TaskPipelineInput = {
+  /** User request only. Tool-output prose must never become routing instructions. */
+  prompt: string;
+  /** Explicitly observed relevant files, not a crawl of every repository asset. */
+  files?: readonly string[];
+  /** Names from an inspected manifest; no dependency installation or scanning. */
+  dependencies?: readonly string[] | Record<string, unknown>;
+};
+
+export type AutomaticPipelineInput = {
+  prompt: string;
+  /** The live scope may have escalated since initial intent selection. */
+  profile?: Pick<ExecutionProfile, 'tier' | 'failures'>;
+  files?: readonly string[];
+};
+
+/** A negative request must not stage the very tool it excludes. Kept shared
+ * with legacy intent bundles so activation owners cannot disagree. */
+export const pipelineGitExcluded = (prompt: string): boolean =>
+  /\b(?:without|no)[- ]+(?:git(?:hub)?|version control)\b|\b(?:do not|don't|never)\b[^.;\n!?]{0,80}\b(?:git(?:hub)?|version control)\b/i.test(prompt);
+
+/** A catalog lists every available stage, not every schema needed now. Both
+ * initial intent and live scope activation use this single, I/O-free policy.
+ * Explicit discovery remains the wire owner's authority outside this policy. */
+export function automaticPipelineTools(selection: PipelineSelection, input: AutomaticPipelineInput): string[] {
+  if (!selection.ids.length) return [];
+  const prompt = typeof input?.prompt === 'string' ? input.prompt.slice(0, 32768) : '';
+  const profile = input.profile ?? classifyExecution({ task: prompt });
+  const quality = profile.tier === 'complex' || profile.tier === 'critical' || profile.failures >= 2 ||
+    /\b(?:code_quality|refactor\w*|architectur\w*|code (?:quality|review|smells?)|source (?:audit|review)|(?:audit|review) (?:[\w.+/-]+ ){0,3}(?:code|source)|tech(?:nical)? debt|duplicat\w* (?:code|logic)|dead code|unused (?:code|imports?|exports?)|cyclomatic|lint(?:ing|er|s)?)\b/i.test(prompt);
+  const gitMetadata = (input.files ?? []).some(file => typeof file === 'string' &&
+    /(?:^|\/)(?:\.git\/(?:HEAD|config|index|refs\/[^\n]+)|\.gitmodules)$/i.test(file.replaceAll('\\', '/')));
+  const git = !pipelineGitExcluded(prompt) && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
+    /\b(?:git(?:hub)?|commits?|committing|pull requests?|pre-?commit|rebase|repository history|release (?:process|pipeline|version|tag)|(?:push|merge) (?:the |this |my )?(?:branch|commit|changes)|push (?:to )?(?:origin|upstream))\b/i.test(prompt));
+  const control = /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
+  return [...new Set([
+    ...selection.tools.filter(name => name === 'code_quality' ? quality : name === 'git_info' ? git : name !== 'task_pipeline'),
+    ...(control ? ['task_pipeline'] : []),
+  ])];
+}
+
+type Recipe = { skills: string[]; discovery: string; validation: string; tools?: string[] };
+const RECIPES: Record<TaskPipelineId, Recipe> = {
+  php: { skills: ['php-application-engineering'], discovery: 'Inspect Composer PHP constraints, PHP 8+ syntax support, CLI and web SAPI versions/extensions, document root and session/filesystem rules.', validation: 'Run PHP lint on changed sources and the existing focused request/auth/database checks; check CLI versus FPM/shared-host behavior where relevant.' },
+  node: { skills: ['node-runtime-engineering'], discovery: 'Inspect package scripts, lockfile, installed Node version, ESM/CJS mode and the actual service/CLI entry point.', validation: 'Use the project scripts or Node check/test runner for affected behavior, async failures, shutdown and resource cleanup.' },
+  'frontend-js': { skills: ['frontend-js', 'browser-javascript-engineering'], discovery: 'Identify browser versus Node execution from the actual entry point. For browser work inspect module/load order, supported browsers and existing DOM/state conventions.', validation: 'Check modules in their actual runtime. Browser changes need relevant events, async failures, repeated mounting and cleanup checks; a pure function can use a focused local check.' },
+  'vanilla-frontend': { skills: ['vanilla-web-libs', 'browser-javascript-engineering'], discovery: 'Keep the existing HTML/CSS/DOM stack; inspect native controls, module/CDN policy and any necessary small library before adding dependencies.', validation: 'Verify the page through its real served URL, including load order and keyboard operation; avoid requiring a build step for a working static page.' },
+  'react-cdn': { skills: ['modern-frontend-frameworks'], discovery: 'Inspect pinned React/ReactDOM CDN URLs, globals or import maps, JSX transformation and root mounting. Preserve the chosen no-build deployment mode.', validation: 'Run the served CDN edition in a browser; inspect React/ReactDOM compatibility, network/CSP/module failures and the representative interaction.' },
+  'react-node': { skills: ['modern-frontend-frameworks'], discovery: 'Inspect React versions, bundler, package scripts, lockfile, route/state ownership and client/server boundaries.', validation: 'Run the affected type/build/test scripts and use the actual served application to check the representative React state transition.' },
+  go: { skills: ['go-service-engineering'], discovery: 'Inspect go.mod/toolchain, package boundaries, entry point, context cancellation and service/CLI contracts.', validation: 'Run focused go test and applicable vet/build checks; use the race detector when shared-state changes warrant it.' },
+  rust: { skills: ['rust-systems-engineering'], discovery: 'Inspect Cargo workspace, edition/toolchain, feature flags, target and ownership/error conventions.', validation: 'Run the affected Cargo tests/checks and relevant lint/build profile; exercise failure and cleanup paths rather than inventing new unsafe code.' },
+  java: { skills: ['java-platform-engineering'], discovery: 'Inspect the JDK target, Maven/Gradle wrapper, modules, dependencies and runtime/service entry point.', validation: 'Use the existing Maven/Gradle wrapper for affected tests and packaging; check cancellation/resource disposal where changed.' },
+  python: { skills: ['python-software-engineering'], discovery: 'Inspect pyproject/requirements, the actual interpreter/environment and module/CLI entry point.', validation: 'Run changed-source syntax and affected existing tests; check the intended interpreter and dependency versions.' },
+  'python-flask': { skills: ['python-software-engineering', 'web-security'], discovery: 'Inspect Flask app factory, routes, environment, auth/session/CSRF handling and development versus production WSGI entry points.', validation: 'Exercise representative Flask routes with the test client and real serving path where relevant, including boundary validation and error responses.' },
+  bash: { skills: ['linux'], discovery: 'Inspect the shebang, target shell, quoting, exit/status handling and command side effects.', validation: 'Use bash -n or the declared shell plus available ShellCheck; exercise representative failure/cleanup paths safely.' },
+  c: { skills: ['c-systems-engineering'], discovery: 'Inspect the C standard, compiler/build flags, ABI, allocation ownership and integer boundaries.', validation: 'Run the affected build/tests and applicable warnings/sanitizers for memory or integer changes; verify cleanup/failure paths.' },
+  cpp: { skills: ['cpp-performance-engineering', 'c-cpp-multiplatform'], discovery: 'Inspect the C++ standard, CMake/Make target, compiler, ABI and resource/concurrency ownership.', validation: 'Run the affected build/tests and applicable warnings/sanitizers; measure performance claims on the actual workload.' },
+  'linux-native': { skills: ['linux', 'desktop-app-dev'], discovery: 'Inspect the actual Linux entry point, toolkit, packaging, display/audio services and host dependencies.', validation: 'Launch the installed/native application normally and exercise its actual CLI or GUI input and shutdown. For a GUI inspect real displayed content; an offscreen render does not prove the native UI.' },
+  'local-webapp': { skills: ['web-security', 'product-ui-verification'], discovery: 'Inspect local host/port ownership, startup/shutdown, persistent data boundaries and frontend/backend connection.', validation: 'Start through the documented local command and check a representative browser-to-backend task, error state and cleanup.' },
+  algorithms: { skills: ['algorithm-design', 'numerical-computing'], discovery: 'State the input contract, invariants, scale, exactness requirements and existing baseline before choosing the algorithm.', validation: 'Use a reference/oracle or invariant-based checks for boundaries and adversarial inputs; measure claimed complexity or speed on representative inputs.' },
+  'ai-ml': { skills: ['ml-engineering', 'model-evaluation'], discovery: 'Inspect objective, dataset provenance/splits, baseline, model/runtime versions and deployment constraints.', validation: 'Check leakage, fixed evaluation slices and baseline comparisons; separate quality, latency and cost from model/catalog availability.' },
+  finetuning: { skills: ['llm-fine-tuning', 'llm-dataset-preparation'], discovery: 'Inspect immutable model/tokenizer revision, license, GPU memory, data hashes/splits, loss masking, training method and checkpoint destination.', validation: 'Validate collated batches and the requested preparation/execution scope. A prepared script or notebook is not a successful training run.' },
+  colab: { skills: ['google-colab-training'], discovery: 'Choose the actually available Colab browser/CLI/Enterprise/local-Jupyter connection; inspect real runtime/GPU and durable storage only within authorized scope.', validation: 'Validate notebook cells as independently rerunnable setup/data/smoke/train/evaluate/export steps. Report connected runtime and resource state; never infer GPU access from a local notebook.' },
+  'ui-quality': { skills: ['design-slop-prevention', 'ui-antipattern-review', 'accessible-interaction-design'], discovery: 'Read the existing design doctrine before choosing palette/type/layout. Ground choices in the real subject and user intent; avoid default purple-gradient SaaS and cream/terracotta cursive/italic editorial formulas, fake metrics and ornaments without a job.', validation: 'Use existing UI doctrine, source signals and bounded quality review; actual application pixels and real interaction evidence decide appearance and behavior, with the swap test and explicit user preferences.', tools: ['render_see', 'design_audit', 'quality_review'] },
+  'git-ssh-deploy': { skills: ['git-github', 'multi-developer-pipelines'], discovery: 'Inspect Git source/remote/history and the explicitly authorized SSH destination, document root, runtime, protected data and rollback path. Namecheap/GoDaddy branding does not establish account capabilities; discover actual cPanel/VPS/SSH support.', validation: 'Verify the local release/build, deployment manifest and rollback before remote promotion. Keep secrets, uploads and databases outside accidental sync; Git push alone does not prove a live deployment.', tools: ['git_info', 'ssh_plan', 'net_probe', 'env_audit'] },
+};
+
+const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
+const bounded = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
+const WORK = /\b(?:build|create|implement|fix|debug|improve|refactor|edit|change|update|test|validate|verify|review|audit|write|develop|deploy|publish|release|train|finetune|fine[- ]tune|prepare|design|optimize|optimise|run|add|remove|make)\b/i;
+const IGNORED_FILE = /(?:^|\/)(?:node_modules|vendor|\.git|skills)(?:\/|$)|(?:^|\/)SKILL\.md$/i;
+
+/** Metadata-only routing: no models, commands, project crawling, or skill-body injection. */
+export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection {
+  const prompt = bounded(input?.prompt, 24000);
+  const files = (Array.isArray(input?.files) ? input.files : []).slice(-64)
+    .filter(file => typeof file === 'string' && file.length <= 2048)
+    .map(file => file.replaceAll('\\', '/')).filter(file => !IGNORED_FILE.test(file));
+  const dependencies = new Set((Array.isArray(input?.dependencies) ? input.dependencies : Object.keys(input?.dependencies ?? {})).slice(0, 128).map(name => String(name).toLowerCase()));
+  const ids: TaskPipelineId[] = [];
+  const add = (id: TaskPipelineId, selected: boolean) => { if (selected) ids.push(id); };
+  const has = (pattern: RegExp) => files.some(file => pattern.test(file));
+  const active = WORK.test(prompt) || files.length > 0;
+  if (!active || /\b(?:no|without)\s+(?:tools?|workflows?|pipelines?)\b|\b(?:do not|don't|never)\s+(?:use|run|activate)\s+(?:any\s+)?(?:tools?|workflows?|pipelines?)\b/i.test(prompt))
+    return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
+
+  const cdn = /\breact(?:\.js)?\b/i.test(prompt) && /\b(?:cdn|no[- ]build|import[- ]map|script[- ]tag)\b/i.test(prompt);
+  const react = /\breact(?:\.js)?\b/i.test(prompt) || has(/\.(?:jsx|tsx)$/i) || dependencies.has('react');
+  const backendOnly = /\b(?:backend|api|authentication|database)\b/i.test(prompt) && !/\b(?:front[- ]?end|layout|palette|css|html|visual|form|screen|UI|UX|render)\b/i.test(prompt);
+  const frontend = (!backendOnly && /\b(?:front[- ]?end|browser|webpage|web page|website|html|css|DOM|vanilla javascript|vanilla js)\b/i.test(prompt)) || has(/\.(?:html|css|jsx|tsx|vue|svelte)$/i) || react;
+  add('php', /\bphp(?:\s*8(?:\.\d+)?\+?)?\b/i.test(prompt) || has(/\.(?:php|phtml)$/i) || has(/(?:^|\/)composer\.json$/i));
+  add('node', /\bnode(?:\.js|js)?\b/i.test(prompt) || has(/\.(?:mjs|cjs)$/i) || (has(/(?:^|\/)package\.json$/i) && !cdn) || dependencies.has('express') || dependencies.has('fastify'));
+  add('frontend-js', frontend || /\b(?:javascript|js)\b/i.test(prompt) || has(/\.(?:js|ts)$/i));
+  add('vanilla-frontend', frontend && !react && (/\bvanilla\b|\bstatic (?:site|page|website)\b/i.test(prompt) || has(/\.(?:html|css)$/i)));
+  add('react-cdn', cdn);
+  add('react-node', react && !cdn);
+  add('go', /\bGo\b/.test(prompt) || /\b(?:golang|go (?:language|service|server|module|application|app|cli|code|test|build)|(?:in|using) go)\b/i.test(prompt) || has(/\.go$|(?:^|\/)go\.mod$/i));
+  add('rust', /\brust\b/i.test(prompt) || has(/\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/i));
+  add('java', /\bjava\b/i.test(prompt) || has(/\.java$|(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$/i));
+  add('python', /\bpython\b/i.test(prompt) || has(/\.(?:py|ipynb)$|(?:^|\/)(?:pyproject\.toml|requirements[^/]*\.txt)$/i) || dependencies.has('flask'));
+  add('python-flask', /\bflask\b/i.test(prompt) || dependencies.has('flask'));
+  add('bash', /\b(?:bash|shell script|shell scripting)\b/i.test(prompt) || has(/\.(?:sh|bash)$/i));
+  add('c', /(?:\bC programming\b|\bC language\b|\bC\/C\+\+\b)/i.test(prompt) || has(/\.c$/i));
+  add('cpp', /(?:\bC\+\+|\bcpp\b|\bC\/C\+\+)/i.test(prompt) || has(/\.(?:cpp|cc|cxx|hpp)$/i));
+  add('linux-native', /\blinux[- ]native\b|\bnative (?:linux|desktop|application|app)\b/i.test(prompt));
+  add('local-webapp', /\blocal (?:webapp|web app|website)\b|\blocalhost\b/i.test(prompt));
+  add('algorithms', /\balgorithm(?:s|ic)?\b|\bdata structures?\b/i.test(prompt));
+  const tuning = /\b(?:finetun(?:e|ing)|fine[- ]tun(?:e|ing)|lora|qlora|sft|dpo)\b/i.test(prompt) || dependencies.has('peft') || dependencies.has('trl');
+  add('ai-ml', tuning || /\b(?:machine learning|deep learning|neural networks?|AI\/ML|ML (?:models?|algorithms?|training)|model (?:training|evaluation))\b/i.test(prompt) || ['torch', 'tensorflow', 'scikit-learn', 'sklearn', 'transformers', 'jax', 'onnxruntime'].some(name => dependencies.has(name)));
+  add('finetuning', tuning);
+  add('colab', /\b(?:google )?colab\b/i.test(prompt));
+  const ui = frontend || /\b(?:UI|UX|user interface|dashboard|app screen|desloppification|deslop|visual design)\b/i.test(prompt);
+  add('ui-quality', ui);
+  add('git-ssh-deploy', /\b(?:namecheap|godaddy|cpanel)\b|\b(?:deploy|deployment|production|website|site)\b[^\n]{0,100}\b(?:ssh|git)\b|\b(?:ssh|git)\b[^\n]{0,100}\b(?:deploy|deployment|production|website|site)\b/i.test(prompt));
+
+  if (!ids.length) return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
+  const recipes = ids.map(id => RECIPES[id]);
+  const skills = unique(recipes.flatMap(recipe => recipe.skills));
+  const baseTools = ['project_intel', 'read', 'project_tests', 'code_quality'];
+  const stages: PipelineStage[] = [
+    { id: 'discovery', phase: 'discovery', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.discovery}`).join('\n'), evidenceKinds: ['inspection'], dependsOn: [], tools: ['project_intel', 'read'] },
+    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Read only selected skills whose procedure changes the next decision; read design-slop-prevention before UI choices. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: ['discovery'], tools: ['read', 'edit', 'write'] },
+    { id: 'validation', phase: 'validation', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.validation}`).join('\n') + '\nReuse current project_tests execution receipts. For a low-impact change, an explicit reasoned assessment may establish that additional tests are unnecessary; an assessment cannot claim a test passed.', evidenceKinds: ['execution', 'assessment'], dependsOn: ['implementation'], tools: ['project_tests', 'code_quality'] },
+  ];
+  if (ui) {
+    stages.push({ id: 'ui-pixels', phase: 'validation', check: 'Inspect captured pixels from the actual served/native application. Apply design doctrine and the swap test, contrast/responsive/content checks. Source analysis, image headers or exit zero cannot settle appearance.', evidenceKinds: ['pixels'], dependsOn: ['implementation'], tools: ['render_see', 'design_audit', 'quality_review'] });
+    stages.push({ id: 'ui-interaction', phase: 'validation', check: 'Exercise the representative user task, keyboard/focus and relevant loading/empty/error/disabled states in the actual application. Record real interaction evidence.', evidenceKinds: ['interaction'], dependsOn: ['implementation'], tools: ['browser_session', 'quality_review'] });
+  }
+  const artifactOnly = /\b(?:prepare|draft|write|create|build|validate)\b[^\n]{0,100}\b(?:notebook|training script|training pipeline|recipe)\b/i.test(prompt)
+    && !/\b(?:start|execute|run)\b[^\n]{0,80}\b(?:training|finetuning|fine[- ]tuning|notebook)\b/i.test(prompt);
+  const executeTraining = /\b(?:train|finetune|fine[- ]tune)\s+(?:(?:the|a|an|this|my|our)\s+)?(?:models?|LLM|adapters?|weights?)\b|\b(?:start|execute|run)\b[^\n]{0,80}\b(?:training|finetuning|fine[- ]tuning)\b/i.test(prompt);
+  if (tuning && !artifactOnly && executeTraining) {
+    stages.push({ id: 'training-smoke', phase: 'validation', check: 'Observe a collated batch and a finite forward/backward/save/reload/resume smoke test on the actual runtime before a substantial run. Record versions, data hashes, masking and observed memory.', evidenceKinds: ['execution'], dependsOn: ['implementation'], tools: ['project_tests'] });
+    stages.push({ id: 'model-evaluation', phase: 'validation', check: 'Compare untuned, tuned and exported models on the same frozen test slices/decoding settings. Record quality/retention/cost/latency and durable checkpoints; missing training or inference remains unresolved.', evidenceKinds: ['evaluation'], dependsOn: ['training-smoke'], tools: ['project_tests'] });
+  }
+  const deploying = ids.includes('git-ssh-deploy') && /\b(?:deploy|publish|promote|sync|upload)\b/i.test(prompt)
+    && !/\b(?:prepare|plan|draft|design)\b[^\n]{0,80}\b(?:deployment|deploy|pipeline|workflow)\b/i.test(prompt);
+  if (deploying) {
+    stages.push({ id: 'deploy-preflight', phase: 'delivery', check: 'Confirm the concrete authorized source/destination, trusted host, artifact manifest, protected data and tested rollback. Use ssh_plan only as an argv plan; it proves no authentication or connectivity.', evidenceKinds: ['inspection'], dependsOn: stages.filter(stage => stage.phase === 'validation').map(stage => stage.id), tools: ['git_info', 'ssh_plan', 'env_audit'] });
+    stages.push({ id: 'deploy-remote', phase: 'delivery', check: 'Execute the authorized promotion using actual host/account capabilities and record the remote revision/artifact. Do not overwrite databases/uploads or claim promotion from a plan.', evidenceKinds: ['remote'], dependsOn: ['deploy-preflight'], tools: ['bash'] });
+    stages.push({ id: 'deploy-live', phase: 'delivery', check: 'Verify the deployed revision through the public serving path and representative live behavior. DNS/TLS/SSH banner probes and Git push alone do not prove the application works.', evidenceKinds: ['live'], dependsOn: ['deploy-remote'], tools: ['net_probe', 'browser_session'] });
+  }
+  stages.push({ id: 'delivery', phase: 'delivery', check: 'Report the concrete artifact/revision, reused validation evidence and unresolved gaps. Follow the actual project Git/release/install process when requested; prepared notebooks and deployment plans stay labeled as prepared.', evidenceKinds: ['artifact'], dependsOn: stages.filter(stage => stage.id !== 'discovery' && stage.id !== 'implementation').map(stage => stage.id), tools: ['git_info'] });
+  const tools = unique([...baseTools, ...recipes.flatMap(recipe => recipe.tools ?? []), ...stages.flatMap(stage => stage.tools)]);
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ids, stages: stages.map(stage => stage.id) })).digest('hex').slice(0, 16);
+  return { ids, fingerprint, skills, tools, stages };
+}
+
+export type PipelineCoordinate = { scope: string; revision: string; maxChars?: number };
+export type PipelineReceipt = {
+  scope: string;
+  /** Observed source/content identity; a task-local counter alone is insufficient across reloads. */
+  revision: string;
+  stageId: string;
+  status: 'passed' | 'failed' | 'blocked';
+  evidenceKind: PipelineEvidenceKind;
+  /** Reference to existing native evidence, not a shell command to execute. */
+  source: string;
+  summary?: string;
+};
+export type PipelineLedger = { receipts: Array<PipelineReceipt & { failures: number }> };
+export type PendingPipelineStage = PipelineStage & { ready: boolean; status: 'pending' | 'failed' | 'blocked'; failures: number };
+const MAX_RECEIPTS = 256;
+const EVIDENCE_KINDS = new Set<PipelineEvidenceKind>(['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live']);
+
+export function createPipelineLedger(): PipelineLedger { return { receipts: [] }; }
+function coordinateValid(value: PipelineCoordinate): boolean {
+  return typeof value?.scope === 'string' && value.scope.trim().length > 0 && value.scope.length <= 240 &&
+    typeof value?.revision === 'string' && value.revision.trim().length > 0 && value.revision.length <= 160;
+}
+function latestReceipt(ledger: PipelineLedger, coordinate: PipelineCoordinate, stageId: string): (PipelineReceipt & { failures: number }) | undefined {
+  return ledger.receipts.findLast(receipt => receipt.scope === coordinate.scope.trim() && receipt.revision === coordinate.revision.trim() && receipt.stageId === stageId);
+}
+
+/** Stage indexing only. Existing project_tests/quality_review/native tools own execution evidence. */
+export function recordPipelineEvidence(ledger: PipelineLedger, receipt: PipelineReceipt, selection: PipelineSelection): { recorded: boolean } {
+  if (!coordinateValid(receipt) || typeof receipt.source !== 'string' || !receipt.source.trim() || receipt.source.length > 2048 ||
+      !['passed', 'failed', 'blocked'].includes(receipt.status) || !EVIDENCE_KINDS.has(receipt.evidenceKind))
+    throw Error('A bounded scope, content revision, status, evidence kind and native evidence source are required');
+  const stage = selection.stages.find(candidate => candidate.id === receipt.stageId);
+  if (!stage) throw Error(`Unknown pipeline stage: ${bounded(receipt.stageId, 80)}`);
+  if (receipt.status === 'passed' && !stage.evidenceKinds.includes(receipt.evidenceKind)) throw Error(`${stage.id} requires ${stage.evidenceKinds.join(' or ')} evidence`);
+  if (receipt.status === 'passed' && stage.dependsOn.some(id => latestReceipt(ledger, receipt, id)?.status !== 'passed'))
+    throw Error(`${stage.id} has unresolved prerequisite stages`);
+  const clean = { ...receipt, scope: receipt.scope.trim(), revision: receipt.revision.trim(), source: receipt.source.trim(), ...(receipt.summary ? { summary: bounded(receipt.summary, 1200) } : {}) };
+  const previous = latestReceipt(ledger, clean, clean.stageId);
+  if (previous && previous.status === clean.status && previous.evidenceKind === clean.evidenceKind && previous.source === clean.source && previous.summary === clean.summary)
+    return { recorded: false };
+  // A new result for an upstream stage invalidates its descendants even if a
+  // caller reused a revision. Keep unrelated validators and other scopes.
+  const invalidated = new Set([stage.id]);
+  for (const candidate of selection.stages) if (candidate.dependsOn.some(id => invalidated.has(id))) invalidated.add(candidate.id);
+  ledger.receipts = ledger.receipts.filter(item => item.scope !== clean.scope || item.revision !== clean.revision || !invalidated.has(item.stageId));
+  ledger.receipts.push({ ...clean, failures: (previous?.failures ?? 0) + (clean.status === 'failed' ? 1 : 0) });
+  if (ledger.receipts.length > MAX_RECEIPTS) ledger.receipts.splice(0, ledger.receipts.length - MAX_RECEIPTS);
+  return { recorded: true };
+}
+
+/** Never reuse receipts from another task/todo or from stale content. */
+export function pendingPipelineStages(selection: PipelineSelection, ledger: PipelineLedger, coordinate: PipelineCoordinate): PendingPipelineStage[] {
+  if (!coordinateValid(coordinate)) throw Error('A scope and observed content revision are required');
+  return selection.stages.flatMap(stage => {
+    const receipt = latestReceipt(ledger, coordinate, stage.id);
+    if (receipt?.status === 'passed') return [];
+    const failures = receipt?.failures ?? 0;
+    return [{ ...stage, ready: stage.dependsOn.every(id => latestReceipt(ledger, coordinate, id)?.status === 'passed'), status: receipt?.status ?? 'pending', failures }];
+  });
+}
+export function nextPipelineStages(selection: PipelineSelection, ledger: PipelineLedger, coordinate: PipelineCoordinate): PendingPipelineStage[] {
+  return pendingPipelineStages(selection, ledger, coordinate).filter(stage => stage.ready);
+}
+
+/** Bounded next-step context; completed recipes and skill bodies are never repeated. */
+export function buildPipelineContext(selection: PipelineSelection, ledger: PipelineLedger, coordinate: PipelineCoordinate): string | undefined {
+  if (!selection.ids.length) return undefined;
+  const pending = pendingPipelineStages(selection, ledger, coordinate);
+  if (!pending.length) return undefined;
+  const maxChars = Number.isFinite(coordinate.maxChars) ? Math.max(0, Math.min(12000, Math.floor(coordinate.maxChars!))) : 2400;
+  if (maxChars < 160) return undefined;
+  const ready = pending.filter(stage => stage.ready);
+  const header = `[Task pipelines: ${selection.ids.join(', ')}]\nScope ${coordinate.scope}; revision ${coordinate.revision}. Reuse current native receipts; do not repeat passed stages.\n`;
+  const skills = ready.some(stage => stage.phase === 'discovery') ? `Relevant skill names: ${selection.skills.join(', ')}. Read only what changes the next decision.\n` : '';
+  const body = ready.map(stage => `${stage.id}${stage.failures ? ` (${stage.failures} failure receipts: diagnose/escalate before retrying)` : ''}: ${stage.check}`).join('\n');
+  const blocked = ready.length ? '' : 'Prerequisite evidence is unresolved; inspect pipeline status before proceeding.';
+  return (header + skills + body + blocked).slice(0, maxChars);
+}

@@ -1,4 +1,5 @@
 import { recallProjectContext } from "./lib/project-memory-context.ts";
+import { currentExecutionProfile } from './lib/adaptive-execution.ts';
 import { askJev } from './lib/jev-client.ts';
 import { microMetrics } from './lib/micro-intelligence/metrics.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -247,6 +248,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
+    execution: () => currentExecutionProfile(ctx),
     judge: (site, state, questions, options) => {
       const origin = owner;
       return askJev(site, state, questions, { signal: options?.signal,

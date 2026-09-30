@@ -8,6 +8,7 @@ import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import { editRenderers } from "./renderers/edit.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+import { documentMutationEvidence } from "../guardian/guardian-prose.js";
 const replaceEditSchema = Type.Object({
     oldText: Type.String({
         description: "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
@@ -144,7 +145,7 @@ export function createEditToolDefinition(cwd, options) {
                             text: `Successfully replaced ${edits.length} block(s) in ${path}. Content hash now: ${afterHash}. Pass expectedHash=${afterHash} for the next edit of this file.`,
                         },
                     ],
-                    details: { diff: diffResult.diff, patch, optimisticConcurrency: { before: beforeHash, after: afterHash }, firstChangedLine: diffResult.firstChangedLine },
+                    details: { diff: diffResult.diff, patch, optimisticConcurrency: { before: beforeHash, after: afterHash }, firstChangedLine: diffResult.firstChangedLine, documentMutation: documentMutationEvidence(absolutePath, rawContent, finalContent) },
                 };
             });
         },

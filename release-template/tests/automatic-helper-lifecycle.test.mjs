@@ -21,6 +21,7 @@ const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/sh
 const {buildModelCandidates}=await load('extensions/pi-subagents/src/runs/shared/model-fallback.ts');
 const {AUTOMATIC_HELPER_LIMITS}=await load('extensions/pi-subagents/src/runs/shared/automatic-budgets.ts');
 const {planAssistance}=await load('extensions/pi-subagents/src/runs/shared/assistance-plan.ts');
+const {classifyExecution,createAdaptiveExecutionController,registerAdaptiveExecution}=await load('extensions/lib/adaptive-execution.ts');
 const evidence=await load('extensions/pi-subagents/src/runs/shared/free-route-evidence.ts');
 evidence.publishFreeEvidence([{id:'example/adviser',pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL);
 const model={provider:'openrouter',id:'example/adviser',api:'openai-completions',baseUrl:evidence.FREE_BASE_URL,cost:{input:0,output:0},input:['text'],contextWindow:65536,maxTokens:8192,reasoning:false};
@@ -45,7 +46,7 @@ test('a delayed preparation cannot launch helpers for a newer request, session, 
  for(const transition of ['input','session','abort']) {
   let release;
   const fx=fixture({judge:()=>new Promise(resolve=>{release=resolve;})});
-  const prompt='Audit the README documentation and release notes for this repository';
+  const prompt='Audit cross-file compatibility for the README documentation and release notes for this repository';
   await fx.input(prompt);
   const systemPrompt=['github-readme-authoring','evidence-first-engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
   const pending=fx.emit('before_agent_start',{prompt,systemPrompt});
@@ -58,6 +59,62 @@ test('a delayed preparation cannot launch helpers for a newer request, session, 
   assert.equal(fx.calls.length,0,transition);
   await fx.emit('session_shutdown');
  }
+});
+
+test('direct single-file work performs no helper launch or remote ranking, then escalates once after real failures',async()=>{
+ let judges=0;
+ const fx=fixture({judge:async()=>{judges++;return {ok:false,skipped:'unavailable'};}});
+ const prompt='Fix the typo in one file and run its existing check';
+ const controller=createAdaptiveExecutionController();controller.begin({task:prompt});
+ const dispose=registerAdaptiveExecution(fx.ctx,()=>controller.profile());
+ const systemPrompt=['coding-practices','evidence-first-engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
+ await fx.input(prompt);await fx.emit('before_agent_start',{prompt,systemPrompt});await tick();
+ assert.equal(judges,0);assert.equal(fx.calls.length,0);
+ controller.observe({ok:false,failureKey:'parse'});
+ await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,0);
+ controller.observe({ok:false,failureKey:'parse'});
+ await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,1);
+ assert.equal(fx.calls[0][1].delegatedThinkingOverride,'low');
+ controller.observe({ok:false,failureKey:'parse'});
+ await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,1,'one group does not respawn on each failure');
+ dispose();await fx.emit('session_shutdown');
+});
+
+test('technology-only constraints preserve diagnosis helpers and configured reasoning',async(t)=>{
+ const preferred={...model,provider:'friendli',id:'vendor/diagnostic',baseUrl:'https://provider.invalid/v1'};
+ const route='friendli/vendor/diagnostic';
+ fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({version:1,models:{chosen:{provider:preferred.provider,model:preferred.id}},preferences:{subagents:{models:['chosen']}}}));
+ clearLlmPreferencesCache();
+ t.after(()=>{fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});clearLlmPreferencesCache();});
+ const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
+ assert.equal(planAssistance(prompt).mode,'subagent');
+ assert.equal(classifyExecution({task:prompt}).features.assistance,true);
+ const fx=fixture({primary:{...model,provider:'parent'},models:[preferred,model]});
+ await fx.input(prompt);await fx.emit('before_agent_start',{prompt});await tick();
+ assert.equal(fx.calls.length,1);assert.equal(fx.calls[0][1].model,route);
+ assert.equal(fx.calls[0][1].delegatedThinkingOverride,undefined,'configured child thinking stays exact');
+ await fx.emit('session_shutdown');
+});
+
+test('automatic completion review retains whole-task thinking and reviewer width after a mechanical todo',async()=>{
+ const models=['reviewer-a','reviewer-b','reviewer-c'].map(id=>({...model,id:`example/${id}`}));
+ evidence.publishFreeEvidence(models.map(row=>({id:row.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}})),evidence.FREE_CATALOG_URL);
+ const fx=fixture({primary:{...model,provider:'parent'},models});
+ const dispose=registerAdaptiveExecution(fx.ctx,()=>classifyExecution({task:'Format one source file',scope:'todo'}));
+ await fx.input('Fix authentication token validation');
+ await globalThis[Symbol.for('yunus-pi.quality-review-runner.v1')]({task:'Fix authentication token validation',aspects:[{id:'security'},{id:'correctness'},{id:'runtime'}],automatic:true,files:['src/auth.ts'],history:[]},fx.ctx,new AbortController().signal);
+ assert.equal(fx.calls.length,3);
+ assert.ok(fx.calls.every(call=>call[1].delegatedThinkingOverride==='high'));
+ dispose();await fx.emit('session_shutdown');
+ evidence.publishFreeEvidence([{id:model.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL);
+});
+
+test('adaptive kill switch restores generic bounded-work helper planning and preserves opt-outs',t=>{
+ const original=process.env.PI_ADAPTIVE_EXECUTION;t.after(()=>{if(original===undefined)delete process.env.PI_ADAPTIVE_EXECUTION;else process.env.PI_ADAPTIVE_EXECUTION=original;});
+ const prompt='Fix the parser comparison in the existing source function';
+ delete process.env.PI_ADAPTIVE_EXECUTION;assert.equal(planAssistance(prompt).mode,'none');
+ process.env.PI_ADAPTIVE_EXECUTION='off';assert.equal(planAssistance(prompt).mode,'subagent');
+ assert.equal(planAssistance(`${prompt}. Do not spawn helpers.`).mode,'none');
 });
 
 test('unclear follow-ups do not launch a second interpretation sidecar',async()=>{

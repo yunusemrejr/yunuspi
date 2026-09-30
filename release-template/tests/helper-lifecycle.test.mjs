@@ -20,12 +20,25 @@ process.env.PI_LLM_PREFERENCES_FILE = preferencesFile;
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(configDir, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_SUBAGENT_CHILD;
+// This suite verifies the full-analysis provenance and lifecycle contract.
+// Its small synthetic requests intentionally opt out of adaptive admission.
+const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
+process.env.PI_ADAPTIVE_EXECUTION = 'off';
 
-const { default: register, lastMicroRequest, microRequestAdvice, settleMicroAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
+const { default: register, lastMicroRequest, microRequestAdvice, settleMicroAnalyses: settleAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
 const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { searchCapabilityMetadata } = await import(pathToFileURL(path.join(agent, 'extensions/lib/capability-groups.ts')));
 const { collectSessionMetrics } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-metrics.ts')));
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+async function bounded(pending, label) {
+	let timer;
+	try {
+		return await Promise.race([pending, new Promise((_resolve, reject) => {
+			timer = setTimeout(() => reject(new Error(`Fixture timed out: ${label}`)), 5000);
+		})]);
+	} finally { clearTimeout(timer); }
+}
+const settleMicroAnalyses = () => bounded(settleAnalyses(), 'analysis settlement');
 
 const routeInside = { provider: 'openrouter', id: 'test/inside', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', input: ['text'], contextWindow: 65_536, maxTokens: 4096, reasoning: true, cost: { input: 0.1, output: 0.1 } };
 const routeOutside = { ...routeInside, id: 'test/outside' };
@@ -93,6 +106,8 @@ function fixture({
 	const typedEvents = [];
 	const uiNotices = [];
 	const customMessages = [];
+	const lifecycle = new AbortController();
+	let warmups = 0;
 	const modelRegistry = {
 		getAvailable: () => models,
 		find: (provider, id) => models.find((model) => model.provider === provider && model.id === id),
@@ -101,7 +116,7 @@ function fixture({
 	const ctx = {
 		cwd: configDir,
 		scopedModels,
-		signal: new AbortController().signal,
+		signal: lifecycle.signal,
 		modelRegistry,
 		sessionManager: {
 			getSessionId: () => currentSession,
@@ -126,17 +141,21 @@ function fixture({
 			stopReason: 'stop',
 		};
 	};
-	register(pi, { classify: () => undefined, warmup() {}, completePromptAnalysis });
+	register(pi, { classify: () => undefined, warmup() { warmups++; }, completePromptAnalysis });
 	const emit = async (name, event = {}, context = ctx) => {
+		if (name === 'session_shutdown') lifecycle.abort(new Error('Synthetic fixture cleanup'));
+		const ownedEvent = name === 'input' ? { ...event, signal: AbortSignal.any([lifecycle.signal, event.signal ?? new AbortController().signal]) } : event;
 		let last;
 		for (const handler of hooks.get(name) ?? []) {
-			const result = await handler(event, context);
+			const result = await handler(ownedEvent, context);
 			if (result !== undefined) last = result;
 		}
+		if (name === 'session_shutdown') await settleMicroAnalyses();
 		return last;
 	};
 	return {
 		ctx, hooks, completions, typedEvents, uiNotices, customMessages, emit,
+		warmups: () => warmups,
 		setSession: (value) => { currentSession = value; },
 	};
 }
@@ -202,6 +221,28 @@ test('only core-provenanced interactive and RPC inputs receive one structured ad
 	const replay = await f.emit('context', { ...batch, messages: rewritten.messages });
 	assert.equal(replay, undefined, 'replaying the same request IDs does not insert duplicate context');
 	assert.equal(f.typedEvents.length, 2, 'typed Guardian facts emit once per request');
+});
+
+test('adaptive direct inputs preserve literal constraints without a helper or advisory context', async t => {
+	writePreferences();
+	process.env.PI_ADAPTIVE_EXECUTION = 'on';
+	const f = fixture();
+	t.after(() => f.emit('session_shutdown'));
+	try {
+		await f.emit('session_start', { reason: 'new' });
+		await f.emit('input', input({ prompt: promptA, requestId: 'adaptive-direct' }));
+		await settleMicroAnalyses();
+		assert.equal(f.completions.length, 0);
+		assert.equal(f.warmups(), 0);
+		assert.equal(lastMicroRequest('owner-1').promptAnalysis.source, 'fallback');
+		assert.equal(microRequestAdvice(promptA, 'owner-1'), undefined);
+		const rewritten = await f.emit('context', {
+			messages: [{ role: 'user', content: [{ type: 'text', text: promptA }] }],
+			requestMessages: [{ requestId: 'adaptive-direct', turnId: 'turn-adaptive-direct', messageIndex: 0 }],
+		});
+		assert.equal(rewritten, undefined, 'literal input remains unchanged with no auxiliary interpretation');
+		assert.equal(f.customMessages[0].message.details.attempts.length, 0);
+	} finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 
 test('unusable explicit analysis routes inherit configured subagent order', async (t) => {
@@ -278,7 +319,7 @@ test('explicit abort prevents stale analysis from reaching context or Guardian',
 	await f.emit('session_start', { reason: 'new' });
 	const controller = new AbortController();
 	const pending = f.emit('input', input({ prompt: promptA, requestId: 'aborted', signal: controller.signal }));
-	await started;
+	await bounded(started, 'abort fixture analysis startup');
 	await pending;
 	assert.equal(lastMicroRequest('owner-1').advisoryPending, true, 'input returns while its analysis is still running');
 	controller.abort();
@@ -307,7 +348,7 @@ test('queued prompt from a replaced session cannot reset or contaminate the new 
 	await f.emit('session_start', { reason: 'new' });
 	const aController = new AbortController();
 	const a = f.emit('input', input({ prompt: promptA, requestId: 'old-a', signal: aController.signal }));
-	await started;
+	await bounded(started, 'replaced session analysis startup');
 	const bController = new AbortController();
 	const b = f.emit('input', input({ prompt: promptB, requestId: 'old-b', signal: bController.signal }));
 	f.setSession('session-2');
@@ -521,4 +562,10 @@ test('legacy completion observes auth URL overrides', async (t) => {
 	await f.emit('input', input({ prompt: promptA, requestId: 'url' }));
 	await settleMicroAnalyses();
 	assert.equal(observedUrl, 'http://localhost:43210/v1');
+});
+
+test.after(() => {
+	if (priorAdaptive === undefined) delete process.env.PI_ADAPTIVE_EXECUTION;
+	else process.env.PI_ADAPTIVE_EXECUTION = priorAdaptive;
+	fs.rmSync(configDir, { recursive: true, force: true });
 });

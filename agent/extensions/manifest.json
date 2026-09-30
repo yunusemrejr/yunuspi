@@ -49,7 +49,8 @@
     "expert-director.ts",
     "task-state.ts",
     "art-direction.ts",
-    "goal.ts"
+    "goal.ts",
+    "adaptive-workflows.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -219,7 +220,11 @@
     "video-publish.ts",
     "video-studio.ts",
     "workspace-write-lease.ts",
-    "worktree-checkpoint.ts"
+    "worktree-checkpoint.ts",
+    "adaptive-execution.ts",
+    "task-pipelines.ts",
+    "audio-studio.ts",
+    "media-pipeline.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

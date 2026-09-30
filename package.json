@@ -1,6 +1,6 @@
 {
   "name": "yunuspi",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -21,7 +21,8 @@
     "check:public": "node scripts/check-public.mjs",
     "prepare:hooks": "git config core.hooksPath .githooks",
     "build:core": "node scripts/build-core.mjs",
-    "test:fork": "node --test tests/core-independence.test.mjs"
+    "test:fork": "node --test tests/core-independence.test.mjs",
+    "bench:adaptive": "PI_LOCAL_LM=off node agent/scripts/adaptive-execution-bench.mjs"
   },
   "workspaces": [
     "core/*",

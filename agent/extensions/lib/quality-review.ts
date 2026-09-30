@@ -19,6 +19,7 @@ import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
 import { registerShadowSource } from './intervention-registry.ts';
 import { choices } from "./tool-schema.ts";
+import { classifyExecution, currentExecutionProfile } from './adaptive-execution.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
 
@@ -65,7 +66,16 @@ export function reviewAspects(files: string[], task = '', history: any[] = [], p
   // interface aspect so rendered verification is demanded there too.
   if (uiSignal) selected.add('interface');
   if ((uiFile || uiSignal) && /\bredesign\b|\brestyle\b|styling|stylesheet|\btheme\b|dark mode|\blayout\b/i.test(prose)) selected.add('interface');
-  if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
+  // Captured verification logs are outcome evidence, not newly authored
+  // copy. A *.log.txt check receipt must not buy a second content reviewer.
+  // Preserve explicitly requested textual artifacts and ordinary prose files.
+  const contentFiles = files.filter(file => {
+    if (!/\.log(?:\.txt)?$/i.test(file)) return true;
+    const base = path.basename(file);
+    return prose.includes(file) || prose.includes(base)
+      || /\b(?:write|create|produce|deliver|edit|improve)\b[^.!?\n]{0,80}\b(?:logs?|reports?|text(?:ual)? artifacts?)\b/i.test(prose);
+  }).join('\n');
+  if (/\.(?:mdx?|rst|txt|html?)\b/i.test(contentFiles) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
   if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose) ||
     signal('quality-fanout', 'audit-runtime') ||
     (codeFile && /\b(?:deadlock|race condition|backpressure|latency|throughput|timeouts?|slow query|n\+1)\b/i.test(prose))) selected.add('runtime');
@@ -195,6 +205,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let truncated = false, delivered = '', deliveryInFlight = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
 	let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [], evidenceRejected: string[] = [];
   let scanning: Promise<void> | undefined, activity = 0, reviewUnavailable = false;
+  let policyContext: any, explicitReview = false;
   let testsWaitSettled = 0, testsWaitNeed = '';
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   let policyFindings: Array<{id:string; key:string; detail:string; file?:string}> = [];
@@ -259,12 +270,26 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     return true;
   };
   const unavailableReason = () => dispatchGap || reason || (reviewUnavailable ? 'Independent review unavailable: ' + [...new Set(reports.map(r => r.gap))].join(' ').slice(0, 1000) : '');
+  // Completion reviews cover the retained whole task and current changed
+  // source, never only its final mechanical todo. Direct work can finish on
+  // local evidence without manufacturing an independent approval receipt.
+  const automaticReviewExempt = () => {
+    const live = currentExecutionProfile(policyContext);
+    if (!live || explicitReview || busy || rounds || reports.length || dispatchGap || reviewUnavailable || disposition || !task.trim() || truncated || scopeOverflow || policyFindings.length) return false;
+    if (live.tier !== 'direct' || live.failures || [...patterns.values()].some(signals => signals.length)) return false;
+    const consequentialPaths = changed.some(file => /(?:^|\/)(?:auth(?:entication|orization)?|security|credentials?|billing|payments?|migrations?)(?:[./_-]|$)|(?:^|\/)\.github\/workflows\//i.test(file));
+    return !consequentialPaths && classifyExecution({task,changedFiles:changed}).tier === 'direct';
+  };
   /** One unresolved-verification item shared by the rendered warning line and
    * the structured gate receipt, so prose and identity cannot diverge. */
   const qualityVerification = (): { id: string; state: string; text: string } | undefined => {
-    if (!(enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted')) return undefined;
+    if (!(enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted') || automaticReviewExempt()) return undefined;
     const current = status();
-    return { id: `status:${current}`, state: disposition === 'blocked' ? 'blocked' : 'unresolved', text: `Independent review ${current}: ${unavailableReason() || 'current changes have not been accepted; inspect the review evidence and remaining gaps.'}` };
+    const guidance = current === 'awaiting_assessment'
+      ? 'current reviewer reports are complete. Reuse them and call quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) once with the current reports and required checks; do not launch another review just to finish.'
+      : current === 'reviewing' ? 'the native review is already running; reuse its result before assessing.'
+      : 'current changes have not been accepted; inspect the review evidence and remaining gaps.';
+    return { id: `status:${current}`, state: disposition === 'blocked' ? 'blocked' : 'unresolved', text: `Independent review ${current}: ${unavailableReason() || guidance}` };
   };
   const qualityVerificationLine = (): string[] => {
     const item = qualityVerification();
@@ -274,7 +299,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     const item = qualityVerification();
     return item ? [{ source: 'quality-review', id: item.id, revision: String(revision), state: item.state, count: changed.length, line: `quality review: ${item.text}` }] : [];
   };
-  const status = () => !changed.length ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
+  const status = () => !changed.length || automaticReviewExempt() ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? busy ? 'reviewing' : rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
     .sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,12);
   const parentReports = () => {
@@ -291,6 +316,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     }) }));
   };
   const summary = (includePrevious = false, fullReports = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? fullReports ? reports : parentReports() : [], staleReports: reviewed !== revision && reports.length > 0,
+    ...(automaticReviewExempt() ? { automaticReview: 'suppressed', policyReason: 'Direct task and changed scope: preserve required local checks; independent review remains deliberately available.' } : {}),
     ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
     reason: unavailableReason() || (evidenceRejected.length ? `Outcome evidence rejected: ${evidenceRejected.join(' ').slice(0, 1000)}` : '') || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''),
     ...(evidenceRejected.length ? { evidenceRejected } : {}), truncated: truncated || scopeOverflow,
@@ -299,7 +325,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     ...(reviewed === revision && consolidation && consolidation.revision === reviewed && consolidation.groups.length ? { consolidated: consolidation.groups.slice(0, 16).map((group) => ({ kept: group.kept, merged: group.merged, sources: group.sources })) } : {}),
     ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted when current reports and required checks support it (an aspect whose reviewer did not return is a disclosed verification limit, not a blocker, once another aspect passed and no blocking finding remains), otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. An aspect whose reviewer did not return does not prevent accepted once another aspect passed and required checks are green; it is disclosed automatically. Record blocked only for an actual blocker. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
     scope: 'Duplicate prose references its representative; action=inspect retains full original reports. Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
-  const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess the retained findings. If necessary outcome evidence was missing, attach new or updated evidence paths to an explicit review call while a round remains.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. For UI/behavior work attach outcome evidence (renders, test output) via evidence paths so reviewers judge the outcome, not the diff shape.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
+  const advice = () => {
+    if (!changed.length || disposition || automaticReviewExempt()) return '';
+    if (busy && reviewed !== revision) return `[quality review] Revision ${revision}: reviewing. The native review is already running. Reuse its result; do not launch a duplicate review.`;
+    if (reviewed === revision) return `[quality review] Revision ${revision}: awaiting_assessment. Current reviewer reports are complete. Reuse them and call quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) once, citing current reports and required checks. Fix actual blocking findings; defer optional improvements. Another review requires a concrete repair or newly supplied missing evidence, never merely remaining budget. Report unavailable review separately; do not claim missing evidence was verified.`;
+    return `[quality review] Revision ${revision}: ${status()}. ${rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. For UI/behavior work attach outcome evidence (renders, test output) via evidence paths so reviewers judge the outcome, not the diff shape.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
+  };
   const automaticAdvice = () => testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
   const refresh = async (ctx: any) => {
@@ -321,9 +352,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     noteHealth('review.disposition', { decision: disposition, count: reports.flatMap(r => r.findings).filter(f => f.severity === 'blocking').length });
   };
   const run = async (ctx: any, signal?: AbortSignal, automatic = false, evidence: string[] = [], rejectedEvidence: string[] = [], retryReason = '') => {
+    policyContext = ctx;
+    if (!automatic) explicitReview = true;
     const entryGeneration = generation;
     await refresh(ctx);
     if (entryGeneration !== generation || signal?.aborted || ctx.signal?.aborted) return summary();
+    if (automatic && automaticReviewExempt()) return summary();
     // Test assessment/execution owns the next automatic step while unresolved.
     // An explicit source review still works, but parallel automatic reviews
     // would spend their bounded rounds on source/tests that are still changing.
@@ -552,6 +586,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       return invalidated;
     },
     restore(ctx: any) {
+      policyContext = ctx; explicitReview = false;
       disposeContinuationNotice();
       disposeContinuationNotice = registerContinuationSource({session:ctx.sessionManager,name:'quality review',verification:() => qualityVerificationLine(),verificationReceipts:() => qualityVerificationReceipt(),pending:() => enabled() && capable() && active && !paused && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
       releaseShared();
@@ -609,6 +644,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     },
     input(event: any) {
       if (event.source === 'extension') return;
+      explicitReview = false;
       try { shadowPlane.beginRequest('review-input'); } catch { /* shadow only */ }
       cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; followups = 0; delivered = ''; noted = ''; testsWaitSettled = 0; testsWaitNeed = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));

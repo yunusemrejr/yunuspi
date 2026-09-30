@@ -8,6 +8,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
+import { masterMedia } from "./audio-studio.ts";
 import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
 import { memoryBudgetMb, watchMemory } from "./memory-guard.ts";
@@ -107,7 +108,8 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
   const issues: Issue[] = [];
   const err = (message: string, scene?: string) => issues.push({ severity: "error", message, ...(scene ? { scene } : {}) });
   const warn = (message: string, scene?: string) => issues.push({ severity: "warn", message, ...(scene ? { scene } : {}) });
-  if (!spec || typeof spec !== "object") return { issues: [{ severity: "error", message: "video.json is not an object" }], scenes: [], seconds: 0 };
+  const object = (value: any) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!object(spec)) return { issues: [{ severity: "error", message: "video.json is not an object" }], scenes: [], seconds: 0 };
   if (!Number.isInteger(spec.fps) || spec.fps < 1 || spec.fps > 60) err("fps must be an integer 1..60");
   for (const key of ["width", "height"]) if (!Number.isInteger(spec[key]) || spec[key] < 64 || spec[key] > 3840 || spec[key] % 2) err(`${key} must be an even integer 64..3840`);
   if (!Array.isArray(spec.scenes) || !spec.scenes.length) { err("scenes must be a non-empty array"); return { issues, scenes: [], seconds: 0 }; }
@@ -122,27 +124,32 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     const seconds = Number(raw.seconds);
     if (!Number.isFinite(seconds) || seconds < 0.5 || seconds > 600) { err("seconds must be 0.5..600", id); continue; }
     if (!components.has(raw.component)) err(`component "${raw.component}" is not registered in src/scenes/index.ts`, id);
-    for (const [name, value] of Object.entries(raw.cues ?? {})) {
-      if (typeof value !== "number" || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
+    if (raw.cues !== undefined && !object(raw.cues)) err("cues must be an object of scene-relative seconds", id);
+    for (const [name, value] of Object.entries(object(raw.cues) ? raw.cues : {})) {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
     }
+    if (raw.energy !== undefined && (typeof raw.energy !== "number" || !Number.isFinite(raw.energy) || raw.energy < 0 || raw.energy > 1)) err("energy must be a number 0..1", id);
     if (raw.chapter !== undefined && (typeof raw.chapter !== "string" || !raw.chapter.trim() || raw.chapter.length > 60)) err("chapter must be a title of at most 60 characters", id);
     if (raw.cueWords !== undefined) {
+      if (!object(raw.cueWords)) err("cueWords must be an object of spoken words", id);
       const tokens = typeof raw.narration === "string" ? raw.narration.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [] : [];
-      for (const [name, word] of Object.entries(raw.cueWords ?? {})) {
+      for (const [name, word] of Object.entries(object(raw.cueWords) ? raw.cueWords : {})) {
         if (typeof word !== "string" || !word.trim()) { err(`cueWords.${name} must name a spoken word`, id); continue; }
-        if (!(name in (raw.cues ?? {}))) err(`cueWords.${name} needs a placeholder cue of the same name in cues (narration_tts overwrites it with the time of the word; scenes read cues before narration exists)`, id);
+        if (!(name in (object(raw.cues) ? raw.cues : {}))) err(`cueWords.${name} needs a placeholder cue of the same name in cues (narration_tts overwrites it with the time of the word; scenes read cues before narration exists)`, id);
         const [text] = word.toLowerCase().split("#");
         if (tokens.length && !tokens.includes(text.replace(/[^\p{L}\p{N}']/gu, ""))) err(`cueWords.${name} = "${word}" does not occur in the narration`, id);
       }
     }
+    if (raw.narrationWords !== undefined && !Array.isArray(raw.narrationWords)) err("narrationWords must be an array of measured words", id);
     if (Array.isArray(raw.narrationWords) && typeof raw.narration === "string") {
       const spoken = raw.narration.trim().split(/\s+/);
       if (raw.narrationWords.length !== spoken.length || raw.narrationWords.some((entry: any, i: number) => entry?.w !== spoken[i])) warn("narrationWords no longer match the narration text; re-run narration_tts for this scene so captions and cues use measured timing", id);
+      if (raw.narrationWords.some((entry: any, i: number, entries: any[]) => !entry || typeof entry.s !== "number" || typeof entry.e !== "number" || !Number.isFinite(entry.s) || !Number.isFinite(entry.e) || entry.s < 0 || entry.e <= entry.s || (i > 0 && entry.s < entries[i - 1]?.e) || (Number(raw.narrationSeconds) > 0 && entry.e > Number(raw.narrationSeconds) + 0.05))) err("narrationWords timings must be finite, ordered and inside the measured narration", id);
     }
     if (raw.transition !== undefined) {
       const kind = raw.transition?.type, length = raw.transition?.seconds ?? 0.5;
       if (!["fade", "slide", "slideup", "slidedown", "wipe", "zoom", "blur", "none"].includes(kind)) err('transition.type must be fade, slide, slideup, slidedown, wipe, zoom, blur or none', id);
-      else if (typeof length !== "number" || length < 0.05 || length > Math.min(3, seconds / 2)) err(`transition.seconds must be 0.05..${Math.min(3, seconds / 2)}`, id);
+      else if (typeof length !== "number" || !Number.isFinite(length) || length < 0.05 || length > Math.min(3, seconds / 2)) err(`transition.seconds must be 0.05..${Math.min(3, seconds / 2)}`, id);
     }
     const offset = raw.narrationOffset ?? 0;
     if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) { err("narrationOffset must be a non-negative number", id); continue; }
@@ -178,16 +185,18 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
       if (c.position !== undefined && !["bottom", "top"].includes(c.position)) err('captions.position must be "bottom" or "top"');
     }
   }
-  const audio = spec.audio ?? {};
+  if (spec.audio !== undefined && !object(spec.audio)) err("audio must be an object");
+  const audio = object(spec.audio) ? spec.audio : {};
   if (audio.music && !exists(audio.music)) err(`music public/${audio.music} is missing`);
   for (const key of ["musicVolume", "musicDuckedVolume", "narrationVolume"]) {
     const volume = audio[key];
     if (volume !== undefined && (typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 2)) err(`${key} must be a number 0..2`);
   }
   if (typeof audio.musicVolume === "number" && typeof audio.musicDuckedVolume === "number" && audio.musicDuckedVolume >= audio.musicVolume) warn("musicDuckedVolume should sit below musicVolume or ducking under narration does nothing");
-  for (const sfx of audio.sfx ?? []) {
+  if (audio.sfx !== undefined && !Array.isArray(audio.sfx)) err("audio.sfx must be an array");
+  for (const sfx of Array.isArray(audio.sfx) ? audio.sfx : []) {
     if (!sfx?.src || !exists(sfx.src)) err(`sfx public/${sfx?.src} is missing`);
-    if (typeof sfx?.at !== "number" || sfx.at < 0 || sfx.at >= at) err(`sfx ${sfx?.src} at ${sfx?.at}s is outside the timeline`);
+    if (typeof sfx?.at !== "number" || !Number.isFinite(sfx.at) || sfx.at < 0 || sfx.at >= at) err(`sfx ${sfx?.src} at ${sfx?.at}s is outside the timeline`);
     if (sfx.volume !== undefined && (typeof sfx.volume !== "number" || !Number.isFinite(sfx.volume) || sfx.volume < 0 || sfx.volume > 2)) err(`sfx ${sfx?.src} volume must be a number 0..2`);
   }
   return { issues, scenes, seconds: at };
@@ -202,7 +211,7 @@ export function captionTrack(spec: any, scenes: TimedScene[]): Array<{ text: str
     if (!text) return [];
     const spoken = Number(scene.narrationSeconds) > 0 ? Number(scene.narrationSeconds) : estimateSeconds(text);
     const origin = scene.start + (scene.narrationOffset ?? 0);
-    return captionChunks(text, spoken, maxWords).map((chunk) => ({ text: chunk.text, start: origin + chunk.start, end: Math.min(scene.end, origin + chunk.end) })).filter((c) => c.end > c.start);
+    return captionChunks(text, spoken, maxWords, 42, scene.narrationWords).map((chunk) => ({ text: chunk.text, start: origin + chunk.start, end: Math.min(scene.end, origin + chunk.end) })).filter((c) => c.end > c.start);
   });
 }
 
@@ -381,7 +390,9 @@ export async function projectDir(value: unknown, cwd: string, mustExist = true):
 }
 
 export async function readSpec(dir: string) {
-  return JSON.parse(await fs.readFile(path.join(dir, "video.json"), "utf8"));
+  const spec = JSON.parse(await fs.readFile(path.join(dir, "video.json"), "utf8"));
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) throw new Error("video.json must be an object");
+  return spec;
 }
 
 /** Project-owned output paths must remain inside the physical project, even
@@ -589,7 +600,7 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
       const frames = request.range ? request.range[1] - request.range[0] + 1 : total;
       const timeoutMs = Math.min(3_600_000, 120_000 + frames * (mode === "final" ? 600 : 250));
       const result = await runRenderer(dir, request, signal, report, timeoutMs);
-      let mastered: { before: number; after: number } | undefined;
+      let mastered: Awaited<ReturnType<typeof masterMedia>> | undefined;
       if (mode === "final" && params.master !== false && !request.muted && (await probe(result.output, signal)).streams?.some((st: any) => st.codec_type === "audio")) mastered = await masterFinal(result.output, targetLoudness(spec), signal);
       const info = await probe(result.output, signal);
       await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(result.output, 0), "-f", "null", "-"], signal, timeoutMs);
@@ -611,7 +622,7 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
         if (chapters.length) await fs.writeFile(path.join(out, "chapters.txt"), formatChapters(chapters) + "\n", { flag: "wx" });
         publish = { description: path.join(out, "description.md"), ...(chapters.length ? { chapters: path.join(out, "chapters.txt") } : {}), note: "description.md is a skeleton: write the hook line and add links. Chapters follow the YouTube rules (first at 0:00, three or more, each at least 10 s)." };
       }
-      return { mode, output: result.output, ...(mastered ? { loudness: { mixLufs: mastered.before, deliveredLufs: mastered.after, note: "audio normalized to delivery loudness (video stream copied)" } } : {}), ...(captions ? { captions } : {}), ...(publish ? { publish } : {}), frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
+      return { mode, output: result.output, ...(mastered ? { loudness: { ...mastered, mixLufs: mastered.before.integratedLufs, deliveredLufs: mastered.after.integratedLufs, note: "delivery encoding measured after normalization (video stream copied); silence is preserved" } } : {}), ...(captions ? { captions } : {}), ...(publish ? { publish } : {}), frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
         review: mode === "final" ? "Run video_qa on this file, then inspect its contact sheet and listen-check narration timing before delivery." : "Watch the motion: extract frames around transitions with video_frames, or check timing against cues in video.json. Stills cannot show pacing, easing or transitions." };
     }
     throw new Error("mode must be stills, preview, final or thumbnail");
@@ -624,19 +635,9 @@ export const targetLoudness = (spec: any): number => (isPublishing(spec) && (spe
 
 /** Two-pass EBU R128 normalization of the audio stream (video is copied, not
  * re-encoded), so the final file lands on the delivery loudness whatever
- * balance the mix started with. Returns the measured before-values. */
-async function masterFinal(file: string, target: number, signal?: AbortSignal): Promise<{ before: number; after: number }> {
-  const filter = `loudnorm=I=${target}:TP=-2.2:LRA=11`;
-  const first = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, 0), "-vn", "-af", `${filter}:print_format=json`, "-f", "null", "-"], signal, 600_000);
-  const json = /\{[^{}]*"input_i"[^{}]*\}/.exec(first.stderr)?.[0];
-  if (!json) throw new Error("Loudness measurement produced no result");
-  const m = JSON.parse(json);
-  const pass = `${filter}:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
-  const mastered = `${file}.mastered.mp4`;
-  await fs.rm(mastered, { force: true });
-  await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputArgs(file, 0), "-map", "0:v", "-c:v", "copy", "-map", "0:a", "-af", pass, "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", mastered], signal, 600_000);
-  await fs.rename(mastered, file);
-  return { before: Number(m.input_i), after: target };
+ * balance the mix started with. Measures the delivered encoding as well. */
+async function masterFinal(file: string, target: number, signal?: AbortSignal) {
+  return masterMedia(file, target, signal);
 }
 
 async function runRenderer(dir: string, request: any, signal: AbortSignal | undefined, report: Progress, timeoutMs: number) {

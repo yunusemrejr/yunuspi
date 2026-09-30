@@ -36,6 +36,7 @@ const {
 const { projectTestFacts, isProjectReviewSource } = await import(
  pathToFileURL(path.join(agent, "scripts/workspace-facts.mjs"))
 );
+const { classifyExecution, registerAdaptiveExecution } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const storePath = path.join(
  agent,
  "extensions/lib/project-intelligence/store.mjs",
@@ -145,6 +146,37 @@ async function fixture(t, { runner, context, beforeRefresh, dedup } = {}) {
  };
 }
 
+test('direct adaptive work finishes without independent fan-out, pending-review clutter or a synthetic acceptance', async t => {
+ const f=await fixture(t);
+ f.api.input({source:'interactive',text:'Correct the one-line typo in README.md'});
+ const dispose=registerAdaptiveExecution(f.ctx,()=>classifyExecution({task:'Correct the one-line typo in README.md'}));t.after(dispose);
+ await f.mutate('README.md','A corrected title.');
+ f.tests({need:'assessment',changed:['README.md']});
+ await f.settle();
+ assert.equal(f.calls.length,0);assert.equal(f.state().status,'not_needed');assert.equal(f.state().automaticReview,'suppressed');
+ assert.equal(f.state().rounds,0);assert.equal(f.state().reports.length,0);assert.equal(f.sent.length,0);
+ assert.equal(f.api.notice(),'','no unperformed review is advertised as required');
+ await f.tool({action:'review'});
+ assert.equal(f.calls.length,1,'deliberate review remains available');assert.equal(f.state().status,'awaiting_assessment');
+});
+
+test('a direct final todo cannot waive parent task risk or consequential changed paths',async t=>{
+ for(const [task,file] of [['Fix authentication token validation','src/value.js'],['Fix the one-line parser comparison','auth.ts']]) {
+  const f=await fixture(t);f.api.input({source:'interactive',text:task});
+  const dispose=registerAdaptiveExecution(f.ctx,()=>classifyExecution({task:'Format one source file',scope:'todo'}));t.after(dispose);
+  await f.mutate(file,'export const value=1;');await f.settle();
+  assert.equal(f.calls.length,1,task);assert.equal(f.state().status,'awaiting_assessment');assert.equal(f.state().automaticReview,undefined);
+ }
+});
+
+test('adaptive rollback restores established automatic quality review for direct scopes',async t=>{
+ const original=process.env.PI_ADAPTIVE_EXECUTION;t.after(()=>{if(original===undefined)delete process.env.PI_ADAPTIVE_EXECUTION;else process.env.PI_ADAPTIVE_EXECUTION=original;});
+ const f=await fixture(t);f.api.input({source:'interactive',text:'Fix the one-line parser comparison'});
+ const dispose=registerAdaptiveExecution(f.ctx,()=>classifyExecution({task:'Fix the one-line parser comparison'}));t.after(dispose);
+ await f.mutate('src/value.js','export const value=1;');process.env.PI_ADAPTIVE_EXECUTION='off';await f.settle();
+ assert.equal(f.calls.length,1);assert.equal(f.state().automaticReview,undefined);
+});
+
 test('current source and rendered policy cues require repair or a specific assessment dismissal', async t => {
  const f=await fixture(t);
  await f.mutate('ui.css','.answer::before{width:8px;height:8px;border-radius:50%;background:blue}');
@@ -216,6 +248,30 @@ test("routing includes text, CSS/HTML, technical stack, security and delivery wi
  );
  assert.equal(aspects[0].id, "content");
  assert.equal(REVIEW_LIMITS.rounds, 2);
+});
+
+test('generated check logs do not add copy review while requested textual deliverables remain covered',()=>{
+ const ids=(files,task='')=>reviewAspects(files,task).map(row=>row.id).sort();
+ assert.deepEqual(ids(['src/parser.js','verify-final.log.txt'],'Fix the parser and run its checks'),['correctness']);
+ assert.ok(ids(['src/parser.js','README.md']).includes('content'));
+ assert.ok(ids(['src/parser.js','response.txt']).includes('content'));
+ assert.ok(ids(['src/parser.js','verify-final.log.txt'],'Write the requested verify-final.log.txt report').includes('content'));
+ assert.ok(ids(['src/parser.js','archive.log.txt'],'Create a textual report for the user').includes('content'));
+});
+
+test('review guidance distinguishes active dispatch from completed reports needing one parent assessment',async t=>{
+ let finish;
+ const f=await fixture(t,{runner:req=>new Promise(resolve=>{finish=()=>resolve(req.aspects.map(aspect=>pass(aspect.id)));})});
+ await f.mutate();const pending=f.api.run(f.ctx);
+ while(!finish)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.state().status,'reviewing');
+ assert.match(f.api.notice(),/already running/);
+ finish();await pending;
+ assert.equal(f.state().status,'awaiting_assessment');
+ const guidance=f.api.notice();assert.match(guidance,/action:"assess"/);assert.match(guidance,/Reuse/);
+ assert.equal(f.calls.length,1);
+ await f.api.run(f.ctx);assert.equal(f.calls.length,1,'completed reports are reused');
+ assert.equal(f.state().status,'awaiting_assessment','guidance never manufactures acceptance');
 });
 
 test("aspect routing catches semantics without reviewing everything (precision/recall bench)", () => {

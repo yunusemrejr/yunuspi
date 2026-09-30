@@ -1,6 +1,7 @@
 /** Persistent project intelligence. Heavy discovery/SQLite work lives in a
  * worker; the optional viewer owns an independent process and lifetime. */
 import path from "node:path";
+import { classifyExecution, currentExecutionProfile, adaptiveExecutionEnabled } from './lib/adaptive-execution.ts';
 import { createContextAnchor } from "./lib/context-anchor.ts";
 import { envelopInjection, type InjectionEnvelope } from "./lib/context-provenance.ts";
 
@@ -456,6 +457,10 @@ export default function projectIntelligence(pi: any) {
   });
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     if (!enabled()) return;
+    const execution = currentExecutionProfile(ctx) ?? classifyExecution({ task: event.prompt ?? '' });
+    // Discovery already refreshes asynchronously. Direct tasks can inspect
+    // source immediately and use project_intel explicitly when needed.
+    if (adaptiveExecutionEnabled() && execution.tier === 'direct') return;
     const turn = inputGeneration;
     try {
       await ensure(ctx);

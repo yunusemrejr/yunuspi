@@ -3153,7 +3153,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 902
+        "line": 907
       },
       {
         "name": "harness-backup",
@@ -3178,52 +3178,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113808
+        "line": 113833
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113512
+        "line": 113537
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113569
+        "line": 113594
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113604
+        "line": 113629
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113581
+        "line": 113606
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113723
+        "line": 113748
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113537
+        "line": 113562
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113505
+        "line": 113530
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113742
+        "line": 113767
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113519
+        "line": 113544
       },
       {
         "name": "logs",
@@ -3253,7 +3253,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 566
+        "line": 568
       },
       {
         "name": "or-provider",
@@ -3263,7 +3263,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 767
+        "line": 786
       },
       {
         "name": "prompt-workflow",
@@ -3388,7 +3388,7 @@
       {
         "name": "task-state",
         "source": "agent/extensions/task-state.ts",
-        "line": 166
+        "line": 170
       },
       {
         "name": "tasks",
@@ -3403,7 +3403,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 341
+        "line": 343
       },
       {
         "name": "websearch",
@@ -3498,13 +3498,13 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 259,
+        "line": 260,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 277,
+        "line": 282,
         "kind": "factory"
       },
       {
@@ -3565,7 +3565,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 221,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -3735,7 +3735,7 @@
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 258,
+        "line": 259,
         "kind": "factory"
       },
       {
@@ -3759,13 +3759,19 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 260,
+        "line": 261,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 256,
+        "line": 257,
+        "kind": "factory"
+      },
+      {
+        "name": "media_pipeline",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 283,
         "kind": "factory"
       },
       {
@@ -3807,7 +3813,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 494,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -3825,7 +3831,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 263,
+        "line": 265,
         "kind": "factory"
       },
       {
@@ -3867,67 +3873,67 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 786,
+        "line": 791,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 747,
+        "line": 766,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 715,
+        "line": 734,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 677,
+        "line": 696,
         "kind": "literal"
       },
       {
         "name": "project_memory_read",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 452,
+        "line": 471,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 597,
+        "line": 616,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 627,
+        "line": 646,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 731,
+        "line": 750,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 377,
+        "line": 396,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 529,
+        "line": 548,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 718,
+        "line": 754,
         "kind": "literal"
       },
       {
@@ -3951,13 +3957,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 273,
+        "line": 275,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 274,
+        "line": 276,
         "kind": "factory"
       },
       {
@@ -3987,7 +3993,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 376,
+        "line": 377,
         "kind": "literal"
       },
       {
@@ -4064,9 +4070,15 @@
         "kind": "literal"
       },
       {
+        "name": "task_pipeline",
+        "source": "agent/extensions/adaptive-workflows.ts",
+        "line": 305,
+        "kind": "literal"
+      },
+      {
         "name": "task_state",
         "source": "agent/extensions/task-state.ts",
-        "line": 121,
+        "line": 125,
         "kind": "literal"
       },
       {
@@ -4078,7 +4090,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 289,
+        "line": 334,
         "kind": "literal"
       },
       {
@@ -4102,13 +4114,13 @@
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 276,
+        "line": 281,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 257,
+        "line": 258,
         "kind": "factory"
       },
       {
@@ -4255,7 +4267,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 221,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -4375,7 +4387,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 494,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -4399,67 +4411,67 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 786,
+        "line": 791,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 747,
+        "line": 766,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 715,
+        "line": 734,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 677,
+        "line": 696,
         "kind": "literal"
       },
       {
         "name": "project_memory_read",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 452,
+        "line": 471,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 597,
+        "line": 616,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 627,
+        "line": 646,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 731,
+        "line": 750,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 377,
+        "line": 396,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 529,
+        "line": 548,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 718,
+        "line": 754,
         "kind": "literal"
       },
       {
@@ -4507,7 +4519,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 376,
+        "line": 377,
         "kind": "literal"
       },
       {
@@ -4535,15 +4547,21 @@
         "kind": "literal"
       },
       {
+        "name": "task_pipeline",
+        "source": "agent/extensions/adaptive-workflows.ts",
+        "line": 305,
+        "kind": "literal"
+      },
+      {
         "name": "task_state",
         "source": "agent/extensions/task-state.ts",
-        "line": 121,
+        "line": 125,
         "kind": "literal"
       },
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 289,
+        "line": 334,
         "kind": "literal"
       },
       {
@@ -4634,7 +4652,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          246
+          247
         ],
         "knownNames": [
           "audio_analyze",
@@ -4642,6 +4660,7 @@
           "image_ocr",
           "media_edit",
           "media_info",
+          "media_pipeline",
           "music_compose",
           "scene_create",
           "scene_render",
@@ -4801,11 +4820,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 683,
-      "registrationSites": 83,
+      "sourceFiles": 689,
+      "registrationSites": 84,
       "indirectRegistrationSites": 19,
-      "stableRegistrationRows": 123,
-      "uniqueStableTools": 122,
+      "stableRegistrationRows": 125,
+      "uniqueStableTools": 124,
       "dynamicOwnerCount": 15,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4816,6 +4835,10 @@
   },
   "inventory": {
     "extensions": [
+      {
+        "path": "agent/extensions/adaptive-workflows.ts",
+        "exists": true
+      },
       {
         "path": "agent/extensions/agent-context-tools.ts",
         "exists": true
@@ -5019,11 +5042,19 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/adaptive-execution.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/artifact-checks.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/asset-registry.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/audio-studio.ts",
         "exists": true
       },
       {
@@ -5316,6 +5347,10 @@
       },
       {
         "path": "agent/extensions/lib/local-models.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/media-pipeline.ts",
         "exists": true
       },
       {
@@ -5636,6 +5671,10 @@
       },
       {
         "path": "agent/extensions/lib/sys-probe.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/task-pipelines.ts",
         "exists": true
       },
       {
@@ -7553,6 +7592,10 @@
         "path": "docs/ACTION-PLANS.md"
       },
       {
+        "name": "ADAPTIVE-EXECUTION.md",
+        "path": "docs/ADAPTIVE-EXECUTION.md"
+      },
+      {
         "name": "ANTI-SLOP-CHECKLIST.md",
         "path": "docs/ANTI-SLOP-CHECKLIST.md"
       },
@@ -7705,6 +7748,10 @@
         "path": "docs/RECOVERY-AND-TESTING.md"
       },
       {
+        "name": "RELEASE-0.17.0-VERIFICATION.md",
+        "path": "docs/RELEASE-0.17.0-VERIFICATION.md"
+      },
+      {
         "name": "REVIEWS-AND-COUNCILS.md",
         "path": "docs/REVIEWS-AND-COUNCILS.md"
       },
@@ -7743,6 +7790,10 @@
       {
         "name": "SUBAGENT-CONTRACTS.md",
         "path": "docs/SUBAGENT-CONTRACTS.md"
+      },
+      {
+        "name": "TASK-PIPELINES.md",
+        "path": "docs/TASK-PIPELINES.md"
       },
       {
         "name": "TASK-STATE-GRAPH.md",

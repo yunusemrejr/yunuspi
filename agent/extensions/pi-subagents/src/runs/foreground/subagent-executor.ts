@@ -1,6 +1,8 @@
 import { fileVerificationSummary } from "../shared/file-verification.ts";
 import { attachTaskStateSliceDeep, expandCommonTask, taskSliceFocus } from "../shared/common-task.ts";
 import { currentTaskStateService } from "../../../../lib/task-state/service.ts";
+import { currentExecutionProfile } from "../../../../lib/adaptive-execution.ts";
+import { adaptiveDispatchDefaults, adaptiveChildBrief, adaptiveNativeChildThinking } from "../shared/adaptive-dispatch.ts";
 import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import { persistSubagentActivity } from "../../extension/session-cost.ts";
 import { helperLaunchFailure } from "../../extension/helper-receipt.ts";
@@ -4766,6 +4768,14 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			const { modelRouteCandidates: _untrustedRouteCandidates, ...publicParams } = requestParams;
 			requestParams = publicParams;
 		}
+		// Keep branch-specific authored text separate from common briefs and
+		// advisory task-state packets so a mechanical child is assessed locally.
+		const adaptiveBriefs = requestParams;
+		const dispatchDefaults = adaptiveDispatchDefaults(requestParams, deps.config, currentExecutionProfile(ctx));
+		requestParams = dispatchDefaults.params;
+		if (dispatchDefaults.changes.length) {
+			try { deps.pi.appendEntry("adaptive-subagent-dispatch-v1", { defaults: dispatchDefaults.changes, preservesRequestedWork: true }); } catch { /* optional diagnostics */ }
+		}
 		try { requestParams = expandCommonTask(requestParams); }
 		catch (error) { return buildRequestedModeError(requestParams, error instanceof Error ? error.message : String(error)); }
 		try {
@@ -6587,12 +6597,22 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			prepareForkThinking(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin);
 			await prepareForkSessionForIndex(idx);
 		};
+		let nativeThinkingModels: ModelInfo[] | undefined;
 		const forkThinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, idx = 0, modelOverride, modelOverrideFromParent, modelOrigin) => {
-			if (!shouldForkAgent(contextPolicy, agentName)) return delegatedThinkingOverride;
+			const agent = agents.find(candidate => candidate.name === agentName);
+			const nativeDefault = () => adaptiveNativeChildThinking({
+				brief: adaptiveChildBrief(adaptiveBriefs, idx, deps.config.chain?.dynamicFanout?.maxItems),
+				model: modelOverride ?? agent?.model ?? (requestParentModel ? `${requestParentModel.provider}/${requestParentModel.id}` : undefined),
+				agentThinking: agent?.thinking, requestThinking: effectiveParams.thinking,
+				maxThinking: agent?.maxThinking, fallbackModels: agent?.fallbackModels,
+				externalRunner: agent?.runner?.type === "external-cli" || agent?.runner?.type === "external-job",
+				availableModels: nativeThinkingModels ??= ctx.modelRegistry.getAvailable().map(toModelInfo), provider: requestParentModel?.provider,
+			});
+			if (!shouldForkAgent(contextPolicy, agentName)) return delegatedThinkingOverride ?? nativeDefault();
 			prepareForkThinking(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin);
 			const override = forkThinkingOverrideForIndex(idx);
 			if (override === "off") forkThinkingDowngrades.set(idx, agentName);
-			return override ?? delegatedThinkingOverride;
+			return override ?? delegatedThinkingOverride ?? nativeDefault();
 		};
 		const childSessionFileForTask: ForkSessionFileForTask = (agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin) =>
 			forkSessionFileForTask(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin) ?? path.join(sessionDirForIndex(idx), "session.jsonl");

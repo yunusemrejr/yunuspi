@@ -6,6 +6,7 @@ import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import { writeRenderers } from "./renderers/write.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+import { documentMutationEvidence } from "../guardian/guardian-prose.js";
 const writeSchema = Type.Object({
     path: Type.String({ description: "Path to the file to write (relative or absolute)" }),
     content: Type.String({ description: "Content to write to the file" }),
@@ -47,9 +48,10 @@ export function createWriteToolDefinition(cwd, options) {
                 // Write the file contents.
                 await ops.writeFile(absolutePath, content);
                 throwIfAborted();
+                const documentMutation = documentMutationEvidence(absolutePath, undefined, content);
                 return {
                     content: [{ type: "text", text: `Successfully wrote to ${path}` }],
-                    details: undefined,
+                    details: documentMutation ? { documentMutation } : undefined,
                 };
             });
         },

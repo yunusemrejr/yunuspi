@@ -23,6 +23,9 @@ const publish = (price = '0') => evidence.publishFreeEvidence([{ id: model.id,
   pricing: { prompt: price, completion: price }, capabilities: { contextWindow: 65536, maxTokens: 4096, toolCalling: false } }], evidence.FREE_CATALOG_URL);
 
 async function run({ mode = 'registry', paid = false, beforeDispatch, rewritePayload, overrideModel } = {}) {
+  // Transport/provenance checks explicitly exercise the retained full-analysis mode.
+  const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
+  process.env.PI_ADAPTIVE_EXECUTION = 'off';
   const selected = paid ? { ...model, cost: { input: .1, output: .2, cacheRead: 0, cacheWrite: 0 } } : model;
   publish(paid ? '0.000001' : '0');
   fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ version: 1,
@@ -59,7 +62,11 @@ async function run({ mode = 'registry', paid = false, beforeDispatch, rewritePay
       turnId: id, sessionId: id, processId: 'fixture-process', guardianOwnerId: id, signal: new AbortController().signal }, ctx);
     await settleMicroAnalyses();
     return { requests, responses, analysis: lastMicroRequest(id)?.promptAnalysis };
-  } finally { await hooks.get('session_shutdown')(); }
+  } finally {
+    await hooks.get('session_shutdown')();
+    if (priorAdaptive === undefined) delete process.env.PI_ADAPTIVE_EXECUTION;
+    else process.env.PI_ADAPTIVE_EXECUTION = priorAdaptive;
+  }
 }
 
 test('direct prompt analysis caps free SDK payloads after routing while preserving paid choices', async () => {

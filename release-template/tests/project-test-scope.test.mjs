@@ -28,6 +28,21 @@ test('a later failed receipt retires an older pass for the identical tree across
  assert.notEqual(api.snapshot().need,null,'the newer failure must not disappear and reveal the older pass');
 });
 
+test('the native nested execution result retires an earlier pass on nonzero exit or signal', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-native-execution-')),tools={};
+ const ctx={cwd},api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix and verify the parser'});
+ fs.writeFileSync(path.join(cwd,'parser.js'),'export const value=1;');
+ await api.result({toolName:'write',toolCallId:'write',input:{path:'parser.js'},isError:false},ctx);
+ await tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The focused regression exercises the parser contract.',commands:['node --test']},undefined,undefined,ctx);
+ const run=async(id,execution)=>{const event={toolName:'bash',toolCallId:id,input:{command:'node --test'}};await api.call(event,ctx);await api.result({...event,isError:false,details:{execution},content:[{type:'text',text:'1 test executed'}]},ctx);};
+ await run('pass',{exitCode:0});assert.equal(api.snapshot().need,null);
+ await run('fail',{exitCode:1});assert.equal(api.snapshot().need,'failed');
+ await run('pass-again',{exitCode:0});assert.equal(api.snapshot().need,null);
+ await run('signal',{signal:'SIGTERM'});assert.equal(api.snapshot().need,'failed');
+});
+
 test('a late test from a completed scope cannot approve the next user scope',async t=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-scope-'));
  const tools={};

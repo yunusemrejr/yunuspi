@@ -11,6 +11,7 @@ import { retrieveProjectMemory, retrieveFamily, retrieveFamilyViews } from '../a
 import { findClusters } from '../agent/extensions/lib/project-memory-consolidate.ts';
 import { recallProjectContext, PROJECT_MEMORY_RECALL } from '../agent/extensions/lib/project-memory-context.ts';
 import piVectorMemory from '../agent/extensions/pi-vector-memory.ts';
+import { createAdaptiveExecutionController, registerAdaptiveExecution } from '../agent/extensions/lib/adaptive-execution.ts';
 
 const response = (vectors, model = 'Qwen/Qwen3-Embedding-8B', usage = { prompt_tokens: 12, cost: 0.000001 }) => new Response(JSON.stringify({ model, data: vectors.map((embedding, index) => ({ index, embedding })).reverse(), usage }));
 const remote = (fetchImpl, extra = {}) => openRouterMemoryEmbedder({ env: {}, key: () => 'synthetic-key', fetch: fetchImpl, ...extra });
@@ -391,6 +392,137 @@ test('settled events persist lexical evidence before one shared embedding batch'
   const after = await tools.get('project_memory_status').execute('status',{},undefined,undefined,ctx);
   assert.equal(after.details.counts.embedded,3);
   hooks.get('session_shutdown')({},ctx); await new Promise(r=>setImmediate(r));
+});
+
+function adaptiveMemory(t, task = 'Correct a one-line README spelling typo') {
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'adaptive-memory-')),projects=path.join(dir,'projects');
+ fs.writeFileSync(path.join(dir,'.pi-project-id'),'adaptive-memory');
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'adaptive-session',getSessionFile:()=>path.join(dir,'session.jsonl')}};
+ const priorMode=process.env.PI_ADAPTIVE_EXECUTION;process.env.PI_ADAPTIVE_EXECUTION='on';
+ const execution=createAdaptiveExecutionController();execution.begin({task},'task');
+ const dispose=registerAdaptiveExecution(ctx,()=>execution.profile());
+ const hooks=new Map(),tools=new Map(),requests=[],receipts=[];
+ const e=remote(async(_url,{body})=>{const payload=JSON.parse(body);requests.push(payload);return response(payload.input.map(()=>[1,0]));},{accounting:()=>receipt=>receipts.push(receipt)});
+ piVectorMemory({on:(name,handler)=>hooks.set(name,handler),registerTool:tool=>tools.set(tool.name,tool),registerCommand(){}},{env:{PI_PROJECTS_DIR:projects},embedder:e});
+ hooks.get('session_start')({},ctx);
+ t.after(async()=>{await hooks.get('session_shutdown')({},ctx);dispose();fs.rmSync(dir,{recursive:true,force:true});priorMode===undefined?delete process.env.PI_ADAPTIVE_EXECUTION:process.env.PI_ADAPTIVE_EXECUTION=priorMode;});
+ const call=(name,args={})=>tools.get(name).execute('memory-test',args,undefined,undefined,ctx);
+ const status=async()=>(await call('project_memory_status')).details;
+ const input=text=>hooks.get('input')({source:'interactive',text},ctx);
+ const settled=async()=>{hooks.get('agent_settled')({},ctx);await new Promise(resolve=>setImmediate(resolve));};
+ const saved=async()=>{const state=await status();return openProjectStore(path.join(projects,state.projectId,'memory.sqlite'),{projectId:state.projectId});};
+ return {dir,ctx,hooks,requests,receipts,execution,dispose,call,status,input,settled,saved};
+}
+
+test('direct automatic memory flush persists raw text, atoms, lexical recall and provenance with zero remote embeddings',async t=>{
+ const f=adaptiveMemory(t);
+ const prompt='Correct the one-line orchard README spelling typo and preserve its wording.';
+ f.input(prompt);
+ f.hooks.get('tool_call')({toolName:'edit',toolCallId:'readme-edit',input:{path:'README.md'}},f.ctx);
+ f.hooks.get('tool_result')({toolName:'edit',toolCallId:'readme-edit',isError:false},f.ctx);
+ f.hooks.get('agent_end')({messages:[{role:'assistant',stopReason:'stop',content:[{type:'text',text:'Corrected the orchard README spelling typo and checked the complete file.'}]}]},f.ctx);
+ await f.settled();
+ f.hooks.get('session_compact')({compactionEntry:{summary:'The orchard README spelling typo was corrected; preserve its existing wording and the observed readback.'}},f.ctx);
+ await new Promise(resolve=>setImmediate(resolve));
+ await f.settled(); // Existing backlog alone must not start an optional request.
+ const status=await f.status();
+ assert.equal(status.queue,0);assert.equal(status.counts.chunks,4);assert.equal(status.counts.embedded,0);
+ assert.ok(status.atoms.atoms>=4);assert.equal(status.atoms.embedded,0);
+ assert.equal(f.requests.length,0);assert.equal(f.receipts.length,0,'no pending auxiliary charge is created');
+ const store=await f.saved();
+ try {
+  const rows=store.listRecent(10);
+  assert.ok(rows.some(row=>row.source_type==='user_request'&&row.text===prompt));
+  const edited=rows.find(row=>row.source_type==='code');assert.equal(edited.source_path,'README.md');
+  const outcome=rows.find(row=>row.title==='Assistant outcome (unverified)');assert.equal(outcome.confidence,.5);assert.equal(outcome.authority,.5);
+  assert.ok(rows.some(row=>row.source_type==='session_summary'));
+  assert.ok(rows.every(row=>row.session_id==='adaptive-session'&&row.content_hash&&row.timestamp));
+  assert.ok(store.lexicalSearch('orchard spelling').length>0);
+ } finally {store.close();}
+ f.input('Preserve the remaining direct orchard continuity note before shutting down.');
+ await f.hooks.get('session_shutdown')({},f.ctx);
+ assert.equal(f.requests.length,0,'shutdown drains native lexical work without starting deferred inference');
+ const persisted=await f.saved();try{assert.equal(persisted.counts().chunks,5);}finally{persisted.close();}
+});
+
+test('explicit backfill, remember, file index and semantic search stay effective in a direct scope',async t=>{
+ const f=adaptiveMemory(t);
+ f.input('Preserve the orchard transaction convention for a later architectural decision.');
+ f.input('Preserve the orchard delivery boundary for later work.');await f.settled();
+ assert.equal(f.requests.length,0);
+ const backfill=await f.call('project_memory_reembed',{limit:2});
+ assert.equal(backfill.details.embedded,2);assert.equal(backfill.details.remaining,0);assert.equal(f.requests.length,1);
+ assert.equal((await f.status()).counts.chunks,2,'backfill preserves existing raw records');
+ const remembered=await f.call('project_memory_remember',{text:'Explicit durable orchard decisions use the existing transaction boundary.',type:'decision'});
+ assert.equal(remembered.details.result.embedded,1);
+ fs.writeFileSync(path.join(f.dir,'design.md'),'# Orchard boundary\n\nThe existing transaction boundary owns delivery retries.\n');
+ assert.equal((await f.call('project_memory_index_path',{path:'design.md'})).details.result.embedded,1);
+ const before=f.requests.length;
+ const search=await f.call('project_memory_search',{query:'Why did we keep the orchard transaction boundary?',scope:'project'});
+ assert.ok(search.details.hits.length>0);assert.ok(f.requests.length>before,'deliberate semantic search remains available');
+ assert.ok(f.receipts.some(receipt=>receipt.status==='completed'&&receipt.usage));
+});
+
+test('disposing a known direct profile during lexical persistence cannot start deferred semantic cleanup',async t=>{
+ const f=adaptiveMemory(t);
+ f.input('Preserve the orchard README spelling correction and its observed direct readback.');
+ f.hooks.get('agent_settled')({},f.ctx); // Native indexOne yields before embedding admission.
+ f.dispose(); // Matches adaptive owner reset during settled/shutdown cleanup.
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.requests.length,0);assert.equal(f.receipts.length,0);
+ assert.equal((await f.status()).counts.chunks,1);assert.equal((await f.status()).counts.embedded,0);
+ await f.hooks.get('session_shutdown')({},f.ctx);
+ assert.equal(f.requests.length,0,'native drain remains lexical after profile disposal');
+ const store=await f.saved();try{assert.ok(store.lexicalSearch('orchard readback').length);assert.equal(store.listRecent(1)[0].session_id,'adaptive-session');}finally{store.close();}
+});
+
+test('a replacement session identity cannot supply admission to an old in-flight memory owner',async t=>{
+ const f=adaptiveMemory(t);
+ f.input('Preserve the old direct orchard spelling correction with its original session provenance.');
+ f.hooks.get('agent_settled')({},f.ctx);
+ f.ctx.sessionManager={getSessionId:()=> 'replacement-session',getSessionFile:()=>path.join(f.dir,'replacement.jsonl')};
+ const replacement=createAdaptiveExecutionController();replacement.begin({task:'Redesign multiple services and their architecture'});
+ const dispose=registerAdaptiveExecution(f.ctx,()=>replacement.profile());t.after(dispose);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.requests.length,0,'new complex admission cannot leak into the previous writer');
+ const store=await f.saved();try{assert.equal(store.listRecent(1)[0].session_id,'adaptive-session');}finally{store.close();}
+ f.hooks.get('session_switch')({},f.ctx);
+ await f.settled();
+ assert.equal(f.requests.length,1,'the actual replacement owner may resume bounded semantic backlog');
+});
+
+test('live escalation during persistence refreshes captured direct admission before optional embedding',async t=>{
+ const f=adaptiveMemory(t);
+ f.input('Preserve the orchard correction after the actual edit encountered an unresolved failure.');
+ f.hooks.get('agent_settled')({},f.ctx);
+ f.execution.observe({ok:false,failureKey:'observed-native-edit-failure'});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.requests.length,1);assert.equal((await f.status()).counts.embedded,1);
+});
+
+test('complex automatic indexing keeps native bounded embedding and backlog recovery',async t=>{
+ const f=adaptiveMemory(t,'Redesign multiple services and their cross-file architecture');
+ assert.equal(f.execution.profile().tier,'complex');
+ for(let i=0;i<12;i++)f.input(`Preserve orchard architecture constraint number ${i} before implementing service boundaries.`);
+ await f.settled();
+ const status=await f.status();
+ assert.equal(status.counts.chunks,12);assert.equal(status.queue,0);
+ assert.equal(status.counts.embedded,8);assert.equal(f.requests.length,1,'the current batch retains the native eight-chunk cap');
+ await f.settled();assert.equal((await f.status()).counts.embedded,12);assert.equal(f.requests.length,2,'a later native bounded batch repairs the deferred four-chunk tail');
+ await f.settled();assert.equal(f.requests.length,2,'compatible vectors are not embedded again');
+});
+
+test('failure escalation resumes deferred indexing and verified simplification defers new semantic work',async t=>{
+ const f=adaptiveMemory(t);
+ f.input('Preserve the orchard typo correction and its existing wording.');await f.settled();assert.equal(f.requests.length,0);
+ f.execution.observe({ok:false,failureKey:'actual-edit-error'});
+ assert.equal(f.execution.profile().tier,'direct');assert.equal(f.execution.profile().failures,1);
+ await f.settled();assert.equal(f.requests.length,1);assert.equal((await f.status()).counts.embedded,1,'unresolved failure can recover existing backlog');
+ f.execution.observe({ok:true,verified:true});
+ f.input('Preserve the second direct orchard wording correction.');await f.settled();
+ assert.equal((await f.status()).counts.chunks,2);assert.equal((await f.status()).counts.embedded,1);assert.equal(f.requests.length,1);
+ f.execution.begin({task:'Redesign multiple services and their cross-file architecture',scope:'subtask'},'subtask:architecture');
+ await f.settled();assert.equal((await f.status()).counts.embedded,2);assert.equal(f.requests.length,2,'an escalated subtask resumes the native bounded backlog');
 });
 
 test('Qwen query instructions are separate from document vectors and empty indexes make no requests', async t => {

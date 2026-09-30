@@ -1,4 +1,4 @@
-import { configureContextLsp } from "../context-lsp.mjs";
+import { configureContextLsp, configureDeferredMutationDrain, flushLensBeforeVerification } from "../context-lsp.mjs";
 import { createRequire as __pilensCreateRequire } from "node:module"; const require = __pilensCreateRequire(import.meta.url);
 // PI_LENS_SEMANTIC_DRY — thin loader; policy in ../semantic-radar/runtime.mjs
 async function __piSemanticDryTurnEnd(cwd, dataDir, modifiedAbsPaths, dbg) {
@@ -93393,13 +93393,13 @@ function __piLensPreserveInlineSvgOnWrite(filePath, dbg2) {
   }
 }
 
-async function runFormatPhase(filePath, getFormatService2, dbg2) {
+async function runFormatPhase(filePath, getFormatService2, dbg2, beforeVerification = false) {
   if (!lensWorkState(filePath, path152.dirname(filePath))) return { formatChanged: false, formattersUsed: [], formatFailures: [], fileContent: void 0 };
-  if (__piLensRecentlyWritten(filePath, dbg2)) {
-    return { filePath, formatters: [], anyChanged: false, allSucceeded: true };
+  if (!beforeVerification && __piLensRecentlyWritten(filePath, dbg2)) {
+    return { formatChanged: false, formattersUsed: [], formatFailures: [], fileContent: void 0 };
   }
   if (__piLensPreserveInlineSvgOnWrite(filePath, dbg2)) {
-    return { filePath, formatters: [], anyChanged: false, allSucceeded: true };
+    return { formatChanged: false, formattersUsed: [], formatFailures: [], fileContent: void 0 };
   }
   let formatChanged = false;
   let formattersUsed = [];
@@ -93793,8 +93793,8 @@ function recordProjectChange(args) {
     onAppendError: (err) => args.dbg(`project change log append failed for ${args.filePath}: ${err}`)
   });
 }
-async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg2, runtime: runtime2, cacheManager, getFormatService: getFormatService2, biomeClient, ruffClient, getAutofixClients, currentSessionId, staleAfterMs = DEFERRED_FORMAT_STALE_AFTER_MS }) {
-  const { claimed, staleClaimed, deferredToOwner, droppedOrphans } = runtime2.claimDeferredMutations(currentSessionId, Date.now(), staleAfterMs, ctxCwd ?? runtime2.projectRoot);
+async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg2, runtime: runtime2, cacheManager, getFormatService: getFormatService2, biomeClient, ruffClient, getAutofixClients, currentSessionId, staleAfterMs = DEFERRED_FORMAT_STALE_AFTER_MS, beforeVerification = false, readbackPath }) {
+  const { claimed, staleClaimed, deferredToOwner, droppedOrphans } = runtime2.claimDeferredMutations(currentSessionId, Date.now(), staleAfterMs, ctxCwd ?? runtime2.projectRoot, readbackPath);
   const records = [...claimed, ...staleClaimed];
   const requeuedKinds = /* @__PURE__ */ new Set();
   const requeue = (pending3, reason) => {
@@ -93827,7 +93827,7 @@ async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg
   };
   const rootActionableAutofixEnabled = !!getFlag("lens-actionable-warning-autofix");
   const actionableWarningsWriterEnabled = !!getFlag("lens-actionable-warnings");
-  const inspectActionableReport = actionableWarningsWriterEnabled && typeof cacheManager.readCache === "function" && (rootActionableAutofixEnabled || getFlagSource !== void 0);
+  const inspectActionableReport = !readbackPath && actionableWarningsWriterEnabled && typeof cacheManager.readCache === "function" && (rootActionableAutofixEnabled || getFlagSource !== void 0);
   if (droppedOrphans.length > 0) {
     dbg2(`agent_end deferred_format: left ${droppedOrphans.length} orphaned file(s) queued due to a mismatched origin (unclaimed >${staleAfterMs}ms, not formatted by this flush): ${droppedOrphans.map((r) => `${r.filePath} origin=${r.originCwd}`).join(", ")}`);
     const firstSeenOrphans = [];
@@ -94055,7 +94055,7 @@ async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg
             record: record2,
             filePath,
             fileStart,
-            result: await runFormatPhase(filePath, getFormatService2, dbg2)
+            result: await runFormatPhase(filePath, getFormatService2, dbg2, beforeVerification)
           };
         } catch (err) {
           work[index] = {
@@ -94329,7 +94329,7 @@ async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg
     const names = summary.changed.map((f) => path153.basename(f)).join(", ");
     notify(`pi-lens deferred format applied to ${summary.changed.length} file(s): ${names}`, "info");
   }
-  return summary;
+  return { ...summary, requeued: requeuedKinds.size };
 }
 
 // dist/clients/runtime-context.js
@@ -95601,6 +95601,10 @@ var RuntimeCoordinator = class {
   get pendingDeferredMutationCount() {
     return this._pendingDeferredMutations.size;
   }
+  peekOwnedDeferredReadbackPaths(currentSessionId, currentOriginCwd) {
+    if (currentSessionId === void 0 || currentOriginCwd === void 0) return [];
+    return [...this._pendingDeferredMutations.values()].filter(record => record.ownerSessionId === currentSessionId && pathsEqual(record.originCwd, currentOriginCwd) && [...record.toolNames].some(name => name === "edit" || name === "write")).map(record => record.filePath);
+  }
   /**
    * Legacy unconditional drain — still exposed for any caller that
    * genuinely wants "everything, no ownership check" (and for tests). New
@@ -95641,12 +95645,13 @@ var RuntimeCoordinator = class {
    * `agent_end`'s latency-log provenance and for the "stale fallback
    * fired"/"orphan mismatch" log lines.
    */
-  claimDeferredFormatFiles(currentSessionId, now, staleAfterMs, currentOriginCwd) {
+  claimDeferredFormatFiles(currentSessionId, now, staleAfterMs, currentOriginCwd, onlyFilePath) {
     const claimed = [];
     const staleClaimed = [];
     const deferredToOwner = [];
     const droppedOrphans = [];
     for (const [key3, record2] of this._pendingDeferredMutations) {
+      if (onlyFilePath && !pathsEqual(record2.filePath, onlyFilePath)) continue;
       const sameSession = record2.ownerSessionId === void 0 || currentSessionId === void 0 || record2.ownerSessionId === currentSessionId;
       if (sameSession) {
         claimed.push(record2);
@@ -95687,8 +95692,8 @@ var RuntimeCoordinator = class {
       });
     }
   }
-  claimDeferredMutations(currentSessionId, now, staleAfterMs, currentOriginCwd) {
-    return this.claimDeferredFormatFiles(currentSessionId, now, staleAfterMs, currentOriginCwd);
+  claimDeferredMutations(currentSessionId, now, staleAfterMs, currentOriginCwd, onlyFilePath) {
+    return this.claimDeferredFormatFiles(currentSessionId, now, staleAfterMs, currentOriginCwd, onlyFilePath);
   }
   requeueDeferredMutations(records) {
     this.requeueDeferredFormatFiles(records);
@@ -98625,13 +98630,13 @@ function getDebounceMs() {
     return DEFAULT_DEBOUNCE_MS;
   return Math.min(raw, MAX_DEBOUNCE_MS);
 }
-async function flushDebouncedToolResults(filePath) {
-  const entries = filePath ? debouncedPipelines.has(filePath) ? [
+async function flushDebouncedToolResults(filePath, sessionId) {
+  const entries = (filePath ? debouncedPipelines.has(filePath) ? [
     [
       filePath,
       debouncedPipelines.get(filePath)
     ]
-  ] : [] : [...debouncedPipelines.entries()];
+  ] : [] : [...debouncedPipelines.entries()]).filter(([, entry]) => sessionId === void 0 || entry.latestDeps.sessionId === sessionId);
   for (const [key3, entry] of entries) {
     clearTimeout(entry.timer);
     debouncedPipelines.delete(key3);
@@ -113337,6 +113342,26 @@ function activateExtension(hostPi) {
       return;
     ownEventCtx = ctx;
     rememberEventCtx(ctx);
+    configureDeferredMutationDrain(ctx, async (checkCtx, readbackPath) => {
+      if (!lensEnabled) return;
+      const cancelled = () => ({block:true,reason:"Verification cancelled because the Pi Lens session changed or its deferred source work was aborted. Rerun the check/review in the current session."});
+      if (checkCtx.signal?.aborted || probeCtxActive(checkCtx) === false) return cancelled();
+      const generation = runtime.sessionGeneration;
+      const sessionId = getStableSessionId(checkCtx);
+      try {
+        setAmbientAbortSignal(checkCtx.signal);
+        await flushDebouncedToolResults(readbackPath, sessionId);
+        if (generation !== runtime.sessionGeneration || getStableSessionId(checkCtx) !== sessionId || checkCtx.signal?.aborted || probeCtxActive(checkCtx) === false) return cancelled();
+        const result = await runDeferredMutationDrain(checkCtx, true, readbackPath);
+        if (generation !== runtime.sessionGeneration || getStableSessionId(checkCtx) !== sessionId || checkCtx.signal?.aborted || probeCtxActive(checkCtx) === false) return cancelled();
+        if (result?.failed?.length || result?.requeued) return {block:true,reason:"Pi Lens deferred formatting/autofix failed before verification. Resolve the configured formatter errors or explicitly disable automatic formatting, then rerun the check/review."};
+      } finally { setAmbientAbortSignal(void 0); }
+    }, (checkCtx) => {
+      const sessionId = getStableSessionId(checkCtx);
+      const queued = runtime.peekOwnedDeferredReadbackPaths(sessionId, checkCtx.cwd);
+      const debounced = [...debouncedPipelines.entries()].filter(([, entry]) => entry.latestDeps.sessionId === sessionId && pathsEqual(entry.latestDeps.ctxCwd, checkCtx.cwd) && ["edit", "write"].includes(entry.latestDeps.event.toolName)).map(([file]) => file);
+      return [...queued, ...debounced];
+    });
   };
   let renderInvalidator;
   const hostPorts = createHostPorts(pi, {
@@ -114175,6 +114200,8 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
     }
   });
   pi.on("tool_call", async (event, ctx) => {
+    const pending = await flushLensBeforeVerification(event, ctx);
+    if (pending) return pending;
     return handleToolCall({
       event,
       ctx,
@@ -114227,7 +114254,8 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
         // with the STABLE session id of the ctx that produced it, so a
         // later agent_end can tell its own queued work apart from a
         // concurrent in-process secondary session's.
-        sessionId: getStableSessionId(ctx)
+        sessionId: getStableSessionId(ctx),
+        ctxCwd: ctx.cwd
       });
       resultProfileOutcome = event.isError === true ? "tool-error" : profiledResult ? "returned" : "unchanged";
       return profiledResult;
@@ -114261,7 +114289,7 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
     });
   };
   pi.on("turn_start", wrapSessionEventHandler("turn_start", onTurnStart, { dbg }));
-  async function runDeferredMutationDrain(ctx) {
+  async function runDeferredMutationDrain(ctx, beforeVerification = false, readbackPath) {
     const currentSessionId = getStableSessionId(ctx);
     const emission = classifyOwnedSessionEmission(ctx, currentSessionId);
     if (emission === "concurrent-secondary") {
@@ -114275,7 +114303,7 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
       });
       return;
     }
-    await handleAgentEnd({
+    const result = await handleAgentEnd({
       ctxCwd: ctx.cwd,
       getFlag: (name, filePath) => getLensFlag(name, filePath),
       getFlagSource: (name, filePath) => getLensFlagSource(name, filePath),
@@ -114288,11 +114316,14 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
         const { biomeClient, ruffClient } = await loadBootstrapClients();
         return { biomeClient, ruffClient };
       },
-      currentSessionId
+      currentSessionId,
+      beforeVerification,
+      readbackPath
     });
     if (ctx.ui?.setStatus && ctx.ui.theme) {
       updateLspStatus(ctx.ui.setStatus, ctx.ui.theme);
     }
+    return result;
   }
   const onAgentEnd = async (_event, ctx) => {
     if (!lensEnabled)

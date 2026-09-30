@@ -73,6 +73,7 @@ import { createHash } from "node:crypto";
 import { PROJECT_MEMORY_RECALL, type ProjectMemoryRecall } from "./lib/project-memory-context.ts";
 import { sensitiveMemoryPath } from "./lib/memory-redaction.ts";
 import { DEFAULT_MEMORY_EMBEDDER } from "./lib/project-memory-embedder.ts";
+import { adaptiveExecutionEnabled, currentExecutionProfile } from "./lib/adaptive-execution.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 
@@ -331,9 +332,24 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
     catch { noteHealth('ml.project-memory.index-error', { count: 1, kind: 'embedding-batch' }); }
   };
 
-  const flush = async (sessionId: string): Promise<void> => {
+  const automaticEmbeddingsAllowed = (ctx: any, previous = true): boolean => {
+    if (!adaptiveExecutionEnabled(env)) return true;
+    const profile = currentExecutionProfile(ctx);
+    // Raw text, retrieval atoms, FTS and provenance are always persisted.
+    // Semantic indexing is optional cleanup for an otherwise completed
+    // direct task. Refresh live evidence after persistence, but an owner's
+    // disposal during asynchronous cleanup cannot turn known direct work
+    // into an unknown permissive admission.
+    return profile ? profile.tier !== 'direct' || profile.failures > 0 : previous;
+  };
+
+  const flush = async (sessionId: string, ctx: any, previousAdmission = true): Promise<void> => {
     const owner = current;
     if (!owner || owner.flushing) return;
+    let embeddingsAllowed = automaticEmbeddingsAllowed(ctx, previousAdmission);
+    const manager = ctx?.sessionManager, cwd = ctx?.cwd;
+    const identity = () => { try { return JSON.stringify([ctx?.cwd, ctx?.sessionManager?.getSessionId?.(), ctx?.sessionManager?.getSessionFile?.()]); } catch { return undefined; } };
+    const sessionIdentity = identity();
     owner.flushing = (async () => {
       const ids: string[] = [];
       // Persist the entire bounded queue before any network work. Embedding
@@ -341,7 +357,10 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       for (let i = 0; i < QUEUE_CAP && queue.length && current === owner && !owner.controller.signal.aborted; i++) {
         ids.push(...await indexOne(owner, queue.shift() as IndexEvent, sessionId));
       }
-      if (current === owner) await embedBatch(owner, ids);
+      if (current === owner && sessionIdentity !== undefined && manager === ctx?.sessionManager && cwd === ctx?.cwd && sessionIdentity === identity()) {
+        embeddingsAllowed = automaticEmbeddingsAllowed(ctx, embeddingsAllowed);
+        if (embeddingsAllowed) await embedBatch(owner, ids);
+      }
       if (dropped) {
         noteHealth("ml.project-memory.queue-dropped", { count: dropped });
         dropped = 0;
@@ -350,7 +369,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
     try { await owner.flushing; }
     finally {
       owner.flushing = undefined;
-      if (current === owner && queue.length) void flush(sessionId);
+      if (current === owner && queue.length && sessionIdentity !== undefined && sessionIdentity === identity()) void flush(sessionId, ctx, embeddingsAllowed);
     }
   };
 
@@ -896,7 +915,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   pi.on("agent_settled", (_event: any, ctx: any) => {
     try {
       if (current?.outcome) { enqueue(current.outcome); current.outcome = undefined; }
-      void flush(sidOf(ctx));
+      void flush(sidOf(ctx), ctx);
     } catch {
       /* best effort */
     }
@@ -916,7 +935,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
         importance: 0.9,
         timestamp: isoNow(),
       });
-      void flush(sidOf(ctx));
+      void flush(sidOf(ctx), ctx);
     } catch {
       /* compaction must not fail */
     }

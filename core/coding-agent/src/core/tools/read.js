@@ -10,6 +10,7 @@ import { readRenderers } from "./renderers/read.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
 import { spillToolOutput } from "./spill-output.js";
+import { documentReadEvidence } from "../guardian/guardian-prose.js";
 const readSchema = Type.Object({
     path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
     offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
@@ -148,6 +149,8 @@ export function createReadToolDefinition(cwd, options) {
                                 outputText = truncation.content;
                             }
                             content = [{ type: "text", text: outputText }];
+                            const documentRead = documentReadEvidence(absolutePath, textContent, startLine === 0 && !truncation.truncated && !truncation.firstLineExceedsLimit && (userLimitedLines === undefined || userLimitedLines >= allLines.length));
+                            if (documentRead) details = { ...details, documentRead };
                         }
                         if (aborted)
                             return;

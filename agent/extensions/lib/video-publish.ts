@@ -102,6 +102,7 @@ export function publishFindings(spec: any, scenes: TimedScene[], seconds: number
 export function validatePublishSpec(spec: any, seconds: number): Issue[] {
   const issues: Issue[] = [];
   const err = (message: string) => issues.push({ severity: "error", message });
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return [{ severity: "error", message: "video.json must be an object" }];
   if (spec.brand !== undefined) {
     if (!spec.brand || typeof spec.brand !== "object") err("brand must be an object");
     else for (const key of ["name", "handle", "website", "tagline", "logo"]) if (spec.brand[key] !== undefined && (typeof spec.brand[key] !== "string" || spec.brand[key].length > 120)) err(`brand.${key} must be a string of at most 120 characters`);

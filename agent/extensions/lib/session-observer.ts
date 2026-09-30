@@ -8,6 +8,7 @@ import { promptRequestFocus } from './prompt-interpretation.ts';
 import { capFreeRequest, isProvenFreeRoute } from '../pi-subagents/src/runs/shared/free-route-evidence.ts';
 import { BOOK_RULES, BOOK_SECTION_BYTES, screenMarginNote, type BookSection } from './observer-book.ts';
 import { OBSERVER_TOOLS, OBSERVER_TOOL_ROUNDS, runObserverTool, type ObserverToolHost } from './observer-journal.ts';
+import { adaptiveExecutionEnabled, type ExecutionProfile } from './adaptive-execution.ts';
 
 export const OBSERVER_MIN_GAP_MS = 30_000;
 export const OBSERVER_MAX_GAP_MS = 120_000;
@@ -524,6 +525,9 @@ interface ObserverPorts {
   dispatch?: typeof observerDispatch;
   /** Cheap semantic admission; the full reviewer remains the fallback. */
   judge?: JudgeFn;
+  /** Live scope profile. Cheap admission runs before evidence or packet work;
+   * callers without a profile retain the existing scheduler behavior. */
+  execution?: () => ExecutionProfile | undefined;
 }
 /** One session owner; callbacks never wake the agent or await its tool hooks.
  * A provider that ignores abort retains its transport slot until it settles. The
@@ -539,6 +543,7 @@ export function createSessionObserver(ports: ObserverPorts) {
   let owner = '', generation = 0, active = false, closed = false, timer: ReturnType<typeof setTimeout> | undefined;
   let flight: { controller: AbortController; cancel: () => void; started: number; route: string } | undefined, lastHash = '', lastNotice = '';
   let lastReviewAt = -Infinity, lastCheckAt = 0, check = 0;
+  let startedAt = now();
   // One routine opportunity may be deferred, with its evidence still unread.
   // The next opportunity runs a full review even if the evidence is unchanged.
   let triageDeferred = false;
@@ -596,6 +601,14 @@ export function createSessionObserver(ports: ObserverPorts) {
   const arm = () => { stopTimer(); if (!active || closed) return; timer = schedule(() => { timer = undefined; arm(); void tick(); }, interval); timer.unref?.(); };
   async function tick() {
     if (!active || closed) return;
+    let execution: ExecutionProfile | undefined;
+    try { execution = adaptiveExecutionEnabled() ? ports.execution?.() : undefined; } catch { /* Missing policy retains the established behavior. */ }
+    const capability = ports.usageOwner === 'session-watchmaker' ? 'watchmaker' : 'observer';
+    if (execution && !execution.features[capability]) return;
+    const scopeGap = execution ? capability === 'watchmaker' ? execution.cadence.watchmakerMs : execution.cadence.observerMs : 0;
+    // The first review waits for useful work to accumulate. Failures shorten
+    // admission to the base tick; routine direct work builds no packets at all.
+    if (scopeGap && now() - (Number.isFinite(lastReviewAt) ? lastReviewAt : startedAt) < (execution?.failures ? OBSERVER_MIN_GAP_MS : scopeGap)) return;
     if (flight) {
       if (flight.controller.signal.aborted) checkIn(`Provider has not acknowledged cancellation; overlapping ${label.toLowerCase()} calls are paused.`);
       else checkIn(`Still reviewing with ${flight.route} · ${Math.floor((now() - flight.started) / 1000)}s elapsed / ${Math.ceil(deadlineMs / 1000)}s allowed; main agent continues.`);
@@ -615,7 +628,7 @@ export function createSessionObserver(ports: ObserverPorts) {
         : `Recent observer responses were unusable; the next review waits up to ${Math.round(hold / 1000)}s unless errors, results, claims or plan changes arrive.`);
       return;
     }
-    if (ports.judge && snapshot.allowTriage && lastReviewed && !triageDeferred
+    if (ports.judge && (!execution || execution.features.jev) && snapshot.allowTriage && lastReviewed && !triageDeferred
       && !failures && !consults && !snapshot.requiresFullReview
       && !snapshot.packet.evidence.some(row => ['tool error', 'guardian intervention'].includes(row.kind))) {
       const controller = new AbortController();
@@ -758,7 +771,7 @@ export function createSessionObserver(ports: ObserverPorts) {
     } catch { if (!controller.signal.aborted && generation === epoch && active && owner === origin) notice('unavailable', `${label} evidence could not be reconciled`); } finally { unschedule(deadline); if (!terminal && !cancelled && !timedOut) thisFlight.cancel(); }
   }
   return {
-    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; triageDeferred = false; lastReviewed = undefined; quiet = failures = consults = 0; topics.clear(); flight?.cancel(); active = false; stopTimer(); },
+    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; startedAt = now(); triageDeferred = false; lastReviewed = undefined; quiet = failures = consults = 0; topics.clear(); flight?.cancel(); active = false; stopTimer(); },
     start() { if (closed || active) return; active = true; lastCheckAt = now(); arm(); },
     stop(reason = 'Current work ended') {
       if (active && flight && !flight.controller.signal.aborted) notice('stopped', `${reason}; cancellation requested`);

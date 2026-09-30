@@ -68,6 +68,10 @@ const isBrowserMutation = (args: HookArgs) =>
  */
 export const HOOK_RULES: readonly HookRule[] = [
   {
+    key: 'media-pipeline-evidence', tools: ['media_pipeline'],
+    line: 'Reuse the stage receipts and completed artifacts. Resolve failed technical QA, then inspect playback for edit intent, motion, sync and audible quality; mastering measurements do not establish artistic approval.',
+  },
+  {
     key: 'host-device-preflight', tools: ['sys_probe'],
     when: args => args.action === 'host' || args.action === 'devices',
     line: 'Preserve network, session ancestors and mounted data. Inspect test entrypoints; prefer isolated bounded experiments and compile-only firmware checks. Device metadata does not verify wiring or authorize writes.',

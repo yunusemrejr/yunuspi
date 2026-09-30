@@ -35,14 +35,14 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop", lingerAfterStop = false } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false } = {}) {
   clearExclusions();
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
   const fakePi = path.join(cwd, "fixture-pi.mjs");
   const hookPath = path.join(base, "runs/shared/subagent-prompt-runtime.ts");
   fs.writeFileSync(fakePi, `#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const { registerSubagentModelRouteOverride } = await import(pathToFileURL(${JSON.stringify(hookPath)}).href);
 const handlers = new Map();
@@ -51,8 +51,17 @@ const candidate = JSON.parse(process.env.PI_SUBAGENT_MODEL_ROUTE_CANDIDATE || "n
 const model = { provider: "openrouter", id: "org/executor-fixture" };
 const payload = { model: model.id, messages: [] };
 const request = handlers.get("before_provider_request")?.({ type: "before_provider_request", payload }, { model }) ?? payload;
-appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider }) + "\\n");
+appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider${captureNative ? ', argv:process.argv.slice(2), phase:"start", pid:process.pid, timestamp:Date.now()' : ''} }) + "\\n");
 if (candidate?.providerRouting?.only?.[0] === "together") { process.stderr.write("429 rate limit"); process.exit(1); }
+${startBarrier ? `// Keep the first admitted wave alive until every native slot has started.
+// This proves capacity despite uneven local import/bootstrap times under CI.
+const barrierDeadline = Date.now() + 30_000;
+while (readFileSync(${JSON.stringify(recordPath)}, "utf8").trim().split("\\n").map(line => JSON.parse(line)).filter(row => row.phase === "start").length < ${startBarrier}) {
+  if (Date.now() >= barrierDeadline) throw new Error("Native scheduler start barrier timed out");
+  await new Promise(resolve => setTimeout(resolve, 10));
+}` : ''}
+${childDelayMs ? `await new Promise(resolve => setTimeout(resolve, ${childDelayMs}));` : ''}
+${captureNative ? `appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({phase:"end",pid:process.pid,timestamp:Date.now()}) + "\\n");` : ''}
 process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", provider: model.provider, model: model.id,
   api: "openai-completions", timestamp: Date.now(), content: [{ type: "text", text: "Child completed" }], stopReason: ${JSON.stringify(stopReason)},
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } }) + "\\n");
@@ -66,15 +75,93 @@ ${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
   const state = { baseCwd: cwd, currentSessionId: null, subagentInProgress: false,
     subagentSpawns: { sessionId: null, count: 0 }, asyncJobs: new Map(), foregroundRuns: new Map(), foregroundControls: new Map(),
     cleanupTimers: new Map(), completionSeen: new Map(), resultFileCoalescer: { schedule: () => false, clear() {} } };
-  const pi = { events: createEventBus(), appendEntry() {}, getActiveTools: () => [], getModel: () => model, getSessionName: () => "Executor fixture" };
-  const executor = createSubagentExecutor({ state, pi, config: {}, asyncByDefault: false,
+  const runtimeModel = { ...model, reasoning }, entries = [];
+  const pi = { events: createEventBus(), appendEntry(type, data) { entries.push({type,data}); }, getActiveTools: () => [], getModel: () => runtimeModel, getSessionName: () => "Executor fixture" };
+  const executor = createSubagentExecutor({ state, pi, config, asyncByDefault: false,
     tempArtifactsDir: path.join(cwd, "artifacts"), getSubagentSessionRoot: () => path.join(cwd, "sessions"),
     expandTilde: value => value, discoverAgents: () => ({ agents: [agent] }) });
   const sessionManager = SessionManager.inMemory(cwd);
-  const ctx = { cwd, hasUI: false, model, sessionManager, modelRegistry: { getAvailable: () => [model] }, getSystemPrompt: () => "", isIdle: () => true };
+  const ctx = { cwd, hasUI: false, model: runtimeModel, sessionManager, modelRegistry: { getAvailable: () => [runtimeModel] }, getSystemPrompt: () => "", isIdle: () => true };
   t.after(() => { for (const timer of state.cleanupTimers.values()) clearTimeout(timer); });
-  return { cwd, agent, executor, ctx, hasLaunched: () => fs.existsSync(recordPath), records: () => fs.readFileSync(recordPath, "utf8").trim().split("\n").map(line => JSON.parse(line)) };
+  return { cwd, agent, executor, ctx, entries, hasLaunched: () => fs.existsSync(recordPath), records: () => fs.readFileSync(recordPath, "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
+
+async function awaitNativeBackground(f, result) {
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  const statusPath=path.join(result.details.asyncDir,'status.json');
+  let status;
+  for(const deadline=Date.now()+60_000;Date.now()<deadline;){
+    status=JSON.parse(fs.readFileSync(statusPath,'utf8'));
+    if(['complete','completed','failed','stopped'].includes(status.state)&&status.processTerminal?.state==='observed'){
+      assert.ok(['complete','completed'].includes(status.state),JSON.stringify(status));
+      return status;
+    }
+    await new Promise(resolve=>setTimeout(resolve,25));
+  }
+  assert.fail(`native background child processes did not finish: ${JSON.stringify(status)}`);
+}
+function launchThinking(row) {
+  const explicit=row.argv.indexOf('--thinking');
+  if(explicit>=0)return row.argv[explicit+1];
+  const modelArg=row.argv[row.argv.indexOf('--model')+1];
+  return /:(off|minimal|low|medium|high|xhigh|max)$/.exec(modelArg ?? '')?.[1];
+}
+
+test('adaptive native foreground reasoning follows authored child scope and preserves route/config pins',{timeout:30_000},async t=>{
+  const f=fixture(t,{reasoning:true,captureNative:true});
+  const briefs=[['Fix a one-line README comment typo','minimal'],['Investigate an intermittent parser failure','low'],['Redesign authentication across multiple services','high']];
+  for(const [task, expected] of briefs){
+    const result=await f.executor.execute('adaptive-reasoning',{agent:'route-fixture',commonTask:'Parent context: redesign authentication across multiple services',task,context:'fresh',async:false,artifacts:false,acceptance:{level:'none',reason:'Read-only launch-contract fixture'}},new AbortController().signal,undefined,f.ctx);
+    assert.notEqual(result.isError,true,JSON.stringify(result));
+    assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),expected);
+  }
+  f.agent.thinking='high';
+  await f.executor.execute('adaptive-pinned-config',{agent:'route-fixture',task:briefs[0][0],context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
+  assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),'high');
+  delete f.agent.thinking;
+  await f.executor.execute('adaptive-pinned-route',{agent:'route-fixture',task:briefs[0][0],model:`${route}:high`,context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
+  assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),'high');
+});
+
+test('adaptive native background arrays apply per-child reasoning and default scheduler width without dropping work',{timeout:75_000},async t=>{
+  const f=fixture(t,{reasoning:true,captureNative:true,childDelayMs:600,startBarrier:2});
+  const result=await f.executor.execute('adaptive-parallel',{tasks:[
+    {agent:'route-fixture',task:'Fix a one-line README comment typo'},
+    {agent:'route-fixture',task:'Investigate an intermittent parser failure'},
+    {agent:'route-fixture',task:'Fix another one-line README comment typo'},
+    {agent:'route-fixture',task:'Fix the last one-line README comment typo'},
+  ],context:'fresh',async:true,artifacts:false,acceptance:{level:'none',reason:'Read-only launch-contract fixture'}},new AbortController().signal,undefined,f.ctx);
+  const status=await awaitNativeBackground(f,result);
+  const records=f.records(),starts=records.filter(row=>row.phase==='start');
+  assert.equal(starts.length,4,'every requested child must execute');
+  assert.deepEqual(starts.map(launchThinking).sort(),['low','minimal','minimal','minimal']);
+  let active=0,peak=0;for(const row of records){active+=row.phase==='start'?1:-1;peak=Math.max(peak,active);}
+  assert.equal(peak,2,'the actual native process scheduler consumes width 2');
+  assert.equal(active,0);
+  assert.equal(status.steps.length,4);
+  assert.ok(f.entries.some(row=>row.type==='adaptive-subagent-dispatch-v1'&&row.data.defaults[0].concurrency===2));
+});
+
+test('adaptive native arrays retain explicit configured parallel capacity',{timeout:75_000},async t=>{
+  const f=fixture(t,{captureNative:true,childDelayMs:600,startBarrier:3,config:{parallel:{concurrency:3}}});
+  const result=await f.executor.execute('adaptive-configured-parallel',{tasks:Array.from({length:4},()=>({agent:'route-fixture',task:'Read a single README line'})),context:'fresh',async:true,artifacts:false,acceptance:{level:'none',reason:'Read-only launch-contract fixture'}},new AbortController().signal,undefined,f.ctx);
+  const status=await awaitNativeBackground(f,result);
+  let active=0,peak=0;for(const row of f.records()){active+=row.phase==='start'?1:-1;peak=Math.max(peak,active);}
+  assert.equal(peak,3);
+  assert.equal(f.records().filter(row=>row.phase==='start').length,4);
+  assert.equal(active,0,'every configured-capacity child reaches its end');
+  assert.equal(status.steps.length,4);
+});
+
+test('adaptive native rollback restores unconfigured child launch defaults',{timeout:15_000},async t=>{
+  const f=fixture(t,{reasoning:true,captureNative:true});
+  process.env.PI_ADAPTIVE_EXECUTION='off';
+  try{
+    const result=await f.executor.execute('adaptive-off',{agent:'route-fixture',task:'Fix a one-line comment typo',context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
+    assert.notEqual(result.isError,true,JSON.stringify(result));
+    assert.equal(launchThinking(f.records().find(row=>row.phase==='start')),undefined);
+  }finally{delete process.env.PI_ADAPTIVE_EXECUTION;}
+});
 
 for (const background of [false, true]) test(`successful ${background ? 'background' : 'foreground'} post-final cleanup is not a process failure`, {timeout:30_000}, async t => {
   const f=fixture(t,{lingerAfterStop:true});

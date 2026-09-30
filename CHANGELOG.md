@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.0 — 2026-09-30
+
+**Execution support now follows the work.** A shared, deterministic policy selects task, subtask and native todo support, reassesses real failures, lowers support after current substantive verification, and bounds automatic helpers, councils, reviews, Observer, Watchmaker, local ranking and JEV. Direct work skips remote prompt interpretation, skill scouts and periodic reviewers. Native child scheduling and reasoning defaults adapt to their own briefs; explicit model, concurrency, thinking and delegation constraints stay authoritative. Completed assurance remains evidence for the current source revision, with no synthetic passes or acceptance.
+
+**Recurring development workflows start with the right capabilities.** Automatically selected recipes cover PHP 8+, Node, browser/vanilla JavaScript, React CDN and Node builds, Go, Rust, Java, Python/Flask, Bash, C/C++, Linux applications, local webapps, algorithms, AI/ML, local/Colab finetuning, UI quality and Git/SSH hosted deployment. Stage receipts reuse existing checks, distinguish prepared artifacts from actual execution, require pixels and interactions for UI claims, and preserve deployment/training gaps. Inferred schemas are released on simpler follow-ups; deliberate discoveries remain available.
+
+**Local media production has an executable reusable pipeline.** `media_pipeline` combines editable score generation, effects, voice-driven music ducking, mixing, clip/scene composition and measured delivery QA. Tracks support bounded looping, pitch-preserving speed and denoise; optional mastering is verified on the delivered audio. Exported subtitles use measured narration timing. Malformed timeline inputs, silent mastering and FFmpeg sidechain starvation cannot produce misleading successful delivery receipts.
+
+**Lifecycle fixes have behavioral regressions.** Native todo subjects now reach task state and policy. Updated scope requirements retire old evidence; delayed writes invalidate other scopes' checks; aborted startup inputs do not become tasks; stale, empty, skipped, signaled or detached test runs cannot simplify policy or certify completion. Review status distinguishes completed reports awaiting assessment from work still running.
+
+**Formatting settles before verification.** Pi Lens drains pending autofix and formatting before native tests and review capture source identity. Failed or interrupted drains refuse verification, and final settlement cannot silently change a revision already accepted by its reviewer.
+
+**Proofreading can finish after an actual readback.** Guardian accepts a complete, current, hash-matched readback for one small prose edit requested as proofreading. Native tool evidence bounds the file, changed text and mutation count. Code, policy, risky or mixed work, opaque commands and explicit requests for behavioral tests retain verification requirements. This does not record a test pass.
+
+**Small sessions preserve memory without waiting for semantic indexing.** Automatic ingestion retains raw text, lexical indexes and provenance for direct work while deferring embedding and backlog recovery. Explicit memory operations, substantial tasks and unresolved failures retain semantic indexing.
+
+See [adaptive execution](docs/ADAPTIVE-EXECUTION.md), [task pipelines](docs/TASK-PIPELINES.md), [video and audio workflows](docs/VIDEO-STUDIO.md) and the measured [verification report](docs/RELEASE-0.17.0-VERIFICATION.md). CI checks the real scheduler's bounded dispatch counts alongside the complete distribution suite.
+
 ## 0.16.3 — 2026-09-29
 
 **Reading a memory no longer prints `chars undefined–undefined`.** The memory read view showed each retrieval unit's character span, and the matched fragment line, from properties the stored records do not have (`charStart`/`charEnd`; the store uses `char_start`/`char_end`). Every read of an atom, and every "Matched fragment" line, rendered the span as `undefined–undefined`, so the evidence trail pointed nowhere. The spans now come from the stored columns.

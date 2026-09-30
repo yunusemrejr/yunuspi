@@ -18,10 +18,29 @@ process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(directory, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
+// These transport/recovery checks intentionally exercise full analysis even
+// for a small synthetic request. Adaptive admission is covered separately.
+const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
+process.env.PI_ADAPTIVE_EXECUTION = 'off';
 const { default: register, lastMicroRequest, settleMicroAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
 const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { runPromptAnalysis } = await import(pathToFileURL(path.join(agent, 'extensions/lib/prompt-analysis-runtime.ts')));
 const tick = () => new Promise(resolve => setImmediate(resolve));
+async function bounded(pending, label) {
+  let timer;
+  try {
+    return await Promise.race([pending, new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Fixture timed out: ${label}`)), 5000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+async function waitFor(ready, label) {
+  const deadline = Date.now() + 5000;
+  while (!ready()) {
+    if (Date.now() >= deadline) throw new Error(`Fixture timed out: ${label}`);
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
 const answer = JSON.stringify({ intent: 'Inspect the synthetic parser', taskLabel: 'Parser review', confidence: .9, explicitConstraints: ['Preserve the API.'] });
 const prompt = 'Inspect the synthetic parser. Preserve the API.';
 let sequence = 0;
@@ -59,7 +78,8 @@ async function fixture(t, { mode = 'registry', thinking, mandatoryReasoning = tr
   clearLlmPreferencesCache();
   let sessionId = `session-${++sequence}`;
   const hooks = new Map(), requests = [], sdkResponses = [], statuses = [], rows = [], events = [];
-  let status;
+  let status, warmups = 0;
+  const lifecycle = new AbortController();
   const complete = async (selected, context, options) => {
     const result = await completeSimple(selected, context, { ...options, apiKey: 'synthetic-key', fetch: async (_url, init) => {
       const wire = JSON.parse(init.body);
@@ -76,16 +96,21 @@ async function fixture(t, { mode = 'registry', thinking, mandatoryReasoning = tr
     ui: { setStatus: (key, value) => { assert.equal(key, 'prompt-analysis'); statuses.push(value); status = value; if (throwingUI) throw new Error('Synthetic unavailable UI'); } } };
   register({ on: (name, handler) => hooks.set(name, handler), registerTool() {}, registerMessageRenderer() {},
     events: { emit: (name, event) => events.push({ name, event }) }, sendMessage: async message => rows.push(message) },
-    { classify: () => undefined, warmup() {}, ...(mode === 'legacy' ? { completePromptAnalysis: complete } : {}) });
+    { classify: () => undefined, warmup() { warmups++; }, ...(mode === 'legacy' ? { completePromptAnalysis: complete } : {}) });
   const emit = (name, event = {}) => hooks.get(name)?.(event, ctx);
   const input = (requestId, signal = new AbortController().signal) => {
-    const event = { source: 'interactive', text: prompt, originalText: prompt, requestId, turnId: `turn-${requestId}`, processId: 'synthetic-process', sessionId, guardianOwnerId: `owner-${sessionId}`, signal };
-    return { event, run: async () => { const result = await emit('input', event); await settleMicroAnalyses(); return result; } };
+    const event = { source: 'interactive', text: prompt, originalText: prompt, requestId, turnId: `turn-${requestId}`, processId: 'synthetic-process', sessionId, guardianOwnerId: `owner-${sessionId}`, signal: AbortSignal.any([lifecycle.signal, signal]) };
+    return { event, run: async () => { const result = await emit('input', event); await bounded(settleMicroAnalyses(), `analysis ${requestId}`); return result; } };
   };
   const context = event => emit('context', { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], requestMessages: [{ requestId: event.requestId, turnId: event.turnId, messageIndex: 0 }] });
+  t.after(async () => {
+    lifecycle.abort(new Error('Synthetic fixture cleanup'));
+    await emit('session_shutdown');
+    await bounded(settleMicroAnalyses(), 'analysis cleanup');
+  });
   await emit('session_start', { reason: 'new' });
-  t.after(() => emit('session_shutdown'));
   return { requests, sdkResponses, statuses, rows, events, emit, input, context, status: () => status,
+    warmups: () => warmups,
     analysis: () => lastMicroRequest(`owner-${sessionId}`)?.promptAnalysis,
     changeSession: () => { sessionId = `session-${++sequence}`; } };
 }
@@ -113,6 +138,23 @@ test('reasoning-only length responses receive one compact retry through registry
     assert.deepEqual(f.rows[0].details.attempts.map(row => row.outcome), ['truncated', 'complete']);
     assert.ok(rewritten.messages.some(row => row.customType === 'prompt-analysis-context'));
   }
+});
+
+test('adaptive direct recovery fixture needs no inference, warmup, progress or advisory context', async t => {
+  process.env.PI_ADAPTIVE_EXECUTION = 'on';
+  try {
+    const f = await fixture(t);
+    const task = f.input('adaptive-direct');
+    await task.run();
+    assert.equal(f.analysis()?.source, 'fallback');
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.sdkResponses.length, 0);
+    assert.equal(f.warmups(), 0);
+    assert.ok(f.statuses.every(value => value === undefined), 'no analysis progress row is started');
+    const rewritten = await f.context(task.event);
+    assert.ok(!rewritten?.messages?.some(row => row.customType === 'prompt-analysis-context'), 'the literal request needs no auxiliary context');
+    assert.equal(f.rows[0]?.details.attempts.length, 0, 'bookkeeping cannot invent a model attempt');
+  } finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 
 test('explicit thinking and provider output ceilings survive compact recovery', async t => {
@@ -234,7 +276,7 @@ test('cancelled registry and legacy streams clear progress without publishing fa
     const controller = new AbortController();
     const task = f.input(`${mode}-cancel`, controller.signal);
     const pending = task.run();
-    await began;
+    await bounded(began, `${mode} stream startup`);
     assert.match(f.status(), /Intent analysis/);
     assert.match(f.status(), /0s \/ 240s allowed/);
     controller.abort();
@@ -257,7 +299,7 @@ test('legacy cancellation while resolving authentication never dispatches a mode
   const f = await fixture(t, { mode: 'legacy', auth: () => { started(); return new Promise(resolve => { finishAuth = resolve; }); } });
   const controller = new AbortController(), task = f.input('auth-cancel', controller.signal);
   const pending = task.run();
-  await began;
+  await bounded(began, 'authentication startup');
   controller.abort();
   await pending;
   finishAuth({ ok: true, apiKey: 'synthetic-late-key' });
@@ -271,14 +313,14 @@ test('session changes and shutdown retire progress immediately and late old stre
   const pendingWires = [];
   const f = await fixture(t, { fetchPlan: () => new Promise(resolve => pendingWires.push(resolve)) });
   const oldTask = f.input('old-session'), oldRun = oldTask.run();
-  while (!pendingWires.length) await tick();
+  await waitFor(() => pendingWires.length > 0, 'old session transport startup');
   assert.match(f.status(), /Intent analysis/);
   f.changeSession();
   await f.emit('session_start', { reason: 'new' });
   assert.equal(f.status(), undefined, 'session switch immediately clears the previous session row');
   await oldRun;
   const newTask = f.input('new-session'), newRun = newTask.run();
-  while (pendingWires.length < 2) await tick();
+  await waitFor(() => pendingWires.length >= 2, 'new session transport startup');
   const newStatus = f.status();
   pendingWires[0](response());
   await tick();
@@ -297,7 +339,7 @@ test('committed tree navigation retires a pending progress row without publishin
   let finish;
   const f = await fixture(t, { fetchPlan: () => new Promise(resolve => { finish = resolve; }) });
   const task = f.input('tree-old'), running = task.run();
-  while (!finish) await tick();
+  await waitFor(() => !!finish, 'tree navigation transport startup');
   assert.match(f.status(), /Intent analysis/);
   await f.emit('session_tree');
   assert.equal(f.status(), undefined);
@@ -317,4 +359,8 @@ test('throwing progress UI cannot discard a successful advisory', async t => {
   assert.ok(f.statuses.filter(value => typeof value === 'string').length >= 2, 'both immediate and periodic status writes tolerate unavailable UI');
 });
 
-test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+test.after(() => {
+  if (priorAdaptive === undefined) delete process.env.PI_ADAPTIVE_EXECUTION;
+  else process.env.PI_ADAPTIVE_EXECUTION = priorAdaptive;
+  fs.rmSync(directory, { recursive: true, force: true });
+});

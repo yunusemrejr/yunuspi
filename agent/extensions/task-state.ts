@@ -106,9 +106,13 @@ function todoTasksFromResult(event: { details?: unknown; output?: unknown }): Ar
 	const details = (event.details ?? event.output) as { tasks?: unknown } | undefined;
 	if (!details || !Array.isArray(details.tasks)) return [];
 	return details.tasks
-		.filter((task): task is { id: number; title?: string; status?: string } =>
+		.filter((task): task is { id: number; subject?: string; title?: string; status?: string } =>
 			!!task && typeof task === "object" && Number.isSafeInteger((task as { id: number }).id))
-		.map((task) => ({ id: task.id, title: typeof task.title === "string" ? task.title : undefined, status: typeof task.status === "string" ? task.status : undefined }));
+		.map((task) => ({
+			id: task.id,
+			title: typeof task.subject === "string" ? task.subject : typeof task.title === "string" ? task.title : undefined,
+			status: typeof task.status === "string" ? task.status : undefined,
+		}));
 }
 
 function excerptOf(event: { content?: unknown }, max = 600): string {

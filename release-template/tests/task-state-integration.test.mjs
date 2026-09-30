@@ -412,3 +412,28 @@ test('a background suite records its outcome only when the terminal receipt arri
   await h.emit('message_end', { message: { role: 'custom', customType: 'background-task-notification', details: { id: 'bg_3', command: 'npm install', status: 'completed', exitCode: 0 } } });
   assert.doesNotMatch(await run({ action: 'evidence' }), /npm install/, 'an unrelated job is not a check');
 });
+
+test('native todo subjects retain their task names in the shared graph and read-only tool', async () => {
+  clearTaskStateServices();
+  const h = taskHarness('sid-native-todo');
+  await h.emit('session_start');
+  await h.emit('input', { source: 'interactive', text: 'Implement search keyboard navigation and verify it.' });
+  await h.emit('tool_result', {
+    toolName: 'todo', toolCallId: 'native-todo', input: { action: 'list' }, isError: false,
+    content: [{ type: 'text', text: '[completed] #1 Implement search keyboard navigation' }],
+    details: { action: 'list', params: { action: 'list' }, nextId: 4, tasks: [
+      { id: 1, subject: 'Implement search keyboard navigation', status: 'completed' },
+      { id: 2, subject: 'Verify search keyboard navigation', status: 'in_progress' },
+      { id: 3, title: 'Legacy task title', status: 'pending' },
+    ] },
+  });
+  const service = currentTaskStateService();
+  const tasks = service.query(entity => entity.kind === 'work');
+  assert.equal(tasks.find(entity => entity.refs?.todoId === 1).title, 'Implement search keyboard navigation');
+  assert.equal(tasks.find(entity => entity.refs?.todoId === 2).title, 'Verify search keyboard navigation');
+  assert.equal(tasks.find(entity => entity.refs?.todoId === 3).title, 'Legacy task title');
+  assert.equal(tasks.find(entity => entity.refs?.todoId === 1).status, 'implemented', 'todo completion does not claim independent verification');
+  const status = (await h.tools.get('task_state').execute('native-status', { action: 'status' }, undefined, undefined, h.ctx)).details.text;
+  assert.match(status, /Implement search keyboard navigation/);
+  assert.match(status, /Verify search keyboard navigation/);
+});

@@ -334,6 +334,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         if (ticket === epoch) {
           facts = { unavailable: true, tests: [], manifests: [], scripts: [], truncated: true };
           options.onFacts?.({ ...facts, root: state.root || ctx.cwd, reviewSources: {} }, observeChanges, token);
+          try { pi.events?.emit?.('project-source-observed', { ctx, revision: workspaceRevision.current, complete: false, unavailable: true }); } catch { /* observation cannot prevent tools */ }
         }
         return;
       }
@@ -365,6 +366,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       state.tree = treeHash(identities);
       state.treeComplete = next.truncated !== true;
       facts = next;
+      // Publish the existing scan after both owners have observed it. Runtime
+      // workflow indexing consumes this receipt instead of scanning again or
+      // assuming an opaque shell command left its source unchanged.
+      try { pi.events?.emit?.('project-source-observed', { ctx, revision: workspaceRevision.current, tree: state.tree, complete: state.treeComplete, unavailable: false }); } catch { /* observation cannot prevent tools */ }
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };
@@ -597,8 +602,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           receipt(start, event.toolCallId, handle ? 'running' : 'unknown', handle);
         } else {
           const noTests = /\bno tests? (?:found|ran|collected|to run)|\btests? (?:are )?skipped\b|\b(?:tests?|pass|passed|passing)\s*[:=]?\s*0\b|\b(?:Ran 0 tests?|0 passing)\b/i.test(text);
-          const exit = event.details?.exitCode ?? event.details?.exit_code;
-          const failed = event.isError || typeof exit === 'number' && exit !== 0 || !!event.details?.signal;
+          const exit = event.details?.execution?.exitCode ?? event.details?.exitCode ?? event.details?.exit_code;
+          const failed = event.isError || typeof exit === 'number' && exit !== 0 || !!(event.details?.execution?.signal ?? event.details?.signal);
           receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed');
         }
       }

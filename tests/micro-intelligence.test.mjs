@@ -404,13 +404,14 @@ async function promptContextFixture(t, sendMessage) {
     models: { advisor: { provider: 'micro-fixture', model: 'advisor' } },
     preferences: { prompt_analysis: { models: ['advisor'] } } }));
   const { clearLlmPreferencesCache } = await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
-  const { default: register } = await load('extensions/micro-intelligence.ts');
+  const { default: register, settleMicroAnalyses } = await load('extensions/micro-intelligence.ts');
   clearLlmPreferencesCache();
   const model = { provider: 'micro-fixture', id: 'advisor', api: 'openai-completions', baseUrl: 'https://synthetic.invalid/v1',
     contextWindow: 65536, maxTokens: 4096, reasoning: false, input: ['text'], cost: { input: .1, output: .1, cacheRead: 0, cacheWrite: 0 } };
   let sessionId = 'micro-session-1';
+  const lifecycle = new AbortController();
   const handlers = new Map();
-  const ctx = { cwd: directory, sessionManager: { getSessionId: () => sessionId, getBranch: () => [] },
+  const ctx = { cwd: directory, signal: lifecycle.signal, sessionManager: { getSessionId: () => sessionId, getBranch: () => [] },
     modelRegistry: { getAvailable: () => [model], find: () => model, getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'synthetic-key' }) },
     ui: { setStatus() {} } };
   register({ on: (name, handler) => handlers.set(name, handler), registerTool() {}, registerMessageRenderer() {},
@@ -418,14 +419,31 @@ async function promptContextFixture(t, sendMessage) {
       stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ intent: 'Inspect the parser', taskLabel: 'Parser review', confidence: .9, subtasks: ['Verify the parser'] }) }],
     }) });
   const emit = (name, event = {}) => handlers.get(name)?.(event, ctx);
-  const request = { source: 'interactive', originalText: 'Inspect the parser and verify its behavior.', requestId: 'micro-request-1', turnId: 'micro-turn-1',
-    processId: 'micro-process', sessionId, guardianOwnerId: 'micro-owner-1', signal: new AbortController().signal };
+  // Display retry and stale-capsule tests need genuine remote advisory context;
+  // keep adaptive routing active and use a proportionately complex request.
+  const request = { source: 'interactive', originalText: 'Investigate cross-file race conditions and compare parser architecture alternatives.', requestId: 'micro-request-1', turnId: 'micro-turn-1',
+    processId: 'micro-process', sessionId, guardianOwnerId: 'micro-owner-1', signal: lifecycle.signal };
+  t.after(async () => {
+    lifecycle.abort(new Error('Synthetic fixture cleanup'));
+    await emit('session_shutdown');
+    await boundedContextWait(settleMicroAnalyses(), 'analysis cleanup');
+    for (const key of keys) if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   await emit('session_start', { reason: 'new' });
   await emit('input', request);
-  t.after(() => { emit('session_shutdown'); for (const key of keys) if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; fs.rmSync(directory, { recursive: true, force: true }); });
   const messages = [{ role: 'user', content: [{ type: 'text', text: request.originalText }] }];
-  return { context: (input = messages) => emit('context', { messages: input, requestMessages: [{ requestId: request.requestId, turnId: request.turnId, messageIndex: 0 }] }),
+  return { context: (input = messages) => boundedContextWait(emit('context', { messages: input, requestMessages: [{ requestId: request.requestId, turnId: request.turnId, messageIndex: 0 }] }), 'context result'),
     switchSession: () => { sessionId = 'micro-session-2'; emit('session_tree'); } };
+}
+
+async function boundedContextWait(pending, label) {
+  let timer;
+  try {
+    return await Promise.race([pending, new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Fixture timed out: ${label}`)), 5000);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 test('failed prompt-analysis display can retry without duplicating the context capsule', async t => {
@@ -443,8 +461,12 @@ test('failed prompt-analysis display can retry without duplicating the context c
 test('session switch during prompt-analysis display cannot return stale context advice', async t => {
   let release;
   const f = await promptContextFixture(t, () => new Promise(resolve => { release = resolve; }));
+  t.after(() => release?.());
   const pending = f.context();
-  while (!release) await Promise.resolve();
+  for (const deadline = Date.now() + 5000; !release;) {
+    if (Date.now() >= deadline) throw new Error('Fixture timed out: advisory display startup');
+    await new Promise(resolve => setImmediate(resolve));
+  }
   f.switchSession();
   release();
   assert.equal(await pending, undefined, 'the old session must not receive a capsule after the display await');

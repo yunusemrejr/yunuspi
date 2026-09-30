@@ -2,6 +2,7 @@ import type { AgentTool } from "@yunuspi/agent-core";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { type EditRenderState } from "./renderers/edit.ts";
+import type { DocumentMutationEvidence } from "../guardian/guardian-prose.js";
 declare const editSchema: Type.TObject<{
     expectedHash: Type.TOptional<Type.TString>;
     path: Type.TString;
@@ -16,6 +17,7 @@ export declare const editToolSystemPromptContribution: {
 };
 export type EditToolInput = Static<typeof editSchema>;
 export interface EditToolDetails {
+    documentMutation?: DocumentMutationEvidence;
     optimisticConcurrency: { before: string; after: string };
     /** Display-oriented diff of the changes made */
     diff: string;

@@ -44,8 +44,9 @@ import {
 	fileCheckpoints,
 	fileCheckpointText,
 } from "./lib/checkpoint-files.ts";
-import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/project-tests.ts";
+import { createProjectTestLifecycle, createWorkspaceRevision, projectCheckCommand, checkInvocation } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
+import { flushLensBeforeVerification } from "./pi-lens/context-lsp.mjs";
 import { askJev } from "./lib/jev-client.ts";
 import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
@@ -735,6 +736,14 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		quality.message(event);
 	});
 	pi.on("tool_call", async (event, ctx) => {
+		// Source writers settle before checks capture their tree/revision and
+		// before reviewers inspect or accept the completed source. Owned bounded
+		// prose readbacks also settle their target before native hash evidence.
+		const candidate = ["bash", "bg_run"].includes(event.toolName)
+			? projectCheckCommand(checkInvocation(event.input?.command)?.body ?? event.input?.command, ctx.cwd, true) : null;
+		const declared = Boolean(candidate && projectTests.snapshot().assessment?.checks.some(check => check.key === candidate.key));
+		const deferred = await flushLensBeforeVerification(event, ctx, declared);
+		if (deferred) return deferred;
 		const gate = gateCompletion(event, ctx);
 		if (gate) return gate;
 		if (

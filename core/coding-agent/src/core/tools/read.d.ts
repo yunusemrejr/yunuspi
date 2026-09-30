@@ -2,6 +2,7 @@ import type { AgentTool } from "@yunuspi/agent-core";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { type TruncationResult } from "./truncate.ts";
+import type { DocumentReadEvidence } from "../guardian/guardian-prose.js";
 declare const readSchema: Type.TObject<{
     path: Type.TString;
     offset: Type.TOptional<Type.TNumber>;
@@ -14,6 +15,7 @@ export declare const readToolSystemPromptContribution: {
 export type ReadToolInput = Static<typeof readSchema>;
 export interface ReadToolDetails {
     truncation?: TruncationResult;
+    documentRead?: DocumentReadEvidence;
 }
 /**
  * Pluggable operations for the read tool.

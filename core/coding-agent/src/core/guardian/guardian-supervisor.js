@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createInterventionSession } from "../intervention-session.js";
 import { claimsCompletion, fingerprintFailureResult, fingerprintToolCall, hasExplicitRetryDirective, isMutationCall, isVerificationCall, makeRepeatedFailureFeatures, safeToolShape } from "./guardian-features.js";
 import { getGuardianKernelRuntime } from "./guardian-kernels.js";
+import { directProseRequest, prosePath, proseToolAllowed } from "./guardian-prose.js";
 
 export const GUARDIAN_REQUEST_META = Symbol.for("yunuspi.guardian.request-meta.v1");
 const MAX_TASKS = 64;
@@ -354,6 +355,7 @@ export class GuardianSupervisor {
 			const rawPrompt = originalText.length <= MAX_RAW_PROMPT ? originalText : undefined;
 			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), consecutiveFailures: 0, burstErrors: [], burstPrints: [], mutationVersion: 0, verifiedVersion: 0, verificationEpoch: 0, pendingChecks: new Map(), completionChecked: false };
 			task.retryDirective = hasExplicitRetryDirective(originalText);
+			task.proseReadback = { eligible: directProseRequest(originalText), bytes: 0, mutations: 0 };
 			this._tasks.set(requestId, task);
 			while (this._tasks.size > MAX_TASKS) {
 				const removedId = [...this._tasks.keys()].find((id) => id !== this._activeTaskId && id !== this._latestAcceptedTaskId && id !== requestId);
@@ -488,11 +490,13 @@ export class GuardianSupervisor {
 			task.toolCount++;
 			const verification = isVerificationCall(toolName, event.args);
 			if (verification) { task.verifiedVersion = -1; task.verificationEpoch++; }
+			if (verification || !proseToolAllowed(toolName, event.args)) task.proseReadback.eligible = false;
 			const rawPath = typeof event.args?.path === "string" && event.args.path.length <= 1024 ? event.args.path : undefined;
 			if (rawPath) this._noteTouchedPath(task, toolName, rawPath);
 			const candidatePath = (toolName === "write" || toolName === "edit") && rawPath ? rawPath : undefined;
 			const readKey = toolName === "read" && rawPath ? `${rawPath}|${Number(event.args?.offset) || 0}|${Number(event.args?.limit) || 0}` : undefined;
 			this._inFlight.set(event.toolCallId ?? "active", { toolName, fingerprint, shape, taskId: task.requestId, responseEpoch: task.responseEpoch, at: this._clock(), candidatePath, rawPath, readKey,
+				documentPath: rawPath ? canonicalPathForEvidence(this.cwd, rawPath) : undefined, precedingRead: task.proseReadback.lastRead,
 				mutation: isMutationCall(toolName, event.args), verification, verificationEpoch: task.verificationEpoch,
 				verificationVersion: task.mutationVersion, verificationEligible: ![...this._inFlight.values()].some(call => call.taskId === task.requestId && call.mutation) });
 			while (this._inFlight.size > 64) this._inFlight.delete(this._inFlight.keys().next().value);
@@ -642,6 +646,7 @@ export class GuardianSupervisor {
 	 * evidence; nothing here stores file contents. */
 	async _trackWorkingPattern(task, call, event, errorHash) {
 		if (!this._enabled) return;
+		if (event.isError) task.proseReadback.eligible = false;
 		// A failed check is evidence against completion, not verification of it.
 		if (call.verification && event.isError === false) {
 			const details = event.result?.details;
@@ -675,11 +680,35 @@ export class GuardianSupervisor {
 		}
 		if (call.mutation && (!event.isError || event.result?.details?.fileMutation)) {
 			task.mutationVersion++; task.completionChecked = false; this._stats.mutations++;
+			const prose = task.proseReadback, document = event.result?.details?.documentMutation;
+			prose.current = undefined;
+			if (prose.eligible) {
+				const preceding = call.precedingRead;
+				const rewriteBytes = document?.rewrite ? preceding?.bytes ?? 1025 : 0;
+				const valid = !event.isError && (call.toolName === "edit" || call.toolName === "write")
+					&& document?.path === call.documentPath && prosePath(this.cwd, call.documentPath ?? "")
+					&& document.proseOnly === true && /^[a-f0-9]{64}$/.test(document.hash ?? "")
+					&& Number.isInteger(document.changedBytes) && document.changedBytes > 0
+					&& (!document.rewrite || preceding?.path === call.documentPath && preceding.plain && preceding.version === call.verificationVersion && call.verificationEligible)
+					&& (!prose.path || prose.path === call.documentPath)
+					&& ++prose.mutations <= 4 && (prose.bytes += document.changedBytes + rewriteBytes) <= 1024;
+				if (valid) { prose.path = call.documentPath; prose.hash = document.hash; }
+				else prose.eligible = false;
+			}
+			prose.lastRead = undefined;
 			// File contents may have changed: earlier reads are no longer repeats.
 			task.reads.clear();
 			if (call.rawPath) task.editFailures.delete(call.rawPath);
 		}
 		if (call.toolName === "read" && !event.isError && call.rawPath) {
+			const prose = task.proseReadback, document = event.result?.details?.documentRead;
+			if (prose.path === call.documentPath) prose.current = undefined;
+			const stable = call.verificationEligible && call.verificationVersion === task.mutationVersion
+				&& ![...this._inFlight.values()].some(active => active.taskId === task.requestId && active.mutation);
+			if (prose.eligible && stable && document?.path === call.documentPath && document.complete === true && /^[a-f0-9]{64}$/.test(document.hash ?? "") && document.bytes <= 16384) {
+				prose.lastRead = { ...document, version: task.mutationVersion };
+				if (prose.path === call.documentPath && prose.hash === document.hash) prose.current = task.mutationVersion;
+			}
 			task.editFailures.delete(call.rawPath);
 			if (call.readKey) {
 				const seen = (task.reads.get(call.readKey) ?? 0) + 1;
@@ -733,6 +762,10 @@ export class GuardianSupervisor {
 		const parts = Array.isArray(message.content) ? message.content : [];
 		if (parts.some((part) => part?.type === "toolCall")) return;
 		if (task.verifiedVersion === task.mutationVersion) return;
+		// A current native read of a small proofreading edit proves its delivery.
+		// It does not increment verification counters or certify behaviour/tests.
+		if (task.proseReadback.eligible && task.proseReadback.current === task.mutationVersion
+			&& ![...this._inFlight.values()].some(active => active.taskId === task.requestId && active.mutation)) return;
 		const text = parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
 		if (!claimsCompletion(text)) return;
 		task.completionChecked = true;

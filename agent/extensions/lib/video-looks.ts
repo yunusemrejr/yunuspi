@@ -173,7 +173,7 @@ export function lintDesign(spec: any): LintIssue[] {
   if (back && back.s < 0.04 && (back.l < 0.03 || back.l > 0.97)) warn("pure-neutral", "The background is pure black or white; give the neutral a deliberate hue bias and say why.");
   const checks: Array<[string, unknown, unknown, number]> = [["ink on background", theme.ink, theme.background, 7], ["muted text on background", theme.muted, theme.background, 4.5], ["accent on background", theme.accent, theme.background, 3]];
   for (const [label, a, b, min] of checks) { const ratio = contrast(a, b); if (ratio !== null && ratio < min) warn("contrast", `Contrast of ${label} is ${ratio.toFixed(1)}:1; needs at least ${min}:1 to survive phones and compression.`); }
-  const scenes: any[] = Array.isArray(spec?.scenes) ? spec.scenes : [];
+  const scenes: any[] = Array.isArray(spec?.scenes) ? spec.scenes.filter((scene: any) => scene && typeof scene === "object" && !Array.isArray(scene)) : [];
   const left: string[] = [];
   const scan = (value: unknown) => { if (typeof value === "string") { if (PLACEHOLDERS.some((p) => p.test(value.trim()))) left.push(value.trim().slice(0, 40)); } else if (Array.isArray(value)) value.forEach(scan); else if (value && typeof value === "object") Object.values(value).forEach(scan); };
   scan(spec?.title); scenes.forEach((scene) => { scan(scene.narration); scan(scene.props); });

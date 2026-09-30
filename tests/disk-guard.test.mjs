@@ -76,10 +76,13 @@ test('core bash reports a disk guard stop',onPosix,withEnv({PI_MAX_FILE_GB:'0',P
  fs.rmSync(path.join(scratch,'runaway.bin'),{force:true});
 }));
 
-test('managed bash caps single files and stops a runaway writer',onPosix,withEnv({PI_MAX_FILE_GB:String(1/1024),PI_DISK_BUDGET_GB:String(16/1024)},async()=>{
+test('managed bash caps single files and stops a runaway writer',onPosix,withEnv({PI_MAX_FILE_GB:String(1/1024),PI_DISK_BUDGET_GB:'0'},async()=>{
+ // Isolate the file cap from the filesystem-growth guard: other concurrent
+ // suite processes share this filesystem and may exceed the tiny test budget.
  const capped=await runManagedCommand(`ulimit -f; head -c ${4*MiB} /dev/zero > m-capped.bin; echo exit=$?`,scratch,30,undefined,Infinity);
  assert.match(capped.output,/^1024\n[\s\S]*exit=153/);
  process.env.PI_MAX_FILE_GB='0';
+ process.env.PI_DISK_BUDGET_GB=String(16/1024);
  const started=Date.now();
  await assert.rejects(runManagedCommand(`head -c ${64*MiB} /dev/zero > m-runaway.bin; sleep 20`,scratch,30,undefined,Infinity),/^Error: disk-guard:consumed/);
  assert.ok(Date.now()-started<10000);

@@ -16,6 +16,7 @@ const economy = await mod('runs/shared/model-economy.ts');
 const { selectAssistanceTeam } = await mod('runs/shared/assistance-plan.ts');
 const { toModelInfo } = await mod('shared/model-info.ts');
 const { resetSharedControl } = await import(pathToFileURL(path.join(agent, 'extensions/lib/intervention-shared.ts')));
+const {classifyExecution,createAdaptiveExecutionController,registerAdaptiveExecution}=await import(pathToFileURL(path.join(agent,'extensions/lib/adaptive-execution.ts')));
 const { parseFrontmatter, parseFrontmatterList } = await mod('agents/frontmatter.ts');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-discovery-'));
 const keys = ['PI_CODING_AGENT_DIR', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_LLM_PREFERENCES_FILE', 'PI_AUTONOMOUS_FREE_ASSIST', 'PI_SUBAGENT_CHILD', 'PI_SUBAGENT_CHILD_AGENT', 'PI_OFFLINE'];
@@ -46,9 +47,33 @@ function fixture(options = {}) {
   return { calls, entries, ctx, runner: globalThis[SKILL_DISCOVERY_RUNNER], stale: () => { current = false; } };
 }
 
+test('adaptive direct skill discovery performs no remote judge, launch, budget claim or lifecycle work',async()=>{
+  let judges=0;
+  const f=fixture({judge:async()=>{judges++;return {ok:false,skipped:'unavailable'};}});
+  const request={task:'Correct teh to the in README.md and stop',brief:'Installed skills and observed tools',candidates:[{name:'coding-practices',description:'Maintain code'}]};
+  assert.equal(await f.runner(request,f.ctx),undefined);
+  assert.equal(judges,0);assert.equal(f.calls.length,0);assert.equal(f.entries.length,0);
+  const controller=createAdaptiveExecutionController();controller.begin({task:request.task});
+  const dispose=registerAdaptiveExecution(f.ctx,()=>controller.profile());
+  try{
+    assert.equal(await f.runner({...request,task:'Investigate cross-file compatibility'},f.ctx),undefined,'the current todo owns complexity');
+    controller.observe({ok:false,failureKey:'typo-check'});controller.observe({ok:false,failureKey:'typo-check'});
+    await f.runner(request,f.ctx);
+    assert.equal(f.calls.length,1,'real unresolved failures admit the existing bounded scout');
+    assert.equal(judges,1);
+  }finally{dispose();}
+});
+
+test('adaptive skill scout preserves inherited delegation constraints and rollback',async()=>{
+  const blocked=fixture();const dispose=registerAdaptiveExecution(blocked.ctx,()=>classifyExecution({task:'Investigate cross-file compatibility',noDelegation:true}));
+  try{assert.equal(await blocked.runner({task:'Investigate the error',brief:'Evidence'},blocked.ctx),undefined);assert.equal(blocked.calls.length,0);}finally{dispose();}
+  const f=fixture();process.env.PI_ADAPTIVE_EXECUTION='off';
+  try{assert.equal(await f.runner({task:'Correct teh to the in README.md and stop',brief:'Evidence'},f.ctx),'{"skills":[]}');assert.equal(f.calls.length,1);}finally{delete process.env.PI_ADAPTIVE_EXECUTION;}
+});
+
 test('typed skill selection avoids a full child and cannot invent catalog identifiers', async () => {
   const {microMetrics,resetMicroMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/micro-intelligence/metrics.ts')));
-  const request={brief:'Review database query plans using the supplied sql skill.',task:'Review database query plans',candidates:[{name:'sql-query-engineering',description:'Database query execution plans'}]};
+  const request={brief:'Investigate database query plans using the supplied sql skill.',task:'Investigate database query plans',candidates:[{name:'sql-query-engineering',description:'Database query execution plans'}]};
   const judged=(name,exists=.95)=>({ok:true,answers:{skill:{type:'choice',choice:name,probabilities:{[name]:.9}},exists:{type:'noul',noul:exists}},usage:{model:'mock',inputTokens:20,costUsd:0,ms:1,cached:false}});
   resetMicroMetrics();
   const f=fixture({judge:async()=>judged('sql-query-engineering')});
@@ -69,8 +94,8 @@ test('a large skill catalog is shortlisted to fit the Jev input budget instead o
   const { JEV_MAX_INPUT_CHARS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/jev-client.ts')));
   const catalog = Array.from({ length: 240 }, (_, i) => ({ name: `domain-skill-${i}`, file: `/skills/domain-skill-${i}/SKILL.md`, description: `Guidance for specialised area number ${i} covering frameworks, tooling and review workflow details`.padEnd(150, '.') }));
   catalog.push({ name: 'sql-query-engineering', file: '/skills/sql/SKILL.md', description: 'Database query execution plans, indexes and slow postgres statements' });
-  const built = buildSkillDiscoveryRequest(catalog, { prompt: 'Speed up slow postgres query execution plans', files: ['db/queries.sql'], tools: ['read'] });
-  const request = { brief: built.brief, task: 'Speed up slow postgres query execution plans', candidates: built.catalog.map(skill => ({ name: skill.name, description: skill.description.slice(0, 160) })) };
+  const built = buildSkillDiscoveryRequest(catalog, { prompt: 'Investigate slow postgres query execution plans', files: ['db/queries.sql'], tools: ['read'] });
+  const request = { brief: built.brief, task: 'Investigate slow postgres query execution plans', candidates: built.catalog.map(skill => ({ name: skill.name, description: skill.description.slice(0, 160) })) };
   const payloads = [];
   const answer = exists => async (_site, state, questions) => { payloads.push(JSON.stringify([state, questions])); return { ok: true, answers: { skill: { type: 'choice', choice: 'sql-query-engineering', probabilities: { 'sql-query-engineering': .9 } }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } }; };
   const f = fixture({ judge: answer(.95) });
@@ -131,7 +156,7 @@ test('tool-free discovery admits text-only free capacity without weakening ordin
 test('catalog prose cannot become a user delegation or model restriction', async () => {
   const seen = [];
   const f = fixture({ constraintsFn: (_ctx, task) => { seen.push(task); return { fixedRoute: task.includes('Use only') }; } });
-  const task = 'Inspect the current source and choose relevant skills.';
+  const task = 'Investigate the current source and choose relevant skills.';
   assert.equal(await f.runner({ task, brief: 'Catalog description: Use only when requested. No delegation. Observed tool text.' }, f.ctx), '{"skills":[]}');
   assert.deepEqual(seen, [task]);
   const absent = fixture({ constraintsFn: (_ctx, task) => { assert.equal(task, ''); return {}; } });
@@ -361,7 +386,7 @@ test('skill discovery preserves configured Friendli routes through dispatch admi
   } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache(); }
 });
 
-test('skill discovery runs a configured :high route without its thinking suffix', async () => {
+test('skill discovery preserves explicitly configured thinking in the actual native route and provider candidates', async () => {
   const prefs = await mod('runs/shared/llm-preferences.ts');
   const thinker = { ...model, id: 'free/thinker', reasoning: true, thinkingLevelMap: { off: 'none', low: 'low', medium: 'medium', high: 'high' } };
   fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ preferences: { subagents: [{ provider: thinker.provider, model: thinker.id, thinking: 'high' }] } }));
@@ -370,9 +395,10 @@ test('skill discovery runs a configured :high route without its thinking suffix'
     const f = fixture({ models: [thinker], launch: async () => result('{"skills":[]}') });
     assert.equal(await f.runner({ brief: 'Select a useful installed skill from the supplied evidence.' }, f.ctx), '{"skills":[]}');
     const [, params] = f.calls[0];
-    assert.equal(params.model, `openrouter/${thinker.id}`, 'thinking stays off for bounded selection');
-    assert.equal(params.thinking, 'off');
-    assert.deepEqual(params.modelRouteCandidates.map(c => c.route), [`openrouter/${thinker.id}`]);
+    assert.equal(params.model, `openrouter/${thinker.id}:high`, 'explicit thinking remains exact for bounded selection');
+    assert.equal(params.thinking, 'high');
+    assert.equal(params.modelOrigin,'configured');
+    assert.deepEqual(params.modelRouteCandidates.map(c => c.route), [`openrouter/${thinker.id}:high`]);
   } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE, { force: true }); prefs.clearLlmPreferencesCache(); }
 });
 

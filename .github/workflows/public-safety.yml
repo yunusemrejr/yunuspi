@@ -62,6 +62,10 @@ jobs:
           PI_BROWSER_REQUIRE: '1'
           PI_RENDER_BROWSER_CHANNEL: chromium
         run: PI_LOCAL_LM=off node --test --test-concurrency=4 tests/*.test.mjs
+      - name: Check adaptive scheduling and coordination bounds
+        env:
+          PI_LOCAL_LM: 'off'
+        run: node agent/scripts/adaptive-execution-bench.mjs
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

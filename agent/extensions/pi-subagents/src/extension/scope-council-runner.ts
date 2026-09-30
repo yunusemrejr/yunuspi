@@ -18,6 +18,7 @@ import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
 import { COUNCIL_PERSPECTIVES, selectPerspectives, type RankFn } from "../../../lib/micro-intelligence/review.ts";
 import { microRequestAdvice } from '../../../micro-intelligence.ts';
 import type { ActivityOutcome, FinishActivity } from '../../../lib/harness-activity.ts';
+import { automaticChildThinking, classifyExecution, currentExecutionProfile } from '../../../lib/adaptive-execution.ts';
 
 /** The automatic scope council is a service used by the parent lifecycle.
  * It deliberately has no registered user-facing tool: an agent cannot opt into
@@ -598,7 +599,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				const timeoutMs = phase === "peer-critique"
 					? Math.min(remaining, SCOPE_COUNCIL_LIMITS.synthesisMs)
 					: Math.min(120_000, Math.max(1, remaining - 30_000));
-				work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs, mode), signal, undefined, ctx);
+				const execution = currentExecutionProfile(ctx) ?? classifyExecution({task:request.task});
+				work = deps.launch(runId, {...launchParams(member, limits, phase, source.packet, evidence, timeoutMs, mode),
+					...{delegatedThinkingOverride:automaticChildThinking(execution,member.route,member.proof === 'explicit llm_preferences')}}, signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				const returnedRow = rawResultRow(result);
 				const rawRow = { ...identity, ...returnedRow,
