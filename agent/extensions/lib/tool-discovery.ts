@@ -41,7 +41,7 @@ async function rerankWithJev<T>(
       kind, site: 'rank', query, lexical,
       local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options), signal,
       needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }),
-      jev: (site, state, questions) => askJev(site, state, questions, { pi, signal }),
+      jev: (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal ?? signal }),
       jevMark: (site, detail, usage) => jevMark(site, detail, usage),
     });
     if (outcome.applied === 'lexical') return undefined;

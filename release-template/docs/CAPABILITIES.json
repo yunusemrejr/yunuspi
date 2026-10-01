@@ -7645,6 +7645,10 @@
         "path": "docs/AUDIT-CHANGED-FILES.md"
       },
       {
+        "name": "AUTONOMOUS-ORCHESTRATION.md",
+        "path": "docs/AUTONOMOUS-ORCHESTRATION.md"
+      },
+      {
         "name": "CHANGE-SCOPE.md",
         "path": "docs/CHANGE-SCOPE.md"
       },

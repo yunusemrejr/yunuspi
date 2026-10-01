@@ -559,7 +559,7 @@ export function createSessionObserver(ports: ObserverPorts) {
   // thinking down one level for later reviews (the user's configured level is
   // the ceiling); three clean reviews step it back up. Measured: a high-thinking
   // route truncated 14 and timed out 104 of ~560 reviews in one day.
-  const LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+  const LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   const drops = new Map<string, { drop: number; clean: number; scale?: number }>();
   const lowerThinking = (key: string) => { const entry = drops.get(key) ?? { drop: 0, clean: 0 }; entry.drop = Math.min(2, entry.drop + 1); entry.clean = 0; drops.set(key, entry); };
   // A route already at its lowest thinking level cannot trade reasoning for

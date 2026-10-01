@@ -217,6 +217,19 @@ test('a truncated floor-thinking route widens its output ceiling instead of trun
   assert.deepEqual(bodies,[8192,8192]);
 });
 
+test('max and ultra reviewer effort adapts after truncation and recovers within the configured ceiling', async () => {
+  for(const [level,lower] of [['max','xhigh'],['ultra','max']]) {
+    const time=clock(),routes=[];let revision=0;
+    const observer=createSessionObserver({...time,snapshot:()=>({packet:packet(),reviewKey:String(revision++),route:{...route,thinking:level}}),notice(){},receipt(){},
+      dispatch:async(sent)=>{routes.push(sent);return routes.length===1?{...reply(),stopReason:'length'}:reply();}});
+    observer.begin('owner');observer.start();
+    for(let i=0;i<12&&routes.length<5;i++)await time.advance(120000);
+    assert.equal(routes[0].thinking,level);assert.equal(routes[1].thinking,lower);
+    assert.equal(routes[1].configuredThinking,level);assert.equal(routes[4].thinking,level);
+    observer.close();
+  }
+});
+
 test('native transport ignores malicious model defaults and enforces pins, free caps and canonical endpoints', async () => {
   const sent=[];
   const registry={completeSimple:(selected,context,opts)=>completeSimple(selected,context,{...opts,apiKey:'synthetic-key',fetch:async(_url,init)=>{

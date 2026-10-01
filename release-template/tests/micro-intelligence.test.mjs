@@ -126,7 +126,10 @@ test("large retrieval uses one batched judge before local fallbacks and retains 
         if (mode === 'cancelled') { controller.abort(); return { ok: false, skipped: 'cancelled' }; }
         if (mode === 'unavailable') return { ok: false, skipped: 'unavailable' };
         const top = mode === 'foreign' ? 'not-authorized' : 'item-2';
-        return { ok: true, answers: { rank: { choice: top, probabilities: { [top]: mode === 'uncertain' ? .2 : .9 } }, exists: { noul: .95 } }, usage: { inputTokens: 100, cached: false } };
+        const p = mode === 'uncertain' ? .2 : .9;
+        const probabilities = Object.fromEntries(state.candidates.map(item => [item.id, item.id === top ? p : (1 - p) / 24]));
+        if (mode === 'foreign') probabilities[top] = p;
+        return { ok: true, answers: { rank: { choice: top, probabilities }, exists: { noul: .95 } }, usage: { inputTokens: 100, cached: false } };
       },
       needle: async () => { calls.push('needle'); return { ok: true, cached: false, ms: 1, shadow: false, value: { ranked: [{ id: 'item-1', score: .99 }], margin: .1 } }; },
       local: async () => { calls.push('local'); return { ok: false, reason: 'unavailable' }; },
@@ -350,7 +353,7 @@ test("retrieval validates accepted disagreement and preserves Jev during shadow"
       kind: "tool", site: "rank", query: "browser screenshot", lexical: lexicalTools,
       needle: async () => ({ ok: true, cached: false, ms: 4, shadow,
         value: { ranked: [{ id: "bash", score: 0.99 }, { id: "read", score: 0.9 }, { id: "browser_session", score: 0.8 }], margin: 0.09 } }),
-      jev: async () => { calls++; return { ok: true, answers: { rank: { choice: "browser_session", probabilities: { browser_session: 0.9 } }, exists: { noul: 0.9 } }, usage: { inputTokens: 40, cached: false } }; },
+      jev: async () => { calls++; return { ok: true, answers: { rank: { choice: "browser_session", probabilities: { browser_session: 0.9, read: .05, bash: .05 } }, exists: { noul: 0.9 } }, usage: { inputTokens: 40, cached: false } }; },
     });
     assert.equal(calls, 1);
     assert.equal(outcome.applied, "jev");
@@ -511,7 +514,7 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
       needle: async () => { calls.push('needle'); return stage === 'needle' ? wait() : { ok: false, reason: 'unavailable' }; },
       local: async () => { calls.push('local'); return stage === 'local' ? wait() : { ok: false, reason: 'unavailable' }; },
       jev: async (_site, _state, _questions, options) => {
-        calls.push('jev'); assert.equal(options.signal, controller.signal); return wait();
+        calls.push('jev'); assert.equal(options.signal.aborted, false); return wait();
       },
     });
     if (stage !== 'before') { await begun; controller.abort(); }
@@ -522,6 +525,54 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
       assert.deepEqual(calls, ['needle', 'local', 'jev'].slice(0, stage === 'before' ? 0 : ['needle', 'local', 'jev'].indexOf(stage) + 1));
     } finally { clearTimeout(deadline); release?.({ ok: false, reason: 'unavailable', skipped: 'aborted' }); }
   }
+});
+
+test('an exact identifier in a large pool needs no optional inference and retains all entries', async () => {
+  const lexical = Array.from({ length: 27 }, (_, index) => ({ id: `tool-${index}`, text: `Authorized tool ${index}` }));
+  const unexpected = async () => { assert.fail('exact selection must not start a helper'); };
+  const result = await retrievalMod.multiStageRetrieve({kind:'tool',site:'exact',query:'tool-14',lexical,needle:unexpected,local:unexpected,jev:unexpected});
+  assert.equal(result.applied,'lexical'); assert.equal(result.ordered[0].id,'tool-14');
+  assert.deepEqual(new Set(result.ordered.map(row=>row.id)),new Set(lexical.map(row=>row.id)));
+});
+
+test('retrieval rejects partial, extra, non-unit and non-winning probability distributions', async () => {
+  for (const probabilities of [
+    {browser_session:.9},
+    {browser_session:.9,read:.05,bash:.05,foreign:0},
+    {browser_session:.9,read:.1,bash:.1},
+    {browser_session:.4,read:.5,bash:.1},
+  ]) {
+    const result=await retrievalMod.multiStageRetrieve({kind:'tool',site:'invalid',query:'capture a screenshot',lexical:lexicalTools,
+      jev:async()=>({ok:true,answers:{rank:{choice:'browser_session',probabilities},exists:{noul:.95}},usage:{inputTokens:1,cached:false}})});
+    assert.equal(result.applied,'lexical'); assert.deepEqual(result.ordered,lexicalTools);
+  }
+});
+
+test('a stuck local refinement releases its stage budget and a batched judge can still settle the choice', async () => {
+  let localSignal, release, guard;
+  const pending=retrievalMod.multiStageRetrieve({kind:'tool',site:'bounded',query:'capture a screenshot',lexical:lexicalTools,stageTimeoutMs:10,timeoutMs:1000,
+    local:async(_query,_candidates,_purpose,options)=>{localSignal=options.signal;return new Promise((_resolve,reject)=>{release=reject;});},
+    jev:async()=>({ok:true,answers:{rank:{choice:'browser_session',probabilities:{browser_session:.9,read:.05,bash:.05}},exists:{noul:.95}},usage:{inputTokens:1,cached:false}})});
+  try {
+    const result=await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('fallback blocked by local inference')),1000);})]);
+    assert.equal(localSignal.aborted,true); assert.equal(result.applied,'jev');
+    assert.equal(result.ordered[0].id,'browser_session'); release(Error('late local transport rejection'));
+    await new Promise(resolve=>setImmediate(resolve));
+  } finally {clearTimeout(guard);}
+});
+
+test('the total retrieval budget stops later stages even when helpers ignore cancellation', async () => {
+  const calls=[], signals=[]; let guard;
+  const stuck=(name,signal)=>{calls.push(name);signals.push(signal);return new Promise(()=>{});};
+  const pending=retrievalMod.multiStageRetrieve({kind:'tool',site:'total-budget',query:'capture a screenshot',lexical:lexicalTools,stageTimeoutMs:20,timeoutMs:30,
+    needle:async(_query,_candidates,_topK,options)=>stuck('needle',options.signal),
+    local:async(_query,_candidates,_purpose,options)=>stuck('local',options.signal),
+    jev:async()=>{calls.push('jev');assert.fail('expired budget must not start a remote judgment');}});
+  try {
+    const result=await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('retrieval exceeded its total budget')),1000);})]);
+    assert.equal(result.applied,'lexical'); assert.deepEqual(result.ordered,lexicalTools);
+    assert.deepEqual(calls,['needle','local']); assert.ok(signals.every(signal=>signal.aborted));
+  } finally {clearTimeout(guard);}
 });
 
 test('Span session changes cancel old work and stale completions cannot clear the new session flight', async () => {

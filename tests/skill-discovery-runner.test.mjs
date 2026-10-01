@@ -10,7 +10,7 @@ const release = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(release, 'agent'), path.resolve(release, '..')].find(p => fs.existsSync(path.join(p, 'extensions/pi-subagents/src/extension/skill-discovery-runner.ts')));
 const source = path.join(agent, 'extensions/pi-subagents');
 const mod = p => import(pathToFileURL(path.join(source, 'src', p)));
-const { registerSkillDiscoveryRunner, SKILL_DISCOVERY_RUNNER, SKILL_DISCOVERY_LIMITS } = await mod('extension/skill-discovery-runner.ts');
+const { registerSkillDiscoveryRunner, judgeSkillDiscovery, SKILL_DISCOVERY_RUNNER, SKILL_DISCOVERY_LIMITS } = await mod('extension/skill-discovery-runner.ts');
 const free = await mod('runs/shared/free-route-evidence.ts');
 const economy = await mod('runs/shared/model-economy.ts');
 const { selectAssistanceTeam } = await mod('runs/shared/assistance-plan.ts');
@@ -74,7 +74,7 @@ test('adaptive skill scout preserves inherited delegation constraints and rollba
 test('typed skill selection avoids a full child and cannot invent catalog identifiers', async () => {
   const {microMetrics,resetMicroMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/micro-intelligence/metrics.ts')));
   const request={brief:'Investigate database query plans using the supplied sql skill.',task:'Investigate database query plans',candidates:[{name:'sql-query-engineering',description:'Database query execution plans'}]};
-  const judged=(name,exists=.95)=>({ok:true,answers:{skill:{type:'choice',choice:name,probabilities:{[name]:.9}},exists:{type:'noul',noul:exists}},usage:{model:'mock',inputTokens:20,costUsd:0,ms:1,cached:false}});
+  const judged=(name,exists=.95)=>({ok:true,answers:{skill:{type:'choice',choice:name,probabilities:{[name]:1}},exists:{type:'noul',noul:exists}},usage:{model:'mock',inputTokens:20,costUsd:0,ms:1,cached:false}});
   resetMicroMetrics();
   const f=fixture({judge:async()=>judged('sql-query-engineering')});
   assert.equal(JSON.parse(await f.runner(request,f.ctx)).suggestions[0].name,'sql-query-engineering');
@@ -97,7 +97,13 @@ test('a large skill catalog is shortlisted to fit the Jev input budget instead o
   const built = buildSkillDiscoveryRequest(catalog, { prompt: 'Investigate slow postgres query execution plans', files: ['db/queries.sql'], tools: ['read'] });
   const request = { brief: built.brief, task: 'Investigate slow postgres query execution plans', candidates: built.catalog.map(skill => ({ name: skill.name, description: skill.description.slice(0, 160) })) };
   const payloads = [];
-  const answer = exists => async (_site, state, questions) => { payloads.push(JSON.stringify([state, questions])); return { ok: true, answers: { skill: { type: 'choice', choice: 'sql-query-engineering', probabilities: { 'sql-query-engineering': .9 } }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } }; };
+  const answer = exists => async (_site, state, questions) => {
+    payloads.push(JSON.stringify([state, questions]));
+    assert.ok(state.candidates.some(c=>c.name==='sql-query-engineering'&&c.description.includes('Database')),'existence sees the same descriptions as ranking');
+    const names=Object.keys(questions.skill.criteria),p=names.length===1?1:.9;
+    const probabilities=Object.fromEntries(names.map(name=>[name,name==='sql-query-engineering'?p:(1-p)/(names.length-1)]));
+    return { ok: true, answers: { skill: { type: 'choice', choice: 'sql-query-engineering', probabilities }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } };
+  };
   const f = fixture({ judge: answer(.95) });
   assert.equal(JSON.parse(await f.runner(request, f.ctx)).suggestions[0].name, 'sql-query-engineering');
   assert.equal(f.calls.length, 0, 'a confident pick avoids the paid child');
@@ -119,6 +125,33 @@ test('skill judge respects delegation policy and rejects stale results', async (
   resolve({ok:true,answers:{exists:{type:'noul',noul:0}},usage:{model:'mock',inputTokens:10,costUsd:0,ms:1,cached:false}});
   assert.equal(await work,undefined);
   assert.equal(stale.calls.length,0);
+});
+
+test('skill judgment rejects incomplete probabilities and fits escaped descriptions in shared state', async () => {
+  const candidates=Array.from({length:220},(_,i)=>({name:`database-${i}`,description:('database query '+ '\\"'.repeat(65)).slice(0,160)}));
+  let called=0;
+  const result=await judgeSkillDiscovery({brief:'Investigate database query plans',task:'Investigate database query plans',candidates},async(_site,state,questions)=>{
+    called++; assert.ok(JSON.stringify([state,questions]).length<=32768);
+    assert.equal(state.candidates.length,Object.keys(questions.skill.criteria).length);
+    assert.ok(state.candidates.length<candidates.length);
+    assert.ok(questions.exists.instructions.includes('state.candidates'));
+    return {ok:true,answers:{skill:{type:'choice',choice:state.candidates[0].name,probabilities:{[state.candidates[0].name]:.95}},exists:{type:'noul',noul:.95}},usage:{model:'mock',inputTokens:1,ms:1,cached:false}};
+  });
+  assert.equal(called,1); assert.equal(result,undefined,'an incomplete distribution cannot justify a suggestion');
+});
+
+test('cancelled skill judgments return promptly even when the transport ignores abort', async () => {
+  const controller=new AbortController(); let signal, rejectLate, guard;
+  const request={brief:'Investigate database query plans',candidates:[{name:'sql',description:'Database query plans'}]};
+  const pending=judgeSkillDiscovery(request,async(_site,_state,_questions,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>{rejectLate=reject;});},undefined,controller.signal);
+  controller.abort();
+  try {
+    assert.equal(await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('cancelled skill discovery is still waiting')),500);})]),undefined);
+    assert.equal(signal.aborted,true);rejectLate(Error('late judge rejection'));await new Promise(resolve=>setImmediate(resolve));
+  } finally {clearTimeout(guard);}
+  let calls=0;
+  assert.equal(await judgeSkillDiscovery(request,async()=>{calls++;},undefined,controller.signal),undefined);
+  assert.equal(calls,0,'an already cancelled request starts no transport');
 });
 
 test('one tool-free fresh helper shares the existing assistance budget and leaves only bounded JSON', async () => {

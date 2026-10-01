@@ -17,6 +17,7 @@ import type { NeedleResult } from "../needle-runtime.ts";
 import type { NeedleRankResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
 import { LOCAL_CHOICE_MIN_P, LOCAL_CHOICE_MIN_MARGIN, type LocalChooser } from "../local-lm.ts";
+import { readJevChoice } from "../jev-client.ts";
 
 export interface RetrievalCandidate {
   id: string;
@@ -27,6 +28,7 @@ export type RetrievalNeedle = (
   query: string,
   candidates: RetrievalCandidate[],
   topK: number,
+  options?: { signal?: AbortSignal },
 ) => Promise<NeedleResult<NeedleRankResult>>;
 
 export type RetrievalJev = (
@@ -59,6 +61,8 @@ const NEEDLE_STAGE = 12;
 const EMBED_CHARS = 160;
 /** Reciprocal-rank fusion constant (the conventional 60). */
 const RRF_K = 60;
+export const RETRIEVAL_TIMEOUT_MS = 6000;
+export const RETRIEVAL_STAGE_TIMEOUT_MS = 2000;
 
 export function trivialQuery(query: unknown): boolean {
   return typeof query !== "string" || query.trim().length < 3;
@@ -86,7 +90,7 @@ async function awaitStage<T>(work: Promise<T>, signal?: AbortSignal): Promise<T 
  *   or disagreeing local ranking. At most one batched call, same bars as the
  *   existing tool-discovery rerank (exists >= 0.5, topProb >= 0.4).
  */
-export async function multiStageRetrieve<T extends RetrievalCandidate>(options: {
+export interface RetrievalOptions<T extends RetrievalCandidate> {
   kind: string;
   site: string;
   query: string;
@@ -99,7 +103,23 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   acceptScore?: number;
   acceptMargin?: number;
   needleTopK?: number;
-}): Promise<RetrievalOutcome<T>> {
+  /** Total optional refinement budget, including all fallback stages. */
+  timeoutMs?: number;
+  /** Per-stage ceiling leaves room for another helper after a slow route. */
+  stageTimeoutMs?: number;
+}
+
+export async function multiStageRetrieve<T extends RetrievalCandidate>(options: RetrievalOptions<T>): Promise<RetrievalOutcome<T>> {
+  const controller = new AbortController();
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, Math.min(60000, options.timeoutMs!)) : RETRIEVAL_TIMEOUT_MS;
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(new DOMException('Retrieval budget exhausted', 'TimeoutError')), timeoutMs);
+  timer.unref?.();
+  try { return await retrieve({ ...options, signal }); }
+  finally { clearTimeout(timer); controller.abort(); }
+}
+
+async function retrieve<T extends RetrievalCandidate>(options: RetrievalOptions<T>): Promise<RetrievalOutcome<T>> {
   const { kind, site, query, lexical } = options;
   const metrics = microMetrics();
   const bit = (id: string | undefined): string | undefined => id;
@@ -115,6 +135,24 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
     metrics.skip("needle", lexical.length < 2 ? "no-candidates" : "trivial");
     return done([...lexical], "lexical");
   }
+
+  // An exact authorized identifier is already a decision. Apply it before
+  // embeddings or remote judgments, including for a large candidate set.
+  const identity = (text: string) => text.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
+  const named = lexical.find(entry => identity(entry.id) === identity(query));
+  if (named) return done([named, ...lexical.filter(entry => entry !== named)], 'lexical');
+
+  const stageMs = Number.isFinite(options.stageTimeoutMs) ? Math.max(1, Math.min(60000, options.stageTimeoutMs!)) : RETRIEVAL_STAGE_TIMEOUT_MS;
+  const stage = async <R>(start: (signal: AbortSignal) => Promise<R>): Promise<R | undefined> => {
+    if (options.signal?.aborted) return undefined;
+    const controller = new AbortController();
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    const timer = setTimeout(() => controller.abort(new DOMException('Retrieval stage timed out', 'TimeoutError')), stageMs);
+    timer.unref?.();
+    try {
+      return await awaitStage(Promise.resolve().then(() => { signal.throwIfAborted(); return start(signal); }), signal);
+    } finally { clearTimeout(timer); controller.abort(); }
+  };
 
   const slice = lexical.slice(0, MAX_STAGE);
   const limit = Number.isSafeInteger(options.needleTopK) ? Math.max(2, Math.min(MAX_STAGE, options.needleTopK!)) : NEEDLE_STAGE;
@@ -135,19 +173,21 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
       const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
       // Each typed question sees the shared state, not its sibling's criteria.
       // The existence check needs the candidates too or it judges an empty set.
-      const judged = await awaitStage(options.jev(site, { query: query.slice(0, 256), candidates }, {
+      const judged = await stage(signal => options.jev!(site, { query: query.slice(0, 256), candidates }, {
         rank: {
           type: "choice",
           instructions: `Which ${kind} entry best serves this need?`,
           criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.id])),
         },
         exists: { type: "noul", instructions: "Does at least one entry in state.candidates provide the capability or evidence requested by state.query? Judge its description, not whether the action has already executed." },
-      }, { signal: options.signal }), options.signal);
-      if (!judged || options.signal?.aborted) return done([...lexical], 'lexical');
+      }, { signal }));
+      if (options.signal?.aborted) return done([...lexical], 'lexical');
+      if (!judged) { metrics.skip('jev', 'timeout'); return; }
       if (judged.ok) {
-        const order = judged.answers.rank?.probabilities ?? {};
-        const top = judged.answers.rank?.choice;
-        const topProb = top ? (order[top] ?? 0) : 0;
+        const choice = readJevChoice(judged.answers.rank, candidates.map(candidate => candidate.id));
+        const order = choice?.probabilities ?? {};
+        const top = choice?.choice;
+        const topProb = choice?.probability ?? 0;
         metrics.run("jev");
         metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
         if (judged.usage.cached) metrics.cacheHit("jev");
@@ -188,13 +228,15 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   if (options.needle) {
     metrics.offer("needle");
     try {
-      const ranked = await awaitStage(options.needle(
+      const ranked = await stage(signal => options.needle!(
         query.slice(0, EMBED_CHARS),
         needleSlice.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, EMBED_CHARS) })),
         needleSlice.length,
-      ), options.signal);
-      if (!ranked || options.signal?.aborted) return done([...lexical], 'lexical');
-      if (ranked.ok) {
+        { signal },
+      ));
+      if (options.signal?.aborted) return done([...lexical], 'lexical');
+      if (!ranked) metrics.skip('needle', 'timeout');
+      else if (ranked.ok) {
         metrics.run("needle", ranked.ms);
         if (ranked.cached) metrics.cacheHit("needle");
         needleShadow = ranked.shadow;
@@ -256,15 +298,13 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   // One local token can settle a short capability shortlist. Only promote
   // an existing entry; never drop evidence/candidates or expand authority.
   // Exact names and shadow ranking keep their existing behavior.
-  const identity = (text: string) => text.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
-  const named = lexical.some(entry => identity(entry.id) === identity(query) || identity(entry.text.split(':')[0]) === identity(query));
   if (options.local && !needleShadow && !named && !options.signal?.aborted) {
     try {
       const pool = needleOrdered ?? fusedOrdered ?? [...lexical];
       const candidates = pool.slice(0, 3).map(entry => ({ id: entry.id, text: entry.text.slice(0, 300) }));
-      const picked = await awaitStage(options.local(query, candidates, `${kind}-discovery`, { signal: options.signal }), options.signal);
-      if (!picked || options.signal?.aborted) return done([...lexical], 'lexical');
-      if (picked.ok && !options.signal?.aborted && Number.isFinite(picked.p) && picked.p >= LOCAL_CHOICE_MIN_P && picked.p <= 1
+      const picked = await stage(signal => options.local!(query, candidates, `${kind}-discovery`, { signal }));
+      if (options.signal?.aborted) return done([...lexical], 'lexical');
+      if (picked?.ok && !options.signal?.aborted && Number.isFinite(picked.p) && picked.p >= LOCAL_CHOICE_MIN_P && picked.p <= 1
         && Number.isFinite(picked.margin) && picked.margin >= LOCAL_CHOICE_MIN_MARGIN && picked.margin <= 1 && candidates.some(entry => entry.id === picked.id)) {
         return done([...pool.filter(entry => entry.id === picked.id), ...pool.filter(entry => entry.id !== picked.id)], 'local', { needleTop, needleMargin });
       }

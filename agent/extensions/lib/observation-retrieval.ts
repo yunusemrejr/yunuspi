@@ -62,6 +62,7 @@ export async function retrieveObservation(raw: string, query: string, options: {
   const terms = taskTerms(query);
   const ranked = await abortable(multiStageRetrieve({
     kind: "observation excerpt", site: "obs-read", query,
+    signal,
     lexical: lexical.map(chunk => {
       const anchor = anchorOffset(chunk.text, terms, query);
       const start = Math.max(0, anchor - 48);

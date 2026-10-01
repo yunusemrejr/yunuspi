@@ -4,6 +4,7 @@ import { sessionObservability } from './session-observability.ts';
 import { wantsNoObserver } from './session-observer.ts';
 import { promptRequestFocus } from './prompt-interpretation.ts';
 import type { RetrievalRole } from './project-memory-retrieve.ts';
+import { raceWithAbortSignal } from '@yunuspi/ai/utils/abort';
 
 export const PROJECT_MEMORY_RECALL = Symbol.for('yunus-pi.project-memory-recall.v1');
 export type ProjectMemoryRecall = (cwd: string, query: string, role: RetrievalRole, signal: AbortSignal, background?: boolean) => Promise<string>;
@@ -14,12 +15,12 @@ export async function recallProjectContext(cwd: string, request: string, role: R
   if (!recall || query.length < 16 || signal?.aborted || wantsNoObserver(request)) return '';
   const deadline = AbortSignal.timeout(options.background ? 9000 : 1200);
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
-  let abort: (() => void) | undefined;
   try {
     // Optional recall never holds a foreground request behind a stuck helper.
-    return await Promise.race([recall(cwd, query, role, bounded, options.background), new Promise<string>(resolve => {
-      abort = () => resolve(''); bounded.addEventListener('abort', abort, { once: true });
-    })]);
+    const text = await raceWithAbortSignal(Promise.resolve().then(() => {
+      bounded.throwIfAborted();
+      return recall(cwd, query, role, bounded, options.background);
+    }), bounded);
+    return typeof text === 'string' && !bounded.aborted ? text : '';
   } catch { return ''; }
-  finally { if (abort) bounded.removeEventListener('abort', abort); }
 }

@@ -2039,6 +2039,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 - [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 - [`docs/AUDIT-CHANGED-FILES.md`](AUDIT-CHANGED-FILES.md)
+- [`docs/AUTONOMOUS-ORCHESTRATION.md`](AUTONOMOUS-ORCHESTRATION.md)
 - [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 - [`docs/CODE-AUDIT.md`](CODE-AUDIT.md)
 - [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)

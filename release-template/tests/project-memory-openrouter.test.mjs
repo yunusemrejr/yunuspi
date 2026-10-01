@@ -12,6 +12,7 @@ import { findClusters } from '../agent/extensions/lib/project-memory-consolidate
 import { recallProjectContext, PROJECT_MEMORY_RECALL } from '../agent/extensions/lib/project-memory-context.ts';
 import piVectorMemory from '../agent/extensions/pi-vector-memory.ts';
 import { createAdaptiveExecutionController, registerAdaptiveExecution } from '../agent/extensions/lib/adaptive-execution.ts';
+import { sessionObservability } from '../agent/extensions/lib/session-observability.ts';
 
 const response = (vectors, model = 'Qwen/Qwen3-Embedding-8B', usage = { prompt_tokens: 12, cost: 0.000001 }) => new Response(JSON.stringify({ model, data: vectors.map((embedding, index) => ({ index, embedding })).reverse(), usage }));
 const remote = (fetchImpl, extra = {}) => openRouterMemoryEmbedder({ env: {}, key: () => 'synthetic-key', fetch: fetchImpl, ...extra });
@@ -25,6 +26,21 @@ function storeFor(t, name = 'project') {
 }
 const remember = (store, text, embedder, extra = {}) => indexEvent(store, store.projectId, { kind: 'decision', text, ...extra }, { embedder });
 const put = (store, id, embedder = 'needle3', embedding = [1, 0], text = `Historical architectural evidence for ${id}`) => store.upsertChunk({ id, project_id: store.projectId, source_type: 'decision', text, content_hash: id, embedder, embedding });
+
+test('project recall observes cancellation triggered inside the recall hook and handles late rejection', async t => {
+  const owner=sessionObservability(),previous=owner[PROJECT_MEMORY_RECALL],controller=new AbortController();
+  t.after(()=>{if(previous===undefined)delete owner[PROJECT_MEMORY_RECALL];else owner[PROJECT_MEMORY_RECALL]=previous;});
+  let rejectLate,guard;
+  owner[PROJECT_MEMORY_RECALL]=async(_cwd,_query,role,signal)=>{
+    assert.equal(role,'observer'); controller.abort(); assert.equal(signal.aborted,true);
+    return new Promise((_resolve,reject)=>{rejectLate=reject;});
+  };
+  try {
+    const pending=recallProjectContext('/synthetic/project','Recall the architecture constraints for this task','observer',controller.signal);
+    assert.equal(await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('recall missed cancellation')),500);})]),'');
+    rejectLate(Error('late memory transport rejection'));await new Promise(resolve=>setImmediate(resolve));
+  } finally {clearTimeout(guard);}
+});
 
 test('automatic indexing retains local semantics during a remote outage and backfills the selected space incrementally', async t => {
  const {store}=storeFor(t);let calls=0,localCalls=0,now=0,healthy=false;

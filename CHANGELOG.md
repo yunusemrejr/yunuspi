@@ -13,6 +13,9 @@ See [child outcomes and cancellation](docs/SESSION-ORCHESTRATION.md).
 - Preserve prompt/schema order for identical active tool sets and record Qwen cache creation separately from cached input hits.
 - Reuse equivalent JEV requests across hook builders, keep valid cached judgments through provider outages, and ask fewer distillation questions over larger bounded logs.
 - Share deterministic local Qwen probability reuse across judgments and choices, skip duplicate queued inference, and scope warmed prefixes to their actual server/transport. Add a reproducible live inference-reuse benchmark and cache behavior documentation.
+- Bound shared capability retrieval to one total latency budget, resolve exact identifiers before inference, and preserve fallback helpers after stage timeouts.
+- Give every skill-discovery JEV question the same candidate evidence, enforce serialized input/option bounds and require complete probability distributions before promotion.
+- Reconcile cancellation in skill judgments and vector-memory recall, propagate observation/tool consumer cancellation, and adapt max/ultra reviewer effort after truncation without disabling session helpers.
 
 ## 0.18.0 — 2026-09-30
 
