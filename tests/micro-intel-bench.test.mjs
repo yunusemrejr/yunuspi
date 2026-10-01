@@ -109,10 +109,11 @@ test("escalation plumbing accepts a mocked correct judge (asset-gated)", { skip:
       const outcome = await retrievalMod.multiStageRetrieve({
         kind: "tool", site: "bench", query: fixture.query, lexical: scored,
         needle: (query, candidates, topK) => handle.rank({ query, candidates, topK }),
-        jev: async () => ({
+        jev: async (_site, state) => ({
           ok: true,
           answers: {
-            rank: { choice: fixture.expected, probabilities: { [fixture.expected]: 0.8 } },
+            rank: { choice: fixture.expected, probabilities: Object.fromEntries(state.candidates.map(candidate =>
+              [candidate.id, candidate.id === fixture.expected ? .8 : .2 / (state.candidates.length - 1)])) },
             exists: { noul: 0.9 },
           },
           usage: { inputTokens: 100, cached: false },
