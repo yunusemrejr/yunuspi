@@ -214,10 +214,10 @@ export function adaptiveExecutionEnabled(env: Record<string, string | undefined>
 /** Only native automatic helpers consume this default. Explicit configured
  * routes (including their thinking suffix) retain the user's exact setting. */
 export function automaticChildThinking(profile: ExecutionProfile, route: string, configured = false): ExecutionProfile['reasoning'] | undefined {
-  return !adaptiveExecutionEnabled() || configured || /:(?:off|minimal|low|medium|high|xhigh|max)$/.test(route) ? undefined : profile.reasoning;
+  return !adaptiveExecutionEnabled() || configured || /:(?:off|minimal|low|medium|high|xhigh|max|ultra)$/.test(route) ? undefined : profile.reasoning;
 }
 
-const THINKING_LEVELS = ['off','minimal','low','medium','high','xhigh','max'] as const;
+const THINKING_LEVELS = ['off','minimal','low','medium','high','xhigh','max','ultra'] as const;
 type ThinkingLevel = typeof THINKING_LEVELS[number];
 /** Session-local thinking actuator. The configured current level is a ceiling;
  * CLI pins and later manual selections stay exact. Own setter events are
@@ -225,8 +225,8 @@ type ThinkingLevel = typeof THINKING_LEVELS[number];
 export function createAdaptiveThinkingController(pi: any, options: {argv?: readonly string[]; env?: Record<string,string|undefined>} = {}) {
   const argv = options.argv ?? process.argv;
   const cliPinned = argv.some((arg,index) => /^--thinking(?:=|$)/.test(arg)
-    || /^(?:--model|-m)$/.test(arg) && /:(?:off|minimal|low|medium|high|xhigh|max)$/.test(argv[index+1] ?? '')
-    || /^--model=.*:(?:off|minimal|low|medium|high|xhigh|max)$/.test(arg));
+    || /^(?:--model|-m)$/.test(arg) && /:(?:off|minimal|low|medium|high|xhigh|max|ultra)$/.test(argv[index+1] ?? '')
+    || /^--model=.*:(?:off|minimal|low|medium|high|xhigh|max|ultra)$/.test(arg));
   let owner: ReturnType<typeof sessionKey>, ceiling: ThinkingLevel | undefined, lastAuto: ThinkingLevel | undefined, manual = cliPinned;
   const pending: Array<{level:ThinkingLevel;previousLevel:ThinkingLevel}> = [];
   const read = (): ThinkingLevel | undefined => { try { const level = pi.getThinkingLevel?.(); return THINKING_LEVELS.includes(level) ? level : undefined; } catch { return; } };
@@ -258,7 +258,7 @@ export function createAdaptiveThinkingController(pi: any, options: {argv?: reado
       const limit=THINKING_LEVELS.indexOf(ceiling),desired=Math.min(limit,THINKING_LEVELS.indexOf(profile.reasoning));
       const map=ctx?.model?.thinkingLevelMap;
       const available=THINKING_LEVELS.filter((level,index)=>index<=limit && (ctx?.model?.reasoning!==false || level==='off')
-        && map?.[level]!==null && (!(level==='xhigh'||level==='max') || map?.[level]!==undefined));
+        && map?.[level]!==null && (!(level==='xhigh'||level==='max'||level==='ultra') || map?.[level]!==undefined));
       const below=available.filter(level=>THINKING_LEVELS.indexOf(level)<=desired);
       const target=below.at(-1) ?? available[0] ?? current;
       const applied=set(target,current);lastAuto=applied;return applied;

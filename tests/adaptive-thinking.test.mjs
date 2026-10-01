@@ -38,6 +38,19 @@ test('manual selections win over automatic changes, including delayed own select
   f.controller.begin(f.ctx);f.controller.update(direct,f.ctx);assert.equal(f.get(),'medium','manual preference persists into later task scopes');
 });
 
+test('ultra defaults adapt and restore, while ultra CLI pins and later manual selections remain exact',()=>{
+  const f=fixture('ultra');f.ctx.model.thinkingLevelMap={ultra:'ultra'};
+  assert.equal(f.controller.update(direct,f.ctx),'minimal');f.flush();
+  assert.equal(f.controller.restore(f.ctx),'ultra');f.flush();
+  assert.equal(f.controller.state().manual,false);
+  for(const argv of [['--model','provider/model:ultra'],['-m','provider/model:ultra'],['--model=provider/model:ultra']]) {
+    const pinned=fixture('ultra',{argv});pinned.controller.update(direct,pinned.ctx);
+    assert.equal(pinned.get(),'ultra');assert.equal(pinned.setters.length,0);
+  }
+  f.controller.update(direct,f.ctx);f.flush();f.manual('ultra');
+  assert.equal(f.controller.update(direct,f.ctx),'ultra');assert.equal(f.controller.restore(f.ctx),'ultra');
+});
+
 test('an externally changed setting without an event is preserved on update and restore',()=>{
   const f=fixture();f.controller.update(direct,f.ctx);f.flush();
   f.pi.setThinkingLevel('off');

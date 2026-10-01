@@ -87,6 +87,7 @@ test('automatic child reasoning follows the scope without overriding configured 
   const p=classifyExecution({task:'Investigate a parser failure'});
   assert.equal(automaticChildThinking(p,'provider/model'),'low');
   assert.equal(automaticChildThinking(p,'provider/model:high'),undefined);
+  assert.equal(automaticChildThinking(p,'provider/model:ultra'),undefined);
   assert.equal(automaticChildThinking(p,'provider/model',true),undefined);
   assert.equal(automaticChildThinking(classifyExecution({task:'Migrate schema'}),'provider/model'),'high');
 });
