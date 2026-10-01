@@ -12,6 +12,7 @@ const load=relative=>import(pathToFileURL(path.join(runtime,'core',relative)));
 const chat=await load('ai/dist/api/openai-completions.js');
 const responses=await load('ai/dist/api/openai-responses.js');
 const codex=await load('ai/dist/api/openai-codex-responses.js');
+const bedrock=await load('ai/dist/api/bedrock-converse-stream.js');
 const {convertResponsesMessages}=await load('ai/dist/api/openai-responses-shared.js');
 const {getSupportedThinkingLevels}=await load('ai/dist/models.js');
 const model={id:'fixture',name:'Fixture',provider:'fixture',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',reasoning:true,
@@ -64,6 +65,18 @@ test('ultra reaches the wire only when the selected model declares support',asyn
    const unsupported=await request(driver,{...m,thinkingLevelMap:{...m.thinkingLevelMap,ultra:null}},simple?{reasoning:'ultra'}:{reasoningEffort:'ultra'},simple);
    assert.equal(unsupported.reasoning_effort??unsupported.reasoning?.effort,'max');
   }
+ }
+});
+
+test('Bedrock budget-based Claude clamps ultra before selecting default and custom budgets',async()=>{
+ const m={...model,id:'anthropic.claude-3-7-sonnet-20250219-v1:0',api:'bedrock-converse-stream',provider:'amazon-bedrock'};
+ for(const simple of [false,true])for(const custom of [false,true]){
+  let payload;
+  const result=await bedrock[simple?'streamSimple':'stream'](m,context,{reasoning:'ultra',maxTokens:8192,
+   ...(custom?{thinkingBudgets:{high:4096}}:{}),
+   onPayload:body=>{payload=body;throw Error('stop before synthetic transport');}}).result();
+  assert.equal(result.stopReason,'error');assert.match(result.errorMessage,/stop before synthetic transport/);
+  assert.equal(payload.additionalModelRequestFields.thinking.budget_tokens,custom?4096:simple?7168:16384);
  }
 });
 

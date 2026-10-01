@@ -1013,8 +1013,8 @@ function buildAdditionalModelRequestFields(model, options) {
                     max: 16384,
                 };
                 // Custom budgets only cover token-based levels through high.
-                const level = options.reasoning === "xhigh" || options.reasoning === "max" ? "high" : options.reasoning;
-                const budget = options.thinkingBudgets?.[level] ?? defaultBudgets[options.reasoning];
+                const level = clampReasoning(options.reasoning);
+                const budget = options.thinkingBudgets?.[level] ?? defaultBudgets[level];
                 return {
                     thinking: {
                         type: "enabled",
