@@ -113,16 +113,17 @@ export function classifyChildTerminal(facts: ChildTerminalFacts | undefined): Ch
 	// A detached child left this group's supervision: terminal here, recorded as
 	// cancelled unless it already carries an explicit success (checked below).
 	if ((truthy(facts.detached) || status === "detached") && facts.ok !== true && facts.success !== true) return "cancelled";
+	const hasExitCode = Number.isSafeInteger(facts.exitCode);
+	// A completed process can still fail its acceptance contract, and a stale
+	// success flag cannot hide a nonzero exit. Preserve that evidence before
+	// interpreting the coarse completed status used by retained results.
+	if (facts.ok === false || facts.success === false || status === "failed" || status === "partial"
+		|| outcomeState === "partial" || outcomeState === "failed" || (hasExitCode && facts.exitCode !== 0)) return "failed";
 	if (isTerminalStateValue(status)) return status;
-	let ended = status === "completed" || status === "complete" || status === "failed" || status === "partial" || status === "paused" || status === "detached" || truthy(facts.detached) || outcomeState === "partial" || outcomeState === "failed" || outcomeState === "complete";
-	if (typeof facts.exitCode === "number") ended = true;
-	if (!ended && facts.exitCode === undefined && facts.ok === undefined && facts.success === undefined) return undefined;
 	const succeeded = facts.ok === true || facts.success === true || status === "completed" || status === "complete" || outcomeState === "complete";
-	if (succeeded && !truthy(facts.timedOut) && !truthy(facts.stopped)) return "succeeded";
+	if (succeeded) return "succeeded";
 	if (truthy(facts.detached) || status === "detached") return "cancelled";
-	if (ended) return "failed";
-	if (typeof facts.exitCode === "number") return facts.exitCode === 0 ? "succeeded" : "failed";
-	if (facts.ok === false || facts.success === false) return "failed";
+	if (hasExitCode) return "succeeded";
 	return undefined;
 }
 
@@ -150,8 +151,9 @@ export function childTerminalCause(facts: ChildTerminalFacts | undefined): Child
 	if (terminal === "succeeded") return "completed";
 	if (terminal === "timed_out") return "timeout";
 	if (terminal === "cancelled") return "cancelled";
-	if (truthy(facts.breakerReason)) {
+	if (lower(facts.breakerReason)) {
 		const breaker = lower(facts.breakerReason);
+		if (breaker === "excessive_tool_calls") return "budget_exhausted";
 		if (breaker.includes("provider")) return "provider_failure";
 		if (breaker.includes("tool")) return "tool_failure";
 		if (breaker.includes("progress")) return "tool_failure";

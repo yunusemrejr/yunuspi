@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Child outcomes now recognize successful exit-only results and preserve failed
+acceptance or exit evidence over coarse completion status. Retained breaker
+causes survive into wait results. Child permission cancellation propagates the
+hook deadline and prevents reviewer dispatch after delayed authentication has
+outlived the request. The builtin delegate accepts `general-purpose` explicitly.
+See [child outcomes and cancellation](docs/SESSION-ORCHESTRATION.md).
+
 - Fix account-specific Codex discovery hiding new models behind an older catalog protocol. Refresh older protocol caches and preserve explicitly advertised `ultra` reasoning through CLI, configuration, menus, sessions and child routes.
 - Preserve prompt/schema order for identical active tool sets and record Qwen cache creation separately from cached input hits.
 - Reuse equivalent JEV requests across hook builders, keep valid cached judgments through provider outages, and ask fewer distillation questions over larger bounded logs.

@@ -29,6 +29,17 @@ test('agent resolution tolerates case but not case-only ambiguity',()=>{
  assert.match(clash.error??'',/Ambiguous agent name/);
 });
 
+test('general-purpose is an explicit shipped delegate alias and exact definitions take priority',()=>{
+ const raw=fs.readFileSync(path.join(agent,'extensions/pi-subagents/agents/delegate.md'),'utf8');
+ const {frontmatter}=parseFrontmatter(raw);
+ const aliases=parseFrontmatterList(frontmatter.aliases)??[];
+ assert.ok(aliases.includes('general-purpose'));
+ const delegate=cfg('delegate',{aliases,source:'builtin'});
+ assert.equal(resolveAgentName('general-purpose',[delegate]).agent?.name,'delegate');
+ const named=cfg('general-purpose',{source:'project'});
+ assert.equal(resolveAgentName('general-purpose',[delegate,named]).agent?.source,'project');
+});
+
 test('unknown agent names get ranked suggestions, never a guess',()=>{
  const agents=[cfg('delegate',{aliases:['generic']}),cfg('critic'),cfg('researcher')];
  assert.deepEqual(suggestAgentNames('delgate',agents),['delegate']);

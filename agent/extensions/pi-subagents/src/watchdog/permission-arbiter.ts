@@ -46,10 +46,12 @@ export function createWatchdogPermissionArbiter(options: WatchdogPermissionArbit
 		const auditBase = { type: "permission.request", createdAt, toolName: request.toolName, preview, matchedRule: "ask", decisionSource: "watchdog" };
 		appendPermissionAudit(request.auditPath, auditBase);
 		let completed = false;
+		let finalResult: WatchdogPermissionResult | undefined;
 		const finish = (approved: boolean, reason: string, decision: string): WatchdogPermissionResult => {
 			const concise = conciseReason(reason);
-			if (completed) return { approved, reason: concise, source: "watchdog" };
+			if (finalResult) return finalResult;
 			completed = true;
+			finalResult = { approved, reason: concise, source: "watchdog" };
 			appendPermissionAudit(request.auditPath, {
 				type: "permission.decision",
 				createdAt: Date.now(),
@@ -60,7 +62,7 @@ export function createWatchdogPermissionArbiter(options: WatchdogPermissionArbit
 				decisionSource: "watchdog",
 				reason: concise,
 			});
-			return { approved, reason: concise, source: "watchdog" };
+			return finalResult;
 		};
 
 		let childConfig;
@@ -93,6 +95,10 @@ export function createWatchdogPermissionArbiter(options: WatchdogPermissionArbit
 			const run = async (): Promise<WatchdogPermissionResult> => {
 				const config = childResolvedConfig(childConfig);
 				const selection = await resolveWatchdogReviewModel(request.ctx, config);
+				// Auth lookup can outlive cancellation or the permission deadline.
+				// A finished request must never start a late, unsupervised inference.
+				if (completed) return finalResult!;
+				if (request.signal?.aborted || request.ctx.signal?.aborted) return finish(false, "Watchdog permission decision was cancelled.", "cancelled");
 				const auth = selection.auth;
 				const registeredProvider = (request.ctx.modelRegistry as {
 					getRegisteredProviderConfig?: (provider: string) => { api?: string; streamSimple?: StreamFn } | undefined;
@@ -125,19 +131,21 @@ export function createWatchdogPermissionArbiter(options: WatchdogPermissionArbit
 					toolExecution: "sequential",
 				});
 				await agent.prompt(`Tool: ${request.toolName}\nRedacted arguments: ${preview}`);
+				if (completed) return finalResult!;
 				if (!decision) return finish(false, "Watchdog permission arbiter returned no decision.", "malformed");
 				const approved = decision.decision === "approve";
 				return finish(approved, decision.reason, decision.decision);
 			};
-			return await Promise.race([
-				run(),
-				new Promise<WatchdogPermissionResult>((resolve) => { timeout = setTimeout(() => { agent?.abort(); resolve(finish(false, "Watchdog permission decision timed out.", "timeout")); }, childConfig.agentEndTimeoutMs); }),
-				new Promise<WatchdogPermissionResult>((resolve) => {
-					abort = () => { agent?.abort(); resolve(finish(false, "Watchdog permission decision was cancelled.", "cancelled")); };
-					request.signal?.addEventListener("abort", abort, { once: true });
-					request.ctx.signal?.addEventListener("abort", abort, { once: true });
-				}),
-			]);
+			// Install cancellation before invoking model/auth resolution, which can
+			// synchronously abort its caller. Keep observing run() after losing a race.
+			const cancellation = new Promise<WatchdogPermissionResult>((resolve) => {
+				abort = () => { agent?.abort(); resolve(finish(false, "Watchdog permission decision was cancelled.", "cancelled")); };
+				request.signal?.addEventListener("abort", abort, { once: true });
+				request.ctx.signal?.addEventListener("abort", abort, { once: true });
+				if (request.signal?.aborted || request.ctx.signal?.aborted) abort();
+			});
+			const deadline = new Promise<WatchdogPermissionResult>((resolve) => { timeout = setTimeout(() => { agent?.abort(); resolve(finish(false, "Watchdog permission decision timed out.", "timeout")); }, childConfig.agentEndTimeoutMs); });
+			return await Promise.race([cancellation, deadline, completed ? Promise.resolve(finalResult!) : run()]);
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error);
 			return finish(false, `Watchdog permission arbiter failed closed: ${reason}`, reason.includes("timed out") ? "timeout" : "error");

@@ -4028,7 +4028,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 934,
+        "line": 937,
         "kind": "literal"
       },
       {
@@ -4535,7 +4535,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 934,
+        "line": 937,
         "kind": "literal"
       },
       {
@@ -7819,6 +7819,10 @@
       {
         "name": "SESSION-OBSERVER.md",
         "path": "docs/SESSION-OBSERVER.md"
+      },
+      {
+        "name": "SESSION-ORCHESTRATION.md",
+        "path": "docs/SESSION-ORCHESTRATION.md"
       },
       {
         "name": "SESSION-RECOVERY-AUDIT.md",
