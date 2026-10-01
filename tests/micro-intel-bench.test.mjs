@@ -22,6 +22,12 @@ const smol = await load("extensions/lib/smol-preprocessor.ts");
 const diag = await load("extensions/lib/session-diagnostics.ts");
 const needleRuntime = await load("extensions/lib/needle-runtime.ts");
 const needleAssets = await load("extensions/lib/needle-assets.mjs");
+const { needlePolicy } = await load("extensions/lib/needle-policy.ts");
+// Calibration measures quality, not interactive latency. Concurrent sandbox
+// tests can delay a real WASM worker beyond the foreground service budget.
+// Give these isolated benchmark workers a bounded calibration budget; the
+// production policy and runtime timeout regressions retain their own limits.
+const benchmarkNeedle = () => needleRuntime.createNeedleRuntime({policy:{...needlePolicy(),opTimeoutMs:10000,maxOpTimeoutMs:30000}});
 
 const routing = JSON.parse(fs.readFileSync(path.join(fixtures, "routing.json"), "utf8"));
 const intent = JSON.parse(fs.readFileSync(path.join(fixtures, "intent.json"), "utf8"));
@@ -67,7 +73,7 @@ test("paraphrase set contains genuine zero-overlap cases", () => {
 });
 
 test("needle rank serves every query with calibrated acceptance (asset-gated)", { skip: !HAS_NEEDLE && "needle assets not installed" }, async () => {
-  const handle = needleRuntime.createNeedleRuntime({});
+  const handle = benchmarkNeedle();
   try {
     let hits = 0, accepted = 0, acceptedWrong = 0;
     const latencies = [];
@@ -98,7 +104,7 @@ test("escalation plumbing accepts a mocked correct judge (asset-gated)", { skip:
   // This checks escalation/application plumbing, not actual Jev quality,
   // measured model-call avoidance or real blended accuracy.
   const retrievalMod = await load("extensions/lib/micro-intelligence/retrieval.ts");
-  const handle = needleRuntime.createNeedleRuntime({});
+  const handle = benchmarkNeedle();
   try {
     let appliedNeedle = 0, appliedJev = 0;
     for (const fixture of routing.semantic) {
@@ -132,12 +138,12 @@ test("escalation plumbing accepts a mocked correct judge (asset-gated)", { skip:
 test("intent pre-screen decides safely under asymmetric bars (asset-gated)", { skip: !HAS_NEEDLE && "needle assets not installed" }, async () => {
   const intentMod = await load("extensions/lib/micro-intelligence/intent.ts");
   const bars = intentMod.PRESCREEN_BARS;
-  const handle = needleRuntime.createNeedleRuntime({});
+  const handle = benchmarkNeedle();
   try {
     let decided = 0, correct = 0;
     for (const fixture of intent.tasks) {
       const result = await handle.classify({ text: fixture.task, labels: intentMod.PRESCREEN_LABELS });
-      assert.equal(result.ok, true);
+      assert.equal(result.ok, true, result.ok ? '' : `Needle skipped classification: ${result.reason}`);
       const { label, score, margin } = result.value;
       const verdict = label === "implementation" && score >= bars.implementation.score && margin >= bars.implementation.margin
         ? "implementation"
