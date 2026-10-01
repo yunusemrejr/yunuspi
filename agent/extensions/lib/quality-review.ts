@@ -303,6 +303,26 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const status = () => !changed.length || automaticReviewExempt() ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? busy ? 'reviewing' : rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
     .sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,12);
+  /** Bounded current-source scan used to route review aspects by what the code does, not only its name. */
+  const scanSource = (files: string[], budget = 2_000_000) => {
+    const scanned = new Map<string, ReturnType<typeof authoredReviewSignals> | 'skipped' | 'missing'>();
+    for (const file of files) try {
+      const target = path.join(root, file), stat = fs.lstatSync(target), size = stat.size;
+      const relative = path.relative(fs.realpathSync(root), fs.realpathSync(target));
+      if (!stat.isFile() || relative.startsWith('../') || path.isAbsolute(relative) || size > 256000 || size > budget) { scanned.set(file, 'skipped'); continue; }
+      budget -= size;
+      scanned.set(file, authoredReviewSignals(file, authoredReviewSnippets('write', {content:fs.readFileSync(target,'utf8')})));
+    } catch { scanned.set(file, 'missing'); /* Deleted/unreadable source is handled by the reviewer. */ }
+    return scanned;
+  };
+  /** Aspects a set of moved files can affect. Semantic routing needs the files' CURRENT content: invalidation
+   * drops their cues, so a changed file is re-read here, and a file whose content is gone is assumed to touch
+   * every aspect that content cues can select. A pass whose coverage cannot be shown unchanged is not reusable. */
+  const touchedAspects = (files: string[], scanned: ReturnType<typeof scanSource>) => {
+    const touched = new Set(reviewAspects(files, '', [], [...scanned.values()].flatMap(value => Array.isArray(value) ? value : [])).map(aspect => aspect.id));
+    if ([...scanned.values()].includes('missing')) for (const id of ['security', 'interface', 'runtime']) touched.add(id);
+    return touched;
+  };
   const parentReports = () => {
     if (!consolidation || consolidation.revision !== reviewed) return reports;
     const duplicates = new Map(consolidation.groups.flatMap(group => group.merged.map(item => [item.id, group.kept] as const)));
@@ -421,11 +441,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     // whose outcome evidence is unchanged, keeps its verdict. Measured: full
     // second rounds re-ran every aspect for 4-5 minutes after one-file fixes.
     const carried = new Map<string, ReviewReport>();
-    if (previousReview && reviewed !== rev && (!evidence.length || evidenceKey === previousEvidence)) {
-      const touched = new Set(reviewAspects(previousReview.changedFiles, '', [], patternReport()).map(aspect => aspect.id));
-      for (const report of reports) if (report.outcome === 'pass' && !report.gap.trim() && !touched.has(report.aspect))
-        carried.set(report.aspect, { ...report, evidence: [`Carried forward from revision ${reviewed}: no file this aspect covers changed since that review.`, ...report.evidence].slice(0, 6) });
-    }
+    const carryable = Boolean(previousReview) && reviewed !== rev && (!evidence.length || evidenceKey === previousEvidence);
     rounds++; reviewedEvidence = evidenceKey; reviewedEvidencePaths = [...evidence]; save();
     const roundProgress = { round: rounds, startedAt: Date.now(), startedClock: performance.now(), deadlineMs: REVIEW_LIMITS.deadlineMs, aspects: {} as Record<string,string> };
     progress = roundProgress; emitProgress();
@@ -442,14 +458,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
 	  } catch {}
       // Inspect the current bounded source, including bash-generated edits.
       // Snippet reminders alone miss large writes and are not current evidence.
-      let sourceBudget = 2_000_000;
-      for (const file of changed) try {
-        const target = path.join(root, file), stat = fs.lstatSync(target), size = stat.size;
-        const relative = path.relative(fs.realpathSync(root), fs.realpathSync(target));
-        if (!stat.isFile() || relative.startsWith('../') || path.isAbsolute(relative) || size > 256000 || size > sourceBudget) continue;
-        sourceBudget -= size;
-        patterns.set(file, authoredReviewSignals(file, authoredReviewSnippets('write', {content:fs.readFileSync(target,'utf8')})));
-      } catch { /* Deleted/unreadable source is handled by the reviewer. */ }
+      const scanned = scanSource(changed);
+      for (const [file, signals] of scanned) if (Array.isArray(signals)) patterns.set(file, signals);
+      // Reuse a passed aspect only after the fresh scan: a changed file's cues were just invalidated, and
+      // choosing before re-reading its source would call a semantic aspect (auth, DOM, runtime) untouched.
+      if (carryable) {
+        const delta = previousReview!.changedFiles;
+        const touched = touchedAspects(delta, new Map(delta.map(file => [file, scanned.get(file) ?? 'missing'] as const)));
+        for (const report of reports) if (report.outcome === 'pass' && !report.gap.trim() && !touched.has(report.aspect))
+          carried.set(report.aspect, { ...report, evidence: [`Carried forward from revision ${reviewed}: no file this aspect covers changed since that review.`, ...report.evidence].slice(0, 6) });
+      }
       const aspects = reviewAspects(changed,task,history,patternReport());
       // Shadow calibration for the typed review-aspects decision: measured,
       // never applied. The deterministic set above stays authoritative.
@@ -520,7 +538,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // carry into the next round through reviewedHashes) instead of
         // discarding every paid assessment because one file changed.
         const moved = changed.filter(file => !reviewScopeHashes[file] || reviewContentHash(path.join(root, file)) !== reviewScopeHashes[file]);
-        const touched = new Set(reviewAspects(moved, '', [], patternReport()).map(aspect => aspect.id));
+        const touched = touchedAspects(moved, scanSource(moved));
         reports = received.map(report => touched.has(report.aspect) ? {...report,outcome:'unknown' as const,gap:`Source changed during this review; evidence may span revisions and cannot approve current source. ${report.gap}`.slice(0,900)} : report);
         reviewed = rev; reviewedHashes = reviewScopeHashes; save(); return summary();
       }

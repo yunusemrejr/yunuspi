@@ -82,6 +82,10 @@ interface PendingAttempt {
 	ambiguous?: boolean;
 	/** Explicit OpenRouter routing can be retained before provider attribution. */
 	candidateProvider?: string;
+	/** Wall-clock admission time; a completion only supersedes failures recorded before it. */
+	admittedAt?: number;
+	/** Pressure estimate of this request, so a failure is paced by its own size. */
+	estTokens?: number;
 }
 
 // `message_end` has no request id, so this map is only a bounded attribution
@@ -392,6 +396,8 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 				setStatus(ctx as AnyCtx, "");
 			}
 			attempt.started = performance.now();
+			attempt.admittedAt = outcome.admittedAt;
+			attempt.estTokens = estTokens;
 			return undefined; // allow the payload unchanged
 		} catch (err) {
 			removePendingAttempt(pending, attempt);
@@ -457,7 +463,10 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
                 && typeof usage.cost?.total === "number" && Number.isFinite(usage.cost.total) && usage.cost.total>=0
                 ? {...(typeof observedElapsed==="number" && observedElapsed>=0 && observedElapsed<=600_000 ? {elapsedMs:observedElapsed}:{}),messageAt:message.timestamp,input:usage.input,output:usage.output,cacheRead:usage.cacheRead,cacheWrite:usage.cacheWrite,costUsd:usage.cost.total,
                     rates:economyRateIdentity(cost,current.baseUrl,current.api)} : undefined;
-            recordSuccess({ provider, model, endpoint, inputTokens: usage.input, economyUsage });
+            const startedAt = !attempt?.ambiguous && typeof attempt?.admittedAt === "number"
+                ? attempt.admittedAt
+                : Number.isSafeInteger(message.timestamp) ? message.timestamp : undefined;
+            recordSuccess({ provider, model, endpoint, inputTokens: usage.input, economyUsage, ...(startedAt !== undefined ? { startedAt } : {}) });
 		}
 	});
 

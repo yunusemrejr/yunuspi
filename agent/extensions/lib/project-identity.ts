@@ -458,7 +458,10 @@ function resolveExplicit(cwd: string, explicitId: string, anchorDir: string, env
  */
 export function resolveProjectChain(cwd: string, opts: ResolveProjectOptions = {}, env: Env = process.env): ProjectChainLink[] {
   const now = (opts.now ?? (() => new Date().toISOString()))();
-  const root = path.resolve(cwd);
+  // Walk the canonical location: a symlink from outside the repository into one
+  // of its subdirectories has lexical parents that never reach the repository's
+  // anchors, and a generated id would then be written through the link.
+  const root = bestEffortRealpath(cwd);
   const anchors = findProjectAnchors(root, env);
   if (!anchors.length) {
     const anchorDir = findMarkerRoot(root) ?? root;

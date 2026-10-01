@@ -23,6 +23,34 @@ import { protectedEvidence } from "./local-intelligence.mjs";
 import { microMetrics } from './micro-intelligence/metrics.ts';
 import { beginHarnessActivity } from './harness-activity.ts';
 
+/** Response bodies from the network are read under a byte ceiling: a misbehaving upstream must not be able to buffer an unbounded payload into the session process. Test doubles without a stream fall back to their own accessors. */
+const JEV_MAX_BODY_BYTES = 262_144;
+async function boundedBody(response: Response, maxBytes = JEV_MAX_BODY_BYTES): Promise<string> {
+  const declared = Number(response.headers?.get?.("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) { await response.body?.cancel?.().catch(() => {}); throw Error("response too large"); }
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const text = await response.text();
+    if (text.length > maxBytes) throw Error("response too large");
+    return text;
+  }
+  const parts: Uint8Array[] = [];
+  let bytes = 0, complete = false;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) { complete = true; break; }
+      bytes += part.value.byteLength;
+      if (bytes > maxBytes) throw Error("response too large");
+      parts.push(part.value);
+    }
+    return new TextDecoder("utf-8").decode(Buffer.concat(parts));
+  } finally {
+    if (!complete) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
 export const JEV_PREFERRED_SLUGS = ["~typesafe/jev-latest", "typesafe/jev-1.13"];
@@ -257,7 +285,7 @@ async function discoverSlugs(): Promise<string[]> {
       try {
         const response = await deps.fetchImpl(JEV_MODELS_URL, { signal: controller.signal });
         if (!response.ok) return discovered.slugs;
-        const body = (await response.json()) as { data?: Array<{ id?: string }> };
+        const body = JSON.parse(await boundedBody(response)) as { data?: Array<{ id?: string }> };
         const ids = (body.data ?? [])
           .map((entry) => entry?.id)
           .filter((id): id is string => typeof id === "string" && /^~?typesafe\/jev[-\w.]*$/.test(id));
@@ -331,14 +359,14 @@ async function postDecisions(
       signal: controller.signal,
     });
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
+      const body = await boundedBody(response, 4096).catch(() => "");
       // Provider error bodies may echo the submitted state. Retain only the
       // status and safe model-rejection category in health/UI diagnostics.
       const err = Error(`decisions ${response.status}${isModelRejection(response.status, body) ? ': invalid model' : ''}`) as Error & { status?: number };
       err.status = response.status;
       throw err;
     }
-    const body = (await response.json()) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
+    const body = JSON.parse(await boundedBody(response)) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
     controller.signal.throwIfAborted();
     if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
       throw Error("decisions: malformed answers");

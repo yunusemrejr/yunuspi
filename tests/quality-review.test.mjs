@@ -1594,6 +1594,31 @@ test('a repair round re-reviews only aspects the delta touches; clean passes car
 });
 
 
+test('a repair that changes semantic auth mechanics in a generic file re-reviews security instead of carrying it', async (t) => {
+ const f = await fixture(t);
+ const login = (secret) => `export async function login(u, p) {\n const ok = await verifyPassword(p, u.hash);\n if (!ok) throw new Error('no');\n return jwt.sign({ sub: u.id }, process.env.${secret});\n}`;
+ await f.mutate('src/service.js', login('API_SECRET'));
+ await f.tool({ action: 'review' });
+ assert.ok(f.calls.at(-1)[0].aspects.some(a => a.id === 'security'), 'auth mechanics select security by content, not by name');
+ await f.mutate('src/service.js', login('OTHER_SECRET'));
+ await f.tool({ action: 'review' });
+ assert.ok(f.calls.at(-1)[0].aspects.some(a => a.id === 'security'), 'the earlier security pass must not stand for changed auth mechanics');
+});
+
+test('deleting the file that justified a semantic aspect never presents its old pass as current evidence', async (t) => {
+ const f = await fixture(t);
+ await f.mutate('src/service.js', "export async function login(u, p) {\n const ok = await verifyPassword(p, u.hash);\n if (!ok) throw new Error('no');\n return jwt.sign({ sub: u.id }, process.env.API_SECRET);\n}");
+ await f.mutate('src/value.js', 'export const value=1;');
+ await f.tool({ action: 'review' });
+ assert.ok(f.calls.at(-1)[0].aspects.some(a => a.id === 'security'));
+ fs.rmSync(path.join(f.dir, 'src/service.js'));
+ await f.mutate('src/value.js', 'export const value=2;');
+ const second = await f.tool({ action: 'review' });
+ const data = second.details ?? JSON.parse(second.content[0].text);
+ const security = data.reports.find(report => report.aspect === 'security');
+ assert.ok(!security || !/Carried forward/.test(security.evidence[0] ?? ''), 'a removed file cannot be certified by its earlier pass');
+});
+
 test('review parent receipts compact duplicate findings while inspect retains full original evidence', async t => {
   const detail = 'The login handler persists session credentials in browser-visible cookies without HttpOnly protection, allowing injected scripts to capture the token and impersonate the authenticated user.';
   const f = await fixture(t, { runner: async req => req.aspects.map(aspect => ({ aspect: aspect.id, ok: true, text: JSON.stringify({

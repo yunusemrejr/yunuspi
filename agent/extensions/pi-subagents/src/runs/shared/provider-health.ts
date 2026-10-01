@@ -406,47 +406,75 @@ export function readHealth(): ProviderHealthState {
 }
 
 /**
- * Exclusive mkdir lock with stale takeover (same discipline as
- * notify-broker.mjs). Returns the release function.
+ * One non-blocking acquisition attempt for the exclusive mkdir lock (same
+ * stale-takeover discipline as notify-broker.mjs). Returns the release
+ * function, or undefined while a live owner holds it. A lock older than
+ * STALE_LOCK_MS is dead: the critical section is a read-modify-write of a
+ * small JSON file, never a long operation.
  */
+function tryAcquireLock(lockDir: string): (() => void) | undefined {
+	try {
+		fs.mkdirSync(lockDir);
+		return () => {
+			try {
+				fs.rmSync(lockDir, { recursive: true, force: true });
+			} catch {
+				/* best effort */
+			}
+		};
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		try {
+			if (Date.now() - fs.statSync(lockDir).mtimeMs > STALE_LOCK_MS) fs.rmSync(lockDir, { recursive: true, force: true });
+		} catch {
+			/* a disappearing lock is transient; the caller's deadline bounds a persistent stat error */
+		}
+		return undefined;
+	}
+}
+
+function lockTimeoutError(lockDir: string): Error {
+	return new Error(`provider-health: state lock timeout (${LOCK_TIMEOUT_MS}ms): ${lockDir}`);
+}
+
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+
+/** Synchronous sleep that parks the thread instead of spinning the CPU. */
+function sleepSync(ms: number): void {
+	Atomics.wait(sleepCell, 0, 0, ms);
+}
+
 function acquireLock(lockDir: string): () => void {
 	const deadline = Date.now() + LOCK_TIMEOUT_MS;
 	for (;;) {
-		try {
-			fs.mkdirSync(lockDir);
-			return () => {
-				try {
-					fs.rmSync(lockDir, { recursive: true, force: true });
-				} catch {
-					/* best effort */
-				}
-			};
-		} catch (err) {
-			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-			// A lock older than STALE_LOCK_MS is dead: the critical section is a
-			// read-modify-write of a small JSON file, never a long operation.
-			try {
-				if (Date.now() - fs.statSync(lockDir).mtimeMs > STALE_LOCK_MS) {
-					fs.rmSync(lockDir, { recursive: true, force: true });
-					continue;
-				}
-			} catch {
-				// A disappearing lock is transient, but a persistent stat error must
-				// still honor the acquisition deadline instead of spinning forever.
-				if (Date.now() > deadline) {
-					throw new Error(`provider-health: state lock timeout (${LOCK_TIMEOUT_MS}ms): ${lockDir}`);
-				}
-				continue; // lock vanished between stat and rm — retry
-			}
-			if (Date.now() > deadline) {
-				throw new Error(`provider-health: state lock timeout (${LOCK_TIMEOUT_MS}ms): ${lockDir}`);
-			}
-			const spinUntil = Date.now() + LOCK_POLL_MS;
-			while (Date.now() < spinUntil) {
-				/* bounded wait, keeps the critical section tight */
-			}
-		}
+		const release = tryAcquireLock(lockDir);
+		if (release) return release;
+		if (Date.now() > deadline) throw lockTimeoutError(lockDir);
+		sleepSync(LOCK_POLL_MS);
 	}
+}
+
+/** Lock wait that yields to the event loop and honors cancellation. */
+async function acquireLockAsync(lockDir: string, signal?: AbortSignal): Promise<() => void> {
+	const deadline = Date.now() + LOCK_TIMEOUT_MS;
+	for (;;) {
+		signal?.throwIfAborted();
+		const release = tryAcquireLock(lockDir);
+		if (release) return release;
+		if (Date.now() > deadline) throw lockTimeoutError(lockDir);
+		await sleepWithSignal(LOCK_POLL_MS, signal, defaultSleep);
+	}
+}
+
+function commitHealth<T>(file: string, mutator: (state: ProviderHealthState) => T): T {
+	const state = readHealth();
+	const result = mutator(state);
+	state.updatedAt = Date.now();
+	expireStaleFailures(state, state.updatedAt);
+	const tmp = `${file}.${process.pid}.tmp`;
+	fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+	fs.renameSync(tmp, file);
+	return result;
 }
 
 /** Locked read-modify-write; persists atomically (tmp+rename, 0600). */
@@ -456,14 +484,19 @@ export function mutateHealth<T>(mutator: (state: ProviderHealthState) => T): T {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	const release = acquireLock(lockDir);
 	try {
-		const state = readHealth();
-		const result = mutator(state);
-		state.updatedAt = Date.now();
-		expireStaleFailures(state, state.updatedAt);
-		const tmp = `${file}.${process.pid}.tmp`;
-		fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
-		fs.renameSync(tmp, file);
-		return result;
+		return commitHealth(file, mutator);
+	} finally {
+		release();
+	}
+}
+
+/** mutateHealth for request-path callers: waits for the lock without blocking the event loop. */
+export async function mutateHealthAsync<T>(mutator: (state: ProviderHealthState) => T, signal?: AbortSignal): Promise<T> {
+	const file = healthFilePath();
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	const release = await acquireLockAsync(`${file}.lock`, signal);
+	try {
+		return commitHealth(file, mutator);
 	} finally {
 		release();
 	}
@@ -504,15 +537,23 @@ export interface RecordRequestInput {
 	now?: number;
 }
 
+function pushRequest(state: ProviderHealthState, input: RecordRequestInput, now: number): void {
+	const entry = ensureEntry(state, input.provider, now);
+	entry.updatedAt = now;
+	entry.requests.push({ at: now, estTokens: Math.max(0, Math.round(input.estTokens ?? 0)) });
+	pruneWindow(entry, now);
+}
+
 /** Record an outgoing request in the provider's pressure window. */
 export function recordRequest(input: RecordRequestInput): void {
 	const now = input.now ?? Date.now();
-	mutateHealth((state) => {
-		const entry = ensureEntry(state, input.provider, now);
-		entry.updatedAt = now;
-		entry.requests.push({ at: now, estTokens: Math.max(0, Math.round(input.estTokens ?? 0)) });
-		pruneWindow(entry, now);
-	});
+	mutateHealth((state) => pushRequest(state, input, now));
+}
+
+/** Request-path variant: waits for the state lock without blocking the event loop. */
+export async function recordRequestAsync(input: RecordRequestInput, signal?: AbortSignal): Promise<void> {
+	const now = input.now ?? Date.now();
+	await mutateHealthAsync((state) => pushRequest(state, input, now), signal);
 }
 
 export interface RecordFailureInput {
@@ -631,6 +672,14 @@ export interface RecordSuccessInput {
 	model?: string;
 	inputTokens?: number;
  economyUsage?: Omit<EconomyUsageSample, "at">;
+	/**
+	 * Wall-clock time the successful request was admitted. A success is recovery
+	 * evidence only for failures recorded no later than this: a response that was
+	 * already in flight when a sibling hit a 429 says nothing about that 429.
+	 * Omitted for completions that cannot be attributed to a request; those keep
+	 * the unconditional clear.
+	 */
+	startedAt?: number;
 	now?: number;
 }
 
@@ -651,13 +700,19 @@ export function recordSuccess(input: RecordSuccessInput): void {
 			ok: true,
 			...(typeof input.inputTokens === "number" ? { inputTokens: Math.round(input.inputTokens) } : {}),
 		};
-		entry.failure = undefined;
-		entry.cooldownUntil = 0;
-		entry.cooldownSource = undefined;
+		const supersedes = (failure: FailureRecord | undefined) =>
+			input.startedAt === undefined || !failure || failure.at <= input.startedAt;
+		if (supersedes(entry.failure)) {
+			entry.failure = undefined;
+			entry.cooldownUntil = 0;
+			entry.cooldownSource = undefined;
+		}
 		if (input.model && entry.models[input.model]) {
 			const model = entry.models[input.model]!;
-			model.cooldownUntil = 0;
-			model.failure = undefined;
+			if (supersedes(model.failure)) {
+				model.cooldownUntil = 0;
+				model.failure = undefined;
+			}
 			model.updatedAt = now;
             const usage = input.economyUsage;
             const sample: RecoveryObservation = {at:now,ok:true,rates:usage?.rates,
@@ -666,7 +721,8 @@ export function recordSuccess(input: RecordSuccessInput): void {
             observeRecovery(model, sample);
             if (input.endpoint && input.provider === "openrouter") {
              const endpoint = entry.models[endpointHealthKey(input.model, input.endpoint)] ??= {updatedAt:now,cooldownUntil:0};
-             endpoint.cooldownUntil=0; endpoint.failure=undefined; endpoint.updatedAt=now;
+             if (supersedes(endpoint.failure)) {endpoint.cooldownUntil=0; endpoint.failure=undefined;}
+             endpoint.updatedAt=now;
              observeRecovery(endpoint, sample);
             }
             if (usage && [usage.input,usage.output,usage.cacheRead,usage.cacheWrite].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000_000)
@@ -750,6 +806,8 @@ export interface GateOutcome {
 	allowed: boolean;
 	/** Deferred ms before the allow (0 when immediately allowed). */
 	deferredMs: number;
+	/** Wall-clock time the request was admitted (after any deferral). */
+	admittedAt: number;
 	decision?: RouteDecision;
 }
 
@@ -786,17 +844,24 @@ function sleepWithSignal(ms: number, signal: AbortSignal | undefined, sleep: (ms
 /**
  * THE pre-send gate step (used by extensions/provider-gate.ts and tests):
  *
- *   1. record request pressure (shared, so sibling processes see it),
- *   2. evaluate executable cooldown state for the route,
- *   3. when cooling and the remaining cooldown fits the in-gate budget:
+ *   1. evaluate executable cooldown state for the route from a lock-free read
+ *      of the shared file (so a held or failing state lock can never prevent
+ *      the cooldown from being enforced),
+ *   2. when cooling and the remaining cooldown fits the in-gate budget:
  *      DEFER — hold the request in place (polling shared state so a sibling
  *      session's success/failure is observed), preserving the pending
  *      continuation in the store for inspection, then allow the SAME request,
- *   4. when cooling longer than the budget: DENY by throwing GateDeniedError
+ *   3. when cooling longer than the budget: DENY by throwing GateDeniedError
  *      carrying `PI_AUTONOMOUS_REQUEST_DENIED` (the patched request seam
  *      re-throws it, so the provider is never called) and a rate-limit-class
  *      message (the cooldown-class retry machinery then owns the longer wait:
- *      fixed 25s between re-requests, 2-min budget, pause-with-note).
+ *      fixed 25s between re-requests, 2-min budget, pause-with-note),
+ *   4. only an ADMITTED request is added to the shared pressure window, so
+ *      denied or cancelled attempts never count as outgoing traffic.
+ *
+ * Shared-state writes (pressure, pending markers) are best-effort and wait for
+ * the state lock asynchronously and abortably; their failure never turns an
+ * allowed request into an error nor a denial into a different error.
  *
  * ZERO provider calls happen while a cooling state binds — the allow returns
  * only after eligibility.
@@ -804,50 +869,53 @@ function sleepWithSignal(ms: number, signal: AbortSignal | undefined, sleep: (ms
 export async function gateRequest(input: GateRequestInput): Promise<GateOutcome> {
 	input.signal?.throwIfAborted();
 	const now = input.now ?? Date.now();
-	recordRequest({ provider: input.provider, model: input.model, estTokens: input.estTokens, now });
-	let decision = evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now });
-	if (decision.allowed) {
-		clearPending(`${input.provider}/${input.model ?? ""}`, input.session);
-		return { allowed: true, deferredMs: 0 };
-	}
-	const maxWaitMs = input.maxWaitMs ?? resolveMaxWaitMs();
 	const route = `${input.provider}/${input.model ?? ""}`;
-	if (decision.waitMs > maxWaitMs) {
-		denyPending(route, decision, input.session);
+	const evaluate = (at: number) => evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: at });
+	const admit = async (deferredMs: number): Promise<GateOutcome> => {
+		const admittedAt = Date.now();
+		await bestEffort(() => recordRequestAsync({ provider: input.provider, model: input.model, estTokens: input.estTokens, now: admittedAt }, input.signal), input.signal);
+		await bestEffort(() => clearPending(route, input.session, input.signal), input.signal);
+		return { allowed: true, deferredMs, admittedAt };
+	};
+	let decision = evaluate(now);
+	if (decision.allowed) return admit(0);
+	const maxWaitMs = input.maxWaitMs ?? resolveMaxWaitMs();
+	const deny = async (): Promise<never> => {
+		await bestEffort(() => denyPending(route, decision, input.session, input.signal), input.signal);
 		throw new GateDeniedError(
 			`429 rate limit: provider-gate deferral for ${route} — cooldown-active ${Math.ceil(decision.waitMs / 1000)}s` +
 				` (kind: ${decision.kind ?? "unknown"}, source: ${decision.source ?? "unknown"}, bound: ${decision.boundBy ?? "unknown"};` +
 				` state: provider-health.json)`,
 			decision,
 		);
-	}
+	};
+	if (decision.waitMs > maxWaitMs) return deny();
 	const sleep = input.sleep ?? defaultSleep;
 	const startedAt = now;
-	markPending(route, decision, input.session);
+	await bestEffort(() => markPending(route, decision, input.session, input.signal), input.signal);
 	try {
 		for (;;) {
 			await sleepWithSignal(Math.min(GATE_POLL_MS, decision.waitMs), input.signal, sleep);
 			input.signal?.throwIfAborted();
 			const now2 = Date.now();
-			decision = evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: now2 });
-			if (decision.allowed) {
-				clearPending(route, input.session);
-				return { allowed: true, deferredMs: now2 - startedAt };
-			}
-			if (now2 - startedAt + decision.waitMs > maxWaitMs) {
-				denyPending(route, decision, input.session);
-				throw new GateDeniedError(
-					`429 rate limit: provider-gate deferral for ${route} — cooldown-active ${Math.ceil(decision.waitMs / 1000)}s` +
-						` (kind: ${decision.kind ?? "unknown"}, source: ${decision.source ?? "unknown"}, bound: ${decision.boundBy ?? "unknown"};` +
-						` state: provider-health.json)`,
-					decision,
-				);
-			}
+			decision = evaluate(now2);
+			if (decision.allowed) return await admit(now2 - startedAt);
+			if (now2 - startedAt + decision.waitMs > maxWaitMs) return await deny();
 		}
 	} catch (err) {
 		// Cancellation while deferring: drop the pending marker, rethrow.
-		if (!(err instanceof GateDeniedError)) clearPending(route, input.session);
+		if (!(err instanceof GateDeniedError)) await bestEffort(() => clearPending(route, input.session), undefined);
 		throw err;
+	}
+}
+
+/** Shared-state bookkeeping must never decide admission; only cancellation propagates. */
+async function bestEffort(work: () => Promise<unknown> | unknown, signal: AbortSignal | undefined): Promise<void> {
+	try {
+		await work();
+	} catch (err) {
+		signal?.throwIfAborted();
+		void err;
 	}
 }
 
@@ -860,50 +928,39 @@ function resolveMaxWaitMs(): number {
 // Pending-continuation bookkeeping (observability: inspectable, not prose)
 // ---------------------------------------------------------------------------
 
-function markPending(route: string, decision: RouteDecision, session?: string): void {
-	mutateHealth((state) => {
-		state.pending = state.pending.filter((p) => p.route !== route || p.session !== session);
-		state.pending.push({
-			route,
-			reason: "cooldown-active",
-			since: Date.now(),
-			until: decision.cooldownUntil,
-			...(session ? { session } : {}),
-			...(decision.kind !== undefined ? { kind: decision.kind } : {}),
-			...(decision.source !== undefined ? { source: decision.source } : {}),
-		});
-		state.pending = state.pending.slice(-16);
-		return undefined;
-	});
+function pendingEntry(route: string, reason: string, decision: RouteDecision, session?: string): PendingContinuation {
+	return {
+		route,
+		reason,
+		since: Date.now(),
+		until: decision.cooldownUntil,
+		...(session ? { session } : {}),
+		...(decision.kind !== undefined ? { kind: decision.kind } : {}),
+		...(decision.source !== undefined ? { source: decision.source } : {}),
+	};
 }
 
-function clearPending(route: string, session?: string): void {
-	// Healthy requests ordinarily have no pending continuation. Avoid a second
-	// locked rewrite after pressure recording when cleanup would change nothing.
+function replacePending(state: ProviderHealthState, route: string, session: string | undefined, next?: PendingContinuation): void {
+	state.pending = state.pending.filter((p) => p.route !== route || p.session !== session);
+	if (next) state.pending.push(next);
+	state.pending = state.pending.slice(-16);
+}
+
+async function markPending(route: string, decision: RouteDecision, session?: string, signal?: AbortSignal): Promise<void> {
+	await mutateHealthAsync((state) => replacePending(state, route, session, pendingEntry(route, "cooldown-active", decision, session)), signal);
+}
+
+async function clearPending(route: string, session?: string, signal?: AbortSignal): Promise<void> {
+	// Healthy requests ordinarily have no pending continuation. Avoid a locked
+	// rewrite after pressure recording when cleanup would change nothing.
 	if (!readHealth().pending.some((p) => p.route === route && p.session === session)) return;
-	mutateHealth((state) => {
-		state.pending = state.pending.filter((p) => p.route !== route || p.session !== session);
-		return undefined;
-	});
+	await mutateHealthAsync((state) => replacePending(state, route, session), signal);
 }
 
-function denyPending(route: string, decision: RouteDecision, session?: string): void {
+async function denyPending(route: string, decision: RouteDecision, session?: string, signal?: AbortSignal): Promise<void> {
 	// A denial hands the wait back to the cooldown-class retry machinery; keep
 	// a pending marker with the DENIED reason so the deferral stays inspectable.
-	mutateHealth((state) => {
-		state.pending = state.pending.filter((p) => p.route !== route || p.session !== session);
-		state.pending.push({
-			route,
-			reason: "denied-beyond-gate-budget",
-			since: Date.now(),
-			until: decision.cooldownUntil,
-			...(session ? { session } : {}),
-			...(decision.kind !== undefined ? { kind: decision.kind } : {}),
-			...(decision.source !== undefined ? { source: decision.source } : {}),
-		});
-		state.pending = state.pending.slice(-16);
-		return undefined;
-	});
+	await mutateHealthAsync((state) => replacePending(state, route, session, pendingEntry(route, "denied-beyond-gate-budget", decision, session)), signal);
 }
 
 // ---------------------------------------------------------------------------

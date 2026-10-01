@@ -11,6 +11,11 @@ const context=(id='current')=>({cwd:'/tmp/synthetic-project',sessionManager:{get
 const history={evidence:[{id:'past:1',role:'user',at:'2026-01-01',text:'Preserve the serif typography and the blue palette.'},{id:'past:2',role:'assistant',at:'2026-02-01',text:'I added a jumping mascot to draw attention to the navigation.'}],incomplete:false,coverage:'Two relevant synthetic messages.'};
 const result={status:'complete',proposals:[{role:'preservation',text:'Keep typography [past:1].'},{role:'change',text:'Reconsider the mascot behavior [past:2].'}],discussion:'Revise the motion substantially; preserve the explicit visual references. Verify reduced-motion and the rendered result.',gap:''};
 
+test('a bounded refactor follows the shared adaptive admission instead of buying a council',()=>{
+  for(const p of ['Refactor the local variable foo to bar in one file.','Refactor this helper into a single small function.','Refactor the parser loop to use early returns.'])assert.equal(shouldRunScopeCouncil(p),false,p);
+  for(const p of ['Refactor the task scheduling architecture across multiple services.','Refactor the module and compare alternatives for the storage layer.','Redesign and refactor the checkout flow.'])assert.equal(shouldRunScopeCouncil(p),true,p);
+});
+
 test('open scope changes trigger automatically; exact edits, quotations and read-only tasks stay small',()=>{
   for(const p of [prompt,'Improve the checkout workflow.','Refactor the task scheduling architecture.','Please fix the animation; it looks cheap.','Can you rework the character behavior?',"Redesign the distracting mascot, but don't change the font or colors."])assert.equal(shouldRunScopeCouncil(p),true,p);
   for(const p of ['What is a good animation?','How would you redesign the website?','Only explain how to improve the UI.','Change animation-duration to 2s.','Fix the spelling of navigation.','Read-only review: redesign the layout?','> Please redesign the animation\nSummarize the quotation.','```text\nRedesign the UI\n```'])assert.equal(shouldRunScopeCouncil(p),false,p);

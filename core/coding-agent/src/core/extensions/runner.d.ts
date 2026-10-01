@@ -156,7 +156,7 @@ export declare class ExtensionRunner {
     emitContext(messages: AgentMessage[], metadata?: Pick<ContextEvent, "requestMessages" | "requestId" | "turnId" | "requestMessageIndex">): Promise<AgentMessage[]>;
     emitBeforeProviderRequest(payload: unknown): Promise<unknown>;
     emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
-    emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions): Promise<BeforeAgentStartCombinedResult | undefined>;
+    emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions, requestSignal?: AbortSignal): Promise<BeforeAgentStartCombinedResult | undefined>;
     emitResourcesDiscover(cwd: string, reason: ResourcesDiscoverEvent["reason"]): Promise<{
         skillPaths: Array<{
             path: string;

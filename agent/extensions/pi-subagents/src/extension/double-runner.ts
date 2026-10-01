@@ -275,6 +275,13 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	}
 	pi.registerMessageRenderer?.(DOUBLE_PROGRESS, renderDoubleProgress);
 
+	// Extension-generated wakes (reminders, background results) are the harness
+	// continuing its own work, not a new user prompt; they must not pay for
+	// another twin-stream pass. Input is serialized, so the latest input event
+	// is the one that owns the before_agent_start that follows it.
+	let inputFromExtension = false;
+	pi.on?.("input", (event: any) => { inputFromExtension = event?.source === "extension"; return undefined; });
+
 	pi.on?.("session_start", (_event: any, ctx: any) => {
 		enabled = false;
 		capabilityWarned = false;
@@ -326,6 +333,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	pi.on?.("before_agent_start", async (event: any, ctx: ExtensionContext) => {
 		if (!doubleEnabled()) return undefined;
 		if ((globalThis as any)[DOUBLE_RUNNER] !== runner) return undefined;
+		if (inputFromExtension) return undefined;
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		if (!prompt.trim()) return undefined;
 		const ref = modelRefOf(ctx?.model);

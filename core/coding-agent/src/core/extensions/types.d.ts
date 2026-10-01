@@ -558,6 +558,8 @@ export interface BeforeAgentStartEvent {
     systemPrompt: string;
     /** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
     systemPromptOptions: BuildSystemPromptOptions;
+    /** Aborts when the user cancels this prompt before the agent run starts (Stop, session switch). Bind child work to it. */
+    signal?: AbortSignal;
 }
 /** Fired when an agent loop starts */
 export interface AgentStartEvent {

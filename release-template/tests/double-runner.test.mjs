@@ -431,6 +431,46 @@ test('guards: kill switch, empty prompt, missing model, missing capability, abor
   assert.equal(launches, 0, 'no stream launches on guarded or cancelled turns');
 });
 
+test('an extension-sourced wake is not doubled, but the next user prompt is', async () => {
+  const pi = makePi();
+  let launches = 0;
+  registerDoubleMode(pi, { launch: async () => { launches++; return okResult('x'); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+
+  await fire(pi, 'input', { text: 'reminder fired', source: 'extension' }, ctx);
+  const [woken] = await fire(pi, 'before_agent_start', { prompt: 'reminder fired', systemPrompt: 's' }, ctx);
+  assert.equal(woken, undefined);
+  assert.equal(launches, 0, 'no twin streams for the harness continuing its own work');
+
+  await fire(pi, 'input', { text: 'Do the real task.', source: 'interactive' }, ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Do the real task.', systemPrompt: 's' }, ctx);
+  assert.ok(launches >= 2, 'a user prompt still launches both streams');
+});
+
+test('aborting the request signal mid-preflight cancels both streams and starts no reconciliation', async () => {
+  const pi = makePi();
+  const launched = [];
+  registerDoubleMode(pi, {
+    launch: (id, params, signal) => {
+      launched.push({ kind: kindOf(params), signal });
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    },
+  });
+  const request = new AbortController();
+  const ctx = makeCtx(pi, { ctx: { signal: request.signal } });
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const run = fire(pi, 'before_agent_start', { prompt: 'Do it.', systemPrompt: 's', signal: request.signal }, ctx);
+  while (launched.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+  request.abort();
+  const [result] = await run;
+  assert.equal(result, undefined, 'no stale directive is returned');
+  assert.deepEqual(launched.map((entry) => entry.kind).sort(), ['A', 'B'], 'reconciliation never starts');
+  assert.ok(launched.every((entry) => entry.signal.aborted), 'both children were aborted');
+});
+
 test('limits keep reconciliation lightweight and the run bounded', () => {
   assert.ok(DOUBLE_LIMITS.synthesisMs < DOUBLE_LIMITS.streamMs);
   assert.ok(DOUBLE_LIMITS.tokensReconcile < DOUBLE_LIMITS.tokensPerStream);

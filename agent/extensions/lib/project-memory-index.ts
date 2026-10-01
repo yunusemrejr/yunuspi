@@ -85,6 +85,11 @@ export function contentHash(sourceType: string, text: string): string {
   return createHash("sha256").update(`${sourceType}\0${normalizeForHash(text)}`).digest("hex");
 }
 
+/** Source files are compared byte for byte: identifier/string case and indentation change what code means. */
+export function sourceHash(sourceType: string, text: string): string {
+  return createHash("sha256").update(`source\0${sourceType}\0${text}`).digest("hex");
+}
+
 export function newChunkId(): string {
   return `mem_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
 }
@@ -262,8 +267,8 @@ function splitBlocks(text: string, hardDef: RegExp | null, softDef: RegExp | nul
   return blocks;
 }
 
-function hardSplitBlock(block: TextBlock, maxChars: number): TextBlock[] {
-  if (block.text.length <= ATOM_HARD_SPLIT_CHARS) return [block];
+function hardSplitBlock(block: TextBlock, maxChars: number, hardLimit: number): TextBlock[] {
+  if (block.text.length <= hardLimit) return [block];
   const out: TextBlock[] = [];
   let acc: string[] = [];
   let accChars = 0;
@@ -302,14 +307,14 @@ function hardSplitBlock(block: TextBlock, maxChars: number): TextBlock[] {
   return out.length ? out : [block];
 }
 
-function packBlocks(blocks: TextBlock[], source: string, maxChars: number): TextBlock[] {
+function packBlocks(blocks: TextBlock[], source: string, maxChars: number, hardLimit: number): TextBlock[] {
   const out: TextBlock[] = [];
   let acc: TextBlock | null = null;
   const flush = () => {
     if (acc) out.push(acc);
     acc = null;
   };
-  for (const block of blocks.flatMap((b) => hardSplitBlock(b, maxChars))) {
+  for (const block of blocks.flatMap((b) => hardSplitBlock(b, maxChars, hardLimit))) {
     if (!acc) {
       acc = block;
       continue;
@@ -330,12 +335,12 @@ function packBlocks(blocks: TextBlock[], source: string, maxChars: number): Text
 /** Split one parent chunk into retrieval atoms. Short parents stay a single
  * atom with byte-identical text, so their vectors match the legacy whole-chunk
  * embedding input exactly. */
-export function atomizeParent(text: string, kind: "prose" | "code", maxChars = ATOM_TARGET_CHARS): MemoryAtom[] {
+export function atomizeParent(text: string, kind: "prose" | "code", maxChars = ATOM_TARGET_CHARS, hardLimit = ATOM_HARD_SPLIT_CHARS): MemoryAtom[] {
   if (text.length <= maxChars) {
     return [{ title: "", text, start: 1, end: text.split("\n").length, charStart: 0, charEnd: text.length }];
   }
   const blocks = splitBlocks(text, kind === "code" ? CODE_HARD_DEF : null, kind === "code" ? CODE_SOFT_DEF : null);
-  const packed = packBlocks(blocks.length ? blocks : [{ text, startLine: 1, endLine: text.split("\n").length, charStart: 0, charEnd: text.length }], text, maxChars);
+  const packed = packBlocks(blocks.length ? blocks : [{ text, startLine: 1, endLine: text.split("\n").length, charStart: 0, charEnd: text.length }], text, maxChars, hardLimit);
   return packed.map((block) => ({ title: "", text: block.text, start: block.startLine, end: block.endLine, charStart: block.charStart, charEnd: block.charEnd }));
 }
 
@@ -347,6 +352,16 @@ export function atomizeProse(text: string, maxChars = ATOM_TARGET_CHARS): Memory
 /** Code atoms: definition-aware blocks packed to target size. */
 export function atomizeCode(text: string, maxChars = ATOM_TARGET_CHARS): MemoryAtom[] {
   return atomizeParent(text, "code", maxChars);
+}
+
+/**
+ * Characters of embedding input the embedder can actually represent (undefined
+ * when it covers every atom). A local model that truncates at 512 characters
+ * would otherwise store atoms whose tails no vector ever describes.
+ */
+export function embedderCoverage(embedder: MemoryEmbedder | undefined): number | undefined {
+  const value = embedder?.coverageChars;
+  return typeof value === "number" && Number.isFinite(value) && value >= 64 ? Math.floor(value) : undefined;
 }
 
 export function newAtomId(chunkId: string, ordinal: number): string {
@@ -369,9 +384,13 @@ export interface AtomizeParentInput {
 export function buildAtomInputs(
   chunkId: string,
   parent: AtomizeParentInput,
-  opts: { kind: "prose" | "code"; path?: string },
+  opts: { kind: "prose" | "code"; path?: string; coverage?: number },
 ): UpsertAtomInput[] {
-  return atomizeParent(parent.text, opts.kind).map((atom, ordinal) => ({
+  // The parent title is prepended to the first atom's embedding input, so the
+  // atom budget leaves room for it (and a short allowance for the separator).
+  const fit = opts.coverage === undefined ? undefined : Math.max(128, opts.coverage - 1 - Math.min(160, parent.title.length));
+  const atoms = fit === undefined ? atomizeParent(parent.text, opts.kind) : atomizeParent(parent.text, opts.kind, Math.min(ATOM_TARGET_CHARS, fit), Math.min(ATOM_HARD_SPLIT_CHARS, fit));
+  return atoms.map((atom, ordinal) => ({
     id: newAtomId(chunkId, ordinal),
     chunk_id: chunkId,
     ordinal,
@@ -434,13 +453,13 @@ export async function embedAtomJobs(
 }
 
 /** Atomize a parent that predates atoms (legacy backfill path). */
-export function ensureChunkAtoms(store: ProjectVectorStore, chunk: StoredChunk, now: string): StoredAtom[] {
+export function ensureChunkAtoms(store: ProjectVectorStore, chunk: StoredChunk, now: string, coverage?: number): StoredAtom[] {
   const existing = store.getAtoms(chunk.id);
   if (existing.length) return existing;
   const detected = chunk.source_path ? chunkerForPath(chunk.source_path) : chunk.source_type === "code" ? "code" : "text";
   store.setAtoms(chunk.id, buildAtomInputs(chunk.id,
     { title: chunk.title, text: chunk.text, start: chunk.source_start },
-    { kind: detected === "code" ? "code" : "prose", path: chunk.source_path }), now);
+    { kind: detected === "code" ? "code" : "prose", path: chunk.source_path, coverage }), now);
   return store.getAtoms(chunk.id);
 }
 
@@ -580,7 +599,7 @@ export async function indexEvent(
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
     result.ids.push(id);
-    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: "prose", path: event.path ?? "" });
+    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: "prose", path: event.path ?? "", coverage: embedderCoverage(opts.embedder) });
     store.setAtoms(id, inputs, now);
     for (const atom of inputs) {
       jobs.push({ chunkId: id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.title, atom.text) });
@@ -624,11 +643,23 @@ export async function indexFile(
   const now = (opts.now ?? (() => new Date().toISOString()))();
   const pending: Array<{ id: string; chunk: TextChunk; hash: string }> = [];
   const backfillIds: string[] = [];
+  const keepIds: string[] = [];
+  const keepStarts = new Map<string, number>();
+  const commit = input.commit;
   for (const chunk of chunks) {
-    const hash = contentHash(`${type}:${input.path}`, chunk.text);
-    const duplicate = store.hasHash(hash);
+    const hash = sourceHash(`${type}:${input.path}`, chunk.text);
+    // Rows stored before exact source identity used a normalized hash; they
+    // still count as this chunk only when their text is byte-identical.
+    let duplicate = store.hasHash(hash);
+    if (!duplicate) {
+      const legacy = store.hasHash(contentHash(`${type}:${input.path}`, chunk.text));
+      if (legacy && store.getChunk(legacy)?.text === chunk.text) duplicate = legacy;
+    }
     if (duplicate) {
       result.skippedDup++;
+      keepIds.push(duplicate);
+      keepStarts.set(duplicate, chunk.start);
+      store.refreshSource(duplicate, { start: chunk.start, end: chunk.end, ...(commit ? { commit } : {}) }, now);
       const stored = store.getChunk(duplicate);
       if (opts.embedder && stored && chunkNeedsSpace(store, stored, opts.embedder.id)) backfillIds.push(duplicate);
       continue;
@@ -663,12 +694,15 @@ export async function indexFile(
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
     result.ids.push(id);
-    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: atomKind, path: input.path });
+    keepIds.push(id);
+    keepStarts.set(id, chunk.start);
+    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: atomKind, path: input.path, coverage: embedderCoverage(opts.embedder) });
     store.setAtoms(id, inputs, now);
     for (const atom of inputs) {
       jobs.push({ chunkId: id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.title, atom.text) });
     }
   }
+  retireReplacedSource(store, input.path, type, keepIds, keepStarts, now);
   if (jobs.length && opts.embedder) {
     result.embedded += (await embedAtomJobs(store, opts.embedder, jobs.slice(0, ATOM_EMBED_BUDGET), { signal: opts.signal, now: () => now })).gained.size;
   }
@@ -677,6 +711,35 @@ export async function indexFile(
     result.embedded += report.embedded + report.fallbackEmbedded;
   }
   return result;
+}
+
+/**
+ * Fragments an earlier index of this file produced that the current text no
+ * longer contains become historical: kept for provenance, backlinked to the
+ * nearest current fragment and demoted by retrieval. Only rows recorded in the
+ * file's own index manifest (or, for rows predating it, same-path rows of the
+ * same type that are not edit notes) are touched, never other memories.
+ */
+function retireReplacedSource(store: ProjectVectorStore, sourcePath: string, type: ChunkType, keepIds: string[], keepStarts: Map<string, number>, now: string): void {
+  if (!keepIds.length) return;
+  const previous = store.sourceManifest(sourcePath, type)
+    ?? store.getChunksByPath(sourcePath, 200)
+      .filter((chunk) => chunk.source_type === type && chunk.valid_until === null && !chunk.superseded_by && !chunk.text.startsWith("File edited via "))
+      .map((chunk) => chunk.id);
+  const keep = new Set(keepIds);
+  const starts = [...keepStarts];
+  for (const id of previous) {
+    if (keep.has(id)) continue;
+    const old = store.getChunk(id);
+    if (!old || old.valid_until !== null || old.source_path !== sourcePath) continue;
+    let nearest = starts[0]![0], distance = Math.abs(starts[0]![1] - old.source_start);
+    for (const [candidate, start] of starts) {
+      const d = Math.abs(start - old.source_start);
+      if (d < distance) { nearest = candidate; distance = d; }
+    }
+    store.markSuperseded(id, nearest, now);
+  }
+  store.setSourceManifest(sourcePath, type, keepIds);
 }
 
 /** Backfill embeddings for chunks stored while the embedder was unavailable.
@@ -698,7 +761,7 @@ export async function reindexEmbeddings(
     if (!chunks.length) continue;
     const jobs: AtomEmbedJob[] = [];
     for (const chunk of chunks) {
-      const atoms = ensureChunkAtoms(store, chunk, now());
+      const atoms = ensureChunkAtoms(store, chunk, now(), embedderCoverage(embedder));
       for (const atom of atoms) {
         if (!atom.has_embedding || atom.embedder !== embedder.id) {
           jobs.push({ chunkId: chunk.id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.ordinal === 0 ? chunk.title : atom.title, atom.text) });

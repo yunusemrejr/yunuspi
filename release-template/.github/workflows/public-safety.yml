@@ -71,6 +71,36 @@ jobs:
           PI_LOCAL_LM: 'off'
         run: node agent/scripts/adaptive-execution-bench.mjs
 
+  # The manifest supports Node >=22.19.0 while the full suite runs on 24. This
+  # lane keeps the minimum runtime honest with the deterministic, prerequisite-
+  # free core of the suite: build, cancellation, provider admission, memory and review.
+  minimum-node:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build:core
+      - name: Run the deterministic core on the minimum supported Node
+        env:
+          PI_LOCAL_LM: 'off'
+        run: >-
+          node --test --test-concurrency=2
+          tests/command-dispatch.test.mjs tests/core-robustness.test.mjs tests/preflight-stop-cancellation.test.mjs
+          tests/provider-gate.test.mjs tests/provider-health-admission.test.mjs tests/provider-health-stall.test.mjs
+          tests/double-runner.test.mjs tests/quality-review.test.mjs tests/scope-deliberation.test.mjs
+          tests/project-vector-memory.test.mjs tests/memory-embedding-coverage.test.mjs tests/jev-client.test.mjs
+
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest

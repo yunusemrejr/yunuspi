@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { raceWithAbortSignal } from '@yunuspi/ai/utils/abort';
 import { needleEmbed, needleWarmup } from './needle-runtime.ts';
+import { needlePolicy } from './needle-policy.ts';
 import { openRouterKey } from './jev-client.ts';
 import { redactSecrets } from './memory-redaction.ts';
 import { sessionObservability } from './session-observability.ts';
@@ -23,6 +24,8 @@ export interface MemoryEmbedder {
   readonly backend?: string;
   readonly model?: string;
   readonly version?: number;
+  /** Input characters this backend represents; atoms for it are sized to fit. Omitted when it covers a whole atom. */
+  readonly coverageChars?: number;
   readonly candidates?: readonly MemoryEmbedder[];
   readonly fallback?: MemoryEmbedder;
   embed(texts: string[], opts?: EmbeddingOptions): Promise<number[][] | null>;
@@ -58,25 +61,60 @@ export function needleMemoryEmbedder(): MemoryEmbedder {
   let dimension = 0, lastError = '';
   return {
     id: 'needle3', backend: 'needle', model: 'needle3', version: 1,
+    get coverageChars() { return needlePolicy().maxTextChars; },
     status: () => ({ backend: 'needle', model: 'needle3', dimension, lastError, state: lastError ? 'degraded' : dimension ? 'healthy' : 'not-run', fallback: 'lexical' }),
     async embed(texts, opts = {}) {
       try {
         needleWarmup();
-        const out: number[][] = [];
-        for (let i = 0; i < texts.length; i += MEMORY_EMBED_BATCH) {
+        // The local model reads a bounded window. Text beyond it (a fallback after a
+        // remote backend, which sizes atoms for itself) is embedded as consecutive
+        // windows and pooled, so no tail is invisible to the vector.
+        const windows = texts.map(t => embeddingWindows(redactSecrets(t).slice(0, MEMORY_EMBED_CHARS), needlePolicy().maxTextChars));
+        const flat = windows.flat();
+        const vectors: number[][] = [];
+        for (let i = 0; i < flat.length; i += MEMORY_EMBED_BATCH) {
           if (opts.signal?.aborted) return null;
-          const batch = texts.slice(i, i + MEMORY_EMBED_BATCH).map(t => redactSecrets(t).slice(0, MEMORY_EMBED_CHARS));
+          const batch = flat.slice(i, i + MEMORY_EMBED_BATCH);
           const result = await needleEmbed(batch);
           if (opts.signal?.aborted) return null;
           if (!result.ok || !validMemoryVectors(result.value.vectors, batch.length)) { lastError = result.ok ? 'malformed-vectors' : result.reason; return null; }
           if (dimension && dimension !== result.value.vectors[0].length) { lastError = 'dimension-mismatch'; return null; }
           dimension = result.value.vectors[0].length;
-          out.push(...result.value.vectors);
+          vectors.push(...result.value.vectors);
         }
+        let at = 0;
+        const out = windows.map(parts => poolVectors(vectors.slice(at, at += parts.length)));
         lastError = ''; return out;
       } catch { lastError = 'unavailable'; return null; }
     },
   };
+}
+
+/** Split text into consecutive windows of at most `limit` characters, preferring whitespace boundaries. */
+export function embeddingWindows(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > limit) {
+    let cut = limit;
+    const space = rest.lastIndexOf(' ', limit), line = rest.lastIndexOf('\n', limit);
+    const boundary = Math.max(space, line);
+    if (boundary > limit * 0.6) cut = boundary + 1;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest.trim()) out.push(rest);
+  return out;
+}
+
+/** Mean of window vectors, renormalized; a single window is returned unchanged. */
+export function poolVectors(vectors: number[][]): number[] {
+  if (vectors.length === 1) return vectors[0]!;
+  const dim = vectors[0]!.length;
+  const sum = new Array<number>(dim).fill(0);
+  for (const vector of vectors) for (let i = 0; i < dim; i++) sum[i]! += vector[i]!;
+  const norm = Math.sqrt(sum.reduce((total, value) => total + value * value, 0)) || 1;
+  return sum.map(value => value / norm);
 }
 
 export function openRouterMemoryEmbedder(options: { model?: string; env?: Record<string, string | undefined>; key?: () => string | undefined; fetch?: typeof fetch; now?: () => number; timeoutMs?: number; accounting?: EmbeddingAccounting } = {}): MemoryEmbedder {
@@ -199,6 +237,8 @@ export function configuredMemoryEmbedder(env: Record<string, string | undefined>
   let selecting: Promise<MemoryEmbedding | null> | undefined;
   return {
     get id() { return selected?.id ?? local.id; },
+    // Local runs first; until a backend is selected, size atoms for it.
+    get coverageChars() { return (selected ?? local).coverageChars; },
     candidates: [local, remote],
     fallback: local,
     status: () => ({ mode: 'auto', ...(selected?.status?.() ?? { backend: 'auto', model: remote.model ?? DEFAULT_MEMORY_EMBEDDING_MODEL, state: 'not-run' }), local: local.status?.(), remote: remote.status?.() }),

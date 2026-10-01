@@ -275,6 +275,18 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
 
   const ensureStore = ensureChain;
 
+  /** Provenance paths are anchored to the primary project root, so a session in /repo/src and one in /repo record the same file the same way (and two subdirectories' same-named files stay distinct). */
+  const projectRelativePath = (cwd: string, file: string): string => {
+    const base = cwd || process.cwd();
+    const absolute = path.resolve(base, file);
+    const root = current?.chain[0]?.root;
+    if (root) {
+      const relative = path.relative(root, absolute);
+      if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return relative.split(path.sep).join("/");
+    }
+    return path.isAbsolute(file) ? path.relative(base, absolute) : file;
+  };
+
   const countDropped = (kind: IndexEventKind): void => {
     dropped++;
     droppedTotal++;
@@ -719,7 +731,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       if (content.includes("\0")) throw new Error(`Cannot index '${params.path}': binary content.`);
       const store = ensureStore(cwd);
       const result = await indexFile(store, store.projectId, {
-        path: path.relative(cwd, resolved),
+        path: projectRelativePath(cwd, resolved),
         content,
         sessionId: sidOf(ctx),
         sourceType: params.type,
@@ -876,7 +888,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
           sessionId: sidOf(ctx),
           title: `Edited ${target}`,
           text: `File edited via ${toolName}: ${target}. Index full content with project_memory_index_path when durable.`,
-          path: target,
+          path: projectRelativePath(ctx?.cwd ?? "", target),
           timestamp: at,
         });
         return;

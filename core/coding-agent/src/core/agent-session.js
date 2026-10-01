@@ -1040,7 +1040,7 @@ export class AgentSession {
             }
             this._pendingNextTurnMessages = [];
             // Emit before_agent_start extension event
-            const result = await this._extensionRunner.emitBeforeAgentStart(expandedText, currentImages, this._baseSystemPrompt, this._baseSystemPromptOptions);
+            const result = await awaitBeforeAbort(this._extensionRunner.emitBeforeAgentStart(expandedText, currentImages, this._baseSystemPrompt, this._baseSystemPromptOptions, inputAbortController.signal), inputAbortController.signal);
             inputAbortController.signal.throwIfAborted();
             // Add all custom messages from extensions
             if (result?.messages) {

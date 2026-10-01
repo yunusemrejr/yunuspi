@@ -593,6 +593,56 @@ export class ProjectVectorStore {
     return rows.map(rowToChunk);
   }
 
+  /** Chunk ids the last index of a source file produced (scopes later reconciliation to file-indexed rows). */
+  sourceManifest(sourcePath: string, sourceType: string): string[] | undefined {
+    const raw = this.getMeta(`source:${sourceType}:${sourcePath}`);
+    if (raw === undefined) return undefined;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  setSourceManifest(sourcePath: string, sourceType: string, ids: string[]): void {
+    this.setMeta(`source:${sourceType}:${sourcePath}`, JSON.stringify(ids));
+  }
+
+  /**
+   * Unchanged source text can move or return: refresh where it now sits (and the
+   * commit that observed it) and make a version that came back live again. The
+   * revival applies only to rows an earlier reindex retired (valid_until with a
+   * same-file replacement), never to a deliberate tombstone. Returns true when
+   * anything changed.
+   */
+  refreshSource(id: string, loc: { start: number; end: number; commit?: string }, now?: string): boolean {
+    const row = this.db.prepare("SELECT source_path, source_start, source_end, commit_sha, valid_until, superseded_by FROM chunks WHERE id = ?").get(id) as { source_path: string; source_start: number; source_end: number; commit_sha: string; valid_until: string | null; superseded_by: string } | undefined;
+    if (!row) return false;
+    const retired = row.valid_until !== null;
+    if (retired) {
+      const replacement = row.superseded_by ? this.db.prepare("SELECT source_path FROM chunks WHERE id = ?").get(row.superseded_by) as { source_path: string } | undefined : undefined;
+      if (replacement?.source_path !== row.source_path) return false;
+    }
+    const commit = loc.commit ?? row.commit_sha;
+    if (!retired && row.source_start === loc.start && row.source_end === loc.end && row.commit_sha === commit) return false;
+    const at = now ?? new Date().toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE chunks SET source_start = ?, source_end = ?, commit_sha = ?, valid_until = NULL, superseded_by = '', updated_at = ? WHERE id = ?").run(loc.start, loc.end, commit, at, id);
+      // Atom ranges are offsets from the parent start; keep them in step.
+      if (row.source_start > 0 && loc.start > 0 && row.source_start !== loc.start) {
+        const shift = loc.start - row.source_start;
+        this.db.prepare("UPDATE atoms SET source_start = source_start + ?, source_end = source_end + ?, updated_at = ? WHERE chunk_id = ? AND source_start > 0").run(shift, shift, at, id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+    return true;
+  }
+
   /** Chunks that supersede the given id (backlink side of the chain). */
   findSuperseding(id: string): Array<{ id: string; title: string; source_type: string; timestamp: string }> {
     const rows = this.db.prepare("SELECT id, title, source_type, timestamp FROM chunks WHERE superseded_by = ? OR supersedes LIKE ? ESCAPE '\\' ORDER BY timestamp DESC LIMIT 32").all(id, `%"${likeEscape(id)}"%`) as Array<{ id: string; title: string; source_type: string; timestamp: string }>;
@@ -763,7 +813,13 @@ export class ProjectVectorStore {
     return rows.filter((row) => row.id).map((row) => ({ id: row.id as string, rank: row.rank }));
   }
 
-  /** Brute-force cosine over legacy chunk-level vectors. Dim mismatches are skipped. */
+  /** Rows the latest brute-force vector search read, and whether its cap cut off eligible rows. */
+  lastVectorScan: { scanned: number; truncated: boolean } = { scanned: 0, truncated: false };
+
+  /** Brute-force cosine over legacy chunk-level vectors. Dim mismatches are skipped.
+   * When more rows are eligible than the scan cap, the NEWEST rows are scanned: a
+   * cap that froze coverage at the oldest rows would make recent memory invisible
+   * to semantic recall; lexical retrieval still reaches everything. */
   vectorSearch(queryVec: number[] | Float32Array, opts: { embedder?: string; limit?: number; scanCap?: number; types?: ChunkType[]; since?: string; minAuthority?: number; includeSuperseded?: boolean } = {}): VectorHit[] {
     const arr = Array.isArray(queryVec) ? Float32Array.from(queryVec) : queryVec;
     const limit = Math.max(1, Math.min(200, opts.limit ?? 40));
@@ -789,7 +845,9 @@ export class ProjectVectorStore {
       conditions.push("authority >= ?");
       params.push(opts.minAuthority);
     }
-    const rows = this.db.prepare(`SELECT id, embedding FROM chunks WHERE ${conditions.join(" AND ")} ORDER BY rowid LIMIT ?`).all(...params, scanCap) as Array<{ id: string; embedding: Uint8Array }>;
+    const fetched = this.db.prepare(`SELECT id, embedding FROM chunks WHERE ${conditions.join(" AND ")} ORDER BY rowid DESC LIMIT ?`).all(...params, scanCap + 1) as Array<{ id: string; embedding: Uint8Array }>;
+    const rows = fetched.slice(0, scanCap);
+    this.lastVectorScan = { scanned: rows.length, truncated: fetched.length > scanCap };
     // Bounded top-K heap via partial selection (limit is small).
     const scored: VectorHit[] = [];
     for (const row of rows) {
@@ -811,7 +869,8 @@ export class ProjectVectorStore {
   }
 
   /** Brute-force cosine over atom vectors, joined to parents for filtering.
-   * One hit per atom; callers collapse to the best atom per parent chunk. */
+   * One hit per atom; callers collapse to the best atom per parent chunk. Over
+   * the scan cap, the newest atoms are scanned (see vectorSearch). */
   atomVectorSearch(queryVec: number[] | Float32Array, opts: { embedder?: string; limit?: number; scanCap?: number; types?: ChunkType[]; since?: string; minAuthority?: number; includeSuperseded?: boolean } = {}): AtomHit[] {
     const arr = Array.isArray(queryVec) ? Float32Array.from(queryVec) : queryVec;
     const limit = Math.max(1, Math.min(200, opts.limit ?? 60));
@@ -837,7 +896,9 @@ export class ProjectVectorStore {
       conditions.push("c.authority >= ?");
       params.push(opts.minAuthority);
     }
-    const rows = this.db.prepare(`SELECT a.id AS atom_id, a.chunk_id, a.ordinal, a.embedding FROM atoms a JOIN chunks c ON c.id = a.chunk_id WHERE ${conditions.join(" AND ")} ORDER BY a.rowid LIMIT ?`).all(...params, scanCap) as Array<{ atom_id: string; chunk_id: string; ordinal: number; embedding: Uint8Array }>;
+    const fetched = this.db.prepare(`SELECT a.id AS atom_id, a.chunk_id, a.ordinal, a.embedding FROM atoms a JOIN chunks c ON c.id = a.chunk_id WHERE ${conditions.join(" AND ")} ORDER BY a.rowid DESC LIMIT ?`).all(...params, scanCap + 1) as Array<{ atom_id: string; chunk_id: string; ordinal: number; embedding: Uint8Array }>;
+    const rows = fetched.slice(0, scanCap);
+    this.lastVectorScan = { scanned: rows.length, truncated: fetched.length > scanCap };
     // Bounded top-K heap via partial selection (limit is small).
     const scored: AtomHit[] = [];
     for (const row of rows) {

@@ -615,3 +615,29 @@ test('protected fit fields survive; unprotectable oversize abstains instead of j
   const skipped = await jev.askJev('bounded', { only: huge }, q, { protect: ['only'] });
   assert.equal(skipped.skipped, 'input-budget', 'oversize with nothing trimmable abstains');
 });
+
+test('an oversized judgment response is refused without buffering it, and cancels the stream', async () => {
+  let cancelled = false;
+  const oversized = () => ({
+    ok: true, status: 200,
+    headers: { get: () => null },
+    body: { getReader: () => {
+      let sent = 0;
+      return { read: async () => { sent += 65_536; return sent > 1_000_000 ? { done: true } : { done: false, value: new Uint8Array(65_536).fill(97) }; },
+        cancel: async () => { cancelled = true; }, releaseLock() {} };
+    } },
+  });
+  harness(async () => oversized());
+  const result = await jev.askJev('unit', 'evidence for a hostile upstream', { ping: { type: 'noul', instructions: 'Affirmative?' } });
+  assert.equal(result.ok, false, 'a response beyond the byte ceiling is not a judgment');
+  assert.equal(cancelled, true, 'the unread remainder of the stream is cancelled');
+});
+
+test('a declared oversized content-length is rejected before any body is read', async () => {
+  let read = false;
+  harness(async () => ({ ok: true, status: 200, headers: { get: (name) => name === 'content-length' ? '99999999' : null },
+    body: { getReader: () => { read = true; return { read: async () => ({ done: true }), cancel: async () => {}, releaseLock() {} }; }, cancel: async () => {} } }));
+  const result = await jev.askJev('unit', 'another hostile payload', { ping: { type: 'noul', instructions: 'Affirmative?' } });
+  assert.equal(result.ok, false);
+  assert.equal(read, false);
+});

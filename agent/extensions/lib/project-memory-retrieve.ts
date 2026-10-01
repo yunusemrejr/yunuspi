@@ -250,7 +250,10 @@ export async function retrieveProjectMemory(
           includeSuperseded: opts.includeSuperseded,
         };
         const legacy = store.vectorSearch(vectors[0], { ...searchOpts, limit: 40 }).filter(hit => hit.score >= 0.3);
+        const legacyCapped = store.lastVectorScan.truncated;
         const atoms = store.atomVectorSearch(vectors[0], { ...searchOpts, limit: 60 }).filter(hit => hit.score >= 0.3);
+        // Over its scan cap the semantic pass reads only the newest vectors; say so rather than imply full recall.
+        if (legacyCapped || store.lastVectorScan.truncated) degraded.push('semantic-scan-capped');
         atomCandidates = atoms.length;
         // Collapse atoms to the best fragment per parent, then merge with
         // legacy chunk vectors keeping the stronger evidence per chunk.
@@ -487,13 +490,52 @@ export async function retrieveFamily(
   };
 }
 
-/** Shared priming for the main agent and reviewers: one query embedding,
- * role-specific policy views, no additional ranking or embedding requests. */
+/**
+ * The search stage (lexical match plus brute-force vector scans) does not depend on the
+ * retrieval role: only the scoring after it does. Views of one query reuse each store's scan
+ * results instead of re-reading every stored vector once per role.
+ */
+function shareScans(members: FamilyStore[]): FamilyStore[] {
+  return members.map(({ store, relation }) => {
+    const lexical = new Map<string, ReturnType<ProjectVectorStore["lexicalSearch"]>>();
+    const scans = new WeakMap<object, Map<string, { hits: unknown; scan: ProjectVectorStore["lastVectorScan"] }>>();
+    const scanned = (kind: "vector" | "atom", vector: ArrayLike<number> & object, rest: unknown) => {
+      const key = `${kind}:${JSON.stringify(rest)}`;
+      const byVector = scans.get(vector) ?? new Map();
+      scans.set(vector, byVector);
+      const cached = byVector.get(key);
+      if (cached) { store.lastVectorScan = cached.scan; return cached.hits; }
+      const hits = kind === "vector" ? store.vectorSearch(vector as Float32Array, rest as never) : store.atomVectorSearch(vector as Float32Array, rest as never);
+      byVector.set(key, { hits, scan: store.lastVectorScan });
+      return hits;
+    };
+    const shared = new Proxy(store, {
+      get(target, prop) {
+        if (prop === "lexicalSearch") return (query: string, limit?: number) => {
+          const key = `${limit}:${query}`;
+          const hit = lexical.get(key) ?? target.lexicalSearch(query, limit);
+          lexical.set(key, hit);
+          return hit;
+        };
+        if (prop === "vectorSearch") return (vector: Float32Array, rest: unknown) => scanned("vector", vector, rest);
+        if (prop === "atomVectorSearch") return (vector: Float32Array, rest: unknown) => scanned("atom", vector, rest);
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      set(target, prop, value) { (target as any)[prop] = value; return true; },
+    });
+    return { store: shared, relation };
+  });
+}
+
+/** Shared priming for the main agent and reviewers: one query embedding and one scan per
+ * store, role-specific policy views, no additional ranking or embedding requests. */
 export async function retrieveFamilyViews(stores: FamilyStore[], query: string, opts: RetrieveOptions = {}): Promise<Record<RetrievalRole, FamilyHit[]>> {
   const semantic = await queryEmbedding(stores.map(member => member.store), query, opts);
+  const members = shareScans(stores);
   const views = {} as Record<RetrievalRole, FamilyHit[]>;
   for (const role of ['main', 'observer', 'subagent', 'watchmaker'] as const) {
-    views[role] = (await retrieveFamily(stores, query, { ...opts, role, rerank: false, limit: 2 }, semantic)).hits;
+    views[role] = (await retrieveFamily(members, query, { ...opts, role, rerank: false, limit: 2 }, semantic)).hits;
   }
   return views;
 }

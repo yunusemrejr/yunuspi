@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { safeText } from './project-intelligence/privacy.mjs';
 import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
+import { classifyExecution } from './adaptive-execution.ts';
 import { heuristicDesignBrief } from './design-direction.ts';
 import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
 import type { JudgeFn } from './micro-intelligence/review.ts';
@@ -57,7 +58,11 @@ export function shouldRunScopeCouncil(prompt: string): boolean {
   if (councilMode(source) === 'direction') return true;
   const action = /\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor|improve|polish|refine|fix|change|adjust|update|replace|remove)\b/i.test(text);
   if (!action) return false;
-  if (/\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor)\b/i.test(text)) return true;
+  if (/\b(?:redesign|rework|rethink|overhaul|revamp|reimagine)\b/i.test(text)) return true;
+  // A refactor is not by itself open-ended design: the shared adaptive policy
+  // decides, so a bounded one-file rename cannot buy helper dispatch, context
+  // construction and preflight latency that its own profile says it never needs.
+  if (/\brefactor\b/i.test(text)) return classifyExecution({ task: source }).features.council;
   const dissatisfaction = /\b(?:distracting|annoying|low[- ]quality|unprofessional|clunky|confusing|awkward|not happy|unhappy|too (?:busy|much|noisy|slow|complex)|doesn['’]?t (?:look|feel|work)|not (?:good|working|right)|looks? (?:bad|wrong|cheap))\b/i.test(text);
   const openImprovement = /\b(?:improve|polish|refine)\b/i.test(text) && /\b(?:design|UI|interface|animation|motion|character|experience|layout|architecture|workflow|logic|behavior|harness|system)\b/i.test(text);
   return dissatisfaction || openImprovement;

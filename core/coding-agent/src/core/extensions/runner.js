@@ -943,9 +943,23 @@ export class ExtensionRunner {
         }
         return headers;
     }
-    async emitBeforeAgentStart(prompt, images, systemPrompt, systemPromptOptions) {
+    async emitBeforeAgentStart(prompt, images, systemPrompt, systemPromptOptions, requestSignal) {
         let currentSystemPrompt = systemPrompt;
         const ctx = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext()));
+        if (requestSignal) {
+            // The agent signal does not exist until the run starts, so a Stop
+            // during this preflight would otherwise leave extension children
+            // (e.g. Double's model streams) running. Bind them to the request.
+            const agentSignalOf = Object.getOwnPropertyDescriptor(ctx, "signal")?.get;
+            Object.defineProperty(ctx, "signal", {
+                configurable: true,
+                enumerable: true,
+                get: () => {
+                    const agentSignal = agentSignalOf?.call(ctx);
+                    return agentSignal ? AbortSignal.any([agentSignal, requestSignal]) : requestSignal;
+                },
+            });
+        }
         ctx.getSystemPrompt = () => {
             this.assertActive();
             return currentSystemPrompt;
@@ -964,8 +978,11 @@ export class ExtensionRunner {
                         images,
                         systemPrompt: currentSystemPrompt,
                         systemPromptOptions,
+                        signal: requestSignal,
                     };
+                    requestSignal?.throwIfAborted();
                     const handlerResult = await handler(event, ctx);
+                    requestSignal?.throwIfAborted();
                     if (handlerResult) {
                         const result = handlerResult;
                         if (result.message) {
@@ -978,6 +995,7 @@ export class ExtensionRunner {
                     }
                 }
                 catch (err) {
+                    if (requestSignal?.aborted) throw err;
                     const message = err instanceof Error ? err.message : String(err);
                     const stack = err instanceof Error ? err.stack : undefined;
                     this.emitError({

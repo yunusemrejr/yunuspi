@@ -51,6 +51,7 @@ import {
   formatMemoryRead,
   readMemoryChunk,
   retrieveFamily,
+  retrieveFamilyViews,
   retrieveProjectMemory,
   ROLE_POLICIES,
 } from '../agent/extensions/lib/project-memory-retrieve.ts';
@@ -99,6 +100,43 @@ test('explicit id is found walking up; invalid ids are ignored', (t) => {
   fs.renameSync(path.join(dir, 'a', '.pi-project-id'), path.join(dir, 'target'));
   fs.symlinkSync(path.join(dir, 'target'), path.join(dir, 'a', '.pi-project-id'));
   assert.equal(findExplicitId(nested), undefined);
+});
+
+test('a symlink from outside the repository into a subdirectory resolves the repository project', (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const env = testEnv(dir);
+  const repo = path.join(dir, 'repo');
+  const src = path.join(repo, 'src', 'deep');
+  fs.mkdirSync(src, { recursive: true });
+  fs.mkdirSync(path.join(dir, 'elsewhere'));
+  fs.writeFileSync(path.join(repo, '.pi-project-id'), 'linked-project\n');
+  const link = path.join(dir, 'elsewhere', 'link');
+  fs.symlinkSync(src, link);
+  const direct = resolveProjectIdentity(src, {}, env);
+  const viaLink = resolveProjectIdentity(link, {}, env);
+  assert.equal(viaLink.id, 'linked-project');
+  assert.equal(viaLink.id, direct.id);
+  assert.equal(fs.existsSync(path.join(src, '.pi-project-id')), false, 'no nested identity is written through the link');
+  assert.equal(resolveProjectChain(link, {}, env).at(-1).identity.id, 'linked-project');
+});
+
+test('a symlinked subdirectory of a marker-rooted project does not mint a nested identity', (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const env = testEnv(dir);
+  const repo = path.join(dir, 'repo');
+  const src = path.join(repo, 'src');
+  fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'package.json'), '{}\n');
+  fs.mkdirSync(src);
+  fs.mkdirSync(path.join(dir, 'elsewhere'));
+  const link = path.join(dir, 'elsewhere', 'link');
+  fs.symlinkSync(src, link);
+  const viaLink = resolveProjectIdentity(link, {}, env);
+  const direct = resolveProjectIdentity(src, {}, env);
+  assert.equal(viaLink.id, direct.id);
+  assert.equal(fs.existsSync(path.join(src, '.pi-project-id')), false);
 });
 
 test('git remote identity is stable across URL spellings', (t) => {
@@ -389,6 +427,111 @@ test('indexFile embeds only hash-changed chunks', async (t) => {
   assert.equal(backfill.embedded + backfill.failed, store.unembeddedIds(5000).length + backfill.embedded);
 });
 
+test('source identity is byte-exact: case and indentation changes are new content, not duplicates', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_exact');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const python = (indent) => `def handler(request):\n${indent}if request.ready:\n${indent}${indent}return Token("Admin")\n${indent}return None\n`;
+  const first = await indexFile(store, 'prj_exact', { path: 'src/handler.py', content: python('  ') }, { embedder });
+  assert.equal(first.inserted, 1);
+  const livePaths = () => store.getChunksByPath('src/handler.py').filter((c) => c.valid_until === null);
+  assert.match(livePaths()[0].text, /Token\("Admin"\)/);
+
+  // String-literal case: same normalized hash, different program.
+  const cased = python('  ').replace('"Admin"', '"admin"');
+  const second = await indexFile(store, 'prj_exact', { path: 'src/handler.py', content: cased }, { embedder });
+  assert.equal(second.inserted, 1, 'a case-only change is stored as new source');
+  assert.equal(second.skippedDup, 0);
+  assert.equal(livePaths().length, 1, 'only the current version is live');
+  assert.match(livePaths()[0].text, /Token\("admin"\)/);
+
+  // Indentation-only change in a whitespace-significant language.
+  const reindented = await indexFile(store, 'prj_exact', { path: 'src/handler.py', content: python('    ') }, { embedder });
+  assert.equal(reindented.inserted, 1);
+  assert.equal(livePaths().length, 1);
+
+  // Replaced versions stay as backlinked history, and a reverted text returns to live.
+  const all = store.getChunksByPath('src/handler.py');
+  assert.equal(all.length, 3);
+  const history = all.filter((c) => c.valid_until !== null);
+  assert.equal(history.length, 2);
+  assert.ok(history.every((c) => all.some((other) => other.id === c.superseded_by)), 'history points at the fragment that replaced it');
+  assert.ok(history.some((c) => c.superseded_by === livePaths()[0].id));
+  const reverted = await indexFile(store, 'prj_exact', { path: 'src/handler.py', content: python('  ') }, { embedder });
+  assert.equal(reverted.inserted, 0, 'reverting reuses the retained row instead of duplicating it');
+  assert.equal(livePaths().length, 1);
+  assert.match(livePaths()[0].text, /Token\("Admin"\)/);
+  assert.equal(livePaths()[0].superseded_by, '');
+});
+
+test('reindexing refreshes where unchanged fragments now sit and never touches other memories', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_move');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const guide = ['# Guide', '', 'Alpha paragraph with enough words to form a chunk.', '', '## Part', '', 'Beta paragraph with enough words to form a chunk.'];
+  await indexEvent(store, 'prj_move', { kind: 'observation', sessionId: 's', path: 'docs/guide.md', text: 'An unrelated observation that mentions docs/guide.md in passing.' }, { embedder });
+  await indexFile(store, 'prj_move', { path: 'docs/guide.md', content: guide.join('\n'), commit: 'aaa111' }, { embedder });
+  const part = () => store.getChunksByPath('docs/guide.md').find((c) => c.text.startsWith('Beta'));
+  const before = part();
+  // Insert lines above: the same text now sits further down and was seen at a newer commit.
+  const shifted = ['# Preface', '', 'Intro paragraph with enough words to form a chunk.', '', ...guide].join('\n');
+  const result = await indexFile(store, 'prj_move', { path: 'docs/guide.md', content: shifted, commit: 'bbb222' }, { embedder });
+  assert.ok(result.skippedDup >= 2, 'moved text is recognised as unchanged');
+  const after = part();
+  assert.equal(after.id, before.id);
+  assert.ok(after.source_start > before.source_start, 'location is refreshed');
+  assert.equal(after.commit_sha, 'bbb222', 'the observing commit is refreshed');
+  assert.equal(store.getChunksByPath('docs/guide.md').find((c) => c.source_type === 'observation')?.valid_until, null, 'an unrelated memory about the file is untouched');
+  // A deliberate tombstone is not revived by identical content.
+  store.tombstone(after.id);
+  await indexFile(store, 'prj_move', { path: 'docs/guide.md', content: shifted, commit: 'bbb222' }, { embedder });
+  assert.notEqual(part().valid_until, null);
+});
+
+test('semantic scans are capped to the newest vectors and say so', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_cap');
+  t.after(() => store.close());
+  const embedder = testEmbedder(32);
+  for (let i = 0; i < 100; i++) await indexEvent(store, 'prj_cap', { kind: 'observation', sessionId: 's', text: `Filler observation number ${i} about unrelated gardening topics and soil.` }, { embedder });
+  await indexEvent(store, 'prj_cap', { kind: 'observation', sessionId: 's', text: 'The newest note covers quasar telemetry calibration for the observer pipeline.' }, { embedder });
+  const [query] = await embedder.embed(['quasar telemetry calibration observer pipeline']);
+  const space = store.embeddingSpaces()[0].id;
+  // scanCap floors at 100 rows; 101 atoms exist, so the OLDEST must be the one left out.
+  const hits = store.atomVectorSearch(query, { embedder: space, scanCap: 100, limit: 3 });
+  assert.equal(store.lastVectorScan.truncated, true);
+  assert.equal(store.lastVectorScan.scanned, 100);
+  const top = store.getChunk(hits[0].chunkId);
+  assert.match(top.text, /quasar telemetry/, 'a newer row beyond the cap is still reachable semantically');
+  const wide = store.atomVectorSearch(query, { embedder: space, scanCap: 5000, limit: 3 });
+  assert.equal(store.lastVectorScan.truncated, false);
+  assert.equal(wide[0].chunkId, hits[0].chunkId);
+});
+
+test('role views of one query scan each store once', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_views');
+  t.after(() => store.close());
+  const embedder = testEmbedder(32);
+  await indexEvent(store, 'prj_views', { kind: 'decision', sessionId: 's', text: 'Decision: observer advice is delivered once per task epoch with a receipt.' }, { embedder });
+  await indexEvent(store, 'prj_views', { kind: 'observation', sessionId: 's', text: 'Observation: the observer advice receipt is ledgered before display.' }, { embedder });
+  const counts = { lexical: 0, vector: 0, atom: 0 };
+  for (const [name, key] of [['lexicalSearch', 'lexical'], ['vectorSearch', 'vector'], ['atomVectorSearch', 'atom']]) {
+    const original = store[name].bind(store);
+    store[name] = (...args) => { counts[key]++; return original(...args); };
+  }
+  const views = await retrieveFamilyViews([{ store, relation: 'self' }], 'observer advice receipt', { embedder, rerank: false });
+  assert.deepEqual(Object.keys(views).sort(), ['main', 'observer', 'subagent', 'watchmaker']);
+  assert.ok(views.main.length > 0);
+  assert.deepEqual(counts, { lexical: 1, vector: 1, atom: 1 }, 'four role views share one scan per store');
+});
+
 // ---------------------------------------------------------------------------
 // retrieval
 // ---------------------------------------------------------------------------
@@ -586,6 +729,34 @@ test('extension indexes files and session events incrementally', async (t) => {
   assert.ok(kinds.length >= 4, `expected queued events to flush, got ${kinds.length}`);
   const command = await pi.commands.get('project-memory').handler([], ctx);
   assert.match(command, /chunks/i);
+});
+
+test('file provenance is anchored to the project root, not the session workdir', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const root = path.join(dir, 'proj');
+  const client = path.join(root, 'client');
+  const server = path.join(root, 'server');
+  fs.mkdirSync(client, { recursive: true });
+  fs.mkdirSync(server, { recursive: true });
+  fs.writeFileSync(path.join(root, '.pi-project-id'), 'rooted-project\n');
+  const same = 'export const listenPort = 8080;\n'.repeat(6);
+  fs.writeFileSync(path.join(client, 'config.ts'), same);
+  fs.writeFileSync(path.join(server, 'config.ts'), same);
+  const pi = fakePi();
+  piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
+  const index = (cwd, file) => pi.tools.get('project_memory_index_path').execute('1', { path: file }, undefined, undefined, fakeCtx(cwd));
+  pi.handlers.get('session_start')({}, fakeCtx(client));
+  const fromClient = await index(client, 'config.ts');
+  const fromServer = await index(server, 'config.ts');
+  const fromRoot = await index(root, 'client/config.ts');
+  assert.equal(fromClient.details.result.inserted, 1);
+  assert.equal(fromServer.details.result.inserted, 1, 'same-named files in different subdirectories are distinct sources');
+  assert.equal(fromRoot.details.result.inserted, 0, 'the same file indexed from another workdir is the same source');
+  const store = openProjectStore(path.join(dir, 'projects', 'rooted-project', 'memory.sqlite'), { projectId: 'rooted-project', create: false });
+  t.after(() => store.close());
+  const paths = store.listRecent(20).map((chunk) => chunk.source_path).sort();
+  assert.deepEqual(paths, ['client/config.ts', 'server/config.ts']);
 });
 
 test('a session switch drains the old queue into the old project, not the void', async (t) => {
