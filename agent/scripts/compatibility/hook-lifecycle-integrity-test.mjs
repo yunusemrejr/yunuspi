@@ -26,8 +26,8 @@ for(const file of owners){
 function fixture(){
  const handlers=new Map(),sent=[];let idle=false,fail=false;
  const ctx={isIdle:()=>idle,sessionManager:{getBranch:()=>[]}};
- const pi={on:(name,fn)=>handlers.set(name,fn),sendMessage:(m,o)=>{if(fail&&o.triggerTurn)throw Error('transient delivery');sent.push({m,o});}};
- const notify=createCompletionNotifier(pi,()=>ctx);
+ const pi={on:(name,fn)=>handlers.set(name,fn),sendMessage:(m,o)=>{if(fail&&o.triggerTurn)throw Error('transient delivery');sent.push({m,o});o.onAccepted?.();}};
+ const notify=createCompletionNotifier(pi,()=>ctx,{graceMs:0});
  const emit=(name,event={})=>handlers.get(name)?.(event,ctx);
  emit('session_start');
  return {notify,emit,sent,idle:()=>idle=true,fail:value=>fail=value};

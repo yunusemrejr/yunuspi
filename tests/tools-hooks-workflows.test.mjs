@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.join(root, '..', 'agent'), path.resolve(root, '..'), path.resolve(root, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/session-hooks.ts')));
@@ -87,4 +88,11 @@ test('hook result ownership prevents an unrelated result from consuming queued g
   call({ toolCallId: 'late', toolName: 'media_pipeline', input: {} });
   handlers.get('session_switch')();
   assert.equal(result({ toolCallId: 'late', toolName: 'media_pipeline', content: [], isError: false }, {}), undefined);
+});
+
+test('offline hook compatibility checks retain the current completion acknowledgement contract', () => {
+  const output = execFileSync(process.execPath, [path.join(agent, 'scripts/compatibility/hook-lifecycle-integrity-test.mjs')], {
+    encoding: 'utf8', timeout: 20000, env: { ...process.env, PI_LOCAL_LM: 'off' },
+  });
+  assert.match(output, /PASS SDK\/CLI hook cancellation/);
 });
