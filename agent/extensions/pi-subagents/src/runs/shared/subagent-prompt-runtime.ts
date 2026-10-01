@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { BeforeProviderRequestEvent, ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
+import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
 import { registerNativeSupervisorClient } from "../../intercom/native-supervisor-channel.ts";
 import { shouldUseNativeFsWatch } from "../../shared/watch-strategy.ts";
 import { decodePermissionRules, permissionDecision, PERMISSION_AUDIT_PATH_ENV, PERMISSION_POLICY_ENV } from "./permissions.ts";
@@ -499,31 +500,33 @@ export function registerPermissionGate(
 		}
 		if (ctx.signal?.aborted) return { block: true, reason: "Blocked by pi-subagents permission rule: Watchdog permission decision was cancelled." };
 		let timeout: ReturnType<typeof setTimeout> | undefined;
-		let abort: (() => void) | undefined;
+		const controller = new AbortController();
+		const abort = () => controller.abort(ctx.signal?.reason);
+		ctx.signal?.addEventListener("abort", abort, { once: true });
+		if (ctx.signal?.aborted) abort();
 		let result: WatchdogPermissionResult;
 		try {
-			result = await Promise.race([
-				requestPermission({
+			timeout = setTimeout(() => controller.abort(new Error(`Watchdog permission decision timed out after ${timeoutMs}ms.`)), timeoutMs);
+			const request = Promise.resolve().then(() => {
+				controller.signal.throwIfAborted();
+				return requestPermission({
 					ctx,
 					toolName,
 					args: event.input ?? {},
 					rawWatchdogConfig,
 					auditPath: process.env[PERMISSION_AUDIT_PATH_ENV],
-					...(ctx.signal ? { signal: ctx.signal } : {}),
-				}),
-				new Promise<WatchdogPermissionResult>((resolve) => {
-					if (!ctx.signal) return;
-					abort = () => resolve({ approved: false, reason: "Watchdog permission decision was cancelled.", source: "watchdog" });
-					ctx.signal.addEventListener("abort", abort, { once: true });
-				}),
-				new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`Watchdog permission decision timed out after ${timeoutMs}ms.`)), timeoutMs); }),
-			]);
+					signal: controller.signal,
+				});
+			});
+			result = await raceWithAbortSignal(request, controller.signal);
+			controller.signal.throwIfAborted();
 		} catch (error) {
+			if (ctx.signal?.aborted) return { block: true, reason: "Blocked by pi-subagents permission rule: Watchdog permission decision was cancelled." };
 			const reason = error instanceof Error ? error.message : String(error);
 			return { block: true, reason: `Blocked by pi-subagents permission rule: Watchdog permission arbiter failed closed: ${reason}` };
 		} finally {
 			if (timeout) clearTimeout(timeout);
-			if (abort) ctx.signal?.removeEventListener("abort", abort);
+			ctx.signal?.removeEventListener("abort", abort);
 		}
 		if (result.approved) return undefined;
 		return { block: true, reason: `Blocked by pi-subagents permission rule: ${result.reason}` };

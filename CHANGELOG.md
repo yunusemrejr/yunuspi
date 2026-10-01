@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Child outcomes now recognize successful exit-only results and preserve failed
+acceptance or exit evidence over coarse completion status. Retained breaker
+causes survive into wait results. Child permission cancellation propagates the
+hook deadline and prevents reviewer dispatch after delayed authentication has
+outlived the request. The builtin delegate accepts `general-purpose` explicitly.
+See [child outcomes and cancellation](docs/SESSION-ORCHESTRATION.md).
+
 ## 0.18.0 — 2026-09-30
 
 **Direct work carries fewer schemas; assurance carries less repeated text.** Adaptive routing stages 17 core tool names for direct work instead of 30, restores coordination on observed escalation, and retains explicit/named/used tools and caller ceilings. Compact verification and review views retain actionable gaps and findings; full native state remains available. Current source-bound test receipts include bounded, protected-material-aware diagnostics for independent reviewers, avoiding unnecessary temporary evidence logs. Source changes and changed/deleted supplied captures still invalidate old evidence.
