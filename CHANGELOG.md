@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Creative and debugging workflows now select native inspections, require an observed bug reproduction, and keep playback, listening and rendered-pixel review distinct from technical validation. Media pipelines validate sources and options before synthesis, reuse source probes, and cancel and settle sibling workers after failure. SVG inspection applies affine geometry and excludes unused definitions from visible bounds; matrix capture fits intrinsic-size artwork into its review viewport and removes failed captures. Hooks skip unrelated status/setup calls, bind result guidance to the dispatched tool, and cover more creative failures. Bounded diagnostics retain failures buried in long test output.
+
 Child outcomes now recognize successful exit-only results and preserve failed
 acceptance or exit evidence over coarse completion status. Retained breaker
 causes survive into wait results. Child permission cancellation propagates the

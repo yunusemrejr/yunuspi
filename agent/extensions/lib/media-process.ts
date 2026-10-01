@@ -54,6 +54,29 @@ export async function run(binary: string, args: string[], signal?: AbortSignal, 
     throw new Error(`${binary} failed: ${String(error.stderr || error.message).slice(-3000)}`);
   }
 }
+/** Cancel siblings on the first failure, preserve its cause, and settle all
+ * writers before the caller removes their output directory. */
+export async function mediaMap<T, R>(items: readonly T[], work: (item: T, index: number, signal: AbortSignal) => Promise<R>, signal?: AbortSignal, concurrency = 4): Promise<R[]> {
+  integer(concurrency, 4, 1, 4, 'concurrency');
+  signal?.throwIfAborted();
+  const stop = new AbortController();
+  const active = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
+  const results = new Array<R>(items.length);
+  let next = 0, failed = false, failure: unknown;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (!failed && next < items.length) {
+      const index = next++;
+      try { active.throwIfAborted(); results[index] = await work(items[index], index, active); }
+      catch (error) {
+        if (!failed) { failed = true; failure = error; stop.abort(error); }
+      }
+    }
+  });
+  await Promise.all(workers);
+  if (failed) throw failure;
+  signal?.throwIfAborted();
+  return results;
+}
 export async function probe(file: string, signal?: AbortSignal): Promise<any> {
   const { stdout } = await run("ffprobe", ["-v", "error", ...INPUT_FLAGS, "-show_entries", "format=format_name,duration,start_time,size,bit_rate:stream=index,codec_type,codec_name,width,height,pix_fmt,sample_aspect_ratio,display_aspect_ratio,r_frame_rate,avg_frame_rate,time_base,start_time,duration,sample_rate,channels,channel_layout,color_space,color_transfer,color_primaries:stream_disposition=attached_pic:stream_side_data=rotation", "-of", "json", file], signal, 20000);
   return JSON.parse(stdout);

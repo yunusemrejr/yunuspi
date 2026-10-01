@@ -3502,13 +3502,13 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 262,
+        "line": 258,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 284,
+        "line": 280,
         "kind": "factory"
       },
       {
@@ -3739,7 +3739,7 @@
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 261,
+        "line": 257,
         "kind": "factory"
       },
       {
@@ -3763,19 +3763,19 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 263,
+        "line": 259,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 259,
+        "line": 255,
         "kind": "factory"
       },
       {
         "name": "media_pipeline",
         "source": "agent/extensions/media-tools.ts",
-        "line": 285,
+        "line": 281,
         "kind": "factory"
       },
       {
@@ -3835,7 +3835,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 267,
+        "line": 263,
         "kind": "factory"
       },
       {
@@ -3961,13 +3961,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 277,
+        "line": 273,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 278,
+        "line": 274,
         "kind": "factory"
       },
       {
@@ -4076,7 +4076,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 305,
+        "line": 319,
         "kind": "literal"
       },
       {
@@ -4094,7 +4094,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 362,
+        "line": 365,
         "kind": "literal"
       },
       {
@@ -4118,13 +4118,13 @@
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 283,
+        "line": 279,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 260,
+        "line": 256,
         "kind": "factory"
       },
       {
@@ -4553,7 +4553,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 305,
+        "line": 319,
         "kind": "literal"
       },
       {
@@ -4565,7 +4565,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 362,
+        "line": 365,
         "kind": "literal"
       },
       {
@@ -4656,7 +4656,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          249
+          245
         ],
         "knownNames": [
           "audio_analyze",

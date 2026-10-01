@@ -154,7 +154,7 @@ test("video workflow hooks fire once per session on their tools", () => {
   assert.equal(hooks.matchHook("video_project", {})?.key, "video-timeline-check");
   assert.equal(hooks.matchHook("video_render", {})?.key, "video-render-review");
   assert.equal(hooks.matchHook("video_qa", {})?.key, "video-qa-review");
-  assert.equal(hooks.matchHook("narration_tts", {})?.key, "narration-fit");
+  assert.equal(hooks.matchHook("narration_tts", { action: "synthesize" })?.key, "narration-fit");
   assert.equal(hooks.matchHook("audio_synth", {})?.key, "audio-synth-balance");
   assert.equal(hooks.matchHook("video_compose", {})?.key, "timeline-compose-review");
   assert.equal(hooks.matchHook("audio_mix", {})?.key, "timeline-compose-review");

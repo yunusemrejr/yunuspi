@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
-import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, probe, produced, requireStream, run, windowParams } from "./lib/media-process.ts";
+import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, probe, produced, requireStream, run, windowParams, mediaMap } from "./lib/media-process.ts";
 import { composeMusic } from "./lib/music-score.ts";
 import { sceneCapabilities, sceneCreate, sceneRender } from "./lib/scene-studio.ts";
 import { audioMix, videoCompose, VIDEO_TRANSITIONS } from "./lib/media-timeline.ts";
@@ -27,7 +27,7 @@ export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) 
       try {
         const langs = (await run("tesseract", ["--list-langs"], signal, 10000)).stdout;
         binaries.tesseract.languages = langs.split("\n").slice(1).map((s: string) => s.trim()).filter(Boolean).slice(0, 32);
-      } catch { binaries.tesseract.languages = []; }
+      } catch (error) { if (signal?.aborted) throw error; binaries.tesseract.languages = []; }
     })());
     if (binaries.ffmpeg.available) detail.push((async () => {
       const [filters, encoders] = await Promise.all([
@@ -38,6 +38,7 @@ export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) 
       binaries.encoders = Object.fromEntries(["libx264", "aac", "pcm_s16le", "png"].map(x => [x, new RegExp(`\\b${x}\\b`).test(encoders)]));
     })());
     await Promise.all(detail);
+    signal?.throwIfAborted();
     return { ...binaries, musicCompose: { available: true, engine: "built-in MIDI writer and sine/triangle audition synth" }, sceneStudio: sceneCapabilities() };
   }
   if (action === "motion") return videoMotion(params, cwd, signal);
@@ -68,29 +69,24 @@ export async function videoFrames(params: any, cwd: string, signal?: AbortSignal
   }
   if (Number.isFinite(total) && times.some(t => t >= total)) throw new Error("Timestamp is outside the source duration");
   const dir = await outputFolder(params.outputDir, cwd);
-  const extract = async (index: number) => {
-    signal?.throwIfAborted();
+  const extract = async (_time: number, index: number, active: AbortSignal) => {
+    active.throwIfAborted();
     const output = path.join(dir, `frame-${String(index + 1).padStart(2, "0")}.png`);
     // Fit display aspect ratio (including non-square input pixels) inside
     // the box, then emit square pixels. reset_sar requires newer FFmpeg
     // than Ubuntu LTS supplies; these expressions also work on FFmpeg 6.
     const scale = `scale=w='if(gte(dar,1),${width},max(1,round(${width}*dar)))':h='if(gte(dar,1),max(1,round(${width}/dar)),${width})',setsar=1`;
-    const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[index]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `${scale},showinfo`, "-update", "1", output], signal, 20000);
+    const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[index]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `${scale},showinfo`, "-update", "1", output], active, 20000);
     const match = /\bn:\s*0\s+pts:\s*-?\d+\s+pts_time:([\d.e+-]+)/.exec(r.stderr);
     return { ...await produced(output), requestedSeconds: times[index], decodedSeconds: match ? times[index] + Number(match[1]) : null };
   };
   try {
-    // Identical per-frame commands, bounded-parallel: four workers share the
-    // queue and results land by index, so output order never changes.
-    const frames: any[] = new Array(times.length);
-    let next = 0;
-    const workers = Array.from({ length: Math.min(4, times.length) }, async () => { while (next < times.length) { const i = next++; frames[i] = await extract(i); } });
-    const settled = await Promise.allSettled(workers);
-    for (const outcome of settled) if (outcome.status === "rejected") throw outcome.reason;
+    const frames = await mediaMap(times, extract, signal);
     let sheet: any;
     if (params.contactSheet === true) sheet = await contactSheet(frames, dir, signal);
     const result = { source: file, timestampOrigin: "seconds from source presentation start; decodedSeconds adds post-seek PTS and may reflect decoder rounding", frames, ...(sheet ? { contactSheet: sheet } : {}), note: "Sparse frames do not establish continuous motion or events between samples." };
     await fs.writeFile(path.join(dir, "frames.json"), JSON.stringify(result, null, 2) + "\n", { flag: "wx" });
+    signal?.throwIfAborted();
     return result;
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }

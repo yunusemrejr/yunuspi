@@ -9,9 +9,8 @@
  * bounds, strokes, fills, defs, transforms, accessibility and path
  * complexity; the set review flags the icon that drifted from its siblings;
  * the render matrix rasterizes representative sizes for legibility judgment.
- * Bounds apply translate/scale transforms; rotate/skew/matrix are reported
- * but not applied, so rotated artwork keeps approximate bounds — stated in
- * the output, never silently exact.
+ * Affine transforms apply to geometry before bounds are measured. Curves,
+ * paint effects and unresolved instances retain explicit approximation causes.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -266,7 +265,7 @@ const unionBounds = (a: SvgBounds | null, b: SvgBounds | null): SvgBounds | null
   return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
 };
 
-// translate/scale-only 2D matrix stack for icon-typical transforms.
+// SVG transform lists post-multiply; nested groups compose parent × child.
 interface Matrix { a: number; b: number; c: number; d: number; e: number; f: number }
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 const applyMatrix = (m: Matrix, x: number, y: number): [number, number] => [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f];
@@ -276,23 +275,45 @@ const multiplyMatrix = (m: Matrix, n: Matrix): Matrix => ({
   e: m.a * n.e + m.c * n.f + m.e, f: m.b * n.e + m.d * n.f + m.f,
 });
 
-const parseTransform = (value: string): { matrix: Matrix; trivial: boolean } => {
+const parseTransform = (value: string): { matrix: Matrix; trivial: boolean; valid: boolean } => {
   let matrix = { ...IDENTITY };
-  let trivial = true;
-  const re = /(translate|scale|rotate|skewX|skewY|matrix)\s*\(([^)]*)\)/g;
+  let trivial = true, valid = true, end = 0;
+  const re = /([A-Za-z]+)\s*\(([^)]*)\)/g;
   let match: RegExpExecArray | null;
   let guard = 0;
   while ((match = re.exec(value)) && guard++ < 32) {
-    const args = match[2].trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(Number.isFinite);
-    if (match[1] === "translate" && args.length >= 1) {
+    if (!/^[\s,]*$/.test(value.slice(end, match.index))) valid = false;
+    end = re.lastIndex;
+    const body = match[2].trim();
+    const tokens = body.split(/[\s,]+/), args = tokens.map(Number);
+    if (!body || /(?:^,|,$|,\s*,)/.test(body) || tokens.some(token => !/^[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?$/.test(token)) || args.some(n => !Number.isFinite(n))) { valid = false; continue; }
+    let next: Matrix | undefined;
+    if (match[1] === "translate" && [1, 2].includes(args.length)) {
       const [tx, ty = 0] = args;
-      matrix = multiplyMatrix(matrix, { ...IDENTITY, e: tx, f: ty });
-    } else if (match[1] === "scale" && args.length >= 1) {
+      next = { ...IDENTITY, e: tx, f: ty };
+    } else if (match[1] === "scale" && [1, 2].includes(args.length)) {
       const [sx, sy = sx] = args;
-      matrix = multiplyMatrix(matrix, { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 });
-    } else trivial = false;
+      next = { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 };
+    } else if (match[1] === 'rotate' && [1, 3].includes(args.length)) {
+      const [angle, cx = 0, cy = 0] = args, radians = angle * Math.PI / 180;
+      const cos = Math.cos(radians), sin = Math.sin(radians);
+      next = { a: cos, b: sin, c: -sin, d: cos, e: cx - cos * cx + sin * cy, f: cy - sin * cx - cos * cy };
+      trivial = false;
+    } else if (['skewX', 'skewY'].includes(match[1]) && args.length === 1 && Math.abs(Math.cos(args[0] * Math.PI / 180)) > 1e-12) {
+      const tangent = Math.tan(args[0] * Math.PI / 180);
+      next = { ...IDENTITY, ...(match[1] === 'skewX' ? { c: tangent } : { b: tangent }) };
+      trivial = false;
+    } else if (match[1] === 'matrix' && args.length === 6) {
+      const [a, b, c, d, e, f] = args; next = { a, b, c, d, e, f }; trivial = false;
+    } else valid = false;
+    if (next) {
+      const combined = multiplyMatrix(matrix, next);
+      if (Object.values(combined).every(Number.isFinite)) matrix = combined;
+      else valid = false;
+    }
   }
-  return { matrix, trivial };
+  if (!end || !/^[\s,]*$/.test(value.slice(end))) valid = false;
+  return { matrix, trivial, valid };
 };
 
 const SHAPE_TAGS = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
@@ -326,7 +347,8 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
   let curveCommands = 0, lineCommands = 0, rxCount = 0;
   let inkArea = 0, inkCx = 0, inkCy = 0;
   const matrixStack: Matrix[] = [{ ...IDENTITY }];
-  let depth = 0, maxTransformDepth = 0, nonTrivialPresent = false;
+  const hiddenStack = [false];
+  let depth = 0, maxTransformDepth = 0, invalidTransform = false, sampledCurves = false, nestedViewport = false, rotatedMass = false;
   // Certainty tracking: every static-analysis gap that moves a measurement
   // from exact to approximate is recorded here (see approximationCauses).
   let sawClass = false, sawStyleElement = false, sawStrokedShape = false, sawInheritedPaint = false;
@@ -339,6 +361,8 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     const filled = fill !== "none";
     const stroked = stroke !== "none" && strokeWidth > 0;
     let local: SvgBounds | null = null;
+    let vertices: Array<[number, number]> | undefined;
+    let ellipse: { cx: number; cy: number; rx: number; ry: number } | undefined;
     if (name === "path" && attrs.d) {
       const { points, stat } = flattenPath(attrs.d);
       measure.paths++;
@@ -346,20 +370,21 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
       measure.longestPathNodes = Math.max(measure.longestPathNodes, stat.nodes);
       curveCommands += stat.curves + (stat.arcs ? 1 : 0);
       lineCommands += Math.max(0, stat.commands - stat.curves - (stat.arcs ? 1 : 0));
-      local = boundsOfPoints(points);
+      vertices = points;
+      if (stat.curves || stat.arcs) sampledCurves = true;
     } else if (name === "rect") {
       const x = num(attrs.x) ?? 0, y = num(attrs.y) ?? 0, w = num(attrs.width) ?? 0, h = num(attrs.height) ?? 0;
       if (num(attrs.rx) || num(attrs.ry)) rxCount++;
       if (w > 0 && h > 0) local = { x, y, width: w, height: h };
     } else if (name === "circle") {
       const cx = num(attrs.cx) ?? 0, cy = num(attrs.cy) ?? 0, r = num(attrs.r) ?? 0;
-      if (r > 0) { local = { x: cx - r, y: cy - r, width: 2 * r, height: 2 * r }; curveCommands++; }
+      if (r > 0) { ellipse = { cx, cy, rx: r, ry: r }; curveCommands++; }
     } else if (name === "ellipse") {
       const cx = num(attrs.cx) ?? 0, cy = num(attrs.cy) ?? 0, rx = num(attrs.rx) ?? 0, ry = num(attrs.ry) ?? 0;
-      if (rx > 0 && ry > 0) { local = { x: cx - rx, y: cy - ry, width: 2 * rx, height: 2 * ry }; curveCommands++; }
+      if (rx > 0 && ry > 0) { ellipse = { cx, cy, rx, ry }; curveCommands++; }
     } else if (name === "line") {
       const x1 = num(attrs.x1) ?? 0, y1 = num(attrs.y1) ?? 0, x2 = num(attrs.x2) ?? 0, y2 = num(attrs.y2) ?? 0;
-      local = { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+      vertices = [[x1, y1], [x2, y2]];
       lineCommands++;
     } else if (name === "polyline" || name === "polygon") {
       const nums = (attrs.points ?? "").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
@@ -367,10 +392,15 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
       for (let k = 0; k + 1 < nums.length; k += 2) pts.push([nums[k], nums[k + 1]]);
       measure.totalNodes += pts.length;
       lineCommands += Math.max(0, pts.length - 1);
-      local = boundsOfPoints(pts);
+      vertices = pts;
     }
-    if (local) {
-      const m = matrixStack[matrixStack.length - 1];
+    const m = matrixStack[matrixStack.length - 1];
+    if (vertices) local = boundsOfPoints(vertices.map(([x, y]) => applyMatrix(m, x, y)));
+    else if (ellipse) {
+      const [cx, cy] = applyMatrix(m, ellipse.cx, ellipse.cy);
+      const rx = Math.hypot(m.a * ellipse.rx, m.c * ellipse.ry), ry = Math.hypot(m.b * ellipse.rx, m.d * ellipse.ry);
+      local = { x: cx - rx, y: cy - ry, width: 2 * rx, height: 2 * ry };
+    } else if (local) {
       const corners = [[local.x, local.y], [local.x + local.width, local.y], [local.x, local.y + local.height], [local.x + local.width, local.y + local.height]]
         .map(([px, py]) => applyMatrix(m, px, py));
       local = boundsOfPoints(corners as Array<[number, number]>);
@@ -388,11 +418,15 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
   for (const tag of tags) {
     if (tag.closing) {
       depth = Math.max(0, depth - 1);
+      if (hiddenStack.length > 1) hiddenStack.pop();
       if (matrixStack.length > 1) matrixStack.pop();
       continue;
     }
     measure.elements[tag.name] = (measure.elements[tag.name] ?? 0) + 1;
     const { attrs } = tag;
+    const style = parseStyleAttr(attrs.style);
+    const hidden = hiddenStack.at(-1)! || ['defs', 'symbol', 'clippath', 'mask', 'pattern', 'marker', 'filter'].includes(tag.name) || (style.display ?? attrs.display ?? '').replace(/\s*!important\s*$/, '') === 'none';
+    if (tag.name === 'svg' && measure.elements.svg > 1) nestedViewport = true;
     if (attrs.class) sawClass = true;
     if (tag.name === "style") sawStyleElement = true;
     if (!SHAPE_TAGS.has(tag.name) && (attrs.fill !== undefined || attrs.stroke !== undefined || attrs["stroke-width"] !== undefined)) {
@@ -440,19 +474,21 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     let pushed = false;
     if (attrs.transform) {
       measure.transforms.count++;
-      const { matrix, trivial } = parseTransform(attrs.transform);
+      const { matrix, trivial, valid } = parseTransform(attrs.transform);
       matrixStack.push(multiplyMatrix(matrixStack[matrixStack.length - 1], matrix));
       pushed = true;
       maxTransformDepth = Math.max(maxTransformDepth, depth + 1);
       if (!trivial) {
-        nonTrivialPresent = true;
         if (measure.transforms.nonTrivial.length < 8) measure.transforms.nonTrivial.push(attrs.transform.slice(0, 120));
       }
+      if (!valid) invalidTransform = true;
     }
     if (SHAPE_TAGS.has(tag.name)) {
       const { bounds, filled, stroked, strokeWidth } = shapeBounds(tag.name, attrs);
-      if (stroked) sawStrokedShape = true;
-      if (bounds && bounds.width >= 0 && bounds.height >= 0) {
+      const current = matrixStack.at(-1)!;
+      if (!hidden && (Math.abs(current.b) > 1e-12 || Math.abs(current.c) > 1e-12)) rotatedMass = true;
+      if (!hidden && stroked) sawStrokedShape = true;
+      if (!hidden && bounds && bounds.width >= 0 && bounds.height >= 0) {
         measure.unionBounds = unionBounds(measure.unionBounds, bounds);
         const area = Math.max(0, bounds.width * bounds.height);
         const weight = filled ? area : stroked ? area * Math.min(1, strokeWidth / 8) : 0;
@@ -469,6 +505,7 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     } else if (!tag.selfClosing) {
       depth++;
     }
+    if (!tag.selfClosing) hiddenStack.push(hidden);
     if (tag.selfClosing && pushed) matrixStack.pop();
     if (matrixStack.length > 400) break;
   }
@@ -500,7 +537,10 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
   const curvy = curveCommands > lineCommands * 2;
   measure.cornerLanguage = rounded ? (sharp ? "mixed round/sharp" : "round") : sharp ? "sharp" : curvy ? "curved" : lineCommands ? "angular" : "unknown";
   const causes: string[] = [];
-  if (nonTrivialPresent) causes.push("rotate/skew/matrix transforms are reported but not applied: bounds ignore rotation");
+  if (invalidTransform) causes.push('unsupported, malformed or bounded transform list: geometry may be incomplete');
+  if (rotatedMass) causes.push('rotated/skewed shape mass uses bounding-box estimates; optical weight needs rendered verification');
+  if (sampledCurves) causes.push('path curves/arcs use sampled extrema: bounds are approximate');
+  if (nestedViewport) causes.push('nested SVG viewport/viewBox mapping is not applied');
   if (measure.uses > 0) causes.push("<use> instances are counted, not expanded: referenced geometry is missing from bounds");
   if (sawClass || sawStyleElement) causes.push("CSS class/<style> styling is not applied: fill/stroke/visibility may differ");
   if (sawStrokedShape) causes.push("stroke extents are excluded: bounds cover fill geometry only");
@@ -635,7 +675,7 @@ export async function svgInspectRun(params: { path?: unknown; paths?: unknown; f
     ...(approximateFiles.length ? { approximateGeometry: approximateFiles } : {}),
     note: approximateFiles.length
       ? `Static geometry is APPROXIMATE for ${approximateFiles.length} file(s) (see approximationCauses per measure): final visual verification must use the render matrix plus vision judgment, not the padding/center/mass estimates.`
-      : "Geometry from source, not taste: stroke/mass/center/padding outliers flag the icon that drifted from its siblings. Bounds apply translate/scale only (see boundsApproximate). Small-size legibility needs the render matrix plus vision judgment.",
+      : "Geometry from source, not taste: stroke/mass/center/padding outliers flag the icon that drifted from its siblings. Affine transforms apply before bounds; see approximationCauses for remaining gaps. Small-size legibility needs the render matrix plus vision judgment.",
   };
 }
 
@@ -656,29 +696,41 @@ export function planSvgMatrix(sizes: unknown): { captureSize: number; targets: n
 /** Rasterize one SVG at icon-representative sizes and measure ink coverage
  * per size as a clogging proxy. */
 export async function svgMatrixRun(params: { path: string; sizes?: unknown }, cwd: string, signal: AbortSignal | undefined, capture: QACapture) {
-  const { resolved } = await readSvg(params.path, cwd);
+  signal?.throwIfAborted();
+  const { xml, resolved } = await readSvg(params.path, cwd);
   const plan = planSvgMatrix(params.sizes);
   const dir = await qaFolder(undefined, cwd, "ui-review", "svg");
-  signal?.throwIfAborted();
-  const master = path.join(dir, "svg-master.png");
-  await capture({ source: resolved, width: plan.captureSize, height: plan.captureSize, fullPage: false, timeoutMs: 30_000 }, master, cwd, signal);
-  const bytes = await fs.readFile(master);
-  const cells: any[] = [];
-  for (const size of plan.targets) {
+  const source = path.join(dir, 'matrix-source.html');
+  try {
+    // An SVG with width=24 otherwise occupies only 24px of a 256px capture.
+    // The image context fits intrinsic artwork and keeps SVG scripts inert.
+    await fs.writeFile(source, `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;background:white}img{display:block;width:100%;height:100%;object-fit:contain}</style><img alt="" src="data:image/svg+xml;base64,${Buffer.from(xml).toString('base64')}">`, { flag: 'wx' });
     signal?.throwIfAborted();
-    const img = await decodeImage(bytes, { exactWidth: Math.min(size, plan.captureSize), maxPixels: 2_000_000 }, signal);
-    const bg: [number, number, number] = [img.data[0], img.data[1], img.data[2]];
-    let ink = 0;
-    for (let i = 0; i < img.width * img.height; i++) {
-      const d = Math.abs(img.data[i * 4] - bg[0]) + Math.abs(img.data[i * 4 + 1] - bg[1]) + Math.abs(img.data[i * 4 + 2] - bg[2]);
-      if (d >= 60) ink++;
+    const master = path.join(dir, "svg-master.png");
+    await capture({ source, width: plan.captureSize, height: plan.captureSize, fullPage: false, timeoutMs: 30_000 }, master, cwd, signal);
+    const bytes = await fs.readFile(master);
+    const cells: any[] = [];
+    for (const size of plan.targets) {
+      signal?.throwIfAborted();
+      const img = await decodeImage(bytes, { exactWidth: Math.min(size, plan.captureSize), maxPixels: 2_000_000 }, signal);
+      const bg: [number, number, number] = [img.data[0], img.data[1], img.data[2]];
+      let ink = 0;
+      for (let i = 0; i < img.width * img.height; i++) {
+        const d = Math.abs(img.data[i * 4] - bg[0]) + Math.abs(img.data[i * 4 + 1] - bg[1]) + Math.abs(img.data[i * 4 + 2] - bg[2]);
+        if (d >= 60) ink++;
+      }
+      const dest = path.join(dir, `svg-${size}px.png`);
+      await fs.writeFile(dest, await encodeImage(img, "png", {}, signal), { flag: "wx" });
+      cells.push({ size, file: relative(cwd, dest), coverage: Math.round((ink / (img.width * img.height)) * 1000) / 10 });
     }
-    const dest = path.join(dir, `svg-${size}px.png`);
-    await fs.writeFile(dest, await encodeImage(img, "png", {}, signal), { flag: "wx" });
-    cells.push({ size, file: relative(cwd, dest), coverage: Math.round((ink / (img.width * img.height)) * 1000) / 10 });
+    signal?.throwIfAborted();
+    return {
+      source: relative(cwd, resolved), dir: relative(cwd, dir), master: relative(cwd, master), cells,
+      note: "Artwork is fitted into a square on white with its aspect ratio preserved; cells downsample one master capture. External resources and scripts are unavailable in the SVG image context. Coverage is an ink proxy; judge silhouettes from the pixels and verify native small-size rendering when hinting matters.",
+    };
+  } catch (error) {
+    await fs.rm(dir, { recursive: true, force: true }); throw error;
+  } finally {
+    await fs.rm(source, { force: true });
   }
-  return {
-    source: relative(cwd, resolved), dir: relative(cwd, dir), master: relative(cwd, master), cells,
-    note: "Coverage is an ink proxy, not legibility: near-0% at 16px means vanished detail, near-100% means a clogged blob. Judge silhouettes from the pixels.",
-  };
 }

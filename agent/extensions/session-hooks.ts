@@ -27,7 +27,7 @@ const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 
 export default function (pi: any) {
 	/** toolCallId -> rule key queued at tool_call time. */
-	const pending = new Map<string, { success: ReturnType<typeof matchHook>; failure: ReturnType<typeof matchHook>; input: Record<string, unknown> }>();
+	const pending = new Map<string, { tool: string; success: ReturnType<typeof matchHook>; failure: ReturnType<typeof matchHook>; input: Record<string, unknown> }>();
 	/** Rule keys already shown this session. */
 	const shown = new Set<string>();
 	/** A successful deploy stays unverified until live bytes are compared. */
@@ -37,7 +37,7 @@ export default function (pi: any) {
 	const deployVerificationText = (at: number): string =>
 		`deploy at ${new Date(at).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`;
 	let disposeDeployNotice: (() => void) | undefined;
-	const deployCalls = new Map<string, { deploy: boolean; verify: boolean; revision: number }>();
+	const deployCalls = new Map<string, { tool: string; deploy: boolean; verify: boolean; revision: number }>();
 
 	const enabled = (): boolean =>
 		(process.env.PI_SESSION_HOOKS ?? "on").toLowerCase() !== "off";
@@ -68,7 +68,7 @@ export default function (pi: any) {
 		const verify = (deploy || unverifiedDeployAt !== undefined) && isLiveByteVerification(event.toolName, input);
 		if (deploy || verify) {
 			if (deployCalls.size >= 256) deployCalls.delete(deployCalls.keys().next().value!);
-			deployCalls.set(event.toolCallId, { deploy, verify, revision: deployRevision });
+			deployCalls.set(event.toolCallId, { tool: event.toolName, deploy, verify, revision: deployRevision });
 		}
 		const success = matchHook(event.toolName, event.input ?? {});
 		const failure = matchHook(event.toolName, event.input ?? {}, true);
@@ -78,11 +78,13 @@ export default function (pi: any) {
 		if (!mayMatchResult && (!success || shown.has(success.key)) && (!failure || shown.has(failure.key))) return;
 		// Aborted/unpaired calls cannot retain an unbounded per-session map.
 		if (pending.size >= 256) pending.delete(pending.keys().next().value!);
-		pending.set(event.toolCallId, { success, failure, input: event.input ?? {} });
+		pending.set(event.toolCallId, { tool: event.toolName, success, failure, input: event.input ?? {} });
 	});
 
 	pi.on("tool_result", (event: any, ctx: any) => {
+		const queued = pending.get(event.toolCallId);
 		const deployRole = deployCalls.get(event.toolCallId);
+		if (queued && queued.tool !== event.toolName || deployRole && deployRole.tool !== event.toolName) return;
 		deployCalls.delete(event.toolCallId);
 		if (deployRole && !event.isError) {
 			const verifiesCurrent = deployRole.revision === deployRevision;
@@ -109,7 +111,6 @@ export default function (pi: any) {
 			// That older fetch is not evidence for the newly published revision.
 			if (deployRole.verify && verifiesCurrent) unverifiedDeployAt = undefined;
 		}
-		const queued = pending.get(event.toolCallId);
 		pending.delete(event.toolCallId);
 		if (!enabled() || !queued) return;
 		// Structured browser failures already carry the precise recovery step.

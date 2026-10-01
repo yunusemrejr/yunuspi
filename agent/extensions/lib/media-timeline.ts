@@ -1,7 +1,7 @@
 /** Data-only FFmpeg timeline construction. No user filters, shell or remote inputs. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, probe, produced, requireStream, run } from './media-process.ts';
+import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, probe, produced, requireStream, run, mediaMap } from './media-process.ts';
 import { masterMedia } from './audio-studio.ts';
 
 function fields(value: any, allowed: string[], name: string) {
@@ -17,10 +17,12 @@ function sourceDuration(info: any, stream: any) {
   if (!Number.isFinite(seconds) || seconds <= 0) throw Error('Source duration is unknown; use a finalized local media file');
   return seconds;
 }
-function cachedProbe(signal?: AbortSignal) {
+export type MediaInspector = (file: string, signal?: AbortSignal) => Promise<any>;
+export function cachedProbe(signal?: AbortSignal): MediaInspector {
   const files = new Map<string, Promise<any>>();
-  return (file: string) => {
-    if (!files.has(file)) files.set(file, probe(file, signal));
+  return (file: string, active = signal) => {
+    active?.throwIfAborted();
+    if (!files.has(file)) files.set(file, probe(file, active));
     return files.get(file)!;
   };
 }
@@ -113,20 +115,23 @@ async function finish(dir: string, output: string, signal: AbortSignal | undefin
   signal?.throwIfAborted();
   return result;
 }
-function loopBudget(tracks: any[]) {
+export function loopBudget(tracks: any[]) {
   // aloop stores decoded float stereo; cap aggregate buffers at 128 MiB.
   if (tracks.filter(track => track.loop).reduce((bytes, track) => bytes + Math.ceil(track.sourceDuration * 48000) * 8, 0) > 128 * 1024 * 1024) throw Error('Loop buffers exceed 128 MiB; shorten source segments or use fewer looped tracks');
 }
 
-export async function audioMix(params: any, cwd: string, signal?: AbortSignal) {
+export async function prepareAudioMix(params: any, cwd: string, signal?: AbortSignal, inspect = cachedProbe(signal)) {
   const duration = number(params.duration, 30, 0.1, 120, 'duration');
-  const inspect = cachedProbe(signal);
-  const tracks = [];
-  for (const track of array(params.tracks, 'tracks')) tracks.push(await audioTrack(track, cwd, duration, inspect));
+  const tracks = await mediaMap(array(params.tracks, 'tracks'), (track, _index, active) => audioTrack(track, cwd, duration, file => inspect(file, active)), signal);
   const ducking = duckingOptions(params.ducking, tracks.map(t => t.role));
   loopBudget(tracks);
   const target = params.targetLufs === undefined ? undefined : number(params.targetLufs, -16, -36, -8, 'targetLufs');
   signal?.throwIfAborted();
+  return { duration, tracks, ducking, target };
+}
+
+export async function audioMix(params: any, cwd: string, signal?: AbortSignal, inspect?: MediaInspector) {
+  const { duration, tracks, ducking, target } = await prepareAudioMix(params, cwd, signal, inspect);
   const dir = await outputFolder(params.outputDir, cwd), output = path.join(dir, 'mix.wav');
   try {
     const voiceBus = ducking ? await renderVoiceBus(tracks.filter(track => track.role === 'voice'), duration, dir, signal) : undefined;
@@ -150,14 +155,13 @@ export async function audioMix(params: any, cwd: string, signal?: AbortSignal) {
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }
 
-export async function videoCompose(params: any, cwd: string, signal?: AbortSignal) {
+export async function prepareVideoCompose(params: any, cwd: string, signal?: AbortSignal, inspect = cachedProbe(signal)) {
   const width = integer(params.width, 1280, 64, 1920, 'width'), height = integer(params.height, 720, 64, 1080, 'height'), fps = integer(params.fps, 24, 1, 60, 'fps');
   if (width % 2 || height % 2) throw Error('width and height must be even');
   const transition = params.transition ?? 'cut';
   if (!(VIDEO_TRANSITIONS as readonly string[]).includes(transition)) throw Error(`transition must be one of ${VIDEO_TRANSITIONS.join(', ')}`);
   const overlap = transition === 'cut' ? 0 : number(params.transitionDuration, 0.5, 1 / fps, 3, 'transitionDuration');
   if (params.includeClipAudio !== undefined && typeof params.includeClipAudio !== 'boolean') throw Error('includeClipAudio must be boolean');
-  const inspect = cachedProbe(signal);
   const clips = []; let requestedDuration = 0;
   for (const raw of array(params.clips, 'clips')) {
     fields(raw, ['path', 'start', 'duration'], 'clip');
@@ -182,16 +186,20 @@ export async function videoCompose(params: any, cwd: string, signal?: AbortSigna
   }
   const duration = clips.at(-1)!.endFrame / fps;
   if (duration > 120 || Math.ceil(duration * fps) * width * height > 1_500_000_000) throw Error('Timeline exceeds duration/pixel work budget; reduce duration, fps or resolution');
-  const extraTracks = [];
   // User audio is expressed in the requested timeline. Final mixing trims or
   // pads the sub-frame difference after video boundary quantization.
-  for (const track of array(params.audio ?? [], 'audio', 0)) extraTracks.push(await audioTrack(track, cwd, requestedDuration, inspect));
+  const extraTracks = await mediaMap(array(params.audio ?? [], 'audio', 0), (track, _index, active) => audioTrack(track, cwd, requestedDuration, file => inspect(file, active)), signal);
   const clipRoles = params.includeClipAudio !== false ? clips.filter(clip => clip.audio !== undefined).map(() => 'voice') : [];
   const ducking = duckingOptions(params.ducking, [...clipRoles, ...extraTracks.map(t => t.role)]);
   loopBudget(extraTracks);
   const target = params.targetLufs === undefined ? undefined : number(params.targetLufs, -16, -36, -8, 'targetLufs');
   if (target !== undefined && !clipRoles.length && !extraTracks.length) throw Error('Loudness normalization requires audio');
   signal?.throwIfAborted();
+  return { width, height, fps, transition, overlap, clips, duration, requestedDuration, extraTracks, clipRoles, ducking, target };
+}
+
+export async function videoCompose(params: any, cwd: string, signal?: AbortSignal, inspect?: MediaInspector) {
+  const { width, height, fps, transition, overlap, clips, duration, requestedDuration, extraTracks, ducking, target } = await prepareVideoCompose(params, cwd, signal, inspect);
   const dir = await outputFolder(params.outputDir, cwd), output = path.join(dir, 'timeline.mp4');
   try {
     const clipVoice = params.includeClipAudio !== false ? clips.flatMap((clip, i) => clip.audio === undefined ? [] : [{ ...clip, stream: clip.audio, sourceDuration: clip.requestedDuration, gain: 1, pan: 0, fadeIn: clip.transitionDuration, fadeOut: clips[i + 1]?.transitionDuration ?? 0 }]) : [];

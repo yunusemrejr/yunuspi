@@ -106,8 +106,8 @@ test("sourceRevision hashes files and marks live sources", async () => {
 });
 
 test("creative hook rules bind the QA loop", () => {
-  assert.equal(hooks.matchHook("creative_direct", {})?.key, "creative-direction-loop");
-  assert.equal(hooks.matchHook("visual_review", {})?.key, "visual-review-receipt");
+  assert.equal(hooks.matchHook("creative_direct", { action: "set" })?.key, "creative-direction-loop");
+  assert.equal(hooks.matchHook("visual_review", { action: "run" })?.key, "visual-review-receipt");
   assert.equal(hooks.matchHook("ui_explore", {})?.key, "art-qa-evidence");
   assert.equal(hooks.matchHook("motion_inspect", {})?.key, "art-qa-evidence");
   assert.equal(hooks.matchHook("svg_inspect", {})?.key, "art-qa-evidence");

@@ -42,7 +42,16 @@ export function testDiagnostics(text: string) {
   if (redactSecrets(text) !== text || /\[\[(?:private|protected|secret)|<\/?(?:private|secret|protected)\b|\b(?:confidential|private[- ]input|do not (?:send|share|upload)|not for distribution)\b/i.test(text))
     return { text: '[Diagnostic output withheld: possible protected material.]', chars: text.length, omitted: true };
   const limit = 1400;
-  return { text: text.length > limit ? `${text.slice(0,500)}\n[Diagnostic middle omitted]\n${text.slice(-850)}` : text, chars: text.length, omitted: text.length > limit };
+  if (text.length <= limit) return { text, chars: text.length, omitted: false };
+  // Runner setup and teardown can surround the only useful stack trace.
+  // Match line starts, not summary counts or an incidental "error" in prose.
+  const plain = text.replace(/\x1b\[[0-9;]*m/g, '');
+  const failure = /^[ \t]*(?:#[ \t]*)?(?:not ok\b|FAIL(?:ED|URE|URES)?\b|[✖×]\s|(?:[\w.$]*(?:Error|Exception)|error(?:\[[^\]]+\])?):\s|Exception in thread\b|[^\s:\n]{1,240}:\d+(?::\d+)?:[ \t]*(?:fatal[ \t]+)?error:|Traceback \(most recent call last\):|E\s+\S|panic:|thread .+ panicked)/m.exec(plain);
+  if (!failure || failure.index < 400 || failure.index > plain.length - 850)
+    return { text: `${text.slice(0,500)}\n[Diagnostic middle omitted]\n${text.slice(-850)}`, chars: text.length, omitted: true };
+  const start = Math.max(0, plain.lastIndexOf('\n', failure.index - 2) + 1);
+  const excerpt = `${plain.slice(0,180)}\n[Diagnostic gap omitted]\n${plain.slice(start, start + 850)}\n[Diagnostic gap omitted]\n${plain.slice(-300)}`;
+  return { text: excerpt.slice(0, limit), chars: text.length, omitted: true };
 }
 export function reviewTestContext(data: any) {
   const safe = (value: unknown) => typeof value === 'string' ? redactSecrets(value) : value;

@@ -8,7 +8,7 @@ import { askJev, jevMark, tooShort } from './jev-client.ts';
 import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
-import { skillActionSegments, skillRoutes } from './skill-routing.ts';
+import { skillActionSegments, skillIntentSegments, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
 
@@ -150,10 +150,13 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
   for (const bundle of DIRECT_BUNDLES) if (segments.some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
-  if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(text)) out.add('music_compose');
-  if (/\bmix\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(text)) out.add('audio_mix');
-  if (/\b(?:trim|denoise|normalize)\b[^\n]{0,60}\b(?:audio|sound|music)\b/i.test(text)) out.add('media_edit');
-  if (/\b(?:soundtrack|ducking|voice and music)\b|\bmix\b[^\n]{0,80}\b(?:master|normaliz|video)\w*\b|\b(?:music|audio)\b[^\n]{0,80}\b(?:pipeline|workflow)\b/i.test(text)) out.add('media_pipeline');
+  for (const part of skillIntentSegments(text)) {
+    if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(part)) out.add('music_compose');
+    if (/\b(?:mix|denoise|time[- ]stretch)\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(part)) out.add('audio_mix');
+    if (/\b(?:trim|normalize)\b[^\n]{0,60}\b(?:audio|sound|music)\b/i.test(part)) out.add('media_edit');
+    if (/\b(?:create|make|generate|synthesize)\b[^\n]{0,60}\b(?:sound effects?|sfx)\b/i.test(part)) out.add('audio_synth');
+    if (/\b(?:soundtrack|ducking|voice and music)\b|\bmix\b[^\n]{0,80}\b(?:master|normaliz|video)\w*\b|\b(?:music|audio)\b[^\n]{0,80}\b(?:pipeline|workflow)\b/i.test(part)) out.add('media_pipeline');
+  }
   const pipeline = selectTaskPipelines({ prompt: !adaptiveExecutionEnabled() ? '' : text });
   for (const name of automaticPipelineTools(pipeline, { prompt: text })) out.add(name);
   return [...out];

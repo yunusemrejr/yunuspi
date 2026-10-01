@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { pathToFileURL } from 'node:url';
 
 const template = path.resolve(import.meta.dirname, '..');
-const agent = [path.join(template, 'agent'), path.join(template, '..', 'agent'), path.resolve(template, '..')].find(dir => fs.existsSync(path.join(dir, 'extensions/adaptive-workflows.ts')));
+const agent = [path.join(template, 'agent'), path.join(template, '..', 'agent'), path.resolve(template, '..'), path.resolve(template, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/adaptive-workflows.ts')));
 process.env.PI_LOCAL_LM = 'off';
 process.env.PI_JEV = 'off';
 process.env.PI_NEEDLE = 'off';
@@ -101,6 +101,33 @@ async function waitForPolicy(f, predicate) {
   }
   assert.fail('Native background source observation did not settle the expected policy');
 }
+
+test('native media receipts settle technical stages while playback and listening stay unresolved', async t => {
+  const f = fixture(t);
+  await f.emit('session_start'); await f.start('Edit a video with narration and a soundtrack');
+  await f.call('media_info', { action: 'capabilities' }, { details: { ffmpeg: { available: true } } });
+  assert.equal((await f.status()).evidence.length, 0, 'capability availability does not inspect the source');
+  const probe = await f.beginCall('media_info', { path: 'source.mp4' });
+  await f.finish({ ...probe, toolName: 'audio_analyze' }, { details: { source: 'wrong.wav' } });
+  assert.equal((await f.status()).evidence.length, 0, 'unrelated result cannot consume the source probe');
+  await f.finish(probe, { details: { path: 'source.mp4', streams: [{ codec_type: 'video' }] } });
+  const made = await f.beginCall('media_pipeline', {});
+  await f.finish(made, { details: { artifact: { path: 'media-unique/final.mp4', bytes: 1000 }, decodeVerified: true, automatedChecks: { decode: true, loudnessWithinTarget: true } } });
+  let status = await f.status();
+  assert.ok(status.evidence.some(row => row.stageId === 'validation' && row.status === 'passed'));
+  for (const id of ['video-playback', 'audio-listening']) assert.ok(status.pending.some(row => row.id === id));
+  await f.runTool({ action: 'record', stageId: 'video-playback', status: 'passed', evidenceKind: 'playback', source: 'playback:final' });
+  await f.runTool({ action: 'record', stageId: 'audio-listening', status: 'passed', evidenceKind: 'listening', source: 'listening:final' });
+  const changed = await f.beginCall('media_pipeline', {});
+  await f.finish(changed, { details: { artifact: { path: 'media-new/final.mp4', bytes: 1100 }, decodeVerified: true, automatedChecks: { loudnessWithinTarget: false } } });
+  status = await f.status();
+  assert.ok(status.evidence.some(row => row.stageId === 'validation' && row.status === 'failed'));
+  assert.ok(!status.evidence.some(row => ['video-playback', 'audio-listening'].includes(row.stageId)), 'new output invalidates earlier artistic approval');
+  const pending = await f.beginCall('media_pipeline', {});
+  await f.start('Create an SVG icon set');
+  await f.finish(pending, { details: { artifact: { path: 'late/final.mp4', bytes: 1000 }, decodeVerified: true } });
+  assert.equal((await f.status()).evidence.length, 0, 'late output belongs to the old task');
+});
 
 // These tests drive native lifecycle events and inspect resulting policy and
 // receipts. They do not mock the selector, controller or stage ledger.

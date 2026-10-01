@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { validateScore, composeMusic } from './music-score.ts';
-import { audioMix, videoCompose } from './media-timeline.ts';
+import { audioMix, videoCompose, prepareAudioMix, prepareVideoCompose, cachedProbe, duckingOptions, loopBudget } from './media-timeline.ts';
 import { measureAudio } from './audio-studio.ts';
 import { sceneRender } from './scene-studio.ts';
 import { inputFile, number, outputFolder } from './media-process.ts';
@@ -46,6 +46,23 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     if ((await fs.stat(file)).size > SCENE_LIMITS.jsonBytes) throw Error('Scene JSON exceeds 256 KiB');
     animation = validateScene({ ...JSON.parse(await fs.readFile(file, 'utf8')), ...(params.width === undefined ? {} : { width: params.width }), ...(params.height === undefined ? {} : { height: params.height }), ...(params.fps === undefined ? {} : { fps: params.fps }) });
   }
+  // Resolve every source and edit option before synthesizing or allocating
+  // output. The same call-local probe promises serve preflight and rendering.
+  const inspect = cachedProbe(signal);
+  const duration = animation ? Math.ceil(animation.duration * animation.fps) / animation.fps : params.duration ?? (params.score ? validateScore(params.score).seconds : 30);
+  const sourceOptions = { tracks: params.tracks ?? [], duration, ducking: false };
+  const prepared = plan.mode === 'video'
+    ? await prepareVideoCompose({ clips: params.clips, audio: params.tracks, transition: params.transition, transitionDuration: params.transitionDuration, includeClipAudio: params.includeClipAudio, width: params.width, height: params.height, fps: params.fps, ducking: false }, cwd, signal, inspect)
+    : (params.tracks?.length ? await prepareAudioMix(sourceOptions, cwd, signal, inspect) : undefined);
+  if (plan.mode !== 'video' && plan.hasAudio) number(duration, 30, 0.1, 120, 'duration');
+  const roles = [...(prepared && 'extraTracks' in prepared ? [...prepared.clipRoles, ...prepared.extraTracks.map(track => track.role)] : prepared?.tracks.map(track => track.role) ?? []), ...(params.score ? ['music'] : [])];
+  if (params.score) loopBudget([
+    ...(prepared && 'extraTracks' in prepared ? prepared.extraTracks : prepared?.tracks ?? []),
+    { loop: true, sourceDuration: Math.min(validateScore(params.score).seconds, prepared && 'requestedDuration' in prepared ? prepared.requestedDuration : duration) },
+  ]);
+  duckingOptions(params.ducking, roles);
+  if (params.targetLufs !== undefined && !roles.length) throw Error('Loudness normalization requires audio');
+  signal?.throwIfAborted();
   const dir = await outputFolder(params.outputDir, cwd);
   const stages: Array<{ name: string; elapsedMs: number }> = [];
   const stage = async (name: string, work: () => Promise<any>) => {
@@ -64,11 +81,11 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     const mixOptions = { tracks, ducking: params.ducking, targetLufs: params.targetLufs, outputDir: dir };
     let rendered: any, artifact: any, mastering: any;
     if (plan.mode === 'video') {
-      rendered = await stage('compose_video', () => videoCompose({ clips: params.clips, transition: params.transition, transitionDuration: params.transitionDuration, includeClipAudio: params.includeClipAudio, audio: tracks, ducking: params.ducking, targetLufs: params.targetLufs, width: params.width, height: params.height, fps: params.fps, outputDir: dir }, cwd, signal));
+      rendered = await stage('compose_video', () => videoCompose({ clips: params.clips, transition: params.transition, transitionDuration: params.transitionDuration, includeClipAudio: params.includeClipAudio, audio: tracks, ducking: params.ducking, targetLufs: params.targetLufs, width: params.width, height: params.height, fps: params.fps, outputDir: dir }, cwd, signal, inspect));
       artifact = rendered.artifact;
     } else {
       let mixed: any;
-      if (tracks.length) mixed = await stage('mix_audio', () => audioMix({ ...mixOptions, duration: animation ? Math.ceil(animation.duration * animation.fps) / animation.fps : params.duration ?? score?.seconds ?? 30 }, cwd, signal));
+      if (tracks.length) mixed = await stage('mix_audio', () => audioMix({ ...mixOptions, duration }, cwd, signal, inspect));
       if (plan.mode === 'animation') {
         rendered = await stage('render_animation', () => sceneRender({ path: params.animation, mode: 'video', audio: mixed?.artifact.path, width: params.width, height: params.height, fps: params.fps, outputDir: dir }, cwd, signal));
         artifact = rendered.video;

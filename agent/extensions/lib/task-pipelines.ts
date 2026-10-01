@@ -3,9 +3,11 @@ import { classifyExecution, type ExecutionProfile } from './adaptive-execution.t
 
 export type TaskPipelineId = 'php' | 'node' | 'frontend-js' | 'vanilla-frontend' | 'react-cdn' | 'react-node' |
   'go' | 'rust' | 'java' | 'python' | 'python-flask' | 'bash' | 'c' | 'cpp' | 'linux-native' |
-  'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy';
+  'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy' |
+  'video' | 'audio' | 'svg-art' | 'debugging';
 export type PipelinePhase = 'discovery' | 'implementation' | 'validation' | 'delivery';
-export type PipelineEvidenceKind = 'inspection' | 'artifact' | 'execution' | 'assessment' | 'pixels' | 'interaction' | 'evaluation' | 'remote' | 'live';
+export const PIPELINE_EVIDENCE_KINDS = ['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live', 'playback', 'listening'] as const;
+export type PipelineEvidenceKind = (typeof PIPELINE_EVIDENCE_KINDS)[number];
 export type PipelineStage = {
   id: string;
   phase: PipelinePhase;
@@ -56,8 +58,9 @@ export function automaticPipelineTools(selection: PipelineSelection, input: Auto
   const git = !pipelineGitExcluded(prompt) && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
     /\b(?:git(?:hub)?|commits?|committing|pull requests?|pre-?commit|rebase|repository history|release (?:process|pipeline|version|tag)|(?:push|merge) (?:the |this |my )?(?:branch|commit|changes)|push (?:to )?(?:origin|upstream))\b/i.test(prompt));
   const control = /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
+  const codeWork = selection.ids.some(id => !['video', 'audio', 'svg-art'].includes(id));
   return [...new Set([
-    ...selection.tools.filter(name => name === 'code_quality' ? quality : name === 'git_info' ? git : name !== 'task_pipeline'),
+    ...selection.tools.filter(name => name === 'code_quality' ? codeWork && quality : name === 'project_tests' ? codeWork : name === 'git_info' ? git : name !== 'task_pipeline'),
     ...(control ? ['task_pipeline'] : []),
   ])];
 }
@@ -85,12 +88,16 @@ const RECIPES: Record<TaskPipelineId, Recipe> = {
   finetuning: { skills: ['llm-fine-tuning', 'llm-dataset-preparation'], discovery: 'Inspect immutable model/tokenizer revision, license, GPU memory, data hashes/splits, loss masking, training method and checkpoint destination.', validation: 'Validate collated batches and the requested preparation/execution scope. A prepared script or notebook is not a successful training run.' },
   colab: { skills: ['google-colab-training'], discovery: 'Choose the actually available Colab browser/CLI/Enterprise/local-Jupyter connection; inspect real runtime/GPU and durable storage only within authorized scope.', validation: 'Validate notebook cells as independently rerunnable setup/data/smoke/train/evaluate/export steps. Report connected runtime and resource state; never infer GPU access from a local notebook.' },
   'ui-quality': { skills: ['design-slop-prevention', 'ui-antipattern-review', 'accessible-interaction-design'], discovery: 'Read the existing design doctrine before choosing palette/type/layout. Ground choices in the real subject and user intent; avoid default purple-gradient SaaS and cream/terracotta cursive/italic editorial formulas, fake metrics and ornaments without a job.', validation: 'Use existing UI doctrine, source signals and bounded quality review; actual application pixels and real interaction evidence decide appearance and behavior, with the swap test and explicit user preferences.', tools: ['render_see', 'design_audit', 'quality_review'] },
+  video: { skills: ['terminal-video-editing', 'video-analysis'], discovery: 'Probe source streams, display aspect, frame timing, audio, color transfer and available encoders. Preserve originals and establish the requested timeline and delivery format before rendering.', validation: 'Reuse media_pipeline/video_compose decode and duration receipts. Inspect a contact sheet, then actual playback around cuts, transitions and narration cues; check the final encoded audio rather than an intermediate mix.', tools: ['media_info', 'video_frames'] },
+  audio: { skills: ['audio-processing', 'sound-analysis', 'music-composition'], discovery: 'Probe source channels, sample rates and durations; establish voice/music/effect roles, edit windows, loudness target and delivery format. For creation keep the editable score and intended instrument rendering.', validation: 'Reuse audio_mix/media_pipeline mastering measurements from the delivered encoding. Check duration, LUFS and true peak, then listen for intelligibility, clipping, artifacts, timing and endings; oscillator previews do not establish instrument quality.', tools: ['media_info', 'audio_analyze'] },
+  'svg-art': { skills: ['custom-svg', 'svg-assessment'], discovery: 'Inspect viewBox, geometry, transforms, inherited paint, references, accessibility and the intended sizes/backgrounds. Keep the requested visual direction and a consistent icon-set grammar.', validation: 'Use svg_inspect source measurements and its render matrix at intended sizes. Inspect pixels for clipping, small-size legibility, optical balance and consistent visual weight; approximate geometry does not establish conformance.', tools: ['svg_inspect'] },
+  debugging: { skills: ['debugging'], discovery: 'Capture the actual failing command/input, first diagnostic, source location and relevant runtime versions. Use symbol_search/context_slice to follow the established owner; minimize one falsifiable hypothesis before repair.', validation: 'Rerun the same minimal reproducer after repair, then affected project checks. Preserve first-failure diagnostics and source-bound receipts; a retry, background launch or zero collected tests cannot establish a fix.', tools: ['project_tests', 'symbol_search', 'context_slice'] },
   'git-ssh-deploy': { skills: ['git-github', 'multi-developer-pipelines'], discovery: 'Inspect Git source/remote/history and the explicitly authorized SSH destination, document root, runtime, protected data and rollback path. Namecheap/GoDaddy branding does not establish account capabilities; discover actual cPanel/VPS/SSH support.', validation: 'Verify the local release/build, deployment manifest and rollback before remote promotion. Keep secrets, uploads and databases outside accidental sync; Git push alone does not prove a live deployment.', tools: ['git_info', 'ssh_plan', 'net_probe', 'env_audit'] },
 };
 
 const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
 const bounded = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
-const WORK = /\b(?:build|create|implement|fix|debug|improve|refactor|edit|change|update|test|validate|verify|review|audit|write|develop|deploy|publish|release|train|finetune|fine[- ]tune|prepare|design|optimize|optimise|run|add|remove|make)\b/i;
+const WORK = /\b(?:build|create|implement|fix|debug|improve|refactor|edit|change|update|test|validate|verify|review|audit|write|develop|deploy|publish|release|train|finetune|fine[- ]tune|prepare|design|optimize|optimise|run|add|remove|make|render|mix|compose|denoise|normalize|synthesize|time[- ]stretch)\b/i;
 const IGNORED_FILE = /(?:^|\/)(?:node_modules|vendor|\.git|skills)(?:\/|$)|(?:^|\/)SKILL\.md$/i;
 
 /** Metadata-only routing: no models, commands, project crawling, or skill-body injection. */
@@ -132,23 +139,35 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   add('ai-ml', tuning || /\b(?:machine learning|deep learning|neural networks?|AI\/ML|ML (?:models?|algorithms?|training)|model (?:training|evaluation))\b/i.test(prompt) || ['torch', 'tensorflow', 'scikit-learn', 'sklearn', 'transformers', 'jax', 'onnxruntime'].some(name => dependencies.has(name)));
   add('finetuning', tuning);
   add('colab', /\b(?:google )?colab\b/i.test(prompt));
-  const ui = frontend || /\b(?:UI|UX|user interface|dashboard|app screen|desloppification|deslop|visual design)\b/i.test(prompt);
+  const ui = frontend || /\b(?:UI|UX|user interface|dashboard|app screen|desloppification|deslop|visual design)\b|\b(?:anti[- ]?(?:ai[- ]?)?slop|design slop)\b[^.\n]{0,60}\b(?:design|interface|layout)\b/i.test(prompt);
   add('ui-quality', ui);
+  const video = /\b(?:video|footage|storyboard|montage|motion graphics)\b/i.test(prompt) || has(/\.(?:mp4|mov|webm|mkv|avi)$/i);
+  const audio = !/\b(?:no|without)\s+(?:audio|sound|music|soundtrack)\b/i.test(prompt) &&
+    (/\b(?:audio|soundtrack|music|narration|voiceover|podcast|sound effects?|ducking|midi)\b/i.test(prompt) || has(/\.(?:wav|mp3|flac|ogg|aac|m4a|mid|midi)$/i));
+  const art = /\b(?:svgs?|vector (?:art|icons?|illustrations?)|icon (?:set|pack)|logo (?:mark|design))\b|\.svg\b/i.test(prompt) || has(/\.svg$/i);
+  const debugging = /\b(?:debug|debugging|troubleshoot|reproduce|reproducer|regression|crash|stack\s?trace)\b|\b(?:fix|investigate|diagnose)\b[^.\n]{0,80}\b(?:bug|failure|failing|error|hang|leak|race)\b/i.test(prompt);
+  add('video', video); add('audio', audio); add('svg-art', art); add('debugging', debugging);
   add('git-ssh-deploy', /\b(?:namecheap|godaddy|cpanel)\b|\b(?:deploy|deployment|production|website|site)\b[^\n]{0,100}\b(?:ssh|git)\b|\b(?:ssh|git)\b[^\n]{0,100}\b(?:deploy|deployment|production|website|site)\b/i.test(prompt));
 
   if (!ids.length) return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
   const recipes = ids.map(id => RECIPES[id]);
   const skills = unique(recipes.flatMap(recipe => recipe.skills));
-  const baseTools = ['project_intel', 'read', 'project_tests', 'code_quality'];
+  const codeWork = ids.some(id => !['video', 'audio', 'svg-art'].includes(id));
+  const validationTools = codeWork ? ['project_tests', 'code_quality'] : unique(recipes.flatMap(recipe => recipe.tools ?? []));
+  const baseTools = ['project_intel', 'read', ...validationTools];
   const stages: PipelineStage[] = [
     { id: 'discovery', phase: 'discovery', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.discovery}`).join('\n'), evidenceKinds: ['inspection'], dependsOn: [], tools: ['project_intel', 'read'] },
-    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Read only selected skills whose procedure changes the next decision; read design-slop-prevention before UI choices. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: ['discovery'], tools: ['read', 'edit', 'write'] },
-    { id: 'validation', phase: 'validation', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.validation}`).join('\n') + '\nReuse current project_tests execution receipts. For a low-impact change, an explicit reasoned assessment may establish that additional tests are unnecessary; an assessment cannot claim a test passed.', evidenceKinds: ['execution', 'assessment'], dependsOn: ['implementation'], tools: ['project_tests', 'code_quality'] },
+    ...(debugging ? [{ id: 'debug-reproduction', phase: 'discovery' as const, check: 'Run the minimal reproducer and retain the observed failure before repair. Expected failure is successful reproduction evidence; missing reproduction remains blocked, not a claimed diagnosis.', evidenceKinds: ['execution' as const], dependsOn: ['discovery'], tools: ['project_tests', 'bash'] }] : []),
+    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Read only selected skills whose procedure changes the next decision; read design-slop-prevention before UI choices. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: [debugging ? 'debug-reproduction' : 'discovery'], tools: ['read', 'edit', 'write'] },
+    { id: 'validation', phase: 'validation', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.validation}`).join('\n') + '\nReuse current native execution receipts. For a low-impact change, an explicit reasoned assessment may establish that additional tests are unnecessary; an assessment cannot claim a test passed.', evidenceKinds: ['execution', 'assessment'], dependsOn: ['implementation'], tools: validationTools },
   ];
   if (ui) {
     stages.push({ id: 'ui-pixels', phase: 'validation', check: 'Inspect captured pixels from the actual served/native application. Apply design doctrine and the swap test, contrast/responsive/content checks. Source analysis, image headers or exit zero cannot settle appearance.', evidenceKinds: ['pixels'], dependsOn: ['implementation'], tools: ['render_see', 'design_audit', 'quality_review'] });
     stages.push({ id: 'ui-interaction', phase: 'validation', check: 'Exercise the representative user task, keyboard/focus and relevant loading/empty/error/disabled states in the actual application. Record real interaction evidence.', evidenceKinds: ['interaction'], dependsOn: ['implementation'], tools: ['browser_session', 'quality_review'] });
   }
+  if (video) stages.push({ id: 'video-playback', phase: 'validation', check: 'Inspect actual playback of the final video for pacing, framing, motion, transitions and audio sync. A sparse contact sheet, successful decode or timeline JSON cannot establish continuous playback quality.', evidenceKinds: ['playback'], dependsOn: ['validation'], tools: ['video_frames', 'motion_inspect'] });
+  if (audio) stages.push({ id: 'audio-listening', phase: 'validation', check: 'Listen to the delivered encoding at representative quiet/loud sections and edits. Resolve audible artifacts, intelligibility and ending defects; LUFS, true peak and a synthesized preview cannot establish audible quality.', evidenceKinds: ['listening'], dependsOn: ['validation'], tools: ['audio_analyze'] });
+  if (art) stages.push({ id: 'art-pixels', phase: 'validation', check: 'Inspect the rendered art at intended sizes and backgrounds against the requested direction. Resolve clipping, small-size legibility and inconsistent weight; retain the render matrix with the finding.', evidenceKinds: ['pixels'], dependsOn: ['validation'], tools: ['svg_inspect'] });
   const artifactOnly = /\b(?:prepare|draft|write|create|build|validate)\b[^\n]{0,100}\b(?:notebook|training script|training pipeline|recipe)\b/i.test(prompt)
     && !/\b(?:start|execute|run)\b[^\n]{0,80}\b(?:training|finetuning|fine[- ]tuning|notebook)\b/i.test(prompt);
   const executeTraining = /\b(?:train|finetune|fine[- ]tune)\s+(?:(?:the|a|an|this|my|our)\s+)?(?:models?|LLM|adapters?|weights?)\b|\b(?:start|execute|run)\b[^\n]{0,80}\b(?:training|finetuning|fine[- ]tuning)\b/i.test(prompt);
@@ -184,7 +203,7 @@ export type PipelineReceipt = {
 export type PipelineLedger = { receipts: Array<PipelineReceipt & { failures: number }> };
 export type PendingPipelineStage = PipelineStage & { ready: boolean; status: 'pending' | 'failed' | 'blocked'; failures: number };
 const MAX_RECEIPTS = 256;
-const EVIDENCE_KINDS = new Set<PipelineEvidenceKind>(['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live']);
+const EVIDENCE_KINDS = new Set<PipelineEvidenceKind>(PIPELINE_EVIDENCE_KINDS);
 
 export function createPipelineLedger(): PipelineLedger { return { receipts: [] }; }
 function coordinateValid(value: PipelineCoordinate): boolean {

@@ -31,6 +31,8 @@ video_qa({ path: "attention-video/out/final-…/final.mp4", dir: "attention-vide
 
 For recurring local sound edits or finishing clips, use the smaller data-only pipeline. It selects only the required stages, preserves inputs and removes all new intermediate artifacts when a stage fails or is cancelled. A clip timeline mixes audio in the video render instead of creating a full intermediate mix. Ducking renders one bounded voice bus first, avoiding FFmpeg 8 scheduling failures that can silently remove compression or truncate the mix. Repeated uses of a source within one timeline share its FFprobe result. A mastered file's existing delivery measurements are reused instead of running another loudness analysis. Keep one-step edits on the focused tools; batching helps when a task would otherwise require several model/tool round trips.
 
+Before synthesis or output-directory creation, the pipeline validates source files, durations, timeline options and the voice/music roles required for ducking. Preflight and rendering share the same call-local source probes. Source inspection and frame extraction use at most four workers; the first failure stops new work, cancels siblings and waits for them to settle before cleanup, retaining the original cause.
+
 ```js
 // Clean and edit speech; the speed changes tempo while preserving pitch.
 media_pipeline({ duration: 20, targetLufs: -16,

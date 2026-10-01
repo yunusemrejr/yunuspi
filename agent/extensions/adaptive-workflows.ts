@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { createAdaptiveExecutionController, registerAdaptiveExecution, adaptiveExecutionEnabled, createAdaptiveThinkingController } from './lib/adaptive-execution.ts';
-import { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, buildPipelineContext, type PipelineSelection } from './lib/task-pipelines.ts';
+import { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, buildPipelineContext, PIPELINE_EVIDENCE_KINDS, type PipelineSelection } from './lib/task-pipelines.ts';
 import { projectCheckCommand } from './lib/project-tests.ts';
 
 export default function adaptiveWorkflows(pi: any) {
@@ -17,7 +17,7 @@ export default function adaptiveWorkflows(pi: any) {
   const scopes = new Map<string, { selection: PipelineSelection; revision: string; task: string }>();
   let parentNoDelegation = false;
   type Observation = { sequence: number; revision: number; tree?: string; complete: boolean };
-  const changed = new Map<string, string>(), calls = new Map<string, { scope: string; revision: string; key: string; observation?: number }>();
+  const changed = new Map<string, string>(), calls = new Map<string, { tool: string; scope: string; revision: string; key: string; observation?: number }>();
   type OwnedCheck = { scope: string; revision: string; key: string; callId: string; candidate: boolean; failedObserved?: boolean };
   const ownedChecks = new Map<string, OwnedCheck>(), backgroundChecks = new Map<string, OwnedCheck>();
   const pendingTerminals = new Map<string, { task: any; after: number }>();
@@ -185,7 +185,7 @@ export default function adaptiveWorkflows(pi: any) {
   pi.on('tool_call', (event: any, ctx: any) => {
     if (!enabled() || !owns(ctx) || !task || !event.toolCallId) return;
     const key = createHash('sha256').update(JSON.stringify([event.toolName, event.input])).digest('hex');
-    calls.set(event.toolCallId, { scope, revision, key, observation: observation?.sequence });
+    calls.set(event.toolCallId, { tool: event.toolName, scope, revision, key, observation: observation?.sequence });
     if (['bash', 'bg_run'].includes(event.toolName) && event.input?.isAgent !== true) {
       ownedChecks.set(event.toolCallId, { scope, revision, key, callId: event.toolCallId, candidate: Boolean(projectCheckCommand(event.input?.command, ctx.cwd)) });
       while (ownedChecks.size > 256) ownedChecks.delete(ownedChecks.keys().next().value!);
@@ -193,8 +193,9 @@ export default function adaptiveWorkflows(pi: any) {
     if (calls.size > 256) calls.delete(calls.keys().next().value!);
   });
   pi.on('tool_result', (event: any, ctx: any) => {
-    const call = calls.get(event.toolCallId); calls.delete(event.toolCallId);
-    if (!enabled() || !owns(ctx) || !call) return;
+    const call = calls.get(event.toolCallId);
+    if (!enabled() || !owns(ctx) || !call || call.tool !== event.toolName) return;
+    calls.delete(event.toolCallId);
     const owned = ownedChecks.get(event.toolCallId);
     if (owned?.candidate) {
       const text = (event.content ?? []).filter((row: any) => row.type === 'text').map((row: any) => row.text).join('\n');
@@ -243,6 +244,19 @@ export default function adaptiveWorkflows(pi: any) {
         observeCheckFailure(ownedChecks.get(receipt.callId));
     }
     const source = `tool:${event.toolCallId}`;
+    const mediaOnly = selection.ids.length > 0 && selection.ids.every(id => ['video', 'audio', 'svg-art'].includes(id));
+    const inspectedSource = typeof event.details?.path === 'string' || typeof event.details?.source === 'string' || event.details?.files?.length > 0;
+    if (mediaOnly && call.revision === revision && !failed && ['media_info', 'audio_analyze', 'svg_inspect'].includes(event.toolName) && inspectedSource && !event.details?.disabled) {
+      record('discovery', 'inspection', source);
+    }
+    if (mediaOnly && call.revision === revision && !failed && ['media_pipeline', 'audio_mix', 'video_compose', 'media_edit', 'scene_render'].includes(event.toolName)) {
+      const artifact = event.details?.artifact ?? event.details?.video;
+      if (event.details?.decodeVerified === true && typeof artifact?.path === 'string' && artifact.bytes > 0) {
+        record('implementation', 'artifact', source);
+        const technicalFailure = Object.values(event.details?.automatedChecks ?? {}).some(value => value === false);
+        record('validation', 'execution', source, technicalFailure ? 'failed' : 'passed');
+      }
+    }
     if (['bash', 'bg_run'].includes(event.toolName) && call.revision === revision && projectCheckCommand(command, ctx.cwd)) {
       if (failed) record('validation', 'execution', source, 'failed');
       else if (incomplete || event.toolName === 'bg_run') record('validation', 'execution', source, 'blocked');
@@ -311,7 +325,7 @@ export default function adaptiveWorkflows(pi: any) {
       scope: Type.Optional(Type.String({ maxLength: 160 })),
       stageId: Type.Optional(Type.String({ maxLength: 80 })),
       status: Type.Optional(Type.Union(['passed', 'failed', 'blocked'].map(value => Type.Literal(value)))),
-      evidenceKind: Type.Optional(Type.Union(['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live'].map(value => Type.Literal(value)))),
+      evidenceKind: Type.Optional(Type.Union(PIPELINE_EVIDENCE_KINDS.map(value => Type.Literal(value)))),
       source: Type.Optional(Type.String({ maxLength: 2048 })),
       summary: Type.Optional(Type.String({ maxLength: 1200 })),
     }),
