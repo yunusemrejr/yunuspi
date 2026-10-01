@@ -75,6 +75,52 @@ test('one inference runs at a time, bursts beyond the queue are refused and repe
   assert.equal((await L.createLocalLm({ runtime: undefined, fetch: async () => probs(1, 0) }).judge('q', 'x')).ok, false);
 });
 
+test('identical queued judgments share inference, expire, and retain caller cancellation',async()=>{
+  let calls=0,now=0,finish,started;
+  const entering=new Promise(resolve=>{started=resolve;});
+  const lm=L.createLocalLm({runtime,now:()=>now,fetch:async()=>{
+    calls++;started();await new Promise(resolve=>{finish=resolve;});return probs(.9,.1);
+  }});
+  const first=lm.judge('A stable relevance question','skill');await entering;
+  const queued=lm.judge('A stable relevance question','tool');
+  const controller=new AbortController();
+  const cancelled=lm.judge('A stable relevance question','cancelled',{signal:controller.signal});controller.abort();
+  finish();const [a,b,c]=await Promise.all([first,queued,cancelled]);
+  assert.equal(calls,1);assert.equal(a.cached,false);assert.equal(b.cached,true);assert.equal(a.p,b.p);
+  assert.equal(c.reason,'cancelled');
+  assert.equal((await lm.judge('A stable relevance question','review')).cached,true);assert.equal(calls,1);
+  now=300000;
+  const expired=lm.judge('A stable relevance question','skill');
+  for(let i=0;i<20&&calls<2;i++)await new Promise(resolve=>setTimeout(resolve,0));
+  finish();assert.equal((await expired).cached,false);assert.equal(calls,2);
+});
+
+test('a cached judgment respects cancellation during runtime readiness',async()=>{
+  let calls=0;
+  const lm=L.createLocalLm({runtime,fetch:async()=>{calls++;return probs(.9,.1);}});
+  assert.equal((await lm.judge('Stable question','unit')).ok,true);
+  const controller=new AbortController();
+  const pending=lm.judge('Stable question','unit',{signal:controller.signal});
+  controller.abort();
+  assert.equal((await pending).reason,'cancelled');assert.equal(calls,1);
+  assert.equal(lm.stats().cached,0,'cancelled callers do not consume cached evidence');
+});
+
+test('prefix checkpoints are scoped to the actual transport, not shared globally by text',async()=>{
+  const prefix='Shared examples for two separate servers. '.repeat(4)+'\n';
+  const recorded=[];
+  for(let transport=0;transport<2;transport++){
+    const lm=L.createLocalLm({runtime,fetch:async(_url,init)=>{
+      const body=JSON.parse(init.body);recorded.push([transport,body.n_predict]);
+      if(body.n_predict===0)return new Response(JSON.stringify({tokens_evaluated:40}));
+      return probs(.9,.1);
+    }});
+    await lm.judge(prefix+'Question: one','unit',{prefix});
+    await lm.judge(prefix+'Question: two','unit',{prefix});
+  }
+  assert.deepEqual(recorded,[[0,0],[0,1],[0,1],[1,0],[1,1],[1,1]]);
+});
+
 test('the relevance prompt is few-shot, bounded and ends where the answer begins', () => {
   const prompt = L.skillRelevancePrompt('Build a music blog in PHP.\u0007 '.repeat(100), { name: 'all-about-odoo', description: 'Odoo ERP reference' });
   assert.match(prompt, /Helps: no\n/);

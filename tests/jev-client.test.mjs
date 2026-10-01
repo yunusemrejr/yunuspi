@@ -37,6 +37,42 @@ const ANSWERS = { ping: { type: "noul", noul: 0.9 } };
 const decisionsOk = () => jsonOk({ answers: ANSWERS });
 const emptyModels = () => jsonOk({ data: [] });
 
+test('equivalent JSON map order shares one in-flight judgment across hook callers',async()=>{
+  let calls=0,finish;
+  const {pi,ledger}=harness(async()=>{calls++;await new Promise(resolve=>{finish=resolve;});return decisionsOk();});
+  const first=jev.askJev('skill',{task:'Review source',evidence:{a:1,b:2}},{ping:{type:'noul',instructions:'Affirmative?'}},{pi});
+  const second=jev.askJev('tool',{evidence:{b:2,a:1},task:'Review source'},{ping:{instructions:'Affirmative?',type:'noul'}},{pi});
+  await new Promise(resolve=>setTimeout(resolve,0));finish();
+  const results=await Promise.all([first,second]);
+  assert.equal(calls,1);assert.ok(results.every(result=>result.ok));
+  assert.equal(ledger.filter(row=>!row.data.cached).length,1);
+  const cached=await jev.askJev('review',{evidence:{b:2,a:1},task:'Review source'},{ping:{type:'noul',instructions:'Affirmative?'}},{pi});
+  assert.equal(cached.usage.cached,true);assert.equal(calls,1);
+});
+
+test('a valid cached judgment remains usable while both network routes cool down',async()=>{
+  let broken=false,calls=0;
+  harness(async()=>{calls++;if(broken)throw Error('offline');return decisionsOk();});
+  const questions={ping:{type:'noul',instructions:'Affirmative?'}};
+  assert.equal((await jev.askJev('unit','already judged evidence',questions)).ok,true);
+  broken=true;assert.equal((await jev.askJev('unit','new evidence',questions)).ok,false);
+  assert.equal(jev.jevHealth().state,'open');const before=calls;
+  const cached=await jev.askJev('unit','already judged evidence',questions);
+  assert.equal(cached.ok,true);assert.equal(cached.usage.cached,true);assert.equal(calls,before);
+});
+
+test('distillation asks only about omittable chunks and handles twelve bounded chunks',async()=>{
+  const text=Array.from({length:12},(_,i)=>`${i===5?'ERROR: preserve failure\n':''}${'ordinary progress\n'.repeat(100)}`).join('');
+  let questions;
+  const selected=await jev.selectDistillChunks('bash',text,async(_site,_state,asked)=>{
+    questions=asked;
+    return {ok:true,answers:Object.fromEntries(Object.keys(asked).map(key=>[key,{type:'noul',noul:.01}])),
+      usage:{model:'synthetic',inputTokens:1,costUsd:0,ms:1,cached:false}};
+  });
+  assert.ok(selected);assert.ok(Object.keys(questions).length<12);assert.ok(!Object.hasOwn(questions,'chunk_0'));
+  assert.match(selected,/ERROR: preserve failure/);assert.match(selected,/omitted/);
+});
+
 test("cascade tries tilde latest, then pinned, then discovered variations", async () => {
   const seen = [];
   const { pi } = harness(async (url, opts) => {

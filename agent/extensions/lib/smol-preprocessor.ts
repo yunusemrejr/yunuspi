@@ -295,7 +295,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
           outcome = 'malformed-response';
           const envelope = await Promise.race([inference, deadline]);
           if (abort.signal.aborted || epoch !== generation) return;
-          noteLocalLmPrefixReuse(SMOL_SYSTEM, envelope);
+          noteLocalLmPrefixReuse(SMOL_SYSTEM, envelope, post);
           if (typeof envelope.content !== 'string' || envelope.content.length > 2048 || envelope.truncated === true) return;
           // Model-selected IDs are only a proposal. Validate their domain first,
           // then union the independently retained boundary/status/task evidence.

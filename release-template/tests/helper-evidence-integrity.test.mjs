@@ -77,7 +77,7 @@ test('Jev abstains on missing or malformed judgments and oversized sources witho
     assert.equal(await jev.selectDistillChunks('read', text, async () => ({ ok: true, answers: Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`chunk_${i}`, { type: 'noul', noul: value }])), usage })), undefined);
   }
   let calls = 0;
-  assert.equal(await jev.selectDistillChunks('read', chunks(Array(12).fill('ordinary prose')), async () => { calls++; return rejectMiddle(); }), undefined);
+  assert.equal(await jev.selectDistillChunks('read', chunks(Array(16).fill('ordinary prose')), async () => { calls++; return rejectMiddle(); }), undefined);
   assert.equal(calls, 0);
 });
 

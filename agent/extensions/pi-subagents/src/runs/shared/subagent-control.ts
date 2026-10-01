@@ -94,6 +94,7 @@ function scaledNeedsAttentionAfterMs(config: ResolvedControlConfig, thinking?: s
 		case "high":
 			return config.needsAttentionAfterMs * 5 * weight;
 		case "xhigh":
+		case "ultra":
 		case "max":
 			return config.needsAttentionAfterMs * 10 * weight;
 		default:

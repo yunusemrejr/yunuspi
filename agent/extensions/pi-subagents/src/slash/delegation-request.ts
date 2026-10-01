@@ -25,7 +25,7 @@ const supportedFields = new Set([
 	"result",
 ]);
 
-const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 const MAX_SCHEMA_BYTES = 64 * 1024;
 const MAX_TASK_BYTES = 1024 * 1024;
 const MAX_CWD_BYTES = 32 * 1024;

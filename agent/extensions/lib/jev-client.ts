@@ -227,10 +227,14 @@ function cacheKey(slug: string, state: unknown, questions: unknown): string {
 function cacheGet(key: string): { answers: Record<string, JevAnswer>; inputTokens: number; model: string } | undefined {
   const hit = cache.get(key);
   if (!hit) return undefined;
-  if (deps.now() - hit.at > JEV_CACHE_TTL_MS) {
+  if (deps.now() < hit.at || deps.now() - hit.at >= JEV_CACHE_TTL_MS) {
     cache.delete(key);
     return undefined;
   }
+  // Repeated useful judgments should outlive one-off traffic in the bounded
+  // cache. Touch recency without extending the evidence's original lifetime.
+  cache.delete(key);
+  cache.set(key, hit);
   return hit;
 }
 
@@ -494,7 +498,13 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   try {
     // The transport, validation and cache must refer to one immutable request.
     // Callers may update their task/candidate objects while inference awaits.
-    const serialized = JSON.stringify([state, questions]);
+    // JSON object order carries no decision evidence. Different hook builders
+    // often assemble equivalent state and questions in different orders.
+    // Preserve array order, text and scalar values; normalize only map keys.
+    const serialized = JSON.stringify([state, questions], (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+        : value);
     [state, questions] = JSON.parse(serialized);
     identity = createHash('sha256').update(serialized).digest('hex');
   } catch { return {ok:false,skipped:'invalid-input'}; }
@@ -578,11 +588,6 @@ async function askJevOnce(
   const key = openRouterKey();
   if (!key) return { ok: false, skipped: "no-key" };
   if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
-  if (breakerOpen) {
-    scheduleProbe();
-    return { ok: false, skipped: "unhealthy" };
-  }
-
   let payloadChars: number;
   try { payloadChars = JSON.stringify([state, questions]).length; }
   catch { return { ok: false, skipped: 'invalid-input' }; }
@@ -602,6 +607,12 @@ async function askJevOnce(
         usage: { model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true },
       };
     }
+  }
+  // A provider outage cannot invalidate a still-current, paid-for judgment.
+  // Cache hits need no transport or recovery probe.
+  if (breakerOpen) {
+    scheduleProbe();
+    return { ok: false, skipped: "unhealthy" };
   }
   const epoch = generation;
   // Cache hits above do not advance traffic. Equal-load healthy families
@@ -722,7 +733,7 @@ export async function selectDistillChunks(
   keepAt = 0.6,
   task = "",
 ): Promise<string | undefined> {
-  const chunks = splitTextChunks(text, 8, 2000);
+  const chunks = splitTextChunks(text, 12, 2000);
   if (chunks.length < 2) return undefined;
   const signal = tool === "bash" ? terminalSignal : protectedEvidence;
   const required = chunks.map((chunk, index) => index === 0 || index === chunks.length - 1 || signal.test(chunk));
@@ -730,6 +741,9 @@ export async function selectDistillChunks(
   const metrics=microMetrics();metrics.offer('jev');
   const questions: Record<string, unknown> = {};
   chunks.forEach((_, index) => {
+    // Code already guarantees these chunks survive. Asking the model about
+    // them costs tokens without changing the selection.
+    if (required[index]) return;
     questions[`chunk_${index}`] = {
       type: "noul",
       instructions: `Does chunk ${index} carry information relevant to the task (errors, results, decisions, data)?`,

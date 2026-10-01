@@ -1,6 +1,6 @@
 import type { ModelCost } from "@yunuspi/ai";
 
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
 export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
 
@@ -94,7 +94,7 @@ export function getSupportedThinkingLevels(model: ModelInfo | undefined): Thinki
 	const levels = THINKING_LEVELS.filter((level) => {
 		const mapped = model.thinkingLevelMap?.[level];
 		if (mapped === null) return false;
-		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		if (level === "xhigh" || level === "max" || level === "ultra") return mapped !== undefined;
 		return true;
 	});
 	return levels;

@@ -15,7 +15,7 @@ export interface SubagentDelegationToolBudget {
 
 export type SubagentDelegationJsonSchemaObject = Record<string, unknown>;
 
-export type SubagentDelegationThinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type SubagentDelegationThinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type SubagentDelegationResultRequest =
 	| { kind: "text" }

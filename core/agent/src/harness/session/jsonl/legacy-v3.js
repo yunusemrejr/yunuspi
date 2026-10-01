@@ -222,7 +222,7 @@ function normalizeRetainedEntry(entry, seq, entriesById, resolver) {
         data: entry.data,
     };
 }
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 function selectedConfiguration(entriesById, selectedId) {
     let model;
     let thinkingLevel;

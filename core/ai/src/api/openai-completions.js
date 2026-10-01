@@ -1196,7 +1196,8 @@ function convertTools(tools, compat) {
 function parseChunkUsage(rawUsage, model, serviceTier) {
     const promptTokens = rawUsage.prompt_tokens || 0;
     const cacheReadTokens = rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? rawUsage.cached_tokens ?? 0;
-    const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
+    // Alibaba's explicit Qwen cache reports creation separately from hits.
+    const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens ?? rawUsage.prompt_tokens_details?.cache_creation_input_tokens ?? 0;
     // Follow documented OpenAI/OpenRouter semantics: cached_tokens is cache-read
     // tokens (hits). Providers disagree on placement: OpenAI/OpenRouter use
     // prompt_tokens_details.cached_tokens, DeepSeek uses prompt_cache_hit_tokens,

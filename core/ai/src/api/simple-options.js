@@ -59,7 +59,7 @@ export const DEFAULT_THINKING_BUDGETS = {
     high: 16384,
 };
 export function clampReasoning(effort) {
-    return effort === "xhigh" || effort === "max" ? "high" : effort;
+    return effort === "xhigh" || effort === "max" || effort === "ultra" ? "high" : effort;
 }
 export function thinkingBudgetForLevel(reasoningLevel, customBudgets) {
     const budgets = { ...DEFAULT_THINKING_BUDGETS, ...customBudgets };

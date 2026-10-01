@@ -67,7 +67,7 @@ export async function loadLocalLmRuntime(path = localLmRuntimePath()): Promise<L
 }
 
 type Unavailable = { ok: false; reason: "unavailable" | "busy" | "paused" | "timeout" | "failed" | "cancelled" | "input-budget" | "low-confidence" };
-export type Judgement = { ok: true; p: number; ms: number } | Unavailable;
+export type Judgement = { ok: true; p: number; ms: number; cached?: boolean } | Unavailable;
 export type LocalChoice = { ok: true; id: string; p: number; margin: number; ms: number; cached: boolean } | Unavailable;
 export type LocalChooser = (task: string, candidates: readonly { id: string; text: string }[], purpose: string, options?: { signal?: AbortSignal }) => Promise<LocalChoice>;
 
@@ -76,6 +76,8 @@ function note(data: Record<string, unknown>) {
 }
 
 type Post = (body: Record<string, unknown>) => Promise<any>;
+const prefixStates = new WeakMap<Post, Map<string, number>>();
+const transportPrefixes = new WeakMap<typeof fetch, Map<string, Map<string, number>>>();
 type LocalLmQueue = { active: boolean; waiting: Array<() => void> };
 // Injected transports have independent lifetimes; production clients share
 // the native fetch identity and pinned loopback endpoint.
@@ -110,7 +112,7 @@ export function acquireLocalLmSlot(request: typeof fetch, endpoint: string, sign
 
 /** Bounded JSON POST to the local server, shared by judgements and line selection. */
 export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, signal: AbortSignal, maxBytes = 65_536): Post {
-	return async (body) => {
+	const post: Post = async (body) => {
 		signal.throwIfAborted();
 		const response = await request(runtime.endpoint, { method: "POST", redirect: "error", signal,
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.apiKey}` },
@@ -135,21 +137,33 @@ export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, sign
 			reader.releaseLock();
 		}
 	};
+	let endpoints = transportPrefixes.get(request);
+	if (!endpoints) { endpoints = new Map(); transportPrefixes.set(request, endpoints); }
+	// Checkpoints belong to a server/transport, not to prompt text globally.
+	const scope = `${runtime.endpoint}\0${runtime.apiKey}`;
+	let prefixes = endpoints.get(scope);
+	if (!prefixes) { prefixes = new Map(); endpoints.set(scope, prefixes); }
+	prefixStates.set(post, prefixes);
+	return post;
 }
 
-/** Prefix -> token count, for prefixes whose checkpoint the server holds. */
-const warmedPrefixes = new Map<string, number>();
 /** Process a constant prompt prefix alone, once, so the server keeps a
  * context checkpoint exactly where the variable part begins. */
 export async function warmLocalLmPrefix(post: Post, prefix: string): Promise<void> {
-	if (warmedPrefixes.has(prefix)) return;
+	let prefixes = prefixStates.get(post);
+	if (!prefixes) { prefixes = new Map(); prefixStates.set(post, prefixes); }
+	if (prefixes.has(prefix)) return;
 	const tokens = Number((await post({ prompt: prefix, n_predict: 0 }))?.tokens_evaluated);
-	if (Number.isSafeInteger(tokens) && tokens > 0) warmedPrefixes.set(prefix, tokens);
+	if (Number.isSafeInteger(tokens) && tokens > 0) {
+		if (prefixes.size >= 8) prefixes.delete(prefixes.keys().next().value!);
+		prefixes.set(prefix, tokens);
+	}
 }
 /** A restarted or evicted server no longer holds the checkpoint: warm again next time. */
-export function noteLocalLmPrefixReuse(prefix: string, body: any): void {
+export function noteLocalLmPrefixReuse(prefix: string, body: any, post: Post): void {
+	const prefixes = prefixStates.get(post);
 	const reused = Number(body?.timings?.cache_n);
-	if (Number.isFinite(reused) && reused < (warmedPrefixes.get(prefix) ?? 0)) warmedPrefixes.delete(prefix);
+	if (Number.isFinite(reused) && reused < (prefixes?.get(prefix) ?? 0)) prefixes?.delete(prefix);
 }
 
 /** Only exact, finite token probabilities may influence an advisory. */
@@ -218,7 +232,9 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 	const services = options.services ?? (options.fetch ? undefined : { ensure: () => ensureLocalServices(), warming: () => localServicesWarming() });
 	let failures = 0, pausedUntil = 0;
 	const stats = { answered: 0, failed: 0, busy: 0, cached: 0, totalMs: 0 };
-	const choices = new Map<string, { at: number; result: LocalChoice }>();
+	// Both yes/no and shortlist judgments use the same bounded deterministic
+	// inference cache. Retain probabilities, not caller IDs or purpose labels.
+	const answers = new Map<string, { at: number; body: any }>();
 	const ensure = async () => {
 		// A missing descriptor is re-checked at most once a minute, so a model
 		// installed while sessions run is picked up without a restart.
@@ -226,12 +242,26 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); if (value) services?.ensure(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
-	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
+	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number; cached: boolean } | Unavailable> {
 			const { signal, prefix } = options;
 			if (signal?.aborted) return { ok: false, reason: "cancelled" };
 			if (!prompt || prompt.length > 12_000) return { ok: false, reason: "input-budget" };
 			await ensure();
+			if (signal?.aborted) return { ok: false, reason: "cancelled" };
 			if (!runtime) return { ok: false, reason: "unavailable" };
+			const key = createHash('sha256').update(JSON.stringify([prompt, options.nProbs ?? 10])).digest('hex');
+			const reuse = () => {
+				const hit = answers.get(key);
+				if (!hit) return;
+				if (now() < hit.at || now() - hit.at >= 300_000) { answers.delete(key); return; }
+				const value = parse(structuredClone(hit.body));
+				if (value === undefined) { answers.delete(key); return; }
+				answers.delete(key); answers.set(key, hit);
+				stats.cached++; note({ decision: "cached", purpose, durationMs: 0, count: 1 });
+				return { ok: true as const, value, ms: 0, cached: true };
+			};
+			const hit = reuse();
+			if (hit) return hit;
 			if (now() < pausedUntil) return { ok: false, reason: "paused" };
 			const started = now();
 			const controller = new AbortController();
@@ -242,6 +272,11 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			try {
 				if (signal?.aborted) controller.abort();
 				release = await acquireLocalLmSlot(request, runtime.endpoint, controller.signal, queueLimit);
+				// An identical queued caller can reuse the preceding caller's result.
+				// It keeps its own cancellation/deadline without a second inference.
+				controller.signal.throwIfAborted();
+				const queuedHit = reuse();
+				if (queuedHit) return queuedHit;
 				// Requests admitted before an outage must respect the newly opened breaker.
 				if (now() < pausedUntil) return { ok: false, reason: "paused" };
 				const post = localLmPost(runtime, request, controller.signal);
@@ -249,13 +284,15 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				if (cacheable) await warmLocalLmPrefix(post, prefix);
 				const body = await post({ prompt, n_predict: 1, n_probs: options.nProbs ?? 10 });
 				controller.signal.throwIfAborted();
-				if (cacheable) noteLocalLmPrefixReuse(prefix, body);
+				if (cacheable) noteLocalLmPrefixReuse(prefix, body, post);
 				const value = parse(body);
 				if (value === undefined) throw new Error("no probabilities");
+				if (answers.size >= 128) answers.delete(answers.keys().next().value!);
+				answers.set(key, { at: now(), body: structuredClone(body) });
 				const ms = now() - started;
 				failures = 0; stats.answered++; stats.totalMs += ms;
 				note({ decision: "answered", purpose, durationMs: ms, count: 1 });
-				return { ok: true, value, ms };
+				return { ok: true, value, ms, cached: false };
 			} catch (error) {
 				if (error instanceof LocalLmBusyError) { stats.busy++; return { ok: false, reason: "busy" }; }
 				if (!release && controller.signal.aborted) return { ok: false, reason: signal?.aborted ? "cancelled" : "timeout" };
@@ -281,7 +318,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		stats: () => ({ ...stats, model: runtime ? LOCAL_LM_MODEL : undefined, paused: now() < pausedUntil }),
 		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: string } = {}): Promise<Judgement> {
 			const result = await infer(prompt, purpose, yesProbability, options);
-			return result.ok ? { ok: true, p: result.value, ms: result.ms } : result;
+			return result.ok ? { ok: true, p: result.value, ms: result.ms, cached: result.cached } : result;
 		},
 		/** One generated token, bounded shortlist, shared queue and prefix cache.
 		 * No prose, invented IDs, negative filtering or correctness authority. */
@@ -292,21 +329,13 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			if (!prompt) return { ok: false, reason: "input-budget" };
 			// Preserve the exact IDs described by the prompt across queued inference.
 			const candidateIds = candidates.map(candidate => candidate.id);
-			const key = createHash("sha256").update(JSON.stringify([purpose, prompt, candidateIds])).digest("hex");
-			const hit = choices.get(key);
-			if (hit && now() - hit.at < 300_000) {
-				stats.cached++; note({ decision: "cached", purpose, count: 1 });
-				return hit.result.ok ? { ...hit.result, cached: true, ms: 0 } : { ...hit.result };
-			}
 			const result = await infer(prompt, purpose, tokenProbabilities, { ...options, prefix: LOCAL_CHOICE_EXAMPLES, nProbs: 20 });
 			if (!result.ok) return result;
 			const ranked = [...result.value].sort((a, b) => b[1] - a[1]);
 			const [letter, p] = ranked[0] ?? ["N", 0];
 			const index = letter.length === 1 ? letter.charCodeAt(0) - 65 : -1, margin = p - (ranked[1]?.[1] ?? 0);
 			const choice: LocalChoice = index >= 0 && index < candidateIds.length && p >= LOCAL_CHOICE_MIN_P && margin >= LOCAL_CHOICE_MIN_MARGIN
-				? { ok: true, id: candidateIds[index], p, margin, ms: result.ms, cached: false } : { ok: false, reason: "low-confidence" };
-			if (choices.size >= 128) choices.delete(choices.keys().next().value!);
-			choices.set(key, { at: now(), result: choice });
+				? { ok: true, id: candidateIds[index], p, margin, ms: result.ms, cached: result.cached } : { ok: false, reason: "low-confidence" };
 			return choice;
 		},
 	};

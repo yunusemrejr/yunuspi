@@ -9,7 +9,7 @@ import type { ExtensionAPI } from '@yunuspi/coding-agent';
  * and no-op selections add no noise.
  */
 const ENTRY = 'model-config-v1';
-const THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 function cleanRouting(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;

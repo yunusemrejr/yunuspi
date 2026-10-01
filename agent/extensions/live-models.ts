@@ -372,7 +372,7 @@ function openrouterEffortMap(
     supportedEfforts: string[] | undefined,
     mandatory?: boolean,
 ): Record<string, string | null> {
-    const levels = ["minimal", "low", "medium", "high", "xhigh", "max"];
+    const levels = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
     const has = (level: string) => supportedEfforts?.includes(level) ?? false;
     return {
         off: mandatory !== true && (mandatory === false || has("none")) ? "none" : null,
