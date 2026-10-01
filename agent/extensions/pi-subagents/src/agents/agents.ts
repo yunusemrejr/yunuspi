@@ -1283,7 +1283,7 @@ function readSubagentSettings(filePath: string | null): SubagentSettings {
 		try {
 			maxThinking = parseThinkingLevel(subagentsObject.maxThinking, `'${filePath}' subagents.maxThinking`);
 		} catch (error) {
-			throw new Error(`Subagent settings in '${filePath}' have invalid 'maxThinking'; expected one of off, minimal, low, medium, high, xhigh, or max.`, { cause: error instanceof Error ? error : undefined });
+			throw new Error(`Subagent settings in '${filePath}' have invalid 'maxThinking'; expected one of off, minimal, low, medium, high, xhigh, max, or ultra.`, { cause: error instanceof Error ? error : undefined });
 		}
 	}
 	let defaultExtensions: string[] | undefined;

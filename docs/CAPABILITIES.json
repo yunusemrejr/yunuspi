@@ -3132,7 +3132,7 @@
       {
         "name": "effort",
         "source": "agent/extensions/thinking.ts",
-        "line": 48
+        "line": 49
       },
       {
         "name": "errors",
@@ -7711,6 +7711,10 @@
       {
         "name": "INDEPENDENT-AUDIT.md",
         "path": "docs/INDEPENDENT-AUDIT.md"
+      },
+      {
+        "name": "INFERENCE-CACHING.md",
+        "path": "docs/INFERENCE-CACHING.md"
       },
       {
         "name": "INSTALL.md",

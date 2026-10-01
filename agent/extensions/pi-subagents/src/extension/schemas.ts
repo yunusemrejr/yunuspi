@@ -55,7 +55,7 @@ const SubagentParamProperties = {
 	action: Type.Optional(Type.String({ minLength: 1, description: "Management/control action (list, get, models, status, resume, steer, create/update/delete, mission.*, watchdog.*, schedule.*). Omit for execution." })),
 	async: Type.Optional(Type.Boolean({ description: "Run in background (default unless asyncByDefault:false). false only when the parent must block." })),
 	model: Type.Optional(Type.String({ description: "Child model override (provider/id; bare ids resolve only when unique). Thinking suffix on the string, e.g. 'provider/id:high'. With action='models' it filters the registry listing instead." })),
-	thinking: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "Thinking level for action='watchdog.configure' only (off/minimal/low/medium/high/xhigh/max, inherit, or false). Ignored on dispatch." })),
+	thinking: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "Thinking level for action='watchdog.configure' only (off/minimal/low/medium/high/xhigh/max/ultra, inherit, or false). Ignored on dispatch." })),
 	context: Type.Optional(Type.String({ enum: ["fresh", "fork", "profile"], description: "fresh/fork branch from the parent session; profile uses the agent's declared defaultContext. Omitted: config defaultSubagentContext wins." })),
 	cwd: Type.Optional(Type.String({ description: "Execution cwd (or target project directory for project.* actions)." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Managed isolation: each workflow child gets a separate git worktree; per-child override allowed." })),

@@ -11,7 +11,7 @@ export const SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV = "PI_SUBAGENT_MODEL_ROUTE_CANDI
 export const MODEL_ROUTE_MAX_LENGTH = 768;
 export const MODEL_ROUTE_ROUTING_MAX_LENGTH = 16 * 1024;
 const MAX_CANDIDATE_ENV_BYTES = 20 * 1024;
-const KNOWN_THINKING_SUFFIXES = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const KNOWN_THINKING_SUFFIXES = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
 export function routeOf(candidate: string | ModelRouteCandidate | undefined): string | undefined {
 	return typeof candidate === "string" ? candidate : candidate?.route;

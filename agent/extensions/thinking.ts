@@ -11,7 +11,7 @@
  * is left untouched.
  *
  *   /effort           list current + available levels
- *   /effort <level>   set thinking level (off..max)
+ *   /effort <level>   set thinking level (off..ultra)
  */
 import type {
 	ExtensionAPI,
@@ -26,6 +26,7 @@ const LEVELS = [
 	"high",
 	"xhigh",
 	"max",
+	"ultra",
 ] as const;
 type Level = (typeof LEVELS)[number];
 
@@ -35,7 +36,7 @@ function available(model: ExtensionContext["model"]): Level[] {
 	const map = model.thinkingLevelMap;
 	return LEVELS.filter((l) => {
 		if (map?.[l] === null) return false;
-		if (l === "xhigh" || l === "max") return map?.[l] !== undefined;
+		if (l === "xhigh" || l === "max" || l === "ultra") return map?.[l] !== undefined;
 		return true;
 	});
 }
@@ -48,7 +49,7 @@ export default function thinkingExtension(pi: ExtensionAPI) {
 	pi.registerCommand("effort", {
 		description:
 			"Set thinking (reasoning-effort) level for the active model — incl. custom providers the default /thinking can't engage",
-		argumentHint: "[off|minimal|low|medium|high|xhigh|max]",
+		argumentHint: "[off|minimal|low|medium|high|xhigh|max|ultra]",
 		handler(args, ctx) {
 			const arg = args.trim().toLowerCase();
 			if (!arg) {

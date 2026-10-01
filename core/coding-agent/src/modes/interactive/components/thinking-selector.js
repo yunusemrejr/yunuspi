@@ -14,6 +14,7 @@ const LEVEL_DESCRIPTIONS = {
     high: "Deep reasoning (~16k tokens)",
     xhigh: "Extra-high reasoning (~32k tokens)",
     max: "Maximum reasoning",
+    ultra: "Ultra reasoning (when supported by the model)",
 };
 /**
  * Component that renders a thinking level selector with borders

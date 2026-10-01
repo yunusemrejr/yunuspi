@@ -596,7 +596,7 @@ export function calculateCost(model, usage) {
     if (threshold >= 0) cost.inputTokensAbove = threshold;
     return cost;
 }
-const EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const EXTENDED_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 export function getSupportedThinkingLevels(model) {
     if (!model.reasoning)
         return ["off"];
@@ -604,7 +604,7 @@ export function getSupportedThinkingLevels(model) {
         const mapped = model.thinkingLevelMap?.[level];
         if (mapped === null)
             return false;
-        if (level === "xhigh" || level === "max")
+        if (level === "xhigh" || level === "max" || level === "ultra")
             return mapped !== undefined;
         return true;
     });

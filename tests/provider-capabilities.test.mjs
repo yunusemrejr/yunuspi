@@ -54,6 +54,36 @@ test('direct calls and simple calls obey the same reasoning enum across request 
  const summaryMapped={...model,api:'openai-responses',thinkingLevelMap:{...model.thinkingLevelMap,medium:'high'}};
  assert.equal((await request(responses,summaryMapped,{reasoningSummary:'auto'})).reasoning.effort,'high','summary-only requests still apply the provider effort map');
 });
+
+test('ultra reaches the wire only when the selected model declares support',async()=>{
+ for(const [driver,api] of [[chat,'openai-completions'],[responses,'openai-responses'],[codex,'openai-codex-responses']]){
+  const m={...model,api,thinkingLevelMap:{...model.thinkingLevelMap,ultra:'ultra'}};
+  for(const simple of [false,true]){
+   const body=await request(driver,m,simple?{reasoning:'ultra'}:{reasoningEffort:'ultra'},simple);
+   assert.equal(body.reasoning_effort??body.reasoning?.effort,'ultra');
+   const unsupported=await request(driver,{...m,thinkingLevelMap:{...m.thinkingLevelMap,ultra:null}},simple?{reasoning:'ultra'}:{reasoningEffort:'ultra'},simple);
+   assert.equal(unsupported.reasoning_effort??unsupported.reasoning?.effort,'max');
+  }
+ }
+});
+
+test('provider cache counters preserve Qwen creations, GLM/OpenAI hits and DeepSeek misses',async()=>{
+ const cases=[
+  ['qwen', {prompt_tokens_details:{cached_tokens:800,cache_creation_input_tokens:100}},100,800,100],
+  ['glm', {prompt_tokens_details:{cached_tokens:800}},200,800,0],
+  ['openai', {prompt_tokens_details:{cached_tokens:0}},1000,0,0],
+  ['deepseek', {prompt_cache_hit_tokens:800,prompt_cache_miss_tokens:200},200,800,0],
+ ];
+ for(const [provider,extra,input,read,write] of cases){
+  const usage={prompt_tokens:1000,completion_tokens:5,...extra};
+  const result=await chat.stream({...model,provider},context,{apiKey:'TEST_fixture-only',maxRetries:0,fetch:async()=>new Response(
+   'data: '+JSON.stringify({id:'fixture',choices:[{index:0,delta:{content:'ok'},finish_reason:'stop'}],usage})+'\n\ndata: [DONE]\n\n',
+   {headers:{'content-type':'text/event-stream'}})}).result();
+  assert.equal(result.stopReason,'stop',result.errorMessage);
+  assert.equal(result.usage.input,input,provider);assert.equal(result.usage.cacheRead,read,provider);assert.equal(result.usage.cacheWrite,write,provider);
+  assert.equal(result.usage.totalTokens,1005);assert.equal(result.usage.cacheReadReported,true);
+ }
+});
 test('cross-model Responses tool ids stay distinct and paired after normalization',()=>{
  const ids=['call:a','call/a'];
  const messages=[

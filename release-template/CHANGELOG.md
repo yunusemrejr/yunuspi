@@ -9,6 +9,11 @@ hook deadline and prevents reviewer dispatch after delayed authentication has
 outlived the request. The builtin delegate accepts `general-purpose` explicitly.
 See [child outcomes and cancellation](docs/SESSION-ORCHESTRATION.md).
 
+- Fix account-specific Codex discovery hiding new models behind an older catalog protocol. Refresh older protocol caches and preserve explicitly advertised `ultra` reasoning through CLI, configuration, menus, sessions and child routes.
+- Preserve prompt/schema order for identical active tool sets and record Qwen cache creation separately from cached input hits.
+- Reuse equivalent JEV requests across hook builders, keep valid cached judgments through provider outages, and ask fewer distillation questions over larger bounded logs.
+- Share deterministic local Qwen probability reuse across judgments and choices, skip duplicate queued inference, and scope warmed prefixes to their actual server/transport. Add a reproducible live inference-reuse benchmark and cache behavior documentation.
+
 ## 0.18.0 — 2026-09-30
 
 **Direct work carries fewer schemas; assurance carries less repeated text.** Adaptive routing stages 17 core tool names for direct work instead of 30, restores coordination on observed escalation, and retains explicit/named/used tools and caller ceilings. Compact verification and review views retain actionable gaps and findings; full native state remains available. Current source-bound test receipts include bounded, protected-material-aware diagnostics for independent reviewers, avoiding unnecessary temporary evidence logs. Source changes and changed/deleted supplied captures still invalidate old evidence.

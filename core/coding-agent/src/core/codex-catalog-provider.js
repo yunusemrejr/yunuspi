@@ -4,11 +4,12 @@ import { getPiUserAgent } from "../utils/pi-user-agent.js";
 
 const BASE_URL = "https://chatgpt.com/backend-api";
 // Catalog protocol version, independent of this client's product version.
-const CATALOG_URL = `${BASE_URL}/codex/models?client_version=0.155.0`;
+const CATALOG_CLIENT_VERSION = "0.159.2";
+const CATALOG_URL = `${BASE_URL}/codex/models?client_version=${CATALOG_CLIENT_VERSION}`;
 const CATALOG_SOURCE = "openai-codex-account-v1";
 const TTL_MS = 15 * 60_000;
 const MAX_BODY_BYTES = 1_048_576;
-const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const identifier = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/.test(value);
 
@@ -94,19 +95,20 @@ export function withOpenAICodexCatalog(provider) {
             if (!context.allowNetwork || context.signal.aborted || !owner) return;
             const stored = restored ? context.stored : undefined;
             const now = Date.now();
-            if (!context.force && positive(stored?.checkedAt) && now >= stored.checkedAt && now - stored.checkedAt < TTL_MS) return;
+            const currentProtocol = stored?.catalogClientVersion === CATALOG_CLIENT_VERSION;
+            if (!context.force && currentProtocol && positive(stored?.checkedAt) && now >= stored.checkedAt && now - stored.checkedAt < TTL_MS) return;
             const signal = AbortSignal.any([context.signal, AbortSignal.timeout(4_000)]);
             const response = await fetch(CATALOG_URL, {
                 signal, redirect: "error",
                 headers: {
                     accept: "application/json", authorization: `Bearer ${context.credential.access}`,
                     "chatgpt-account-id": owner.accountId, originator: "yunuspi", "User-Agent": getPiUserAgent(VERSION),
-                    ...(typeof stored?.etag === "string" && stored.etag.length <= 512 ? { "if-none-match": stored.etag } : {}),
+                    ...(currentProtocol && typeof stored?.etag === "string" && stored.etag.length <= 512 ? { "if-none-match": stored.etag } : {}),
                 },
             });
             context.signal.throwIfAborted();
             const checkedAt = Date.now();
-            if (response.status === 304 && stored) {
+            if (response.status === 304 && stored && currentProtocol) {
                 await context.publish({ persist: { ...stored, checkedAt } });
                 return;
             }
@@ -117,7 +119,7 @@ export function withOpenAICodexCatalog(provider) {
             const models = parseModels(await readCatalog(response), provider.getModels());
             context.signal.throwIfAborted();
             await context.publish({
-                persist: { models, catalogSource: CATALOG_SOURCE, credentialScope: owner.scope, checkedAt, validatedAt: checkedAt, etag: response.headers.get("etag") ?? undefined },
+                persist: { models, catalogSource: CATALOG_SOURCE, catalogClientVersion: CATALOG_CLIENT_VERSION, credentialScope: owner.scope, checkedAt, validatedAt: checkedAt, etag: response.headers.get("etag") ?? undefined },
                 update: () => { dynamic = models; },
             });
         },

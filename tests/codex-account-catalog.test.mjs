@@ -9,6 +9,9 @@ import { AuthStorage } from '../core/coding-agent/src/core/auth-storage.js';
 import { InMemoryCodingAgentModelsStore } from '../core/coding-agent/src/core/models-store.js';
 import { toModelInfo } from '../agent/extensions/pi-subagents/src/shared/model-info.ts';
 import { isProvenFreeRoute } from '../agent/extensions/pi-subagents/src/runs/shared/free-route-evidence.ts';
+import { getSupportedThinkingLevels, clampThinkingLevel } from '../core/ai/src/models.js';
+import { getSupportedThinkingLevels as childLevels } from '../agent/extensions/pi-subagents/src/shared/model-info.ts';
+import { parseArgs } from '../core/coding-agent/src/cli/args.js';
 const base = { id:'known', name:'Known', provider:'openai-codex', api:'openai-codex-responses', baseUrl:'https://chatgpt.com/backend-api', reasoning:true, input:['text'], contextWindow:100000, maxTokens:32000, cost:{input:1,output:2,cacheRead:0.1,cacheWrite:0}, compat:{supportsToolSearch:true} };
 const payload = { models: [
   { slug:'known', display_name:'Known updated', visibility:'list', supported_in_api:true, context_window:272000, input_modalities:['text','image'], supported_reasoning_levels:[{effort:'low'},{effort:'high'}] },
@@ -47,6 +50,29 @@ test('official account catalog adds exact visible IDs without inventing price or
     await refresh(provider,state,{force:false});assert.equal(calls,1,'fresh cache avoids another network request');
     globalThis.fetch=async(_url,init)=>{assert.equal(init.headers['if-none-match'],'"version-1"');return new Response(null,{status:304});};
     await refresh(provider,state);assert.equal(provider.getModels().length,2);
+  } finally {globalThis.fetch=originalFetch;}
+});
+
+test('new catalog protocol refreshes a fresh older cache and preserves ultra support through CLI and children', async()=>{
+  const originalFetch=globalThis.fetch,state={},provider=wrap();
+  try {
+    globalThis.fetch=async()=>response();await refresh(provider,state);
+    state.stored.catalogClientVersion='0.155.0';
+    globalThis.fetch=async(url,init)=>{
+      assert.equal(new URL(url).searchParams.get('client_version'),'0.159.2');
+      assert.equal(init.headers['if-none-match'],undefined,'old protocol etag cannot mask new models');
+      return new Response(JSON.stringify({models:[{slug:'gpt-6.1-sol',display_name:'GPT-6.1 Sol',visibility:'list',supported_in_api:true,
+        context_window:272000,input_modalities:['text','image'],supported_reasoning_levels:['low','medium','high','xhigh','max','ultra'].map(effort=>({effort}))}]}));
+    };
+    await refresh(provider,state,{force:false});
+    const [model]=provider.getModels();assert.equal(model.id,'gpt-6.1-sol');
+    const supported=['low','medium','high','xhigh','max','ultra'];
+    assert.deepEqual(getSupportedThinkingLevels(model),supported);
+    assert.deepEqual(childLevels(toModelInfo(model)),supported);
+    assert.equal(clampThinkingLevel(model,'ultra'),'ultra');
+    assert.equal(clampThinkingLevel({...model,thinkingLevelMap:{...model.thinkingLevelMap,ultra:null}},'ultra'),'max');
+    assert.equal(parseArgs(['--thinking','ultra']).thinking,'ultra');
+    assert.equal(state.stored.catalogClientVersion,'0.159.2');
   } finally {globalThis.fetch=originalFetch;}
 });
 

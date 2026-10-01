@@ -733,7 +733,9 @@ export class AgentSession {
     setActiveToolsByName(toolNames) {
         const tools = [];
         const validToolNames = [];
-        for (const name of toolNames) {
+        // Discovery and restoration can enumerate the same set in different
+        // orders. Keep prompt snippets and wire schemas stable across them.
+        for (const name of [...new Set(toolNames)].sort()) {
             const tool = this._toolRegistry.get(name);
             if (tool) {
                 tools.push(tool);

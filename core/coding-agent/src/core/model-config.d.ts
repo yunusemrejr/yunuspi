@@ -14,6 +14,7 @@ declare const ModelDefinitionSchema: Type.TObject<{
         high: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         xhigh: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         max: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
+        ultra: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
     }>>;
     input: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
     cost: Type.TOptional<Type.TObject<{
@@ -132,6 +133,7 @@ declare const ModelOverrideSchema: Type.TObject<{
         high: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         xhigh: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         max: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
+        ultra: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
     }>>;
     input: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
     cost: Type.TOptional<Type.TObject<{
@@ -348,6 +350,7 @@ declare const ProviderConfigSchema: Type.TObject<{
             high: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
             xhigh: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
             max: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
+            ultra: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         }>>;
         input: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
         cost: Type.TOptional<Type.TObject<{
@@ -466,6 +469,7 @@ declare const ProviderConfigSchema: Type.TObject<{
             high: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
             xhigh: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
             max: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
+            ultra: Type.TOptional<Type.TUnion<[Type.TString, Type.TNull]>>;
         }>>;
         input: Type.TOptional<Type.TArray<Type.TUnion<[Type.TLiteral<"text">, Type.TLiteral<"image">]>>>;
         cost: Type.TOptional<Type.TObject<{

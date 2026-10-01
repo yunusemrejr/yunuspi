@@ -14,6 +14,7 @@ const THINKING_DESCRIPTIONS = {
     high: "Deep reasoning (~16k tokens)",
     xhigh: "Extra-high reasoning (~32k tokens)",
     max: "Maximum reasoning",
+    ultra: "Ultra reasoning (when supported by the model)",
 };
 const DEFAULT_PROJECT_TRUST_LABELS = {
     ask: "Ask",

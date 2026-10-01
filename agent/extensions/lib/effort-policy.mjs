@@ -26,6 +26,7 @@ export const LEVELS = Object.freeze([
 	"high",
 	"xhigh",
 	"max",
+	"ultra",
 ]);
 const RANK = Object.freeze(Object.fromEntries(LEVELS.map((l, i) => [l, i])));
 export const levelRank = (level) => RANK[level] ?? -1;
@@ -69,7 +70,7 @@ const EXPLICIT_DEEPER = [
 	/\bthink (hard|harder|deeply|carefully|step[- ]by[- ]step)\b/i,
 	/\bhigh(er)? (reasoning|effort|thinking)\b/i,
 	/\bmax(imum|imal)? (reasoning|effort|thinking)\b/i,
-	/\breason(ing)? (at|on) (high|max|xhigh)\b/i,
+	/\breason(ing)? (at|on) (high|max|xhigh|ultra)\b/i,
 	/\bdo not (rush|guess)\b/i,
 ];
 const EXPLICIT_CHEAPER = [
@@ -230,7 +231,7 @@ export const COST_MODEL = Object.freeze({
 	receiptFixedTokens: 40,
 	/** Reasoning tokens per request by advised level. */
 	reasoningTokensByLevel: Object.freeze({
-		off: 0, minimal: 24, low: 96, medium: 320, high: 900, xhigh: 1600, max: 2400,
+		off: 0, minimal: 24, low: 96, medium: 320, high: 900, xhigh: 1600, max: 2400, ultra: 3200,
 	}),
 });
 

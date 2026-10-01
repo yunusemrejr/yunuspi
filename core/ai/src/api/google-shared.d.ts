@@ -9,7 +9,7 @@ type GoogleApiType = "google-generative-ai" | "google-vertex";
  * Mirrors Google's ThinkingLevel enum values.
  */
 export type GoogleApiThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
-export type ResolvedGoogleThinkingLevel = Exclude<ThinkingLevel, "xhigh" | "max">;
+export type ResolvedGoogleThinkingLevel = Exclude<ThinkingLevel, "xhigh" | "max" | "ultra">;
 /** Resolve a supported pi level or model-specific Google mapping to a standard Google level. */
 export declare function resolveGoogleThinkingLevel<T extends GoogleApiType>(model: Model<T>, level: ModelThinkingLevel): ResolvedGoogleThinkingLevel;
 /**
