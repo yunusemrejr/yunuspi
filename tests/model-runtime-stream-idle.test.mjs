@@ -90,3 +90,39 @@ for (const method of ['stream', 'streamSimple']) {
     assert.equal(message.stopReason, 'stop');
   });
 }
+
+// Observed: a provider accepted the request and emitted nothing for the full
+// 300s inactivity budget twice, while the retry answered in seconds. Before any
+// content the shorter first-event budget applies; `start` alone does not count.
+function silentProvider(api) {
+  const factory = () => {
+    const stream = new AssistantMessageEventStream();
+    stream.push({ type: 'start', partial: partialMessage(undefined) });
+    return stream;
+  };
+  return { api, stream: factory, streamSimple: factory };
+}
+
+test('a stream that never produces content fails at the first-event budget, not the idle budget', async () => {
+  const runtime = await runtimeWith(silentProvider());
+  const started = Date.now();
+  const message = await resultWithin(runtime.stream(model, { messages: [] }, { timeoutMs: 60000, firstEventTimeoutMs: 150 }), 10000);
+  assert.equal(message.stopReason, 'error');
+  assert.match(message.errorMessage ?? '', /idle timeout after 150ms without first assistant content/);
+  assert.ok(Date.now() - started < 10000);
+});
+
+test('content switches the budget to the inactivity budget', async () => {
+  const runtime = await runtimeWith(hangingProvider());
+  const message = await resultWithin(runtime.stream(model, { messages: [] }, { timeoutMs: 200, firstEventTimeoutMs: 60000 }), 10000);
+  assert.match(message.errorMessage ?? '', /idle timeout after 200ms without assistant events/);
+});
+
+test('hidden-reasoning APIs keep the full budget unless configured', async () => {
+  const { piWithStreamIdle } = await import('../core/ai/src/utils/event-stream.js');
+  const hidden = { ...model, api: 'openai-responses', reasoning: true };
+  const message = await resultWithin(piWithStreamIdle(hidden, { timeoutMs: 300 }, () => silentProvider().stream()), 10000);
+  assert.match(message.errorMessage ?? '', /idle timeout after 300ms without first assistant content/);
+  const configured = await resultWithin(piWithStreamIdle(hidden, { timeoutMs: 60000, firstEventTimeoutMs: 100 }, () => silentProvider().stream()), 10000);
+  assert.match(configured.errorMessage ?? '', /idle timeout after 100ms/);
+});

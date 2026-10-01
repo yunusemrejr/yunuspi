@@ -285,7 +285,7 @@ const PROVIDER_AUTH_RE = /\b401\b|invalid[ _-]api[ _-]key|authentication[ _-](?:
 const PROVIDER_OUTAGE_RE =
 	/\b503\b|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|upstream.{0,24}unavailable|provider.{0,24}unavailable/i;
 const ROUTE_TRANSPORT_RE =
-	/json error injected into sse stream|stream_read_error|websocket error|h2 protocol error|gateway|bad gateway|\b50[024]\b|\b529\b|\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|fetch failed|socket hang up|connection (?:reset|closed)|request timed out|overloaded/i;
+	/json error injected into sse stream|stream_read_error|websocket error|h2 protocol error|gateway|bad gateway|\b50[024]\b|\b529\b|\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|fetch failed|socket hang up|connection (?:reset|closed)|request timed out|overloaded|provider stream idle timeout/i;
 const MODEL_FAILURE_RE =
 	/finish_reason: error|no actionable content|empty(?:\/thinking-only)? response/i;
 const BILLING_RE = /\b402\b|insufficient credits|insufficient_quota|credit limit|out of budget|billing/i;

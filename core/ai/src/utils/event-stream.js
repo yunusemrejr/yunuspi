@@ -80,6 +80,23 @@ export class AssistantMessageEventStream extends EventStream {
 // Symbol.for also deduplicates a runtime bundle calling an SDK custom stream.
 // This marker is written ONLY to our own child signal, never the caller's.
 const piStreamIdleSignalOwner = Symbol.for("pi-harness.stream-idle.v1");
+// APIs whose reasoning arrives as stream events; others (hidden reasoning)
+// may be legitimately silent for minutes and keep the full inactivity budget.
+const piStreamsReasoning = new Set(["openai-completions", "anthropic-messages", "mistral-conversations"]);
+const PI_FIRST_EVENT_DEFAULT_MS = 120000;
+function piFirstEventBudget(model, options, idleMs) {
+    if (idleMs <= 0) return 0;
+    const configured = options?.firstEventTimeoutMs ?? options?.env?.PI_STREAM_FIRST_EVENT_MS ??
+        (typeof process !== "undefined" ? process.env?.PI_STREAM_FIRST_EVENT_MS : undefined);
+    if (configured !== undefined && String(configured).trim() !== "") {
+        const ms = Number(configured);
+        if (!Number.isFinite(ms) || ms < 0 || ms > 2147483647)
+            throw new Error("Invalid PI_STREAM_FIRST_EVENT_MS/firstEventTimeoutMs budget: " + String(configured));
+        return ms === 0 ? idleMs : Math.min(idleMs, Math.floor(ms));
+    }
+    if (model?.reasoning && !piStreamsReasoning.has(model.api)) return idleMs;
+    return Math.min(idleMs, PI_FIRST_EVENT_DEFAULT_MS);
+}
 export function piWithStreamIdle(model, options, start) {
     if (options?.signal?.[piStreamIdleSignalOwner] === true) return start(options);
     const outer = new AssistantMessageEventStream();
@@ -144,11 +161,21 @@ export function piWithStreamIdle(model, options, start) {
             throw new Error("Invalid PI_STREAM_IDLE_MS/timeoutMs inactivity budget: " + String(configured));
         idleMs = Math.floor(idleMs);
     } catch (error) { fail(error); return outer; }
+    // A provider that accepts a request but never emits content (queued or
+    // wedged upstream) must not hold a turn for the full inactivity budget:
+    // observed as two 300s stalls in one session while the retry answered in
+    // seconds. Until the first content event the budget is the shorter
+    // first-event one; `start` (headers) does not count as content.
+    let firstEventMs;
+    try { firstEventMs = piFirstEventBudget(model, options, idleMs); } catch (error) { fail(error); return outer; }
+    let sawContent = false;
     const reset = () => {
         clearTimeout(timer);
-        if (idleMs > 0) timer = setTimeout(() => fail(new Error(
-            "Provider stream idle timeout after " + idleMs + "ms without assistant events"
-        )), idleMs);
+        const budget = sawContent ? idleMs : firstEventMs;
+        if (budget > 0) timer = setTimeout(() => fail(new Error(
+            sawContent ? "Provider stream idle timeout after " + budget + "ms without assistant events"
+                : "Provider stream idle timeout after " + budget + "ms without first assistant content"
+        )), budget);
     };
     callerSignal?.addEventListener("abort", onAbort, { once: true });
     if (callerSignal?.aborted) { onAbort(); return outer; }
@@ -188,7 +215,7 @@ export function piWithStreamIdle(model, options, start) {
                     outer.end(event.type === "done" ? event.message : event.error);
                     return;
                 }
-                reset();
+                if (event.type !== "start") { sawContent = true; reset(); }
                 outer.push(event);
             }
         } catch (error) { fail(error); }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.2 — 2026-10-02
+
+**A provider that accepts a request and never answers no longer costs five minutes per attempt.** Diagnosed from a session that spent 19 of its 20 minutes on one DeepSeek route: two attempts sat silent for the full 300 s inactivity budget (a third was aborted by the user after almost four more minutes) while the retry between them answered in seconds. The stream watchdog now has a separate first-event budget (120 s by default, `PI_STREAM_FIRST_EVENT_MS` or `firstEventTimeoutMs` to change it, `0` to use the inactivity budget) that applies until the first content event; response headers alone do not count, and the 300 s budget governs the gaps after content starts. APIs that can legitimately hide reasoning (OpenAI Responses, Google, Bedrock) keep the full budget unless configured. A stream idle timeout is also classified as a route failure, so provider health cools the stalled route and autonomous recovery can leave it instead of re-sending the same request into the same stall (before, the error matched no failure class and neither cooldown nor failover ever engaged).
+
 ## 0.18.1 — 2026-10-01
 
 **Stop now cancels everything a prompt launched.** The request's own cancellation signal reaches `before_agent_start` handlers (`ctx.signal` and `event.signal`), so Double's twin streams, the reconciliation pass and any other preflight child work abort when the user stops an idle-started prompt; previously only the not-yet-existing agent signal was visible and the children ran to their own deadline while a replacement prompt started. Double also skips harness-generated wakes (reminders, background results) instead of paying for another twin-stream pass.

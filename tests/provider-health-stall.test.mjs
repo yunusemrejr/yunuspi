@@ -55,3 +55,13 @@ test('dead credentials and exhausted credit hold the provider for an hour, and d
   assert.equal(state.providers.stepfun.failure, undefined, 'expired day-old auth failure no longer pins the provider');
   assert.equal(state.providers.openrouter.models['qwen/qwen3.8-27b:free'].failure, undefined);
 });
+
+test('a provider stream idle timeout is a route failure so recovery can leave the stalled route', () => {
+  for (const text of [
+    'Provider stream idle timeout after 300000ms without assistant events',
+    'Provider stream idle timeout after 120000ms without first assistant content',
+  ]) {
+    const failure = health.classifyFailure(text);
+    assert.deepEqual({ kind: failure?.kind, scope: failure?.scope }, { kind: 'route-failure', scope: 'route' });
+  }
+});
