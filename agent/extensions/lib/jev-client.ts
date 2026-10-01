@@ -23,6 +23,10 @@ import { protectedEvidence } from "./local-intelligence.mjs";
 import { microMetrics } from './micro-intelligence/metrics.ts';
 import { beginHarnessActivity } from './harness-activity.ts';
 
+async function boundedJson(response: Response): Promise<any> {
+  return response.body?.getReader ? JSON.parse(await boundedBody(response)) : response.json();
+}
+
 /** Response bodies from the network are read under a byte ceiling: a misbehaving upstream must not be able to buffer an unbounded payload into the session process. Test doubles without a stream fall back to their own accessors. */
 const JEV_MAX_BODY_BYTES = 262_144;
 async function boundedBody(response: Response, maxBytes = JEV_MAX_BODY_BYTES): Promise<string> {
@@ -285,7 +289,7 @@ async function discoverSlugs(): Promise<string[]> {
       try {
         const response = await deps.fetchImpl(JEV_MODELS_URL, { signal: controller.signal });
         if (!response.ok) return discovered.slugs;
-        const body = JSON.parse(await boundedBody(response)) as { data?: Array<{ id?: string }> };
+        const body = await boundedJson(response) as { data?: Array<{ id?: string }> };
         const ids = (body.data ?? [])
           .map((entry) => entry?.id)
           .filter((id): id is string => typeof id === "string" && /^~?typesafe\/jev[-\w.]*$/.test(id));
@@ -366,7 +370,7 @@ async function postDecisions(
       err.status = response.status;
       throw err;
     }
-    const body = JSON.parse(await boundedBody(response)) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
+    const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
     controller.signal.throwIfAborted();
     if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
       throw Error("decisions: malformed answers");
