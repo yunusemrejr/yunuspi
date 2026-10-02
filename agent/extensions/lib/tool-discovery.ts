@@ -115,6 +115,8 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
+  { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
+  { skill: 'gaussian-splatting', tools: ['lichtfeld_setup', 'lichtfeld_train', 'lichtfeld_render', 'lichtfeld_convert', 'blender_export', 'video_frames'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.

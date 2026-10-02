@@ -93,7 +93,7 @@ const groupIds = new Set(CAPABILITY_GROUPS.map((group) => group.id));
 const RULES: readonly Readonly<{ id: string; pattern: RegExp }>[] = [
   {
     id: "media",
-    pattern: /\b(?:media|image|photo|video|audio|sound|music|animation|animate|motion|visual|thumbnail|subtitle|narrator|faceless|ugc|higgsfield|photoshoot|youtube|blender|cad)\b/i,
+    pattern: /\b(?:media|image|photo|video|audio|sound|music|animation|animate|motion|visual|thumbnail|subtitle|narrator|faceless|ugc|higgsfield|photoshoot|youtube|blender|cad|splat|splatting|lichtfeld|nerf|photogrammetry)\b/i,
   },
   {
     id: "documents",

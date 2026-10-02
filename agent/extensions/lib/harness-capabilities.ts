@@ -953,6 +953,17 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/VIDEO-STUDIO.md",
 	}),
 	capability({
+		id: "3d-studio",
+		group: "web_media",
+		summary: "Headless Blender and LichtFeld Studio. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture. LichtFeld: GPU preflight, from-source install on CUDA machines, --headless Gaussian-splat training from COLMAP or Blender datasets, turntable/camera-path MP4 renders and ply/sog/spz/html conversion plus mesh2splat. Every process is guarded, niced and memory-watched.",
+		entrypoints: ["blender_setup", "blender_run", "blender_render", "lichtfeld_train", "lichtfeld_render"],
+		tools: ["blender_setup", "blender_run", "blender_inspect", "blender_render", "blender_export", "lichtfeld_setup", "lichtfeld_train", "lichtfeld_render", "lichtfeld_convert", "video_frames", "media_info"],
+		options: [option("blend", "Local .blend file; renders and exports never modify it."), option("code|script", "Inline bpy Python or a .py path run with --factory-startup; print YUNUSPI_RESULT {json} to return data."), option("mode", "Render still frames, a quarter-resolution preview or a from/to animation with mp4 and contact sheet.", ["still", "preview", "animation"]), option("format", "Geometry export or a NeRF/Blender transforms.json dataset for splat training.", ["glb", "gltf", "obj", "ply", "stl", "usd", "fbx", "abc", "blend", "dataset"]), option("dataset|model", "COLMAP or transforms.json dataset to train; a trained .ply/.spz to render or convert."), option("action", "status/install for both engines; check validates a dataset without the GPU; path writes a camera path only.")],
+		related: ["video-studio", "creative-studio", "web-and-media", "background-tasks"],
+		sourceFiles: ["agent/extensions/blender-studio.ts", "agent/extensions/lib/blender-studio.ts", "agent/extensions/lib/lichtfeld-studio.ts", "agent/extensions/lib/guarded-process.ts", "agent/scripts/blender-studio.py", "agent/skills/blender-production/SKILL.md", "agent/skills/gaussian-splatting/SKILL.md"],
+		doc: "agent/public-template/docs/3D-STUDIO.md",
+	}),
+	capability({
 		id: "design-studio",
 		group: "web_media",
 		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",

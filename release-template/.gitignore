@@ -17,6 +17,7 @@ node_modules/
 **/artifacts/
 **/worktrees/
 **/local-models/
+**/local-tools/
 *.cact
 needle.wasm
 **/__pycache__/

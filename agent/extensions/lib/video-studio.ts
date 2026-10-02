@@ -5,14 +5,13 @@ import fs from "node:fs/promises";
 import { createWriteStream, existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
 import { masterMedia } from "./audio-studio.ts";
-import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial } from "./self-mutation-guard.ts";
+import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
-import { memoryBudgetMb, watchMemory } from "./memory-guard.ts";
-import { ownProcessGroup } from "./process-owner.ts";
+import { runGuarded, throttled, type Progress } from "./guarded-process.ts";
+import { memoryBudgetMb } from "./memory-guard.ts";
 import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lookById, suggestLook } from "./video-looks.ts";
 import { chapterList, descriptionDraft, formatChapters, isPublishing, planCtas, publishFindings, validatePublishSpec } from "./video-publish.ts";
 // The template's caption timing is the single source for burned-in captions
@@ -319,62 +318,6 @@ export function qaFindings(metrics: QaMetrics, info: { duration: number; videoDu
     }
   }
   return issues;
-}
-
-// ───────────────────────────── process plumbing ─────────────────────────────
-
-type Progress = (text: string) => void;
-/** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
- * whole process group on abort. Returns stdout/stderr tails. */
-async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
-  options.signal?.throwIfAborted();
-  // Heavy local work yields to whatever the person is doing at the keyboard.
-  const niced = options.nice ? { command: "nice", args: ["-n", String(options.nice), command, ...args] } : { command, args };
-  const target = options.guard === false ? niced : guardedCommand(niced.command, niced.args);
-  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...options.env } });
-    ownProcessGroup(child.pid);
-    let stdout = "", stderr = "", pending = "", settled = false;
-    const tail = (text: string, add: string) => (text + add).slice(-200_000);
-    const kill = () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already exited */ } };
-    const timer = setTimeout(() => { kill(); finish(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs);
-    timer.unref?.();
-    const stopWatching = watchMemory(child.pid!, options.memoryMb ?? memoryBudgetMb(), (message, pids) => {
-      kill();
-      for (const pid of pids) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
-      finish(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
-    });
-    const abort = () => { kill(); finish(new Error("Video operation cancelled")); };
-    options.signal?.addEventListener("abort", abort, { once: true });
-    function finish(error?: Error) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      stopWatching();
-      options.signal?.removeEventListener("abort", abort);
-      error ? reject(error) : resolve({ stdout, stderr });
-    }
-    child.stdout.on("data", (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      stdout = tail(stdout, text);
-      pending += text;
-      const lines = pending.split("\n");
-      pending = lines.pop() ?? "";
-      for (const line of lines) options.onLine?.(line);
-    });
-    child.stderr.on("data", (chunk: Buffer) => { stderr = tail(stderr, chunk.toString("utf8")); });
-    child.on("error", (error: any) => finish(error.code === "ENOENT" ? new Error(`${command} is not installed`) : error));
-    child.on("close", (code) => {
-      if (pending) options.onLine?.(pending);
-      if (code === 0) finish();
-      else finish(new Error(`${path.basename(command)} exited with ${code}: ${(stderr || stdout).slice(-3000)}`));
-    });
-  });
-}
-
-function throttled(progress: Progress | undefined, ms = 2500): Progress {
-  let last = 0;
-  return (text) => { const now = Date.now(); if (progress && now - last >= ms) { last = now; progress(text); } };
 }
 
 // ───────────────────────────── project helpers ─────────────────────────────

@@ -50,7 +50,8 @@
     "task-state.ts",
     "art-direction.ts",
     "goal.ts",
-    "adaptive-workflows.ts"
+    "adaptive-workflows.ts",
+    "blender-studio.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -228,7 +229,10 @@
     "assurance-output.ts",
     "gltf-inspect.ts",
     "quality-refinement.ts",
-    "video-motion.ts"
+    "video-motion.ts",
+    "blender-studio.ts",
+    "guarded-process.ts",
+    "lichtfeld-studio.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -616,6 +620,7 @@
     "extensions/lib/utility-mcp/local-reference.mjs",
     "extensions/lib/utility-mcp/web-assets.mjs",
     "extensions/lib/utility-mcp/workflow.mjs",
-    "scripts/video-render.mjs"
+    "scripts/video-render.mjs",
+    "scripts/blender-studio.py"
   ]
 }

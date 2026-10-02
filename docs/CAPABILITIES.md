@@ -1082,6 +1082,29 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
+#### 3d-studio
+
+Headless Blender and LichtFeld Studio. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture. LichtFeld: GPU preflight, from-source install on CUDA machines, --headless Gaussian-splat training from COLMAP or Blender datasets, turntable/camera-path MP4 renders and ply/sog/spz/html conversion plus mesh2splat. Every process is guarded, niced and memory-watched.
+
+**Entrypoints:** `blender_setup`, `blender_run`, `blender_render`, `lichtfeld_train`, `lichtfeld_render`
+
+**Catalog tool pointers:** `blender_setup`, `blender_run`, `blender_inspect`, `blender_render`, `blender_export`, `lichtfeld_setup`, `lichtfeld_train`, `lichtfeld_render`, `lichtfeld_convert`, `video_frames`, `media_info`
+
+**Options:**
+
+- `blend`: Local .blend file; renders and exports never modify it.
+- `code|script`: Inline bpy Python or a .py path run with --factory-startup; print YUNUSPI_RESULT {json} to return data.
+- `mode`: Render still frames, a quarter-resolution preview or a from/to animation with mp4 and contact sheet. Values: `still`, `preview`, `animation`.
+- `format`: Geometry export or a NeRF/Blender transforms.json dataset for splat training. Values: `glb`, `gltf`, `obj`, `ply`, `stl`, `usd`, `fbx`, `abc`, `blend`, `dataset`.
+- `dataset|model`: COLMAP or transforms.json dataset to train; a trained .ply/.spz to render or convert.
+- `action`: status/install for both engines; check validates a dataset without the GPU; path writes a camera path only.
+
+**Related records:** `video-studio`, `creative-studio`, `web-and-media`, `background-tasks`
+
+**Source:** [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts), [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts), [`agent/extensions/lib/lichtfeld-studio.ts`](../agent/extensions/lib/lichtfeld-studio.ts), [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts), [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py), [`agent/skills/blender-production/SKILL.md`](../agent/skills/blender-production/SKILL.md), [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
+
+**Documentation:** [`docs/3D-STUDIO.md`](3D-STUDIO.md)
+
 #### design-studio
 
 Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
@@ -1181,6 +1204,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 691; literal)
 - `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 750; literal)
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
+- `blender_export` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 49; factory)
+- `blender_inspect` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 40; factory)
+- `blender_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 44; factory)
+- `blender_run` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 36; factory)
+- `blender_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 32; factory)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 155; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
@@ -1212,6 +1240,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 321; factory)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 257; factory)
+- `lichtfeld_convert` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 69; factory)
+- `lichtfeld_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 63; factory)
+- `lichtfeld_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 55; factory)
+- `lichtfeld_train` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 59; factory)
 - `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 102; factory)
@@ -1270,7 +1302,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 319; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 365; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 367; literal)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 212; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 133; factory)
 - `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 47; factory)
@@ -1292,6 +1324,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 ### Dynamic tool owners
 
 - [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `ui_explore`, `visual_review` (lines 103)
+- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `lichtfeld_convert`, `lichtfeld_render`, `lichtfeld_setup`, `lichtfeld_train` (lines 14)
 - [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 20)
 - [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 577)
@@ -1478,6 +1511,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts)
 - [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts)
 - [`agent/extensions/bash-router.ts`](../agent/extensions/bash-router.ts)
+- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts)
 - [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts)
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts)
 - [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts)
@@ -1534,6 +1568,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/audio-studio.ts`](../agent/extensions/lib/audio-studio.ts)
 - [`agent/extensions/lib/authored-review.ts`](../agent/extensions/lib/authored-review.ts)
 - [`agent/extensions/lib/bash-routing.ts`](../agent/extensions/lib/bash-routing.ts)
+- [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts)
 - [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts)
 - [`agent/extensions/lib/bulk-edit.ts`](../agent/extensions/lib/bulk-edit.ts)
 - [`agent/extensions/lib/capability-audit.ts`](../agent/extensions/lib/capability-audit.ts)
@@ -1578,6 +1613,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
+- [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts)
 - [`agent/extensions/lib/guidance-topics-domains.ts`](../agent/extensions/lib/guidance-topics-domains.ts)
 - [`agent/extensions/lib/guidance-topics-systems.ts`](../agent/extensions/lib/guidance-topics-systems.ts)
 - [`agent/extensions/lib/guidance-topics.ts`](../agent/extensions/lib/guidance-topics.ts)
@@ -1602,6 +1638,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/intervention-session.ts`](../agent/extensions/lib/intervention-session.ts)
 - [`agent/extensions/lib/intervention-shared.ts`](../agent/extensions/lib/intervention-shared.ts)
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts)
+- [`agent/extensions/lib/lichtfeld-studio.ts`](../agent/extensions/lib/lichtfeld-studio.ts)
 - [`agent/extensions/lib/local-intelligence.mjs`](../agent/extensions/lib/local-intelligence.mjs)
 - [`agent/extensions/lib/local-lm-assets.mjs`](../agent/extensions/lib/local-lm-assets.mjs)
 - [`agent/extensions/lib/local-lm.ts`](../agent/extensions/lib/local-lm.ts)
@@ -1779,6 +1816,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/pi-subagents/src/shared/progress-evidence.ts`](../agent/extensions/pi-subagents/src/shared/progress-evidence.ts)
 - [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
 - [`agent/scripts/auto-update.sh`](../agent/scripts/auto-update.sh)
+- [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py)
 - [`agent/scripts/browser-diagnostics.mjs`](../agent/scripts/browser-diagnostics.mjs)
 - [`agent/scripts/browser-markers.mjs`](../agent/scripts/browser-markers.mjs)
 - [`agent/scripts/browser-page-tools.mjs`](../agent/scripts/browser-page-tools.mjs)
@@ -1857,7 +1895,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 165 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 166 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
@@ -1913,6 +1951,7 @@ The exporter includes 165 public skill directories. This list is a path inventor
 - `fortran-scientific-computing` — [`agent/skills/fortran-scientific-computing/SKILL.md`](../agent/skills/fortran-scientific-computing/SKILL.md)
 - `frontend-design` — [`agent/skills/frontend-design/SKILL.md`](../agent/skills/frontend-design/SKILL.md)
 - `frontend-js` — [`agent/skills/frontend-js/SKILL.md`](../agent/skills/frontend-js/SKILL.md)
+- `gaussian-splatting` — [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
 - `gif-animation-editing` — [`agent/skills/gif-animation-editing/SKILL.md`](../agent/skills/gif-animation-editing/SKILL.md)
 - `git-github` — [`agent/skills/git-github/SKILL.md`](../agent/skills/git-github/SKILL.md)
 - `github-actions-workflows` — [`agent/skills/github-actions-workflows/SKILL.md`](../agent/skills/github-actions-workflows/SKILL.md)
@@ -2033,6 +2072,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 
 ## Public documentation
 
+- [`docs/3D-STUDIO.md`](3D-STUDIO.md)
 - [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
 - [`docs/ADAPTIVE-EXECUTION.md`](ADAPTIVE-EXECUTION.md)
 - [`docs/ANTI-SLOP-CHECKLIST.md`](ANTI-SLOP-CHECKLIST.md)

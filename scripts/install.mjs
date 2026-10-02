@@ -55,7 +55,7 @@ const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest
 // source/dependency checks pass.
 const PRIVATE_STATE_DIRECTORIES = new Set([
   'sessions', 'memory', 'logs', 'backups', 'tasks', 'work', 'artifacts',
-  'worktrees', 'missions', 'local-models', 'project-intelligence',
+  'worktrees', 'missions', 'local-models', 'local-tools', 'project-intelligence',
   'projects',
   // Existing live installations may also have these small private roots.
   '.pi', 'cache', 'agent', 'public-template',

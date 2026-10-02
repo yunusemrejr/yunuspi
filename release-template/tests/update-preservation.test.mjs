@@ -102,12 +102,14 @@ test('unapproved private symlinks fail closed without reading external data',t=>
 test('large private model directories move intact instead of being copied',t=>{
   const f=fixture(t), model=path.join(f.target,'local-models/tinybert/venv/bin');
   fs.mkdirSync(model,{recursive:true});fs.writeFileSync(path.join(model,'python3.12'),'interpreter');
+  const tool=path.join(f.target,'local-tools/blender/blender-5.2.2-linux-x64');fs.mkdirSync(tool,{recursive:true});fs.writeFileSync(path.join(tool,'blender'),'engine');fs.symlinkSync('blender-5.2.2-linux-x64',path.join(f.target,'local-tools/blender/current'));
   fs.symlinkSync('python3.12',path.join(model,'python3'));
   const outside=path.join(f.root,'python');fs.writeFileSync(outside,'external interpreter');
   fs.symlinkSync(outside,path.join(model,'python'));
   const modelFile=path.join(model,'python3.12'), inode=fs.statSync(modelFile).ino;
   const updated=f.update();assert.equal(updated.status,0,updated.stderr);
   assert.equal(fs.lstatSync(path.join(f.target,'local-models')).isDirectory(),true);
+  assert.equal(fs.readFileSync(path.join(f.target,'local-tools/blender/current/blender'),'utf8'),'engine', 'local-tools (Blender, LichtFeld) survives an update like local-models');
   assert.equal(fs.statSync(path.join(f.target,'local-models/tinybert/venv/bin/python3.12')).ino,inode);
   assert.equal(fs.readFileSync(path.join(f.target,'local-models/tinybert/venv/bin/python3.12'),'utf8'),'interpreter');
   assert.equal(fs.readlinkSync(path.join(f.target,'local-models/tinybert/venv/bin/python3')),'python3.12');

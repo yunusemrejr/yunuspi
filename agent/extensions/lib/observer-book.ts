@@ -284,7 +284,7 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'bulk_edit', 'multi_edit', 'apply_p
 const READ_TOOLS = new Set(['read', 'obs_read', 'context_slice', 'symbol_expand', 'checkpoint_read', 'memory_read', 'local_mail_read']);
 const SEARCH_TOOLS = new Set(['grep', 'find', 'ls', 'workspace_search', 'context_score', 'project_intel', 'tool_search', 'skill_review', 'web_search',
   'web_research', 'fetch_content', 'get_search_content', 'memory_search', 'local_mail_search', 'git_info']);
-const RENDER_TOOLS = new Set(['browser_session', 'render_see', 'design_audit', 'web_probe', 'video_render', 'video_frames', 'video_qa', 'scene_render',
+const RENDER_TOOLS = new Set(['browser_session', 'render_see', 'design_audit', 'web_probe', 'video_render', 'video_frames', 'video_qa', 'scene_render', 'blender_render', 'lichtfeld_render',
   'image_ocr', 'artifact_check', 'web_asset_check', 'audio_analyze', 'media_info']);
 const VERIFY_TOOLS = new Set(['project_tests', 'quality_review', 'syntax_check', 'source_check', 'claim_check', 'math_check', 'video_qa', 'design_audit', 'artifact_check', 'web_asset_check']);
 const SHELL_TOOLS = new Set(['bash', 'powershell', 'bg_run', 'sandbox_run']);

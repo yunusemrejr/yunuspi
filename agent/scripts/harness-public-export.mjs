@@ -174,6 +174,7 @@ const omitted = new Set([
  "artifacts",
  "worktrees",
  "local-models",
+ "local-tools",
 ]);
 const stage = fs.mkdtempSync(
  path.join(path.dirname(output), ".yunuspi-public-"),

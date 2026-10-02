@@ -122,7 +122,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
 	},
 	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_qa", "narration_tts", "audio_synth", "scene_render"], onError: true,
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "lichtfeld_train", "lichtfeld_render", "lichtfeld_convert"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
 	},
 	{
