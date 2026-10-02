@@ -292,6 +292,7 @@ function hasHarnessInode(target: fs.Stats): boolean {
 export function guardedCommand(
   command: string,
   args: readonly string[],
+  options: { gpu?: boolean } = {},
 ): { command: string; args: string[] } {
   if (SELF_MUTATION_ALLOWED) return { command, args: [...args] };
   if (rootDiscoveryFailed) throw new Error(discoveryFailure);
@@ -308,6 +309,8 @@ export function guardedCommand(
       ...PROTECTED_MUTATION_ROOTS.filter(
         (root) => root !== HARNESS_ROOT,
       ).flatMap((root) => ["--protect", root]),
+      // GPU render nodes only for engines that compute on them (Vulkan/GL).
+      ...(options.gpu ? ["--gpu"] : []),
       "--",
       command,
       ...args,

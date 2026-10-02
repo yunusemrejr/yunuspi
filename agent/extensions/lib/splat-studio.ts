@@ -238,7 +238,7 @@ export async function splatTrain(params: any, cwd: string, signal?: AbortSignal,
   const timeoutMs = Math.min(7_200_000, Math.max(60_000, (params.timeoutSec ?? 3600) * 1000));
   const started = Date.now();
   // No display: Brush trains without a window unless --with-viewer is passed (never from here).
-  await runGuarded(binary, args, { cwd: output, signal, timeoutMs, nice: 5, env: { RUST_LOG: params.logLevel ?? "info", DISPLAY: undefined, WAYLAND_DISPLAY: undefined }, onLine: (line) => {
+  await runGuarded(binary, args, { cwd: output, signal, timeoutMs, nice: 5, gpu: true, env: { RUST_LOG: params.logLevel ?? "info", DISPLAY: undefined, WAYLAND_DISPLAY: undefined }, onLine: (line) => {
     lines.push(line);
     if (/step|eval|export|error|warn/i.test(line)) report(line.replace(/^\[[^\]]*\]\s*/, "").slice(0, 160));
   } });

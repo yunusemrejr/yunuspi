@@ -11,11 +11,11 @@ import { ownProcessGroup } from "./process-owner.ts";
 export type Progress = (text: string) => void;
 /** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
  * whole process group on abort. Returns stdout/stderr tails. */
-export async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
+export async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; gpu?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
   options.signal?.throwIfAborted();
   // Heavy local work yields to whatever the person is doing at the keyboard.
   const niced = options.nice ? { command: "nice", args: ["-n", String(options.nice), command, ...args] } : { command, args };
-  const target = options.guard === false ? niced : guardedCommand(niced.command, niced.args);
+  const target = options.guard === false ? niced : guardedCommand(niced.command, niced.args, { gpu: options.gpu });
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...options.env } });
     ownProcessGroup(child.pid);

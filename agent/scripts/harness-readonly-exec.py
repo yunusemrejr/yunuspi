@@ -180,7 +180,14 @@ def main():
         raise RuntimeError('invalid harness root')
     roots = {protected}
     at = 2
-    while at < len(sys.argv) and sys.argv[at] == '--protect':
+    gpu = False
+    while at < len(sys.argv) and sys.argv[at] in ('--protect', '--gpu'):
+        if sys.argv[at] == '--gpu':
+            # Opt-in GPU render nodes for Vulkan/GL compute (Brush, Blender). Not the
+            # default: a virtual DRM device changes headless browser rendering.
+            gpu = True
+            at += 1
+            continue
         if at + 1 >= len(sys.argv) or not os.path.isabs(sys.argv[at + 1]):
             raise RuntimeError('invalid protected skill path')
         # Keep link entries AND referents. The trusted parent supplied this
@@ -209,8 +216,7 @@ def main():
                  '--ro-bind', '/', '/', *writable,
                  *ssh_mounts,
                  '--proc', '/proc', '--dev', '/dev',
-                 # GPU render nodes: Vulkan/GL compute (Brush, Blender EEVEE) must not fall back to CPU software drivers.
-                 '--dev-bind-try', '/dev/dri', '/dev/dri',
+                 *(['--dev-bind-try', '/dev/dri', '/dev/dri'] if gpu else []),
                  '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
     try:
         os.execv(arguments[0], arguments)

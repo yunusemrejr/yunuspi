@@ -94,7 +94,7 @@ export async function blenderWorker(req: Record<string, unknown>, options: { cwd
   let result: any;
   const report = throttled(options.progress, 2000);
   try {
-    await runGuarded(binary, args, { cwd: options.cwd, signal: options.signal, timeoutMs: options.timeoutMs, nice: 10, env: blenderEnv(), onLine: (line) => {
+    await runGuarded(binary, args, { cwd: options.cwd, signal: options.signal, timeoutMs: options.timeoutMs, nice: 10, gpu: true, env: blenderEnv(), onLine: (line) => {
       if (line.startsWith(RESULT_MARK)) { try { result = JSON.parse(line.slice(RESULT_MARK.length)); } catch { /* keep stdout tail for the error */ } }
       else if (line.startsWith(PROGRESS_MARK)) report(line.slice(PROGRESS_MARK.length));
       else if (/^Fra:\d+ /.test(line)) report(line.replace(/\s+\|\s+/g, " · ").slice(0, 120));
@@ -275,7 +275,7 @@ export async function blenderRun(params: any, cwd: string, signal?: AbortSignal,
   const report = throttled(progress, 2500);
   const before = await snapshot(root);
   try {
-    const { stderr } = await runGuarded(binary, args, { cwd: root, signal, timeoutMs, nice: 10, env: blenderEnv(), onLine: (line) => {
+    const { stderr } = await runGuarded(binary, args, { cwd: root, signal, timeoutMs, nice: 10, gpu: true, env: blenderEnv(), onLine: (line) => {
       if (line.startsWith(RESULT_MARK)) { try { result = JSON.parse(line.slice(RESULT_MARK.length)); } catch { lines.push(line); } }
       else if (line.startsWith(PROGRESS_MARK)) report(line.slice(PROGRESS_MARK.length));
       else { lines.push(line); if (/^Fra:\d+ /.test(line)) report(line.slice(0, 100)); }
