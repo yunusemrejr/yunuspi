@@ -232,7 +232,7 @@
     "video-motion.ts",
     "blender-studio.ts",
     "guarded-process.ts",
-    "lichtfeld-studio.ts"
+    "splat-studio.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -513,6 +513,11 @@
       "name": "pi-smol-preprocessor.service",
       "retired": "2026-09-25",
       "why": "SmolLM2-135M-Instruct (Q2_K) chose lines at chance level on harness data (skill-relevance AUC 0.53) and almost never ran (eligibility gates rejected nearly every offer; its 250ms take-wait missed ~1s inference). Replaced by the shared local language model Qwen3.5-0.8B (pi-local-lm.service, lib/local-lm.ts, lib/local-lm-assets.mjs): AUC 0.88. local-lm-assets.mjs install retires the old unit and weights. Do not recreate"
+    },
+    {
+      "name": "lichtfeld-studio.ts",
+      "retired": "2026-10-02",
+      "why": "LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate"
     }
   ],
   "supportFiles": [

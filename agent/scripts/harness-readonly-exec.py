@@ -209,6 +209,8 @@ def main():
                  '--ro-bind', '/', '/', *writable,
                  *ssh_mounts,
                  '--proc', '/proc', '--dev', '/dev',
+                 # GPU render nodes: Vulkan/GL compute (Brush, Blender EEVEE) must not fall back to CPU software drivers.
+                 '--dev-bind-try', '/dev/dri', '/dev/dri',
                  '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
     try:
         os.execv(arguments[0], arguments)

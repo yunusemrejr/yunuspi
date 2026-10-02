@@ -122,7 +122,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
 	},
 	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "lichtfeld_train", "lichtfeld_render", "lichtfeld_convert"], onError: true,
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
 	},
 	{
@@ -149,6 +149,24 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "video-render-review", tools: ["video_render"],
 		line: "Stills need contact-sheet inspection (hierarchy, clipping, density, consistency); previews judge pacing, easing and transitions; finals need video_qa plus a listen-check. A successful render never approves itself.",
+	},
+	{
+		key: "blender-render-review", tools: ["blender_render"],
+		line: "Open the returned frames or contact sheet with read and judge framing, clipping, lighting, materials and motion continuity; fix the scene with blender_run and re-render before any longer range. A finished render never approves itself.",
+	},
+	{
+		key: "blender-dataset-next", tools: ["blender_export"],
+		when: (args) => String(args.format) === "dataset",
+		line: "Validate with splat_train action:\"check\" (views, seed points, image sizes), then train with evalSplitEvery so held-out views are tiled beside their ground truth.",
+	},
+	{
+		key: "splat-train-review", tools: ["splat_train"],
+		when: (args) => args.action !== "check",
+		line: "Open fidelity-sheet.png with read: each held-out truth sits beside its splat render. Judge sharpness, missing parts, floaters and colour; few surviving splats means the seed points or views miss the subject, not that bitrate is low. Then splat_preview for a turntable.",
+	},
+	{
+		key: "splat-preview-review", tools: ["splat_preview"],
+		line: "The turntable is an opaque point-cloud preview: judge shape, coverage and floaters from the contact sheet or video_frames, and state that view-dependent shading was not reviewed.",
 	},
 	{
 		key: "video-qa-review", tools: ["video_qa"],

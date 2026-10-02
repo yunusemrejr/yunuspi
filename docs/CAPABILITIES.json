@@ -2502,13 +2502,13 @@
     {
       "id": "3d-studio",
       "group": "web_media",
-      "summary": "Headless Blender and LichtFeld Studio. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture. LichtFeld: GPU preflight, from-source install on CUDA machines, --headless Gaussian-splat training from COLMAP or Blender datasets, turntable/camera-path MP4 renders and ply/sog/spz/html conversion plus mesh2splat. Every process is guarded, niced and memory-watched.",
+      "summary": "Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture with seed points. Splats: Brush (Apache-2.0, wgpu) trains headless on any Vulkan GPU including integrated AMD/Intel, from COLMAP or Blender datasets, exporting PLY with held-out fidelity renders; splat_preview renders a point-cloud turntable. Every process is guarded, niced and memory-watched.",
       "entrypoints": [
-        "blender_setup",
         "blender_run",
         "blender_render",
-        "lichtfeld_train",
-        "lichtfeld_render"
+        "blender_export",
+        "splat_train",
+        "splat_preview"
       ],
       "tools": [
         "blender_setup",
@@ -2516,10 +2516,9 @@
         "blender_inspect",
         "blender_render",
         "blender_export",
-        "lichtfeld_setup",
-        "lichtfeld_train",
-        "lichtfeld_render",
-        "lichtfeld_convert",
+        "splat_setup",
+        "splat_train",
+        "splat_preview",
         "video_frames",
         "media_info"
       ],
@@ -2555,15 +2554,15 @@
             "blend",
             "dataset"
           ],
-          "summary": "Geometry export or a NeRF/Blender transforms.json dataset for splat training."
+          "summary": "Geometry export or a nerfstudio transforms.json dataset (with init.ply seed points) for splat training."
         },
         {
-          "name": "dataset|model",
-          "summary": "COLMAP or transforms.json dataset to train; a trained .ply/.spz to render or convert."
+          "name": "dataset|path",
+          "summary": "COLMAP or transforms.json dataset to train; a splat PLY to preview."
         },
         {
           "name": "action",
-          "summary": "status/install for both engines; check validates a dataset without the GPU; path writes a camera path only."
+          "summary": "status/install for both engines; check validates a dataset and prints the command."
         }
       ],
       "related": [
@@ -2575,7 +2574,7 @@
       "sourceFiles": [
         "agent/extensions/blender-studio.ts",
         "agent/extensions/lib/blender-studio.ts",
-        "agent/extensions/lib/lichtfeld-studio.ts",
+        "agent/extensions/lib/splat-studio.ts",
         "agent/extensions/lib/guarded-process.ts",
         "agent/scripts/blender-studio.py",
         "agent/skills/blender-production/SKILL.md",
@@ -3642,31 +3641,31 @@
       {
         "name": "blender_export",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 49,
+        "line": 50,
         "kind": "factory"
       },
       {
         "name": "blender_inspect",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 40,
+        "line": 41,
         "kind": "factory"
       },
       {
         "name": "blender_render",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 44,
+        "line": 45,
         "kind": "factory"
       },
       {
         "name": "blender_run",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 36,
+        "line": 37,
         "kind": "factory"
       },
       {
         "name": "blender_setup",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 32,
+        "line": 33,
         "kind": "factory"
       },
       {
@@ -3855,30 +3854,6 @@
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
         "line": 257,
-        "kind": "factory"
-      },
-      {
-        "name": "lichtfeld_convert",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 69,
-        "kind": "factory"
-      },
-      {
-        "name": "lichtfeld_render",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 63,
-        "kind": "factory"
-      },
-      {
-        "name": "lichtfeld_setup",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 55,
-        "kind": "factory"
-      },
-      {
-        "name": "lichtfeld_train",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 59,
         "kind": "factory"
       },
       {
@@ -4151,6 +4126,24 @@
         "line": 195,
         "kind": "configured-default",
         "configurable": true
+      },
+      {
+        "name": "splat_preview",
+        "source": "agent/extensions/blender-studio.ts",
+        "line": 64,
+        "kind": "factory"
+      },
+      {
+        "name": "splat_setup",
+        "source": "agent/extensions/blender-studio.ts",
+        "line": 56,
+        "kind": "factory"
+      },
+      {
+        "name": "splat_train",
+        "source": "agent/extensions/blender-studio.ts",
+        "line": 60,
+        "kind": "factory"
       },
       {
         "name": "sqlite_probe",
@@ -4758,7 +4751,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          14
+          15
         ],
         "knownNames": [
           "blender_export",
@@ -4766,10 +4759,9 @@
           "blender_render",
           "blender_run",
           "blender_setup",
-          "lichtfeld_convert",
-          "lichtfeld_render",
-          "lichtfeld_setup",
-          "lichtfeld_train"
+          "splat_preview",
+          "splat_setup",
+          "splat_train"
         ]
       },
       {
@@ -4986,8 +4978,8 @@
       "sourceFiles": 698,
       "registrationSites": 85,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 134,
-      "uniqueStableTools": 133,
+      "stableRegistrationRows": 133,
+      "uniqueStableTools": 132,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5517,10 +5509,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/lichtfeld-studio.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/local-intelligence.mjs",
         "exists": true
       },
@@ -5838,6 +5826,10 @@
       },
       {
         "path": "agent/extensions/lib/source-check.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/splat-studio.ts",
         "exists": true
       },
       {
@@ -6491,6 +6483,11 @@
         "name": "harness-config.json",
         "retired": "2026-08-12",
         "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "lichtfeld-studio.ts",
+        "retired": "2026-10-02",
+        "why": "LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate"
       },
       {
         "name": "long-prompt-offload.ts",

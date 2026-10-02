@@ -1,5 +1,5 @@
 /** Shared child-process plumbing for the local studios (video, Blender,
- * LichtFeld): guarded spawn, line streaming, deadline, memory watch and
+ * Brush): guarded spawn, line streaming, deadline, memory watch and
  * process-group kill on abort. One owner so every heavy local job yields to
  * the keyboard and dies alone when it runs away. */
 import path from "node:path";

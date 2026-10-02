@@ -155,6 +155,19 @@ SmolLM2-135M, 0.47 for LFM2.5-350M and 0.85 for the slower LFM2.5-1.2B; p50
 about 0.9 s per judgement. On a test log it selected exactly the failing
 test's lines. These are small fixtures, not production accuracy.
 
+Re-measured 2026-10-02 with `node scripts/benchmark-local-lm-candidates.mjs --live --models=…`
+(serves each GGUF with the installed llama.cpp runtime and the production
+flags, scores the production relevance prompt as AUC/accuracy at the 0.70 gate
+on the 48 labelled pairs in `tests/fixtures/micro-intel/skill-relevance.json`,
+and the shortlist prompt on `local-choices.json`): Qwen3.5-0.8B Q4_0 AUC 0.97
+with precision 1.00 at the gate; Q8_0 of the same model 0.96 (no gain for 1.5x
+the bytes); Qwen2.5-0.5B 0.89; Qwen3-0.6B 0.85 (accepts 23 shortlist choices,
+4 wrong); Granite 4.0 350M 0.81; Granite 4.0-H 350M 0.62; SmolLM2-360M 0.53;
+Gemma 3 270M 0.48. Negatives reach P(yes) 0.65 on that fixture, so the 0.70
+gate stays: 0.65 would admit an off-topic hint for a recall gain. No smaller
+model earns a swap; the script is the bar a future candidate (or a model
+fine-tuned on recorded harness judgements) must clear.
+
 The model never writes prose that reaches the main agent. It answers bounded
 yes/no questions with a calibrated probability (P(yes) from the first token of
 a few-shot prompt) and proposes source line ids. Judgements, shortlist choices

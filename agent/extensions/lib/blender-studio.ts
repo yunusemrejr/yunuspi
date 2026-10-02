@@ -86,7 +86,7 @@ const RESULT_MARK = "YUNUSPI_RESULT ";
 const PROGRESS_MARK = "YUNUSPI_PROGRESS ";
 
 /** Run Blender headless with the worker script and a JSON request; returns the worker's result object. */
-async function worker(req: Record<string, unknown>, options: { cwd: string; blend?: string; signal?: AbortSignal; timeoutMs: number; progress?: Progress; factoryStartup?: boolean }) {
+export async function blenderWorker(req: Record<string, unknown>, options: { cwd: string; blend?: string; signal?: AbortSignal; timeoutMs: number; progress?: Progress; factoryStartup?: boolean }) {
   const binary = requireBlender();
   const requestPath = path.join(os.tmpdir(), `yunuspi-blender-${randomBytes(6).toString("hex")}.json`);
   await fs.writeFile(requestPath, JSON.stringify(req), { mode: 0o600 });
@@ -177,7 +177,7 @@ const DEADLINE = { inspect: 300_000, render: 3_500_000, export: 900_000, dataset
 
 export async function blenderInspect(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const blend = await readablePath(params.blend, cwd);
-  const result = await worker({ op: "inspect" }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.inspect, progress });
+  const result = await blenderWorker({ op: "inspect" }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.inspect, progress });
   const { ok: _ok, op: _op, ...scene } = result;
   const warnings: string[] = [];
   if (!scene.render?.camera) warnings.push("No active camera: set scene.camera before rendering");
@@ -210,9 +210,17 @@ export async function blenderRender(params: any, cwd: string, signal?: AbortSign
   const scale = params.scale ?? (mode === "preview" ? 0.25 : 1);
   const samples = params.samples ?? (mode === "preview" ? 16 : undefined);
   const req = { op: "render", outputDir, frames, scene: params.scene, camera: params.camera, engine: params.engine, width: params.width, height: params.height, scale, samples, denoise: params.denoise, transparent: params.transparent, format: params.format, threads: params.threads, stem: mode === "animation" ? "frame" : "still" };
-  const result = await worker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.render, progress });
+  const result = await blenderWorker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.render, progress });
   const files: Array<{ frame: number; path: string; bytes: number; seconds: number }> = result.files;
   const out: any = { mode, outputDir, render: result.render, frames: files.length, seconds: result.seconds, files: files.slice(0, 48) };
+  Object.assign(out, await assembleSequence(outputDir, files, { fps: params.fps ?? result.render.fps ?? 24, crf: params.crf ?? 18, stem: "frame", video: mode === "animation" }, signal));
+  out.review = mode === "still" ? "Open the frame(s) with read and judge composition, lighting, clipping and materials before any longer render." : mode === "preview" ? "Low-resolution, low-sample check: judge motion and framing, not shading noise." : "Inspect the contact sheet and play animation.mp4 (video_frames samples transitions); a finished render is not visual approval.";
+  return out;
+}
+
+/** Contact sheet (up to 12 labelled frames) and, when asked, an H.264 preview from a rendered image sequence. */
+export async function assembleSequence(outputDir: string, files: Array<{ frame: number; path: string }>, options: { fps: number; crf: number; stem: string; video?: boolean }, signal?: AbortSignal) {
+  const out: { contactSheet?: string; contactSheetError?: string; video?: string; videoError?: string; fps?: number } = {};
   const labelled = files.filter((_, i) => files.length <= 12 || i % Math.ceil(files.length / 12) === 0).slice(0, 12).map((f) => ({ path: f.path, label: `f${f.frame}` }));
   if (labelled.length > 1 && /\.(png|jpe?g|webp)$/i.test(labelled[0].path)) {
     const sheet = path.join(outputDir, "contact-sheet.png");
@@ -221,15 +229,12 @@ export async function blenderRender(params: any, cwd: string, signal?: AbortSign
     args.push("-filter_complex", contactSheetFilter(labelled.map((i) => i.label)), "-map", "[sheet]", "-frames:v", "1", "-update", "1", sheet);
     await run("ffmpeg", args, signal, 60_000).then(() => { out.contactSheet = sheet; }, (error) => { out.contactSheetError = error.message; });
   }
-  if (mode === "animation" && files.length > 1 && /\.(png|jpe?g)$/i.test(files[0].path)) {
-    const fps = params.fps ?? result.render.fps ?? 24;
+  if ((options.video ?? true) && files.length > 1 && /\.(png|jpe?g)$/i.test(files[0].path)) {
     const video = path.join(outputDir, "animation.mp4");
-    const first = files[0].frame, ext = path.extname(files[0].path);
-    const even = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-    await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", "-framerate", String(fps), "-start_number", String(first), "-i", path.join(outputDir, `frame-%04d${ext}`), "-vf", even, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", String(params.crf ?? 18), "-movflags", "+faststart", video], signal, 600_000)
-      .then(async () => { out.video = (await produced(video)).path; out.fps = fps; }, (error) => { out.videoError = `image sequence rendered but mp4 assembly failed: ${error.message}`; });
+    const ext = path.extname(files[0].path);
+    await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", "-framerate", String(options.fps), "-start_number", String(files[0].frame), "-i", path.join(outputDir, `${options.stem}-%04d${ext}`), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", String(options.crf), "-movflags", "+faststart", video], signal, 600_000)
+      .then(async () => { out.video = (await produced(video)).path; out.fps = options.fps; }, (error) => { out.videoError = `image sequence rendered but mp4 assembly failed: ${error.message}`; });
   }
-  out.review = mode === "still" ? "Open the frame(s) with read and judge composition, lighting, clipping and materials before any longer render." : mode === "preview" ? "Low-resolution, low-sample check: judge motion and framing, not shading noise." : "Inspect the contact sheet and play animation.mp4 (video_frames samples transitions); a finished render is not visual approval.";
   return out;
 }
 
@@ -241,13 +246,13 @@ export async function blenderExport(params: any, cwd: string, signal?: AbortSign
   if (format === "dataset") {
     const outputDir = await freshOutputDir(params.outputDir, cwd, "dataset");
     const req = { op: "dataset", outputDir, views: params.views ?? 60, radius: params.radius, center: params.center, elevations: params.elevations, lensMm: params.lensMm, width: params.width ?? 800, height: params.height ?? 800, scale: params.scale, engine: params.engine ?? "EEVEE", samples: params.samples ?? 32, transparent: params.transparent ?? true, seed: params.seed };
-    const result = await worker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.dataset, progress });
+    const result = await blenderWorker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.dataset, progress });
     const { ok: _ok, op: _op, ...dataset } = result;
-    return { format, ...dataset, next: `lichtfeld_train dataset:${JSON.stringify(outputDir)} trains Gaussian splats from this dataset (NeRF/Blender transforms.json layout; camera matrices are Blender world-space, so lichtfeld_render orbits use up:[0,0,1])` };
+    return { format, ...dataset, next: `splat_train dataset:${JSON.stringify(outputDir)} trains Gaussian splats from this dataset (nerfstudio transforms.json with init.ply seed points; Blender world axes, so splat_preview uses up:[0,0,1])` };
   }
   const target = await writablePath(params.path ?? path.join(".pi", "blender", `${path.basename(blend, ".blend")}.${format}`), cwd);
-  const result = await worker({ op: "export", path: target, format, objects: params.objects, applyModifiers: params.applyModifiers, animation: params.animation }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.export, progress });
-  return { format, files: result.files, objects: result.objects, next: format === "obj" || format === "ply" ? `lichtfeld_convert action:"mesh2splat" turns this mesh into Gaussian splats; video_project feature:"3d" animates a .glb in a code-first video` : format === "glb" ? 'Use with video_project feature:"3d" (Model3D primitive) or asset_register' : undefined };
+  const result = await blenderWorker({ op: "export", path: target, format, objects: params.objects, applyModifiers: params.applyModifiers, animation: params.animation }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.export, progress });
+  return { format, files: result.files, objects: result.objects, next: format === "glb" ? 'Use with video_project feature:"3d" (Model3D primitive) or asset_register' : undefined };
 }
 
 /** Run an agent-authored bpy script headless; the script may print `YUNUSPI_RESULT {json}` to return structured data. */
