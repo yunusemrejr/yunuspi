@@ -813,7 +813,15 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
             const open = reports.map(r => r.outcome === 'unknown' ? `${r.aspect} (unknown outcome${r.gap.trim() ? `: ${flat(r.gap).slice(0, 180)}` : ''})` : r.gap.trim() ? `${r.aspect} (gap: ${flat(r.gap).slice(0, 180)})` : '').filter(Boolean);
             if (reviewed !== revision || !reports.length) open.unshift(!reports.length ? 'no independent report retained' : `review is stale (reviewed r${reviewed}, current r${revision})`);
             const detail = open.join('; ').slice(0, 600);
-            throw Error(`Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.${detail ? ` Open: ${detail}.` : ''}`);
+            // Name the one next call. "Record blocked" is only valid once a
+            // review for this revision ran or could not start; recording it
+            // earlier is refused below, which read as two contradictory
+            // instructions (measured: accepted -> blocked -> accepted retries).
+            const unreviewed = reviewed !== revision || !reports.length;
+            const next = unreviewed && rounds < REVIEW_LIMITS.rounds
+              ? ' Next: call quality_review with action "review" for the current revision, then assess again.'
+              : ' Next: repair or dismiss the open items and re-review within the round budget, or record "blocked" naming what stayed unavailable.';
+            throw Error(`Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.${detail ? ` Open: ${detail}.` : ''}${next}`);
           }
           if (truncated || scopeOverflow) throw Error('Change discovery is incomplete; narrow the workspace or record the uncovered scope as blocked.');
           const test = options.tests();
@@ -845,7 +853,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           if (!changed.length && !verificationBlocked) throw Error('There is no current changed scope to assess as blocked.');
           if (disposition === 'accepted') throw Error('The current revision was accepted already; new changes or input require a fresh review before recording blocked.');
           const currentReview = reviewUnavailable || Boolean(dispatchGap) || reviewed === revision && reports.length > 0;
-          if (!currentReview && !verificationBlocked && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review before recording blocked.');
+          if (!currentReview && !verificationBlocked && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review (quality_review action "review") before recording blocked.');
         }
         disposition = params.disposition; reason = (acceptedLimit ? `${acceptedLimit} ${params.reason.trim()}` : params.reason.trim()).slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});

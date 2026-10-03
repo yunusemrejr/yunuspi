@@ -1654,3 +1654,11 @@ test("work after an accepted revision keeps one review round instead of forcing 
  await f.mutate("src/value.js", "export const value=4;");
  assert.equal(f.state().status, "budget_exhausted", "unaccepted repair churn still exhausts the budget");
 });
+
+test('a rejected assessment names the single next call instead of two contradictory instructions',async t=>{
+ const f=await fixture(t);f.api.input({source:'interactive',text:'Fix authentication token validation'});
+ await f.mutate('src/value.js','export const value=1;');
+ const reason='Looked at the change and it appears complete to the parent session.';
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason}),/must be resolved; record blocked when unavailable\..*Next: call quality_review with action "review"/s,'no review exists for this revision: run one');
+ await assert.rejects(f.tool({action:'assess',disposition:'blocked',reason}),/quality_review action "review"/,'blocked is not yet valid, and the message says which call is');
+});
