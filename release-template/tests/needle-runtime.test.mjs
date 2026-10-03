@@ -11,6 +11,9 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 
+// Live tests share the user's real asset directory; keep the persistent
+// embedding cache out of it unless a test opts in with an explicit path.
+process.env.PI_NEEDLE_DISK_CACHE ??= "off";
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
   fs.existsSync(path.join(p, "extensions/lib/needle-runtime.ts")),
@@ -384,6 +387,54 @@ test('an exact timed-out payload backs off while smaller jobs and later retries 
   } finally { await handle.shutdown(); }
 });
 
+test("embedding ops carry a cooperative deadline inside the hard budget; other ops do not", async () => {
+  const factory = canned(4);
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), maxOpTimeoutMs: 4000 }, workerFactory: factory, assetDir: fixtureAssets() });
+  try {
+    const before = Date.now();
+    assert.equal((await handle.rank({ query: "capture a screenshot", candidates: [{ id: "a", text: "browser screenshot" }, { id: "b", text: "bake bread" }] })).ok, true);
+    assert.equal((await handle.embed(["a deadline field travels with embeds"])).ok, true);
+    assert.equal((await handle.classify({ text: "capture a screenshot", labels: [{ id: "a", text: "browser screenshot" }, { id: "b", text: "bake bread" }] })).ok, true);
+    const posted = factory.workers.flatMap((worker) => worker.posted);
+    for (const op of ["rank", "embed", "classify"]) {
+      const message = posted.find((item) => item.op === op);
+      assert.ok(message, op);
+      assert.ok(message.deadlineAt > before && message.deadlineAt < Date.now() + 4000, `${op} deadline sits inside the 4 s hard budget`);
+    }
+    assert.equal(posted.find((item) => item.op === "init").deadlineAt, undefined, "init keeps only the hard timer");
+  } finally { await handle.shutdown(); }
+});
+
+test("a worker deadline keeps the worker and its progress; only idle deadlines quarantine a payload", async () => {
+  let progress = 3, posts = 0;
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    if (message.op === "init") return reply({ id: message.id, ok: true, result: { dim: 4 }, ms: 0 });
+    posts++;
+    if (message.query === "needs more time") return reply({ id: message.id, ok: false, error: "deadline", progress, ms: 5 });
+    reply({ id: message.id, ok: true, result: { ranked: [{ id: "a", score: 0.9 }], margin: 0 }, ms: 1 });
+  } });
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const input = { query: "needs more time", candidates: [{ id: "a", text: "candidate evidence" }] };
+  try {
+    const first = await handle.rank(input);
+    assert.equal(first.ok, false);
+    assert.equal(first.reason, "timeout");
+    assert.equal(handle.health().workerRestarts, 0, "a cooperative deadline must not restart the worker");
+    assert.equal(factory.workers.length, 1, "no replacement worker is spawned");
+    assert.equal(handle.health().state, "healthy");
+    const retried = posts;
+    assert.equal((await handle.rank(input)).reason, "timeout");
+    assert.equal(posts, retried + 1, "work that advanced is retried immediately instead of waiting out a cooldown");
+    progress = 0;
+    assert.equal((await handle.rank(input)).reason, "timeout");
+    const stalled = posts;
+    assert.equal((await handle.rank(input)).reason, "cooldown", "a payload that made no headway backs off");
+    assert.equal(posts, stalled, "and is not dispatched again");
+    assert.equal(handle.health().workerRestarts, 0);
+    assert.ok(handle.stats().timeouts >= 3, "deadlines still count as timeouts for health reporting");
+  } finally { await handle.shutdown(); }
+});
+
 test("crash recovery cools down after the restart budget", async () => {
   const factory = canned();
   const handle = runtime.createNeedleRuntime({
@@ -684,4 +735,49 @@ test("live grammar extraction gets a decode budget and returns advisory fields",
     assert.equal(handle.stats().timeouts, 0);
     console.log(`bench needle-extraction: ${result.ms}ms, city=${result.value.value.city}, street=${result.value.value.street}, confidence=${result.value.confidence}; fields remain advisory`);
   } finally { await handle.shutdown(); }
+});
+
+test("live persistent cache: deadline keeps progress, a restarted worker and a new session start warm", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
+  const dir = liveAssets.needleAssetDir();
+  const cachePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "needle-disk-")), "embeddings.sqlite");
+  const spawn = () => {
+    const worker = new Worker(new URL(pathToFileURL(path.join(agent, "extensions/lib/needle-worker.mjs"))), { workerData: { cacheMax: 64, embeddingCachePath: cachePath }, execArgv: [] });
+    let id = 0;
+    const call = (request) => new Promise((resolve, reject) => {
+      const requestId = ++id;
+      const timer = setTimeout(() => reject(new Error("worker deadline")), 60000);
+      const receive = (response) => {
+        if (response.id !== requestId) return;
+        clearTimeout(timer); worker.off("message", receive); resolve(response);
+      };
+      worker.on("message", receive);
+      worker.postMessage({ ...request, id: requestId });
+    });
+    return { worker, call };
+  };
+  const candidates = Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, text: `candidate ${i}: ${"measure cold embedding cost with a realistic description. ".repeat(3)}variant ${i}` }));
+  const request = { op: "rank", query: "which candidate describes measuring embedding cost", candidates, topK: 8 };
+  const first = spawn();
+  try {
+    assert.equal((await first.call({ op: "init", assets: { dir } })).ok, true);
+    // A deadline that is already tight stops between forward passes.
+    const tight = await first.call({ ...request, deadlineAt: Date.now() + 700 });
+    assert.equal(tight.ok, false);
+    assert.equal(tight.error, "deadline");
+    assert.ok(tight.progress >= 1, "the first pass always fits and its vector is kept");
+    const ping = await first.call({ op: "ping" });
+    assert.equal(ping.ok, true, "the worker survives a deadline and still answers");
+    // Retrying converges on the stored vectors instead of starting over.
+    let done;
+    for (let attempt = 0; attempt < 12 && !done?.ok; attempt++) done = await first.call({ ...request, deadlineAt: Date.now() + 2500 });
+    assert.equal(done?.ok, true, "repeated bounded attempts finish the rank");
+  } finally { await first.worker.terminate(); }
+  const second = spawn();
+  try {
+    assert.equal((await second.call({ op: "init", assets: { dir } })).ok, true);
+    const warm = await second.call(request);
+    assert.equal(warm.ok, true);
+    assert.equal(warm.cached, true, "a fresh worker reads every vector from the persistent cache without any forward pass");
+    assert.ok(warm.ms < 1500, `warm rank took ${warm.ms}ms`);
+  } finally { await second.worker.terminate(); }
 });

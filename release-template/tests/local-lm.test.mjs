@@ -106,6 +106,46 @@ test('a cached judgment respects cancellation during runtime readiness',async()=
   assert.equal(lm.stats().cached,0,'cancelled callers do not consume cached evidence');
 });
 
+test('a per-task prefix is chained behind the shared examples so each skill evaluates only its own text', async () => {
+  const base = `Unique shared examples ${Date.now()} ${'example '.repeat(12)}\n`;
+  const taskA = `${base}Task: build a music blog in PHP with a database\n`, taskB = `${base}Task: profile a rust cli\n`;
+  const bodies = [];
+  let taskReuse = taskA.length;
+  const lm = L.createLocalLm({ runtime, fetch: async (_url, init) => {
+    const body = JSON.parse(init.body); bodies.push(body);
+    if (body.n_predict === 0) return new Response(JSON.stringify({ tokens_evaluated: body.prompt.length }));
+    const response = JSON.parse(await probs(0.8, 0.2).text());
+    return new Response(JSON.stringify({ ...response, timings: { cache_n: body.prompt.startsWith(taskA) ? taskReuse : body.prompt.length - 4 } }));
+  } });
+  const shape = () => bodies.splice(0).map(body => body.n_predict === 0 ? (body.prompt === base ? 'warm:base' : body.prompt === taskA ? 'warm:A' : body.prompt === taskB ? 'warm:B' : 'warm:?') : 'judge');
+  for (const skill of ['one', 'two', 'three']) assert.equal((await lm.judge(`${taskA}Skill ${skill}: d\nHelps:`, 'unit', { prefix: [base, taskA] })).ok, true);
+  assert.deepEqual(shape(), ['warm:base', 'warm:A', 'judge', 'judge', 'judge'], 'both links warm once for the first skill; the rest reuse them');
+  assert.equal((await lm.judge(`${taskB}Skill one: d\nHelps:`, 'unit', { prefix: [base, taskB] })).ok, true);
+  assert.deepEqual(shape(), ['warm:B', 'judge'], 'a new task warms only its own section; the shared base stays warm');
+  taskReuse = 0;
+  await lm.judge(`${taskA}Skill four: d\nHelps:`, 'unit', { prefix: [base, taskA] });
+  await lm.judge(`${taskA}Skill five: d\nHelps:`, 'unit', { prefix: [base, taskA] });
+  assert.deepEqual(shape(), ['judge', 'warm:A', 'judge'], 'an evicted task checkpoint re-warms only that link');
+  await lm.judge(`${taskA}Skill six: d\nHelps:`, 'unit', { prefix: [taskA, base] });
+  assert.deepEqual(shape(), ['judge'], 'links that do not extend one another are never warmed');
+});
+
+test('a cancelled judgement leaves the shared queue without being sent to the model', async () => {
+  const sent = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const lm = L.createLocalLm({ runtime, fetch: async (_url, init) => { sent.push(JSON.parse(init.body).prompt); await gate; return probs(0.8, 0.2); } });
+  const first = lm.judge('first question\nAnswer:', 'unit');
+  const stale = new AbortController();
+  const queued = lm.judge('stale question\nAnswer:', 'unit', { signal: stale.signal });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  stale.abort();
+  assert.deepEqual(await queued, { ok: false, reason: 'cancelled' });
+  release();
+  assert.equal((await first).ok, true);
+  assert.deepEqual(sent, ['first question\nAnswer:'], 'the superseded prompt never reached the server');
+});
+
 test('prefix checkpoints are scoped to the actual transport, not shared globally by text',async()=>{
   const prefix='Shared examples for two separate servers. '.repeat(4)+'\n';
   const recorded=[];
