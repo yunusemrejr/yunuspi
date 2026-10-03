@@ -51,7 +51,10 @@ L2-normalized float32 vector. A query matches an atom; the agent reads the
 parent. `chunks_fts` (FTS5, porter stemming) indexes parent title/text/
 concepts in the same transaction. Vectors scan brute-force cosine over
 normalized BLOBs — no sqlite-vec dependency; project-scale corpora
-(thousands of chunks) answer in milliseconds.
+(thousands of chunks) answer in milliseconds. The scan streams rows through an
+exact binary-heap top-k, so peak memory is one vector plus the result heap
+rather than every scanned BLOB (a 4096-dimension, 8,000-atom store measured
+290 MB before and 136 MB after, with identical scores).
 
 Prose atoms split on paragraph/list boundaries; code atoms split on
 blank lines and definition starts (types and functions at any indent,

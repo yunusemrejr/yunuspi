@@ -328,6 +328,62 @@ export interface OpenStoreOptions {
   create?: boolean;
 }
 
+/** Exact cosine top-k over a stream of unit-length float32 BLOB rows.
+ *
+ * Rows are consumed one at a time, so peak memory is one vector plus the
+ * heap instead of every scanned BLOB at once (a 40,000-atom scan of 4096-d
+ * vectors used to hold ~650 MB). The BLOB is viewed in place when aligned,
+ * the query is normalized once rather than per element per row, and a binary
+ * min-heap replaces re-sorting the candidate list on every improvement.
+ * Dot products accumulate in index order, so scores are identical to the
+ * naive loop. Ties keep the earlier-scanned (newer) row. */
+function streamTopK<R extends { embedding: Uint8Array }, H extends { score: number }>(
+  rows: Iterable<R>, query: Float32Array, norm: number, limit: number, scanCap: number, hit: (row: R, score: number) => H,
+): { hits: H[]; scanned: number; truncated: boolean } {
+  const dim = query.length;
+  const q = new Float64Array(dim);
+  for (let i = 0; i < dim; i++) q[i] = query[i] / norm;
+  const heap: Array<{ score: number; seq: number; value: H }> = [];
+  // Min-heap order: lower score first; among equals the later-scanned row is "smaller" so it is evicted first.
+  const before = (a: { score: number; seq: number }, b: { score: number; seq: number }) => a.score < b.score || (a.score === b.score && a.seq > b.seq);
+  const up = (index: number) => {
+    const item = heap[index];
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (!before(item, heap[parent])) break;
+      heap[index] = heap[parent]; index = parent;
+    }
+    heap[index] = item;
+  };
+  const down = (index: number) => {
+    const item = heap[index], size = heap.length;
+    for (;;) {
+      let child = index * 2 + 1;
+      if (child >= size) break;
+      if (child + 1 < size && before(heap[child + 1], heap[child])) child++;
+      if (!before(heap[child], item)) break;
+      heap[index] = heap[child]; index = child;
+    }
+    heap[index] = item;
+  };
+  let scanned = 0, truncated = false, seq = 0;
+  for (const row of rows) {
+    if (scanned >= scanCap) { truncated = true; break; }
+    scanned++;
+    const bytes = row.embedding;
+    if (!bytes || bytes.byteLength !== dim * 4) continue;
+    const vec = bytes.byteOffset % 4 === 0 ? new Float32Array(bytes.buffer, bytes.byteOffset, dim) : new Float32Array(bytes.slice().buffer);
+    let dot = 0;
+    for (let i = 0; i < dim; i++) dot += q[i] * vec[i];
+    if (!Number.isFinite(dot)) continue;
+    if (heap.length < limit) { heap.push({ score: dot, seq: seq++, value: hit(row, dot) }); up(heap.length - 1); }
+    else if (dot > heap[0].score) { heap[0] = { score: dot, seq: seq++, value: hit(row, dot) }; down(0); }
+    else seq++;
+  }
+  heap.sort((a, b) => b.score - a.score || a.seq - b.seq);
+  return { hits: heap.map(entry => entry.value), scanned, truncated };
+}
+
 export class ProjectVectorStore {
   readonly dbPath: string;
   readonly projectId: string;
@@ -845,27 +901,10 @@ export class ProjectVectorStore {
       conditions.push("authority >= ?");
       params.push(opts.minAuthority);
     }
-    const fetched = this.db.prepare(`SELECT id, embedding FROM chunks WHERE ${conditions.join(" AND ")} ORDER BY rowid DESC LIMIT ?`).all(...params, scanCap + 1) as Array<{ id: string; embedding: Uint8Array }>;
-    const rows = fetched.slice(0, scanCap);
-    this.lastVectorScan = { scanned: rows.length, truncated: fetched.length > scanCap };
-    // Bounded top-K heap via partial selection (limit is small).
-    const scored: VectorHit[] = [];
-    for (const row of rows) {
-      const bytes = row.embedding;
-      if (!bytes || bytes.byteLength !== dim * 4) continue;
-      const vec = new Float32Array(Uint8Array.from(bytes).buffer);
-      let dot = 0;
-      for (let i = 0; i < dim; i++) dot += (arr[i] / norm) * vec[i];
-      if (!Number.isFinite(dot)) continue;
-      if (scored.length < limit) {
-        scored.push({ id: row.id, score: dot });
-        if (scored.length === limit) scored.sort((a, b) => a.score - b.score);
-      } else if (dot > scored[0].score) {
-        scored[0] = { id: row.id, score: dot };
-        scored.sort((a, b) => a.score - b.score);
-      }
-    }
-    return scored.sort((a, b) => b.score - a.score);
+    const rows = this.db.prepare(`SELECT id, embedding FROM chunks WHERE ${conditions.join(" AND ")} ORDER BY rowid DESC LIMIT ?`).iterate(...params, scanCap + 1) as Iterable<{ id: string; embedding: Uint8Array }>;
+    const { hits, scanned, truncated } = streamTopK(rows, arr, norm, limit, scanCap, (row, score): VectorHit => ({ id: row.id, score }));
+    this.lastVectorScan = { scanned, truncated };
+    return hits;
   }
 
   /** Brute-force cosine over atom vectors, joined to parents for filtering.
@@ -896,28 +935,10 @@ export class ProjectVectorStore {
       conditions.push("c.authority >= ?");
       params.push(opts.minAuthority);
     }
-    const fetched = this.db.prepare(`SELECT a.id AS atom_id, a.chunk_id, a.ordinal, a.embedding FROM atoms a JOIN chunks c ON c.id = a.chunk_id WHERE ${conditions.join(" AND ")} ORDER BY a.rowid DESC LIMIT ?`).all(...params, scanCap + 1) as Array<{ atom_id: string; chunk_id: string; ordinal: number; embedding: Uint8Array }>;
-    const rows = fetched.slice(0, scanCap);
-    this.lastVectorScan = { scanned: rows.length, truncated: fetched.length > scanCap };
-    // Bounded top-K heap via partial selection (limit is small).
-    const scored: AtomHit[] = [];
-    for (const row of rows) {
-      const bytes = row.embedding;
-      if (!bytes || bytes.byteLength !== dim * 4) continue;
-      const vec = new Float32Array(Uint8Array.from(bytes).buffer);
-      let dot = 0;
-      for (let i = 0; i < dim; i++) dot += (arr[i] / norm) * vec[i];
-      if (!Number.isFinite(dot)) continue;
-      const hit = { id: row.atom_id, atomId: row.atom_id, chunkId: row.chunk_id, ordinal: row.ordinal, score: dot };
-      if (scored.length < limit) {
-        scored.push(hit);
-        if (scored.length === limit) scored.sort((a, b) => a.score - b.score);
-      } else if (dot > scored[0].score) {
-        scored[0] = hit;
-        scored.sort((a, b) => a.score - b.score);
-      }
-    }
-    return scored.sort((a, b) => b.score - a.score);
+    const rows = this.db.prepare(`SELECT a.id AS atom_id, a.chunk_id, a.ordinal, a.embedding FROM atoms a JOIN chunks c ON c.id = a.chunk_id WHERE ${conditions.join(" AND ")} ORDER BY a.rowid DESC LIMIT ?`).iterate(...params, scanCap + 1) as Iterable<{ atom_id: string; chunk_id: string; ordinal: number; embedding: Uint8Array }>;
+    const { hits, scanned, truncated } = streamTopK(rows, arr, norm, limit, scanCap, (row, score): AtomHit => ({ id: row.atom_id, atomId: row.atom_id, chunkId: row.chunk_id, ordinal: row.ordinal, score }));
+    this.lastVectorScan = { scanned, truncated };
+    return hits;
   }
 }
 

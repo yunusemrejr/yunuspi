@@ -1337,3 +1337,38 @@ test('extension reads memories in full after compact search', async (t) => {
   assert.ok(read.details.atoms.length >= 2);
   await assert.rejects(() => pi.tools.get('project_memory_read').execute('4', { id: 'mem_missing' }, undefined, undefined, ctx), /Unknown project memory id/);
 });
+
+test('streamed top-k scans equal a naive full sort for atoms and legacy chunk vectors', (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_exact');
+  t.after(() => store.close());
+  const dim = 24, space = { id: 'exact:space', backend: 'test', model: 'exact', version: 1, dim };
+  let seed = 4242;
+  const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296 - 0.5;
+  const unit = () => { const v = Float32Array.from({ length: dim }, random); const n = Math.hypot(...v); return v.map((x) => x / n); };
+  const vectors = new Map();
+  for (let i = 0; i < 160; i++) {
+    const id = `c${i}`, vec = unit();
+    store.upsertChunk({ id, project_id: 'prj_exact', source_type: 'observation', text: `chunk ${i}`, content_hash: `h${i}`, embeddingSpace: space, embedding: vec });
+    store.setAtoms(id, [{ id: `a${i}`, chunk_id: id, text: `atom ${i}`, content_hash: `ah${i}` }]);
+    store.setAtomEmbedding(`a${i}`, space, vec);
+    vectors.set(`a${i}`, vec); vectors.set(id, vec);
+  }
+  const query = unit();
+  const naive = (ids) => ids.map((id) => ({ id, score: vectors.get(id).reduce((sum, x, k) => sum + x * query[k], 0) })).sort((a, b) => b.score - a.score);
+  const atomIds = [...vectors.keys()].filter((id) => id.startsWith('a')), chunkIds = [...vectors.keys()].filter((id) => id.startsWith('c'));
+  for (const limit of [1, 7, 60, 200]) {
+    const atoms = store.atomVectorSearch(query, { embedder: space.id, limit, scanCap: 5000 });
+    assert.deepEqual(atoms.map((hit) => hit.atomId), naive(atomIds).slice(0, limit).map((hit) => hit.id), `atom top-${limit} matches a full sort`);
+    for (let k = 1; k < atoms.length; k++) assert.ok(atoms[k - 1].score >= atoms[k].score, 'descending');
+    const chunks = store.vectorSearch(query, { embedder: space.id, limit, scanCap: 5000 });
+    assert.deepEqual(chunks.map((hit) => hit.id), naive(chunkIds).slice(0, limit).map((hit) => hit.id), `legacy chunk top-${limit} matches a full sort`);
+  }
+  const capped = store.atomVectorSearch(query, { embedder: space.id, limit: 5, scanCap: 100 });
+  assert.equal(store.lastVectorScan.scanned, 100);
+  assert.equal(store.lastVectorScan.truncated, true);
+  assert.equal(capped.length, 5);
+  const newest = new Set(atomIds.slice(60));
+  assert.ok(capped.every((hit) => newest.has(hit.atomId)), 'a capped scan reads the newest rows only');
+});
