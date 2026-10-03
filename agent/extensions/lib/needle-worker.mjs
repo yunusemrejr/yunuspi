@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { verifyAssets } from "./needle-assets.mjs";
+import { verifyAssets, NEEDLE_PINNED_FILES } from "./needle-assets.mjs";
 
 process.env.NEEDLE_TELEMETRY = "0";
 process.env.DO_NOT_TRACK = "1";
@@ -36,29 +36,46 @@ let dim = 0;
 /** sha256(text) -> Float32Array copy. Bounded LRU; embeddings only. */
 const cache = new Map();
 let cacheHits = 0;
+/** Persistent layer under the LRU (see needle-embedding-cache.mjs); undefined when unavailable. */
+let disk;
 // Counts real embedding forward passes, including initialization warmup. An
 // operation is fully cached only when this counter does not advance.
 let embeddingInferences = 0;
 
 const hashText = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
-function cacheGet(text) {
+function cacheGet(key) {
   if (CACHE_MAX === 0) return undefined;
-  const hit = cache.get(hashText(text));
-  if (!hit) return undefined;
-  cache.delete(hashText(text));
-  cache.set(hashText(text), hit);
+  let hit = cache.get(key);
+  if (hit) cache.delete(key);
+  else {
+    hit = disk?.get(key);
+    if (!hit) return undefined;
+  }
+  cache.set(key, hit);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   cacheHits++;
   return hit;
 }
 
-function cacheSet(text, vec) {
+function cacheSet(key, vec) {
   if (CACHE_MAX === 0) return;
-  const key = hashText(text);
   cache.delete(key);
   cache.set(key, vec);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  disk?.set(key, vec);
 }
+
+/** Cooperative deadline for the request being handled. Forward passes are
+ * synchronous and cannot be interrupted, so the worker declines to START one
+ * it expects to overrun; everything finished so far stays cached, and the
+ * main thread keeps this worker alive instead of discarding the progress. */
+class DeadlineError extends Error {}
+let activeDeadline = Infinity;
+let freshThisRequest = 0;
+/** Observed milliseconds per character of fresh embedding (EMA); conservative until measured. */
+let msPerChar = 6;
+const expectedPassMs = (text) => Math.max(60, Math.ceil(text.length * msPerChar * 1.25) + 50);
 
 const cleanText = (raw) => {
   if (typeof raw !== "string") return undefined;
@@ -82,24 +99,35 @@ function heapF32(M, byteOffset, length) {
   return Float32Array.from(new Float32Array(buffer, byteOffset, length));
 }
 
-/** Embed one text. Returns a fresh Float32Array (caller-owned copy). */
-function embedOne(text) {
-  const hit = cacheGet(text);
-  if (hit) return Float32Array.from(hit);
+/** One forward pass, no cache. Returns a fresh Float32Array. */
+function embedFresh(text) {
   const M = withModule();
   const outPtr = M._malloc(dim * 4);
   if (!outPtr) throw new Error("wasm out of memory");
+  const started = performance.now();
   try {
     embeddingInferences++;
     const rc = M.ccall("needle_embed", "number", ["string", "number", "number"], [text, outPtr, dim]);
     if (rc !== dim) throw new Error(`needle_embed returned unexpected dimension (rc=${rc}, expected=${dim})`);
     const vec = heapF32(M, outPtr, dim);
     if (vec.length !== dim || !vec.every(Number.isFinite) || !vec.some((value) => value !== 0)) throw new Error("needle_embed returned degenerate vector");
-    cacheSet(text, vec);
+    if (text.length >= 16) msPerChar = 0.7 * msPerChar + 0.3 * Math.max(0.5, (performance.now() - started) / text.length);
     return vec;
   } finally {
     M._free(outPtr);
   }
+}
+
+/** Embed one text. Returns a fresh Float32Array (caller-owned copy). */
+function embedOne(text) {
+  const key = hashText(text);
+  const hit = cacheGet(key);
+  if (hit) return Float32Array.from(hit);
+  if (Date.now() + expectedPassMs(text) > activeDeadline) throw new DeadlineError("deadline");
+  const vec = embedFresh(text);
+  freshThisRequest++;
+  cacheSet(key, vec);
+  return vec;
 }
 
 function cosine(a, b) {
@@ -107,6 +135,20 @@ function cosine(a, b) {
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   if (na <= 0 || nb <= 0) return 0;
   return Math.max(-1, Math.min(1, dot / (Math.sqrt(na) * Math.sqrt(nb))));
+}
+
+/** Persistent embedding layer, namespaced by the pinned model bytes. Optional:
+ * any failure (or PI_NEEDLE_DISK_CACHE=off) leaves the in-memory cache alone.
+ * `workerData.embeddingCachePath` selects an explicit file (tests, tooling). */
+async function openDiskCache(dir, embeddingDim) {
+  if (CACHE_MAX === 0) return undefined;
+  const explicit = typeof workerData?.embeddingCachePath === "string" && workerData.embeddingCachePath ? workerData.embeddingCachePath : undefined;
+  if (!explicit && process.env.PI_NEEDLE_DISK_CACHE === "off") return undefined;
+  try {
+    const { openEmbeddingDisk } = await import("./needle-embedding-cache.mjs");
+    const fingerprint = createHash("sha256").update(NEEDLE_PINNED_FILES.map((file) => `${file.local}:${file.sha256}`).join("\n")).digest("hex");
+    return openEmbeddingDisk({ path: explicit ?? join(dir, "embedding-cache.sqlite"), fingerprint, dim: embeddingDim }) ?? undefined;
+  } catch { return undefined; }
 }
 
 async function opInit(assets) {
@@ -151,13 +193,14 @@ async function opInit(assets) {
     if (!Number.isInteger(detected) || detected <= 0 || detected > 8192) throw new Error(`needle reported an implausible embedding dim (${detected})`);
     Module = M;
     dim = detected;
+    disk = await openDiskCache(dir, detected);
     // Representative warmup: the first real forward pass pays buffer
     // allocation (measured >1.5s cold vs ~120ms warm per embed), which the
     // op timeout cannot absorb. Three realistic-length embeds move that
     // cost off the critical path.
-    embedOne("fix the failing authentication test in the login handler");
-    embedOne("take a screenshot of the browser page for review");
-    embedOne("summarize the deployment status and remaining verification work");
+    embedFresh("fix the failing authentication test in the login handler");
+    embedFresh("take a screenshot of the browser page for review");
+    embedFresh("summarize the deployment status and remaining verification work");
     cache.clear();
     return { dim, cacheHits };
   })();
@@ -268,6 +311,9 @@ async function handle(message) {
   const started = Date.now();
   const inferenceStart = embeddingInferences;
   const fail = (error) => ({ id: message?.id ?? -1, ok: false, error: err(error), ms: Date.now() - started });
+  const embeds = message?.op === "embed" || message?.op === "rank" || message?.op === "classify";
+  activeDeadline = embeds && Number.isFinite(message.deadlineAt) ? message.deadlineAt : Infinity;
+  freshThisRequest = 0;
   try {
     if (!message || typeof message !== "object" || !Number.isSafeInteger(message.id)) return fail("malformed request");
     switch (message.op) {
@@ -315,7 +361,12 @@ async function handle(message) {
         return fail(`unknown op: ${String(message.op).slice(0, 32)}`);
     }
   } catch (error) {
+    // Declined before starting a pass it could not finish in time: report the
+    // vectors already stored so the caller can keep this worker.
+    if (error instanceof DeadlineError) return { ...fail("deadline"), progress: freshThisRequest };
     return fail(error);
+  } finally {
+    activeDeadline = Infinity;
   }
 }
 

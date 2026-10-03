@@ -145,12 +145,15 @@ export interface NeedleAssetPaths {
 }
 
 /** Worker protocol (postMessage). Requests carry an id; exactly one response
- * (ok or error) is posted per request. */
+ * (ok or error) is posted per request. Embedding ops may carry `deadlineAt`
+ * (epoch ms): the worker declines to start a forward pass it expects to
+ * overrun it and answers `error: "deadline"` with the vectors it did finish
+ * already stored, so the main thread need not discard the worker. */
 export type NeedleWorkerRequest =
   | { id: number; op: "init"; assets: NeedleAssetPaths }
-  | { id: number; op: "embed"; texts: string[] }
-  | { id: number; op: "rank"; query: string; candidates: NeedleRankCandidate[]; topK: number }
-  | { id: number; op: "classify"; text: string; labels: NeedleRankCandidate[]; acceptAt: number; marginAt: number }
+  | { id: number; op: "embed"; texts: string[]; deadlineAt?: number }
+  | { id: number; op: "rank"; query: string; candidates: NeedleRankCandidate[]; topK: number; deadlineAt?: number }
+  | { id: number; op: "classify"; text: string; labels: NeedleRankCandidate[]; acceptAt: number; marginAt: number; deadlineAt?: number }
   | { id: number; op: "extract"; text: string; name: string; schema: Record<string, unknown>; system: string }
   | { id: number; op: "complete"; input: string; toolsJson: string; system: string; maxTokens: number }
   | { id: number; op: "reset" }
@@ -158,4 +161,4 @@ export type NeedleWorkerRequest =
 
 export type NeedleWorkerResponse =
   | { id: number; ok: true; result: unknown; ms: number; /** True only when embed/rank/classify performed no embedding forward pass. */ cached?: boolean }
-  | { id: number; ok: false; error: string; ms: number };
+  | { id: number; ok: false; error: string; ms: number; /** Fresh embeddings completed before a `deadline` error. */ progress?: number };

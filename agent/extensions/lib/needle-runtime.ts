@@ -50,6 +50,13 @@ export type NeedleResult<T> =
   | { ok: false; reason: NeedleSkipReason; detail?: string };
 
 const RING_MAX = 128;
+/** Skip-detail prefix for a cooperative worker deadline; the suffix is the
+ * number of embeddings that call finished and stored. */
+const SOFT_DEADLINE = "deadline:";
+/** A deadline run that stored new vectors will finish sooner next time, so
+ * its payload is not quarantined like one that made no headway. */
+const advancedBeforeDeadline = (result: { detail?: string }): boolean =>
+  typeof result.detail === "string" && result.detail.startsWith(SOFT_DEADLINE) && Number(result.detail.slice(SOFT_DEADLINE.length)) > 0;
 
 function percentile(sorted: number[], frac: number): number {
   if (!sorted.length) return 0;
@@ -358,6 +365,10 @@ export function createNeedleRuntime(options: {
       const finish = beginHarnessActivity('needle');
       const resolve = (response: NeedleWorkerResponse) => { finish(response.ok ? cachedResponse(response, op) ? 'cached' : 'ok' : closed ? 'cancelled' : 'error'); settle(response); };
       const budget = budgetFor(request, op);
+      // Embedding ops stop themselves just before the hard timer so a slow
+      // cold-cache call keeps its progress and its worker (see needle-worker).
+      const cooperative = op === "embed" || op === "rank" || op === "classify";
+      const deadlineAt = cooperative ? Date.now() + budget - Math.min(300, Math.floor(budget * 0.2)) : undefined;
       const timer = setTimeout(() => {
         pending.delete(id);
         stats.timeouts++;
@@ -371,7 +382,7 @@ export function createNeedleRuntime(options: {
       // timers (reprobe/cooldown) may unref.
       pending.set(id, { resolve, timer, op, queuedAt: now() });
       try {
-        current.postMessage({ ...request, id });
+        current.postMessage({ ...request, id, ...(deadlineAt === undefined ? {} : { deadlineAt }) });
       } catch (error) {
         pending.delete(id);
         clearTimeout(timer);
@@ -418,6 +429,14 @@ export function createNeedleRuntime(options: {
     pushLatency(stats.latencies, ms);
     if (!response.ok) {
       const error = typeof response.error === "string" ? response.error : "malformed worker response";
+      if (error === "deadline") {
+        // The worker stopped cleanly and keeps every vector it finished: no
+        // restart, and a payload that advanced is worth retrying at once.
+        const progress = Number.isSafeInteger(response.progress) && (response.progress as number) > 0 ? (response.progress as number) : 0;
+        stats.timeouts++;
+        noteHealth("ml.needle.timeout", { op, soft: true, progress, count: 1 });
+        return skip("timeout", `${SOFT_DEADLINE}${progress}`, ms);
+      }
       const reason: NeedleSkipReason = error === "timeout" ? "timeout" : "unavailable";
       return skip(reason, error.slice(0, 160), ms);
     }
@@ -457,7 +476,7 @@ export function createNeedleRuntime(options: {
       return { ...structuredClone(result), cached: true, coalesced: true };
     });
     const work = enqueue(snapshot, op).then(result => {
-      if (!result.ok && result.reason === 'timeout') {
+      if (!result.ok && result.reason === 'timeout' && !advancedBeforeDeadline(result)) {
         timedOut.delete(identity);
         timedOut.set(identity, now() + policy.cooldownMs);
         if (timedOut.size > RING_MAX) timedOut.delete(timedOut.keys().next().value!);

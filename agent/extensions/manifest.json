@@ -142,6 +142,7 @@
     "motion-inspect.ts",
     "music-score.ts",
     "needle-assets.mjs",
+    "needle-embedding-cache.mjs",
     "needle-policy.ts",
     "needle-runtime.ts",
     "needle-types.ts",

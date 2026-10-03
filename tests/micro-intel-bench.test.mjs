@@ -3,6 +3,8 @@
 // and assert only structural validity, since model behavior legitimately
 // varies by deployment. Needle sections run only when assets verify;
 // everything else always runs.
+// Real Needle runs here share the user asset directory; keep the persistent embedding cache out of it.
+process.env.PI_NEEDLE_DISK_CACHE ??= "off";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
