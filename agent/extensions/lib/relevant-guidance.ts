@@ -1,4 +1,4 @@
-import { localLm, skillRelevancePrompt, SKILL_RELEVANCE_EXAMPLES, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
+import { localLm, skillRelevancePrefix, skillRelevancePrompt, SKILL_RELEVANCE_EXAMPLES, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * Deterministic routes remain authoritative; optional asynchronous discovery
@@ -83,6 +83,9 @@ export function createRelevantGuidance(pi: any) {
   // are cached per request focus. Measured on live sessions, lexical overlap
   // alone offered an ERP reference and a proxy-research pack for a music blog.
   let taskFocus = "", focusEpoch = 0;
+  // Judgements for a superseded task are useless but would still occupy the
+  // single-slot local server (~0.4-1 s each); a new focus cancels them.
+  let judgeAbort = new AbortController();
   const skillVerdicts = new Map<string, "yes" | "no" | "pending">();
   // Load the local model descriptor now so the first prompt is already gated.
   try { localLm().ready(); } catch { /* optional */ }
@@ -409,7 +412,10 @@ export function createRelevantGuidance(pi: any) {
     skillVerdicts.set(key, "pending");
     if (skillVerdicts.size > 256) skillVerdicts.delete(skillVerdicts.keys().next().value!);
     const epoch = focusEpoch;
-    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance", { prefix: SKILL_RELEVANCE_EXAMPLES }).then(result => {
+    // The task section is shared by every skill judged for this focus: warm it
+    // as its own checkpoint behind the constant examples so each judgement only
+    // evaluates its skill text.
+    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance", { signal: judgeAbort.signal, prefix: [SKILL_RELEVANCE_EXAMPLES, skillRelevancePrefix(taskFocus)] }).then(result => {
       if (epoch !== focusEpoch) return;
       // Without a usable model the lexical hint keeps its previous behavior.
       if (!result.ok) { skillVerdicts.delete(key); add(hint); return; }
@@ -1017,7 +1023,7 @@ export function createRelevantGuidance(pi: any) {
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
       const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
-      if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); focusEpoch++; }
+      if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); focusEpoch++; judgeAbort.abort(); judgeAbort = new AbortController(); }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
       if (!readOnlyPrompt && !requestDisabled) uiDoctrine.observePrompt(taskPrompt, { keep: continuation });
       else uiDoctrine.cancel();

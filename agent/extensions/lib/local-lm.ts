@@ -76,6 +76,10 @@ function note(data: Record<string, unknown>) {
 }
 
 type Post = (body: Record<string, unknown>) => Promise<any>;
+/** A constant prompt prefix, or nested prefixes from shortest to longest (each
+ * extending the one before). The server keeps a checkpoint at each end, so a
+ * shared preamble and then a per-task section are each evaluated once. */
+export type LocalLmPrefix = string | readonly string[];
 const prefixStates = new WeakMap<Post, Map<string, number>>();
 const transportPrefixes = new WeakMap<typeof fetch, Map<string, Map<string, number>>>();
 type LocalLmQueue = { active: boolean; waiting: Array<() => void> };
@@ -242,8 +246,10 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); if (value) services?.ensure(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
-	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number; cached: boolean } | Unavailable> {
-			const { signal, prefix } = options;
+	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: LocalLmPrefix; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number; cached: boolean } | Unavailable> {
+			const { signal } = options;
+			const chain = typeof options.prefix === "string" ? [options.prefix] : options.prefix ? [...options.prefix] : [];
+			const longest = chain.at(-1);
 			if (signal?.aborted) return { ok: false, reason: "cancelled" };
 			if (!prompt || prompt.length > 12_000) return { ok: false, reason: "input-budget" };
 			await ensure();
@@ -268,10 +274,11 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			const abort = () => controller.abort();
 			signal?.addEventListener("abort", abort, { once: true });
 			const timer = setTimeout(() => controller.abort(), runtime.timeoutMs);
-			let release: (() => void) | undefined;
+			let release: (() => void) | undefined, queueMs = 0;
 			try {
 				if (signal?.aborted) controller.abort();
 				release = await acquireLocalLmSlot(request, runtime.endpoint, controller.signal, queueLimit);
+				queueMs = now() - started;
 				// An identical queued caller can reuse the preceding caller's result.
 				// It keeps its own cancellation/deadline without a second inference.
 				controller.signal.throwIfAborted();
@@ -280,18 +287,21 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				// Requests admitted before an outage must respect the newly opened breaker.
 				if (now() < pausedUntil) return { ok: false, reason: "paused" };
 				const post = localLmPost(runtime, request, controller.signal);
-				const cacheable = prefix !== undefined && prefix.length >= 64 && prompt.length <= 12_000 && prompt.startsWith(prefix);
-				if (cacheable) await warmLocalLmPrefix(post, prefix);
+				// Every link must extend the previous one and the prompt must extend the
+				// last, so each warm leaves a checkpoint exactly where the next begins.
+				const cacheable = longest !== undefined && longest.length >= 64 && prompt.length <= 12_000 && prompt.startsWith(longest)
+					&& chain.every((link, index) => index === 0 || link.startsWith(chain[index - 1]));
+				if (cacheable) for (const link of chain) await warmLocalLmPrefix(post, link);
 				const body = await post({ prompt, n_predict: 1, n_probs: options.nProbs ?? 10 });
 				controller.signal.throwIfAborted();
-				if (cacheable) noteLocalLmPrefixReuse(prefix, body, post);
+				if (cacheable) noteLocalLmPrefixReuse(longest, body, post);
 				const value = parse(body);
 				if (value === undefined) throw new Error("no probabilities");
 				if (answers.size >= 128) answers.delete(answers.keys().next().value!);
 				answers.set(key, { at: now(), body: structuredClone(body) });
 				const ms = now() - started;
 				failures = 0; stats.answered++; stats.totalMs += ms;
-				note({ decision: "answered", purpose, durationMs: ms, count: 1 });
+				note({ decision: "answered", purpose, durationMs: ms, queueMs, count: 1 });
 				return { ok: true, value, ms, cached: false };
 			} catch (error) {
 				if (error instanceof LocalLmBusyError) { stats.busy++; return { ok: false, reason: "busy" }; }
@@ -316,7 +326,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		/** Synchronous readiness; starts loading the descriptor when unknown. */
 		ready(): boolean { if (!loaded || (!runtime && now() - loadedAt >= 60_000)) void ensure(); return Boolean(runtime) && now() >= pausedUntil; },
 		stats: () => ({ ...stats, model: runtime ? LOCAL_LM_MODEL : undefined, paused: now() < pausedUntil }),
-		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: string } = {}): Promise<Judgement> {
+		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: LocalLmPrefix } = {}): Promise<Judgement> {
 			const result = await infer(prompt, purpose, yesProbability, options);
 			return result.ok ? { ok: true, p: result.value, ms: result.ms, cached: result.cached } : result;
 		},
@@ -364,6 +374,12 @@ Helps: yes
  * 0.66 let an ERP reference through for a PHP music blog (P 0.68). */
 export const SKILL_RELEVANCE_THRESHOLD = 0.70;
 const oneLine = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+/** Everything up to the per-skill section. All skills judged against one task
+ * share it, so warming it once leaves each judgement only its own skill text
+ * to evaluate (measured: ~420 ms instead of ~900 ms per judgement). */
+export function skillRelevancePrefix(task: string): string {
+	return `${SKILL_RELEVANCE_EXAMPLES}Task: ${oneLine(task, 600)}\n`;
+}
 export function skillRelevancePrompt(task: string, skill: { name: string; description: string }): string {
-	return `${SKILL_RELEVANCE_EXAMPLES}Task: ${oneLine(task, 600)}\nSkill ${oneLine(skill.name, 80)}: ${oneLine(skill.description, 320)}\nHelps:`;
+	return `${skillRelevancePrefix(task)}Skill ${oneLine(skill.name, 80)}: ${oneLine(skill.description, 320)}\nHelps:`;
 }
