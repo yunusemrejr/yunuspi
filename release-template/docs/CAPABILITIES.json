@@ -3196,12 +3196,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1840
+        "line": 1823
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1421
+        "line": 1404
       },
       {
         "name": "curator",
@@ -3221,7 +3221,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1806
+        "line": 1789
       },
       {
         "name": "export-json",
@@ -3386,7 +3386,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1750
+        "line": 1733
       },
       {
         "name": "subagent-cost",
@@ -3471,7 +3471,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1755
+        "line": 1738
       },
       {
         "name": "task-state",
@@ -3486,7 +3486,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1774
+        "line": 1757
       },
       {
         "name": "watchmaker",
@@ -4091,21 +4091,9 @@
         "kind": "literal"
       },
       {
-        "name": "session_audit",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1932,
-        "kind": "literal"
-      },
-      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
-        "kind": "literal"
-      },
-      {
-        "name": "session_self",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1869,
         "kind": "literal"
       },
       {
@@ -4635,21 +4623,9 @@
         "kind": "literal"
       },
       {
-        "name": "session_audit",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1932,
-        "kind": "literal"
-      },
-      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
-        "kind": "literal"
-      },
-      {
-        "name": "session_self",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1869,
         "kind": "literal"
       },
       {
@@ -4975,11 +4951,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 700,
-      "registrationSites": 85,
+      "sourceFiles": 701,
+      "registrationSites": 83,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 133,
-      "uniqueStableTools": 132,
+      "stableRegistrationRows": 131,
+      "uniqueStableTools": 130,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5626,6 +5602,10 @@
       },
       {
         "path": "agent/extensions/lib/path-safety.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/popup-theme.ts",
         "exists": true
       },
       {

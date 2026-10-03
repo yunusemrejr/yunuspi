@@ -29,6 +29,7 @@ import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { openExternal } from "./lib/project-intelligence/viewer.mjs";
+import { cacheTone, popupDocument, tokenMixHtml } from "./lib/popup-theme.ts";
 import {
   SettingsManager,
   getAgentDir,
@@ -57,68 +58,9 @@ export function escapeHtml(text: unknown): string {
   );
 }
 
-const POPUP_CSS = [
-  ":root{color-scheme:dark}",
-  "body{margin:0;background:#14161a;color:#e8e6e1;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif;text-align:left;word-spacing:normal;letter-spacing:normal}",
-  "main{max-width:860px;margin:0 auto;padding:24px 22px 40px}",
-  "h1{font-size:20px;line-height:1.25;margin:0 0 5px}",
-  "h2{font-size:14px;margin:20px 0 6px;color:#ffd479}",
-  "h3{font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 5px;color:#9aa0a8}",
-  "p.sub{margin:0 0 8px;color:#9aa0a8;font-size:12px}",
-  "p.note{margin:7px 0 10px;color:#b4b8bf;font-size:12px}",
-  "ul{list-style:none;margin:0;padding:0}",
-  "li{padding:3px 0;border-bottom:1px solid #26292f;display:flex;gap:8px;align-items:baseline}",
-  "li:last-child{border-bottom:0}",
-  "code.row{flex:1;overflow-wrap:anywhere}",
-  "b.count{color:#8fd0ff;white-space:nowrap}",
-  "span.dim{color:#9aa0a8;font-size:12px}",
-  ".overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0 10px}",
-  ".stat{background:#1b1e23;border:1px solid #2b2f36;border-radius:9px;padding:10px 11px;min-width:0}",
-  ".stat strong{display:block;color:#f7f4ed;font-size:19px;line-height:1.15;overflow-wrap:anywhere}",
-  ".stat span{display:block;color:#9aa0a8;font-size:11px;margin-top:3px}",
-  "details.group{margin:10px 0;border:1px solid #2b2f36;border-radius:10px;background:#191b20;overflow:hidden}",
-  "details.group>summary{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 13px;list-style:none;user-select:none}",
-  "details.group>summary::-webkit-details-marker,details.item>summary::-webkit-details-marker{display:none}",
-  "details.group>summary::before,details.item>summary::before{content:'›';color:#ffd479;font-size:18px;line-height:1;transform-origin:center;transition:transform .12s ease}",
-  "details[open]>summary::before{transform:rotate(90deg)}",
-  "details.group>summary:hover,details.group>summary:focus-visible,details.item>summary:hover,details.item>summary:focus-visible{background:#22252b;outline:none}",
-  "details.group>summary:focus-visible,details.item>summary:focus-visible{box-shadow:inset 0 0 0 2px #8fd0ff}",
-  ".group-title{font-weight:700;color:#f7f4ed;white-space:nowrap}",
-  ".group-meta{margin-left:auto;color:#aeb3ba;font-size:12px;text-align:right}",
-  ".group-body{border-top:1px solid #2b2f36;padding:9px 13px 13px}",
-  "details.item{border-bottom:1px solid #292c32}",
-  "details.item:last-child{border-bottom:0}",
-  "details.item>summary{display:flex;align-items:center;gap:8px;cursor:pointer;padding:7px 3px;list-style:none}",
-  ".item-name{min-width:0;flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;overflow-wrap:anywhere}",
-  ".item-meta{color:#9aa0a8;font-size:12px;text-align:right}",
-  ".badge{display:inline-block;border:1px solid #3a3f48;border-radius:999px;padding:0 7px;color:#c8ccd2;font-size:11px;line-height:1.7;white-space:nowrap}",
-  ".badge.current,.badge.complete,.badge.read{border-color:#315d4a;color:#9de1bd;background:#192a23}",
-  ".badge.active,.badge.partial{border-color:#715d2a;color:#ffd479;background:#2b2518}",
-  ".badge.failed{border-color:#743d43;color:#ff9da7;background:#2c1c20}",
-  ".badge.info{border-color:#31566d;color:#8fd0ff;background:#182630}",
-  "button#copy-errors{background:#2b6cb0;border:0;border-radius:8px;color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:7px 16px;cursor:pointer}",
-  "button#copy-errors:hover,button#copy-errors:focus-visible{background:#3580cc;outline:none}",
-  "button#copy-errors:focus-visible{box-shadow:0 0 0 2px #8fd0ff}",
-  ".copy-row{display:flex;align-items:center;gap:10px;margin:12px 0}",
-  ".facts-grid{display:grid;grid-template-columns:minmax(105px,auto) 1fr;gap:3px 12px;margin:2px 0 10px;padding:0 0 0 23px;font-size:12px}",
-  ".facts-grid dt{color:#858b94}",
-  ".facts-grid dd{margin:0;overflow-wrap:anywhere;color:#d4d2cd}",
-  ".empty{color:#777d86;padding:4px 0}",
-  ".status-line{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}",
-  "pre{background:#0d0e11;border:1px solid #26292f;border-radius:8px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}",
-  "div.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}",
-  "div.chips span{background:#23262c;border-radius:6px;padding:1px 8px;font-size:12px}",
-  "table.facts{border-collapse:collapse;margin:8px 0;font-size:13px}",
-  "table.facts td{padding:2px 10px 2px 0;vertical-align:top}",
-  "table.facts td:first-child{color:#9aa0a8;white-space:nowrap}",
-  "@media(max-width:640px){main{padding:18px 12px 30px}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.group-meta{white-space:normal}.item-meta{display:none}}",
-  "main:has(.used-report){max-width:1120px}.used-report{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Liberation Sans',Arial,sans-serif;letter-spacing:normal;word-spacing:normal;text-align:left;font-variant-numeric:tabular-nums}.usage-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px}.usage-eyebrow{display:block;font-size:11px;color:#9aa0a8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}.used-report h1{font-size:26px}.usage-snapshot{font-size:11px;color:#9aa0a8}.used-report .overview{margin:12px 0}.used-report .stat strong{font-size:26px}.used-report .group-title{white-space:normal}.usage-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0 14px}.usage-kpi{min-width:0;padding:8px 10px;border-left:2px solid #353b44}.usage-kpi strong{display:block;font-size:22px;line-height:1.2;font-weight:650;color:#f7f4ed}.usage-kpi span,.usage-kpi small{display:block;font-size:11px;line-height:1.4;color:#aeb3ba;margin-top:3px}.usage-components{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.usage-component{border-top:1px solid #30343b;min-width:0}.usage-component>summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;min-height:54px;padding:8px 2px}.usage-component>summary::before{content:'›';color:#ffd479;font-size:18px}.usage-component[open]>summary::before{transform:rotate(90deg)}.usage-component summary b{font-size:13px;font-weight:600}.usage-component summary small{display:block;font-size:11px;color:#9aa0a8}.usage-component-value{margin-left:auto;text-align:right;font-size:11px;color:#b4b8bf}.usage-component .usage-mini-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.usage-component .usage-kpi strong{font-size:18px}.usage-component .facts-grid{padding-left:0;grid-template-columns:145px minmax(0,1fr)}.usage-component:focus-within{outline-color:#8fd0ff}.usage-component>summary:focus-visible,.usage-history>summary:focus-visible{outline:2px solid #8fd0ff;outline-offset:-2px}.usage-note{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-width:80ch;margin:8px 24px 14px}.used-report time{color:#9aa0a8;font-size:11px;white-space:nowrap}.usage-history{border-top:1px solid #30343b;margin-top:14px}.usage-history summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:12px}.usage-history ol{list-style:none;padding:0;margin:0}.usage-history li{display:grid;grid-template-columns:150px minmax(0,1fr);font-size:12px;padding:7px 0}.used-report details.item>summary{min-height:38px}.used-report .facts-grid dd{white-space:pre-wrap}.skill-evidence{list-style:none;padding:0 24px 12px;margin:0}.skill-evidence li{display:block;padding:8px 0;border-top:1px solid #30343b;font-size:12px}.skill-evidence small{display:block;color:#9aa0a8;margin:3px 0}.skill-evidence code{display:block;overflow-wrap:anywhere;color:#c8ccd2;font-size:11px}",
-  "@media(max-width:700px){.usage-components{grid-template-columns:1fr}.usage-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.used-report .group-meta{max-width:45%;font-size:11px}.usage-heading{align-items:flex-start;flex-direction:column;gap:8px}.used-report h1{font-size:22px}.usage-history li{grid-template-columns:1fr;gap:3px}.usage-note{margin-left:8px;margin-right:8px}.used-report .facts-grid{grid-template-columns:100px minmax(0,1fr);padding-left:0}.used-report details.item>summary{flex-wrap:wrap}.used-report .item-name{min-width:120px}.used-report time{white-space:normal}}",
-  "@media(prefers-reduced-motion:reduce){details.group>summary::before,details.item>summary::before{transition:none}}",
-].join("\n");
 
 export function renderPopupHtml(title: string, bodyHtml: string): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${POPUP_CSS}</style></head><body><main>${bodyHtml}</main></body></html>`;
+  return popupDocument(title, bodyHtml);
 }
 
 // Only the age changes in a saved report. Never imply that the underlying
@@ -798,6 +740,11 @@ const childStateLabel = (state: string, category?: string, acceptance?: string) 
   const labels: Record<string, string> = {timeout:"Timed out", "budget-exhausted":"Budget exhausted", auth:"Authentication failed", quota:"Quota reached", "rate-limit":"Rate limited", overload:"Provider overloaded", transport:"Connection failed", "output-truncated":"Output truncated", internal:"Internal error", permission:"Permission denied", dependency:"Missing dependency", "invalid-request":"Invalid request", "schema-incompatible":"Schema incompatible", "unsupported-field":"Unsupported field", "context-overflow":"Context limit reached", "process-signal":"Process interrupted"};
   return labels[category ?? ""] ?? (category && category !== "unknown" && category !== "none" ? `Failed · ${category}` : "Failed · cause unknown");
 };
+/** Share of a route's prompt tokens served from cache, or null when unmeasured. */
+const modelReuse = (model: { turns: number; input: number; cacheRead: number; cacheWrite: number }): number | null => {
+  const prompt = model.input + model.cacheRead + model.cacheWrite;
+  return model.turns > 0 && prompt > 0 ? (model.cacheRead / prompt) * 100 : null;
+};
 const agentDisplayName = (agent?: string) => agent === "automatic-free-assistant" ? "Automatic assistant" : agent;
 
 export function usedSummaryHtml(summary: UsedSummary): string {
@@ -827,9 +774,9 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const capturedLabel = Number.isFinite(capturedTime) ? new Date(capturedTime).toISOString().replace('T', ' ').replace('Z', ' UTC') : "time not recorded";
   const modelUsage = summary.modelUsage ?? { total: models.filter(model => model.turns > 0).length, rows: models.filter(model => model.turns > 0).map(model => ({ route: model.route, scopes: ["Main conversation"] })), omitted: 0 };
   const sections: string[] = [
-    `<div class="used-report"><div class="usage-heading"><div><span class="usage-eyebrow">Session evidence</span><h1>What this session used</h1><p class="sub">${formatCount(summary.inspected)} retained session entries · open a section for the evidence behind each count.</p></div><div class="usage-snapshot">Snapshot · <time id="usage-captured-at" datetime="${escapeHtml(capturedAt)}">${escapeHtml(capturedLabel)}</time><br><span id="usage-snapshot-age"></span></div></div>`,
+    `<div class="used-report"><div class="usage-heading"><div><h1>What this session used</h1><p class="sub">${formatCount(summary.inspected)} retained session entries · open a section for the evidence behind each count.</p></div><div class="usage-snapshot">Snapshot · <time id="usage-captured-at" datetime="${escapeHtml(capturedAt)}">${escapeHtml(capturedLabel)}</time><br><span id="usage-snapshot-age"></span></div></div>`,
     `<p class="note usage-freshness"><strong>Saved snapshot.</strong> Activity after the capture time is not included. Run <code>/used</code> again in the terminal for current measurements; reloading this saved page keeps the same snapshot.</p>`,
-    `<div class="overview"><div class="stat"><strong>${formatCount(modelUsage.total)}</strong><span>Models used</span></div><div class="stat"><strong>${formatCount(session.toolCalls)}</strong><span>Tool calls</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child tasks · ${formatCount(agents.active)} active</span></div></div>`,
+    `<div class="overview"><div class="stat"><strong>${formatCount(modelUsage.total)}</strong><span>Models used</span></div><div class="stat"><strong>${formatCount(session.toolCalls)}</strong><span>Tool calls</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child tasks · ${formatCount(agents.active)} active</span></div><div class="stat ${cacheTone(session.cacheRate)}"><strong>${session.cacheRate === null ? "—" : `${session.cacheRate.toFixed(1)}%`}</strong><span>prompt cache reuse</span></div></div>`,
     `<p class="note">Tool calls cover the main conversation. Counts describe recorded session activity. “Suggested” is not the same as opened or applied; missing model or usage data stays explicitly unknown.</p>`,
   ];
 
@@ -837,8 +784,9 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const modelBody = models.length ? models.map((model) => {
     const traffic = model.input + model.cacheRead + model.cacheWrite + model.output;
     const badges = [
-      ...(model.current ? [`<span class="badge current">● current</span>`] : []),
+      ...(model.current ? [`<span class="badge current">current</span>`] : []),
       `<span class="badge info">${model.turns ? plural(model.turns, "response") : "selected only"}</span>`,
+      ...(modelReuse(model) !== null ? [`<span class="badge ${({ ok: "complete", warn: "active", bad: "failed", "": "info" } as const)[cacheTone(modelReuse(model))]}">cache ${modelReuse(model)!.toFixed(1)}%</span>`] : []),
       ...(model.errors ? [`<span class="badge failed">${plural(model.errors, "error")}</span>`] : []),
     ].join(" ");
     return `<details class="item"><summary><span class="item-name">${escapeHtml(model.route)}</span><span class="item-meta">${badges}</span></summary>${factGrid([
@@ -846,6 +794,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       ["Recorded use", model.turns ? plural(model.turns, "usage-bearing assistant turn") : "no assistant response usage recorded"],
       ["Token traffic", model.turns?`${formatCount(traffic)} total · ${formatCount(model.input)} input · ${formatCount(model.cacheRead)} cache read · ${formatCount(model.cacheWrite)} cache write · ${formatCount(model.output)} output`:"not recorded"],
       ["Reasoning", model.turns?`${formatCount(model.reasoning)} tokens (included in output)`:"not recorded"],
+      ["Prompt cache reuse", modelReuse(model) === null ? "not recorded" : `${modelReuse(model)!.toFixed(2)}% of ${formatCount(model.input + model.cacheRead + model.cacheWrite)} prompt tokens`],
       ["Errors", formatCount(model.errors)],
       ["Selections", model.selections ? plural(model.selections, "recorded selection") : "none recorded"],
       ["Thinking levels", model.thinking.length ? model.thinking.join(", ") : "not recorded"],
@@ -871,7 +820,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       `${partial.length ? `<h3>Partially opened only (${partial.length})</h3><div class="skill-rows">${partial.map((skill) => skillDetail(skill.name, skill.count ? plural(skill.count, "partial read") : "partial read recorded", "partial")).join("")}</div>` : ""}` +
       `${suggestedOnly.length ? `<h3>Suggested, not opened (${suggestedOnly.length})</h3><div class="skill-rows">${suggestedOnly.map((name) => skillDetail(name, "suggested · no read recorded", "info")).join("")}</div>` : ""}`
     : `<div class="empty">No skill activity was recorded.</div>`;
-  sections.push(group("📚 Skills", `${skillTotals.read} fully opened · ${skillTotals.partial} partial only · ${skillTotals.suggestedOnly} suggested only`, `<p class="note">“Fully opened” means the complete SKILL.md was recorded as read. It does not prove every instruction was applied. Guidance snapshots show the first recorded appearance, not a count of repeated recommendations.</p>${skillsBody}${skillTotals.omitted ? `<p class="note">${plural(skillTotals.omitted, "older skill detail")} omitted from this bounded list; the totals above include them.</p>` : ""}`));
+  sections.push(group("Skills", `${skillTotals.read} fully opened · ${skillTotals.partial} partial only · ${skillTotals.suggestedOnly} suggested only`, `<p class="note">“Fully opened” means the complete SKILL.md was recorded as read. It does not prove every instruction was applied. Guidance snapshots show the first recorded appearance, not a count of repeated recommendations.</p>${skillsBody}${skillTotals.omitted ? `<p class="note">${plural(skillTotals.omitted, "older skill detail")} omitted from this bounded list; the totals above include them.</p>` : ""}`));
 
   const agentBadges = [
     `<span class="badge info">${agents.total} total</span>`,
@@ -937,30 +886,30 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   sections.push(harnessUsageHtml(summary.harnessUsage??collectHarnessUsage([])));
 
   const review = summary.reviews;
-  const coordinationBody = `<ul>${usedRow("🐝 Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("🌀 Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("🛟 Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
-    `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`🏛️ Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>`;
-  sections.push(group("⚡ Coordination", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, coordinationBody));
-  const reviewBody = `<ul>${review ? usedRow(`🔍 ${plural(review.rounds, "round")}`, review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
+  const coordinationBody = `<ul>${usedRow("Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
+    `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>`;
+  sections.push(group("Coordination", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, coordinationBody));
+  const reviewBody = `<ul>${review ? usedRow(plural(review.rounds, "round"), review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
   const expert = summary.expert;
-  const expertBody = `<ul>${expert ? usedRow(`🎯 ${plural(expert.runs, "run")}`, expert.verdict ?? "no verdict", `${expert.domains.join("+") || "no brief"}${expert.taskType ? ` · ${expert.taskType}` : ""}${expert.openEnded ? " · open" : ""}`, expert.verdict === "converged" ? "complete" : "info") : `<li><span class="empty">No Expert Director run recorded</span></li>`}</ul>`;
-  sections.push(group("🔍 Reviews", review ? `${plural(review.rounds, "round")} · ${review.disposition}` : "none recorded", `<p class="note">Reviews consume evidence; a review count is never a quality signal.</p>${reviewBody}${expertBody}`));
+  const expertBody = `<ul>${expert ? usedRow(plural(expert.runs, "run"), expert.verdict ?? "no verdict", `${expert.domains.join("+") || "no brief"}${expert.taskType ? ` · ${expert.taskType}` : ""}${expert.openEnded ? " · open" : ""}`, expert.verdict === "converged" ? "complete" : "info") : `<li><span class="empty">No Expert Director run recorded</span></li>`}</ul>`;
+  sections.push(group("Reviews", review ? `${plural(review.rounds, "round")} · ${review.disposition}` : "none recorded", `<p class="note">Reviews consume evidence; a review count is never a quality signal.</p>${reviewBody}${expertBody}`));
 
   const promptTokens = session.input + session.cacheRead + session.cacheWrite;
-  sections.push(group("💰 Cost", session.cost, factGrid([
+  sections.push(group("Cost", session.cost, factGrid([
     ["Recorded cost", `${session.cost}${session.costUnknown ? " · incomplete/unknown coverage" : ""}${session.costPending ? ` · ${plural(session.costPending, "child operation")} pending` : ""}`],
     ["Child token traffic", formatCount(session.childTokens)],
   ]) + `<p class="note">Unknown cost is never rendered as $0. Verified zero and missing evidence are distinct states.</p>`));
-  sections.push(group("🧠 Context/cache", session.cacheRate === null ? "reuse unknown" : `${session.cacheRate.toFixed(2)}% reuse`, factGrid([
+  sections.push(group("Context and cache", session.cacheRate === null ? "reuse unknown" : `${session.cacheRate.toFixed(2)}% reuse`, tokenMixHtml({ fresh: session.input, read: session.cacheRead, write: session.cacheWrite }) + factGrid([
     ["Prompt traffic", `${formatCount(promptTokens)} tokens · ${formatCount(session.input)} uncached input · ${formatCount(session.cacheRead)} cache read · ${formatCount(session.cacheWrite)} cache write`],
     ["Output", `${formatCount(session.output)} tokens · ${formatCount(session.reasoning)} reported reasoning (included in output)`],
     ["Prompt cache reuse", session.cacheRate === null ? "unknown" : `${session.cacheRate.toFixed(2)}% cumulative`],
     ["Compactions", formatCount(session.compactions)],
   ])));
   const hookHtml = hooks.length ? `<ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${(hook.confirmWaitMs ?? 0) > 0 ? `${Math.round(hook.activeMs ?? hook.ms)} ms active + ${Math.round(hook.confirmWaitMs ?? 0)} ms user-confirm wait` : `${Math.round(hook.ms)} ms`}`, hook.errors ? "failed" : "info")).join("")}</ul>` : `<div class="empty">No hook measurement was recorded.</div>`;
-  sections.push(group("🪝 Hooks", session.hookCalls === null ? "unknown before telemetry" : plural(session.hookCalls, "call"), factGrid([
+  sections.push(group("Hooks", session.hookCalls === null ? "unknown before telemetry" : plural(session.hookCalls, "call"), factGrid([
     ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
   ]) + hookHtml));
-  sections.push(group("🚨 Failures/recovery", `${agents.failed} child · ${session.parentErrors} main-session · ${summary.recoveries} recoveries`, factGrid([
+  sections.push(group("Failures and recovery", `${agents.failed} child · ${session.parentErrors} main-session · ${summary.recoveries} recoveries`, factGrid([
     ["Parent failures", `${formatCount(session.parentErrors)} total · ${formatCount(session.blockedTools)} blocked tools`],
     ["Tool failures", formatCount(toolErrorsTotal)],
     ["Child failures", formatCount(agents.failed)],
@@ -973,34 +922,68 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     ["Tool traffic", `${formatCount(session.toolCalls)} calls · ${formatCount(session.toolResults)} results`],
     ["Compactions", formatCount(session.compactions)],
   ]);
-  sections.push(group("🧾 Session totals", `${session.responses} responses · ${session.compactions} compactions · ${session.cost}`, sessionFactsHtml));
+  sections.push(group("Session totals", `${session.responses} responses · ${session.compactions} compactions · ${session.cost}`, sessionFactsHtml));
   return sections.join("")+"</div>"+USED_SNAPSHOT_SCRIPT;
 }
 
 export function sysPromptHtml(snapshot: SysSnapshot): string {
-  const facts = [
+  const system = typeof snapshot.system === "string" ? snapshot.system : "";
+  const facts: [string, string][] = [
     ["captured", snapshot.at],
-    ...(snapshot.model ? [["model", snapshot.model]] : []),
+    ...(snapshot.model ? [["model", snapshot.model] as [string, string]] : []),
     ["tools", `${snapshot.toolCount} registered`],
+    ["size", `${formatCount(system.length)} characters · about ${formatCount(Math.round(system.length / 4))} tokens (estimate)`],
   ];
-  return `<h1>📜 Session system prompt</h1><p class="sub">First provider request of this session — exactly what the agent saw initially.</p>` +
+  // Outline of markdown headings, skipping fenced code so a "# comment" inside
+  // an example is not mistaken for a section.
+  const headings: { id: string; text: string }[] = [];
+  let fenced = false;
+  const body = system.split("\n").map((line, index) => {
+    if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
+    const heading = !fenced && headings.length < 80 ? /^#{1,3}\s+(\S.*?)\s*$/.exec(line) : null;
+    if (!heading) return escapeHtml(line);
+    headings.push({ id: `h${index}`, text: heading[1] });
+    return `<span class="hd" id="h${index}">${escapeHtml(line)}</span>`;
+  }).join("\n");
+  return `<h1>Session system prompt</h1><p class="sub">First provider request of this session — exactly what the agent saw initially.</p>` +
     `<table class="facts">${facts.map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join("")}</table>` +
-    (snapshot.tools.length ? `<div class="chips">${snapshot.tools.map((tool) => `<span>${escapeHtml(tool)}</span>`).join("")}</div>` : "") +
-    `<pre>${escapeHtml(snapshot.system)}</pre>`;
+    (snapshot.tools.length ? `<h2>Tools</h2><div class="chips">${snapshot.tools.map((tool) => `<span>${escapeHtml(tool)}</span>`).join("")}</div>` : "") +
+    (headings.length > 1 ? `<h2>Sections</h2><nav class="outline">${headings.map((h) => `<a href="#${h.id}">${escapeHtml(h.text)}</a>`).join("")}</nav>` : "") +
+    `<div class="copy-row"><button id="copy-prompt" type="button">Copy prompt</button><span id="copy-prompt-status" class="dim"></span></div>` +
+    `<pre id="prompt-text">${body}</pre>` + copyScript("copy-prompt", "prompt-text", "copy-prompt-status", "the prompt");
 }
+
+const SOURCE_LABELS: Record<string, string> = { extension: "Extension commands", prompt: "Prompt templates", skill: "Skill commands" };
+const SOURCE_ORDER = ["extension", "prompt", "skill"];
+
+const COMMAND_FILTER_SCRIPT = `<script>(function(){var box=document.getElementById('cmd-filter'),count=document.getElementById('cmd-count'),none=document.getElementById('cmd-none');if(!box)return;var rows=[].slice.call(document.querySelectorAll('[data-cmd]')),groups=[].slice.call(document.querySelectorAll('[data-group]'));function apply(){var q=box.value.trim().toLowerCase(),shown=0;rows.forEach(function(r){var hit=!q||r.getAttribute('data-cmd').indexOf(q)>=0;r.hidden=!hit;if(hit)shown++;});groups.forEach(function(g){g.hidden=!g.querySelector('[data-cmd]:not([hidden])');});count.textContent=q?shown+' of '+rows.length+' shown':rows.length+' registered';none.hidden=shown>0;}box.addEventListener('input',apply);})();</script>`;
 
 export function commandsHtml(commands: { name: string; description?: string; source?: string }[]): string {
   const rows = [...commands]
     .filter((command) => command && typeof command.name === "string" && command.name)
     .sort((a, b) => a.name.localeCompare(b.name));
-  return `<h1>⌨️ Slash commands</h1><p class="sub">${rows.length} registered</p><ul>${
-    rows.length
-      ? rows.map((command) => `<li><code class="row">/${escapeHtml(command.name)}${command.description ? ` <span class="dim">${escapeHtml(command.description)}</span>` : ""}</code></li>`).join("")
-      : "<li><span class=\"dim\">—</span></li>"
-  }</ul>`;
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = typeof row.source === "string" && row.source ? row.source : "other";
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const rank = (key: string) => (SOURCE_ORDER.includes(key) ? SOURCE_ORDER.indexOf(key) : SOURCE_ORDER.length);
+  const keys = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const entry = (command: (typeof rows)[number]) =>
+    `<div data-cmd="${escapeHtml(`${command.name} ${command.description ?? ""}`.toLowerCase())}"><dt>/${escapeHtml(command.name)}</dt><dd>${escapeHtml(command.description || "")}</dd></div>`;
+  const list = keys.map((key) =>
+    `<section class="cmdgroup" data-group><h2>${escapeHtml(SOURCE_LABELS[key] ?? key)} <span class="dim">${groups.get(key)!.length}</span></h2><dl class="cmdgrid">${groups.get(key)!.map(entry).join("")}</dl></section>`).join("");
+  return `<h1>Slash commands</h1><p class="sub"><span id="cmd-count">${rows.length} registered</span></p>` +
+    (rows.length
+      ? `<div class="toolbar"><input id="cmd-filter" type="search" placeholder="Filter by name or description" aria-label="Filter commands" autocomplete="off"></div>${list}<p id="cmd-none" class="empty" hidden>No command matches the filter.</p>${COMMAND_FILTER_SCRIPT}`
+      : `<p class="empty">No slash commands are registered in this session.</p>`);
 }
 
-const COPY_SCRIPT = `<script>(function(){var btn=document.getElementById('copy-errors'),status=document.getElementById('copy-status');if(!btn)return;btn.addEventListener('click',function(){var el=document.getElementById('errors-json');var text=el?el.textContent:'';function done(msg){if(status)status.textContent=msg;}function fallback(){try{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done('Copied.');}catch(e){done('Copy failed — select the JSON manually.');}}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done('Copied.');},fallback);}else{fallback();}});})();</script>`;
+function copyScript(buttonId: string, sourceId: string, statusId: string, what: string): string {
+  return `<script>(function(){var btn=document.getElementById('${buttonId}'),status=document.getElementById('${statusId}');if(!btn)return;btn.addEventListener('click',function(){var el=document.getElementById('${sourceId}');var text=el?el.textContent:'';function done(msg){if(status)status.textContent=msg;}function fallback(){try{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done('Copied.');}catch(e){done('Copy failed — select ${what} manually.');}}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done('Copied.');},fallback);}else{fallback();}});})();</script>`;
+}
+
+const COPY_SCRIPT = copyScript("copy-errors", "errors-json", "copy-status", "the JSON");
 
 /** Deep session errors: per-error drill-down plus the full bounded JSON with a copy button. Newest first. */
 export function errorsHtml(report: SessionErrorsReport): string {
@@ -1011,12 +994,12 @@ export function errorsHtml(report: SessionErrorsReport): string {
   const byKind = report?.byKind && typeof report.byKind === "object" ? report.byKind : {};
   const oneLine = (text: unknown) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "no excerpt";
   const sections: string[] = [
-    `<h1>🚨 Session errors</h1><p class="sub">${formatCount(report?.total ?? 0)} errors in ${formatCount(report?.inspected ?? 0)} of ${formatCount(report?.totalEntries ?? report?.inspected ?? 0)} session entries · captured ${escapeHtml(report?.capturedAt ?? "time not recorded")}. Newest first. The JSON block is the copy source.</p>`,
+    `<h1>Session errors</h1><p class="sub">${formatCount(report?.total ?? 0)} errors in ${formatCount(report?.inspected ?? 0)} of ${formatCount(report?.totalEntries ?? report?.inspected ?? 0)} session entries · captured ${escapeHtml(report?.capturedAt ?? "time not recorded")}. Newest first; the full report is below as JSON.</p>`,
     `<div class="copy-row"><button id="copy-errors" type="button">Copy JSON</button><span id="copy-status" class="dim"></span></div>`,
     `<div class="overview"><div class="stat"><strong>${formatCount(report?.total ?? 0)}</strong><span>errors recorded</span></div><div class="stat"><strong>${formatCount(byKind.tool ?? 0)}</strong><span>tool failures</span></div><div class="stat"><strong>${formatCount((byKind.model ?? 0) + (byKind.child ?? 0) + (byKind.workflow ?? 0))}</strong><span>model / child / workflow</span></div><div class="stat"><strong>${formatCount(hookErrors.reduce((sum, row) => sum + row.errors, 0))}</strong><span>hook errors</span></div></div>`,
   ];
-  sections.push(group("🧮 Groups", `${groups.length} groups`, groups.length ? `<ul>${groups.map((item) => usedRow(`${item.kind} / ${item.tool} / ${item.category}`, plural(item.count, "error"), undefined, "failed")).join("")}</ul>${report?.omittedGroups ? `<p class="note">${plural(report.omittedGroups, "group")} omitted.</p>` : ""}` : `<div class="empty">No error groups.</div>`));
-  sections.push(group("🔁 Recurring signatures", `${signatures.length} signatures`, signatures.length ? `<ul>${signatures.map((item) => usedRow(`${item.tool} / ${item.category}`, plural(item.count, "occurrence"), `${item.signature} · entries ${formatCount(item.firstEntry)}–${formatCount(item.lastEntry)}${item.precedingTools?.length ? ` · after: ${item.precedingTools.map((row) => `${row.tool} ×${row.count}`).join(", ")}` : " · no preceding tool context"}`, "failed")).join("")}</ul>${report?.omittedSignatures ? `<p class="note">${plural(report.omittedSignatures, "signature")} omitted.</p>` : ""}<p class="note">One signature is one recurring cause across calls, counted over the full window — not one row per failure. “After” lists the tools most often seen just before it.</p>` : `<div class="empty">No recurring signatures.</div>`));
+  sections.push(group("Groups", `${groups.length} groups`, groups.length ? `<ul>${groups.map((item) => usedRow(`${item.kind} / ${item.tool} / ${item.category}`, plural(item.count, "error"), undefined, "failed")).join("")}</ul>${report?.omittedGroups ? `<p class="note">${plural(report.omittedGroups, "group")} omitted.</p>` : ""}` : `<div class="empty">No error groups.</div>`));
+  sections.push(group("Recurring signatures", `${signatures.length} signatures`, signatures.length ? `<ul>${signatures.map((item) => usedRow(`${item.tool} / ${item.category}`, plural(item.count, "occurrence"), `${item.signature} · entries ${formatCount(item.firstEntry)}–${formatCount(item.lastEntry)}${item.precedingTools?.length ? ` · after: ${item.precedingTools.map((row) => `${row.tool} ×${row.count}`).join(", ")}` : " · no preceding tool context"}`, "failed")).join("")}</ul>${report?.omittedSignatures ? `<p class="note">${plural(report.omittedSignatures, "signature")} omitted.</p>` : ""}<p class="note">One signature is one recurring cause across calls, counted over the full window — not one row per failure. “After” lists the tools most often seen just before it.</p>` : `<div class="empty">No recurring signatures.</div>`));
   const body = errors.length ? errors.map((item) => {
     const usage = item.usage ? `${formatCount(item.usage.input ?? 0)} in · ${formatCount(item.usage.output ?? 0)} out${item.usage.turns !== undefined ? ` · ${formatCount(item.usage.turns)} turns` : ""}` : undefined;
     return `<details class="item"><summary><span class="item-name">#${item.seq} · ${escapeHtml(item.kind)} / ${escapeHtml(item.tool)} · ${escapeHtml(oneLine(item.error))}</span><span class="badge failed">${escapeHtml(item.category)}</span></summary>${factGrid([
@@ -1042,15 +1025,15 @@ export function errorsHtml(report: SessionErrorsReport): string {
       ["Error chars", `${formatCount(item.errorChars)}${item.truncated ? " · truncated" : ""}`],
     ])}<p class="note">${escapeHtml(item.why)}</p><h3>Error</h3><pre>${escapeHtml(item.error) || "—"}</pre>${item.payload !== undefined ? `<h3>Failed payload (redacted)</h3><pre>${escapeHtml(JSON.stringify(item.payload, null, 2))}</pre>` : ""}${item.details !== undefined ? `<h3>Details (redacted)</h3><pre>${escapeHtml(JSON.stringify(item.details, null, 2))}</pre>` : ""}</details>`;
   }).join("") : `<div class="empty">No tool, model, child or workflow failures in this window. This does not certify task quality.</div>`;
-  sections.push(group("📋 Errors (newest first)", `${errors.length} shown${report?.omitted ? ` · ${report.omitted} omitted` : ""}`, body, true));
-  sections.push(group("🪝 Hook errors", `${hookErrors.length} hooks`, hookErrors.length ? `<ul>${hookErrors.map((row) => usedRow(`${row.owner}:${row.hook}`, plural(row.errors, "error"), `${plural(row.calls, "call")} · ${Math.round(row.ms)} ms`, "failed")).join("")}</ul><p class="note">Telemetry summaries without excerpts; inspect the named owner.</p>` : `<div class="empty">No hook errors recorded.</div>`));
+  sections.push(group("Errors, newest first", `${errors.length} shown${report?.omitted ? ` · ${report.omitted} omitted` : ""}`, body, true));
+  sections.push(group("Hook errors", `${hookErrors.length} hooks`, hookErrors.length ? `<ul>${hookErrors.map((row) => usedRow(`${row.owner}:${row.hook}`, plural(row.errors, "error"), `${plural(row.calls, "call")} · ${Math.round(row.ms)} ms`, "failed")).join("")}</ul><p class="note">Telemetry summaries without excerpts; inspect the named owner.</p>` : `<div class="empty">No hook errors recorded.</div>`));
   let json = "[]";
   try {
     json = JSON.stringify(report, null, 2);
   } catch {
     json = JSON.stringify({ total: report?.total ?? 0, errors: [], note: "report was not serializable" });
   }
-  sections.push(`<h2>JSON (copy source)</h2><pre id="errors-json">${escapeHtml(json)}</pre>${COPY_SCRIPT}`);
+  sections.push(`<h2>Full report as JSON</h2><pre id="errors-json">${escapeHtml(json)}</pre>${COPY_SCRIPT}`);
   return sections.join("");
 }
 

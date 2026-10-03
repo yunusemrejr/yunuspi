@@ -178,7 +178,7 @@ test('used summary joins child runs with launch-level model and thinking', () =>
   assert.equal(summary.reviews.disposition, 'accepted');
   assert.deepEqual(summary.reviews.aspects, [{ aspect: 'correctness', outcome: 'pass' }]);
   const html = signals.usedSummaryHtml(summary);
-  for (const needle of ['openrouter', 'big-model', 'Thinking', 'high', 'DeepInfra', 'Decision 1', 'correctness: pass', '● current']) {
+  for (const needle of ['openrouter', 'big-model', 'Thinking', 'high', 'DeepInfra', 'Decision 1', 'correctness: pass', '<span class="badge current">current</span>']) {
     assert.ok(html.includes(needle), `popup shows ${needle}`);
   }
 });

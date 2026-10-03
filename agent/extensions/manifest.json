@@ -155,6 +155,7 @@
     "observer-model-evidence.ts",
     "output-distiller.ts",
     "path-safety.ts",
+    "popup-theme.ts",
     "process-owner.ts",
     "project-identity.ts",
     "project-memory-consolidate.ts",
