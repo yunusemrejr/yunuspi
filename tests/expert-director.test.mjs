@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 // Calibration: the prompt corpus measures inference false positives and
-// negatives across all 16 domains; the SVG/prose fixtures measure whether
+// negatives across all 20 domains; the SVG/prose fixtures measure whether
 // the deterministic check engines behind the lenses discriminate good from
 // mediocre artifacts. Model-tier lens judgment needs a model and is
 // verified by live session inspection, not asserted here.
@@ -41,7 +41,7 @@ test('domain inference calibrates across the prompt corpus without false positiv
     }
     checked++;
   }
-  assert.ok(checked>=18,'corpus covers all 16 domains plus negatives');
+  assert.ok(checked>=18,'corpus covers all 20 domains plus negatives');
 });
 
 test('task-type precedence and open-ended reading stay conservative',()=>{
@@ -93,7 +93,7 @@ test('expert briefs stay bounded and carry exploration, preservation and critic 
 
 test('doctrine packs are complete, bounded and reference real lenses and tools',()=>{
   assert.deepEqual(Object.keys(EXPERT_PACKS).sort(),[...EXPERT_DOMAIN_IDS].sort());
-  const knownTools=new Set(['artifact_check','math_check','code_quality','syntax_check','claim_check','source_check','design_audit','video_qa','video_frames','audio_analyze','media_info','render_see','browser_session','project_tests','project_intel','context_slice','symbol_expand','dependency_plan','openapi_probe','contract_diff','http_request','data_query','sqlite_probe','coverage_probe','coverage_select','web_asset_check','env_audit','net_probe','sandbox_run','web_search','web_research','source_check','fetch_content','quality_review','subagent','todo','research_toolkit','video_project','video_render','narration_tts','audio_mix','audio_synth','music_compose','media_edit','scene_create','scene_render','image_ocr','skill_review','tool_search','creative_direct','visual_review','ui_explore','motion_inspect','svg_inspect','asset_register','image_generate','creative_compare']);
+  const knownTools=new Set(['artifact_check','math_check','code_quality','syntax_check','claim_check','source_check','design_audit','video_qa','video_frames','audio_analyze','media_info','render_see','blender_inspect','blender_render','splat_preview','web_probe','browser_session','project_tests','project_intel','context_slice','symbol_expand','dependency_plan','openapi_probe','contract_diff','http_request','data_query','sqlite_probe','coverage_probe','coverage_select','web_asset_check','env_audit','net_probe','sandbox_run','web_search','web_research','source_check','fetch_content','quality_review','subagent','todo','research_toolkit','video_project','video_render','narration_tts','audio_mix','audio_synth','music_compose','media_edit','scene_create','scene_render','image_ocr','skill_review','tool_search','creative_direct','visual_review','ui_explore','motion_inspect','svg_inspect','asset_register','image_generate','creative_compare']);
   for(const [id,pack] of Object.entries(EXPERT_PACKS)){
     assert.equal(pack.id,id);
     for(const [key,max] of [['principles',6],['antiPatterns',6],['invariants',5],['dimensions',6],['checks',6],['skills',4],['tools',6],['lenses',6],['evidence',4],['convergeExtra',3]]){
@@ -264,7 +264,7 @@ test('expert_director tool registers five actions with bounded outputs',async t=
   const flat=await call('taste',{op:'forget',selector:'Prefer geometric icon grids'});
   assert.equal(flat.details.forgotten.text,'Prefer geometric icon grids','taste fields sent flat beside action are accepted');
   const status=await call('status');
-  assert.equal(status.details.packs.length,16);
+  assert.equal(status.details.packs.length,20);
   process.env.PI_SUBAGENT_CHILD='1';
   await assert.rejects(()=>call('taste',{taste:{op:'record',text:'Children must not write taste memory'}}),/main-session only/);
   delete process.env.PI_SUBAGENT_CHILD;

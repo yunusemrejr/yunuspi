@@ -4117,7 +4117,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 762,
+        "line": 768,
         "kind": "literal"
       },
       {
@@ -4661,7 +4661,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 762,
+        "line": 768,
         "kind": "literal"
       },
       {
@@ -4975,7 +4975,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 698,
+      "sourceFiles": 699,
       "registrationSites": 85,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 133,
@@ -5574,6 +5574,10 @@
       },
       {
         "path": "agent/extensions/lib/needle-assets.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/needle-embedding-cache.mjs",
         "exists": true
       },
       {
@@ -6679,6 +6683,12 @@
         "source": "agent/extensions/lib/code-audit.ts",
         "signals": [
           "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/expert-domains.ts",
+        "signals": [
+          "MCP"
         ]
       },
       {

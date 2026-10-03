@@ -241,6 +241,22 @@ export const LENS_CATALOG: Record<string, CriticLens> = {
     ["web_research job receipts"],
     "method and scope note",
     "Judge recorded methods and search scope: the work can be redone, competing hypotheses were pursued before concluding, gaps are written down."),
+  "mesh-integrity": lens("mesh-integrity", "Mesh and scene integrity", "deterministic", "checks-only",
+    ["blender_inspect on the saved scene", "media_info on exported files"],
+    "blender_inspect receipt for the final scene plus the export validation",
+    "Deterministic: manifold geometry, outward normals, applied scale and rotation, UV coverage without overlap on hero faces, polygon and texture budgets within the stated destination."),
+  "lighting-materials": lens("lighting-materials", "Lighting and materials", "model", "quality_review:interface",
+    ["blender_render frames from several angles", "visual_review run with recorded verdict"],
+    "rendered frames at delivery resolution from at least three viewpoints and one close-up",
+    "Judge whether light is motivated and directional with deliberate contrast, materials are physically plausible with roughness variation and wear, and the frame holds up in close-ups; default sun, flat grey surfaces and denoiser smear are findings."),
+  "crawl-index": lens("crawl-index", "Crawl and index hygiene", "deterministic", "checks-only",
+    ["web_probe on representative served pages", "web_asset_check on referenced links and assets"],
+    "web_probe receipts for the served pages plus the sitemap and robots responses",
+    "Deterministic: one canonical per document, self-consistent noindex/hreflang, 200 for indexable URLs, valid sitemap and robots rules that do not block needed assets, structured data that parses."),
+  "search-intent": lens("search-intent", "Search intent and content", "model", "quality_review:content",
+    ["render_see of the served page", "web_search for the live results page for the target query"],
+    "rendered page content, title and heading structure, and the target query's intent",
+    "Judge that each page answers one searcher task better than the alternatives: title, headings and first screen match the intent, content is original and complete, and nothing relies on keyword repetition or thin templated pages."),
 };
 
 export interface CriticPlanLens {

@@ -1,1 +1,216 @@
-{"cases": [{"expect": ["web-design"], "openEnded": true, "prompt": "Design a stunning landing page with a distinctive hero, strong typography and a restrained palette", "taskType": "create"}, {"expect": ["visual-art"], "openEnded": true, "prompt": "Create concept art for a foggy harbor town at dawn, painterly style, wide composition", "taskType": "create"}, {"expect": ["svg-iconography"], "openEnded": true, "prompt": "Build a 24px stroke icon set for our toolbar: save, search, settings and trash", "taskType": "create"}, {"expect": ["motion-design"], "openEnded": true, "prompt": "Design the page transition choreography: spring physics, staggered entrances, reduced-motion fallback", "taskType": "create"}, {"expect": ["video"], "openEnded": true, "prompt": "Cut a 60-second trailer from this footage with captions, beat-synced transitions and a clean grade", "taskType": "create"}, {"expect": ["audio"], "openEnded": false, "prompt": "Mix this podcast episode: noise reduction, leveling, EQ and loudness to -16 LUFS", "taskType": "transform"}, {"expect": ["frontend"], "openEnded": false, "prompt": "Refactor the dashboard components to colocate state and resolve the client-side routing waterfall", "taskType": "transform"}, {"expect": ["backend"], "openEnded": false, "prompt": "Implement the webhook endpoint with idempotency keys, a bounded retry queue and a background worker", "taskType": "create"}, {"expect": ["api-design"], "openEnded": true, "prompt": "Design the OpenAPI contract for versioned pagination and consistent error responses", "taskType": "create"}, {"expect": ["database"], "openEnded": true, "prompt": "Fix the slow report query: redesign the indexes and verify the query plan on production-shaped data", "taskType": "fix"}, {"expect": ["algorithms"], "openEnded": false, "prompt": "Prove the shortest-path routine correct: state the invariant, handle adversarial orderings, benchmark worst-case complexity", "taskType": "create"}, {"expect": ["distributed-systems"], "openEnded": true, "prompt": "Design leader election with failover: consistency tradeoffs, retry budgets and split-brain handling", "taskType": "create"}, {"expect": ["security"], "openEnded": false, "prompt": "Audit the auth flow for IDOR and XSS: threat model the trust boundaries and add denied-case tests", "taskType": "review"}, {"expect": ["ml"], "openEnded": false, "prompt": "Fix the ranking model: frozen splits, leakage check on the new features, calibration on held-out data", "taskType": "fix"}, {"expect": ["writing"], "openEnded": true, "prompt": "Write a migration guide for the new config format with concrete before/after examples", "taskType": "create"}, {"expect": ["research"], "openEnded": true, "prompt": "Survey prior work on retrieval reranking: compare approaches with primary dated sources", "taskType": "research"}, {"expect": [], "openEnded": false, "prompt": "Run prettier on the changed files", "taskType": "transform"}, {"expect": [], "openEnded": false, "prompt": "What time is it?", "taskType": "transform"}, {"expect": [], "openEnded": false, "prompt": "Fix the typo in the comment on line 42", "taskType": "fix"}, {"expect": ["backend"], "openEnded": false, "prompt": "Debug the crash in the payment worker: the retry loop storms the queue after a timeout", "taskType": "fix"}]}
+{
+  "cases": [
+    {
+      "expect": [
+        "web-design"
+      ],
+      "openEnded": true,
+      "prompt": "Design a stunning landing page with a distinctive hero, strong typography and a restrained palette",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "visual-art"
+      ],
+      "openEnded": true,
+      "prompt": "Create concept art for a foggy harbor town at dawn, painterly style, wide composition",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "svg-iconography"
+      ],
+      "openEnded": true,
+      "prompt": "Build a 24px stroke icon set for our toolbar: save, search, settings and trash",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "motion-design"
+      ],
+      "openEnded": true,
+      "prompt": "Design the page transition choreography: spring physics, staggered entrances, reduced-motion fallback",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "video"
+      ],
+      "openEnded": true,
+      "prompt": "Cut a 60-second trailer from this footage with captions, beat-synced transitions and a clean grade",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "audio"
+      ],
+      "openEnded": false,
+      "prompt": "Mix this podcast episode: noise reduction, leveling, EQ and loudness to -16 LUFS",
+      "taskType": "transform"
+    },
+    {
+      "expect": [
+        "frontend"
+      ],
+      "openEnded": false,
+      "prompt": "Refactor the dashboard components to colocate state and resolve the client-side routing waterfall",
+      "taskType": "transform"
+    },
+    {
+      "expect": [
+        "backend"
+      ],
+      "openEnded": false,
+      "prompt": "Implement the webhook endpoint with idempotency keys, a bounded retry queue and a background worker",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "api-design"
+      ],
+      "openEnded": true,
+      "prompt": "Design the OpenAPI contract for versioned pagination and consistent error responses",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "database"
+      ],
+      "openEnded": true,
+      "prompt": "Fix the slow report query: redesign the indexes and verify the query plan on production-shaped data",
+      "taskType": "fix"
+    },
+    {
+      "expect": [
+        "algorithms"
+      ],
+      "openEnded": false,
+      "prompt": "Prove the shortest-path routine correct: state the invariant, handle adversarial orderings, benchmark worst-case complexity",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "distributed-systems"
+      ],
+      "openEnded": true,
+      "prompt": "Design leader election with failover: consistency tradeoffs, retry budgets and split-brain handling",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "security"
+      ],
+      "openEnded": false,
+      "prompt": "Audit the auth flow for IDOR and XSS: threat model the trust boundaries and add denied-case tests",
+      "taskType": "review"
+    },
+    {
+      "expect": [
+        "ml"
+      ],
+      "openEnded": false,
+      "prompt": "Fix the ranking model: frozen splits, leakage check on the new features, calibration on held-out data",
+      "taskType": "fix"
+    },
+    {
+      "expect": [
+        "writing"
+      ],
+      "openEnded": true,
+      "prompt": "Write a migration guide for the new config format with concrete before/after examples",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "research"
+      ],
+      "openEnded": true,
+      "prompt": "Survey prior work on retrieval reranking: compare approaches with primary dated sources",
+      "taskType": "research"
+    },
+    {
+      "expect": [],
+      "openEnded": false,
+      "prompt": "Run prettier on the changed files",
+      "taskType": "transform"
+    },
+    {
+      "expect": [],
+      "openEnded": false,
+      "prompt": "What time is it?",
+      "taskType": "transform"
+    },
+    {
+      "expect": [],
+      "openEnded": false,
+      "prompt": "Fix the typo in the comment on line 42",
+      "taskType": "fix"
+    },
+    {
+      "expect": [
+        "backend"
+      ],
+      "openEnded": false,
+      "prompt": "Debug the crash in the payment worker: the retry loop storms the queue after a timeout",
+      "taskType": "fix"
+    },
+    {
+      "expect": [
+        "three-d"
+      ],
+      "openEnded": true,
+      "prompt": "Model a low-poly stylized lighthouse in Blender with PBR materials, a clean UV unwrap and a glTF export for the web",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "three-d"
+      ],
+      "openEnded": true,
+      "prompt": "Create a Gaussian splat from the shoebox photos and render a turntable of the point cloud result",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "seo"
+      ],
+      "openEnded": false,
+      "prompt": "Fix our technical SEO: canonical tags, sitemap.xml, robots.txt and JSON-LD structured data are inconsistent across the site",
+      "taskType": "fix"
+    },
+    {
+      "expect": [
+        "seo"
+      ],
+      "openEnded": true,
+      "prompt": "Improve organic traffic for the pricing pages: search rankings, meta descriptions and title tags",
+      "taskType": "transform"
+    },
+    {
+      "expect": [
+        "llm-systems"
+      ],
+      "openEnded": true,
+      "prompt": "Build an LLM agent with retrieval-augmented generation, tool calling and prompt injection guardrails, plus an eval harness",
+      "taskType": "create"
+    },
+    {
+      "expect": [
+        "automation"
+      ],
+      "openEnded": true,
+      "prompt": "Build a multi-step workflow automation across several third-party APIs with webhook handlers, idempotency keys and retry with backoff",
+      "taskType": "create"
+    },
+    {
+      "expect": [],
+      "prompt": "Rename the mesh variable to vertices in the geometry helper",
+      "taskType": "transform"
+    },
+    {
+      "expect": [],
+      "prompt": "Add a robots emoji to the footer text",
+      "taskType": "transform"
+    }
+  ]
+}

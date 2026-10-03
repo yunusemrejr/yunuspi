@@ -1283,7 +1283,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 816; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1869; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 762; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 768; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `splat_preview` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 64; factory)
 - `splat_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 56; factory)
@@ -1424,6 +1424,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts) — `MCP`
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) — `MCP`
 - [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
@@ -1654,6 +1655,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts)
 - [`agent/extensions/lib/music-score.ts`](../agent/extensions/lib/music-score.ts)
 - [`agent/extensions/lib/needle-assets.mjs`](../agent/extensions/lib/needle-assets.mjs)
+- [`agent/extensions/lib/needle-embedding-cache.mjs`](../agent/extensions/lib/needle-embedding-cache.mjs)
 - [`agent/extensions/lib/needle-policy.ts`](../agent/extensions/lib/needle-policy.ts)
 - [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts)
 - [`agent/extensions/lib/needle-types.ts`](../agent/extensions/lib/needle-types.ts)

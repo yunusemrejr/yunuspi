@@ -4,7 +4,7 @@ import { classifyExecution, type ExecutionProfile } from './adaptive-execution.t
 export type TaskPipelineId = 'php' | 'node' | 'frontend-js' | 'vanilla-frontend' | 'react-cdn' | 'react-node' |
   'go' | 'rust' | 'java' | 'python' | 'python-flask' | 'bash' | 'c' | 'cpp' | 'linux-native' |
   'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy' |
-  'video' | 'audio' | 'svg-art' | 'debugging';
+  'video' | 'audio' | 'svg-art' | 'debugging' | 'blender-3d' | 'seo' | 'llm-app' | 'api-automation';
 export type PipelinePhase = 'discovery' | 'implementation' | 'validation' | 'delivery';
 export const PIPELINE_EVIDENCE_KINDS = ['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live', 'playback', 'listening'] as const;
 export type PipelineEvidenceKind = (typeof PIPELINE_EVIDENCE_KINDS)[number];
@@ -39,6 +39,9 @@ export type AutomaticPipelineInput = {
   files?: readonly string[];
 };
 
+/** Pipelines whose work is judged on produced media, not on project tests. */
+const MEDIA_ONLY: readonly TaskPipelineId[] = ['video', 'audio', 'svg-art', 'blender-3d'];
+
 /** A negative request must not stage the very tool it excludes. Kept shared
  * with legacy intent bundles so activation owners cannot disagree. */
 export const pipelineGitExcluded = (prompt: string): boolean =>
@@ -58,7 +61,7 @@ export function automaticPipelineTools(selection: PipelineSelection, input: Auto
   const git = !pipelineGitExcluded(prompt) && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
     /\b(?:git(?:hub)?|commits?|committing|pull requests?|pre-?commit|rebase|repository history|release (?:process|pipeline|version|tag)|(?:push|merge) (?:the |this |my )?(?:branch|commit|changes)|push (?:to )?(?:origin|upstream))\b/i.test(prompt));
   const control = /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
-  const codeWork = selection.ids.some(id => !['video', 'audio', 'svg-art'].includes(id));
+  const codeWork = selection.ids.some(id => !MEDIA_ONLY.includes(id));
   return [...new Set([
     ...selection.tools.filter(name => name === 'code_quality' ? codeWork && quality : name === 'project_tests' ? codeWork : name === 'git_info' ? git : name !== 'task_pipeline'),
     ...(control ? ['task_pipeline'] : []),
@@ -92,12 +95,22 @@ const RECIPES: Record<TaskPipelineId, Recipe> = {
   audio: { skills: ['audio-processing', 'sound-analysis', 'music-composition'], discovery: 'Probe source channels, sample rates and durations; establish voice/music/effect roles, edit windows, loudness target and delivery format. For creation keep the editable score and intended instrument rendering.', validation: 'Reuse audio_mix/media_pipeline mastering measurements from the delivered encoding. Check duration, LUFS and true peak, then listen for intelligibility, clipping, artifacts, timing and endings; oscillator previews do not establish instrument quality.', tools: ['media_info', 'audio_analyze'] },
   'svg-art': { skills: ['custom-svg', 'svg-assessment'], discovery: 'Inspect viewBox, geometry, transforms, inherited paint, references, accessibility and the intended sizes/backgrounds. Keep the requested visual direction and a consistent icon-set grammar.', validation: 'Use svg_inspect source measurements and its render matrix at intended sizes. Inspect pixels for clipping, small-size legibility, optical balance and consistent visual weight; approximate geometry does not establish conformance.', tools: ['svg_inspect'] },
   debugging: { skills: ['debugging'], discovery: 'Capture the actual failing command/input, first diagnostic, source location and relevant runtime versions. Use symbol_search/context_slice to follow the established owner; minimize one falsifiable hypothesis before repair.', validation: 'Rerun the same minimal reproducer after repair, then affected project checks. Preserve first-failure diagnostics and source-bound receipts; a retry, background launch or zero collected tests cannot establish a fix.', tools: ['project_tests', 'symbol_search', 'context_slice'] },
+  'blender-3d': { skills: ['blender-production', 'gaussian-splatting'], discovery: 'Inspect the saved scene or source assets with blender_inspect (units, scale, object and material inventory, polygon and texture budgets). Establish the destination format, axes, budgets and the look reference before modeling.', validation: 'Run blender_inspect on the final scene (manifold, normals, applied scale, UV coverage, budgets) and validate every exported file in its target format. A viewport, a script exit code or one turntable orbit is not evidence of appearance.', tools: ['blender_inspect', 'blender_render'] },
+  seo: { skills: ['search-discoverability', 'organic-growth-engineering'], discovery: 'Establish the canonical host, locales, indexable versus private routes and the target queries and intents. Probe the served site with web_probe (status codes, canonicals, robots, sitemap, structured data) before changing templates.', validation: 'Re-run web_probe on representative served pages and check canonicals, sitemap membership, robots rules, structured-data validity and rendered content. Rankings, traffic and AI citations are outcomes to measure, never claims.', tools: ['web_probe'] },
+  'llm-app': { skills: ['llm-systems-engineering', 'rag-engineering', 'model-evaluation'], discovery: 'Inspect the provider interface, prompt and tool contracts, retrieval sources, existing evals and cost and latency budgets. Freeze a representative golden set and a simple baseline before changing prompts or models.', validation: 'Validate structured outputs and tool contracts, and exercise prompt-injection, malformed-output, timeout and refusal paths. Compare against the baseline on the frozen set with a slice breakdown.' },
+  'api-automation': { skills: ['api-design', 'evidence-first-engineering', 'distributed-systems'], discovery: 'Read each provider\'s auth, scope, rate-limit, pagination and webhook-delivery documentation, and inspect existing clients, secret handling and the state the workflow must persist. Define the state machine, idempotency keys and approval points before coding.', validation: 'Dry-run or sandbox the workflow first, then run a failure-injection pass (timeout, 429, 5xx, partial batch) and an idempotent re-run. Verify there are no duplicate side effects and that secrets never reach logs or prompts.', tools: ['http_request'] },
   'git-ssh-deploy': { skills: ['git-github', 'multi-developer-pipelines'], discovery: 'Inspect Git source/remote/history and the explicitly authorized SSH destination, document root, runtime, protected data and rollback path. Namecheap/GoDaddy branding does not establish account capabilities; discover actual cPanel/VPS/SSH support.', validation: 'Verify the local release/build, deployment manifest and rollback before remote promotion. Keep secrets, uploads and databases outside accidental sync; Git push alone does not prove a live deployment.', tools: ['git_info', 'ssh_plan', 'net_probe', 'env_audit'] },
 };
 
 const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
 const bounded = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
 const WORK = /\b(?:build|create|implement|fix|debug|improve|refactor|edit|change|update|test|validate|verify|review|audit|write|develop|deploy|publish|release|train|finetune|fine[- ]tune|prepare|design|optimize|optimise|run|add|remove|make|render|mix|compose|denoise|normalize|synthesize|time[- ]stretch)\b/i;
+/** Further action verbs. Measured: 23 of 24 ordinary imperative prompts ("Generate a REST API in Go",
+ * "Export the Blender scene", "Migrate the PHP app", "Cut the interview video") matched no pipeline because
+ * none of the verbs above appeared, so their skills, evidence stages and tool schemas never activated.
+ * Nouns such as model, port or cut only count when imperative, and question-shaped requests never do. */
+const ACTION = /\b(?:generate|convert|export|import|automate|integrate|configure|set ?up|migrate|scrape|crawl|analy[sz]e|enhance|upgrade|rewrite|install|wire|schedule|connect|sync|ship|produce|craft|trim|composite|extend|polish|harden|benchmark|investigate|diagnose|troubleshoot|clean ?up|speed ?up|extract|parse|transcribe|translate|compress|encode|merge|restructure|scaffold|bootstrap|launch|bake|unwrap|retopologi[sz]e|port|cut|capture|record|profile|monitor|document)\b|(?:^|[.!?:]\s+)(?:please\s+)?(?:model|sculpt|animate|rig|texture|illustrate|paint|draw)\b/i;
+const QUESTION = /^\s*(?:what|why|how|who|whom|whose|when|where|which|is|are|was|were|does|do|did|explain|describe|define|tell me|summari[sz]e|list|compare)\b/i;
 const IGNORED_FILE = /(?:^|\/)(?:node_modules|vendor|\.git|skills)(?:\/|$)|(?:^|\/)SKILL\.md$/i;
 
 /** Metadata-only routing: no models, commands, project crawling, or skill-body injection. */
@@ -110,7 +123,7 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const ids: TaskPipelineId[] = [];
   const add = (id: TaskPipelineId, selected: boolean) => { if (selected) ids.push(id); };
   const has = (pattern: RegExp) => files.some(file => pattern.test(file));
-  const active = WORK.test(prompt) || files.length > 0;
+  const active = WORK.test(prompt) || (ACTION.test(prompt) && !QUESTION.test(prompt)) || files.length > 0;
   if (!active || /\b(?:no|without)\s+(?:tools?|workflows?|pipelines?)\b|\b(?:do not|don't|never)\s+(?:use|run|activate)\s+(?:any\s+)?(?:tools?|workflows?|pipelines?)\b/i.test(prompt))
     return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
 
@@ -147,12 +160,16 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const art = /\b(?:svgs?|vector (?:art|icons?|illustrations?)|icon (?:set|pack)|logo (?:mark|design))\b|\.svg\b/i.test(prompt) || has(/\.svg$/i);
   const debugging = /\b(?:debug|debugging|troubleshoot|reproduce|reproducer|regression|crash|stack\s?trace)\b|\b(?:fix|investigate|diagnose)\b[^.\n]{0,80}\b(?:bug|failure|failing|error|hang|leak|race)\b/i.test(prompt);
   add('video', video); add('audio', audio); add('svg-art', art); add('debugging', debugging);
+  add('blender-3d', /\bblender\b|\bgaussian splat(?:ting)?\b|\b3d (?:model(?:l?ing)?|scene|asset|render(?:ing)?|animation)\b|\b(?:glb|gltf)\b|\bphotogrammetry\b/i.test(prompt) || has(/\.(?:blend|glb|gltf|fbx|usd[azc]?|splat)$/i));
+  add('seo', /\bseo\b|\bsearch engine optimi[sz]ation\b|\bsitemap\.xml\b|\brobots\.txt\b|\bjson-ld\b|\bcanonical (?:url|tag|link)s?\b|\bcore web vitals\b|\bhreflang\b/i.test(prompt) || has(/(?:^|\/)(?:sitemap[^/]*\.xml|robots\.txt|llms\.txt)$/i));
+  add('llm-app', /\b(?:llm|rag|retrieval[- ]augmented|prompt engineering|agent(?:ic)? (?:workflow|loop|system|framework)s?|tool[- ]calling|function[- ]calling|prompt injection|evals? (?:harness|suite)|ai (?:agent|assistant|chatbot)s?|chat ?bots?)\b/i.test(prompt));
+  add('api-automation', /\b(?:api (?:integration|workflow|orchestration|automation)s?|workflow automation|webhooks?|(?:third[- ]party|external|multiple|several|various) apis?|idempoten\w+|rate[- ]limit\w*|scheduled (?:jobs?|tasks?)|cron jobs?|etl (?:pipeline|job)s?)\b/i.test(prompt));
   add('git-ssh-deploy', /\b(?:namecheap|godaddy|cpanel)\b|\b(?:deploy|deployment|production|website|site)\b[^\n]{0,100}\b(?:ssh|git)\b|\b(?:ssh|git)\b[^\n]{0,100}\b(?:deploy|deployment|production|website|site)\b/i.test(prompt));
 
   if (!ids.length) return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
   const recipes = ids.map(id => RECIPES[id]);
   const skills = unique(recipes.flatMap(recipe => recipe.skills));
-  const codeWork = ids.some(id => !['video', 'audio', 'svg-art'].includes(id));
+  const codeWork = ids.some(id => !MEDIA_ONLY.includes(id));
   const validationTools = codeWork ? ['project_tests', 'code_quality'] : unique(recipes.flatMap(recipe => recipe.tools ?? []));
   const baseTools = ['project_intel', 'read', ...validationTools];
   const stages: PipelineStage[] = [
@@ -167,6 +184,8 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   }
   if (video) stages.push({ id: 'video-playback', phase: 'validation', check: 'Inspect actual playback of the final video for pacing, framing, motion, transitions and audio sync. A sparse contact sheet, successful decode or timeline JSON cannot establish continuous playback quality.', evidenceKinds: ['playback'], dependsOn: ['validation'], tools: ['video_frames', 'motion_inspect'] });
   if (audio) stages.push({ id: 'audio-listening', phase: 'validation', check: 'Listen to the delivered encoding at representative quiet/loud sections and edits. Resolve audible artifacts, intelligibility and ending defects; LUFS, true peak and a synthesized preview cannot establish audible quality.', evidenceKinds: ['listening'], dependsOn: ['validation'], tools: ['audio_analyze'] });
+  if (ids.includes('blender-3d')) stages.push({ id: 'render-pixels', phase: 'validation', check: 'Inspect rendered frames from at least three angles and one close-up against the requested look; resolve noise, fireflies, light and material errors. A viewport capture, a script exit code or one orbit cannot settle appearance.', evidenceKinds: ['pixels'], dependsOn: ['validation'], tools: ['blender_render'] });
+  if (ids.includes('llm-app')) stages.push({ id: 'llm-evaluation', phase: 'validation', check: 'Score the final configuration and the simplest baseline on the same frozen cases with recorded model, prompt and parameter versions; report slice failures, cost and latency. A handful of hand-picked examples is not an evaluation.', evidenceKinds: ['evaluation'], dependsOn: ['implementation'], tools: ['project_tests'] });
   if (art) stages.push({ id: 'art-pixels', phase: 'validation', check: 'Inspect the rendered art at intended sizes and backgrounds against the requested direction. Resolve clipping, small-size legibility and inconsistent weight; retain the render matrix with the finding.', evidenceKinds: ['pixels'], dependsOn: ['validation'], tools: ['svg_inspect'] });
   const artifactOnly = /\b(?:prepare|draft|write|create|build|validate)\b[^\n]{0,100}\b(?:notebook|training script|training pipeline|recipe)\b/i.test(prompt)
     && !/\b(?:start|execute|run)\b[^\n]{0,80}\b(?:training|finetuning|fine[- ]tuning|notebook)\b/i.test(prompt);

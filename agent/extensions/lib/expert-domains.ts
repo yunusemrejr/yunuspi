@@ -18,12 +18,14 @@ import { skillTerms, skillEvidenceContext } from "./skill-relevance.ts";
 export type ExpertDomainId =
   | "web-design" | "visual-art" | "svg-iconography" | "motion-design"
   | "video" | "audio" | "frontend" | "backend" | "api-design" | "database"
-  | "algorithms" | "distributed-systems" | "security" | "ml" | "writing" | "research";
+  | "algorithms" | "distributed-systems" | "security" | "ml" | "writing" | "research"
+  | "three-d" | "seo" | "llm-systems" | "automation";
 
 export const EXPERT_DOMAIN_IDS: readonly ExpertDomainId[] = [
   "web-design", "visual-art", "svg-iconography", "motion-design",
   "video", "audio", "frontend", "backend", "api-design", "database",
   "algorithms", "distributed-systems", "security", "ml", "writing", "research",
+  "three-d", "seo", "llm-systems", "automation",
 ];
 
 export const EXPERT_DOMAIN_LABELS: Record<ExpertDomainId, string> = {
@@ -32,6 +34,7 @@ export const EXPERT_DOMAIN_LABELS: Record<ExpertDomainId, string> = {
   backend: "Backend engineering", "api-design": "API design", database: "Database design",
   algorithms: "Algorithms", "distributed-systems": "Distributed systems", security: "Security",
   ml: "ML/AI", writing: "Technical writing", research: "Research",
+  "three-d": "3D/Blender", seo: "SEO/discoverability", "llm-systems": "LLM/agent systems", automation: "Automation/API workflows",
 };
 
 export type ExpertTaskType = "create" | "transform" | "fix" | "review" | "research" | "operate";
@@ -114,6 +117,22 @@ const DOMAIN_CUES: readonly DomainCues[] = [
     terms: ["literature", "citation", "citations", "hypothesis", "methodology", "survey", "benchmark", "baseline", "ablation", "peer", "arxiv", "paper", "study", "experiment"],
     phrases: /\b(?:literature review|research paper|prior work|state of the art|experimental design|survey the|compare approaches|evidence for)\b/i,
     files: /\.(?:pdf|bib|tex)$|(?:^|\/)(?:papers?|research|studies|experiments?)\/[^/]+$/i },
+  { id: "three-d", topics: ["graphics"],
+    terms: ["blender", "bpy", "gltf", "glb", "unwrap", "low-poly", "mesh", "meshes", "armature", "rigging", "sculpt", "retopology", "topology", "subdivision", "shader", "shaders", "hdri", "cycles", "eevee", "splat", "splats", "gaussian", "photogrammetry", "turntable"],
+    phrases: /\b(?:blender|3d (?:model(?:l?ing)?|scene|asset|render(?:ing)?|animation|print|character|object)|gaussian splat(?:ting)?|point cloud|pbr (?:material|texture)s?|uv (?:unwrap|map|layout)|low[- ]poly|photogrammetry|(?:glb|gltf) (?:file|export|asset|model)|look[- ]dev|turntable render|nerf)\b/i,
+    files: /\.(?:blend|glb|gltf|obj|fbx|usd[azc]?|stl|ply|splat|3mf)$/i },
+  { id: "seo", topics: ["content"],
+    terms: ["sitemap", "sitemap.xml", "canonical", "hreflang", "robots", "robots.txt", "serp", "backlinks", "crawlability", "indexability", "indexation", "json-ld", "opengraph", "pagespeed", "lighthouse", "snippets", "metadata"],
+    phrases: /\b(?:seo|search engine optimi[sz]ation|technical seo|rich results?|structured data|json-ld|sitemap\.xml|robots\.txt|core web vitals|meta descriptions?|title tags?|canonical (?:url|tag)s?|organic (?:traffic|growth|search)|search rankings?|ranking factors?|answer engine|generative engine|llms\.txt|indexab\w+|crawl budget|keyword research)\b/i,
+    files: /(?:^|\/)(?:sitemap[^/]*\.xml|robots\.txt|llms\.txt)$/i },
+  { id: "llm-systems", topics: ["ml"],
+    terms: ["llm", "llms", "rag", "prompt", "prompts", "agentic", "guardrails", "hallucination", "hallucinations", "evals", "reranker", "openrouter", "mcp", "toolcalling", "retrieval"],
+    phrases: /\b(?:llm (?:app(?:lication)?s?|pipelines?|agents?|workflows?|features?)|prompt engineering|retrieval[- ]augmented|rag (?:pipeline|system|app)|tool[- ]calling|function[- ]calling|agent(?:ic)? (?:workflow|loop|framework|system)s?|structured outputs?|model routing|prompt injection|evals? (?:harness|suite|set)|multi[- ]agent|chat ?bots?|ai (?:assistant|agent)s?|context engineering)\b/i,
+    files: /(?:^|\/)(?:prompts?|evals?|agents?)\/[^/]+$|\.prompt\.[a-z]+$/i },
+  { id: "automation", topics: ["tooling"],
+    terms: ["automation", "automate", "orchestration", "idempotency", "idempotent", "backoff", "etl", "scheduler", "cron", "webhook", "webhooks", "integration", "integrations", "zapier", "n8n", "airflow", "temporal"],
+    phrases: /\b(?:api (?:integration|workflow|orchestration|automation)s?|multi[- ]step (?:workflow|automation|process)|(?:third[- ]party|external|several|multiple|various) apis?|rate[- ]limit(?:ed|ing)? (?:client|handling|aware)|retry (?:policy|with (?:exponential )?backoff)|etl (?:pipeline|job)s?|scheduled (?:jobs?|tasks?|runs?)|autonomous (?:agents?|workflows?|operation|tasks?|runs?)|end[- ]to[- ]end automation|workflow automation)\b/i,
+    files: /(?:^|\/)(?:workflows?|automations?|dags?)\/[^/]+$/i },
 ];
 
 export interface ExpertDomainSignal {
@@ -135,7 +154,7 @@ const TASK_CUES: ReadonlyArray<{ type: ExpertTaskType; test: RegExp }> = [
   { type: "review", test: /\b(?:review|audit|assess|inspect|critique|evaluate|look over|second opinion|code review|quality check)\b/i },
   { type: "research", test: /\b(?:research|investigate|survey|compare|explore options|spike|feasibility|literature|benchmark|state of the art)\b/i },
   { type: "operate", test: /\b(?:deploy|release|publish|ship|roll ?out|migrate to prod|monitor|on-call|incident|postmortem|backup|restore)\b/i },
-  { type: "create", test: /\b(?:create|build|make|design|redesign|generate|craft|produce|develop|implement|scaffold|from scratch|new|launch|write|compose|author|cut|record|shoot|film|prove|derive|solve|compute)\b/i },
+  { type: "create", test: /\b(?:create|build|make|design|redesign|generate|craft|produce|develop|implement|scaffold|from scratch|new|launch|write|compose|author|cut|record|shoot|film|prove|derive|solve|compute)\b|(?:^|[.!?:]\s+)(?:please\s+)?(?:model|sculpt|animate|rig|texture|illustrate|paint|draw|synthesi[sz]e|render)\b/i },
   { type: "transform", test: /\b(?:refactor|restyle|polish|improve|refresh|tweak|adjust|clean ?up|tidy|rework|revamp|overhaul|migrate|upgrade|modernize|rewrite)\b/i },
 ];
 
@@ -185,7 +204,7 @@ export function detectOpenEnded(prompt: string, analysis?: ExpertDetectionInput[
   if (analysis?.source === "model" && analysis.openEnded !== undefined) return analysis.openEnded;
   const text = promptRequestFocus(String(prompt ?? "")).slice(0, FOCUS_LIMIT);
   if (DECIDED_DIRECTION.test(text)) return false;
-  return /\b(?:create|build|make|design|redesign|brainstorm|propose|suggest|explore|best|better|improve|revamp|overhaul|rethink|world-class|stunning|premium|elegant|beautiful|impressive|cut|write|compose|survey|compare)\b/i.test(text)
+  return /\b(?:create|build|make|design|redesign|brainstorm|propose|suggest|explore|best|better|improve|revamp|overhaul|rethink|world-class|stunning|premium|elegant|beautiful|impressive|cut|write|compose|survey|compare)\b|(?:^|[.!?:]\s+)(?:please\s+)?(?:model|sculpt|animate|rig|texture|illustrate|paint|draw|synthesi[sz]e|render)\b/i.test(text)
     && !/\b(?:exactly|precisely|specifically|step-by-step|as specified|per spec)\b/i.test(text);
 }
 

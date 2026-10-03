@@ -2,6 +2,8 @@
 
 The adaptive workflow owner selects development pipelines from the current user request, explicitly observed relevant files and inspected dependency names. `agent/extensions/lib/task-pipelines.ts` performs this selection locally. It reads no project files, launches no models or commands and injects no skill bodies. Questions and explicit workflow opt-outs return no pipelines.
 
+A request counts as work when it contains a build, fix, test or release verb, or a further action verb such as generate, convert, export, migrate, configure, automate, integrate, scrape, trim or cut (nouns such as model or port count only when imperative). Question-shaped requests (what, why, how, explain, describe, list) never activate a pipeline on a verb alone; observed project files still do.
+
 Selection follows the evidence available at task, subtask or todo scope. New file or manifest evidence can change the selected stack; the execution profile decides how much context, coordination and review that scope needs. Do not feed arbitrary tool-output prose into selection. A JavaScript file without browser evidence receives runtime discovery; it does not force a visual review. A React CDN request keeps the no-build edition distinct from a normal React package/bundler project.
 
 ## Recurring stacks
@@ -28,6 +30,10 @@ Selection follows the evidence available at task, subtask or todo scope. New fil
 | Video | Source metadata and timeline constraints; decoded delivery output, followed by playback review for pacing, transitions and sound/image fit. |
 | Audio | Source metadata and signal analysis; decoded delivery output and measured mastering checks, followed by listening review. |
 | SVG art | Transformed geometry, visible bounds and disclosed approximation limits; rendered pixels at intended sizes. |
+| 3D and Blender | Saved-scene inventory, units, budgets and destination format; `blender_inspect` manifold, normal, scale and UV measurements, validated exports, then rendered frames from several angles plus a close-up. A viewport or script exit cannot settle appearance. |
+| SEO | Canonical host, indexable versus private routes and target intents; `web_probe` on served pages for status, canonicals, robots, sitemap and structured data. Rankings, traffic and AI citations are measured outcomes, never claims. |
+| LLM applications | Provider, prompt and tool contracts, retrieval sources, a frozen golden set and a simple baseline; structured-output and injection checks, then a frozen-set comparison with slice breakdown, cost and latency. |
+| API automation | Provider auth, scopes, rate limits, pagination and webhook semantics; a state machine with idempotency keys and approval points; dry run, failure injection (timeout, 429, 5xx, partial batch) and an idempotent re-run. |
 | Debugging | Observed reproduction before implementation; relevant regression checks after the fix. An expected failing reproduction is evidence of the bug, not a fixed result. |
 | Git/SSH hosting | Actual Git source and authorized destination/capabilities, protected data and rollback; local validation, preflight, remote revision and live serving-path checks when deployment is requested. |
 

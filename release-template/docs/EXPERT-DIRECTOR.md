@@ -36,10 +36,12 @@ advisory and owns no routing, safety, or completion decisions.
 
 ## Doctrine packs
 
-`expert-doctrine.ts` holds 16 data packs: `web-design`, `visual-art`,
+`expert-doctrine.ts` holds 20 data packs: `web-design`, `visual-art`,
 `svg-iconography`, `motion-design`, `video`, `audio`, `frontend`, `backend`,
 `api-design`, `database`, `algorithms`, `distributed-systems`, `security`,
-`ml`, `writing`, `research`. Each pack defines positive doctrine (what
+`ml`, `writing`, `research`, `three-d` (Blender, glTF, Gaussian splats), `seo`,
+`llm-systems` (evals, retrieval, agents, injection) and `automation`
+(multi-API workflows: idempotency, approval, failure injection). Each pack defines positive doctrine (what
 excellent work looks like), negative doctrine (characteristic failure modes),
 invariants, quality dimensions, deterministic checks, relevant skills/tools,
 critic lenses, evidence requirements, exploration heuristics, and extra stop

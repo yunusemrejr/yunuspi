@@ -213,3 +213,71 @@ test('required UI and hosting tools are available immediately while explicit wor
   for (const prompt of ['Fix the Node.js parser without Git', 'Fix the Node.js parser. Do not use git.', 'Fix the Node.js parser; no-Git reporting is needed.'])
     assert.ok(!automatic(prompt, { files: ['.git/config'] }).includes('git_info'), prompt);
 });
+
+test('3D, SEO, LLM-application and API-automation work get their own evidence-staged pipelines', () => {
+  const blender = selected('Model a low-poly lighthouse in Blender and export a glTF for the web');
+  assert.ok(blender.ids.includes('blender-3d'));
+  assert.deepEqual(blender.skills.filter(name => name.startsWith('blender') || name === 'gaussian-splatting'), ['blender-production', 'gaussian-splatting']);
+  assert.ok(blender.tools.includes('blender_inspect') && blender.tools.includes('blender_render'));
+  assert.ok(!blender.tools.includes('project_tests') && !blender.tools.includes('code_quality'), 'a render task is judged on frames, not on project tests');
+  const ledger = createPipelineLedger();
+  record(blender, ledger, 'discovery', 'inspection');
+  record(blender, ledger, 'implementation', 'artifact');
+  record(blender, ledger, 'validation', 'execution');
+  assert.throws(() => record(blender, ledger, 'render-pixels', 'execution'), /requires pixels/, 'a script exit or inspection cannot settle appearance');
+  assert.throws(() => record(blender, ledger, 'delivery', 'artifact'), /unresolved prerequisite/);
+  record(blender, ledger, 'render-pixels', 'pixels');
+  record(blender, ledger, 'delivery', 'artifact');
+  assert.deepEqual(pendingPipelineStages(blender, ledger, coordinate), []);
+  assert.ok(selected('Fix the exporter script', { files: ['assets/lighthouse.glb'] }).ids.includes('blender-3d'), 'observed 3D file evidence selects the pipeline');
+  assert.deepEqual(selected('What is a glb file?').ids, [], 'a question without file evidence adds no overhead');
+
+  const seo = selected('Fix our technical SEO: canonical tags, sitemap.xml and robots.txt are inconsistent');
+  assert.ok(seo.ids.includes('seo'));
+  assert.ok(seo.tools.includes('web_probe'));
+  assert.ok(seo.stages.some(stage => stage.id === 'validation' && /web_probe/.test(stage.check) && /never claims/.test(stage.check)));
+  assert.ok(automatic('Fix our technical SEO: canonical tags, sitemap.xml and robots.txt are inconsistent').includes('web_probe'));
+
+  const llm = selected('Build an LLM agent with retrieval-augmented generation and prompt injection guardrails');
+  assert.ok(llm.ids.includes('llm-app'));
+  const llmLedger = createPipelineLedger();
+  record(llm, llmLedger, 'discovery', 'inspection');
+  record(llm, llmLedger, 'implementation', 'artifact');
+  assert.throws(() => record(llm, llmLedger, 'llm-evaluation', 'execution'), /requires evaluation/, 'passing tests is not a frozen-set comparison against a baseline');
+  record(llm, llmLedger, 'llm-evaluation', 'evaluation');
+
+  const automation = selected('Build a workflow automation across several third-party APIs with webhooks, idempotency keys and retry with backoff');
+  assert.ok(automation.ids.includes('api-automation'));
+  assert.ok(automation.stages.some(stage => stage.id === 'validation' && /failure-injection/.test(stage.check) && /idempotent re-run/.test(stage.check)));
+  assert.ok(automation.tools.includes('http_request'));
+});
+
+test('questions about the new domains and unrelated mentions add no pipeline overhead', () => {
+  for (const prompt of ['What is SEO?', 'Explain how Gaussian splatting works', 'Who invented the webhook?', 'Why is Blender called Blender?']) {
+    assert.deepEqual(selected(prompt).ids, [], prompt);
+  }
+  assert.deepEqual(selected('Rename the mesh variable in the geometry helper').ids.filter(id => ['blender-3d', 'seo', 'llm-app', 'api-automation'].includes(id)), []);
+});
+
+test('the new pipelines name only shipped skills and registered tools', () => {
+  const selection = selected('Build a Blender scene, fix SEO canonical tags, build an LLM agent with RAG, and build an API integration workflow with webhooks');
+  for (const id of ['blender-3d', 'seo', 'llm-app', 'api-automation']) assert.ok(selection.ids.includes(id), id);
+  for (const name of selection.skills) assert.ok(fs.existsSync(path.join(agent, 'skills', name, 'SKILL.md')), name);
+  const metadataPath = [path.join(root, 'docs/CAPABILITIES.json'), path.join(agent, 'public-template/docs/CAPABILITIES.json')].find(file => fs.existsSync(file));
+  const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+  const registered = new Set(Object.values(metadata.tools).flatMap(value => Array.isArray(value) ? value : []).map(value => typeof value === 'string' ? value : value.name));
+  registered.add('project_tests');
+  for (const name of selection.tools) assert.ok(registered.has(name), `No registered runtime tool named ${name}`);
+});
+
+test('ordinary imperative requests activate their pipeline even without a classic build/fix verb', () => {
+  const requests = {
+    'Generate a REST API in Go': 'go', 'Convert this Python script to Rust': 'rust', 'Export the Blender scene as glTF': 'blender-3d',
+    'Model a lighthouse in Blender': 'blender-3d', 'Animate the logo in the video': 'video', 'Migrate the PHP app to Go': 'php',
+    'Configure the Flask app for production': 'python-flask', 'Rewrite the Bash installer': 'bash', 'Cut the interview video': 'video',
+    'Trim the audio track': 'audio', 'Schedule the Python job with cron': 'python', 'Scrape the pricing page with Python': 'python',
+  };
+  for (const [prompt, id] of Object.entries(requests)) assert.ok(selected(prompt).ids.includes(id), `${prompt} -> ${id}`);
+  for (const prompt of ['Which port does the Go service use?', 'How do I configure Flask?', 'Who wrote the Python parser?', 'What model is this?', 'Tell me about the Java model', 'Describe how the audio narration works'])
+    assert.deepEqual(selected(prompt).ids, [], prompt);
+});
