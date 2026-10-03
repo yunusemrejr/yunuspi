@@ -22,7 +22,12 @@ export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
 const FUZZY_MIN_TERM = 6;
-const SHORT_DOMAINS = new Set('ai ml ui ux api css sql php pdf csv cad llm rag wasm c++ c# js ts'.split(' '));
+// Short domain terms are the strongest routing signal and would otherwise fall under the
+// four-character floor. Measured: a networking task naming "DNS ... TCP" and another naming
+// "TLS" both matched nothing against a skill whose description lists DNS/TCP/TLS.
+const SHORT_DOMAINS = new Set(('ai ml ui ux api css sql php pdf csv cad llm rag wasm c++ c# js ts '
+  + 'dns tcp udp tls ssl ssh vpn cpu gpu ram ssd nat dhcp xml svg png jpg gif mp3 mp4 wav seo pbr npm aws gcp git '
+  + 'cli tui gui sdk jwt csp xss sso ocr nlp etl orm cdn rss oom 2fa gpt').split(' '));
 const usefulTerm = (term: string) => term.length >= MIN_TERM || SHORT_DOMAINS.has(term);
 // Common prose that would otherwise let a generic description match any task.
 // The trailing methodology words are mindset boilerplate, not domain signal: a

@@ -70,3 +70,10 @@ test('generic engineering nouns do not route native work into unrelated platform
  assert.ok(!rankSkills(index,context).some(r=>r.skill.name==='llm-systems-engineering'));
  assert.equal(rankSkills(index,'Cloudflare workers')[0]?.skill.name,'cloudflare-platform-engineering');
 });
+test('three-letter technical acronyms are routing terms instead of falling under the length floor',()=>{
+ for(const term of ['dns','tcp','tls','git','ssh','svg','seo','gpu'])assert.ok(skillTerms(`the ${term.toUpperCase()} failed`).includes(term),term);
+ for(const noise of ['the','and','for','but'])assert.ok(!skillTerms(`${noise} ${noise}`).includes(noise),noise);
+ const index=buildSkillIndex([skill('linux-network-engineering','Diagnose Linux networks: link, IP, route, DNS, TCP and TLS ladder with ss, dig and nftables playbooks'),skill('copywriting','Write product and marketing copy: headlines, onboarding and microcopy'),...unrelated]);
+ assert.equal(rankSkills(index,'DNS resolves but TCP connects time out')[0]?.skill.name,'linux-network-engineering');
+ assert.equal(rankSkills(index,'The TLS handshake fails from the new subnet').length,0,'one acronym alone is still not a two-term match');
+});
