@@ -130,6 +130,28 @@ test('a per-task prefix is chained behind the shared examples so each skill eval
   assert.deepEqual(shape(), ['judge'], 'links that do not extend one another are never warmed');
 });
 
+test('a lost shared base checkpoint is detected while warming the per-task link and re-warmed next time', async () => {
+  const base = `Unique base preamble ${Date.now()} ${'example '.repeat(12)}\n`;
+  const taskA = `${base}Task: first task text\n`, taskB = `${base}Task: second task text\n`;
+  const bodies = [];
+  let serverHasBase = true;
+  const lm = L.createLocalLm({ runtime, fetch: async (_url, init) => {
+    const body = JSON.parse(init.body); bodies.push(body);
+    if (body.n_predict === 0) return new Response(JSON.stringify({ tokens_evaluated: body.prompt.length, timings: { cache_n: body.prompt === base ? 0 : serverHasBase ? base.length : 0 } }));
+    const response = JSON.parse(await probs(0.8, 0.2).text());
+    return new Response(JSON.stringify({ ...response, timings: { cache_n: body.prompt.length - 4 } }));
+  } });
+  const shape = () => bodies.splice(0).map(body => body.n_predict === 0 ? (body.prompt === base ? 'warm:base' : body.prompt === taskA ? 'warm:A' : 'warm:B') : 'judge');
+  await lm.judge(`${taskA}Skill one: d\nHelps:`, 'unit', { prefix: [base, taskA] });
+  assert.deepEqual(shape(), ['warm:base', 'warm:A', 'judge']);
+  serverHasBase = false;
+  await lm.judge(`${taskB}Skill one: d\nHelps:`, 'unit', { prefix: [base, taskB] });
+  assert.deepEqual(shape(), ['warm:B', 'judge'], 'the loss is only visible while warming task B');
+  serverHasBase = true;
+  await lm.judge(`${taskA}Skill two: d\nHelps:`, 'unit', { prefix: [base, taskA] });
+  assert.deepEqual(shape(), ['warm:base', 'judge'], 'the forgotten base is warmed again; the still-warm task link is not');
+});
+
 test('a cancelled judgement leaves the shared queue without being sent to the model', async () => {
   const sent = [];
   let release;

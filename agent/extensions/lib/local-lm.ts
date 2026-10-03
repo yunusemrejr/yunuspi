@@ -153,11 +153,19 @@ export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, sign
 
 /** Process a constant prompt prefix alone, once, so the server keeps a
  * context checkpoint exactly where the variable part begins. */
-export async function warmLocalLmPrefix(post: Post, prefix: string): Promise<void> {
+export async function warmLocalLmPrefix(post: Post, prefix: string, base?: string): Promise<void> {
 	let prefixes = prefixStates.get(post);
 	if (!prefixes) { prefixes = new Map(); prefixStates.set(post, prefixes); }
 	if (prefixes.has(prefix)) return;
-	const tokens = Number((await post({ prompt: prefix, n_predict: 0 }))?.tokens_evaluated);
+	const warmed = await post({ prompt: prefix, n_predict: 0 });
+	const tokens = Number(warmed?.tokens_evaluated);
+	// A chained prefix should have resumed from its base checkpoint. If the
+	// server reused less than the base's length, the base was lost (restart or
+	// eviction): forget it so the next call warms it again instead of paying
+	// for the shared preamble on every new task.
+	const baseTokens = base === undefined ? undefined : prefixes.get(base);
+	const reused = Number(warmed?.timings?.cache_n);
+	if (baseTokens !== undefined && Number.isFinite(reused) && reused < baseTokens) prefixes.delete(base!);
 	if (Number.isSafeInteger(tokens) && tokens > 0) {
 		if (prefixes.size >= 8) prefixes.delete(prefixes.keys().next().value!);
 		prefixes.set(prefix, tokens);
@@ -291,7 +299,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				// last, so each warm leaves a checkpoint exactly where the next begins.
 				const cacheable = longest !== undefined && longest.length >= 64 && prompt.length <= 12_000 && prompt.startsWith(longest)
 					&& chain.every((link, index) => index === 0 || link.startsWith(chain[index - 1]));
-				if (cacheable) for (const link of chain) await warmLocalLmPrefix(post, link);
+				if (cacheable) for (const [index, link] of chain.entries()) await warmLocalLmPrefix(post, link, chain[index - 1]);
 				const body = await post({ prompt, n_predict: 1, n_probs: options.nProbs ?? 10 });
 				controller.signal.throwIfAborted();
 				if (cacheable) noteLocalLmPrefixReuse(longest, body, post);
