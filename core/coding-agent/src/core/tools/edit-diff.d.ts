@@ -60,6 +60,7 @@ export interface AppliedEditsResult {
  * Unicode quotes/dashes normalized to ASCII).
  */
 export declare function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult;
+export declare function closestLinesHint(content: string, oldText: string): string;
 /**
  * Apply one or more exact-text replacements to LF-normalized content.
  *

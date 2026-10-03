@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.21.0 — 2026-10-03
+
+**A failed edit shows the file's nearest lines.** When `oldText` does not match, the error now includes the closest real lines (numbered, with a similarity percentage), anchored on the most distinctive old line, so a one-character slip is corrected in one step instead of a re-read. Real sessions had 67 such failures in two weeks, the most common single tool error.
 
 **Local judge latency.** Skill-relevance judgements share a chained prompt prefix (examples, then the task section), so each skill evaluates only its own text; a hybrid recurrent model can reuse a prefix only from a checkpoint, and the chain is what makes that checkpoint exist. Five skills are judged in about 2.0 s instead of about 3.4 s (measured end to end, same probabilities within noise). A superseded judgement is cancelled instead of occupying the single inference slot, and a lost shared base checkpoint is detected while warming the per-task link so the next call re-warms it.
 

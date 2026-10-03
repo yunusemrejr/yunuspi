@@ -179,11 +179,71 @@ function countOccurrences(content, oldText) {
     const fuzzyOldText = normalizeForFuzzyMatch(oldText);
     return fuzzyContent.split(fuzzyOldText).length - 1;
 }
-function getNotFoundError(path, editIndex, totalEdits) {
-    if (totalEdits === 1) {
-        return new Error(`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`);
+const bigrams = (text) => {
+    const grams = new Map();
+    for (let i = 0; i < text.length - 1; i++) {
+        const gram = text.slice(i, i + 2);
+        grams.set(gram, (grams.get(gram) ?? 0) + 1);
     }
-    return new Error(`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`);
+    return grams;
+};
+const dice = (a, b) => {
+    let shared = 0, total = 0;
+    for (const n of a.values())
+        total += n;
+    for (const n of b.values())
+        total += n;
+    for (const [gram, n] of a)
+        shared += Math.min(n, b.get(gram) ?? 0);
+    return total ? (2 * shared) / total : 0;
+};
+const HINT_MIN_SIMILARITY = 0.55;
+const HINT_MAX_LINES = 12;
+const HINT_MAX_FILE_LINES = 20000;
+const HINT_MAX_CHARS = 1400;
+/**
+ * The file's nearest lines to a failed oldText. A model that mistyped one
+ * character otherwise re-reads the whole file; the actual lines let it correct
+ * the edit in one step. Anchored on the most distinctive old line so a wrong
+ * indent or quote on the other lines cannot hide the match.
+ */
+export function closestLinesHint(content, oldText) {
+    const fileLines = content.split("\n");
+    if (fileLines.length > HINT_MAX_FILE_LINES)
+        return "";
+    const oldLines = oldText.split("\n");
+    let anchor = -1;
+    for (let i = 0; i < oldLines.length; i++) {
+        const len = oldLines[i].trim().length;
+        if (len >= 8 && (anchor < 0 || len > oldLines[anchor].trim().length))
+            anchor = i;
+    }
+    if (anchor < 0)
+        return "";
+    const target = bigrams(oldLines[anchor].trim());
+    let best = -1, bestScore = 0;
+    for (let i = 0; i < fileLines.length; i++) {
+        const line = fileLines[i].trim();
+        if (line.length < 4)
+            continue;
+        const score = dice(target, bigrams(line));
+        if (score > bestScore) {
+            best = i;
+            bestScore = score;
+        }
+    }
+    if (best < 0 || bestScore < HINT_MIN_SIMILARITY)
+        return "";
+    const count = Math.min(oldLines.length, HINT_MAX_LINES);
+    const start = Math.max(0, Math.min(best - Math.min(anchor, count - 1), fileLines.length - count));
+    const shown = fileLines.slice(start, start + count).map((line, i) => `${start + i + 1}: ${line}`).join("\n");
+    return ` Closest text in the file (lines ${start + 1}-${start + count}, ${Math.round(bestScore * 100)}% similar to your oldText):\n${shown.slice(0, HINT_MAX_CHARS)}`;
+}
+function getNotFoundError(path, editIndex, totalEdits, hint = "") {
+    if (totalEdits === 1) {
+        return new Error(`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.${hint}`);
+    }
+    return new Error(`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.${hint}`);
 }
 function getDuplicateError(path, editIndex, totalEdits, occurrences) {
     if (totalEdits === 1) {
@@ -277,7 +337,7 @@ export function applyEditsToNormalizedContent(normalizedContent, edits, path) {
         const edit = normalizedEdits[i];
         const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
         if (!matchResult.found) {
-            throw getNotFoundError(path, i, normalizedEdits.length);
+            throw getNotFoundError(path, i, normalizedEdits.length, closestLinesHint(normalizedContent, edit.oldText));
         }
         const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
         if (occurrences > 1) {
