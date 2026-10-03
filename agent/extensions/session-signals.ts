@@ -939,7 +939,7 @@ export function sysPromptHtml(snapshot: SysSnapshot): string {
   const headings: { id: string; text: string }[] = [];
   let fenced = false;
   const body = system.split("\n").map((line, index) => {
-    if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
+    if (/^\s*(?:\x60{3}|~~~)/.test(line)) fenced = !fenced;
     const heading = !fenced && headings.length < 80 ? /^#{1,3}\s+(\S.*?)\s*$/.exec(line) : null;
     if (!heading) return escapeHtml(line);
     headings.push({ id: `h${index}`, text: heading[1] });

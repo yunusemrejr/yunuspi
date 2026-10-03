@@ -1,4 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { generateCuratorPage } from "./curator-page.ts";
 import type { ProviderAvailability } from "./gemini-search.ts";
 import type { SummaryMeta } from "./summary-review.ts";
@@ -63,6 +66,21 @@ export interface CuratorServerHandle {
 	/** Reports browser connection state so a cancelled search can surface WHY it
 	 * went stale (e.g. the browser never connected). */
 	getConnectionState: () => { browserConnected: boolean; lastHeartbeatAgeMs: number };
+}
+
+let markedBundle: string | null | undefined;
+
+/** The installed marked UMD build, read once. The package's export map hides
+ * lib/, so the install directory is derived from its exported package.json. */
+function readMarkedBundle(): string | null {
+	if (markedBundle !== undefined) return markedBundle;
+	try {
+		const manifest = createRequire(import.meta.url).resolve("marked/package.json");
+		markedBundle = readFileSync(join(dirname(manifest), "lib", "marked.umd.js"), "utf8");
+	} catch {
+		markedBundle = null;
+	}
+	return markedBundle;
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -339,6 +357,25 @@ export function startCuratorServer(
 					"Cache-Control": "no-store",
 				});
 				res.end(pageHtml);
+				return;
+			}
+
+			// The summary view renders markdown with the harness's own copy of marked, so
+			// opening the page never reaches a CDN. A missing copy falls back to plain text.
+			if (method === "GET" && url.pathname === "/vendor/marked.js") {
+				if (url.searchParams.get("session") !== sessionToken) {
+					res.writeHead(403, { "Content-Type": "text/plain" });
+					res.end("Invalid session");
+					return;
+				}
+				const source = readMarkedBundle();
+				if (!source) {
+					res.writeHead(404, { "Content-Type": "text/plain" });
+					res.end("Unavailable");
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "private, max-age=3600" });
+				res.end(source);
 				return;
 			}
 

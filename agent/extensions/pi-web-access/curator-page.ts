@@ -53,10 +53,7 @@ export function generateCuratorPage(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Curate Search Results</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"><\/script>
+<script src="/vendor/marked.js?session=${encodeURIComponent(sessionToken)}"><\/script>
 <style>
 ${CSS}
 </style>
@@ -72,7 +69,6 @@ ${CSS}
 
 <main>
 <div class="hero" id="hero">
-<div class="hero-kicker">Web Search</div>
 <h1 class="hero-title">Searching\u2026</h1>
 <p class="hero-desc">Results will appear below as they complete.</p>
 <div class="hero-meta">
@@ -88,7 +84,7 @@ ${CSS}
 <div class="add-search" id="add-search">
 <span class="add-search-icon">+</span>
 <input type="text" placeholder="Add a search\u2026" id="add-search-input">
-<button type="button" class="add-search-wand" id="add-search-wand" disabled title="Rewrite query with AI">\u2728</button>
+<button type="button" class="add-search-wand" id="add-search-wand" disabled title="Rewrite query with AI">Rewrite</button>
 </div>
 
 <section class="summary-panel hidden" id="summary-panel" aria-label="Summary review">
@@ -215,9 +211,8 @@ const CSS = `
   --overlay-bg: rgba(24, 24, 30, 0.92);
   --success: #b5bd68;
   --warning: #f0c674;
-  --font: 'Outfit', system-ui, -apple-system, sans-serif;
-  --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
-  --font-mono: 'SF Mono', Consolas, monospace;
+  --font: system-ui, 'Segoe UI', 'Noto Sans', 'DejaVu Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
   --radius: 10px;
   --radius-sm: 6px;
 }
@@ -259,7 +254,6 @@ const CSS = `
 body {
   font-family: var(--font);
   background: var(--bg);
-  background-image: radial-gradient(ellipse at 50% 0%, var(--accent-muted) 0%, transparent 60%);
   color: var(--fg);
   line-height: 1.5;
   min-height: 100dvh;
@@ -348,21 +342,11 @@ main {
 }
 
 .hero { margin-bottom: 28px; }
-.hero-kicker {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--accent);
-  margin-bottom: 8px;
-}
 .hero-title {
-  font-family: var(--font-display);
-  font-size: 40px;
-  font-weight: 400;
-  font-style: italic;
-  letter-spacing: -0.01em;
-  line-height: 1.1;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
   color: var(--fg);
   margin-bottom: 10px;
   text-wrap: balance;
@@ -931,16 +915,18 @@ main {
 }
 .add-search-wand {
   flex-shrink: 0;
-  width: 26px;
   height: 26px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-muted);
   border-radius: 6px;
   background: transparent;
-  color: var(--fg-dim);
-  font-size: 14px;
+  color: var(--fg-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }

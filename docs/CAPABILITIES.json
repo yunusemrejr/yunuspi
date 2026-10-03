@@ -4091,9 +4091,21 @@
         "kind": "literal"
       },
       {
+        "name": "session_audit",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 1915,
+        "kind": "literal"
+      },
+      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
+        "kind": "literal"
+      },
+      {
+        "name": "session_self",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 1852,
         "kind": "literal"
       },
       {
@@ -4623,9 +4635,21 @@
         "kind": "literal"
       },
       {
+        "name": "session_audit",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 1915,
+        "kind": "literal"
+      },
+      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
+        "kind": "literal"
+      },
+      {
+        "name": "session_self",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 1852,
         "kind": "literal"
       },
       {
@@ -4952,10 +4976,10 @@
     ],
     "coverage": {
       "sourceFiles": 701,
-      "registrationSites": 83,
+      "registrationSites": 85,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 131,
-      "uniqueStableTools": 130,
+      "stableRegistrationRows": 133,
+      "uniqueStableTools": 132,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",

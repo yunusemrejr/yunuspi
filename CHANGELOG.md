@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+**Local judge latency.** Skill-relevance judgements share a chained prompt prefix (examples, then the task section), so each skill evaluates only its own text; a hybrid recurrent model can reuse a prefix only from a checkpoint, and the chain is what makes that checkpoint exist. Five skills are judged in about 2.0 s instead of about 3.4 s (measured end to end, same probabilities within noise). A superseded judgement is cancelled instead of occupying the single inference slot, and a lost shared base checkpoint is detected while warming the per-task link so the next call re-warms it.
+
+**Needle3 cold starts converge.** Embeddings are cached on disk (SQLite, WAL, keyed by the pinned model files and dimension, bounded retention) and written as soon as they are produced, and the worker declines to start a forward pass it expects to overrun the request deadline. A cold 12-candidate rank used to take 4.8-7.1 s against an 8 s ceiling and lose every vector on timeout; progress is now kept and the worker is no longer restarted for a soft deadline.
+
+**Expert work is recognised and staged.** The work gate that starts task pipelines and the Expert Director matched too few prompts (23 of 24 imperative requests such as "Model a lighthouse" or "Export the render" were missed); verbs and actions now qualify unless the prompt is a question. New domains, doctrine packs, critic lenses and pipelines cover 3D/Blender/Gaussian splats, SEO, LLM and ML systems, and multi-API automation. Technical acronyms of three letters survive skill-routing term extraction.
+
+**Fewer wrong or looping gate messages.** A rejected quality assessment names the one next call, and a blocked rejection points at `quality_review action "review"`.
+
+**Vector memory scans in bounded memory.** Semantic search streams rows through an exact heap top-k instead of materialising every candidate; truncation is still reported.
+
+**Jev/Kev second opinion.** When one judge answers with a small margin and no dominant option, the other model family is consulted and the two distributions are combined with a geometric opinion pool. Agreement keeps confidence and disagreement flattens it, so consumers fall back to local paths instead of acting on a coin flip. Cost is bounded by a token bucket.
+
+**Report windows are readable.** `/used`, `/errors`, `/commands` and `/sys-prompt` share one visual system with light and dark themes. The old text font stack listed an emoji family ahead of the generic fallback, so on Linux hosts without the first-listed fonts ordinary digits and spaces rendered from the emoji font ("2 0 2 6", gappy words); emoji are no longer used as icons either. `/used` leads with prompt-cache reuse and shows per-route reuse and the prompt token mix, `/commands` groups by source with a live filter, and `/sys-prompt` gains a heading outline, size estimate and copy button. The search curator no longer loads fonts or scripts from external hosts (markdown rendering uses the installed copy, served only for the session) and drops its italic display headline, eyebrow, glow and emoji button.
+
 ## 0.20.0 — 2026-10-02
 
 **Gaussian splatting now runs on ordinary hardware.** The LichtFeld Studio tools shipped in 0.19.0 required an NVIDIA GPU and could not run on the AMD-only development machine; they are retired (tombstoned in the manifest) and replaced by Brush (Apache-2.0, Rust + wgpu), which trains on any Vulkan driver including integrated AMD/Intel graphics. `splat_setup` installs the pinned 44 MB release with a checksum and reports the Vulkan preflight; `splat_train` validates COLMAP or transforms.json datasets (views, intrinsics, seed points, image sizes), trains headless with bounded steps and held-out evaluation views, and tiles each held-out truth beside its splat render in `fidelity-sheet.png`; `splat_preview` renders a point-cloud turntable of any splat PLY through the Blender worker. Measured on a Ryzen 5 7530U iGPU: 1500 steps on 48 views in about 20 s.
