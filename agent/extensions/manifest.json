@@ -126,6 +126,7 @@
     "intervention-session.ts",
     "intervention-shared.ts",
     "jev-client.ts",
+    "jev-fusion.ts",
     "local-intelligence.mjs",
     "local-lm-assets.mjs",
     "local-lm.ts",

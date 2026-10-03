@@ -55,6 +55,8 @@ async function boundedBody(response: Response, maxBytes = JEV_MAX_BODY_BYTES): P
   }
 }
 
+import { uncertainChoice, fuseAnswers } from "./jev-fusion.ts";
+
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
 export const JEV_PREFERRED_SLUGS = ["~typesafe/jev-latest", "typesafe/jev-1.13"];
@@ -130,6 +132,8 @@ export type JevAnswer = {
   confidence?: number;
   score?: number;
   legend?: Record<string, string>;
+  /** Present when a second judge was consulted and the answers were pooled (see jev-fusion.ts). */
+  fusion?: { models: [string, string]; agree: boolean };
 };
 
 /** Choice returns every option and a unit-sum distribution (TypeSafe's wire
@@ -219,6 +223,7 @@ export function resetJevClient(): void {
   nextFamily = "jev";
   for (const route of Object.values(routeHealth)) Object.assign(route, { retryAt: 0, active: 0, failures: 0 });
   stickySlug = undefined;
+  secondOpinionTokens = SECOND_OPINION_BURST; secondOpinionAt = 0;
   breakerOpen = false;
   breakerOpenedAt = 0;
   probeScheduled = false;
@@ -446,6 +451,8 @@ export type JevAskOpts = {
   signal?: AbortSignal;
   /** Top-level state fields the input fitter must never trim. */
   protect?: readonly string[];
+  /** Restrict the call to one judge family (used for the second opinion). */
+  family?: "jev" | "kev";
 };
 
 function knownSlugs(): string[] {
@@ -506,16 +513,67 @@ export async function askJev(
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
   const started = deps.now();
-  const result = await askJevShared(site, fitJevState(state, questions, { protect: opts.protect }), questions, opts);
+  const fitted = fitJevState(state, questions, { protect: opts.protect });
+  let result = await askJevShared(site, fitted, questions, opts);
+  let consensus: "agree" | "split" | undefined;
+  if (result.ok && !opts.family) {
+    const second = await secondOpinion(site, fitted, questions, opts, result);
+    if (second) { result = second.result; consensus = second.split ? "split" : "agree"; }
+  }
   // Report every caller's result in its session scope, including admission
   // failures which never reached the transient transport/footer indicator.
   // Only the controlled reason is emitted: state and provider errors stay out.
   try {
     sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(result.ok ? "ml.jev.used" : "ml.jev.skipped", result.ok
-      ? { count: 1, cached: result.usage.cached, route: result.usage.model, durationMs: result.usage.ms, questions: Object.keys(questions).length }
+      ? { count: 1, cached: result.usage.cached, route: result.usage.model, durationMs: result.usage.ms, questions: Object.keys(questions).length, ...(consensus ? { consensus } : {}) }
       : { count: 1, reason: result.skipped, site: site.slice(0, 40), durationMs: Math.max(0, deps.now() - started) });
   } catch { /* optional visibility */ }
   return result;
+}
+
+/** Second opinions are an accuracy tool for genuinely uncertain choices, not
+ * a default doubling of paid traffic: a small token bucket (6, refilling one
+ * per 20 s) bounds the extra calls, and PI_JEV_SECOND_OPINION=off disables it. */
+const SECOND_OPINION_BURST = 6, SECOND_OPINION_REFILL_MS = 20_000;
+let secondOpinionTokens = SECOND_OPINION_BURST, secondOpinionAt = 0;
+const secondOpinionEnabled = (env: Record<string, string | undefined> = process.env): boolean => !/^(?:0|off|false|no)$/i.test(env.PI_JEV_SECOND_OPINION ?? "");
+function takeSecondOpinionToken(): boolean {
+  const now = deps.now();
+  if (secondOpinionAt === 0) secondOpinionAt = now;
+  const refill = Math.floor((now - secondOpinionAt) / SECOND_OPINION_REFILL_MS);
+  if (refill > 0) { secondOpinionTokens = Math.min(SECOND_OPINION_BURST, secondOpinionTokens + refill); secondOpinionAt += refill * SECOND_OPINION_REFILL_MS; }
+  if (secondOpinionTokens < 1) return false;
+  secondOpinionTokens--;
+  return true;
+}
+
+/** Ask the other judge family when a `choice` answer is too close to act on,
+ * then pool both distributions (see jev-fusion.ts). Any failure, cancellation
+ * or incompatibility keeps the first judge's answer untouched. */
+async function secondOpinion(
+  site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts,
+  first: Extract<JevAskResult, { ok: true }>,
+): Promise<{ result: Extract<JevAskResult, { ok: true }>; split: boolean } | undefined> {
+  if (!secondOpinionEnabled() || opts.signal?.aborted) return undefined;
+  const uncertain = Object.entries(questions).some(([name, question]) => (question as { type?: unknown } | null)?.type === "choice" && uncertainChoice(first.answers[name]));
+  if (!uncertain) return undefined;
+  const other = first.usage.model.includes(KEV_SLUG) ? "jev" : "kev";
+  if (!takeSecondOpinionToken()) return undefined;
+  let second: JevAskResult;
+  try { second = await askJevShared(site, state, questions, { ...opts, family: other }); }
+  catch { return undefined; }
+  if (!second.ok || opts.signal?.aborted) return undefined;
+  const fused = fuseAnswers(first.answers, second.answers, [first.usage.model, second.usage.model]);
+  if (!fused.fused) return undefined;
+  const costUsd = first.usage.costUsd === undefined || second.usage.costUsd === undefined ? undefined : first.usage.costUsd + second.usage.costUsd;
+  return {
+    split: fused.split > 0,
+    result: { ok: true, answers: fused.answers, usage: {
+      model: `${first.usage.model}+${second.usage.model}`,
+      inputTokens: first.usage.inputTokens + second.usage.inputTokens,
+      costUsd, ms: first.usage.ms + second.usage.ms, cached: first.usage.cached && second.usage.cached,
+    } },
+  };
 }
 
 async function askJevShared(site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
@@ -538,7 +596,7 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
         : value);
     [state, questions] = JSON.parse(serialized);
-    identity = createHash('sha256').update(serialized).digest('hex');
+    identity = createHash('sha256').update(serialized).update(`\0${opts.family ?? ''}`).digest('hex');
   } catch { return {ok:false,skipped:'invalid-input'}; }
   let entry=inflight.get(identity);
   if (!entry) {
@@ -628,7 +686,7 @@ async function askJevOnce(
   const started = deps.now();
   // Known-good and preferred routes need no catalog request. Discover other
   // aliases only after all known ones explicitly reject the requested model.
-  const ordered = knownSlugs();
+  const ordered = knownSlugs().filter(slug => !opts.family || (opts.family === "kev") === (slug === KEV_SLUG));
   for (const slug of ordered) {
     const hit = cacheGet(cacheKey(slug, state, questions));
     if (hit) {
@@ -649,11 +707,12 @@ async function askJevOnce(
   const epoch = generation;
   // Cache hits above do not advance traffic. Equal-load healthy families
   // alternate; a recovering route admits only one probationary request.
-  const eligible = families.filter(family => routeHealth[family].retryAt <= deps.now()
+  const eligible = families.filter(family => (!opts.family || family === opts.family) && routeHealth[family].retryAt <= deps.now()
     && !(routeHealth[family].retryAt && routeHealth[family].active));
   eligible.sort((a, b) => routeHealth[a].active - routeHealth[b].active || (a === nextFamily ? -1 : 1));
   if (!eligible.length) return { ok: false, skipped: "unhealthy" };
-  nextFamily = eligible[0] === "jev" ? "kev" : "jev";
+  // A forced second opinion must not disturb the alternation of ordinary traffic.
+  if (!opts.family) nextFamily = eligible[0] === "jev" ? "kev" : "jev";
   for (const family of eligible) {
     if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
     const route = routeHealth[family];

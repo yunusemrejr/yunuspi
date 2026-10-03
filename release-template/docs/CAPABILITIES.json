@@ -4975,7 +4975,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 699,
+      "sourceFiles": 700,
       "registrationSites": 85,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 133,
@@ -5506,6 +5506,10 @@
       },
       {
         "path": "agent/extensions/lib/jev-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/jev-fusion.ts",
         "exists": true
       },
       {

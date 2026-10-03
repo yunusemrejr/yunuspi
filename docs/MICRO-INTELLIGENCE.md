@@ -308,6 +308,24 @@ by lexical overlap. Valid catalog choices or clear no-fit judgments over the
 complete catalog avoid that launch; a no-fit over a shortlist, and uncertainty,
 keep the bounded original fallback.
 
+**Second opinion (consensus or abstain).** A `choice` answer is a full
+unit-sum distribution. When it is genuinely uncertain (best-versus-runner-up
+margin under 0.25 and best probability under 0.7), the client asks the *other*
+family once and pools the two distributions with a geometric opinion pool,
+`f_i ∝ sqrt(p1_i · p2_i)`, after a 2% floor so neither judge can veto an option
+with a hard zero. Equal weights summing to one make this a consensus rule, not a
+sharpener: agreement keeps the shared confidence, disagreement flattens the
+distribution, so the usual top-probability and margin floors reject a split
+decision and consumers fall back to their local paths. The pooled answer still
+satisfies the choice contract and carries `fusion: { models, agree }`; existence
+answers pool in logit space and scores average. Decisive answers, existence-only
+and score-only questions never trigger a second call. Both judgments are cached
+independently, a failed or cancelled second call returns the first answer
+untouched, a small token bucket (6 burst, one refill per 20 s) bounds the extra
+spend, and `PI_JEV_SECOND_OPINION=off` disables it. No pooling weight is fitted:
+the benefit depends on the two judges making partly independent errors, which has
+not been measured on YunusPi tasks.
+
 Preferred working routes and exact-input cache hits avoid model-catalog discovery.
 Only model rejections trigger catalog fallback. Cancelled, malformed and over-budget
 inputs stop before another judgment; the serialized state/question budget is 32 KiB.

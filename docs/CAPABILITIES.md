@@ -1638,6 +1638,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/intervention-session.ts`](../agent/extensions/lib/intervention-session.ts)
 - [`agent/extensions/lib/intervention-shared.ts`](../agent/extensions/lib/intervention-shared.ts)
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts)
+- [`agent/extensions/lib/jev-fusion.ts`](../agent/extensions/lib/jev-fusion.ts)
 - [`agent/extensions/lib/local-intelligence.mjs`](../agent/extensions/lib/local-intelligence.mjs)
 - [`agent/extensions/lib/local-lm-assets.mjs`](../agent/extensions/lib/local-lm-assets.mjs)
 - [`agent/extensions/lib/local-lm.ts`](../agent/extensions/lib/local-lm.ts)
