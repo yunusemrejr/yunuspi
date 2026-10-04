@@ -256,10 +256,22 @@ export function validateObserverAdvice(text: string, packet: ObserverPacket, ext
   }
   const uncited = Boolean(value.note) && value.evidence.length === 0;
   // Advice may refer to observations but must not copy sizeable prompt/thinking
-  // spans into a visible status note. This is a literal leak check, not semantics.
+  // spans into a visible status note. This is a literal leak check, not semantics:
+  // a copied span is cut out and the rest of the paid advice is kept; a note that
+  // was little more than the copy is refused.
+  const copied = new Uint8Array(value.note.length);
   for (const row of packet.evidence.filter(x => x.kind === 'user request' || x.kind === 'provider-returned thinking')) {
     const protectedText = row.text.replace(/\s+/g, ' ');
-    for (let offset = 0; offset + 48 <= protectedText.length; offset++) if (value.note.includes(protectedText.slice(offset, offset + 48))) return invalid('note copies protected prompt or reasoning text');
+    for (let offset = 0; offset + 48 <= protectedText.length; offset++) {
+      const window = protectedText.slice(offset, offset + 48);
+      for (let at = value.note.indexOf(window); at >= 0; at = value.note.indexOf(window, at + 1)) copied.fill(1, at, at + 48);
+    }
+  }
+  if (copied.includes(1)) {
+    let kept = '';
+    for (let i = 0; i < value.note.length; i++) if (!copied[i]) kept += value.note[i]; else if (!copied[i - 1]) kept += '[…]';
+    value.note = kept.replace(/\s+/g, ' ').trim();
+    if (value.note.replace(/\[…\]/g, '').replace(/[^\p{L}\p{N}]+/gu, '').length < 40) return invalid('note copies protected prompt or reasoning text');
   }
   // Book fields exist only when the packet carried a book. Citations are
   // claims and must be exact; reading requests and strikes are requests and

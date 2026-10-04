@@ -57,6 +57,11 @@ test('observer packet and validated advice are bounded, cited, catalog-specific 
   const bounded = buildObserverPacket('task '.repeat(5000), [{ id: 't', kind: 'provider-returned thinking', text: thinking }], Array.from({length:1000},(_,i)=>({name:`tool${i}`,description:'task '.repeat(100)})), []);
   assert.ok(bounded.text.length <= 10000); assert.ok(bounded.evidence[1].text.length <= 450);
   assert.equal(parseObserverAdvice(JSON.stringify({note:thinking.slice(-80),evidence:['t'],tools:[],skills:[]}),bounded),undefined);
+  const advice = 'Run the parser tests after the change and compare the failing case with the fixture before closing.';
+  const quoted = parseObserverAdvice(JSON.stringify({note:`${advice} The model thought: ${thinking.slice(-80)}`,evidence:['t'],tools:[],skills:[]}),bounded);
+  assert.ok(quoted, 'paid advice survives a copied span');
+  assert.ok(quoted.note.startsWith(advice) && quoted.note.includes('[…]'));
+  assert.ok(!quoted.note.includes('private exposed reasoning fragment A private'), 'the copied span is cut out');
 });
 
 test('observer recovers presentation differences but requires actual packet evidence and advertised capabilities', () => {
