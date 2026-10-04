@@ -98,6 +98,16 @@ A mid-range phone holds 60 fps, or degrades resolution before features: cap the 
 | page feels like a template | signature chosen before the subject | redo step 2, apply the swap test |
 | animation fights itself | two systems own one property | one timeline owner per property |
 
+## 10. Apps that are not web pages
+
+The procedure is the same: level, a signature from the subject's world, baseline first, layers, fallbacks, verify rendered.
+
+- **Electron, Tauri or any webview** is a web page; use everything above and judge the real window with `desktop_session` as well as the renderer's HTML with `render_see`.
+- **GTK, Qt, Flutter, Tk:** the signature becomes a custom-painted widget (a world, a live model of the product, a character) on the toolkit's own canvas (Cairo drawing area, QML Canvas or shader effects, Flutter `CustomPainter`), animated with the toolkit's own animation system. Everything that is not the signature keeps platform conventions: menus, shortcuts, focus order, follow-system dark and light, HiDPI.
+- **Fallbacks:** honor the platform's animations-off setting with a still frame, and keep every pointer path keyboard reachable.
+- **Idle means idle:** no continuous repaint when the signature is hidden or the window is minimized.
+- **Verify:** `desktop_session` launch, `wait` for the window, `screenshot` at two window sizes and in both color schemes, then drive it with the keyboard first and look again; judge the signature at rest and in one reaction.
+
 ## Files
 
 - `scripts/palette.mjs`: `node palette.mjs --hue 165 --mood deep --bias cool --harmony split --dark` prints CSS tokens and a contrast report; `--json` for data. It flags the two house-default looks unless you pass `--allow-default`.
