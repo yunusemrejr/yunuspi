@@ -182,3 +182,19 @@ test('pptx: LibreOffice renders every slide the builder wrote', { timeout: 240_0
   const stagingRoot = fs.mkdtempSync(path.join(os.homedir(), 'yunuspi-stage-test-'));
   try { const rendered = await renderOffice(file, out, { pages: 0, stagingRoot }); assert.equal(rendered.pageCount, 3); } finally { fs.rmSync(stagingRoot, { recursive: true, force: true }); }
 });
+
+test('pptx: numbered steps become real automatic numbers, and the numbering continues on follow-on slides', () => {
+  const run = (slide) => slideXml(entries(build({ slides: [slide] }).buffer));
+  const [steps] = run({ title: 'Steps', bullets: ['1. Record', '2) Structure', '3. Redline'] });
+  assert.deepEqual([...steps.matchAll(/buAutoNum type="arabicPeriod" startAt="(\d+)"/g)].map(m => m[1]), ['1', '2', '3']);
+  assert.doesNotMatch(steps, /buChar/); assert.match(steps, /<a:t>Record<\/a:t>/); assert.doesNotMatch(steps, /<a:t>\d[.)] /, 'the typed prefix is replaced by the automatic number');
+  assert.doesNotMatch(run({ title: 'Mixed', bullets: ['1. one', 'two', 'three'] })[0], /buAutoNum/, 'a list that is only partly numbered stays a bullet list');
+  const [forced] = run({ title: 'Forced', numbered: true, bullets: ['a', ['sub'], 'b'] });
+  assert.deepEqual([...forced.matchAll(/startAt="(\d+)"/g)].map(m => m[1]), ['1', '2'], 'sub-bullets keep their dash, the top level counts');
+  const long = Array.from({ length: 30 }, (_, i) => `${i + 1}. Step ${i + 1} with enough words to fill a line and then some more words`);
+  const slides = run({ title: 'Many', bullets: long });
+  assert.ok(slides.length > 1);
+  assert.deepEqual(slides.flatMap(xml => [...xml.matchAll(/startAt="(\d+)"/g)].map(m => Number(m[1]))), Array.from({ length: 30 }, (_, i) => i + 1));
+  const columns = run({ title: 'Two', numbered: true, columns: [{ heading: 'A', bullets: ['x', 'y'] }, { heading: 'B', bullets: ['p', 'q'] }] })[0];
+  assert.deepEqual([...columns.matchAll(/startAt="(\d+)"/g)].map(m => m[1]), ['1', '2', '1', '2'], 'each column counts from one');
+});

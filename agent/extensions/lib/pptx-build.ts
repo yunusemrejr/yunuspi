@@ -14,7 +14,7 @@ import { XML_HEAD, REL, REL_NS, coreProps, appProps, hexColor, fontName, describ
 export type PptxItem = string | { text: string; level?: number; items?: PptxItem[]; children?: PptxItem[] } | PptxItem[];
 export type PptxSlide = {
   layout?: "title" | "section" | "bullets" | "columns" | "image" | "table" | "quote" | "text";
-  title?: string; subtitle?: string; notes?: string;
+  title?: string; subtitle?: string; notes?: string; numbered?: boolean;
   bullets?: PptxItem | PptxItem[]; items?: PptxItem | PptxItem[]; text?: string;
   columns?: Array<{ heading?: string; title?: string; bullets?: PptxItem | PptxItem[]; items?: PptxItem | PptxItem[] }>;
   left?: PptxItem | PptxItem[] | { heading?: string; bullets?: PptxItem | PptxItem[] }; right?: PptxItem | PptxItem[] | { heading?: string; bullets?: PptxItem | PptxItem[] };
@@ -61,11 +61,11 @@ function lineCount(text: string, size: number, widthPt: number, bold = false): n
 }
 const plain = (text: string) => inlineRuns(text).map(run => run.text).join("");
 
-type Item = { text: string; level: number };
+type Item = { text: string; level: number; prefixed?: boolean; number?: number };
 function flatten(value: unknown, level = 0, out: Item[] = [], depth = 0): Item[] {
   if (value === undefined || value === null || depth > 8 || out.length > PPTX_LIMITS.items * 4) return out;
   if (typeof value === "string") {
-    for (const line of clean(value).split("\n")) { const text = line.replace(/^\s*(?:[-*•–]|\d+[.)])\s+/, "").trim(); if (text) out.push({ text, level }); }
+    for (const line of clean(value).split("\n")) { const text = line.replace(/^\s*(?:[-*•–]|\d+[.)])\s+/, "").trim(); if (text) out.push({ text, level, ...(/^\s*\d+[.)]\s/.test(line) ? { prefixed: true } : {}) }); }
   } else if (typeof value === "number" || typeof value === "boolean") out.push({ text: String(value), level });
   else if (Array.isArray(value)) for (const entry of value) flatten(entry, Array.isArray(entry) ? Math.min(level + 1, 2) : level, out, depth + 1);
   else if (typeof value === "object") {
@@ -78,13 +78,20 @@ function flatten(value: unknown, level = 0, out: Item[] = [], depth = 0): Item[]
 }
 
 const levelSize = (size: number, level: number) => Math.max(size - 2 * level, 12);
-const marginOf = (level: number) => 0.3 + 0.4 * level;
+const marginOf = (level: number, numbered = false) => (numbered ? 0.5 : 0.3) + 0.4 * level;
+/** A list whose top-level items all carry 1. 2. 3. prefixes (or a slide marked numbered) is a numbered list: the prefixes become automatic numbers. */
+function numberItems(items: Item[], force = false): Item[] {
+  const top = items.filter(item => item.level === 0);
+  if (!force && !(top.length >= 2 && top.every(item => item.prefixed))) return items;
+  let n = 0; for (const item of top) item.number = ++n;
+  return items;
+}
 /** Height in inches of a bullet list at `size` points inside a box `widthIn` wide. */
 function listHeight(items: Item[], size: number, widthIn: number): number {
   let points = 0;
   for (const item of items) {
     const own = levelSize(size, item.level);
-    points += lineCount(plain(item.text), own, (widthIn - marginOf(item.level)) * 72) * own * 1.2 + own * 0.45;
+    points += lineCount(plain(item.text), own, (widthIn - marginOf(item.level, item.number !== undefined)) * 72) * own * 1.2 + own * 0.45;
   }
   return points / 72;
 }
@@ -143,8 +150,9 @@ export function buildPptx(spec: PptxSpec, readImage: (path: string) => Buffer, n
   }).join("");
   const paragraph = (value: string, size: number, color: string, ctx: Context, options: { bullet?: Item; algn?: "l" | "ctr" | "r"; bold?: boolean; italic?: boolean; after?: number } = {}) => {
     const level = options.bullet?.level ?? 0, own = options.bullet ? levelSize(size, level) : size;
-    const indent = options.bullet ? emu(0.3) : 0, left = options.bullet ? emu(marginOf(level)) : 0;
-    const bullet = options.bullet ? `<a:buClr><a:srgbClr val="${accent}"/></a:buClr><a:buFont typeface="Arial"/><a:buChar char="${level ? "–" : "•"}"/>` : "<a:buNone/>";
+    const counted = options.bullet?.number !== undefined;
+    const indent = options.bullet ? emu(counted ? 0.5 : 0.3) : 0, left = options.bullet ? emu(marginOf(level, counted)) : 0;
+    const bullet = options.bullet ? `<a:buClr><a:srgbClr val="${accent}"/></a:buClr>${counted ? `<a:buFont typeface="+mj-lt"/><a:buAutoNum type="arabicPeriod" startAt="${options.bullet!.number}"/>` : `<a:buFont typeface="Arial"/><a:buChar char="${level ? "–" : "•"}"/>`}` : "<a:buNone/>";
     return `<a:p><a:pPr marL="${left}" indent="${-indent}" algn="${options.algn ?? "l"}"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="${Math.round(own * (options.after ?? 0.45) * 100)}"/></a:spcAft>${bullet}</a:pPr>${runs(inlineRuns(value), own, color, ctx, options)}</a:p>`;
   };
   const frameXml = (f: Frame) => `<a:xfrm><a:off x="${emu(f.x)}" y="${emu(f.y)}"/><a:ext cx="${emu(f.w)}" cy="${emu(f.h)}"/></a:xfrm>`;
@@ -228,7 +236,7 @@ export function buildPptx(spec: PptxSpec, readImage: (path: string) => Buffer, n
     const pageTitle = (page: number, total: number) => page ? `${title || "Slide"} (${page + 1}/${total})` : title;
 
     if (kind === "bullets") {
-      const items = flatten(slide.bullets ?? slide.items); if (items.length > PPTX_LIMITS.items) throw new Error(`${label}: at most ${PPTX_LIMITS.items} bullets per slide`);
+      const items = numberItems(flatten(slide.bullets ?? slide.items), slide.numbered === true); if (items.length > PPTX_LIMITS.items) throw new Error(`${label}: at most ${PPTX_LIMITS.items} bullets per slide`);
       if (!items.length && slide.text) items.push(...flatten(clean(slide.text).split(/\n{2,}/)));
       const { size, chunks } = fitList(items, BODY.w, BODY.h, [28, 26, 24, 22, 20], 20);
       if (chunks.length > 1) { split += chunks.length - 1; warnings.push(`${label}: ${items.length} bullets do not fit at a readable size, so they continue over ${chunks.length} slides`); }
@@ -262,7 +270,7 @@ export function buildPptx(spec: PptxSpec, readImage: (path: string) => Buffer, n
       const columns = (raw as unknown[]).slice(0, PPTX_LIMITS.columns).map(entry => {
         const value = entry as { heading?: string; title?: string; bullets?: unknown; items?: unknown } | unknown[] | string;
         const isObject = value && typeof value === "object" && !Array.isArray(value);
-        return { heading: isObject ? clean((value as any).heading ?? (value as any).title ?? "").trim() : "", items: flatten(isObject ? ((value as any).bullets ?? (value as any).items) : value) };
+        return { heading: isObject ? clean((value as any).heading ?? (value as any).title ?? "").trim() : "", items: numberItems(flatten(isObject ? ((value as any).bullets ?? (value as any).items) : value), slide.numbered === true) };
       });
       if (columns.length < 2 || columns.length > 4) throw new Error(`${label}: layout columns needs two to four columns`);
       const gap = 0.5, colW = (CW - gap * (columns.length - 1)) / columns.length, hasHeading = columns.some(column => column.heading), headH = hasHeading ? 0.6 : 0;
@@ -287,7 +295,7 @@ export function buildPptx(spec: PptxSpec, readImage: (path: string) => Buffer, n
     if (kind === "image") {
       const image = typeof slide.image === "string" ? { path: slide.image } : slide.image;
       if (!image?.path) throw new Error(`${label}: layout image needs image.path`);
-      const items = flatten(slide.bullets ?? slide.items), caption = clean((image as any).caption ?? "").replace(/\s+/g, " ").trim();
+      const items = numberItems(flatten(slide.bullets ?? slide.items), slide.numbered === true), caption = clean((image as any).caption ?? "").replace(/\s+/g, " ").trim();
       const ctx = slideContext(), gap = 0.5, side = items.length > 0;
       const textBox: Frame = { x: M, y: BODY.y, w: side ? CW * 0.42 : CW, h: BODY.h };
       const picBox: Frame = side ? { x: M + CW * 0.42 + gap, y: BODY.y, w: CW * 0.58 - gap, h: BODY.h - (caption ? 0.5 : 0) } : { x: M, y: BODY.y, w: CW, h: BODY.h - (caption ? 0.5 : 0) };

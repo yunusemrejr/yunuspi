@@ -85,6 +85,10 @@ test('office_doc convert: rules apply before any conversion, and a workbook beco
   assert.deepEqual(csv.details.files.map(f => f.path).sort(), ['book-North.csv', 'book-South.csv']);
   assert.match(fs.readFileSync(path.join(dir, 'book-North.csv'), 'utf8'), /Item,Qty\s+a,1\s+b,2/);
   assert.match(csv.details.note, /one csv per sheet/);
+  fs.writeFileSync(path.join(dir, 'solo.xlsx'), buildXlsx({ sheets: [{ name: 'Prices', columns: [{ header: 'SKU' }, { header: 'Price', format: 'decimal' }], rows: [['A1', 0.25]] }] }).buffer);
+  const solo = await h.run('office_doc', { action: 'convert', path: 'solo.xlsx', to: 'csv', outPath: 'prices.csv' }, ctx);
+  assert.deepEqual(solo.details.files.map(f => f.path), ['prices.csv'], 'a single sheet is named exactly as asked, without a sheet suffix');
+  assert.match(fs.readFileSync(path.join(dir, 'prices.csv'), 'utf8'), /SKU,Price\s+A1,0\.25/);
 });
 
 test('office_doc read: a legacy file without LibreOffice fails with the way forward', async (t) => {

@@ -84,7 +84,8 @@ export async function convertOffice(file: string, to: string, outDir: string, op
   try {
     const names = fs.readdirSync(run.staging).filter(name => name !== "profile" && name.startsWith("input") && name.endsWith(`.${target.extension}`) && fs.statSync(path.join(run.staging, name)).size > 0).sort();
     if (!names.length) throw new Error("LibreOffice finished without producing the converted file (the file may be damaged, password-protected or not convertible to this format)");
-    const files = names.map(name => path.join(outDir, name === `input.${target.extension}` ? `${base}.${target.extension}` : `${base}-${name.slice("input-".length, -(target.extension.length + 1)) || name}.${target.extension}`));
+    // One file is named after the base; a workbook with several sheets becomes one file per sheet, named base-Sheet.
+    const files = names.map(name => path.join(outDir, names.length === 1 || name === `input.${target.extension}` ? `${base}.${target.extension}` : `${base}-${name.slice("input-".length, -(target.extension.length + 1))}.${target.extension}`));
     names.forEach((name, at) => fs.copyFileSync(path.join(run.staging, name), files[at]));
     return { files, engine: run.engine };
   } finally { run.cleanup(); }

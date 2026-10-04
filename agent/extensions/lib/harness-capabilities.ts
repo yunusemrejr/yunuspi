@@ -996,7 +996,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		tools: ["office_doc", "deliverable_check", "render_see", "video_frames", "audio_analyze", "data_query"],
 		options: [
 			option("action", "office_doc operation.", ["read", "verify", "build", "render", "convert"]),
-			option("spec", "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, columns, image, table, quote, text, notes}]}."),
+			option("spec", "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, numbered, columns, image, table, quote, text, notes}]}."),
 			option("to", "convert: the format to write (docx, xlsx, pptx, pdf, odt, ods, odp, doc, xls, ppt, rtf, txt, html, csv); outPath chooses the destination inside the workspace, overwrite:true replaces an existing file."),
 			option("pdfPath", "render: also save the PDF at this path inside the workspace and check it; with pages 0 the Office file becomes a checked PDF in one call."),
 			option("paths", "deliverable_check files (1 to 8, relative to the working directory or absolute)."),
