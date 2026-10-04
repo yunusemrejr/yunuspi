@@ -2716,7 +2716,7 @@
         },
         {
           "name": "spec",
-          "summary": "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, columns, image, table, quote, text, notes}]}."
+          "summary": "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, numbered, columns, image, table, quote, text, notes}]}."
         },
         {
           "name": "to",
@@ -6797,6 +6797,10 @@
       },
       {
         "path": "agent/scripts/scene-runtime.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/skill-mirrors.mjs",
         "exists": true
       },
       {

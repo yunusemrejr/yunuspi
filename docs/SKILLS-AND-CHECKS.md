@@ -12,6 +12,10 @@ Delivery remains capped at two hints at a time, with a small initial allowance
 that grows during sustained work. Duplicate, already-read and unavailable skills
 do not consume the queue. Suggestions are not evidence that a skill was read.
 
+## Your own skill folders win over the shipped skills
+
+A folder listed under `skills` in `settings.json` (for example `~/skills`) is loaded before the shipped catalogue, and when a skill has the same name in both, your copy wins without a warning. That is deliberate, so a customized skill is never overwritten. The cost is that a copy made earlier keeps hiding every later improvement to the shipped skill, including tool names that changed: on one machine 37 copies of an older library told the model to run raw `ffmpeg` and `libreoffice` while the shipped skills named `media_edit`, `audio_analyze` and `office_doc`. `node scripts/skill-mirrors.mjs` lists the skills whose copy under your own paths differs from the shipped one and what differs, `--json` prints the same as data, and `--apply` brings them in step: the original directories are copied to `backups/skill-mirrors-<time>/` first, shipped files overwrite files of the same name, and files only you have and skills the harness does not ship are left alone. `verify-harness` prints the same finding as an informational line, so it is not a failure when a difference is intended.
+
 ## Read and apply relevant workflows
 
 The reminders owner selects up to three available workflows from deterministic

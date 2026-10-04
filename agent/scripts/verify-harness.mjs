@@ -17,6 +17,7 @@ import * as path from "node:path";
 import * as nodeModule from "node:module";
 import { activePiProcesses } from "./core-update.mjs";
 import { resolveOwnedCore } from "./lib/owned-core.mjs";
+import { findShadowed } from "./skill-mirrors.mjs";
 
 // WHY promisified execFile over a hand-rolled spawn wrapper: the runtime
 // already gives timeout (SIGTERM after N ms), maxBuffer output capping, and
@@ -715,6 +716,18 @@ async function main() {
     }
   } catch (e) {
     bad(`skill prune failed: ${String(e.message ?? e)}`);
+  }
+  // Skills under the user's own paths win over the shipped copies by design, so an older copy hides every later
+  // improvement to the shipped skill. Informational: a customized skill is a legitimate reason to differ.
+  try {
+    const shadowed = findShadowed({ agentDir: AGENT_DIR, home: HOME });
+    if (shadowed.length === 0) ok("no skill under your own skill paths hides a different shipped copy");
+    else
+      info(
+        `${shadowed.length} skill(s) under your own skill paths win over a different shipped copy (${shadowed.slice(0, 6).map((entry) => entry.name).join(", ")}${shadowed.length > 6 ? ", …" : ""}); review with node ${path.join(AGENT_DIR, "scripts", "skill-mirrors.mjs")}, refresh with --apply (originals are backed up)`,
+      );
+  } catch (e) {
+    info(`skill shadow check skipped: ${String(e.message ?? e)}`);
   }
 
   // ── 8. harness-backup command (script + extension survive updates) ────

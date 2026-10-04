@@ -595,6 +595,7 @@
     "extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js",
     "scripts/sandbox-runner.py",
     "scripts/core-update.mjs",
+    "scripts/skill-mirrors.mjs",
     "scripts/pi-launch.sh",
     "scripts/process-owner.sh",
     "scripts/auto-update.sh",

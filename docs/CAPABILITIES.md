@@ -1141,7 +1141,7 @@ Read, build, verify and render Office files with no office suite, and open any p
 **Options:**
 
 - `action`: office_doc operation. Values: `read`, `verify`, `build`, `render`, `convert`.
-- `spec`: build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, columns, image, table, quote, text, notes}]}.
+- `spec`: build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer}, xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]} (strings starting with = are formulas) or pptx {title, size, font, accent, dark, footer, slides:[{title, subtitle, bullets, numbered, columns, image, table, quote, text, notes}]}.
 - `to`: convert: the format to write (docx, xlsx, pptx, pdf, odt, ods, odp, doc, xls, ppt, rtf, txt, html, csv); outPath chooses the destination inside the workspace, overwrite:true replaces an existing file.
 - `pdfPath`: render: also save the PDF at this path inside the workspace and check it; with pages 0 the Office file becomes a checked PDF in one call.
 - `paths`: deliverable_check files (1 to 8, relative to the working directory or absolute).
@@ -1959,6 +1959,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/sandbox-runner.py`](../agent/scripts/sandbox-runner.py)
 - [`agent/scripts/scene-model.mjs`](../agent/scripts/scene-model.mjs)
 - [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
+- [`agent/scripts/skill-mirrors.mjs`](../agent/scripts/skill-mirrors.mjs)
 - [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
 - [`agent/scripts/transaction.mjs`](../agent/scripts/transaction.mjs)
 - [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs)
