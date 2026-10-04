@@ -271,7 +271,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		reset();
 		primary = keepAutomatic ? previousPrimary : ctx.model;
 		if (keepAutomatic) { automaticRoute = previousAutomatic; endpointSelected = previousEndpoint; restorePrimary = true; }
-		prompt = event.text;
+		prompt = typeof event.originalText === "string" ? event.originalText : event.text;
 	});
 	for (const name of ["session_shutdown", "session_before_switch", "session_before_fork", "session_before_tree"]) on(name, () => { reset(); primary = undefined; prompt = ""; });
 	on("model_select", (event) => {

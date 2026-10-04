@@ -53,9 +53,17 @@ const clip = (text: string, max = MAX_TEXT) => {
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
+/** Long prompts reach the model verbatim (the offload system was retired for that reason), so a goal keeps its
+ * text as typed, line breaks included; only a runaway paste is bounded. Short forms below are for display. */
+export const MAX_GOAL_TEXT = 20_000;
+const verbatim = (text: string) => {
+	const raw = String(text ?? "").replace(/\r\n?/g, "\n").trim();
+	return raw.length > MAX_GOAL_TEXT ? `${raw.slice(0, MAX_GOAL_TEXT - 1)}…` : raw;
+};
+
 /** A new goal with criteria seeded from the user's own words plus a mandatory verification criterion. */
 export function createGoal(text: string, now = Date.now()): GoalState {
-	const goalText = clip(text, 2_000);
+	const goalText = verbatim(text);
 	const listed = String(text ?? "").split(/\r?\n/).map((line) => LIST_ITEM.exec(line)?.[1]).filter((item): item is string => !!item);
 	const prose = String(text ?? "").split(/\r?\n/).filter((line) => !LIST_ITEM.test(line)).join(" ");
 	const extracted = [...(prose.trim() ? extractRequirements(prose).items : []), ...listed].slice(0, MAX_CRITERIA - 2);

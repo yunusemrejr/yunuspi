@@ -12,6 +12,7 @@
 ## What happens
 
 1. The goal text becomes numbered criteria (`C1`…): your list items and directives, plus a mandatory `V` criterion that the result was checked end to end against the real artifact. The `goal` tool is staged for the session.
+   - The goal text is your prompt, not a harness message. It reaches intent analysis, design-direction and expert guidance, the Guardian's constraint tracking, the requirement ledger, task state and memory exactly like a typed prompt, and it is kept as you typed it (line breaks included, up to 20,000 characters). Only the harness's own continuations count as synthetic input.
 2. Every turn carries a compact anchor of the criteria and their state, so the goal survives compaction and resume (state is saved as snapshots on the session branch).
 3. A criterion counts only when the agent records what it observed: `goal({action:"met", id:"C2", evidence:"npm test: 14 passed, exit 0"})`. A bare "done" is refused. `waive` drops an unnecessary or impossible criterion with a reason; `criteria` replaces the open ones with a sharper list; `blocked` reports that only you can unblock the work.
 4. `goal complete` is refused while criteria are open or files changed after the last passing test, build or render. The refusal is issued once per distinct set of gaps; repeating the call records a waiver, so you are never deadlocked and the final report must name what was waived. The waiver is spent by the call that uses it — a later gap of the same shape is refused again rather than inheriting an older approval.

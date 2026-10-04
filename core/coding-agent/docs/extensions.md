@@ -1467,6 +1467,8 @@ pi.sendUserMessage("/review src/index.ts", { expandPromptTemplates: true });
   - `"steer"` - Queues the message for delivery after the current assistant turn finishes executing its tool calls
   - `"followUp"` - Waits for agent to finish all tools
 - `expandPromptTemplates` - Dispatch extension commands and expand skill commands and prompt templates. Defaults to `false`.
+- `authored` - The text is the user's own request, carried by a command the user just issued (for example `/goal`). It then reaches `input` handlers with `source: "interactive"`, so prompt analysis, Guardian constraints, the requirement ledger and memory treat it as a user prompt. Defaults to `false`: extension messages arrive as `source: "extension"` and never become the user's task. Never set it on continuations, wakes or reminders.
+- `userText` - With `authored`: the user's literal words when the delivered text expands them (a goal kickoff adds criteria and markers). Handlers read it as `originalText`; the model still receives the delivered text.
 
 When not streaming, the message is sent immediately and triggers a new turn. When streaming without `deliverAs`, throws an error.
 

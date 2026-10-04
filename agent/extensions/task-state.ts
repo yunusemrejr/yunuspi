@@ -225,13 +225,15 @@ export default function taskStateExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("input", (event: { source?: string; text?: unknown }, ctx: ExtensionContext) => {
+	pi.on("input", (event: { source?: string; text?: unknown; originalText?: unknown }, ctx: ExtensionContext) => {
 		try {
-			if (event.source === "extension" || typeof event.text !== "string" || !event.text.trim()) return;
+			// The user's own words, not text the harness wrapped around them (a goal kickoff adds criteria).
+			const words = typeof event.originalText === "string" ? event.originalText : event.text;
+			if (event.source === "extension" || typeof words !== "string" || !words.trim()) return;
 			const service = serviceFor(ctx);
 			if (!service) return;
 			const relation = latestAnalysisRelation(ctx);
-			const { mode } = service.userInput(event.text, relation);
+			const { mode } = service.userInput(words, relation);
 			// The ledger folds on the same hook; read its rendered line so the
 			// graph adopts ledger R-ids instead of inventing parallel ones.
 			const items = ledgerItemsFromBranch(ctx);

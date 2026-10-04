@@ -155,6 +155,8 @@ export interface PromptOptions {
     streamingBehavior?: "steer" | "followUp";
     /** Source of input for extension input event handlers. Defaults to "interactive". */
     source?: InputSource;
+    /** The user's literal words when `text` is an expansion of them (for example a goal kickoff that adds criteria). Input handlers and the Guardian read it as `originalText`; defaults to `text`. */
+    originalText?: string;
     /** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
     preflightResult?: (success: boolean) => void;
 }
@@ -422,10 +424,14 @@ export declare class AgentSession {
      * @param content User message content (string or content array)
      * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
      * @param options.expandPromptTemplates Whether to dispatch extension commands and expand skill commands and prompt templates. Default: false.
+     * @param options.authored The text is the user's own request carried by a command the user just issued (for example `/goal`); it enters the pipeline as interactive input. Leave unset for harness-generated messages.
+     * @param options.userText With `authored`: the user's literal words when `content` expands them. Input handlers and the Guardian read it as `originalText`.
      */
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
         deliverAs?: "steer" | "followUp";
         expandPromptTemplates?: boolean;
+        authored?: boolean;
+        userText?: string;
     }): Promise<void>;
     /**
      * Clear all queued messages and return them.

@@ -122,8 +122,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				const command = parseGoalArgs(args);
 				const notify = (text: string, level: "info" | "warning" = "info") => ctx.ui?.notify?.(text, level);
 				// The kickoff starts a full agent run; the command must return immediately so
-				// the editor and working indicator stay live while that run streams.
-				const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state)))
+				// the editor and working indicator stay live while that run streams. It carries the
+				// user's own words, so it is authored input: prompt analysis, Guardian constraints,
+				// the requirement ledger and memory must see it (continuations below stay synthetic).
+				// `userText` keeps the user's literal words apart from the criteria the harness adds, so
+				// analysis, the Guardian and memory work from what was asked, not from our wrapper.
+				const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text }))
 					.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 				switch (command.kind) {
 					case "status": return notify(goalSummary(goal));

@@ -129,6 +129,19 @@ test('the anchor and kickoff are compact and the discovery marker stages the goa
  assert.deepEqual(intentBundleTools('Please explain the goal of this module'),[],'ordinary prompts never stage it');
 });
 
+test('a goal keeps the user\'s words as typed: line breaks stay and long prompts are not clipped',()=>{
+ // Long prompts pass through verbatim by user direction; a goal used to flatten and cut at 2,000 characters.
+ const long=Array.from({length:60},(_,i)=>`- requirement ${i+1}: keep the ${'detailed '.repeat(8)}behaviour intact`).join('\n');
+ const goal=gs.createGoal(`Rework the importer\r\n\r\n${long}`);
+ assert.ok(goal.text.length>2_000,'nothing is clipped at the old 2,000 character limit');
+ assert.match(goal.text,/^Rework the importer\n\n- requirement 1:/,'line breaks survive and CRLF is normalised');
+ assert.ok(goal.text.endsWith('behaviour intact'));
+ assert.ok(gs.goalKickoff(goal).includes(goal.text),'the model receives the whole goal');
+ assert.ok(!gs.goalAnchor(goal).includes(goal.text)&&gs.goalAnchor(goal).length<4_500,'the per-turn anchor stays bounded however long the goal is');
+ const absurd=gs.createGoal('x'.repeat(gs.MAX_GOAL_TEXT*2));
+ assert.equal(absurd.text.length,gs.MAX_GOAL_TEXT,'only a runaway paste is bounded');
+});
+
 test('persisted snapshots restore the latest goal on a branch',()=>{
  const a=gs.createGoal('first');const b={...met(gs.createGoal('second'),'C1'),id:'gb'};
  const entries=[{type:'custom',customType:'goal-state-v1',data:a},{type:'message'},{type:'custom',customType:'goal-state-v1',data:b}];
@@ -137,20 +150,20 @@ test('persisted snapshots restore the latest goal on a branch',()=>{
 });
 
 function harness({failSend=false}={}){
- const handlers={},commands={},tools={},entries=[],sent=[],notes=[];
+ const handlers={},commands={},tools={},entries=[],sent=[],sentOptions=[],notes=[];
  const pi={
   on:(name,fn)=>{(handlers[name]??=[]).push(fn);},
   registerCommand:(name,options)=>{commands[name]=options;},
   registerTool:(tool)=>{tools[tool.name]=tool;},
   appendEntry:(customType,data)=>{entries.push({type:'custom',customType,data});},
-  sendUserMessage:async(text)=>{if(failSend)throw new Error('input queue closed');sent.push(text);},
+  sendUserMessage:async(text,options)=>{if(failSend)throw new Error('input queue closed');sent.push(text);sentOptions.push(options);},
   getActiveTools:()=>['read'],setActiveTools:()=>{},
  };
  const ctx={ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries},hasPendingMessages:()=>false};
  goalExtension(pi);
  const emit=async(name,event={})=>{for(const fn of handlers[name]??[])await fn(event,ctx);};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
- return {commands,entries,sent,notes,emit,call,ctx};
+ return {commands,entries,sent,sentOptions,notes,emit,call,ctx};
 }
 
 test('/goal drives a session: kickoff, evidence-gated completion, and a bounded continuation',async()=>{
@@ -174,6 +187,23 @@ test('/goal drives a session: kickoff, evidence-gated completion, and a bounded 
  assert.equal(state().status,'achieved');
  await h.emit('agent_settled');
  assert.equal(h.sent.length,2,'an achieved goal never continues');
+});
+
+test('the kickoff is the user\'s own request; harness continuations never are',async()=>{
+ // Core treats `source:"extension"` input as synthetic: the Guardian opens no task for it, prompt
+ // analysis and design-direction guidance skip it, and the requirement ledger and memory never see it.
+ // A /goal kickoff carries the user's words, so it must arrive authored. A continuation must not.
+ const h=harness();
+ await h.commands.goal.handler('Redesign the settings page',h.ctx);
+ assert.deepEqual(h.sentOptions[0],{authored:true,userText:'Redesign the settings page'},'the kickoff is authored input that carries the user\'s own words');
+ await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});
+ await h.emit('agent_settled');
+ assert.match(h.sent[1],/continuation 1/);
+ assert.equal(h.sentOptions[1],undefined,'a continuation is harness-generated and stays synthetic');
+ await h.emit('message_end',{message:{role:'assistant',stopReason:'aborted'}});
+ await h.emit('agent_settled');
+ await h.commands.goal.handler('resume',h.ctx);
+ assert.deepEqual(h.sentOptions.at(-1),{authored:true,userText:'Redesign the settings page'},'resuming restarts the user\'s request, also authored');
 });
 
 test('an interrupt pauses the goal and blocked reports reach the user without another turn',async()=>{

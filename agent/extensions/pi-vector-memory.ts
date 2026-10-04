@@ -843,7 +843,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   pi.on("input", (event: any, ctx: any) => {
     try {
       if (event?.source === "extension") return;
-      const text = typeof event?.text === "string" ? event.text : "";
+      const text = typeof event?.originalText === "string" ? event.originalText : typeof event?.text === "string" ? event.text : "";
       if (text.trim().length < 12 || text.trim().startsWith("/")) return;
       if (!current) ensureStore(ctx?.cwd ?? "");
       enqueue({ kind: "user_prompt", sessionId: sidOf(ctx), text: text.slice(0, 2000), timestamp: isoNow() });

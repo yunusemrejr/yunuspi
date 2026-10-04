@@ -1016,7 +1016,8 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 	pi.on("input", (event: any) => {
 		if (event.source === "extension" || typeof event.text !== "string") return;
-		const folded = foldRequirements(ledger, event.text);
+		// The user's own words, not text the harness wrapped around them (a goal kickoff adds criteria).
+		const folded = foldRequirements(ledger, typeof event.originalText === "string" ? event.originalText : event.text);
 		if (folded.ledger === ledger) return;
 		ledger = folded.ledger;
 		save();

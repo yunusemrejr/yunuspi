@@ -910,7 +910,7 @@ export class AgentSession {
         const inputAbortController = new AbortController();
         this._pendingInputControllers.add(inputAbortController);
         const requestId = randomUUID();
-        const inputMeta = { requestId, turnId: requestId, sessionId: this.sessionId, processId: String(process.pid), originalText: text, signal: inputAbortController.signal, guardianOwnerId: this._guardian?.ownerId };
+        const inputMeta = { requestId, turnId: requestId, sessionId: this.sessionId, processId: String(process.pid), originalText: typeof options?.originalText === "string" && options.originalText ? options.originalText : text, signal: inputAbortController.signal, guardianOwnerId: this._guardian?.ownerId };
         const previous = this._inputQueueTail;
         let unlock;
         const gate = new Promise((resolve) => { unlock = resolve; });
@@ -1368,6 +1368,12 @@ export class AgentSession {
      * @param content User message content (string or content array)
      * @param options.deliverAs Delivery mode when streaming: "steer" or "followUp"
      * @param options.expandPromptTemplates Whether to dispatch extension commands and expand skill commands and prompt templates. Default: false.
+     * @param options.authored The text is the user's own request, carried by a command the user just issued (for
+     *   example `/goal`). It then enters the pipeline as interactive input: prompt analysis, Guardian constraints,
+     *   requirement ledger and memory all see it. Harness-generated messages (continuations, wakes, reminders) must
+     *   leave this unset so they stay `extension` input and never replace the user's task or unlock a Stop.
+     * @param options.userText With `authored`: the user's literal words when `content` expands them (a goal kickoff
+     *   adds criteria and markers). Input handlers, prompt analysis and the Guardian read it as `originalText`.
      */
     async sendUserMessage(content, options) {
         // Normalize content to text string + optional images
@@ -1395,7 +1401,8 @@ export class AgentSession {
             expandPromptTemplates: options?.expandPromptTemplates ?? false,
             streamingBehavior: options?.deliverAs,
             images,
-            source: "extension",
+            source: options?.authored === true ? "interactive" : "extension",
+            ...(options?.authored === true && typeof options.userText === "string" && options.userText ? { originalText: options.userText } : {}),
         });
     }
     /**

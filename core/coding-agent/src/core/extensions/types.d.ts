@@ -304,6 +304,8 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
         deliverAs?: "steer" | "followUp";
         expandPromptTemplates?: boolean;
+        authored?: boolean;
+        userText?: string;
     }): Promise<void>;
 }
 /** Rendering options for tool results */
@@ -678,7 +680,7 @@ export interface InputEvent {
     source: InputSource;
     /** How the input will be delivered during streaming, or undefined when idle */
     streamingBehavior?: "steer" | "followUp";
-    /** Unmodified input before extension transforms or template expansion. */
+    /** Unmodified input before extension transforms or template expansion; for an authored extension message, the user's literal words (`userText`) rather than the text delivered to the model. */
     originalText?: string;
     requestId?: string;
     turnId?: string;
@@ -1001,10 +1003,15 @@ export interface ExtensionAPI {
      * Send a user message to the agent. Always triggers a turn.
      * When the agent is streaming, use deliverAs to specify how to queue the message.
      * Set expandPromptTemplates to dispatch extension commands and expand skill commands and prompt templates.
+     * Set authored only when the text is the user's own request carried by a command they just issued (for
+     * example /goal): it then arrives as interactive input, so prompt analysis, Guardian constraints, the
+     * requirement ledger and memory see it. Continuations, wakes and reminders must leave it unset.
      */
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
         deliverAs?: "steer" | "followUp";
         expandPromptTemplates?: boolean;
+        authored?: boolean;
+        userText?: string;
     }): Promise<void>;
     /** Append a custom entry to the session for state persistence (not sent to LLM). */
     appendEntry<T = unknown>(customType: string, data?: T): void;
@@ -1216,6 +1223,8 @@ export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "
 export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {
     deliverAs?: "steer" | "followUp";
     expandPromptTemplates?: boolean;
+    authored?: boolean;
+    userText?: string;
 }) => Promise<void>;
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 export type SetSessionNameHandler = (name: string) => void;
