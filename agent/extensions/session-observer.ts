@@ -8,7 +8,7 @@ import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { packetRequirements } from './lib/requirement-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, plannerStatusText, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -192,7 +192,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // review) are not the agent's delegation and need no harvesting.
       const own = ledger.tasks.filter(task => !isHarnessOwnedChild(task)), harness = ledger.tasks.length - own.length;
       childSummary = { total: own.length, failed: own.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
-      if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery or automatic review) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
+      if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery, automatic review or Double streams) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
+      const planners = plannerStatusText();
+      if (planners) rows.push({ id: 'planner-state', kind: 'current state', text: planners });
       if (own.length) {
         const unresolved = own.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
         const finished = own.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');
@@ -246,7 +248,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const reset = (context: any) => { cancelHelpers(); clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; urgent = reviewedUrgent = 0; planEvidenceId = undefined; supersededEvidence.clear(); adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
-    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
+    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${reviewerLabel(peer.reviewer)} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     execution: () => currentExecutionProfile(ctx),
     judge: (site, state, questions, options) => {

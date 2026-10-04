@@ -6,6 +6,7 @@ import { classifyExecution } from './adaptive-execution.ts';
 import { heuristicDesignBrief } from './design-direction.ts';
 import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
 import type { JudgeFn } from './micro-intelligence/review.ts';
+import { publishReviewerNote, reviewerSessionKey } from './reviewer-board.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
 /** contextWaitMs bounds how long the first inference waits for a council: a
@@ -151,6 +152,17 @@ function councilBrief(result: any): string {
   return `Council status: ${result.status}. Advisory, not approval or verification.\n${independence}${noSynthesis}${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
 }
 
+/** What the council told the agent, in a sentence or two, for the peers that must not repeat or contradict it. */
+export function councilDigest(result: any, max = 420): string {
+  const lead = `Scope council (${result?.status ?? 'unavailable'}, advisory)`;
+  const discussion = typeof result?.discussion === 'string' ? result.discussion.replace(/\s+/g, ' ').trim() : '';
+  const proposals = Array.isArray(result?.proposals) ? result.proposals.map((p: any) => `${p.role}: ${String(p.text).replace(/\s+/g, ' ').trim().slice(0, 140)}`) : [];
+  const body = discussion ? discussion : proposals.join(' | ');
+  if (!body) return `${lead}: no usable perspective.`;
+  const room = Math.max(40, max - lead.length - 2);
+  return `${lead}: ${body.length > room ? `${body.slice(0, room - 1).trimEnd()}…` : body}`;
+}
+
 /** The project-intelligence extension owns this state and supplies its existing
  * graph. Every new user input invalidates the prior council; only one ephemeral
  * brief is kept, with no extra memory database or transcript injection. */
@@ -174,7 +186,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       // The SDK emits injected wakes with source 'extension' and every other
       // input (interactive, CLI, programmatic) as 'interactive'. Only the
       // latter carries current user direction.
-      if(event?.source!=='extension'){inputSerial++;inputText=typeof event?.text==='string'?event.text:'';wakeOnly=false;cancel();}
+      if(event?.source!=='extension'){inputSerial++;inputText=typeof event?.originalText==='string'?event.originalText:typeof event?.text==='string'?event.text:'';wakeOnly=false;cancel();}
       else wakeOnly=true;
     },
     cancel,
@@ -309,6 +321,8 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
         if(!current())return;
         result=normalizeCouncilResult(result);
         councilStatus=result.status;seen=false;
+        // The reviewers and Double read the same board: say what the council advised so none of them repeats or contradicts it.
+        if(result.status!=='unavailable'){try{publishReviewerNote(reviewerSessionKey(ctx),'council',councilDigest(result),[],Date.now());}catch{}}
         brief=('[Automatic change-scope deliberation]\n'+historyBrief(history)+'\n'+councilBrief(result)).slice(0,SCOPE_LIMITS.contextChars);
         review=JSON.stringify({status:result.status,proposals:result.proposals.map((p:any)=>({role:p.role,text:p.text.slice(0,180)})),discussion:result.discussion.slice(0,800),gap:result.gap.slice(0,150),history:historyBrief(history,600),note:'Condensed advisory discussion, not an accepted plan. Parent retains current user instructions and full scope brief.'});
         // Only operational receipts persist; no duplicate transcript excerpts.

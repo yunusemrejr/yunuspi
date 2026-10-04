@@ -12,7 +12,7 @@ and the main agent remains responsible for the session in every case.
 | Council | Multi-perspective reasoning for genuinely hard questions | Automatic scope council, or the supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
 | Swarm | Separable parallel investigations in one broad task | Assistance-plan swarm mode with bounded respawns | `subagent({tasks:[...],async:true})` |
 | Fusion | Competing approaches merged with provenance | Fusion-mode workers plus the deterministic fusion planner | Fusion workers plus `runs.fuse` |
-| Double | Two independent streams of the current model reconciled into one decision | Double runner with the native subagent executor | `/double`, then work normally |
+| Double | Two independent streams (the current model twice, or two models you pick) reconciled into one decision | Double runner with the native subagent executor | `/double` or `/custom-double`, then work normally |
 
 Findings come back concise: bounded reports with evidence and explicit gaps,
 never raw reasoning dumps. The parent verifies, decides and owns changes.
@@ -64,6 +64,71 @@ reconciliation) stays visible in the directive and the transcript instead
 of failing the turn. Both streams account through the shared subagent cost
 and lifecycle ledgers, so `/cost` and `/used` reflect the doubled
 inference. `PI_DOUBLE=off` disables the mode; children never re-double.
+
+### Two models: `/custom-double`
+
+`/double` runs the session model twice. `/custom-double` runs **two models you
+choose**, each from any provider (an OpenRouter model beside a direct DeepSeek
+route, for instance), because different models make different mistakes and the
+reconciliation can weigh what both reach independently against what only one
+believes.
+
+With no arguments it opens a small popup in the terminal, built from the same
+parts as the `/model` picker. Type to search every model you can run (provider
+and id both match), press Enter to fill slot A (builds the plan) and then
+slot B (stress-tests it); once both are filled the first row is
+`▶ Start Double with these two models` and one more Enter starts it. `Tab`
+switches the slot you are filling, `ctrl+t` cycles that slot's thinking level
+(only levels the model supports; a model without thinking runs `off`),
+`ctrl+r` cycles where the reconciliation runs (A, B or the session model), `Esc`
+cancels and changes nothing. Each slot defaults to the session's thinking level
+clamped to what its model can run.
+
+Without the popup (scripts, headless sessions) name both models:
+`/custom-double deepseek/deepseek-flash:high zai/glm-5.1 reconcile=session`.
+A bare id is accepted when exactly one provider carries it, or when it is the
+session's own provider; otherwise the command asks for `provider/id` and changes
+nothing. `/custom-double on` resumes the last pair without the popup,
+`/custom-double off` and `/double off` both end the mode, `/custom-double status`
+and `/double status` show it, and `/double` always means the session model twice.
+The confirmed pair is saved in the session and remembered across sessions
+(`double-pair.json` in the agent directory), so the next `/custom-double` opens
+on it; a remembered model that cannot run now is left empty instead of being
+offered back.
+
+What differs from the twin mode, and what does not:
+
+- Each stream is pinned to its own route and thinking level and verified like
+  the twin streams: a stream or reconciliation that ran elsewhere stays usable
+  and shows up as a visible gap in the directive header. A pair never silently
+  substitutes a route; if a pinned route can no longer run, that turn continues
+  single with one warning.
+- Two different routes share no prompt cache, so there is nothing to stagger and
+  both streams start at once. Choosing the same model for both slots is allowed
+  (it is `/double` with separate thinking levels) and keeps the staggered start.
+- The prompts say the peer is a different model and name both, the
+  reconciliation is told that independent agreement across models is stronger
+  evidence than a model agreeing with itself yet still not proof, and never to
+  defer to a model's reputation. Independence, the requirement anchor, the
+  read-only tool ceiling, the acknowledgement skip and the subordination of the
+  directive to your own words are unchanged.
+- The agent that acts on the directive stays the session model; both streams are
+  told which model that is.
+
+### One board for every planner and reviewer
+
+Double and the scope council now say what they told the agent on the same
+in-process board the Guardian, the session observer and Mr. Watchmaker already
+used, and read it back. The reviewers see "Double mode already told the agent
+…" and "Scope council already told the agent …" beside each other's notes, so a
+note that merely restates a directive is suppressed instead of delivered twice.
+While Double is on, both reviewers get one evidence row naming the mode and the
+two routes, so they do not recommend repeating a deliberation the harness
+already runs before every prompt. In the other direction, both Double streams
+receive the reviewers' most recent notes (identically, so the shared prefix stays
+byte-identical) as evidence the forked transcript does not carry. Double's own
+streams and reconciliation are counted as harness-owned runs, never as children
+the agent launched.
 
 ## Session-start disclosure
 

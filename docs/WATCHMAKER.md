@@ -42,7 +42,7 @@ by themselves, so there is nothing for the agent to harvest. A memo the
 Watchmaker writes does not make the next review due, and a note that only
 re-recommends tools or skills its last notes already named is suppressed as a
 repeat. The time sink a note leads with (for example bash) is delivered at most
-twice per task; further diagnoses of the same sink are suppressed. The packet
+twice per task; further diagnoses of the same sink are suppressed. While Double mode is on, a `time-planners` row names it, and Double's directive and the scope council's brief appear as peer notes beside the observer's and Guardian's: the Watchmaker does not count Double's streams as agent time or as children to harvest, and does not recommend a swarm, fusion or council for planning that Double just did. The packet
 lists only registered tools, and a note may not call verification that another
 reviewer asked for churn; it names a cheaper way to meet that check instead.
 

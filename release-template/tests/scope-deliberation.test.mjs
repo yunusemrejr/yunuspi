@@ -324,3 +324,21 @@ test('Jev spares a paid council only for a confident precise edit; open work, un
   assert.equal((await run(judgeAt(0.95,3000))).calls,1,'a slow judge is not waited for beyond its bound');
   assert.equal((await run(judgeAt(0.95),'Build a new landing page for my bakery')).calls,1,'an open visual brief is never vetoed');
 });
+
+test('a finished council tells the shared reviewer board what it advised; an unavailable one stays silent',async()=>{
+  const board=await import(pathToFileURL(path.join(agent,'extensions/lib/reviewer-board.ts')));
+  const {councilDigest}=await import(pathToFileURL(path.join(agent,'extensions/lib/scope-deliberation.ts')));
+  const ctx=context('board-session');const key=board.reviewerSessionKey(ctx);
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>result});
+  await lifecycle.start({prompt},ctx,'graph');
+  const note=board.peerReviewerNotes(key,'observer').find(row=>row.reviewer==='council');
+  assert.ok(note,'the council published on the board the reviewers and Double read');
+  assert.match(note.note,/^Scope council \(complete, advisory\): Revise the motion substantially/);
+  assert.ok(note.note.length<=420);
+  assert.equal(board.reviewerLabel('council'),'Scope council');
+  const silent=context('silent-session');
+  await createScopeDeliberation({},{history:async()=>history,runner:async()=>{throw new Error('down');}}).start({prompt},silent,'graph');
+  assert.equal(board.peerReviewerNotes(board.reviewerSessionKey(silent),'observer').length,0,'a failed council has nothing to tell the others');
+  assert.match(councilDigest({status:'partial',proposals:[{role:'preservation',text:'Keep the serif.'},{role:'change',text:'Rework the mascot.'}],discussion:''}),/^Scope council \(partial, advisory\): preservation: Keep the serif\. \| change: Rework the mascot\./);
+  assert.match(councilDigest({}),/no usable perspective/);
+});

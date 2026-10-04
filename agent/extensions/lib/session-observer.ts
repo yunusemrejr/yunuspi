@@ -419,43 +419,12 @@ export async function observerDispatch(route: ObserverRoute, packet: ObserverPac
     });
   }
 }
-/** Shared note board for the background reviewers and Guardian of one session. Each
- * publishes its latest delivered note; the other sees it as evidence and
- * suppresses a restatement, so the agent is not told the same thing twice or
- * pulled in opposite directions by reviewers blind to each other. In-process
- * and bounded; nothing persists. */
-const PEER_NOTES = Symbol.for('yunus-pi.reviewer-peer-notes.v1');
-const PEER_OWNERS = Symbol.for('yunus-pi.reviewer-peer-owners.v1');
-/** Two runtimes can reopen the same transcript. Share advice only between
- * reviewers attached to the same live manager, including its current branch identity. */
-export function reviewerSessionKey(context: any): string {
-  const manager = context?.sessionManager;
-  if (!manager || typeof manager !== 'object') return '';
-  const owners: WeakMap<object, string> = ((globalThis as any)[PEER_OWNERS] ??= new WeakMap());
-  let owner = owners.get(manager);
-  if (!owner) { owner = randomUUID(); owners.set(manager, owner); }
-  return JSON.stringify([owner, context.cwd ?? '', manager.getSessionId?.() ?? '', manager.getSessionFile?.() ?? '']);
-}
-
 const STEM_STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'then', 'than', 'from', 'into', 'now', 'once', 'instead', 'more', 'its', 'are', 'was', 'not', 'you', 'your', 'while', 'before', 'after']);
 /** Five-letter word stems without filler: paraphrases of one move ("run the
  * project tests now" / "ground the next edit with project tests") overlap. */
 export const adviceStems = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? []).filter(word => !STEM_STOP.has(word)).map(word => word.slice(0, 5)));
 export const stemSimilarity = (a: Set<string>, b: Set<string>) => { const union = new Set([...a, ...b]).size; return union ? [...a].filter(stem => b.has(stem)).length / union : 0; };
-export interface ReviewerPeerNote { reviewer: string; note: string; picks: string[]; at: number }
-const peerBoard = (): Map<string, Map<string, ReviewerPeerNote>> => ((globalThis as any)[PEER_NOTES] ??= new Map());
-export function publishReviewerNote(session: string, reviewer: string, note: string, picks: string[] = [], at = Date.now()) {
-  if (!session || !note) return;
-  const board = peerBoard();
-  const notes = board.get(session) ?? new Map<string, ReviewerPeerNote>();
-  notes.set(reviewer, { reviewer, note: boundedObserverText(note, 1200), picks: picks.slice(0, 6), at });
-  board.delete(session); board.set(session, notes);
-  while (board.size > 16) board.delete(board.keys().next().value!);
-}
-/** Other reviewers' notes for this session, newest first, within maxAgeMs. */
-export function peerReviewerNotes(session: string, reviewer: string, now = Date.now(), maxAgeMs = 600_000): ReviewerPeerNote[] {
-  return [...(peerBoard().get(session)?.values() ?? [])].filter(row => row.reviewer !== reviewer && now - row.at <= maxAgeMs).sort((a, b) => b.at - a.at);
-}
+export { peerReviewerNotes, plannerStatusText, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey, type ReviewerPeerNote, type ReviewerSource } from './reviewer-board.ts';
 
 /** Persist measured billing fields only; never a response body or provider metadata. */
 export function observerUsage(raw: any, provider?: string) {

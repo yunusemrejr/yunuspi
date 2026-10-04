@@ -589,6 +589,63 @@
       "commands": []
     },
     {
+      "id": "double-mode",
+      "group": "orchestration",
+      "summary": "Session mode that analyzes every user request twice before the agent starts and reconciles both into one planning directive. /double runs the session model twice; /custom-double opens a popup to search and pick two models (any providers) for streams A and B plus the reconciling route. The directive is advice below the user's own words; reviewers and the scope council see it on a shared note board.",
+      "entrypoints": [
+        "/double",
+        "/custom-double",
+        "before_agent_start",
+        "double-directive"
+      ],
+      "commands": [
+        "double",
+        "custom-double"
+      ],
+      "options": [
+        {
+          "name": "PI_DOUBLE",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Disable Double mode (both commands) when set to off."
+        },
+        {
+          "name": "/double [on|off|status]",
+          "summary": "Twin mode: the session model runs both streams."
+        },
+        {
+          "name": "/custom-double provider/model[:thinking] provider/model[:thinking]",
+          "summary": "Pin two chosen routes without the popup."
+        },
+        {
+          "name": "reconcile",
+          "values": [
+            "a",
+            "b",
+            "session"
+          ],
+          "summary": "Which route reconciles the two analyses."
+        }
+      ],
+      "related": [
+        "scope-council",
+        "fusion-review",
+        "swarm-execution",
+        "subagent-dispatch"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/extension/double-runner.ts",
+        "agent/extensions/pi-subagents/src/extension/double-pair.ts",
+        "agent/extensions/pi-subagents/src/slash/double-pair-picker.ts",
+        "agent/extensions/lib/double.ts",
+        "agent/extensions/lib/reviewer-board.ts"
+      ],
+      "doc": "docs/REVIEWS-AND-COUNCILS.md",
+      "tools": []
+    },
+    {
       "id": "agent-model-management",
       "group": "models",
       "summary": "List executable agents and their capabilities, inspect or edit scoped definitions, and ask for effective models without hardcoding a provider inventory.",
@@ -3209,9 +3266,14 @@
         "line": 3395
       },
       {
+        "name": "custom-double",
+        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
+        "line": 418
+      },
+      {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 327
+        "line": 398
       },
       {
         "name": "effort",
@@ -3341,7 +3403,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 568
+        "line": 570
       },
       {
         "name": "or-provider",
@@ -3491,7 +3553,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 343
+        "line": 345
       },
       {
         "name": "websearch",
@@ -3829,7 +3891,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 161,
+        "line": 165,
         "kind": "literal"
       },
       {
@@ -4051,7 +4113,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 781,
+        "line": 811,
         "kind": "literal"
       },
       {
@@ -4469,7 +4531,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 161,
+        "line": 165,
         "kind": "literal"
       },
       {
@@ -4607,7 +4669,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 781,
+        "line": 811,
         "kind": "literal"
       },
       {
@@ -4975,7 +5037,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 703,
+      "sourceFiles": 706,
       "registrationSites": 85,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 133,
@@ -5730,6 +5792,10 @@
       },
       {
         "path": "agent/extensions/lib/review-coordinator.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/reviewer-board.ts",
         "exists": true
       },
       {
@@ -6685,6 +6751,12 @@
       },
       {
         "source": "agent/extensions/filesystem-safety.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/goal.ts",
         "signals": [
           "wrapper/adapter"
         ]

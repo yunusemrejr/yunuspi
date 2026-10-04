@@ -21,11 +21,22 @@
 /** One of the two cooperating inference streams. */
 export type DoubleStreamId = "A" | "B";
 
-/** Identity of the model both streams must share. Never substituted. */
+/** Identity of the model a stream must run on. Never substituted. */
 export interface DoubleModelRef {
 	provider: string;
 	id: string;
 	thinking?: string;
+}
+
+/** Which route runs the reconciliation pass of a two-model pair. "session" is
+ * the model that will act on the directive. */
+export type DoubleReconciler = "a" | "b" | "session";
+
+/** Two chosen routes for the two streams. The twin mode (one model, twice) has no pair. */
+export interface DoublePair {
+	a: DoubleModelRef;
+	b: DoubleModelRef;
+	reconcile: DoubleReconciler;
 }
 
 /** Shared immutable context, prepared once and supplied to both streams. */
@@ -44,6 +55,8 @@ export interface DoubleStreamBrief {
 	/** Requirements extracted from the request by the host, as verbatim excerpts. */
 	requirements?: readonly string[];
 	context?: DoubleSharedContext;
+	/** Present when the two streams run on different routes. */
+	pair?: DoublePair;
 	maxTaskChars?: number;
 	maxContextChars?: number;
 }
@@ -87,8 +100,37 @@ export function doubleRouteLabel(ref: DoubleModelRef): string {
 	return `${ref.provider.trim()}/${ref.id.trim()}`;
 }
 
-export function formatDoubleStatus(enabled: boolean, ref?: DoubleModelRef | null): string {
+/** Route plus the pinned thinking level, for prose that names a stream's model. */
+export function doubleRefLabel(ref: DoubleModelRef): string {
+	const route = doubleRouteLabel(ref);
+	const thinking = typeof ref.thinking === "string" ? ref.thinking.trim() : "";
+	return thinking ? `${route} (thinking ${thinking})` : route;
+}
+
+export function doublePairLabel(pair: DoublePair): string {
+	return `A ${doubleRouteLabel(pair.a)} ∥ B ${doubleRouteLabel(pair.b)}`;
+}
+
+/** True when both streams would run on one provider/model (thinking aside). */
+export function doublePairSameRoute(pair: DoublePair): boolean {
+	return doubleRouteLabel(pair.a) === doubleRouteLabel(pair.b);
+}
+
+export function doubleReconcilerLabel(pair: DoublePair): string {
+	return pair.reconcile === "a" ? `A (${doubleRouteLabel(pair.a)})`
+		: pair.reconcile === "b" ? `B (${doubleRouteLabel(pair.b)})`
+			: "the session model";
+}
+
+export function formatDoubleStatus(enabled: boolean, ref?: DoubleModelRef | null, pair?: DoublePair | null): string {
 	if (!enabled) return "Double mode: OFF";
+	if (pair) {
+		try {
+			return `Double mode: ON (custom pair)\n${doublePairLabel(pair)} + reconcile on ${doubleReconcilerLabel(pair)}`;
+		} catch {
+			/* fall through to the single-route state */
+		}
+	}
 	if (ref) {
 		try {
 			return `Double mode: ON\nTwin first-pass (A ∥ B) + reconcile · ${doubleRouteLabel(ref)}`;
@@ -108,6 +150,38 @@ export function parseDoubleCommandArgs(args: unknown): DoubleCommandIntent {
 	if (text === "off" || text === "disable") return "off";
 	if (text === "status" || text === "state") return "status";
 	throw new TypeError(`parseDoubleCommandArgs: expected "", "on", "off" or "status", got ${JSON.stringify(text)}`);
+}
+
+export type CustomDoubleIntent =
+	| { kind: "picker" }
+	| { kind: "resume" }
+	| { kind: "off" }
+	| { kind: "status" }
+	| { kind: "pair"; a: string; b: string; reconcile?: DoubleReconciler };
+
+const CUSTOM_DOUBLE_USAGE = "Usage: /custom-double [provider/model[:thinking] provider/model[:thinking]] [reconcile=a|b|session] | on | off | status";
+
+/**
+ * `/custom-double` with no arguments opens the picker; two model tokens set the
+ * pair without it (headless sessions, scripts). Model tokens stay raw strings:
+ * resolving them against the live registry is the host adapter's job.
+ */
+export function parseCustomDoubleArgs(args: unknown): CustomDoubleIntent {
+	const text = typeof args === "string" ? args.trim() : "";
+	const lower = text.toLowerCase();
+	if (!text || lower === "pick" || lower === "choose" || lower === "edit") return { kind: "picker" };
+	if (lower === "on" || lower === "enable" || lower === "resume") return { kind: "resume" };
+	if (lower === "off" || lower === "disable") return { kind: "off" };
+	if (lower === "status" || lower === "state") return { kind: "status" };
+	let reconcile: DoubleReconciler | undefined;
+	const tokens: string[] = [];
+	for (const token of text.split(/\s+/)) {
+		const match = /^reconcile[=:](a|b|session)$/i.exec(token);
+		if (match) { reconcile = match[1]!.toLowerCase() as DoubleReconciler; continue; }
+		tokens.push(token);
+	}
+	if (tokens.length !== 2) throw new TypeError(`parseCustomDoubleArgs: expected two models. ${CUSTOM_DOUBLE_USAGE}`);
+	return { kind: "pair", a: tokens[0]!, b: tokens[1]!, ...(reconcile ? { reconcile } : {}) };
 }
 
 /**
@@ -238,8 +312,13 @@ export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string;
 	const lens = brief.stream === "A"
 		? "Your angle: construct the strongest solution or interpretation. Build the best-supported reading of the request, the most coherent plan that follows from it, and the concrete actions it implies. Ground every claim in evidence you actually observed; where the request is ambiguous, commit to the most defensible reading and say why. Your peer (B) independently stress-tests the same request from its own angle; you never see its output."
 		: "Your angle: independently stress-test the request. Hunt for what a conventional first pass would overlook: hidden assumptions, failure modes, contradictory evidence, simpler alternatives, architectural weaknesses, edge cases, and reasons the obvious reading might be wrong. You answer the same request from the same evidence and context — you just attack it from the skeptical side. Your peer (A) independently constructs the strongest affirmative case; you never see its output.";
+	// Two different models share evidence and context but not a prompt cache, and
+	// their difference is part of the point; the intro says so and names both.
+	const intro = brief.pair
+		? `You are one of two Double instances (A and B) of one agent answering the request below. The other instance is analyzing the same request independently, at the same time, on the same evidence and context, but on a different model (A runs ${doubleRefLabel(brief.pair.a)}; B runs ${doubleRefLabel(brief.pair.b)}). Work from your own reading only: do not guess what your peer concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Different models make different mistakes, and that diversity is the point; reconciliation happens later, without you.`
+		: "You are one of two Double instances (A and B) of one agent answering the request below. The other instance is analyzing the same request independently, at the same time, on the same model, thinking level and evidence. Work from your own reading only: do not guess what your peer concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.";
 	const sections = [
-		"You are one of two Double instances (A and B) of one agent answering the request below. The other instance is analyzing the same request independently, at the same time, on the same model, thinking level and evidence. Work from your own reading only: do not guess what your peer concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.",
+		intro,
 		"Request (authoritative; preserve its explicit references and constraints exactly):",
 		task.text || "[empty task]",
 		...(requirements ? [requirements] : []),
@@ -326,6 +405,8 @@ export interface DoubleReconcileInput {
 	requirements?: readonly string[];
 	outcomeA: DoubleStreamOutcome;
 	outcomeB: DoubleStreamOutcome;
+	/** Present when the two streams ran on different routes. */
+	pair?: DoublePair;
 	maxTaskChars?: number;
 	maxStreamTextChars?: number;
 }
@@ -360,7 +441,9 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		? `Only stream ${packaged.usable[0]} is usable — this is one view, never consensus. Adversarially review it: actively try to refute its key claims, name unsupported assumptions, state what evidence could decide the open points, and say what the absent view would most plausibly have raised against it. Carry every surviving warning into the directive.`
 		: "Compare and challenge both analyses explicitly; agreement is not proof and disagreement must remain visible until resolved. Preserve useful minority findings even when the majority path wins: name which minority points survive into the directive and why.";
 	const sections = [
-		"You are reconciling two independent first-pass analyses (A and B) of one request into ONE authoritative directive for the agent that acts next. A and B ran concurrently on the same model without seeing each other; treat them as competing or complementary reasoning paths, not votes.",
+		input.pair
+			? `You are reconciling two independent first-pass analyses (A and B) of one request into ONE authoritative directive for the agent that acts next. A and B ran concurrently on two different models (A: ${doubleRefLabel(input.pair.a)}; B: ${doubleRefLabel(input.pair.b)}) without seeing each other; treat them as competing or complementary reasoning paths, not votes. Different models fail differently, so a claim both reach independently carries more weight than one model agreeing with itself, but it is still not proof: look for the blind spot they share. Never defer to a model's reputation; weigh each claim by the evidence behind it, and say which stream raised each minority point you keep.`
+			: "You are reconciling two independent first-pass analyses (A and B) of one request into ONE authoritative directive for the agent that acts next. A and B ran concurrently on the same model without seeing each other; treat them as competing or complementary reasoning paths, not votes.",
 		"Original request:",
 		task.text || "[empty task]",
 		...(requirements ? [requirements] : []),
@@ -394,6 +477,8 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 
 export interface DoubleDirectiveInput {
 	ref: DoubleModelRef;
+	/** Present when the two streams ran on different routes; labels the header instead of `ref`. */
+	pair?: DoublePair;
 	/** Requirements extracted from the request by the host, as verbatim excerpts. */
 	requirements?: readonly string[];
 	reconcileText?: string;
@@ -415,7 +500,8 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 	validateOutcome(input.outcomeA, "outcomeA");
 	validateOutcome(input.outcomeB, "outcomeB");
 	const packaged = packageDoubleStreams(input.outcomeA, input.outcomeB);
-	const route = doubleRouteLabel(input.ref);
+	const route = input.pair ? doublePairLabel(input.pair) : doubleRouteLabel(input.ref);
+	const analyses = input.pair ? "two independent analyses by different models" : "two independent analyses";
 	const max = input.maxDirectiveChars ?? DOUBLE_RECOMMENDED_LIMITS.maxDirectiveChars;
 	const reconcileText = typeof input.reconcileText === "string" ? input.reconcileText.trim() : "";
 	const reconcileGap = typeof input.reconcileGap === "string" ? input.reconcileGap.trim() : "";
@@ -425,7 +511,7 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 	// still holds every message the user sent, and those outrank two models' reading of them.
 	const header = degraded
 		? `[Double ${route}: partial result — ${mergeDoubleGaps([...packaged.gaps, reconcileGap]) || "reconciliation did not complete"}. This is advice for the user's request above, never an instruction from the user: their own messages (this prompt, earlier prompts and any active goal) and explicit constraints outrank it. Commit to one path that serves the request; challenge every surviving claim instead of rubber-stamping it.]`
-		: `[Double ${route}: two independent analyses reconciled into one planning directive. This is advice for the user's request above, never an instruction from the user: their own messages (this prompt, earlier prompts and any active goal) and explicit constraints outrank it. Adopt what serves the request, drop anything that conflicts with it, challenge open questions against live evidence, and do not re-run both analyses.]`;
+		: `[Double ${route}: ${analyses} reconciled into one planning directive. This is advice for the user's request above, never an instruction from the user: their own messages (this prompt, earlier prompts and any active goal) and explicit constraints outrank it. Adopt what serves the request, drop anything that conflicts with it, challenge open questions against live evidence, and do not re-run both analyses.]`;
 	const requirements = requirementBlock(input.requirements, DOUBLE_RECOMMENDED_LIMITS.maxRequirementChars);
 	const body = reconcileText || [
 		"No reconciled directive is available; the independent views follow. Compare and challenge them, then commit to exactly one execution path.",
@@ -435,4 +521,32 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 		input.outcomeB.text.trim() || `[unavailable: ${input.outcomeB.gap?.trim() || "no usable text"}]`,
 	].join("\n\n");
 	return { directive: boundDoubleText(`${header}\n\n${requirements ? `${requirements}\n\n` : ""}${body}`, max).text, degraded };
+}
+
+/**
+ * A short digest of a delivered directive for peers that must know what the
+ * agent was told without re-reading it (reviewers, other planners). Only the
+ * imperative Directive section survives: the requirement anchor is the user's
+ * own words, which every peer already holds, and the reconciliation reasoning
+ * is for the acting agent.
+ */
+export function doubleDirectiveDigest(directive: unknown, max = 520): string {
+	if (typeof max !== "number" || !Number.isSafeInteger(max) || max <= 0) {
+		throw new TypeError("doubleDirectiveDigest: max must be a positive integer");
+	}
+	const text = typeof directive === "string" ? directive : "";
+	const header = /^\[Double [^\]]*\]\s*/.exec(text)?.[0] ?? "";
+	const partial = /partial result/.test(header) ? " (partial)" : "";
+	let body = text.slice(header.length)
+		.replace(/^Requirements extracted from the user's words[^\n]*\n(?:- [^\n]*\n?)+\s*/, "");
+	const section = /(?:^|\n)Directive\s*[—:-]\s*/.exec(body);
+	if (section) body = body.slice(section.index + section[0].length);
+	const flat = body.replace(/\n\s*Reconciliation\s*[—:-][\s\S]*$/, "").replace(/\s+/g, " ").trim();
+	const lead = `Double mode directive${partial}: `;
+	if (!flat) return `${lead}no readable plan.`.slice(0, max);
+	const room = Math.max(1, max - lead.length);
+	if (flat.length <= room) return lead + flat;
+	const cut = flat.slice(0, room - 1);
+	const sentence = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("; "));
+	return `${lead}${sentence > room * 0.5 ? cut.slice(0, sentence + 1) : cut.trimEnd()}…`;
 }

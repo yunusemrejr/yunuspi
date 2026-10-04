@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionContext } from "@yunuspi/coding-agent";
+import { getAgentDir, type ExtensionContext } from "@yunuspi/coding-agent";
 import { Text } from "@yunuspi/tui";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { persistSubagentCost } from "./session-cost.ts";
@@ -8,21 +8,29 @@ import {
 	buildDoubleDirective,
 	buildDoubleReconcileTask,
 	buildDoubleStreamTask,
-DOUBLE_RECOMMENDED_LIMITS,
+	DOUBLE_RECOMMENDED_LIMITS,
+	doubleDirectiveDigest,
+	doublePairLabel,
+	doublePairSameRoute,
 	doubleRouteLabel,
 	formatDoubleStatus,
 	isDoubleAcknowledgement,
 	isDoubleTransientFailure,
 	mergeDoubleGaps,
 	packageDoubleStreams,
+	parseCustomDoubleArgs,
 	parseDoubleCommandArgs,
 	type DoubleModelRef,
+	type DoublePair,
 	type DoubleSharedContext,
 	type DoubleStreamId,
 	type DoubleStreamOutcome,
 	type DoubleStreamStatus,
 } from "../../../lib/double.ts";
 import { extractRequirements } from "../../../lib/requirement-ledger.ts";
+import { peerReviewerNotes, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey } from "../../../lib/reviewer-board.ts";
+import { loadLastPair, pairKey, parseStoredPair, resolveDoubleModel, saveLastPair, serializePair, type DoubleRegistryModel } from "./double-pair.ts";
+import type { DoublePairPickerOptions } from "../slash/double-pair-picker.ts";
 
 /**
  * Double mode — harness adapter.
@@ -34,8 +42,13 @@ import { extractRequirements } from "../../../lib/requirement-ledger.ts";
  * cost/lifecycle ledgers for accounting, and status/progress UI for
  * observability. No parallel launcher, router, or accounting exists here.
  *
+ * Two modes share one runner. `/double` runs the session model twice;
+ * `/custom-double` runs two models the user picked (any providers), each pinned
+ * to its own route, with the reconciliation on a third choice (A, B or the
+ * session model). A pair never substitutes a route either.
+ *
  * Flow per user turn while ON:
- *   1. Pin the current session route (provider/id + thinking); never substitute.
+ *   1. Pin the route(s) (provider/id + thinking); never substitute.
  *   2. Prepare one shared context packet; launch stream A, then stream B once
  *      A has made its first progress (its prompt prefix is cached by then; a
  *      bounded wait covers silent routes), with fork context and a read-only
@@ -94,6 +107,31 @@ export interface DoubleRunnerDeps {
 	now?: () => number;
 	/** Override of DOUBLE_LIMITS.warmWaitMs; 0 launches both streams together. */
 	warmWaitMs?: number;
+	/** Directory that remembers the last confirmed custom pair; defaults to the agent directory. */
+	agentDir?: () => string | undefined;
+	/** The `/custom-double` popup; defaults to the TUI picker. Resolves to the confirmed pair. */
+	pickPair?: (ctx: ExtensionContext, options: Omit<DoublePairPickerOptions, "done">) => Promise<DoublePair | undefined>;
+}
+
+async function pickPairInTui(ctx: ExtensionContext, options: Omit<DoublePairPickerOptions, "done">): Promise<DoublePair | undefined> {
+	const { DoublePairPicker } = await import("../slash/double-pair-picker.ts");
+	const result = await ctx.ui.custom<{ confirmed: boolean; pair?: DoublePair }>(
+		(tui, theme, keybindings, done) => new DoublePairPicker(tui, theme, keybindings, { ...options, done }),
+		{ overlay: false },
+	);
+	return result?.confirmed ? result.pair : undefined;
+}
+
+/** Other reviewers' recent notes, as evidence both streams see identically (cache order is kept). */
+function reviewerNotesBlock(notes: ReadonlyArray<{ reviewer: string; note: string; at: number }>, at: number): string {
+	const rows = notes.slice(0, 3).map((peer) => {
+		const minutes = Math.max(0, Math.round((at - peer.at) / 60_000));
+		const text = peer.note.replace(/\s+/g, " ").trim().slice(0, 280);
+		return `- ${reviewerLabel(peer.reviewer)}, ${minutes < 1 ? "under a minute" : `${minutes} min`} ago: ${text}`;
+	});
+	return rows.length
+		? `Notes other harness reviewers already gave the agent this session (advisory evidence, newest first; check them against what you observe):\n${rows.join("\n")}`
+		: "";
 }
 
 const visibleText = (value: unknown, limit: number) =>
@@ -165,7 +203,7 @@ function detectDoubleSubstitutions(label: string, route: string, thinking: strin
 		kinds.push("route");
 		gaps.push(`${label} ran on ${row.model} instead of the pinned ${route}; its analysis is still independent.`);
 	}
-	const forcedThinkingOff = Array.isArray(result?.content)
+	const forcedThinkingOff = thinking !== "off" && Array.isArray(result?.content)
 		&& result.content.some((part: any) => part?.type === "text" && typeof part.text === "string" && part.text.includes(FORK_THINKING_DOWNGRADE_MARKER));
 	const returnedThinking = typeof row?.thinking === "string" ? row.thinking : undefined;
 	if (thinking !== undefined) {
@@ -277,10 +315,19 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	const lifetime = new AbortController();
 	let sessionEpoch = 0;
 	let enabled = false;
+	/** Set by `/custom-double`; absent means the twin mode (the session model twice). */
+	let pair: DoublePair | undefined;
 	let capabilityWarned = false;
 	let acknowledgementNoted = false;
+	let pairNotice: string | undefined;
+	let pairUnavailableWarned = false;
 
 	const doubleEnabled = () => enabled && (process.env.PI_DOUBLE ?? "on").toLowerCase() !== "off";
+	const agentDir = () => { try { return (deps.agentDir ?? getAgentDir)(); } catch { return undefined; } };
+	// Reviewers read this as evidence: the session already runs a deliberation before every prompt.
+	const disposePlannerStatus = registerPlannerStatus("double", () => doubleEnabled()
+		? `ON${pair ? ` (custom pair ${doublePairLabel(pair)})` : " (the session model, twice)"}: every user prompt is analyzed by two independent streams and reconciled into one planning directive before the agent starts. Do not advise repeating that deliberation; its directive is planning advice the agent holds, not its own reasoning.`
+		: undefined);
 
 	for (const event of ["session_start", "session_switch", "session_tree", "session_fork"]) {
 		pi.on?.(event, () => { sessionEpoch++; });
@@ -296,6 +343,9 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 
 	pi.on?.("session_start", (_event: any, ctx: any) => {
 		enabled = false;
+		pair = undefined;
+		pairNotice = undefined;
+		pairUnavailableWarned = false;
 		capabilityWarned = false;
 		acknowledgementNoted = false;
 		try {
@@ -303,25 +353,46 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			for (let index = entries.length - 1; index >= 0; index -= 1) {
 				const entry = entries[index];
 				if (entry?.type === "custom" && entry?.customType === DOUBLE_MODE_ENTRY) {
-					enabled = (entry as any)?.data?.enabled === true;
+					const data = (entry as any)?.data;
+					enabled = data?.enabled === true;
+					if (enabled && data?.pair !== undefined) {
+						pair = parseStoredPair(data.pair);
+						if (!pair) pairNotice = "Double: the saved custom pair could not be read, so this session doubles the session model instead. Run /custom-double to choose two models again.";
+					}
 					break;
 				}
 			}
 		} catch { /* an unreadable ledger leaves Double off */ }
 	});
 
-	const setEnabled = (next: boolean, ctx: any): void => {
+	const setEnabled = (next: boolean, ctx: any, nextPair?: DoublePair): void => {
 		enabled = next;
+		pair = next ? nextPair : undefined;
+		pairNotice = undefined;
 		try {
-			pi.appendEntry(DOUBLE_MODE_ENTRY, { enabled: next, at: now() });
+			pi.appendEntry(DOUBLE_MODE_ENTRY, { enabled: next, at: now(), ...(pair ? { pair: serializePair(pair) } : {}) });
 		} catch { /* in-memory state still governs this session */ }
 		try {
 			// Streams start at a prompt; turning Double on mid-run changes nothing
 			// until then (measured: a session enabled it mid-task and never ran it).
 			let busy = false;
 			try { busy = next && ctx?.isIdle?.() === false; } catch { /* idle state is optional */ }
-			ctx?.ui?.notify?.(formatDoubleStatus(next, modelRefOf(ctx?.model)) + (busy ? "\nStarts with your next prompt; the running turn continues single." : ""), "info");
+			ctx?.ui?.notify?.(formatDoubleStatus(next, modelRefOf(ctx?.model), pair) + (busy ? "\nStarts with your next prompt; the running turn continues single." : ""), "info");
 		} catch { /* notification is optional */ }
+	};
+
+	const availableModels = async (ctx: any): Promise<DoubleRegistryModel[]> => {
+		const registry = ctx?.modelRegistry;
+		try {
+			// Reloading models.json is local; the bound keeps a stuck refresh from hanging the command.
+			await Promise.race([Promise.resolve(registry?.refresh?.()), new Promise((resolve) => setTimeout(resolve, 2_000).unref?.())]);
+		} catch { /* the last loaded choices still serve */ }
+		try {
+			const models = registry?.getAvailable?.();
+			return Array.isArray(models) ? models : [];
+		} catch {
+			return [];
+		}
 	};
 
 	pi.registerCommand("double", {
@@ -336,10 +407,94 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				return;
 			}
 			if (intent === "status") {
-				ctx?.ui?.notify?.(formatDoubleStatus(doubleEnabled(), modelRefOf(ctx?.model)), "info");
+				ctx?.ui?.notify?.(formatDoubleStatus(doubleEnabled(), modelRefOf(ctx?.model), pair), "info");
 				return;
 			}
+			// `/double` always means the session model twice; a custom pair is chosen with /custom-double.
 			setEnabled(intent === "on" ? true : intent === "off" ? false : !doubleEnabled(), ctx);
+		},
+	});
+
+	pi.registerCommand("custom-double", {
+		description: "Double mode with two models you choose, each from any provider: search and pick A and B in a popup; every request is analyzed by both and reconciled into one directive",
+		argumentHint: "[provider/model[:thinking] provider/model[:thinking]] [reconcile=a|b|session] | on | off | status",
+		async handler(args: string, ctx: any) {
+			const notify = (text: string, level: "info" | "warning" | "error" = "info") => { try { ctx?.ui?.notify?.(text, level); } catch { /* notification is optional */ } };
+			let intent: ReturnType<typeof parseCustomDoubleArgs>;
+			try {
+				intent = parseCustomDoubleArgs(args);
+			} catch (error) {
+				notify(error instanceof Error ? error.message.replace(/^parseCustomDoubleArgs: /, "") : "Usage: /custom-double", "error");
+				return;
+			}
+			if (intent.kind === "status") {
+				notify(formatDoubleStatus(doubleEnabled(), modelRefOf(ctx?.model), pair));
+				return;
+			}
+			if (intent.kind === "off") {
+				setEnabled(false, ctx);
+				return;
+			}
+			if ((process.env.PI_DOUBLE ?? "on").toLowerCase() === "off") {
+				notify("Double is disabled for this process (PI_DOUBLE=off).", "warning");
+				return;
+			}
+			const models = await availableModels(ctx);
+			if (models.length === 0) {
+				notify("No models are available to choose from. Connect a provider with /login first.", "error");
+				return;
+			}
+			const sessionRef = modelRefOf(ctx?.model);
+			let sessionThinking: string | undefined;
+			try {
+				const level = pi.getThinkingLevel?.();
+				if (typeof level === "string" && level.trim()) sessionThinking = level.trim();
+			} catch { /* the models fall back to their own default thinking */ }
+			const adopt = (next: DoublePair) => {
+				setEnabled(true, ctx, next);
+				saveLastPair(agentDir(), next);
+				if (doublePairSameRoute(next)) notify("Both slots use the same model, so this is /double with separate thinking levels.");
+			};
+			const remembered = pair ?? loadLastPair(agentDir());
+			if (intent.kind === "pair") {
+				const resolved = [intent.a, intent.b].map((token) => resolveDoubleModel(token, models, { sessionProvider: sessionRef?.provider, sessionThinking }));
+				const errors = resolved.flatMap((row, index) => row.ok ? [] : [`${index === 0 ? "A" : "B"}: ${row.error}`]);
+				if (errors.length) {
+					notify(`Custom Double unchanged. ${errors.join(" ")}`, "error");
+					return;
+				}
+				adopt({ a: (resolved[0] as { ref: DoubleModelRef }).ref, b: (resolved[1] as { ref: DoubleModelRef }).ref, reconcile: intent.reconcile ?? "a" });
+				return;
+			}
+			// Only routes that can run now are offered back: a prefill must never smuggle an unavailable model into Start.
+			const runnable = (ref: DoubleModelRef | undefined) => ref && models.some((model) => model.provider === ref.provider && model.id === ref.id) ? ref : undefined;
+			const usable = remembered && runnable(remembered.a) && runnable(remembered.b) ? remembered : undefined;
+			if (intent.kind === "resume" && usable) {
+				adopt(usable);
+				return;
+			}
+			const pickPair = deps.pickPair ?? (ctx?.hasUI !== false && typeof ctx?.ui?.custom === "function" ? pickPairInTui : undefined);
+			if (!pickPair) {
+				notify("The model popup needs an interactive session. Name both models instead: /custom-double provider/model provider/model", "warning");
+				return;
+			}
+			let chosen: DoublePair | undefined;
+			try {
+				chosen = await pickPair(ctx, {
+					models,
+					...(remembered ? { initial: { a: runnable(remembered.a), b: runnable(remembered.b), reconcile: remembered.reconcile } } : {}),
+					...(sessionRef ? { session: sessionRef } : {}),
+					...(sessionThinking ? { sessionThinking } : {}),
+				});
+			} catch (error) {
+				notify(`Custom Double picker failed: ${error instanceof Error ? error.message.slice(0, 200) : "unknown error"}`, "error");
+				return;
+			}
+			if (!chosen) {
+				notify(`Custom Double unchanged. ${formatDoubleStatus(doubleEnabled(), modelRefOf(ctx?.model), pair)}`);
+				return;
+			}
+			adopt(chosen);
 		},
 	});
 
@@ -379,6 +534,30 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			return undefined;
 		}
 
+		if (pairNotice) {
+			const text = pairNotice;
+			pairNotice = undefined;
+			try { (ctx as any)?.ui?.notify?.(text, "warning"); } catch {}
+		}
+		if (pair) {
+			// A pair is pinned: a route that can no longer run is reported, never swapped for another.
+			let missing: string | undefined;
+			try {
+				const models = (ctx as any)?.modelRegistry?.getAvailable?.();
+				if (Array.isArray(models)) {
+					missing = [pair.a, pair.b].map((candidate) => doubleRouteLabel(candidate))
+						.find((label) => !models.some((model: any) => `${model?.provider}/${model?.id}` === label));
+				}
+			} catch { /* an unreadable registry leaves the pair to the executor's own checks */ }
+			if (missing) {
+				if (!pairUnavailableWarned) {
+					pairUnavailableWarned = true;
+					try { (ctx as any)?.ui?.notify?.(`Custom Double: ${missing} is not available right now, so this turn continues single. Run /custom-double to choose again.`, "warning"); } catch {}
+				}
+				return undefined;
+			}
+		}
+
 		let sessionFile: string | null | undefined;
 		let identity: string;
 		try {
@@ -405,14 +584,33 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		// The pinned route is provider + model + thinking; verification below
 		// compares each pass against this same triple.
 		if (thinking) ref.thinking = thinking;
+		const activePair = pair;
+		type RouteSpec = { route: string; thinking: string | undefined };
+		const sessionSpec: RouteSpec = { route, thinking };
+		const specOf = (model: DoubleModelRef): RouteSpec => ({ route: doubleRouteLabel(model), thinking: model.thinking });
+		const specs: Record<DoubleStreamId, RouteSpec> = activePair
+			? { A: specOf(activePair.a), B: specOf(activePair.b) }
+			: { A: sessionSpec, B: sessionSpec };
+		const reconcileSpec: RouteSpec = !activePair ? sessionSpec
+			: activePair.reconcile === "a" ? specs.A : activePair.reconcile === "b" ? specs.B : sessionSpec;
 
+		// What the other reviewers already told the agent is evidence neither stream can see in the
+		// transcript; both streams get the identical block, so cache order is untouched.
+		const boardKey = reviewerSessionKey(ctx);
+		let boardNotes = "";
+		try { if (boardKey) boardNotes = reviewerNotesBlock(peerReviewerNotes(boardKey, "double", now()), now()); } catch { /* notes only add evidence */ }
 		// One shared packet for both streams: immutable context is prepared
 		// once, so the two launches differ only in their stream identity.
 		const shared: DoubleSharedContext = {
 			...(typeof ctx.cwd === "string" && ctx.cwd ? { cwd: ctx.cwd } : {}),
 			toolNames: toolNamesOf(pi),
 			skillNames: skillNamesOf(event?.systemPromptOptions),
-			extra: `Active model: ${route}${thinking ? ` (thinking: ${thinking})` : ""}. Double mode is ON for this session; both streams use this same route.`,
+			extra: [
+				activePair
+					? `Double mode is ON (custom pair): stream A runs ${specs.A.route}${specs.A.thinking ? ` (thinking: ${specs.A.thinking})` : ""}; stream B runs ${specs.B.route}${specs.B.thinking ? ` (thinking: ${specs.B.thinking})` : ""}. The agent that acts on the reconciled directive runs ${route}${thinking ? ` (thinking: ${thinking})` : ""}.`
+					: `Active model: ${route}${thinking ? ` (thinking: ${thinking})` : ""}. Double mode is ON for this session; both streams use this same route.`,
+				boardNotes,
+			].filter(Boolean).join("\n"),
 		};
 		// Deterministic requirement anchor from the user's own words, shared by both streams, the
 		// reconciliation and the directive so every stage is checked against the same list.
@@ -421,8 +619,8 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		let streamTaskA: string;
 		let streamTaskB: string;
 		try {
-			streamTaskA = buildDoubleStreamTask({ stream: "A", task: prompt, requirements, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
-			streamTaskB = buildDoubleStreamTask({ stream: "B", task: prompt, requirements, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
+			streamTaskA = buildDoubleStreamTask({ stream: "A", task: prompt, requirements, context: shared, ...(activePair ? { pair: activePair } : {}), maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
+			streamTaskB = buildDoubleStreamTask({ stream: "B", task: prompt, requirements, context: shared, ...(activePair ? { pair: activePair } : {}), maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
 		} catch {
 			return undefined;
 		}
@@ -455,10 +653,10 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			} catch { /* visible diagnostics cannot change the turn */ }
 		};
 
-		const launchParams = (task: string, timeoutMs: number, tokens: number, tools: number, label: string): SubagentParamsLike => ({
+		const launchParams = (task: string, timeoutMs: number, tokens: number, tools: number, label: string, spec: RouteSpec): SubagentParamsLike => ({
 			agent: "automatic-free-assistant",
-			model: route,
-			...(thinking ? { thinking } : {}),
+			model: spec.route,
+			...(spec.thinking ? { thinking: spec.thinking } : {}),
 			modelOrigin: "explicit",
 			context: "fork",
 			async: false,
@@ -503,6 +701,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			const startedAt = now();
 			const scopeId = stream === "A" ? "double-A" : "double-B";
 			const label = `Double stream ${stream}`;
+			const spec = specs[stream];
 			progress(label, "started");
 			setStatus(`Double ${stream} · running ∥ peer running`);
 			const gaps: string[] = [];
@@ -517,12 +716,12 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				if (attempt === 2 && gaps.length === 0) break;
 				attempts = attempt;
 				const runId = `double-${stream === "A" ? "a" : "b"}-${randomUUID()}`;
-				const identity = { index: 0, agent: "automatic-free-assistant", attempt, label, scopeId, model: route };
+				const identity = { index: 0, agent: "automatic-free-assistant", attempt, label, scopeId, model: spec.route };
 				if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
 				let work: Promise<any> | undefined;
 				try {
 					const timeoutMs = streamWindow();
-					work = deps.launch(runId, launchParams(task, timeoutMs, DOUBLE_LIMITS.tokensPerStream, DOUBLE_LIMITS.toolsPerStream, label), signal, onProgress ? () => onProgress() : undefined, ctx);
+					work = deps.launch(runId, launchParams(task, timeoutMs, DOUBLE_LIMITS.tokensPerStream, DOUBLE_LIMITS.toolsPerStream, label, spec), signal, onProgress ? () => onProgress() : undefined, ctx);
 					const result = await boundedAwait(work, signal);
 					const returnedRow = rawResultRow(result);
 					const rawRow = {
@@ -559,7 +758,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					// Same-route pinning is verified, not assumed: a
 					// substituted stream stays usable but visibly degraded.
 					// The gap must survive packaging into the directive.
-					const substituted = detectDoubleSubstitutions(label, route, thinking, result, rawRow);
+					const substituted = detectDoubleSubstitutions(label, spec.route, spec.thinking, result, rawRow);
 					const status: DoubleStreamStatus = substituted.kinds.length ? "partial" : "complete";
 					progress(label, substituted.kinds.length ? `completed · ${substituted.kinds.join("+")} substituted` : "completed", now() - startedAt, text);
 					return {
@@ -596,7 +795,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		const runReconcile = async (outcomeA: DoubleStreamOutcome, outcomeB: DoubleStreamOutcome): Promise<{ text: string; gap: string }> => {
 			let reconcileTask: string;
 			try {
-				reconcileTask = buildDoubleReconcileTask({ task: prompt, requirements, outcomeA, outcomeB, maxTaskChars: DOUBLE_LIMITS.maxTaskChars, maxStreamTextChars: DOUBLE_LIMITS.maxStreamChars }).task;
+				reconcileTask = buildDoubleReconcileTask({ task: prompt, requirements, outcomeA, outcomeB, ...(activePair ? { pair: activePair } : {}), maxTaskChars: DOUBLE_LIMITS.maxTaskChars, maxStreamTextChars: DOUBLE_LIMITS.maxStreamChars }).task;
 			} catch {
 				return { text: "", gap: "" };
 			}
@@ -605,13 +804,13 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			progress("Reconciliation", "started");
 			setStatus("Double · reconciling A ∥ B");
 			const runId = `double-reconcile-${randomUUID()}`;
-			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1, label, scopeId: "double-reconcile", model: route };
+			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1, label, scopeId: "double-reconcile", model: reconcileSpec.route };
 			if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
 			let work: Promise<any> | undefined;
 			try {
 				const remaining = Math.max(1, Math.floor(deadlineAt - now()));
 				const timeoutMs = Math.min(DOUBLE_LIMITS.synthesisMs, remaining);
-				work = deps.launch(runId, launchParams(reconcileTask, timeoutMs, DOUBLE_LIMITS.tokensReconcile, DOUBLE_LIMITS.toolsReconcile, label), signal, undefined, ctx);
+				work = deps.launch(runId, launchParams(reconcileTask, timeoutMs, DOUBLE_LIMITS.tokensReconcile, DOUBLE_LIMITS.toolsReconcile, label, reconcileSpec), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				const returnedRow = rawResultRow(result);
 				const rawRow = {
@@ -629,7 +828,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				}
 				// Reconciliation is verified like the streams: same pinned
 				// route and thinking, or a gap that degrades the directive.
-				const substituted = row && text ? detectDoubleSubstitutions(label, route, thinking, result, rawRow) : { kinds: [] as string[], gap: "" };
+				const substituted = row && text ? detectDoubleSubstitutions(label, reconcileSpec.route, reconcileSpec.thinking, result, rawRow) : { kinds: [] as string[], gap: "" };
 				progress("Reconciliation", row && text ? (substituted.kinds.length ? `completed · ${substituted.kinds.join("+")} substituted` : "completed") : "unavailable", now() - startedAt, text || undefined);
 				return { text, gap: substituted.gap };
 			} catch (error) {
@@ -646,10 +845,10 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		};
 
 		try {
-			setStatus(`Double A ∥ B · ${route}`);
+			setStatus(activePair ? `Double A ∥ B · ${specs.A.route} ∥ ${specs.B.route}` : `Double A ∥ B · ${route}`);
 			progress("Independent A ∥ B", "started");
 			// B starts when A first reports progress: that means A's request is accepted and the prefix
-			// both streams share is cached. A failing or finishing A opens the gate too, and the wait is
+			// both streams share is cached. Two different routes share no cache, so a pair launches both at once. A failing or finishing A opens the gate too, and the wait is
 			// bounded so a route that is silent until it finishes costs at most warmWaitMs.
 			let openWarm!: () => void;
 			const warm = new Promise<void>((resolve) => { openWarm = resolve; });
@@ -663,7 +862,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			});
 			const [outcomeA, outcomeB] = await Promise.all([
 				runStream("A", streamTaskA, openWarm).finally(openWarm),
-				waitForWarm(deps.warmWaitMs ?? DOUBLE_LIMITS.warmWaitMs).then(() => runStream("B", streamTaskB)),
+				waitForWarm(deps.warmWaitMs ?? (activePair && !doublePairSameRoute(activePair) ? 0 : DOUBLE_LIMITS.warmWaitMs)).then(() => runStream("B", streamTaskB)),
 			]);
 			let packaged: ReturnType<typeof packageDoubleStreams>;
 			try {
@@ -690,6 +889,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			try {
 				({ directive, degraded } = buildDoubleDirective({
 					ref,
+					...(activePair ? { pair: activePair } : {}),
 					requirements,
 					...(reconciled.text ? { reconcileText: reconciled.text } : {}),
 					...(reconciled.gap ? { reconcileGap: reconciled.gap } : {}),
@@ -701,6 +901,8 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				return undefined;
 			}
 			progress("Unified action", degraded ? "ready · partial" : "ready", undefined, directive.slice(0, 2500));
+			// Say what the agent was told on the shared board, so the reviewers neither repeat nor contradict it.
+			try { if (boardKey) publishReviewerNote(boardKey, "double", doubleDirectiveDigest(directive), [], now()); } catch { /* the board is best-effort */ }
 			setStatus(undefined);
 			statusOwner = undefined;
 			return { message: { customType: DOUBLE_DIRECTIVE_TYPE, content: directive, display: true } };
@@ -718,8 +920,14 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 
 	const runner = {};
 	(runner as any).limits = DOUBLE_LIMITS;
+	(runner as any).snapshot = () => ({
+		enabled: doubleEnabled(),
+		kind: pair ? "custom" : "twin",
+		...(pair ? { pair: serializePair(pair), key: pairKey(pair) } : {}),
+	});
 	(runner as any).dispose = () => {
 		lifetime.abort();
+		disposePlannerStatus();
 	};
 	(globalThis as any)[DOUBLE_RUNNER] = runner;
 	pi.on?.("session_shutdown", () => {

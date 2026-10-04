@@ -788,6 +788,27 @@ Merge child outputs deterministically with provenance, retaining duplicate, comp
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
+#### double-mode
+
+Session mode that analyzes every user request twice before the agent starts and reconciles both into one planning directive. /double runs the session model twice; /custom-double opens a popup to search and pick two models (any providers) for streams A and B plus the reconciling route. The directive is advice below the user's own words; reviewers and the scope council see it on a shared note board.
+
+**Entrypoints:** `/double`, `/custom-double`, `before_agent_start`, `double-directive`
+
+**Commands:** `/double`, `/custom-double`
+
+**Options:**
+
+- `PI_DOUBLE`: Disable Double mode (both commands) when set to off. Values: `on`, `off`.
+- `/double [on|off|status]`: Twin mode: the session model runs both streams.
+- `/custom-double provider/model[:thinking] provider/model[:thinking]`: Pin two chosen routes without the popup.
+- `reconcile`: Which route reconciles the two analyses. Values: `a`, `b`, `session`.
+
+**Related records:** `scope-council`, `fusion-review`, `swarm-execution`, `subagent-dispatch`
+
+**Source:** [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts), [`agent/extensions/pi-subagents/src/extension/double-pair.ts`](../../agent/extensions/pi-subagents/src/extension/double-pair.ts), [`agent/extensions/pi-subagents/src/slash/double-pair-picker.ts`](../../agent/extensions/pi-subagents/src/slash/double-pair-picker.ts), [`agent/extensions/lib/double.ts`](../../agent/extensions/lib/double.ts), [`agent/extensions/lib/reviewer-board.ts`](../../agent/extensions/lib/reviewer-board.ts)
+
+**Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
+
 ### planning
 
 #### todo-planning
@@ -1235,7 +1256,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 375; literal)
-- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 161; literal)
+- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 165; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 321; factory)
@@ -1272,7 +1293,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 762; literal)
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 408; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 560; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 781; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 811; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 250; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 58; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
@@ -1351,7 +1372,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1823)
 - /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1404)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3395)
-- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 327)
+- /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 418)
+- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 398)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1789)
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
@@ -1377,7 +1399,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 427)
 - /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 568)
+- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 570)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 798)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
@@ -1407,7 +1429,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 170)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 554)
 - /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1757)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../../agent/extensions/session-watchmaker.ts) (line 343)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../../agent/extensions/session-watchmaker.ts) (line 345)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3134)
 
 ### Dynamic command owners
@@ -1422,6 +1444,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) — `wrapper/adapter`
 - [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) — `wrapper/adapter`
 - [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
+- [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/code-audit.ts`](../../agent/extensions/lib/code-audit.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts) — `MCP`
@@ -1694,6 +1717,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/requirement-ledger.ts`](../../agent/extensions/lib/requirement-ledger.ts)
 - [`agent/extensions/lib/retry-policy.ts`](../../agent/extensions/lib/retry-policy.ts)
 - [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
+- [`agent/extensions/lib/reviewer-board.ts`](../../agent/extensions/lib/reviewer-board.ts)
 - [`agent/extensions/lib/scene-studio.ts`](../../agent/extensions/lib/scene-studio.ts)
 - [`agent/extensions/lib/scope-deliberation.ts`](../../agent/extensions/lib/scope-deliberation.ts)
 - [`agent/extensions/lib/scoped-snapshots.ts`](../../agent/extensions/lib/scoped-snapshots.ts)

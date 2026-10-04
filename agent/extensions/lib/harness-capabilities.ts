@@ -347,6 +347,28 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/MODEL-ROUTING.md",
 	}),
 	capability({
+		id: "double-mode",
+		group: "orchestration",
+		summary: "Session mode that analyzes every user request twice before the agent starts and reconciles both into one planning directive. /double runs the session model twice; /custom-double opens a popup to search and pick two models (any providers) for streams A and B plus the reconciling route. The directive is advice below the user's own words; reviewers and the scope council see it on a shared note board.",
+		entrypoints: ["/double", "/custom-double", "before_agent_start", "double-directive"],
+		commands: ["double", "custom-double"],
+		options: [
+			option("PI_DOUBLE", "Disable Double mode (both commands) when set to off.", ["on", "off"]),
+			option("/double [on|off|status]", "Twin mode: the session model runs both streams."),
+			option("/custom-double provider/model[:thinking] provider/model[:thinking]", "Pin two chosen routes without the popup."),
+			option("reconcile", "Which route reconciles the two analyses.", ["a", "b", "session"]),
+		],
+		related: ["scope-council", "fusion-review", "swarm-execution", "subagent-dispatch"],
+		sourceFiles: [
+			"agent/extensions/pi-subagents/src/extension/double-runner.ts",
+			"agent/extensions/pi-subagents/src/extension/double-pair.ts",
+			"agent/extensions/pi-subagents/src/slash/double-pair-picker.ts",
+			"agent/extensions/lib/double.ts",
+			"agent/extensions/lib/reviewer-board.ts",
+		],
+		doc: "agent/public-template/docs/REVIEWS-AND-COUNCILS.md",
+	}),
+	capability({
 		id: "agent-model-management",
 		group: "models",
 		summary: "List executable agents and their capabilities, inspect or edit scoped definitions, and ask for effective models without hardcoding a provider inventory.",

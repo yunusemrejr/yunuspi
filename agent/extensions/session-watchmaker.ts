@@ -6,7 +6,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
 import { packetRequirements } from './lib/requirement-ledger.ts';
-import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, observerDispatch, peerReviewerNotes, plannerStatusText, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { buildWatchmakerPacket, createWatchmakerScratchpad, watchmakerSink, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
@@ -136,13 +136,15 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     if (childrenUnavailable || !reduced) rows.push({ id: 'time-children', kind: 'time', text: 'child-agent evidence unavailable' });
     else {
       const harnessActive = harnessTasks.filter(task => task.state === 'running' || task.state === 'queued').length;
-      const harness = harnessTasks.length ? ` · harness-owned automatic runs (council, skill discovery, review; not launched by the agent, results arrive on their own, nothing to harvest): ${harnessActive} active, ${harnessTasks.length - harnessActive} finished` : '';
+      const harness = harnessTasks.length ? ` · harness-owned automatic runs (council, skill discovery, review, Double streams; not launched by the agent, results arrive on their own, nothing to harvest): ${harnessActive} active, ${harnessTasks.length - harnessActive} finished` : '';
       if (ownTasks.length) {
         const failed = ownTasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed');
         const done = ownTasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed').length;
         rows.push({ id: 'time-children', kind: 'time', text: `${ownTasks.length} agent-launched children: ${activeChildren} active · ${failed.length} failed · ${done} done${failed.length ? ` (${failed.slice(0, 3).map(task => task.label.slice(0, 40)).join('; ')})` : ''}${harness}` });
       } else rows.push({ id: 'time-children', kind: 'time', text: `no agent-launched child agents this task${harness}` });
     }
+    const planners = plannerStatusText();
+    if (planners) rows.push({ id: 'time-planners', kind: 'time', text: planners });
     const visible = todos.filter(task => task.status !== 'deleted');
     if (visible.length) {
       const open = visible.filter(task => task.status !== 'completed').length;
@@ -172,7 +174,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     try { scratchpad.seed(context?.sessionManager?.getBranch?.() ?? []); } catch { /* No persisted memos available. */ }
     runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
-    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
+    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${reviewerLabel(peer.reviewer)} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     execution: () => currentExecutionProfile(ctx),
     judge: (site, state, questions, options) => {

@@ -180,6 +180,7 @@
     "requirement-ledger.ts",
     "retry-policy.ts",
     "review-coordinator.ts",
+    "reviewer-board.ts",
     "scene-studio.ts",
     "scope-deliberation.ts",
     "scoped-snapshots.ts",
