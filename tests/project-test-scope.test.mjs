@@ -307,3 +307,17 @@ test('native diagnostics follow current tree receipts without a temporary log or
  await mutate(2);await assess();assert.notEqual(api.snapshot().need,null);assert.equal(api.snapshot().plannedChecks[0].diagnostics,undefined,'new bytes cannot reuse old diagnostic evidence');
  assert.deepEqual(fs.readdirSync(cwd),['value.js'],'no temporary evidence file is manufactured');
 });
+
+test('review discovery covers an ordinary repository nested past five levels without truncating', async t => {
+  const {projectTestFacts}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pi-review-walk-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const deep=path.join(dir,'agent/extensions/pkg/src/runs/shared/inner');fs.mkdirSync(deep,{recursive:true});
+  fs.writeFileSync(path.join(deep,'deep.ts'),'export const x = 1;\n');
+  for(let i=0;i<1500;i++){const folder=path.join(dir,'src',`m${i%30}`);fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,`f${i}.ts`),'export {};\n');}
+  const facts=await projectTestFacts(dir);
+  assert.equal(facts.truncated,false,'1,500 files and seven levels used to truncate at 1,200 entries or depth 5, which kept quality review from accepting');
+  assert.ok(facts.reviewSources['agent/extensions/pkg/src/runs/shared/inner/deep.ts']);
+  assert.equal(Object.keys(facts.reviewSources).length,1501);
+  const bounded=await projectTestFacts(dir,undefined,{maxEntries:200});
+  assert.equal(bounded.truncated,true,'an explicit budget still truncates');
+});

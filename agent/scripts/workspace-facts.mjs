@@ -792,9 +792,14 @@ export function isProjectReviewSource(file) {
 export async function projectTestFacts(cwd, signal, options = {}) {
   signal?.throwIfAborted();
   const root = await fs.realpath(cwd);
-  const maxEntries = Math.min(4000, Math.max(1, options.maxEntries ?? 1200));
+  // A truncated walk keeps quality review from accepting (or starting) at all, so
+  // the defaults cover an ordinary repository: 4,400 entries nested past five
+  // levels walk in about 300 ms. The deadline bounds the cost of a non-project
+  // directory, which stays truncated, after every mutating tool call.
+  const maxEntries = Math.min(12000, Math.max(1, options.maxEntries ?? 8000));
+  const maxDepth = Math.min(16, Math.max(1, options.maxDepth ?? 12));
   const deadline =
-    Date.now() + Math.min(2000, Math.max(1, options.timeoutMs ?? 400));
+    Date.now() + Math.min(2000, Math.max(1, options.timeoutMs ?? 800));
   const result = {
     root,
     source: "bounded local filenames and stat metadata",
@@ -816,8 +821,10 @@ export async function projectTestFacts(cwd, signal, options = {}) {
   while (queue.length && !result.truncated) {
     const { dir, depth } = queue.shift();
     try {
-      const directory = await fs.opendir(dir);
-      for await (const entry of directory) {
+      // One readdir per directory and its file stats in parallel: the walk is
+      // repeated after every mutating tool call, so per-entry awaits add up.
+      const stats = [];
+      for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         signal?.throwIfAborted();
         if (++result.entries > maxEntries || Date.now() >= deadline) {
           result.truncated = true;
@@ -827,7 +834,7 @@ export async function projectTestFacts(cwd, signal, options = {}) {
         const absolute = path.join(dir, entry.name),
           relative = path.relative(root, absolute).split(path.sep).join("/");
         if (entry.isDirectory()) {
-          if (depth < 5) queue.push({ dir: absolute, depth: depth + 1 });
+          if (depth < maxDepth) queue.push({ dir: absolute, depth: depth + 1 });
           else result.truncated = true;
         } else if (entry.isFile()) {
           if (TEST_MANIFEST.test(entry.name) && result.manifests.length < 32) {
@@ -839,17 +846,18 @@ export async function projectTestFacts(cwd, signal, options = {}) {
             isProjectTestSource(relative) ||
             TEST_MANIFEST.test(entry.name) ||
             /(?:vitest|jest|pytest|test).*config\./i.test(entry.name);
-          if (testSource || isProjectReviewSource(relative)) {
-            const stat = await fs.lstat(absolute);
-            if (!stat.isFile() || stat.isSymbolicLink()) continue;
-            const fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
-            if (testSource) result.sources[relative] = fingerprint;
-            if (isProjectReviewSource(relative))
-              result.reviewSources[relative] = fingerprint;
-            if (TEST_PATH.test(relative) && result.tests.length < 40)
-              result.tests.push(relative);
-          }
+          if (testSource || isProjectReviewSource(relative))
+            stats.push(fs.lstat(absolute).then((stat) => ({ stat, relative, testSource })));
         }
+      }
+      for (const { stat, relative, testSource } of await Promise.all(stats)) {
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+        const fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+        if (testSource) result.sources[relative] = fingerprint;
+        if (isProjectReviewSource(relative))
+          result.reviewSources[relative] = fingerprint;
+        if (TEST_PATH.test(relative) && result.tests.length < 40)
+          result.tests.push(relative);
       }
     } catch (error) {
       signal?.throwIfAborted();
