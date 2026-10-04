@@ -5,7 +5,7 @@ description: "Create, edit and verify Excel XLSX/XLSM or LibreOffice Calc ODS wo
 
 # Spreadsheet authoring
 
-Harness tools: `office_doc` reads, verifies and renders xlsx and ods and builds xlsx, all without an office suite, and `deliverable_check` opens any produced file. Start with `office_doc read` on an existing file; build new workbooks from a spec with `office_doc build` (columns with number formats, calculated formulas, totals, frozen header, auto-fitted widths), then `office_doc render` and look at the pages. Reach for python libraries or an office application only for what a spec cannot express (charts, pivot tables, macros, existing-workbook edits that must keep every feature).
+Harness tools: `office_doc` reads, verifies and renders xlsx and ods and builds xlsx, all without an office suite, and `deliverable_check` opens any produced file. Start with `office_doc read` on an existing file; build new workbooks from a spec with `office_doc build` (columns with number formats, calculated formulas, totals, frozen header, auto-fitted widths), then `office_doc render` and look at the pages (`pdfPath` with `pages:0` converts a workbook to a checked PDF in one call). Reach for python libraries or an office application only for what a spec cannot express (charts, pivot tables, macros, existing-workbook edits that must keep every feature).
 
 Inspect sheets, used ranges, formulas, cached values, named ranges, external links, macros and charts before choosing an editor. Keep identifiers as text, distinguish blanks from zero, and establish dates, locale, currency and units from the source. Preserve the original workbook and user formulas.
 

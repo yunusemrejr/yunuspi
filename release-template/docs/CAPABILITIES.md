@@ -1142,6 +1142,7 @@ Read, build, verify and render Office files with no office suite, and open any p
 
 - `action`: office_doc operation. Values: `read`, `verify`, `build`, `render`.
 - `spec`: build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas.
+- `pdfPath`: render: also save the PDF at this path inside the workspace and check it; with pages 0 the Office file becomes a checked PDF in one call.
 - `paths`: deliverable_check files (1 to 8, relative to the working directory or absolute).
 - `PI_DELIVERABLES`: Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available. Values: `on`, `off`.
 - `PI_BINARY_READ`: Set to off to restore the raw read of binary files. By default read shows a PDF as page text, an Office file as structured text, and an archive, database or media file as what it contains. Values: `on`, `off`.

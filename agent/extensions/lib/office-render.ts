@@ -29,7 +29,7 @@ export type RenderResult = { pdf: string; pageCount?: number; pngs: string[]; en
 export async function renderOffice(file: string, outDir: string, options: { pages?: number; dpi?: number; signal?: AbortSignal; binary?: string } = {}): Promise<RenderResult> {
   const binary = options.binary ?? findOfficeSuite();
   if (!binary) throw new Error("No office suite is installed (LibreOffice: soffice or libreoffice), so pages cannot be rendered. Reading and verifying still work; install LibreOffice to look at layout.");
-  const pages = Math.min(Math.max(Math.round(options.pages ?? 3), 1), 8), dpi = Math.min(Math.max(Math.round(options.dpi ?? 70), 40), 150);
+  const pages = Math.min(Math.max(Math.round(options.pages ?? 3), 0), 8), dpi = Math.min(Math.max(Math.round(options.dpi ?? 70), 40), 150);
   const staging = fs.mkdtempSync(path.join(isSnap(binary) ? os.homedir() : os.tmpdir(), "yunuspi-render-"));
   const notes: string[] = [];
   try {
@@ -44,12 +44,12 @@ export async function renderOffice(file: string, outDir: string, options: { page
     let pageCount: number | undefined;
     try { pageCount = Number(/^Pages:\s+(\d+)/m.exec((await execFileAsync("pdfinfo", [pdf], { timeout: 15000, encoding: "utf8" })).stdout)?.[1]) || undefined; } catch { notes.push("pdfinfo is not installed, so the page count is unknown."); }
     const pngs: string[] = [];
-    try {
+    if (pages > 0) try {
       const prefix = path.join(outDir, "page");
       await execFileAsync("pdftoppm", ["-png", "-r", String(dpi), "-f", "1", "-l", String(pages), pdf, prefix], { timeout: 90_000, encoding: "utf8" });
       for (const name of fs.readdirSync(outDir).filter(entry => /^page-\d+\.png$/.test(entry)).sort()) pngs.push(path.join(outDir, name));
     } catch { notes.push("pdftoppm (poppler) is not installed, so only the PDF was written; convert pages to images to look at them."); }
-    if (pageCount && pageCount > pages) notes.push(`Only the first ${pages} of ${pageCount} pages were rasterized; pass pages to see more.`);
+    if (pages > 0 && pageCount && pageCount > pages) notes.push(`Only the first ${pages} of ${pageCount} pages were rasterized; pass pages to see more.`);
     return { pdf, ...(pageCount ? { pageCount } : {}), pngs, engine: path.basename(binary), notes };
   } finally { fs.rmSync(staging, { recursive: true, force: true }); }
 }

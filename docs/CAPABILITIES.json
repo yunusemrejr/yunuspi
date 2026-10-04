@@ -2718,6 +2718,10 @@
           "summary": "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas."
         },
         {
+          "name": "pdfPath",
+          "summary": "render: also save the PDF at this path inside the workspace and check it; with pages 0 the Office file becomes a checked PDF in one call."
+        },
+        {
           "name": "paths",
           "summary": "deliverable_check files (1 to 8, relative to the working directory or absolute)."
         },

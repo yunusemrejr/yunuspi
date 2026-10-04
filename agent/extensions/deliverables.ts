@@ -155,17 +155,19 @@ export default function deliverables(pi: any) {
   pi.registerTool({
     name: "office_doc",
     label: "Office Document",
-    description: "Read, verify, build and render Office documents with no office suite. read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx or .xlsx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:{label,sum:[column header or letter]}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, MIN, MAX, COUNT, ROUND, IF, IFERROR, cross-sheet refs) and errors like #DIV/0! are reported. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice).",
+    description: "Read, verify, build and render Office documents with no office suite. read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx or .xlsx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:{label,sum:[column header or letter]}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, MIN, MAX, COUNT, ROUND, IF, IFERROR, cross-sheet refs) and errors like #DIV/0! are reported. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice); it also converts any docx/xlsx/pptx/odt/ods/odp to PDF: pass pdfPath (a .pdf inside the workspace; overwrite:true to replace one) and pages:0 to skip the page images.",
     promptSnippet: "Read, verify, build (docx/xlsx) and render Office documents",
     parameters: Type.Object({
       action: choices(["read", "verify", "build", "render"]),
       path: localPath,
       spec: Type.Optional(Type.Object({}, { additionalProperties: true, description: "build: the docx or xlsx spec described above" })),
       format: Type.Optional(choices(["docx", "xlsx"], "build: only needed when path has no .docx/.xlsx extension")),
-      overwrite: Type.Optional(Type.Boolean({ description: "build: replace an existing file" })),
+      overwrite: Type.Optional(Type.Boolean({ description: "build, or render with pdfPath: replace an existing file" })),
       sheet: Type.Optional(Type.String({ maxLength: 31, description: "read: only this sheet" })),
       maxChars: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
-      pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, description: "render: pages to rasterize (default 3)" })),
+      pages: Type.Optional(Type.Integer({ minimum: 0, maximum: 8, description: "render: pages to rasterize (default 3; 0 for the PDF only)" })),
+      pdfPath: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "render: also save the PDF here (a .pdf path inside the workspace); an existing file needs overwrite:true" })),
+      outputDir: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "render: existing workspace folder in which the new media-… folder with the page images is created (default: the working directory)" })),
     }),
     prepareArguments(input: any) {
       if (!input || typeof input !== "object") return input;
@@ -187,10 +189,32 @@ export default function deliverables(pi: any) {
       }
       if (params.action === "render") {
         if (!fs.existsSync(file) || !officeKindForPath(file)) throw new Error(`${relative(file, cwd)} is not an existing Office file`);
+        let pdfTarget: string | undefined;
+        if (params.pdfPath !== undefined) {
+          pdfTarget = canonicalMutationPath(textPath(params.pdfPath), root);
+          if (!/\.pdf$/i.test(pdfTarget)) throw new Error("pdfPath must end in .pdf");
+          if (!containsPath(root, pdfTarget)) throw new Error("pdfPath must be inside the current workspace; choose a path below the working directory");
+          const denial = selfMutationDenial(pdfTarget, root); if (denial) throw new Error(denial);
+          if (fs.existsSync(pdfTarget) && params.overwrite !== true) throw new Error(`${relative(pdfTarget, cwd)} already exists. Pass overwrite:true to replace it or choose another name.`);
+        }
         const outDir = await outputFolder(params.outputDir, cwd);
         try {
           const rendered = await renderOffice(file, outDir, { pages: params.pages, signal: bounded });
-          return text({ ...rendered, pdf: relative(rendered.pdf, cwd), pngs: rendered.pngs.map(png => relative(png, cwd)), note: "Open the PNG pages (read or render_see) and judge layout: overflow, clipping, spacing, hierarchy. Structure checks cannot see these." });
+          let pdf = rendered.pdf, verification: any;
+          if (pdfTarget) {
+            fs.mkdirSync(path.dirname(pdfTarget), { recursive: true });
+            const temporary = `${pdfTarget}.tmp-${randomBytes(4).toString("hex")}`;
+            try { fs.copyFileSync(rendered.pdf, temporary, fs.constants.COPYFILE_EXCL); fs.renameSync(temporary, pdfTarget); } finally { fs.rmSync(temporary, { force: true }); }
+            fs.rmSync(rendered.pdf, { force: true });
+            pdf = pdfTarget;
+            const inspection = await inspectDeliverable(pdfTarget, { cwd, signal: bounded });
+            ledger.noteProduced(pdfTarget, "office_doc"); ledger.noteChecked(pdfTarget, inspection.status);
+            verification = { status: inspection.status, findings: compact(inspection.findings, 6), facts: inspection.facts };
+            if (!rendered.pngs.length) fs.rmSync(outDir, { recursive: true, force: true });
+          }
+          const note = rendered.pngs.length ? "Open the PNG pages (read or render_see) and judge layout: overflow, clipping, spacing, hierarchy. Structure checks cannot see these."
+            : pdfTarget ? `The PDF is at ${relative(pdfTarget, cwd)}${verification?.status === "fail" ? ", but its check failed: read the findings" : ", and its check passed; pass pages (1 to 8) to also see page images"}.` : "Only the PDF was written; pass pages (1 to 8) to also see page images.";
+          return text({ ...rendered, pdf: relative(pdf, cwd), pngs: rendered.pngs.map(png => relative(png, cwd)), ...(verification ? { verification } : {}), note });
         } catch (error) { fs.rmSync(outDir, { recursive: true, force: true }); throw error; }
       }
       // build

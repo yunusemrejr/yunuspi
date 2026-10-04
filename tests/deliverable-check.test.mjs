@@ -277,3 +277,34 @@ test('render: without a runnable office suite the failure is plain; with one the
   if (hasTool('pdftoppm') || spawnSync('pdftoppm', ['-v'], { stdio: 'ignore' }).status === 0) assert.equal(rendered.pngs.length, 1);
   assert.deepEqual(fs.readdirSync(os.homedir()).filter(name => name.startsWith('yunuspi-render-')), [], 'the staging directory is removed');
 });
+
+test('office_doc render: pdfPath converts an Office file to a checked PDF in one call, with the path rules of build', { timeout: 240_000 }, async (t) => {
+  const dir = tmp(), h = host(), ctx = makeCtx(dir); deliverables(h.pi);
+  const source = path.join(dir, 'memo.docx');
+  fs.writeFileSync(source, buildDocx({ title: 'Quarterly memo', blocks: [{ type: 'heading', level: 1, text: 'Findings' }, { type: 'paragraph', text: 'Spending rose by four percent over the quarter.' }] }, () => png()).buffer);
+  // The path rules apply before any rendering, so they are checked even where no office suite is installed.
+  await assert.rejects(h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: 'memo.txt' }, ctx), /must end in \.pdf/);
+  await assert.rejects(h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: path.join(os.tmpdir(), 'escape.pdf') }, ctx), /inside the current workspace/);
+  await assert.rejects(h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: '../escape.pdf' }, ctx), /inside the current workspace/);
+  put(dir, 'taken.pdf', '%PDF-1.4 placeholder');
+  await assert.rejects(h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: 'taken.pdf' }, ctx), /already exists.*overwrite:true/);
+  assert.equal(fs.readFileSync(path.join(dir, 'taken.pdf'), 'utf8'), '%PDF-1.4 placeholder', 'a refused conversion leaves the existing file alone');
+  assert.deepEqual(fs.readdirSync(dir).filter(name => name.startsWith('media-')), [], 'a refused conversion creates nothing');
+  if (!findOfficeSuite() || process.env.YUNUSPI_SKIP_OFFICE_RENDER === '1') return t.skip('LibreOffice is not installed (or rendering is skipped)');
+  const made = await h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: 'out/memo.pdf', pages: 0 }, ctx);
+  assert.equal(made.details.pdf, 'out/memo.pdf'); assert.deepEqual(made.details.pngs, []);
+  assert.equal(fs.readFileSync(path.join(dir, 'out/memo.pdf')).subarray(0, 5).toString(), '%PDF-');
+  assert.equal(made.details.verification.status, 'pass'); assert.equal(made.details.verification.facts.pages, 1);
+  assert.match(made.details.note, /out\/memo\.pdf.*check passed/);
+  assert.deepEqual(fs.readdirSync(dir).filter(name => name.startsWith('media-')), [], 'with no page images wanted, no scratch folder is left behind');
+  assert.deepEqual(collectVerificationReceipts(5, ctx.sessionManager), [], 'the converted PDF was checked, so it leaves no open receipt');
+  await assert.rejects(h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: 'out/memo.pdf', pages: 0 }, ctx), /already exists/);
+  const again = await h.run('office_doc', { action: 'render', path: 'memo.docx', pdfPath: 'out/memo.pdf', pages: 1, overwrite: true }, ctx);
+  assert.equal(again.details.pdf, 'out/memo.pdf');
+  if (spawnSync('pdftoppm', ['-v'], { stdio: 'ignore' }).status === 0) {
+    assert.equal(again.details.pngs.length, 1); assert.match(again.details.pngs[0], /^media-[0-9a-f]+\/page-1\.png$/);
+    const folders = fs.readdirSync(dir).filter(name => name.startsWith('media-'));
+    assert.equal(folders.length, 1); assert.deepEqual(fs.readdirSync(path.join(dir, folders[0])).filter(name => name.endsWith('.pdf')), [], 'the PDF is not duplicated beside the page images');
+  }
+  assert.equal(fs.readdirSync(os.homedir()).filter(name => name.startsWith('yunuspi-render-')).length, 0, 'staging is removed');
+});
