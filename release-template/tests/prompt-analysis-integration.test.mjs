@@ -258,4 +258,19 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   assert.deepEqual(f.errors, []);
 });
 
+test('a comparison prompt carries the prior-art paragraph to the main model; ordinary work does not', async t => {
+  preferences(['third']);
+  const f = await fixture(t);
+  const carries = (call) => call.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => typeof part?.text === 'string' && part.text.includes('Prior art (advisory')));
+  await f.session.prompt('Compare our harness with other agent harnesses and tell me what we are missing.');
+  assert.ok(carries(f.calls.at(-1)), 'the scouting paragraph reaches the model that acts on the prompt');
+  const shown = f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').at(-1);
+  assert.match(shown.content, /prior art · compare/, 'the visible analysis line names the paragraph');
+  const before = f.calls.length;
+  await f.session.prompt('Fix the failing test in the parser and rerun it.');
+  assert.ok(!carries(f.calls.at(-1)), 'a bug fix is not sent to look at competitors');
+  assert.ok(f.calls.length > before);
+  assert.deepEqual(f.errors, []);
+});
+
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
