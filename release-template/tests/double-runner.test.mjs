@@ -1,6 +1,7 @@
-import test, { beforeEach } from 'node:test';
+import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -13,6 +14,14 @@ const { registerDoubleMode, DOUBLE_RUNNER, DOUBLE_PROGRESS, DOUBLE_LIMITS } =
   await import(extension + 'double-runner.ts');
 
 const PI_DOUBLE = process.env.PI_DOUBLE;
+// Forking reads the parent session file, so a session with history has one on disk; a brand-new session does not yet.
+const SESSION_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'double-runner-session-'));
+after(() => fs.rmSync(SESSION_DIR, { recursive: true, force: true }));
+const persistedSession = () => {
+  const file = path.join(SESSION_DIR, 'session.jsonl');
+  fs.writeFileSync(file, '{"type":"session"}\n');
+  return file;
+};
 beforeEach(() => {
   if (PI_DOUBLE === undefined) delete process.env.PI_DOUBLE;
   else process.env.PI_DOUBLE = PI_DOUBLE;
@@ -51,7 +60,7 @@ const makePi = () => {
 const makeCtx = (pi, overrides = {}) => {
   const session = {
     id: 'session-1',
-    file: '/tmp/double-runner-test-session.jsonl',
+    file: persistedSession(),
     ...(overrides.session ?? {}),
   };
   return {
@@ -60,6 +69,7 @@ const makeCtx = (pi, overrides = {}) => {
     sessionManager: {
       getSessionId: () => session.id,
       getSessionFile: () => session.file,
+      getLeafId: () => 'leaf-1',
       getEntries: () => pi.entries,
     },
     signal: new AbortController().signal,
@@ -590,4 +600,33 @@ test('the user\'s own requirements anchor every stage and the directive stays su
   assert.match(result.message.content, /Requirements extracted from the user's words/);
   assert.ok(result.message.content.indexOf('Do not modify auth.ts.') < result.message.content.indexOf('Directive — migrate behind a wrapper'));
   assert.match(result.message.content, /their own messages \(this prompt, earlier prompts and any active goal\) and explicit constraints outrank it/);
+});
+
+test('the first prompt of a new session has no persisted file to fork, so the streams start fresh and still run', async () => {
+  const pi = makePi();
+  const calls = [];
+  registerDoubleMode(pi, {
+    warmWaitMs: 0,
+    launch: async (id, params) => {
+      calls.push(params);
+      const kind = kindOf(params);
+      return okResult(kind === 'reconcile' ? RECONCILED : kind === 'A' ? ANALYSIS_A : ANALYSIS_B);
+    },
+  });
+  const ctx = makeCtx(pi, { session: { file: path.join(SESSION_DIR, 'not-written-yet.jsonl') } });
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 'Be helpful.' }, ctx);
+  assert.ok(result, 'the directive still arrives');
+  assert.deepEqual(calls.map(kindOf).sort(), ['A', 'B', 'reconcile']);
+  for (const params of calls) {
+    assert.equal(params.context, 'fresh', 'a fork needs the parent file, which does not exist yet');
+    assert.ok(params.task.includes('Fix the login redirect.'), 'the request itself travels in the task');
+  }
+  assert.match(calls.find((params) => kindOf(params) === 'A').task, /first prompt, so there is no earlier conversation/);
+  // Once the session has a file the very same runner forks again.
+  const later = makeCtx(pi);
+  await fire(pi, 'before_agent_start', { prompt: 'Now add a test.', systemPrompt: 'Be helpful.' }, later);
+  assert.ok(calls.slice(3).length >= 2);
+  for (const params of calls.slice(3)) assert.equal(params.context, 'fork');
 });

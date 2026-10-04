@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
 import { getAgentDir, type ExtensionContext } from "@yunuspi/coding-agent";
 import { Text } from "@yunuspi/tui";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
@@ -599,6 +600,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		} catch {
 			return undefined;
 		}
+		// A brand-new session writes its file only after the first reply, and a fork needs that file and a
+		// leaf. The first prompt has no earlier conversation to fork anyway (the stream task carries the
+		// request), so the streams start fresh instead of both failing with "Parent session file does not exist".
+		let forkable = false;
+		try { forkable = Boolean(sessionFile) && fs.statSync(sessionFile as string).isFile() && Boolean(ctx.sessionManager?.getLeafId?.()); } catch { forkable = false; }
 		const capturedEpoch = sessionEpoch;
 		const ownsSession = () => {
 			try {
@@ -660,6 +666,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				activePair
 					? `Double mode is ON (custom pair): stream A runs ${specs.A.route}${specs.A.thinking ? ` (thinking: ${specs.A.thinking})` : ""}; stream B runs ${specs.B.route}${specs.B.thinking ? ` (thinking: ${specs.B.thinking})` : ""}. The agent that acts on the reconciled directive runs ${route}${thinking ? ` (thinking: ${thinking})` : ""}.`
 					: `Active model: ${route}${thinking ? ` (thinking: ${thinking})` : ""}. Double mode is ON for this session; both streams use this same route.`,
+				forkable ? "" : "This is the session's first prompt, so there is no earlier conversation yet and you start without a forked transcript.",
 				boardNotes,
 			].filter(Boolean).join("\n"),
 		};
@@ -709,7 +716,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			model: spec.route,
 			...(spec.thinking ? { thinking: spec.thinking } : {}),
 			modelOrigin: "explicit",
-			context: "fork",
+			context: forkable ? "fork" : "fresh",
 			async: false,
 			foregroundOnly: true,
 			acceptance: { level: "none", reason: "Double advisory pass; the parent commits to one reconciled path." },

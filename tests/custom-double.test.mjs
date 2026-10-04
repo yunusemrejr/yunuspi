@@ -1,4 +1,4 @@
-import test, { beforeEach } from 'node:test';
+import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +16,11 @@ const board = await import(url('lib/reviewer-board.ts'));
 const pairLib = await import(url('pi-subagents/src/extension/double-pair.ts'));
 
 const PI_DOUBLE = process.env.PI_DOUBLE;
+// Forking needs the parent session file to exist on disk.
+const SESSION_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-double-session-'));
+const SESSION_FILE = path.join(SESSION_DIR, 'session.jsonl');
+fs.writeFileSync(SESSION_FILE, '{"type":"session"}\n');
+after(() => fs.rmSync(SESSION_DIR, { recursive: true, force: true }));
 beforeEach(() => {
   if (PI_DOUBLE === undefined) delete process.env.PI_DOUBLE;
   else process.env.PI_DOUBLE = PI_DOUBLE;
@@ -48,7 +53,7 @@ const makePi = () => {
 const makeCtx = (pi, overrides = {}) => ({
   model: { provider: 'openrouter', id: 'glm-5.3-flash' },
   cwd: '/work/proj',
-  sessionManager: { getSessionId: () => 'session-1', getSessionFile: () => '/tmp/custom-double-session.jsonl', getEntries: () => pi.entries },
+  sessionManager: { getSessionId: () => 'session-1', getSessionFile: () => SESSION_FILE, getLeafId: () => 'leaf-1', getEntries: () => pi.entries },
   modelRegistry: { getAvailable: () => MODELS },
   signal: new AbortController().signal,
   ui: { notify: (text, level) => pi.notifies.push({ text, level }), setStatus: (key, text) => pi.statuses.push({ key, text }) },
