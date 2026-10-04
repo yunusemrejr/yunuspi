@@ -274,3 +274,37 @@ test('a comparison prompt carries the prior-art paragraph to the main model; ord
 });
 
 test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+const kickoffFor = (words) => `[goal-tracked g1] Goal: ${words}\n\nAcceptance criteria (refine with goal({action:"criteria", items:[…]}) if they miss something; keep it to what the user asked):\n- C1: ${words}\n- V: Result checked end to end against the real artifact.\n\nWork autonomously until all are verified with evidence.`;
+
+test('a /goal kickoff reaches intent analysis and the design-direction ambition guidance; a continuation does not', async (t) => {
+  preferences(['first']);
+  const f = await fixture(t);
+  const words = 'Create stunning complex website designs with advanced motion graphics for a pottery studio.';
+  await f.session.sendUserMessage(kickoffFor(words), { authored: true, userText: words });
+  assert.deepEqual(f.calls.map((call) => call.id), ['first', 'main'], 'the kickoff is analysed before the main turn, like any prompt');
+  const request = JSON.parse(f.calls[0].context.messages[0].content[0].text.split('\n').at(-1));
+  assert.equal(request.currentPrompt, words, 'the analyzer reads what the user wrote, not the harness criteria wrapper');
+  const modelContext = JSON.stringify(f.calls.at(-1).context.messages);
+  assert.match(modelContext, /Ambition: immersive/, 'the brief asked for spectacle, so the guidance says immersive');
+  assert.match(modelContext, /signature-experience/);
+  assert.match(modelContext, /Acceptance criteria/, 'the model still receives the full kickoff with its criteria');
+  assert.equal(f.events.length, 1, 'the Guardian received the analysis, so it tracks the goal as a task');
+  assert.equal(f.session.sessionManager.getEntries().filter((entry) => entry.customType === 'prompt-analysis').length, 1);
+  // The harness's own continuation stays synthetic: no second analysis, no new Guardian task.
+  await f.session.sendUserMessage('[goal g1, continuation 1/6] The goal is not finished: 1 criteria have no evidence yet.');
+  assert.deepEqual(f.calls.map((call) => call.id), ['first', 'main', 'main']);
+  assert.equal(f.events.length, 1);
+  assert.deepEqual(f.errors, []);
+});
+
+test('the ambition level follows the goal: a minimalist brief is told to stay restrained', async (t) => {
+  preferences(['first']);
+  const f = await fixture(t);
+  const words = 'Make this whole mail app into a super minimalist, centered UI. No chunks of text or tons of buttons.';
+  await f.session.sendUserMessage(kickoffFor(words), { authored: true, userText: words });
+  const modelContext = JSON.stringify(f.calls.at(-1).context.messages);
+  assert.match(modelContext, /Ambition: restrained/);
+  assert.doesNotMatch(modelContext, /count caps in frontend-design and web-effects stop applying/);
+  assert.deepEqual(f.errors, []);
+});
