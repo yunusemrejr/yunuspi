@@ -508,3 +508,29 @@ test('an off pin adds no suffix: the executor would reject a literal ":off" rout
   assert.equal(byKind.B.model, 'zai/glm-5.3-flash:low');
   assert.equal(byKind.reconcile.model, 'deepseek/deepseek-flash', 'reconcile=a runs on A, which is pinned off');
 });
+
+test('a chosen route the economy policy would refuse is announced with the command that lifts it', async () => {
+  const pi = makePi();
+  registerDoubleMode(pi, {
+    agentDir: () => tmpAgentDir(),
+    economyBlock: (model) => model.provider === 'zai' ? 'its $0 price is a placeholder, not proof that it is free' : undefined,
+    launch: async () => ({}),
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('custom-double').handler('deepseek/deepseek-flash zai/glm-5.3-flash', ctx);
+  const warnings = pi.notifies.filter((note) => note.level === 'warning');
+  assert.equal(warnings.length, 1, 'only the refused stream is announced');
+  assert.match(warnings[0].text, /Stream B \(zai\/glm-5\.3-flash\) will be unavailable: its \$0 price is a placeholder.*Run \/subagents-economy allow zai\/glm-5\.3-flash to use it\./);
+  assert.ok(pi.notifies.some((note) => /Double mode: ON/.test(note.text)), 'the pair is still adopted: the user decides');
+});
+
+test('the live economy policy classification drives the block reason', async () => {
+  const model = (cost) => ({ provider: 'minimax', id: 'MiniMax-M2.7', name: 'M2.7', reasoning: true, cost });
+  const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  assert.match(pairLib.doubleEconomyBlock(model(free)) ?? '', /\$0 price is a placeholder/);
+  assert.equal(pairLib.doubleEconomyBlock(model({ input: 0.3, output: 1.2, cacheRead: 0, cacheWrite: 0 })), undefined, 'a priced route within budget runs');
+  assert.match(pairLib.doubleEconomyBlock(model({ input: 500, output: 900, cacheRead: 0, cacheWrite: 0 })) ?? '', /above the subagent budget/);
+  assert.equal(pairLib.doubleEconomyBlock({ provider: 'x', id: 'unpriced', reasoning: true }), undefined, 'an unpriced route is not refused by the executor');
+});
+

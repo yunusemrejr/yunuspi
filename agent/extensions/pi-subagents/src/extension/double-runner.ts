@@ -32,7 +32,7 @@ import {
 import { extractRequirements } from "../../../lib/requirement-ledger.ts";
 import { peerReviewerNotes, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey } from "../../../lib/reviewer-board.ts";
 import { recentUnreliableRoutes } from "../runs/shared/run-history.ts";
-import { loadLastPair, pairKey, parseStoredPair, resolveDoubleModel, saveLastPair, serializePair, type DoubleRegistryModel } from "./double-pair.ts";
+import { doubleEconomyBlock, loadLastPair, pairKey, parseStoredPair, resolveDoubleModel, saveLastPair, serializePair, type DoubleRegistryModel } from "./double-pair.ts";
 import type { DoublePairPickerOptions } from "../slash/double-pair-picker.ts";
 
 /**
@@ -114,6 +114,8 @@ export interface DoubleRunnerDeps {
 	agentDir?: () => string | undefined;
 	/** Routes whose recent automatic runs mostly failed to finish (the popup marks them); defaults to the run ledger. */
 	unreliableRoutes?: () => ReadonlySet<string>;
+	/** Why the subagent economy policy would refuse a chosen model as a stream (defaults to the live policy). */
+	economyBlock?: (model: DoubleRegistryModel) => string | undefined;
 	/** The `/custom-double` popup; defaults to the TUI picker. Resolves to the confirmed pair. */
 	pickPair?: (ctx: ExtensionContext, options: Omit<DoublePairPickerOptions, "done">) => Promise<DoublePair | undefined>;
 }
@@ -487,10 +489,17 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				const level = pi.getThinkingLevel?.();
 				if (typeof level === "string" && level.trim()) sessionThinking = level.trim();
 			} catch { /* the models fall back to their own default thinking */ }
+			const economyBlock = deps.economyBlock ?? doubleEconomyBlock;
 			const adopt = (next: DoublePair) => {
 				setEnabled(true, ctx, next);
 				saveLastPair(agentDir(), next);
 				if (doublePairSameRoute(next)) notify("Both slots use the same model, so this is /double with separate thinking levels.");
+				// The executor refuses such a route before it runs; say so now, with the command that lifts it.
+				for (const [slot, ref] of [["A", next.a], ["B", next.b]] as const) {
+					const model = models.find((candidate) => candidate.provider === ref.provider && candidate.id === ref.id);
+					const why = model ? (() => { try { return economyBlock(model); } catch { return undefined; } })() : undefined;
+					if (why) notify(`Stream ${slot} (${ref.provider}/${ref.id}) will be unavailable: ${why}. Run /subagents-economy allow ${ref.provider}/${ref.id} to use it.`, "warning");
+				}
 			};
 			const remembered = pair ?? loadLastPair(agentDir());
 			if (intent.kind === "pair") {
@@ -523,6 +532,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 					...(sessionRef ? { session: sessionRef } : {}),
 					...(sessionThinking ? { sessionThinking } : {}),
 					unreliable: unreliable(),
+					economyBlock: (model) => { try { return economyBlock(model); } catch { return undefined; } },
 					...(typeof sessionTokens === "number" ? { sessionTokens } : {}),
 				});
 			} catch (error) {

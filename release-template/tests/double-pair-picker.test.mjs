@@ -183,3 +183,16 @@ test('a model whose window cannot hold the session transcript is marked, since e
   assert.doesNotMatch(view, /deepseek-flash \[deepseek\] ⚠/);
   assert.doesNotMatch(open({ models: small }).screen(), /⚠ window/, 'an unknown session size marks nothing');
 });
+
+test('a model the subagent economy policy would refuse is marked and explained when highlighted, never hidden', () => {
+  const economyBlock = (model) => model.provider === 'zai' ? 'its $0 price is a placeholder, not proof that it is free' : undefined;
+  const { screen, type, press, results } = open({ economyBlock });
+  type('zai');
+  const view = screen();
+  assert.match(view, /glm-5\.3-flash \[zai\] ⚠ economy policy/);
+  assert.match(view.replace(/\s+/g, ' '), /glm-5\.3-flash: its \$0 price is a placeholder.*Run \/subagents-economy allow zai\/glm-5\.3-flash first, or it will be unavailable\./);
+  assert.doesNotMatch(open({ economyBlock }).screen(), /deepseek-flash \[deepseek\] ⚠/);
+  press(KEYS.enter);
+  assert.equal(results.length, 0, 'choosing a marked model is still allowed; it only fills slot A');
+});
+

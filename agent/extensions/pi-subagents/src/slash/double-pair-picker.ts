@@ -20,6 +20,8 @@ export interface DoublePairPickerOptions {
 	sessionTokens?: number;
 	/** provider/id routes whose recent automatic runs mostly failed to finish: marked, never hidden or blocked. */
 	unreliable?: ReadonlySet<string>;
+	/** Why the subagent economy policy would refuse a model as a Double stream, when it would: marked, never hidden. */
+	economyBlock?: (model: DoubleRegistryModel) => string | undefined;
 	done: (result: DoublePairPickerResult) => void;
 }
 
@@ -156,12 +158,16 @@ export class DoublePairPicker extends Container {
 			const badge = th.fg("muted", `[${model.provider}]`);
 			const marked = tags ? th.fg("success", ` ✓ ${tags}`) : "";
 			const flaky = this.options.unreliable?.has(key) ? th.fg("warning", " ⚠ failed to finish lately") : "";
+			const refused = this.options.economyBlock?.(model) ? th.fg("warning", " ⚠ economy policy") : "";
 			const small = !doubleContextFits((model as { contextWindow?: number }).contextWindow, this.options.sessionTokens)
 				? th.fg("warning", ` ⚠ window ${Math.round(((model as { contextWindow?: number }).contextWindow ?? 0) / 1000)}k < session ${Math.round((this.options.sessionTokens ?? 0) / 1000)}k`) : "";
-			this.listContainer.addChild(new Text(`${cursor}${selected ? th.fg("accent", model.id) : model.id} ${badge}${marked}${flaky}${small}`, 0, 0));
+			this.listContainer.addChild(new Text(`${cursor}${selected ? th.fg("accent", model.id) : model.id} ${badge}${marked}${flaky}${refused}${small}`, 0, 0));
 		}
 		if (start > 0 || end < total) this.listContainer.addChild(new Text(th.fg("muted", `  (${this.selectedIndex + 1}/${total})`), 0, 0));
 		if (total === 0) this.listContainer.addChild(new Text(th.fg("muted", "  No matching models you can run"), 0, 0));
+		const highlighted = this.rows[this.selectedIndex];
+		const why = highlighted?.kind === "model" ? this.options.economyBlock?.(highlighted.model) : undefined;
+		if (highlighted?.kind === "model" && why) this.listContainer.addChild(new Text(th.fg("warning", `  ${highlighted.model.id}: ${why}. Run /subagents-economy allow ${keyOf(highlighted.model)} first, or it will be unavailable.`), 0, 0));
 		if (this.note) this.listContainer.addChild(new Text(th.fg("warning", `  ${this.note}`), 0, 0));
 
 		const slotName = this.active === 0 ? "A" : "B";

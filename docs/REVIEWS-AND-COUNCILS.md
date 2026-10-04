@@ -127,6 +127,13 @@ What differs from the twin mode, and what does not:
   automatic runs mostly failed to finish (read from the same run ledger Double's
   own streams write to), with a warning; marked models can still be chosen. The
   twin mode never needs the check, since the session model holds its own transcript.
+- The pinned thinking level reaches each child as the model's own suffix
+  (`provider/id:level`; none for `off`), because the subagent tool has no per-run
+  thinking field. A route the subagent economy policy refuses as an explicit child
+  (a `$0` price is a placeholder, or the rate is above the budget) is marked
+  `⚠ economy policy` in the popup, explained when highlighted, and announced when
+  the pair is adopted, with the `/subagents-economy allow provider/id` command
+  that lifts it; without that command the stream is reported unavailable.
 
 ### One board for every planner and reviewer
 

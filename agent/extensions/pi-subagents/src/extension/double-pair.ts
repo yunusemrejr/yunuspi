@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { clampSupportedThinkingLevel, getSupportedThinkingLevels, splitKnownThinkingSuffix, THINKING_LEVELS, toModelInfo, type ThinkingLevel } from "../shared/model-info.ts";
 import type { DoubleModelRef, DoublePair, DoubleReconciler } from "../../../lib/double.ts";
+import { classifyModelEconomy, loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 
 /**
  * Pair resolution for `/custom-double`: turns what the user typed or picked
@@ -53,6 +54,23 @@ export function resolveDoubleModel(
 		thinking = defaultDoubleThinking(match, options.sessionThinking);
 	}
 	return { ok: true, ref: { provider: match.provider, id: match.id, ...(thinking ? { thinking } : {}) } };
+}
+
+/**
+ * Why the subagent economy policy refuses this route as an explicit child (a $0 price is a placeholder, or the
+ * rate is above the budget) and nobody has authorized it, or undefined when it may run. Double launches its
+ * streams as such children, so a chosen route that is refused would only show up as "unavailable" on the first
+ * prompt; the popup and the command say so up front, with the command that lifts it.
+ */
+export function doubleEconomyBlock(model: DoubleRegistryModel): string | undefined {
+	try {
+		const cfg = loadModelEconomyConfig();
+		if (!cfg.enabled) return undefined;
+		const verdict = classifyModelEconomy(`${model.provider}/${model.id}`, toModelInfo(model), cfg);
+		if (verdict.verdict === "zero-placeholder") return "its $0 price is a placeholder, not proof that it is free";
+		if (verdict.verdict === "expensive" && verdict.rates) return `its $${verdict.rates.input}/M input and $${verdict.rates.output}/M output are above the subagent budget`;
+	} catch { /* an unreadable policy blocks nothing here; the executor still enforces it */ }
+	return undefined;
 }
 
 /** Deterministic text of a pair for notices and persisted receipts. */
