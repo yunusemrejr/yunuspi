@@ -99,7 +99,12 @@ function boundedCaptureResult(result) {
   }
   return result;
 }
-export async function renderCapture(p, output, signal) {
+// WebGL pages are captured in software: Chrome's SwiftShader rasterizes on the CPU inside the sandbox, with no
+// GPU device access, so the pixels are real while the isolation holds. This is the launch flag scene_render
+// already uses (lib/scene-studio.ts). The first pass keeps WebGL off so ordinary pages stay fast and strict.
+const SOFTWARE_WEBGL_ARGS = ["--use-angle=swiftshader"];
+async function renderCaptureOnce(p, output, signal) {
+  const software = p.webgl === "software";
   const errors = [],
     addError = (s) => {
       // Text inspection cannot echo arbitrary console values or query-bearing URLs.
@@ -131,6 +136,7 @@ export async function renderCapture(p, output, signal) {
       colorScheme: p.colorScheme ?? "light",
       reducedMotion: p.reducedMotion ?? "no-preference",
       animationTimeMs: p.animationTimeMs ?? null,
+      ...(software ? { webgl: "software" } : {}),
     };
   const ms = p.timeoutMs ?? 15000;
   const outputMode = p.output ?? "image";
@@ -255,7 +261,7 @@ export async function renderCapture(p, output, signal) {
         channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
         headless: true,
         timeout: ms,
-        args: ["--disable-webgl", "--disable-gpu"],
+        args: software ? SOFTWARE_WEBGL_ARGS : ["--disable-webgl", "--disable-gpu"],
         chromiumSandbox: true,
       });
       browserStarting = false;
@@ -264,7 +270,7 @@ export async function renderCapture(p, output, signal) {
         await browser.close();
         throw Error("Render cancelled");
       }
-      renderer = `Playwright ${require("playwright/package.json").version} / ${process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome"} ${browser.version()} (sandboxed)`;
+      renderer = `Playwright ${require("playwright/package.json").version} / ${process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome"} ${browser.version()} (sandboxed${software ? "; WebGL in software via SwiftShader, no GPU" : ""})`;
       timer = setTimeout(
         () => browser?.close().catch(() => {}),
         Math.max(1, ms - (Date.now() - start)),
@@ -277,7 +283,7 @@ export async function renderCapture(p, output, signal) {
         colorScheme: conditions.colorScheme,
         reducedMotion: conditions.reducedMotion,
       });
-      await context.addInitScript(() => {
+      await context.addInitScript((softwareWebgl) => {
         globalThis.__piGpuAttempts = [];
         const unsupported = (type) => {
           globalThis.__piGpuAttempts.push(type);
@@ -289,7 +295,7 @@ export async function renderCapture(p, output, signal) {
         ].filter(Boolean)) {
           const original = Klass.prototype.getContext;
           Klass.prototype.getContext = function (type, ...args) {
-            if (/webgl|experimental-webgl/i.test(type)) {
+            if (!softwareWebgl && /webgl|experimental-webgl/i.test(type)) {
               unsupported(type);
               return null;
             }
@@ -313,7 +319,7 @@ export async function renderCapture(p, output, signal) {
         } catch {
           unsupported("WebGPU interception unavailable");
         }
-      });
+      }, software);
       let bytes = 0,
         requests = 0;
       await context.routeWebSocket("**/*", (socket) => {
@@ -454,6 +460,9 @@ export async function renderCapture(p, output, signal) {
       let unsupported = false;
       page.on("console", (m) => {
         if (m.text().includes("PI_UNSUPPORTED_RENDER:")) unsupported = true;
+        // The software rasterizer reports its own cost ("GPU stall due to ReadPixels", "Performance"
+        // severity) for ordinary three.js frames. That is the renderer talking, not a page defect.
+        if (software && /GL Driver Message \(OpenGL, Performance,/.test(m.text())) return;
         if (["warning", "error"].includes(m.type()) && errors.length < 30)
           addError(`console ${m.type()}: ${m.text().slice(0, 400)}`);
       });
@@ -679,8 +688,9 @@ export async function renderCapture(p, output, signal) {
       elapsedMs: Date.now() - start,
       errors: errors.slice(0, 30),
       status: errors.length ? "captured_with_errors" : "captured",
-      limitations:
-        "Isolated unauthenticated browser; WebGL/GPU disabled and attempts rejected. Capture is not proof of semantic correctness. One PDF page per call.",
+      limitations: software
+        ? "Isolated unauthenticated browser; WebGL rendered in software (SwiftShader, no GPU access), WebGPU and workers rejected. The pixels are real, but frame timing and shader cost are not representative of a GPU, and a still frame is not playback proof. Capture is not proof of semantic correctness."
+        : "Isolated unauthenticated browser; WebGL/GPU disabled and attempts rejected. Capture is not proof of semantic correctness. One PDF page per call.",
     });
   } catch (e) {
     await fs.unlink(output).catch(() => {});
@@ -717,6 +727,23 @@ export async function renderCapture(p, output, signal) {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
     await browser?.close();
+  }
+}
+const WEBGL_REJECTION = /unsupported gpu\/webgl/i;
+const RETRY_MIN_MS = 4000;
+/** Every capture tool (render_see, ui_explore, visual_diff, visual_review, motion_inspect, creative_compare)
+ * goes through here. A page that touches WebGL is not a verification dead end: it is captured once more with
+ * software WebGL, inside the same sandbox and the same time budget. WebGPU, workers and everything else the
+ * first pass rejects stay rejected, and `webgl: "software"` can also be requested up front. */
+export async function renderCapture(p, output, signal) {
+  const budget = Math.min(30000, Math.max(100, Number.isFinite(p.timeoutMs) ? p.timeoutMs : 15000));
+  const started = Date.now();
+  try {
+    return await renderCaptureOnce(p, output, signal);
+  } catch (error) {
+    const left = budget - (Date.now() - started);
+    if (p.webgl === "software" || signal?.aborted || !WEBGL_REJECTION.test(String(error?.message)) || left < RETRY_MIN_MS) throw error;
+    return renderCaptureOnce({ ...p, webgl: "software", timeoutMs: Math.floor(left) }, output, signal);
   }
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) {
