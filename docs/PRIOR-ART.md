@@ -29,7 +29,7 @@ The classifier was tuned on the installation's own history: 1,412 distinct user 
 
 ## Switches and reference providers
 
-`PI_PRIOR_ART=off` (or `0`) makes the classifier return nothing, which removes both the Director paragraph and the first-turn tool staging; `PI_EXPERT=off` also removes the paragraph. The web angles of a prior-art plan run through `web_research` with `fallbackProviders:["hackernews","stackexchange","npm"]`: keyless official indexes (Hacker News via Algolia, Stack Overflow, the npm registry) that stay useful while general web search is cooling down. Measured on the installation's recorded sessions, 3 of 8 `web_search` calls failed completely, all through a single scraped provider hitting its cooldown, which is why a second, independent source of technical discovery matters.
+`PI_PRIOR_ART=off` (or `0`) makes the classifier return nothing, which removes both the Director paragraph and the first-turn tool staging; `PI_EXPERT=off` also removes the paragraph. The web angles of a prior-art plan run through `web_research` with `fallbackProviders:["hackernews","stackexchange","npm"]`: keyless official indexes (Hacker News via Algolia, Stack Overflow, the npm registry) that stay useful while general web search is cooling down. Measured on the installation's recorded sessions, 3 of 8 `web_search` calls failed completely: the scraped DuckDuckGo route (the only general route for sessions whose model has no hosted search) failed or was cooling down in every one, and the hosted route was cooling down in two. That is why a second, independent source of technical discovery matters.
 
 ## Limits
 
