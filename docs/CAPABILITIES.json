@@ -2689,7 +2689,7 @@
     {
       "id": "office-and-deliverables",
       "group": "web_media",
-      "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them.",
+      "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.",
       "entrypoints": [
         "office_doc",
         "deliverable_check"
@@ -2728,6 +2728,14 @@
             "off"
           ],
           "summary": "Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available."
+        },
+        {
+          "name": "PI_BINARY_READ",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Set to off to restore the raw read of binary files. By default read shows a PDF as page text, an Office file as structured text, and an archive, database or media file as what it contains."
         }
       ],
       "related": [
@@ -2744,6 +2752,7 @@
         "agent/extensions/lib/office-zip.ts",
         "agent/extensions/lib/xml-lite.ts",
         "agent/extensions/lib/office-render.ts",
+        "agent/extensions/lib/binary-read.ts",
         "agent/extensions/lib/deliverable-inspect.ts",
         "agent/extensions/lib/deliverable-ledger.ts",
         "agent/skills/spreadsheet-authoring/SKILL.md",
@@ -4032,7 +4041,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 98,
+        "line": 121,
         "kind": "literal"
       },
       {
@@ -4256,7 +4265,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 132,
+        "line": 155,
         "kind": "literal"
       },
       {
@@ -4734,7 +4743,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 98,
+        "line": 121,
         "kind": "literal"
       },
       {
@@ -4854,7 +4863,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 132,
+        "line": 155,
         "kind": "literal"
       },
       {
@@ -5296,7 +5305,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 724,
+      "sourceFiles": 725,
       "registrationSites": 89,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 139,
@@ -5555,6 +5564,10 @@
       },
       {
         "path": "agent/extensions/lib/bash-routing.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/binary-read.ts",
         "exists": true
       },
       {

@@ -1132,7 +1132,7 @@ Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS insta
 
 #### office-and-deliverables
 
-Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them.
+Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.
 
 **Entrypoints:** `office_doc`, `deliverable_check`
 
@@ -1144,10 +1144,11 @@ Read, build, verify and render Office files with no office suite, and open any p
 - `spec`: build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas.
 - `paths`: deliverable_check files (1 to 8, relative to the working directory or absolute).
 - `PI_DELIVERABLES`: Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available. Values: `on`, `off`.
+- `PI_BINARY_READ`: Set to off to restore the raw read of binary files. By default read shows a PDF as page text, an Office file as structured text, and an archive, database or media file as what it contains. Values: `on`, `off`.
 
 **Related records:** `creative-studio`, `video-studio`, `quality-review`, `background-tasks`
 
-**Source:** [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../../agent/skills/presentation-authoring/SKILL.md)
+**Source:** [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/binary-read.ts`](../../agent/extensions/lib/binary-read.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../../agent/skills/presentation-authoring/SKILL.md)
 
 **Documentation:** [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
 
@@ -1296,7 +1297,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 126; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 137; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
-- `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 98; literal)
+- `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 121; literal)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `design_audit` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 251; literal)
 - `desktop_session` — [`agent/extensions/desktop-session.ts`](../../agent/extensions/desktop-session.ts) (line 15; literal)
@@ -1333,7 +1334,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 76; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 821; literal)
-- `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 132; literal)
+- `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 155; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 602; literal)
@@ -1648,6 +1649,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/audio-studio.ts`](../../agent/extensions/lib/audio-studio.ts)
 - [`agent/extensions/lib/authored-review.ts`](../../agent/extensions/lib/authored-review.ts)
 - [`agent/extensions/lib/bash-routing.ts`](../../agent/extensions/lib/bash-routing.ts)
+- [`agent/extensions/lib/binary-read.ts`](../../agent/extensions/lib/binary-read.ts)
 - [`agent/extensions/lib/blender-studio.ts`](../../agent/extensions/lib/blender-studio.ts)
 - [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts)
 - [`agent/extensions/lib/bulk-edit.ts`](../../agent/extensions/lib/bulk-edit.ts)
