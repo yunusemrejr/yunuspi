@@ -348,11 +348,17 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
 
   if (options.direction) {
     const hits = matchAvoidSignals(options.direction, [...slopSignals, ...lowContrast.map((c) => `low contrast ${c.hex}`)]);
+    // What measurement cannot decide: is the chosen signature actually there, and does an immersive page hold together.
+    const judged = [
+      ...(options.direction.signature ? [`signature "${options.direction.signature}" must be visible in this render; a still frame shows it, motion needs two captures apart`] : []),
+      ...(options.direction.ambition === "immersive" ? ["ambition immersive: judge coherence (one world model, every layer with a job, a fallback for reduced motion and no WebGL), not element count"] : []),
+    ];
     push("direction", hits.length ? "WARN" : "PASS", [
       `direction "${directionSummary(options.direction)}"`,
       ...hits.slice(0, 6).map((h) => `avoid "${h.avoid}" ↔ ${h.signal}`),
       ...(hits.length ? ["avoid-list hits are possible boilerplate, not automatic failures: the reviewer decides whether each is justified"] : ["no avoid-list pattern hit in deterministic signals"]),
-    ], hits.length > 0);
+      ...judged,
+    ], hits.length > 0 || judged.length > 0);
   }
 
   const run = {

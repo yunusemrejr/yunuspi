@@ -27,7 +27,7 @@ test('a new open visual brief asks for explored directions and marks mentioned s
   assert.match(guidance, /3 genuinely distinct directions/);
   assert.match(guidance, /Context-only references: "yunusemrevurgun\.com"/);
   assert.match(guidance, /not design sources/);
-  assert.ok(guidance.length <= 2000, 'bounded by the 2000-char guidance cap even with the full tell list');
+  assert.ok(guidance.length <= design.DESIGN_GUIDANCE_CAP, 'bounded by the guidance cap even with the full tell list');
   assert.match(design.designDirectionSummary(brief), /open visual brief → explore distinct directions.*context-only: yunusemrevurgun\.com/);
 });
 
@@ -76,4 +76,65 @@ test('the council explores directions for a new open brief and deliberates scope
   assert.equal(councilMode('Redesign the distracting mascot.'), 'scope');
   assert.equal(councilMode('Please do not redesign the landing page; only fix the footer link.'), 'scope');
   assert.equal(shouldRunScopeCouncil('How would you design a new landing page?'), false, 'a question is not a brief');
+});
+
+test('ambition is read from what the brief asks for and what the subject is for', () => {
+  const level = prompt => design.heuristicDesignBrief(prompt)?.ambition;
+  // Spectacle asked for outright, in the user's own kind of words.
+  assert.equal(level('Create stunning complex website designs with advanced motion graphics'), 'immersive');
+  assert.equal(level('design a portfolio website that feels alive and playful with a 3D hero'), 'immersive');
+  assert.equal(level('build a cinematic scroll-driven landing page'), 'immersive');
+  // Quality words mean craft for something that is used, spectacle for something that is looked at.
+  assert.equal(level('make the admin dashboard stunning'), 'balanced');
+  assert.equal(level('build a stunning landing page for my bakery'), 'immersive');
+  // Restraint and an explicit refusal of motion win when nothing asks for spectacle.
+  assert.equal(level('make this whole mail genie app into a super minimalist jelly vibe, centered UI stuff'), 'restrained');
+  assert.equal(level('create a dashboard for our inventory, no animations'), 'restrained');
+  assert.equal(level('create a dashboard for our inventory, no animations but make it stunning and cinematic'), 'restrained', 'a refusal of motion is not overridden by a quality word');
+  assert.equal(level('fix the settings form UI'), 'restrained', 'functional subjects default to quiet');
+  // Mixed or absent signals stay in the middle.
+  assert.equal(level('build a landing page for my bakery'), 'balanced');
+  assert.equal(level('design a calm website with a 3D hero and cinematic scroll scenes and parallax'), 'immersive', 'a single restraint word does not outvote repeated spectacle');
+  assert.equal(level('design a minimalist clean quiet website with one 3D hero'), 'balanced');
+  assert.equal(level('not a visual task: explain the cache policy'), undefined);
+});
+
+test('the guidance says what each ambition permits, and the immersive level lifts the count caps', () => {
+  const open = ambition => design.designDirectionGuidance({ openEnded: true, visualDesign: true, ambition, contextReferences: [], styleReferences: [] });
+  assert.match(open('restrained'), /Ambition: restrained[^\n]*finite-set budget/);
+  assert.match(open('balanced'), /Ambition: balanced[^\n]*One signature element/);
+  const immersive = open('immersive');
+  assert.match(immersive, /Ambition: immersive/);
+  assert.match(immersive, /signature-experience/);
+  assert.match(immersive, /count caps in frontend-design and web-effects stop applying/);
+  assert.match(immersive, /static baseline first/);
+  assert.match(immersive, /fallback \(reduced motion, no WebGL, phone\)/);
+  assert.doesNotMatch(open('restrained'), /count caps/, 'the quiet levels keep the caps');
+  assert.match(open('immersive'), /creative_direct set \(include ambition and signature\)/);
+  // A brief without a level (older callers) gets no ambition line rather than a guess.
+  assert.doesNotMatch(design.designDirectionGuidance({ openEnded: true, visualDesign: true, contextReferences: [], styleReferences: [] }), /Ambition:/);
+  assert.match(design.designDirectionSummary(design.heuristicDesignBrief('Create stunning complex website designs with advanced motion graphics')), /ambition immersive/);
+});
+
+test('the worst case (immersive, several context references, a style reference) keeps every tell', () => {
+  const guidance = design.designDirectionGuidance({ openEnded: true, visualDesign: true, ambition: 'immersive', contextReferences: ['one.example.com', 'two.example.io', 'three.example.dev', 'four.example.net'], styleReferences: ['five.example.org'] });
+  assert.ok(guidance.length <= design.DESIGN_GUIDANCE_CAP);
+  for (const tell of design.UI_PREFLIGHT_TELLS) assert.ok(guidance.includes(tell), `cut by the size cap: ${tell}`);
+  // Regression: with one context reference the old 2,000-character cap already cut the tail of the tell list.
+  const withReference = design.designDirectionGuidance({ openEnded: true, visualDesign: true, contextReferences: ['example.com'], styleReferences: [] });
+  assert.ok(design.UI_PREFLIGHT_TELLS.every(tell => withReference.includes(tell)));
+});
+
+test('model analysis keeps the heuristic ambition because it has no such field', () => {
+  const prompt = 'Create stunning complex website designs with advanced motion graphics';
+  const brief = design.detectDesignBrief(prompt, { source: 'model', visualDesign: true, openEnded: true, styleReferences: [], contextReferences: [] });
+  assert.equal(brief.source, 'analysis');
+  assert.equal(brief.ambition, 'immersive');
+  assert.equal(design.detectDesignBrief('explain the cache policy', { source: 'model', visualDesign: false, openEnded: false, styleReferences: [], contextReferences: [] }), undefined);
+});
+
+test('GUI, app and game phrasing reaches the design protocol when the model analysis is unavailable', () => {
+  for (const prompt of ['create a cute GUI app for my notes', 'make a new desktop app with a good look and feel', 'build a chess game with a lovely interface', 'design a mobile app for plant care'])
+    assert.equal(design.heuristicDesignBrief(prompt)?.visualDesign, true, prompt);
+  assert.equal(design.heuristicDesignBrief('write a compiler for the toy language'), undefined);
 });

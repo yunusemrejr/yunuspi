@@ -16,6 +16,9 @@
  */
 
 export const DIRECTION_FORMAT = "yunuspi-creative-direction-v1";
+/** How much expression the work calls for; the design-direction protocol reads it from the brief. */
+export const AMBITION_LEVELS = ["restrained", "balanced", "immersive"] as const;
+export type DirectionAmbition = (typeof AMBITION_LEVELS)[number];
 const MAX_ITEMS = 12;
 const MAX_TEXT = 120;
 const MAX_REFS = 8;
@@ -52,6 +55,10 @@ export interface CreativeDirection {
   format: typeof DIRECTION_FORMAT;
   name: string;
   intent: string[];
+  /** The expression level chosen for this work (restrained, balanced, immersive). */
+  ambition?: DirectionAmbition;
+  /** The one element the design is built around (a generated 3D world, a live model of the product, a character with behavior), named so QA can check the render shows it. */
+  signature?: string;
   hierarchy: CreativeHierarchy;
   visual: CreativeVisual;
   avoid: string[];
@@ -121,10 +128,14 @@ export function normalizeDirection(raw: unknown): CreativeDirection {
   if (!hierarchy.primary) throw new Error("direction.hierarchy.primary is required (the one focal element, e.g. content, product, diagram)");
   const intent = cleanList(input.intent);
   if (!intent.length) throw new Error("direction.intent needs at least one term (e.g. serious, editorial, restrained)");
+  const ambition = typeof input.ambition === "string" ? AMBITION_LEVELS.find((level) => level === (input.ambition as string).trim().toLowerCase()) : undefined;
+  const signature = cleanText(input.signature);
   return {
     format: DIRECTION_FORMAT,
     name: cleanText(input.name) ?? "untitled",
     intent,
+    ...(ambition ? { ambition } : {}),
+    ...(signature ? { signature } : {}),
     hierarchy,
     visual: cleanRecord<CreativeVisual>(input.visual, ["density", "geometry", "depth", "texture", "illustration"]),
     avoid: cleanList(input.avoid),
@@ -139,6 +150,7 @@ export function normalizeDirection(raw: unknown): CreativeDirection {
 export function renderDirectionBrief(direction: CreativeDirection, maxChars = 1600): string {
   const lines = [`Creative direction "${direction.name}" (advisory; user words win):`];
   lines.push(`- intent: ${direction.intent.join(", ")}`);
+  if (direction.ambition || direction.signature) lines.push(`- ${[direction.ambition ? `ambition ${direction.ambition}` : "", direction.signature ? `signature ${direction.signature}` : ""].filter(Boolean).join("; ")}`);
   const h = direction.hierarchy;
   lines.push(`- hierarchy: primary ${h.primary}${h.secondary ? `, secondary ${h.secondary}` : ""}${h.tertiary ? `, tertiary ${h.tertiary}` : ""}`);
   const visual = Object.entries(direction.visual).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join("; ");
@@ -154,7 +166,7 @@ export function renderDirectionBrief(direction: CreativeDirection, maxChars = 16
 
 /** One-line TUI/ledger summary. */
 export function directionSummary(direction: CreativeDirection): string {
-  return `${direction.name}: ${direction.intent.slice(0, 4).join("/")} · focal ${direction.hierarchy.primary}${direction.avoid.length ? ` · avoid ${direction.avoid.length}` : ""}`;
+  return `${direction.name}: ${direction.intent.slice(0, 4).join("/")}${direction.ambition ? ` · ${direction.ambition}` : ""} · focal ${direction.hierarchy.primary}${direction.avoid.length ? ` · avoid ${direction.avoid.length}` : ""}`;
 }
 
 export interface AvoidHit {

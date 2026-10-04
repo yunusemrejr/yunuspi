@@ -133,7 +133,7 @@ export default function artDirection(pi: any) {
 
   // ── creative_direct ──
   register("creative_direct",
-    "Own the task's structured creative direction: intent, focal hierarchy, visual bounds, avoid-list, motion and audio character, references. Every creative subsystem reads it; visual_review, ui_explore and motion_inspect check conformance against it. set validates and stores (scope session default, project persists to .pi/creative-direction.json); get reads session then project; brief renders the compact context block; status summarizes; clear removes. Parent owns mutation; children stay read-only.",
+    "Own the task's structured creative direction: intent, ambition (restrained, balanced or immersive), the one signature element, focal hierarchy, visual bounds, avoid-list, motion and audio character, references. Every creative subsystem reads it; visual_review, ui_explore and motion_inspect check conformance against it. set validates and stores (scope session default, project persists to .pi/creative-direction.json); get reads session then project; brief renders the compact context block; status summarizes; clear removes. Parent owns mutation; children stay read-only.",
     Type.Object({
       action: choices(["set", "get", "brief", "status", "clear"]),
       scope: Type.Optional(choices(["session", "project"])),

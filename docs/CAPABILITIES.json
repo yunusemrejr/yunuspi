@@ -7741,6 +7741,10 @@
         "path": "agent/skills/search-discoverability/SKILL.md"
       },
       {
+        "name": "signature-experience",
+        "path": "agent/skills/signature-experience/SKILL.md"
+      },
+      {
         "name": "simulation-engineering",
         "path": "agent/skills/simulation-engineering/SKILL.md"
       },

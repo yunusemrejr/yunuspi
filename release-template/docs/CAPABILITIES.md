@@ -1924,7 +1924,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 166 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 167 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
@@ -2053,6 +2053,7 @@ The exporter includes 166 public skill directories. This list is a path inventor
 - `scientific-paper-research` — [`agent/skills/scientific-paper-research/SKILL.md`](../../agent/skills/scientific-paper-research/SKILL.md)
 - `scroll-animated-websites` — [`agent/skills/scroll-animated-websites/SKILL.md`](../../agent/skills/scroll-animated-websites/SKILL.md)
 - `search-discoverability` — [`agent/skills/search-discoverability/SKILL.md`](../../agent/skills/search-discoverability/SKILL.md)
+- `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../../agent/skills/signature-experience/SKILL.md)
 - `simulation-engineering` — [`agent/skills/simulation-engineering/SKILL.md`](../../agent/skills/simulation-engineering/SKILL.md)
 - `small-model-engineering` — [`agent/skills/small-model-engineering/SKILL.md`](../../agent/skills/small-model-engineering/SKILL.md)
 - `software-engineering-wisdom` — [`agent/skills/software-engineering-wisdom/SKILL.md`](../../agent/skills/software-engineering-wisdom/SKILL.md)

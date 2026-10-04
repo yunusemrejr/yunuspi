@@ -107,3 +107,20 @@ test("a JSON-encoded container that does not parse gets an actionable validation
   assert.throws(() => validateToolArguments(tool, { name: "t", arguments: { tasks: broken } }), /"tasks" was sent as a string that is not valid JSON/);
   assert.deepEqual(validateToolArguments(tool, { name: "t", arguments: { tasks: '[{"task":"ok"}]' } }).tasks, [{ task: "ok" }]);
 });
+
+test("ambition and the signature element are validated, rendered and summarized", () => {
+  const base = { name: "world", intent: ["playful", "alive"], hierarchy: { primary: "the generated world" } };
+  const direction = creative.normalizeDirection({ ...base, ambition: " Immersive ", signature: "isometric voxel world where each plot opens one app", motion: { continuous: true } });
+  assert.equal(direction.ambition, "immersive");
+  assert.equal(direction.signature, "isometric voxel world where each plot opens one app");
+  const brief = creative.renderDirectionBrief(direction);
+  assert.match(brief, /- ambition immersive; signature isometric voxel world/);
+  assert.match(creative.directionSummary(direction), /· immersive · focal the generated world/);
+  // Unknown levels are dropped rather than invented, and the fields stay optional.
+  const plain = creative.normalizeDirection({ ...base, ambition: "maximalist" });
+  assert.equal(plain.ambition, undefined);
+  assert.equal("signature" in plain, false);
+  assert.doesNotMatch(creative.renderDirectionBrief(plain), /ambition|signature/);
+  // They survive a stored file round trip like any other field.
+  assert.equal(creative.parseDirectionFile(JSON.stringify(direction)).ambition, "immersive");
+});
