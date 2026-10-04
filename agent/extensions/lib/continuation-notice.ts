@@ -43,6 +43,16 @@ function collectLines(field: 'pending' | 'verification', limit: number, session?
 export const collectContinuationLines = (limit = MAX_LINES, session?: object) => collectLines('pending', limit, session);
 export const collectVerificationLines = (limit = MAX_LINES, session?: object) => collectLines('verification', limit, session);
 
+/** Sources whose pending work is a verification nudge the owner itself would deliver at the real end of the work. */
+const VERIFICATION_OWNERS = ["project tests", "quality review"] as const;
+
+/** Another subsystem (a background task, a delegated run) will resume this session by itself. Verification nudges and
+ * automatic review wait for that: they would judge a tree that is about to change, spend a bounded round on a state
+ * nobody will ship, and wake the agent for a turn the resumed work makes redundant. */
+export function resumesElsewhere(session?: object): boolean {
+  return collectLines('pending', 8, session).some(line => !VERIFICATION_OWNERS.some(name => line.startsWith(`${name}: `)));
+}
+
 const cleanId = (value: unknown, max: number): string | undefined => {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim().slice(0, max);

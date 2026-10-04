@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
 import { tokenizeSimple } from './bash-routing.ts';
-import { registerContinuationSource } from './continuation-notice.ts';
+import { registerContinuationSource, resumesElsewhere } from './continuation-notice.ts';
 import { isSessionStopped } from './session-stop.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
 
@@ -654,7 +654,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       const content = advice(); if (content) notedRevision = state.revision; return content;
     },
     async settled(_event: any, ctx: any) {
-      if (!enabled() || !active || options.shadow || state.paused || state.optedOut || ctx?.signal?.aborted || !capable() || ctx?.isIdle?.() !== true) return;
+      if (!enabled() || !active || options.shadow || state.paused || state.optedOut || ctx?.signal?.aborted || !capable() || ctx?.isIdle?.() !== true || resumesElsewhere(ctx?.sessionManager)) return;
       const ticket = epoch;
       await scan(ctx);
       if (ticket !== epoch || !active || !enabled() || !capable() || state.paused || state.optedOut || ctx?.signal?.aborted || state.followups >= MAX_FOLLOWUPS || ctx?.hasPendingMessages?.()) return;

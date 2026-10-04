@@ -175,3 +175,28 @@ test('project test rationales longer than the owner keeps are clipped, not refus
  assert.ok(reason.startsWith('Verdict first.'));assert.ok(reason.endsWith('Final evidence last.'));assert.ok(reason.includes('[…]'));
  assert.equal(clipRationale('short enough',1200),'short enough');
 });
+
+test('verification nudges and automatic review wait while another subsystem will resume the session',async t=>{
+ const {registerContinuationSource,CONTINUATION_SOURCES,resumesElsewhere}=await load('lib/continuation-notice.ts');
+ const previous=globalThis[CONTINUATION_SOURCES];globalThis[CONTINUATION_SOURCES]=[];
+ t.after(()=>{globalThis[CONTINUATION_SOURCES]=previous;});
+ const session={};
+ assert.equal(resumesElsewhere(session),false);
+ registerContinuationSource({name:'project tests',session,pending:()=>['resolve pending verification scope and current execution evidence']});
+ registerContinuationSource({name:'quality review',session,pending:()=>['complete bounded quality review and assess remaining evidence gaps']});
+ assert.equal(resumesElsewhere(session),false,'the verification owners themselves are not a reason to wait');
+ let running=true;
+ registerContinuationSource({name:'background tasks',session,pending:()=>running?['Render film (b84f) will automatically resume this session when it finishes']:[]});
+ assert.equal(resumesElsewhere(session),true);
+
+ const f=await projectFixture(t);
+ const waiting=f.ctx.sessionManager;
+ registerContinuationSource({name:'subagents',session:waiting,pending:()=>running?['1 delegated run is still active']:[]});
+ await f.edit(1);
+ await f.api.settled({},f.ctx);
+ assert.equal(f.sent.length,0,'no test follow-up while a delegated run is about to resume the session');
+ running=false;
+ await f.api.settled({},f.ctx);
+ assert.equal(f.sent.length,1,'the follow-up is delivered once the session is really finishing');
+
+});

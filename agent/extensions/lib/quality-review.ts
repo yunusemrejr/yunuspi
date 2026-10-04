@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
-import { registerContinuationSource } from './continuation-notice.ts';
+import { registerContinuationSource, resumesElsewhere } from './continuation-notice.ts';
 import { isSessionStopped } from './session-stop.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
 import { UI_DESIGN_POLICY, UI_POLICY_KEYS } from './slop-guidance-signals.ts';
@@ -763,8 +763,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (noted === key) return '';
       const content = automaticAdvice(); if (content) noted = key; return content;
     },
+    // The watchdog joins this owner with an empty event and keeps its own cadence; only the settled hook itself waits for work that resumes the session.
     async settled(_event: any, ctx: any, signal?: AbortSignal) {
-      if (!enabled() || !capable() || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
+      if (!enabled() || !capable() || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || _event?.type === 'agent_settled' && resumesElsewhere(ctx.sessionManager)) return;
       const ticket = generation;
       const roundsBefore = rounds;
       await run(ctx,signal,true);

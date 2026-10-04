@@ -36,6 +36,7 @@ const {
 const { projectTestFacts, isProjectReviewSource } = await import(
  pathToFileURL(path.join(agent, "scripts/workspace-facts.mjs"))
 );
+const { registerContinuationSource, CONTINUATION_SOURCES } = await import(pathToFileURL(path.join(agent, "extensions/lib/continuation-notice.ts")));
 const { classifyExecution, registerAdaptiveExecution } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const storePath = path.join(
  agent,
@@ -1734,4 +1735,29 @@ test("automatic acceptance needs every reviewer clean, cited and the checks reso
  blockedChecks.tests({ need: null, assessment: { disposition: "blocked" } });
  await blockedChecks.settle();
  assert.notEqual(blockedChecks.state().status, "accepted", "an explicit test blocker keeps the model in the loop");
+});
+
+test("the settled hook waits for work that will resume the session; the watchdog join keeps its own cadence", async (t) => {
+ const previous = globalThis[CONTINUATION_SOURCES];
+ globalThis[CONTINUATION_SOURCES] = [];
+ t.after(() => { globalThis[CONTINUATION_SOURCES] = previous; });
+ let running = true;
+ const waiting = async () => {
+  const f = await fixture(t);
+  registerContinuationSource({ name: "background tasks", session: f.ctx.sessionManager, pending: () => (running ? ["Render film (b84f) will automatically resume this session when it finishes"] : []) });
+  await f.mutate();
+  return f;
+ };
+ const hook = await waiting();
+ await hook.api.settled({ type: "agent_settled" }, hook.ctx);
+ assert.equal(hook.calls.length, 0, "no review round is spent on a tree that is about to change");
+ assert.equal(hook.sent.length, 0);
+ running = false;
+ await hook.api.settled({ type: "agent_settled" }, hook.ctx);
+ assert.equal(hook.calls.length, 1, "the review runs once the session is really finishing");
+ assert.equal(hook.state().status, "accepted");
+ running = true;
+ const watchdog = await waiting();
+ await watchdog.api.settled({}, watchdog.ctx);
+ assert.equal(watchdog.calls.length, 1, "the watchdog join is not a settled hook and still reaches the shared owner");
 });
