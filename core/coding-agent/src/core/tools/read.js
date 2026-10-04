@@ -5,7 +5,8 @@ import { Type } from "typebox";
 import { processImage } from "../../utils/image-process.js";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.js";
 import { getExperimentalToolSampling } from "../experimental.js";
-import { resolveReadPathAsync } from "./path-utils.js";
+import { resolveReadPathAsync, resolveToCwd } from "./path-utils.js";
+import { annotatePathError } from "./path-hints.js";
 import { readRenderers } from "./renderers/read.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
@@ -159,8 +160,12 @@ export function createReadToolDefinition(cwd, options) {
                     }
                     catch (error) {
                         signal?.removeEventListener("abort", onAbort);
-                        if (!aborted)
+                        if (!aborted) {
+                            // Local filesystem only: custom operations (remote hosts) have no local listing to hint from.
+                            if (!options?.operations && typeof path === "string")
+                                annotatePathError(error, path, resolveToCwd(path, ctx?.cwd || cwd), ctx?.cwd || cwd);
                             reject(error);
+                        }
                     }
                 })();
             });

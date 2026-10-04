@@ -6,6 +6,7 @@ import { getExperimentalToolSampling } from "../experimental.js";
 import { applyEditsToNormalizedContent, detectLineEnding, generateDiffString, generateUnifiedPatch, normalizeToLF, restoreLineEndings, } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
+import { missingPathHint, withHint } from "./path-hints.js";
 import { editRenderers } from "./renderers/edit.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { documentMutationEvidence } from "../guardian/guardian-prose.js";
@@ -112,7 +113,8 @@ export function createEditToolDefinition(cwd, options) {
                 catch (error) {
                     throwIfAborted();
                     const errorMessage = error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
-                    throw new Error(`Could not edit file: ${path}. ${errorMessage}.`);
+                    const missing = error?.code === "ENOENT" || error?.code === "ENOTDIR";
+                    throw new Error(withHint(`Could not edit file: ${path}. ${errorMessage}.`, missing && !options?.operations ? missingPathHint(path, absolutePath, ctx?.cwd || cwd) : ""));
                 }
                 throwIfAborted();
                 // Read the file.

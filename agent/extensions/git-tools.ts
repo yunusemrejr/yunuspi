@@ -10,6 +10,8 @@
  * shell), paths/revisions are validated, and output is capped.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Type } from "typebox";
@@ -351,6 +353,26 @@ export function commitCommand(command: string): { all: boolean } | undefined {
 }
 const BLOCKING_RISK = /possible (?:private key|AWS access key|GitHub token|Slack token|API secret key|Google API key|JSON web token|credential assignment)|merge conflict marker/;
 
+/** Git repositories one or two levels below `cwd`, bounded in entries read, so an orienting call outside a repository can say where the work probably lives. */
+export function repositoriesBelow(cwd: string, limit = 8): string[] {
+  const found: string[] = [];
+  const skip = new Set(["node_modules", ".cache", ".local", ".npm", ".cargo", "snap", "Library", "AppData"]);
+  let read = 0;
+  const visit = (dir: string, depth: number) => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (found.length >= limit || read++ > 400) return;
+      if (!entry.isDirectory() || skip.has(entry.name)) continue;
+      const child = path.join(dir, entry.name);
+      if (fs.existsSync(path.join(child, ".git"))) { found.push(path.relative(cwd, child) || entry.name); continue; }
+      if (depth < 2 && !entry.name.startsWith(".")) visit(child, depth + 1);
+    }
+  };
+  visit(cwd, 1);
+  return found;
+}
+
 export default function gitTools(pi: any) {
   // Commits the agent makes through bash get a last look at what they will
   // record: secret-like strings and conflict markers stop the commit (or ask,
@@ -413,9 +435,13 @@ export default function gitTools(pi: any) {
         if (!outside && /^(?:Unable to establish managed Git repository identity|Git working tree required)$/.test(message))
           outside = await git(["rev-parse", "--is-inside-work-tree"], cwd).then(() => false, (probe) => probe?.message === "Not inside a Git repository");
         if (!outside) throw error;
+        // A session started in a parent folder (a projects directory, a home folder) is the common way here:
+        // naming the repositories just below it saves the model a directory crawl.
+        const below = repositoriesBelow(cwd);
+        const where = below.length ? ` Repositories found below it: ${below.join(", ")} (pass one as the working directory of bash, or read its files by path).` : "";
         return {
-          content: [{ type: "text", text: `No Git repository at ${cwd} or its parents, so there is no status, history or diff to inspect. If the task needs version control, run \`git init\` with bash.` }],
-          details: { action: params.action, cwd, repository: false },
+          content: [{ type: "text", text: `No Git repository at ${cwd} or its parents, so there is no status, history or diff to inspect.${where} If the task needs version control, run \`git init\` with bash.` }],
+          details: { action: params.action, cwd, repository: false, ...(below.length ? { repositoriesBelow: below } : {}) },
         };
       }
       return {

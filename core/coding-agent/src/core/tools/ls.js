@@ -2,6 +2,7 @@ import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
 import nodePath from "path";
 import { Type } from "typebox";
 import { pathExists, resolveToCwd } from "./path-utils.js";
+import { fileWhereDirectoryExpectedHint, missingPathHint, withHint } from "./path-hints.js";
 import { lsRenderers } from "./renderers/ls.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
@@ -42,13 +43,13 @@ export function createLsToolDefinition(cwd, options) {
                         const effectiveLimit = limit ?? DEFAULT_LIMIT;
                         // Check if path exists.
                         if (!(await ops.exists(dirPath))) {
-                            reject(new Error(`Path not found: ${dirPath}`));
+                            reject(new Error(withHint(`Path not found: ${dirPath}`, options?.operations ? "" : missingPathHint(path || ".", dirPath, ctx?.cwd || cwd))));
                             return;
                         }
                         // Check if path is a directory.
                         const stat = await ops.stat(dirPath);
                         if (!stat.isDirectory()) {
-                            reject(new Error(`Not a directory: ${dirPath}`));
+                            reject(new Error(withHint(`Not a directory: ${dirPath}`, options?.operations ? "" : fileWhereDirectoryExpectedHint(dirPath))));
                             return;
                         }
                         // Read directory entries.

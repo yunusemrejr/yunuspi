@@ -1,9 +1,11 @@
 import { createInterface } from "node:readline";
+import { stat } from "node:fs/promises";
 import { spawn } from "child_process";
 import path from "path";
 import { Type } from "typebox";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { pathExists, resolveToCwd } from "./path-utils.js";
+import { fileWhereDirectoryExpectedHint, missingPathHint, withHint } from "./path-hints.js";
 import { findRenderers } from "./renderers/find.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
@@ -66,6 +68,19 @@ export function createFindToolDefinition(cwd, options) {
                         const searchPath = resolveToCwd(searchDir || ".", ctx?.cwd || cwd);
                         const effectiveLimit = limit ?? DEFAULT_LIMIT;
                         const ops = customOps ?? defaultFindOperations;
+                        if (!customOps?.glob) {
+                            // fd's own message for a bad search root ("No valid search paths given") names no way out,
+                            // and the check needs no fd binary, so it runs first.
+                            if (!(await pathExists(searchPath))) {
+                                settle(() => reject(new Error(withHint(`Path not found: ${searchPath}`, missingPathHint(searchDir || ".", searchPath, ctx?.cwd || cwd)))));
+                                return;
+                            }
+                            const rootStat = await stat(searchPath).catch(() => undefined);
+                            if (rootStat && !rootStat.isDirectory()) {
+                                settle(() => reject(new Error(withHint(`Not a directory: ${searchPath}`, fileWhereDirectoryExpectedHint(searchPath)))));
+                                return;
+                            }
+                        }
                         // If custom operations provide glob(), use that instead of fd.
                         if (customOps?.glob) {
                             if (!(await ops.exists(searchPath))) {

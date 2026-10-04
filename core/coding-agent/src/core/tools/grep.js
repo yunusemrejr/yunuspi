@@ -5,6 +5,7 @@ import path from "path";
 import { Type } from "typebox";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { resolveToCwd } from "./path-utils.js";
+import { missingPathHint, withHint } from "./path-hints.js";
 import { grepRenderers } from "./renderers/grep.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, GREP_MAX_LINE_LENGTH, truncateHead, truncateLine, } from "./truncate.js";
@@ -62,7 +63,7 @@ export function createGrepToolDefinition(cwd, options) {
                             isDirectory = await ops.isDirectory(searchPath);
                         }
                         catch {
-                            settle(() => reject(new Error(`Path not found: ${searchPath}`)));
+                            settle(() => reject(new Error(withHint(`Path not found: ${searchPath}`, customOps ? "" : missingPathHint(searchDir || ".", searchPath, ctx?.cwd || cwd)))));
                             return;
                         }
                         const contextValue = context && context > 0 ? context : 0;
