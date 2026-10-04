@@ -5293,6 +5293,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/competence-store.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/completion-gate.ts",
         "exists": true
       },
@@ -5554,6 +5558,10 @@
       },
       {
         "path": "agent/extensions/lib/mini-preprocessor.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/model-competence.ts",
         "exists": true
       },
       {
