@@ -326,6 +326,19 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	let pairNotice: string | undefined;
 	let pairUnavailableWarned = false;
 
+	// The streams launch through the executor, not through the model-facing tool, so what matters is that the
+	// capability is registered. First-turn tool staging deactivates `subagent` for direct (small) tasks; reading
+	// the active set would silently turn the explicit mode off exactly there and name the wrong cause.
+	const subagentCapability = (): boolean => {
+		try {
+			const registered: unknown = pi.getAllTools?.();
+			if (Array.isArray(registered)) return registered.some((tool: any) => (typeof tool === "string" ? tool : tool?.name) === "subagent");
+			const active: unknown = pi.getActiveTools?.();
+			return Array.isArray(active) && active.includes("subagent");
+		} catch {
+			return false;
+		}
+	};
 	const doubleEnabled = () => enabled && (process.env.PI_DOUBLE ?? "on").toLowerCase() !== "off";
 	// While the mode is on, a footer chip says so between prompts too: Double pays for three model passes
 	// on every prompt, and a mode that persists across resumes must never be forgotten silently.
@@ -546,16 +559,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			return undefined;
 		}
 		if (ctx?.signal?.aborted || lifetime.signal.aborted) return undefined;
-		try {
-			const activeTools: unknown = pi.getActiveTools?.();
-			if (!Array.isArray(activeTools) || !activeTools.includes("subagent")) {
-				if (!capabilityWarned) {
-					capabilityWarned = true;
-					try { (ctx as any)?.ui?.notify?.("Double mode needs the subagent capability; this turn continues single.", "warning"); } catch {}
-				}
-				return undefined;
+		if (!subagentCapability()) {
+			if (!capabilityWarned) {
+				capabilityWarned = true;
+				try { (ctx as any)?.ui?.notify?.("Double mode needs the subagent capability; this turn continues single.", "warning"); } catch {}
 			}
-		} catch {
 			return undefined;
 		}
 

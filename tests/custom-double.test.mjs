@@ -460,3 +460,28 @@ test('the footer keeps a chip while Double is on, between prompts and across res
   await pi.commands.get('double').handler('on', ctx);
   assert.equal(chip(), undefined, 'a disabled process never shows the chip');
 });
+
+test('first-turn tool staging cannot switch the explicit mode off: a registered subagent capability is enough', async () => {
+  const pi = makePi();
+  const seen = [];
+  // Direct (small) tasks stage `subagent` out of the active set while it stays registered.
+  pi.activeTools = ['read', 'bash'];
+  pi.getAllTools = () => [{ name: 'read' }, { name: 'bash' }, { name: 'subagent' }];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => { seen.push(kindOf(params)); return okResult(`${kindOf(params)} text`); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'What is 17 times 23?', systemPrompt: 's' }, ctx);
+  assert.ok(result, 'the explicit mode still ran');
+  assert.deepEqual(seen.sort(), ['A', 'B', 'reconcile']);
+  assert.equal(pi.notifies.some((row) => /subagent capability/.test(row.text)), false, 'no misleading capability warning');
+  // A genuinely absent capability is still reported, once.
+  const bare = makePi();
+  bare.getAllTools = () => [{ name: 'read' }];
+  registerDoubleMode(bare, { launch: async () => okResult('x') });
+  const bareCtx = makeCtx(bare);
+  await fire(bare, 'session_start', { reason: 'startup' }, bareCtx);
+  await bare.commands.get('double').handler('on', bareCtx);
+  assert.equal((await fire(bare, 'before_agent_start', { prompt: 'Fix it.', systemPrompt: 's' }, bareCtx))[0], undefined);
+  assert.equal(bare.notifies.filter((row) => /needs the subagent capability/.test(row.text)).length, 1);
+});

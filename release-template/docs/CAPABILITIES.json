@@ -3293,12 +3293,12 @@
       {
         "name": "custom-double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 436
+        "line": 449
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 416
+        "line": 429
       },
       {
         "name": "effort",
@@ -3858,6 +3858,12 @@
         "kind": "factory"
       },
       {
+        "name": "deliverable_check",
+        "source": "agent/extensions/deliverables.ts",
+        "line": 96,
+        "kind": "literal"
+      },
+      {
         "name": "dependency_plan",
         "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
         "line": 20,
@@ -4061,6 +4067,12 @@
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
         "line": 821,
+        "kind": "literal"
+      },
+      {
+        "name": "office_doc",
+        "source": "agent/extensions/deliverables.ts",
+        "line": 130,
         "kind": "literal"
       },
       {
@@ -4530,6 +4542,12 @@
         "kind": "literal"
       },
       {
+        "name": "deliverable_check",
+        "source": "agent/extensions/deliverables.ts",
+        "line": 96,
+        "kind": "literal"
+      },
+      {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
         "line": 251,
@@ -4635,6 +4653,12 @@
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
         "line": 821,
+        "kind": "literal"
+      },
+      {
+        "name": "office_doc",
+        "source": "agent/extensions/deliverables.ts",
+        "line": 130,
         "kind": "literal"
       },
       {
@@ -5074,11 +5098,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 710,
-      "registrationSites": 86,
+      "sourceFiles": 719,
+      "registrationSites": 88,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 134,
-      "uniqueStableTools": 133,
+      "stableRegistrationRows": 136,
+      "uniqueStableTools": 135,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5135,6 +5159,10 @@
       },
       {
         "path": "agent/extensions/continuation-notice.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/deliverables.ts",
         "exists": true
       },
       {
@@ -5440,6 +5468,14 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/deliverable-inspect.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/deliverable-ledger.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/design-direction.ts",
         "exists": true
       },
@@ -5728,6 +5764,22 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/office-build.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/office-read.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/office-render.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/office-zip.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/output-distiller.ts",
         "exists": true
       },
@@ -5920,6 +5972,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/sheet-formula.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/skill-discovery-controller.ts",
         "exists": true
       },
@@ -6041,6 +6097,10 @@
       },
       {
         "path": "agent/extensions/lib/worktree-checkpoint.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/xml-lite.ts",
         "exists": true
       }
     ],
