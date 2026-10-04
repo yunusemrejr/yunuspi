@@ -28,5 +28,9 @@ mkdir -p "$AGENT/logs"
 LOCK="$AGENT/logs/harness-session.lock"
 if [[ ! -e "$LOCK" ]]; then (umask 077; touch "$LOCK"); fi
 exec 8<"$LOCK"
-flock --shared 8
+# An update or harness verification holds this lock exclusively; say so instead of hanging silently.
+if ! flock --shared --nonblock 8; then
+  echo 'YunusPi is waiting for a harness update or verification to finish...' >&2
+  flock --shared 8
+fi
 exec "$NODE" "$ENTRY" "$@"
