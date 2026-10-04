@@ -61,6 +61,12 @@ async function reviewArtifacts(dir: string, out: string, shotDir: string, name: 
   return { contactSheet: sheet, preview: existsSync(video) ? (await produced(video)).path : undefined };
 }
 
+/** A file argument is usually written relative to the project (`blender/x.blend` beside `dir`), sometimes to the workspace: try the project first. */
+async function sourcePath(value: unknown, dir: string, cwd: string) {
+  if (typeof value === "string" && value.trim() && !path.isAbsolute(value) && existsSync(path.resolve(dir, value))) return readablePath(path.resolve(dir, value), cwd);
+  return readablePath(value, cwd);
+}
+
 export async function videoShot(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const dir = await projectDir(params.dir, cwd);
   const name = String(params.name ?? "");
@@ -70,18 +76,21 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   const plan = planShot(params, spec);
   const theme = spec.theme ?? {};
   const palette = params.look === false ? {} : { background: hexOr(params.background) ?? hexOr(theme.background), accent: hexOr(params.color) ?? hexOr(theme.accent), accent2: hexOr(theme.accent2) };
+  // Resolve every input before touching the disk, so a bad path leaves nothing behind.
+  const blend = source === "blend" ? await sourcePath(params.blend, dir, cwd) : undefined;
+  const model = source === "model" ? await sourcePath(params.model, dir, cwd) : undefined;
+  const title = source === "title" ? { text: params.title?.text, font: params.title?.font ? await sourcePath(params.title.font, dir, cwd) : undefined, depth: params.title?.depth, bevel: params.title?.bevel } : undefined;
+  if (title && (typeof title.text !== "string" || !title.text.trim())) throw new Error("title.text is required for a 3D title shot");
   const shotDir = projectWritePath(dir, "public", "shots", name);
+  // The rigged scene is saved beside the source; never over the source itself.
+  const saved = projectWritePath(dir, "blender", blend && path.resolve(blend) === path.resolve(dir, "blender", `${name}.blend`) ? `${name}-shot.blend` : `${name}.blend`);
+  // shot.json is written last, so a folder without one is the remains of a failed render and is simply replaced.
   if (existsSync(shotDir)) {
-    if (params.replace !== true) throw new Error(`public/shots/${name} already exists; pass replace:true to re-render it or choose another name`);
+    if (existsSync(path.join(shotDir, "shot.json")) && params.replace !== true) throw new Error(`public/shots/${name} already exists; pass replace:true to re-render it or choose another name`);
     await fs.rm(shotDir, { recursive: true, force: true });
   }
   await fs.mkdir(shotDir, { recursive: true });
-  const saved = projectWritePath(dir, "blender", `${name}.blend`);
   await fs.mkdir(path.dirname(saved), { recursive: true });
-  const blend = source === "blend" ? await readablePath(params.blend, cwd) : undefined;
-  const model = source === "model" ? await readablePath(params.model, cwd) : undefined;
-  const title = source === "title" ? { text: params.title?.text, font: params.title?.font ? await readablePath(params.title.font, cwd) : undefined, depth: params.title?.depth, bevel: params.title?.bevel } : undefined;
-  if (title && (typeof title.text !== "string" || !title.text.trim())) throw new Error("title.text is required for a 3D title shot");
   const request = {
     op: "shot", name, source: source === "blend" ? "blend" : source, model, title, outputDir: shotDir, save: saved,
     rig: params.rig ?? (source === "title" ? "orbit" : "turntable"), fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,

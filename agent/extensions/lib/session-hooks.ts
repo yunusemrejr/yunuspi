@@ -49,6 +49,8 @@ const DEPLOY =
 	/\bgit\s+push\s+(?:-\S+\s+)*(?:prod\w*|live|deploy\w*|namecheap|heroku|dokku|server|origin\s+(?:prod\w*|live|deploy\w*))\b|\brsync\b[^\n]*\s[\w.-]+@?[\w.-]+:[^\s]|\bscp\b[^\n]*\s[\w.-]+@?[\w.-]+:|\b(?:vercel(?:\s+--prod)?|netlify\s+deploy|fly\s+deploy|wrangler\s+(?:deploy|publish)|firebase\s+deploy|gcloud\s+app\s+deploy|kubectl\s+apply|helm\s+upgrade|docker\s+push)\b/;
 /** Interface source files whose first write deserves a rendered look. */
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|php|twig|erb|hbs)$/i;
+/** Blender build scripts and HTML motion pages of a video project: where a worked example should come first. */
+const MOTION_FILE = /(?:^|\/)(?:blender\/scripts\/[^/]+\.py|public\/html\/[^/]+\.html)$/i;
 /** Swarm/fusion surfaces inside a subagent workflow script. */
 const FUSION = /\b(?:fuse|fusion|swarm|runs\.(?:all|lanes|fuseFragments))\b/;
 
@@ -149,6 +151,11 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "video-render-review", tools: ["video_render"],
 		line: "Stills need contact-sheet inspection (hierarchy, clipping, density, consistency); previews judge pacing, easing and transitions; finals need video_qa plus a listen-check. A successful render never approves itself.",
+	},
+	{
+		key: "motion-example-first", tools: ["write"],
+		when: (args) => typeof args.path === "string" && MOTION_FILE.test(args.path),
+		line: "A hand-written first draft of advanced motion is the generic version of the effect. Before building this Blender script or HTML motion page from scratch, run motion_examples action:\"search\" for the effect and adapt the closest verified example (action:\"copy\" places it in the project), in the film's own palette and fonts.",
 	},
 	{
 		key: "video-shot-review", tools: ["video_shot"],

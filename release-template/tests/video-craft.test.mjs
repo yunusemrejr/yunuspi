@@ -99,6 +99,13 @@ test("a Blender shot renders a lit RGBA sequence with a manifest and review shee
   assert.ok(result.contactSheet, "a contact sheet is produced for review");
   assert.match(result.use, /BlenderShot|ShotScene/);
   await assert.rejects(shotLib.videoShot({ dir, name: "title", title: { text: "TIDE" }, seconds: 1, fps: 6, width: 192, height: 108 }, dir), /already exists/);
+  // a bad path leaves nothing behind, and the project-relative path the saved scene is known by works from another cwd
+  await assert.rejects(shotLib.videoShot({ dir, name: "ghost", blend: "blender/none.blend" }, dir), /does not exist/);
+  assert.equal(fs.existsSync(path.join(dir, "public/shots/ghost")), false);
+  fs.mkdirSync(path.join(dir, "public/shots/stale"), { recursive: true });
+  const again = await shotLib.videoShot({ dir, name: "stale", blend: "blender/title.blend", seconds: 1, fps: 6, width: 160, height: 90, samples: 8, lights: "scene" }, path.dirname(dir));
+  assert.equal(again.frames, 6, "an empty folder from a failed render is replaced without replace:true, and a project-relative blend resolves");
+  assert.equal(fs.existsSync(path.join(dir, "blender/title.blend")), true);
   await assert.rejects(shotLib.videoShot({ dir, name: "Bad Name", title: { text: "x" } }, dir), /kebab-case/);
   await assert.rejects(shotLib.videoShot({ dir, name: "two", title: { text: "x" }, model: "m.glb" }, dir), /exactly one source/);
 });
