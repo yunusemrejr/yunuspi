@@ -225,12 +225,13 @@ export function mergeDoubleGaps(gaps: unknown): string {
 }
 
 const DOUBLE_TRANSIENT_MARKERS = /\b(timeout|timed?\s?out|deadline\s?exceeded|429|502|503|504|econnreset|etimedout|eai_again|socket\s?hang\s?up|overloaded|over\s?capacity|capacity|rate[\s-]?limit|temporar\w+|transient|try\s?again|service\s?unavailable|server\s?error|internal\s?error|connection\s?(reset|refused|aborted)|network\s?(error|failure)|fetch\s?failed)\b/i;
-const DOUBLE_DETERMINISTIC_MARKERS = /\b(budget|blocked|denied|deny|permission|forbidden|unauthorized|unauthenticated|invalid|not\s?found|no\s?such|unknown\s?model|capability|ceiling|excluded|excludes|validation|schema|auth|api\s?key|quota\s?exceeded|insufficient)\b/i;
+const DOUBLE_DETERMINISTIC_MARKERS = /\b(budget|blocked|denied|deny|permission|forbidden|unauthorized|unauthenticated|invalid|not\s?found|no\s?such|unknown\s?model|capability|ceiling|excluded|excludes|validation|schema|auth|api\s?key|quota\s?exceeded|insufficient|provider[\s-]?gate\s?deferral|cooldown[\s-]active)\b/i;
 
 /**
  * Heuristic retry gate: true only when a failure reason reads as plausibly
  * transient (overload, rate limit, timeout, network blip) rather than
- * deterministic (budget, permissions, validation, unknown model). Pure
+ * deterministic (budget, permissions, validation, unknown model, or a route the
+ * provider gate already holds in cooldown, which a relaunch would hit again). Pure
  * string judgment — the host adapter still owns deadline and row-flag checks.
  */
 export function isDoubleTransientFailure(reason: unknown): boolean {

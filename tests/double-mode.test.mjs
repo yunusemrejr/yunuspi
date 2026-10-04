@@ -176,7 +176,8 @@ test('retry gate admits plausibly transient failures, never deterministic ones',
     'socket hang up','Model overloaded, try again','ECONNRESET','deadline exceeded','temporarily unavailable'])
     assert.equal(isDoubleTransientFailure(reason),true,reason);
   for(const reason of ['Tool budget blocked','Capability ceiling excludes required tool','Unknown model foo/bar',
-    'Invalid params','Permission denied','429 quota exceeded for this key','',undefined,42])
+    'Invalid params','Permission denied','429 quota exceeded for this key',
+    '429 rate limit: provider-gate deferral for cerebras/gpt-oss-120b — cooldown-active 3009s (kind: quota-rate)','',undefined,42])
     assert.equal(isDoubleTransientFailure(reason),false,String(reason));
 });
 

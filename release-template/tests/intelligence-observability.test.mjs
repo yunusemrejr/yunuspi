@@ -184,6 +184,7 @@ test('repeated eligibility and lexical checks stay counted without drowning out 
     assert.equal(sent.length, 6, 'new outage states are visible immediately');
     assert.ok(sent.slice(-3).every(message => message.details.status === 'error'));
     assert.match(sent.at(-2).details.detail, /fallback retained.*timeout/);
+    assert.equal(sent.at(-1).details.detail, 'unavailable; fallback retained', 'an unavailable reason is not repeated after the status');
     assert.equal(activity.counters().errors.length, 3, 'failures persist in the diagnostics ring');
     assert.doesNotMatch(JSON.stringify(sent), /PRIVATE-/);
     activity.note('ml.jev.used', { durationMs: 200, questions: 2 });

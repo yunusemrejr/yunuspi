@@ -140,7 +140,7 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
     const skipLabel = kind === "ml.jev.skipped" ? "JEV" : kind === "ml.needle.skipped" ? "Needle3"
       : kind === "ml.span.skipped" ? "Span sensor" : kind === "ml.microworker.skipped" ? "Micro worker" : "Remote rerank";
     return { label: skipLabel, status: failed ? "error" : "skip", ms,
-      detail: `${failed ? "unavailable; fallback retained" : "skipped"}${reason ? ` · ${reason}` : ""}` };
+      detail: `${failed ? "unavailable; fallback retained" : "skipped"}${reason && !(failed && reason === "unavailable") ? ` · ${reason}` : ""}` };
   }
   if ((kind === "ml.evidence.delivered" || kind === "ml.evidence.returned") && typeof data.helper === "string" && Object.hasOwn(helpers, data.helper)) {
     const saved = amount("savedChars");
