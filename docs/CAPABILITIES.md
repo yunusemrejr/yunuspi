@@ -1127,6 +1127,50 @@ Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS insta
 
 **Documentation:** [`docs/3D-STUDIO.md`](3D-STUDIO.md)
 
+#### office-and-deliverables
+
+Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them.
+
+**Entrypoints:** `office_doc`, `deliverable_check`
+
+**Catalog tool pointers:** `office_doc`, `deliverable_check`, `render_see`, `video_frames`, `audio_analyze`, `data_query`
+
+**Options:**
+
+- `action`: office_doc operation. Values: `read`, `verify`, `build`, `render`.
+- `spec`: build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas.
+- `paths`: deliverable_check files (1 to 8, relative to the working directory or absolute).
+- `PI_DELIVERABLES`: Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available. Values: `on`, `off`.
+
+**Related records:** `creative-studio`, `video-studio`, `quality-review`, `background-tasks`
+
+**Source:** [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../agent/skills/presentation-authoring/SKILL.md)
+
+**Documentation:** [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
+
+#### file-organization
+
+Sort, rename and clean up a folder of files without losing any. fs_organize works in a fixed order: scan (types, sizes, identical files, names needing cleanup, what is left alone), plan (a reviewable list of moves, nothing touched; by type, extension, date, tidy-names, rules with {year}/{month}/{ext}/{type} folders, or an exact moves list the model decided after reading the files), apply (hard-link-then-unlink moves that never overwrite, name clashes become "name (2).ext", a journal of every move, the harness write-scope policy asked for each folder), verify (every moved file present, file count compared) and undo (reverse a plan from its journal, even in a later session). Only regular files move; the home folder, system and hidden configuration folders and software projects are refused, and symlinks, hidden files and unfinished downloads are skipped. Identical copies can be gathered in Duplicates/ and are never deleted.
+
+**Entrypoints:** `fs_organize`
+
+**Catalog tool pointers:** `fs_organize`, `office_doc`, `deliverable_check`, `ls`, `find`
+
+**Options:**
+
+- `action`: fs_organize operation. Values: `scan`, `plan`, `apply`, `verify`, `undo`, `plans`.
+- `by`: plan mode. Values: `type`, `extension`, `date`, `tidy-names`, `rules`, `moves`.
+- `rules`: plan by rules: ordered [{ext, nameContains, glob, regex, olderThanDays, largerThanMB, to}]; first match wins.
+- `moves`: plan by moves: exact [{from, to}]; a to ending in / keeps the file name.
+- `duplicates`: report identical files, or gather the extra copies in Duplicates/. Values: `report`, `separate`.
+- `PI_ORGANIZE_DIR`: Where plan journals are kept (default the agent organize folder).
+
+**Related records:** `office-and-deliverables`, `bulk-edit`, `background-tasks`
+
+**Source:** [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts), [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts), [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
+
+**Documentation:** [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
+
 #### design-studio
 
 Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
@@ -1249,7 +1293,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 135; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 137; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
-- `deliverable_check` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 96; literal)
+- `deliverable_check` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 98; literal)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 251; literal)
 - `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
@@ -1257,6 +1301,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
+- `fs_organize` — [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts) (line 41; literal)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 198; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
@@ -1284,7 +1329,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 53; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 821; literal)
-- `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 130; literal)
+- `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 132; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 602; literal)
@@ -1327,7 +1372,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 390; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 381; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 389; literal)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 212; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 133; factory)
 - `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 47; factory)
@@ -1377,8 +1422,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1823)
 - /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1404)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3402)
-- /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 449)
-- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 429)
+- /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 450)
+- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 430)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1789)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
@@ -1551,6 +1596,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts)
 - [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
+- [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 - [`agent/extensions/goal.ts`](../agent/extensions/goal.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
@@ -1642,6 +1688,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts)
 - [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
 - [`agent/extensions/lib/fail-policy.ts`](../agent/extensions/lib/fail-policy.ts)
+- [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
@@ -1940,7 +1987,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 168 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 169 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
@@ -1989,6 +2036,7 @@ The exporter includes 168 public skill directories. This list is a path inventor
 - `email` — [`agent/skills/email/SKILL.md`](../agent/skills/email/SKILL.md)
 - `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../agent/skills/embedded-device-engineering/SKILL.md)
 - `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../agent/skills/evidence-first-engineering/SKILL.md)
+- `file-organization` — [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
 - `financial-modeling` — [`agent/skills/financial-modeling/SKILL.md`](../agent/skills/financial-modeling/SKILL.md)
 - `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../agent/skills/financial-statement-analysis/SKILL.md)
 - `fonts` — [`agent/skills/fonts/SKILL.md`](../agent/skills/fonts/SKILL.md)
@@ -2140,6 +2188,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
+- [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
 - [`docs/GOAL.md`](GOAL.md)
 - [`docs/GUARDIAN-IMPLEMENTATION-AUDIT.md`](GUARDIAN-IMPLEMENTATION-AUDIT.md)
 - [`docs/GUARDIAN-INTELLIGENCE.md`](GUARDIAN-INTELLIGENCE.md)
@@ -2156,6 +2205,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 - [`docs/NEEDLE-AUDIT.md`](NEEDLE-AUDIT.md)
 - [`docs/OBSERVER-BOOK.md`](OBSERVER-BOOK.md)
+- [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
 - [`docs/OPERATIONS-EVIDENCE-AUDIT.md`](OPERATIONS-EVIDENCE-AUDIT.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
 - [`docs/PATCH-MIGRATION.md`](PATCH-MIGRATION.md)

@@ -2655,6 +2655,146 @@
       "commands": []
     },
     {
+      "id": "office-and-deliverables",
+      "group": "web_media",
+      "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them.",
+      "entrypoints": [
+        "office_doc",
+        "deliverable_check"
+      ],
+      "tools": [
+        "office_doc",
+        "deliverable_check",
+        "render_see",
+        "video_frames",
+        "audio_analyze",
+        "data_query"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "read",
+            "verify",
+            "build",
+            "render"
+          ],
+          "summary": "office_doc operation."
+        },
+        {
+          "name": "spec",
+          "summary": "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas."
+        },
+        {
+          "name": "paths",
+          "summary": "deliverable_check files (1 to 8, relative to the working directory or absolute)."
+        },
+        {
+          "name": "PI_DELIVERABLES",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available."
+        }
+      ],
+      "related": [
+        "creative-studio",
+        "video-studio",
+        "quality-review",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/deliverables.ts",
+        "agent/extensions/lib/office-read.ts",
+        "agent/extensions/lib/office-build.ts",
+        "agent/extensions/lib/sheet-formula.ts",
+        "agent/extensions/lib/office-zip.ts",
+        "agent/extensions/lib/xml-lite.ts",
+        "agent/extensions/lib/office-render.ts",
+        "agent/extensions/lib/deliverable-inspect.ts",
+        "agent/extensions/lib/deliverable-ledger.ts",
+        "agent/skills/spreadsheet-authoring/SKILL.md",
+        "agent/skills/word-document-authoring/SKILL.md",
+        "agent/skills/presentation-authoring/SKILL.md"
+      ],
+      "doc": "docs/OFFICE-AND-DELIVERABLES.md",
+      "commands": []
+    },
+    {
+      "id": "file-organization",
+      "group": "web_media",
+      "summary": "Sort, rename and clean up a folder of files without losing any. fs_organize works in a fixed order: scan (types, sizes, identical files, names needing cleanup, what is left alone), plan (a reviewable list of moves, nothing touched; by type, extension, date, tidy-names, rules with {year}/{month}/{ext}/{type} folders, or an exact moves list the model decided after reading the files), apply (hard-link-then-unlink moves that never overwrite, name clashes become \"name (2).ext\", a journal of every move, the harness write-scope policy asked for each folder), verify (every moved file present, file count compared) and undo (reverse a plan from its journal, even in a later session). Only regular files move; the home folder, system and hidden configuration folders and software projects are refused, and symlinks, hidden files and unfinished downloads are skipped. Identical copies can be gathered in Duplicates/ and are never deleted.",
+      "entrypoints": [
+        "fs_organize"
+      ],
+      "tools": [
+        "fs_organize",
+        "office_doc",
+        "deliverable_check",
+        "ls",
+        "find"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "scan",
+            "plan",
+            "apply",
+            "verify",
+            "undo",
+            "plans"
+          ],
+          "summary": "fs_organize operation."
+        },
+        {
+          "name": "by",
+          "values": [
+            "type",
+            "extension",
+            "date",
+            "tidy-names",
+            "rules",
+            "moves"
+          ],
+          "summary": "plan mode."
+        },
+        {
+          "name": "rules",
+          "summary": "plan by rules: ordered [{ext, nameContains, glob, regex, olderThanDays, largerThanMB, to}]; first match wins."
+        },
+        {
+          "name": "moves",
+          "summary": "plan by moves: exact [{from, to}]; a to ending in / keeps the file name."
+        },
+        {
+          "name": "duplicates",
+          "values": [
+            "report",
+            "separate"
+          ],
+          "summary": "report identical files, or gather the extra copies in Duplicates/."
+        },
+        {
+          "name": "PI_ORGANIZE_DIR",
+          "summary": "Where plan journals are kept (default the agent organize folder)."
+        }
+      ],
+      "related": [
+        "office-and-deliverables",
+        "bulk-edit",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/fs-organize.ts",
+        "agent/extensions/lib/fs-organize.ts",
+        "agent/skills/file-organization/SKILL.md"
+      ],
+      "doc": "docs/FILE-ORGANIZATION.md",
+      "commands": []
+    },
+    {
       "id": "design-studio",
       "group": "web_media",
       "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
@@ -3293,12 +3433,12 @@
       {
         "name": "custom-double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 449
+        "line": 450
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 429
+        "line": 430
       },
       {
         "name": "effort",
@@ -3860,7 +4000,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 96,
+        "line": 98,
         "kind": "literal"
       },
       {
@@ -3905,6 +4045,12 @@
         "line": 197,
         "kind": "configured-default",
         "configurable": true
+      },
+      {
+        "name": "fs_organize",
+        "source": "agent/extensions/fs-organize.ts",
+        "line": 41,
+        "kind": "literal"
       },
       {
         "name": "get_search_content",
@@ -4072,7 +4218,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 130,
+        "line": 132,
         "kind": "literal"
       },
       {
@@ -4331,7 +4477,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 381,
+        "line": 389,
         "kind": "literal"
       },
       {
@@ -4544,7 +4690,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 96,
+        "line": 98,
         "kind": "literal"
       },
       {
@@ -4569,6 +4715,12 @@
         "name": "expert_director",
         "source": "agent/extensions/expert-director.ts",
         "line": 63,
+        "kind": "literal"
+      },
+      {
+        "name": "fs_organize",
+        "source": "agent/extensions/fs-organize.ts",
+        "line": 41,
         "kind": "literal"
       },
       {
@@ -4658,7 +4810,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 130,
+        "line": 132,
         "kind": "literal"
       },
       {
@@ -4820,7 +4972,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 381,
+        "line": 389,
         "kind": "literal"
       },
       {
@@ -5098,11 +5250,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 719,
-      "registrationSites": 88,
+      "sourceFiles": 721,
+      "registrationSites": 89,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 136,
-      "uniqueStableTools": 135,
+      "stableRegistrationRows": 137,
+      "uniqueStableTools": 136,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5179,6 +5331,10 @@
       },
       {
         "path": "agent/extensions/filesystem-safety.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/fs-organize.ts",
         "exists": true
       },
       {
@@ -5533,6 +5689,10 @@
       },
       {
         "path": "agent/extensions/lib/fail-policy.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/fs-organize.ts",
         "exists": true
       },
       {
@@ -7526,6 +7686,10 @@
         "path": "agent/skills/evidence-first-engineering/SKILL.md"
       },
       {
+        "name": "file-organization",
+        "path": "agent/skills/file-organization/SKILL.md"
+      },
+      {
         "name": "financial-modeling",
         "path": "agent/skills/financial-modeling/SKILL.md"
       },
@@ -8096,6 +8260,10 @@
         "path": "docs/EXPERT-DIRECTOR.md"
       },
       {
+        "name": "FILE-ORGANIZATION.md",
+        "path": "docs/FILE-ORGANIZATION.md"
+      },
+      {
         "name": "GOAL.md",
         "path": "docs/GOAL.md"
       },
@@ -8158,6 +8326,10 @@
       {
         "name": "OBSERVER-BOOK.md",
         "path": "docs/OBSERVER-BOOK.md"
+      },
+      {
+        "name": "OFFICE-AND-DELIVERABLES.md",
+        "path": "docs/OFFICE-AND-DELIVERABLES.md"
       },
       {
         "name": "OPERATIONS-EVIDENCE-AUDIT.md",
