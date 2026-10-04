@@ -25,7 +25,7 @@ owner and keeping a compatibility fallback.
 | `scripts/` | public tree | Maintenance, export, verification and compatibility scripts. |
 | `skills/` | public tree | Installed skill workflows. |
 | `settings.json`, `models.json` | user + harness | Canonical configuration (created from `config/*.example.json` at install). Private; never published. |
-| `sessions/`, `memory/`, `logs/`, `cache/`, `artifacts/`, `worktrees/`, `missions/`, `local-models/`, `project-intelligence/` | harness runtime | Live state. Private; never published. |
+| `sessions/`, `memory/`, `logs/`, `cache/`, `artifacts/`, `worktrees/`, `missions/`, `local-models/`, `project-intelligence/`, `competence/` | harness runtime | Live state. Private; never published. |
 | `provider-health.json`, `free-route-evidence.json`, `live-model-catalog.json`, `models-store.json`, `run-history.jsonl`, `auth.json` | harness runtime | Provider and accounting state. Private; never published. |
 
 ## Public repository mirrors

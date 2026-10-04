@@ -120,8 +120,19 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
-const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
-  { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['web_probe'] },
+// `acting` marks a pattern that already contains its own action verb (log in, fill out), so it is tested
+// against every clause instead of only clauses led by a verb from the shared skill-routing task list.
+const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[]; acting?: boolean }> = [
+  // SEO is technical (crawl, canonical, structured data) and research (queries, competitors, SERPs): stage both.
+  { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['web_probe', 'web_search', 'fetch_content'] },
+  // Work whose answer lives on the web stages search and page reading with the first turn instead of
+  // relying on a discovery round trip the agent may not make (an SEO session ran 190 calls without one search).
+  { pattern: /\b(?:search (?:the )?(?:web|internet)|(?:web|online|market|competitor|competitive|keyword|literature|user) research|research (?:the )?(?:competitors?|market|competition|alternatives|options|vendors|prices|pricing|trends|topic|history|news)|competitors?|competitive (?:analysis|landscape)|serp|look ?up (?:online|on the web)|google (?:it|this|for)|latest\b[^.\n]{0,30}\b(?:version|release|news|changes|lts)\b|find out (?:what|which|who|when|how many|whether)|what(?:'s| is) new in|state of the art|literature review)\b/i, tools: ['web_search', 'fetch_content', 'get_search_content'] },
+  // Mailbox actions (not HTML email templates) stage the inbox tools.
+  { pattern: /\b(?:send|draft|write|compose|check|read|triage|answer|search|summari[sz]e|follow up (?:on|with)|reply to)\b(?![^.\n]{0,40}\b(?:templates?|html|mjml|css)\b)[^.\n]{0,60}\b(?:e-?mails?|inbox|mailbox|newsletter subscribers?)\b|\b(?:inbox|mailbox|agentmail|cold (?:e-?mail|outreach)|e-?mail (?:campaign|outreach|list))\b/i, tools: ['agentmail_status', 'agentmail_messages', 'agentmail_message', 'agentmail_search', 'agentmail_send'] },
+  { pattern: /\b(?:promote|promotion|launch (?:post|announcement|campaign)|social media|reddit|hacker news|product hunt|linkedin post|tweet|marketing (?:campaign|plan|copy))\b/i, tools: ['web_search', 'fetch_content', 'browser_session'] },
+  { pattern: /\b(?:call|hit|query|poll|test|curl|fetch)\b[^.\n]{0,50}\b(?:(?:rest|graphql|http|json|public) api|api endpoints?|endpoints?|webhooks?)\b|\bhttp requests?\b|\bapi (?:call|request)s?\b/i, tools: ['http_request'] },
+  { pattern: /\b(?:scrape|crawl|browse (?:to|the web)|log in(?:to)?\b|sign ?(?:in|up) (?:to|for|on)\b|fill (?:in|out) (?:the |a )?(?:form|application)|submit (?:the |a )?form|go to (?:https?:\/\/|www\.))/i, tools: ['browser_session', 'fetch_content'], acting: true },
   { pattern: /\b(?:network|dns|tcp|tls|https?)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|connectivity|failure|refused|timeout)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:network|dns|tcp|tls|https?)\b/i, tools: ['net_probe'] },
   { pattern: /\b(?:linux|systemd|cgroup|memory pressure|disk pressure|listening port|service unit)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|failure|resource|unavailable|slow)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:linux|systemd|cgroup|service unit)\b/i, tools: ['sys_probe'] },
   { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
@@ -144,15 +155,15 @@ const IMAGE_ASK = /\b(?:this|these|attached|like|match\w*|same|similar|based on|
 export function intentBundleTools(prompt: unknown, images = 0): string[] {
   const text = String(prompt ?? '').slice(0, 32768);
   if (!text.trim()) return [];
-  const segments = skillActionSegments(text), out = new Set<string>();
+  const segments = skillActionSegments(text), clauses = skillIntentSegments(text), out = new Set<string>();
   for (const bundle of INTENT_BUNDLES) {
     const route = skillRoutes.find(candidate => candidate.name === bundle.skill);
     const routed = !!route && segments.some(part => route.intent.test(route.pathIntent ? part : part.replace(/(?:\S*\/)+\S*/g, ' ')));
     const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
-  for (const bundle of DIRECT_BUNDLES) if (segments.some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
-  for (const part of skillIntentSegments(text)) {
+  for (const bundle of DIRECT_BUNDLES) if ((bundle.acting ? clauses : segments).some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
+  for (const part of clauses) {
     if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(part)) out.add('music_compose');
     if (/\b(?:mix|denoise|time[- ]stretch)\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(part)) out.add('audio_mix');
     if (/\b(?:trim|normalize)\b[^\n]{0,60}\b(?:audio|sound|music)\b/i.test(part)) out.add('media_edit');

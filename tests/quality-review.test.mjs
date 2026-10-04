@@ -160,6 +160,28 @@ test('direct adaptive work finishes without independent fan-out, pending-review 
  assert.equal(f.calls.length,1,'deliberate review remains available');assert.equal(f.state().status,'awaiting_assessment');
 });
 
+test('route control moves only optional review: guarded routes get code reviewed, earned routes with resolved checks may skip a copy review',async t=>{
+ const run=async(task,control,file,tests)=>{
+  const f=await fixture(t);f.api.input({source:'interactive',text:task});
+  const dispose=registerAdaptiveExecution(f.ctx,()=>classifyExecution({task,control}));t.after(dispose);
+  await f.mutate(file,file.endsWith('.md')?'A corrected title.':'export const value=1;');f.tests(tests);await f.settle();return f;
+ };
+ const small='Fix the one-line parser comparison',diagnosis='Investigate why the parser comparison fails';
+ const open={need:'assessment',changed:['src/value.js']},resolved={need:null,changed:['src/value.js']};
+ const exempt=f=>f.state().status==='not_needed';
+ assert.ok(exempt(await run(small,{level:'standard'},'src/value.js',open)),'a direct change by an unmeasured route stays exempt');
+ assert.equal(exempt(await run(small,{level:'guarded'},'src/value.js',open)),false,'a credibly error-prone route gets an independent look even at a small code change');
+ const guarded=await run(small,{level:'guarded'},'src/value.js',resolved);
+ assert.equal(guarded.calls.length,1,'and the review is dispatched once checks allow it');
+ assert.ok(exempt(await run('Correct the one-line typo in README.md',{level:'guarded'},'README.md',{need:'assessment',changed:['README.md']})),'a prose edit never needs it');
+ assert.equal(exempt(await run(diagnosis,{level:'standard'},'src/value.js',resolved)),false,'diagnosis work by an unmeasured route keeps its review');
+ const earned=await run(diagnosis,{level:'earned'},'src/value.js',resolved);
+ assert.ok(exempt(earned),'a clean record with resolved checks finishes without a copy reviewer');assert.equal(earned.calls.length,0);
+ assert.equal(exempt(await run(diagnosis,{level:'earned'},'src/value.js',open)),false,'unresolved checks keep the review');
+ assert.equal(exempt(await run(diagnosis,{level:'earned',burst:{family:'edit',slips:2}},'src/value.js',resolved)),false,'a burst of mistakes suspends the exemption');
+ assert.equal(exempt(await run('Fix authentication token validation',{level:'earned'},'src/value.js',resolved)),false,'critical scope is never exempt');
+});
+
 test('a direct final todo cannot waive parent task risk or consequential changed paths',async t=>{
  for(const [task,file] of [['Fix authentication token validation','src/value.js'],['Fix the one-line parser comparison','auth.ts']]) {
   const f=await fixture(t);f.api.input({source:'interactive',text:task});

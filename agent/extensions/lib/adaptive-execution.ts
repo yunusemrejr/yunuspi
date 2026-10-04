@@ -2,9 +2,17 @@
  * its evidence; a difficult parent does not make a mechanical todo difficult.
  * This policy never removes tool access, checks, user constraints or authority.
  * Deliberate tool invocations stay available. No inference or I/O is needed. */
+import type { ControlLevel } from './model-competence.ts';
 export type ExecutionScope = 'task' | 'subtask' | 'todo';
 export type ExecutionTier = 'direct' | 'standard' | 'complex' | 'critical';
 export type AutomaticCapability = 'assistance' | 'council' | 'qualityReview' | 'observer' | 'watchmaker' | 'localLm' | 'jev';
+/** Measured reliability of the executing route (see model-competence.ts). Absent
+ * evidence is `standard`; the control can only move optional coordination. */
+export interface ExecutionControl {
+  level: ControlLevel;
+  /** A burst of slips is in progress and the family that keeps failing. */
+  burst?: { family: string; slips: number };
+}
 export interface ExecutionInput {
   task: string;
   scope?: ExecutionScope;
@@ -18,6 +26,7 @@ export interface ExecutionInput {
   verified?: boolean;
   /** Inherited constraints can only suppress automation, never grant authority. */
   noDelegation?: boolean;
+  control?: ExecutionControl;
 }
 export interface ExecutionProfile {
   scope: ExecutionScope;
@@ -27,6 +36,8 @@ export interface ExecutionProfile {
   reasons: string[];
   failures: number;
   constraints: { noDelegation: boolean };
+  /** The reliability control that shaped this profile (`standard` when no evidence exists). */
+  control: ExecutionControl;
   assistance: { mode: 'none' | 'subagent' | 'swarm' | 'fusion'; maxAgents: number };
   features: Record<AutomaticCapability, boolean>;
   cadence: { observerMs: number; watchmakerMs: number };
@@ -63,6 +74,8 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
   const deliberation = deliberationCue.test(text) || openWorkCue.test(text) && !explicitSimpleCue.test(text);
   const critical = input?.risk === 'critical' || input?.risk === 'high' || criticalCue.test(text);
   const stuck = failures >= 2 || repeats >= 2;
+  const control: ExecutionControl = { level: input?.control?.level ?? 'standard', ...(input?.control?.burst ? { burst: input.control.burst } : {}) };
+  const burst = Boolean(control.burst);
   const mechanical = mechanicalCue.test(text) && !behavioralCue.test(text);
   const bounded = explicitSimpleCue.test(text) && !diagnostic && !deliberation && !broad;
   const reasons: string[] = [];
@@ -74,35 +87,45 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
     if (alternatives || deliberation) reasons.push('competing approaches or consequential design');
     if (failures >= 3 || repeats >= 3) reasons.push('repeated unresolved failures');
     if (uncertainty >= .8) reasons.push('high observed uncertainty');
-  } else if (diagnostic || stuck || uncertainty >= .5 || files >= 3 || input?.risk === 'medium') {
-    tier = 'standard'; reasons.push(diagnostic ? 'diagnosis requires evidence' : 'observed scope needs verification');
+  } else if (diagnostic || stuck || burst || uncertainty >= .5 || files >= 3 || input?.risk === 'medium') {
+    tier = 'standard'; reasons.push(diagnostic ? 'diagnosis requires evidence' : burst && !stuck ? 'a burst of recent mistakes' : 'observed scope needs verification');
   } else reasons.push(mechanical || bounded ? 'bounded mechanical work' : 'direct work has no coordination signal');
   // Negative user constraints are fail-safe across the whole request. A long
   // task's tail must never disappear merely because routing uses a prefix.
   const constraintsText = typeof input?.task === 'string' ? input.task : '';
   const constrained = Boolean(input?.noDelegation || noDelegationCue.test(constraintsText) || restrictedRouteCue.test(constraintsText));
-  const help = !constrained && (tier === 'complex' || tier === 'critical' || diagnostic || stuck || uncertainty >= .6);
+  // A route with a measured clean record decides for itself whether open-ended
+  // work needs a helper; explicit breadth, alternatives, diagnosis and failures still do.
+  const earned = control.level === 'earned' && tier !== 'critical' && !stuck && !burst;
+  const guarded = control.level === 'guarded';
+  if (earned) reasons.push('earned autonomy lightens optional coordination');
+  if (guarded) reasons.push('measured slip rate raises oversight');
+  const help = !constrained && (tier === 'critical' || diagnostic || stuck || uncertainty >= .6 || tier === 'complex' && (!earned || broad || alternatives));
   let mode: ExecutionProfile['assistance']['mode'] = help ? 'subagent' : 'none';
   let maxAgents = help ? 1 : 0;
   if (help && alternatives) { mode = 'fusion'; maxAgents = 2; }
   else if (help && broad) { mode = 'swarm'; maxAgents = Math.min(3, Math.max(2, independent || 3)); }
   if (constrained) reasons.push('automatic delegation constrained');
   const substantial = tier === 'complex' || tier === 'critical';
+  const observerBase = tier === 'critical' ? 30000 : tier === 'complex' ? 60000 : 120000;
   return {
-    scope: input?.scope ?? 'task', tier, reasons, failures, constraints: {noDelegation:constrained},
+    scope: input?.scope ?? 'task', tier, reasons, failures, constraints: {noDelegation:constrained}, control,
     reasoning: substantial ? 'high' : tier === 'standard' ? 'low' : 'minimal',
     contextChars: tier === 'critical' ? 16000 : tier === 'complex' ? 12000 : tier === 'standard' ? 6000 : 2400,
     assistance: { mode, maxAgents },
     features: {
       assistance: help, council: !constrained && substantial && (alternatives || deliberation),
-      qualityReview: tier !== 'direct', observer: tier !== 'direct', watchmaker: substantial || stuck,
+      qualityReview: tier !== 'direct' || guarded, observer: tier !== 'direct' || guarded, watchmaker: substantial && !earned || stuck,
       // Cheap stages are useful only for a genuine choice. Deterministic
       // routing goes first; failing helpers never suppress mandatory guards.
       localLm: substantial || diagnostic || uncertainty >= .5,
       jev: substantial || uncertainty >= .6 || stuck,
     },
-    cadence: { observerMs: tier === 'critical' ? 30000 : tier === 'complex' ? 60000 : 120000, watchmakerMs: substantial || stuck ? 120000 : 0 },
-    review: { rounds: tier === 'direct' ? 0 : 2, reviewers: substantial ? 3 : 1 },
+    cadence: {
+      observerMs: earned ? Math.min(240000, observerBase * 2) : guarded ? Math.max(30000, observerBase / 2) : observerBase,
+      watchmakerMs: substantial && !earned || stuck ? guarded ? 90000 : 120000 : 0,
+    },
+    review: { rounds: tier === 'direct' ? 0 : 2, reviewers: substantial ? earned ? 2 : 3 : guarded && tier === 'standard' ? 2 : 1 },
   };
 }
 
@@ -123,7 +146,7 @@ export function automaticCapabilityDecision(profile: ExecutionProfile, capabilit
 /** Delivery assurance cannot inherit only the final todo's cheap profile.
  * Whole-task source/risk and any stronger live failure evidence both remain. */
 export function completionExecutionProfile(task: string, changedFiles: number | readonly string[] = [], live?: ExecutionProfile): ExecutionProfile {
-  const retained = classifyExecution({task,changedFiles,failures:live?.failures,noDelegation:live?.constraints.noDelegation});
+  const retained = classifyExecution({task,changedFiles,failures:live?.failures,noDelegation:live?.constraints.noDelegation,control:live?.control});
   const tiers: ExecutionTier[] = ['direct','standard','complex','critical'];
   const stronger = live && tiers.indexOf(live.tier) > tiers.indexOf(retained.tier) ? live : retained;
   return {...stronger,scope:'task'};
@@ -143,10 +166,12 @@ export interface ExecutionOutcome {
 export function createAdaptiveExecutionController(maxScopes = 64) {
   const scopes = new Map<string, { input: ExecutionInput; failures: number; repeats: number; lastFailure: string }>();
   let selected = 'task';
+  // Route reliability belongs to the executing route, not to a todo or subtask scope.
+  let control: ExecutionControl | undefined;
   const current = () => scopes.get(selected);
   const profile = () => {
     const state = current();
-    return classifyExecution(state ? { ...state.input, failures: state.failures, repeatedFailures: state.repeats } : { task: '' });
+    return classifyExecution(state ? { ...state.input, failures: state.failures, repeatedFailures: state.repeats, control } : { task: '', control });
   };
   return {
     begin(input: ExecutionInput, key: string = input.scope ?? 'task') {
@@ -181,8 +206,14 @@ export function createAdaptiveExecutionController(maxScopes = 64) {
       }
       return profile();
     },
+    /** Returns whether the control changed, so the owner knows to republish the profile. */
+    setControl(next?: ExecutionControl): boolean {
+      const same = (next?.level ?? 'standard') === (control?.level ?? 'standard') && (next?.burst?.family ?? '') === (control?.burst?.family ?? '') && Boolean(next?.burst) === Boolean(control?.burst);
+      control = next && (next.level !== 'standard' || next.burst) ? { level: next.level, ...(next.burst ? { burst: next.burst } : {}) } : undefined;
+      return !same;
+    },
     profile,
-    reset() { scopes.clear(); selected = 'task'; },
+    reset() { scopes.clear(); selected = 'task'; control = undefined; },
   };
 }
 

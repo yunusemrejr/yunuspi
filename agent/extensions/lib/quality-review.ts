@@ -277,9 +277,17 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const automaticReviewExempt = () => {
     const live = currentExecutionProfile(policyContext);
     if (!live || explicitReview || busy || rounds || reports.length || dispatchGap || reviewUnavailable || disposition || !task.trim() || truncated || scopeOverflow || policyFindings.length) return false;
-    if (live.tier !== 'direct' || live.failures || [...patterns.values()].some(signals => signals.length)) return false;
+    // Measured reliability moves only optional review. A route whose slip rate is credibly high gets an
+    // independent look at code changes even when the work is small; one with a clean record may finish a
+    // modest change whose checks are resolved without a copy reviewer. Deliberate review stays available.
+    const level = live.control?.level ?? 'standard';
+    const proseOnly = changed.length > 0 && changed.every(file => /\.(?:md|markdown|rst|txt)$/i.test(file));
+    if (level === 'guarded' && !proseOnly) return false;
+    const lightened = level === 'earned' && live.tier === 'standard' && !live.control?.burst && changed.length <= 4 && !testsPending();
+    if (live.tier !== 'direct' && !lightened || live.failures || [...patterns.values()].some(signals => signals.length)) return false;
     const consequentialPaths = changed.some(file => /(?:^|\/)(?:auth(?:entication|orization)?|security|credentials?|billing|payments?|migrations?)(?:[./_-]|$)|(?:^|\/)\.github\/workflows\//i.test(file));
-    return !consequentialPaths && classifyExecution({task,changedFiles:changed}).tier === 'direct';
+    const retained = classifyExecution({task,changedFiles:changed}).tier;
+    return !consequentialPaths && (retained === 'direct' || lightened && retained === 'standard');
   };
   /** One unresolved-verification item shared by the rendered warning line and
    * the structured gate receipt, so prose and identity cannot diverge. */

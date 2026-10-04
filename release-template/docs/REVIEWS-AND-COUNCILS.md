@@ -31,6 +31,33 @@ proposals, risks and disagreements into a single plan. The streams
 investigate read-only and propose actions; only the parent executes, so no
 state-changing operation runs twice.
 
+**The user's words stay in charge.** The directive is planning advice for the
+request that precedes it, never an instruction from the user: its header
+states that the user's own messages (this prompt, earlier prompts and any
+active goal) and explicit constraints outrank it. The requirements the
+harness extracts from the prompt (`extractRequirements`, the same owner the
+requirement ledger uses) are listed verbatim to both streams, the
+reconciliation and the directive, and the reconciliation is told to reject any
+proposal that conflicts with them. The list leads the directive so a bounded
+directive never loses it. A deterministic note also tells the reconciler how
+many files each stream names in common, so disagreement is visible as a fact.
+
+**Cache order.** Cached prompt prefixes depend on byte order, so the two
+stream prompts share everything (framing, request, requirements, context,
+rules) and differ only in a closing identity and angle. Stream B starts when A
+reports its first progress, which means A's request is accepted and the shared
+prefix (system prompt, forked transcript and this prompt) has been processed;
+a route that stays silent until it finishes costs at most a 6 s wait, and a
+stream that fails or finishes opens the gate at once. The directive is added
+as a message and the system prompt is never modified: an override that
+alternates with harness wakes (which are not doubled) would invalidate the
+whole cached conversation each time it flipped.
+
+**What is not doubled.** A bare acknowledgement ("ok", "thanks", "looks good")
+carries no request, so that turn continues single and says so once. Approvals
+and directives ("do it", "continue") still authorize work and are doubled, as
+are all real requests.
+
 Progress rows show each stream and the reconciliation starting and
 finishing; a degraded run (a stream failed, a route substituted, no
 reconciliation) stays visible in the directive and the transcript instead

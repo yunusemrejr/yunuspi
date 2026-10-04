@@ -8,7 +8,7 @@ const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(dir=>fs.exist
 const lib=await import(pathToFileURL(path.join(agent,'extensions/lib/double.ts')));
 const {doubleRouteLabel,formatDoubleStatus,parseDoubleCommandArgs,boundDoubleText,mergeDoubleGaps,
   buildDoubleStreamTask,packageDoubleStreams,buildDoubleReconcileTask,buildDoubleDirective,DOUBLE_RECOMMENDED_LIMITS,
-  isDoubleTransientFailure}=lib;
+  isDoubleTransientFailure,isDoubleAcknowledgement,doubleOverlapNote}=lib;
 
 const outcome=(stream,text,status='complete',extra={})=>({stream,status,text,...extra});
 
@@ -66,8 +66,8 @@ test('stream briefs are peer-aware but carry no peer content',()=>{
   const b=buildDoubleStreamTask({stream:'B',task:'Fix the login redirect.'});
   for(const [brief,self,peer] of [[a,'A','B'],[b,'B','A']]){
     assert.equal(brief.truncated,false);
-    assert.match(brief.task,new RegExp(`Double instance ${self}`));
-    assert.match(brief.task,new RegExp(`instance \\(${peer}\\)`));
+    assert.match(brief.task,new RegExp(`You are Double instance ${self}; the other instance is ${peer}\\.`));
+    assert.match(brief.task,new RegExp(`Your peer \\(${peer}\\)`));
     assert.match(brief.task,/Fix the login redirect/);
     assert.match(brief.task,/Propose actions; do not take state-changing ones/);
     assert.match(brief.task,/Proposed actions/);
@@ -84,11 +84,14 @@ test('stream briefs are peer-aware but carry no peer content',()=>{
     assert.match(b.task,new RegExp(probe));
   assert.doesNotMatch(a.task,/independently stress-test the request/);
   assert.doesNotMatch(b.task,/construct the strongest solution or interpretation/);
-  const norm=(text,self,peer)=>text
-    .replace(/Your angle as instance [AB]:[^]*?you never see its output\./,'LENS')
-    .replaceAll(`instance ${self}`,'instance X').replaceAll(`(${peer})`,'(X)')
-    .replaceAll(`what ${peer} concluded`,'what X concluded');
-  assert.equal(norm(a.task,'A','B'),norm(b.task,'B','A'));
+  // Cache order: everything shared comes first and is byte-identical; only the closing identity and angle differ.
+  let shared=0;while(shared<a.task.length&&a.task[shared]===b.task[shared])shared++;
+  assert.ok(a.task.length-shared<=720&&b.task.length-shared<=720,`the A and B prompts share their whole prefix (${shared} of ${a.task.length} bytes)`);
+  assert.ok(a.task.slice(shared).includes('You are Double instance A')||a.task.slice(shared-30).includes('Double instance'),'the identity sits in the differing tail');
+  assert.match(a.task.slice(-720),/You are Double instance A/);assert.match(b.task.slice(-720),/You are Double instance B/);
+  const longRequest='Refactor the module. '.repeat(400),la=buildDoubleStreamTask({stream:'A',task:longRequest}),lb=buildDoubleStreamTask({stream:'B',task:longRequest});
+  let longShared=0;while(longShared<la.task.length&&la.task[longShared]===lb.task[longShared])longShared++;
+  assert.ok(longShared/la.task.length>0.9,'a realistic request makes the shared prefix the overwhelming majority of the prompt');
   assert.equal(buildDoubleStreamTask({stream:'A',task:'x'.repeat(100),maxTaskChars:10}).truncated,true);
   assert.throws(()=>buildDoubleStreamTask({stream:'C',task:'t'}),/stream/);
   assert.throws(()=>buildDoubleStreamTask({stream:'A',task:'  '}),/non-empty/);
@@ -147,12 +150,15 @@ test('directive is singular: reconciled when possible, honest fallback otherwise
     outcomeA:outcome('A','a'),outcomeB:outcome('B','b')});
   assert.equal(clean.degraded,false);
   assert.match(clean.directive,/Double openrouter\/glm-5\.3-flash/);
-  assert.match(clean.directive,/single authoritative plan/);
+  assert.match(clean.directive,/never an instruction from the user/);
+  assert.match(clean.directive,/outrank it/);
+  assert.doesNotMatch(clean.directive,/single authoritative plan/);
   assert.match(clean.directive,/Directive — do X/);
   const partial=buildDoubleDirective({ref,reconcileText:'Directive — do X.',
     outcomeA:outcome('A','a'),outcomeB:outcome('B','','failed',{gap:'B timed out.'})});
   assert.equal(partial.degraded,true);
   assert.match(partial.directive,/partial result/);
+  assert.match(partial.directive,/outrank it/,'a degraded directive is just as subordinate to the user');
   assert.match(partial.directive,/B timed out/);
   const fallback=buildDoubleDirective({ref,outcomeA:outcome('A','View A.'),outcomeB:outcome('B','View B.')});
   assert.equal(fallback.degraded,true);
@@ -194,4 +200,38 @@ test('the portable core imports nothing harness-specific',()=>{
   const source=fs.readFileSync(path.join(agent,'extensions/lib/double.ts'),'utf8');
   assert.doesNotMatch(source,/^\s*import\s/m);
   assert.doesNotMatch(source,/yunus|pi-subagents|Subagent|ExtensionContext/);
+});
+
+test('bare acknowledgements are not analyzed twice, real requests always are',()=>{
+  for(const text of ['ok','Thanks!','thank you','  yes. ','Looks good','lgtm','Perfect','👍'])assert.equal(isDoubleAcknowledgement(text),true,text);
+  for(const text of ['Go.','Do it.','continue','go ahead','proceed','please continue','Do it again but faster','continue with the migration to postgres','yes, and also add tests','fix the bug','Why did that fail?','','   ',undefined,42,'ok '.repeat(30)])assert.equal(isDoubleAcknowledgement(text),false,String(text));
+});
+
+test('requirements from the user are anchored in streams, reconciliation and directive within a bound',()=>{
+  const requirements=['Do not modify auth.ts.','Keep the public API stable.'];
+  for(const stream of ['A','B']){
+    const brief=buildDoubleStreamTask({stream,task:'Add a login redirect.',requirements});
+    assert.match(brief.task,/Requirements extracted from the user's words/);
+    assert.match(brief.task,/- Do not modify auth\.ts\./);assert.match(brief.task,/the user's own words outrank this list/);
+  }
+  assert.doesNotMatch(buildDoubleStreamTask({stream:'A',task:'x'}).task,/Requirements extracted/,'no list, no block');
+  const reconcile=buildDoubleReconcileTask({task:'Add a login redirect.',requirements,outcomeA:outcome('A','plan a'),outcomeB:outcome('B','plan b')});
+  assert.match(reconcile.task,/- Keep the public API stable\./);assert.match(reconcile.task,/reject any proposed action that conflicts with the request's explicit constraints/);
+  const ref={provider:'p',id:'m'};
+  const directive=buildDoubleDirective({ref,requirements,reconcileText:'Directive — do X.',outcomeA:outcome('A','a'),outcomeB:outcome('B','b')});
+  assert.ok(directive.directive.indexOf('Do not modify auth.ts.')<directive.directive.indexOf('Directive — do X.'),'the anchor precedes the body so a bounded directive never loses it');
+  const many=Array.from({length:60},(_,index)=>`Requirement number ${index} with some descriptive wording to fill space.`);
+  const bounded=buildDoubleStreamTask({stream:'A',task:'t',requirements:many});
+  assert.ok(bounded.task.length<DOUBLE_RECOMMENDED_LIMITS.maxRequirementChars+4_000,'the requirement list is bounded');
+  assert.ok(directive.directive.length<=DOUBLE_RECOMMENDED_LIMITS.maxDirectiveChars);
+});
+
+test('the reconciler gets a mechanical file-overlap fact, never a judgment',()=>{
+  assert.match(doubleOverlapNote('edit src/a.ts and lib/b.ts','change src/a.ts plus c.py'),/1 in both \(src\/a\.ts\), 1 only in A \(lib\/b\.ts\), 1 only in B \(c\.py\); overlap 33%\./);
+  assert.equal(doubleOverlapNote('no files here','none either'),'');
+  assert.match(doubleOverlapNote('x.ts y.ts','x.ts y.ts'),/overlap 100%/);
+  const both=buildDoubleReconcileTask({task:'t',outcomeA:outcome('A','touch src/a.ts'),outcomeB:outcome('B','touch src/b.ts')});
+  assert.match(both.task,/Named files: 0 in both, 1 only in A \(src\/a\.ts\), 1 only in B \(src\/b\.ts\); overlap 0%/);
+  const lone=packageDoubleStreams(outcome('A','touch src/a.ts'),outcome('B','','failed'));
+  assert.equal(lone.overlapNote,'','one stream has nothing to compare');
 });

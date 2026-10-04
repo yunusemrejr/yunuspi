@@ -741,3 +741,50 @@ test('a delayed successful write from another scope invalidates current source c
   assert.equal(after.execution.tier, 'direct', 'other-scope file breadth does not change this task profile');
   assert.deepEqual(after.pipelines, ['php'], 'another scope’s implementation does not change this task stack');
 });
+
+
+test('the executing route earns or loses oversight from its own results, announces it, and a burst gets one targeted recovery note', async t => {
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-competence-agent-'));
+  const original = { dir: process.env.PI_CODING_AGENT_DIR, store: process.env.PI_COMPETENCE_STORE };
+  process.env.PI_CODING_AGENT_DIR = agentDir; delete process.env.PI_COMPETENCE_STORE;
+  t.after(() => { for (const [key, value] of [['PI_CODING_AGENT_DIR', original.dir], ['PI_COMPETENCE_STORE', original.store]]) if (value === undefined) delete process.env[key]; else process.env[key] = value; fs.rmSync(agentDir, { recursive: true, force: true }); });
+  const { competenceStoreFile, readCompetenceStore, writeCompetenceDeltas } = await import(pathToFileURL(path.join(agent, 'extensions/lib/competence-store.ts')));
+  // History: two hundred clean steps on this route and a fleet that slips about 3.8%.
+  writeCompetenceDeltas(competenceStoreFile(agentDir), { 'test/route-a': { slip: 2, mass: 300 } }, Date.now());
+  writeCompetenceDeltas(competenceStoreFile(agentDir), { 'test/other': { slip: 12, mass: 300 } }, Date.now());
+  const f = fixture(t); f.ctx.model = { provider: 'test', id: 'route-a' };
+  await f.emit('session_start'); await f.start('Redesign the settings page layout');
+  assert.equal(currentExecutionProfile(f.ctx).control.level, 'standard', 'history alone grants nothing before this session shows evidence');
+  const base = currentExecutionProfile(f.ctx).cadence.observerMs;
+  for (let i = 0; i < 20; i++) await f.call('read', { path: `file-${i}.txt` }, { content: [{ type: 'text', text: `contents ${i}` }] });
+  const profile = currentExecutionProfile(f.ctx);
+  assert.equal(profile.control.level, 'earned');assert.equal(profile.cadence.observerMs, base * 2);
+  assert.ok(f.entries.some(row => row.customType === 'adaptive-execution-v1' && row.data.control?.level === 'earned'), 'the published profile records the control');
+  const notice = f.messages.map(args => args[0]).find(message => message.customType === 'harness-activity' && /earned autonomy/.test(message.content));
+  assert.ok(notice, 'a level change is announced once');assert.equal(notice.display, true);assert.equal(notice.excludeFromContext, true);
+  const failing = async (toolName, input) => f.finish(await f.beginCall(toolName, input), { isError: true, content: [{ type: 'text', text: 'Could not find edits[0] in a.js The oldText must match exactly including all whitespace and newlines.' }] });
+  assert.equal((await failing('edit', { path: 'a.js', edits: [{ oldText: 'x1', newText: 'y' }] })).length, 0, 'one slip is not a burst');
+  const second = await failing('edit', { path: 'a.js', edits: [{ oldText: 'x2', newText: 'y' }] });
+  const note = second.flatMap(response => response?.content ?? []).map(part => part.text).find(text => /^\[recovery\]/.test(text ?? ''));
+  assert.match(note, /Two edit calls in a row/);assert.match(note, /read tool/);
+  assert.equal(currentExecutionProfile(f.ctx).control.burst?.family, 'edit');
+  const third = await failing('edit', { path: 'a.js', edits: [{ oldText: 'x3', newText: 'y' }] });
+  assert.equal(third.flatMap(response => response?.content ?? []).some(part => /^\[recovery\]/.test(part.text ?? '')), false, 'a burst sends its note once');
+  await f.emit('agent_settled', {});
+  const stored = readCompetenceStore(competenceStoreFile(agentDir));
+  assert.ok(stored['test/route-a'].mass > 300, 'this session adds its observations to the route history');
+  assert.ok(stored['*'].mass > 600);
+  // A different route has its own record: switching resets the control to what that route has earned.
+  f.ctx.model = { provider: 'test', id: 'route-b' };
+  await f.emit('model_select', { model: f.ctx.model });
+  assert.equal(currentExecutionProfile(f.ctx).control.level, 'standard');
+});
+
+test('the competence store can be disabled and never changes behavior for sessions without a model route', async t => {
+  const original = process.env.PI_COMPETENCE_STORE; process.env.PI_COMPETENCE_STORE = 'off';
+  t.after(() => { if (original === undefined) delete process.env.PI_COMPETENCE_STORE; else process.env.PI_COMPETENCE_STORE = original; });
+  const f = fixture(t);
+  await f.emit('session_start'); await f.start('Fix the Node.js parser');
+  for (let i = 0; i < 30; i++) await f.call('read', { path: `file-${i}.txt` }, { content: [{ type: 'text', text: `contents ${i}` }] });
+  assert.equal(currentExecutionProfile(f.ctx).control.level, 'standard', 'no model route means no measurement');
+});

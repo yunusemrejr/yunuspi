@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyExecution, createAdaptiveExecutionController, automaticCapabilityDecision,
-  registerAdaptiveExecution, currentExecutionProfile, automaticChildThinking,
+  registerAdaptiveExecution, currentExecutionProfile, automaticChildThinking, completionExecutionProfile,
 } from '../agent/extensions/lib/adaptive-execution.ts';
 
 test('direct tasks use no automatic coordination while required and deliberate capabilities remain callable', () => {
@@ -95,4 +95,63 @@ test('automatic child reasoning follows the scope without overriding configured 
 test('malformed numeric observations do not create imaginary scope or errors', () => {
   assert.equal(classifyExecution({task:'Run one test',changedFiles:Infinity,failures:NaN,uncertainty:Infinity}).tier,'direct');
   const c=createAdaptiveExecutionController(1);c.begin({task:'Read one file'},'first');c.begin({task:'Read another file'},'second');assert.equal(c.select('first'),undefined);
+});
+
+
+test('measured control lightens optional coordination for earned routes, tightens it for guarded ones and never relaxes critical or failing scope', () => {
+  const open = 'Redesign the settings page layout';
+  const base = classifyExecution({task: open});
+  assert.equal(base.tier, 'complex');assert.equal(base.control.level, 'standard');
+  const earned = classifyExecution({task: open, control: {level: 'earned'}});
+  assert.equal(earned.cadence.observerMs, base.cadence.observerMs * 2);
+  assert.equal(earned.cadence.watchmakerMs, 0, 'periodic watchmaker review waits for a signal');
+  assert.equal(earned.review.reviewers, 2);assert.equal(earned.features.assistance, false, 'open-ended work alone no longer starts a helper');
+  assert.ok(earned.reasons.some(reason => /earned autonomy/.test(reason)));
+  const broad = classifyExecution({task: 'Implement cross-file changes in frontend and backend with tests', independentWorkItems: 2, control: {level: 'earned'}});
+  assert.equal(broad.features.assistance, true, 'explicit breadth still earns a helper');
+  assert.equal(classifyExecution({task: 'Compare architectural alternatives for the API cache', control: {level: 'earned'}}).assistance.mode, 'fusion');
+  const diagnosis = classifyExecution({task: 'Investigate why the parser check fails', control: {level: 'earned'}});
+  assert.equal(diagnosis.features.assistance, true, 'diagnosis still gets its investigator');
+  const critical = classifyExecution({task: 'Fix authentication token validation', control: {level: 'earned'}});
+  const criticalBase = classifyExecution({task: 'Fix authentication token validation'});
+  assert.deepEqual({...critical, control: undefined, reasons: undefined}, {...criticalBase, control: undefined, reasons: undefined}, 'critical scope ignores earned autonomy');
+  const failing = classifyExecution({task: open, failures: 2, control: {level: 'earned'}});
+  assert.equal(failing.cadence.observerMs, base.cadence.observerMs, 'unresolved failures suspend earned freedom');
+  assert.equal(failing.review.reviewers, base.review.reviewers);
+  const guardedDirect = classifyExecution({task: 'Fix a one-line typo', control: {level: 'guarded'}});
+  assert.equal(guardedDirect.tier, 'direct');assert.equal(guardedDirect.features.observer, true);assert.equal(guardedDirect.features.qualityReview, true);
+  assert.equal(guardedDirect.cadence.observerMs, 60000);assert.equal(guardedDirect.review.reviewers, 1, 'a small change needs one independent look, not two');
+  const guardedStandard = classifyExecution({task: 'Investigate why the parser check fails', control: {level: 'guarded'}});
+  assert.equal(guardedStandard.review.reviewers, 2);assert.equal(guardedStandard.cadence.observerMs, 60000);
+  const constrained = classifyExecution({task: `${open}. Do not spawn subagents.`, control: {level: 'guarded'}});
+  assert.equal(constrained.features.assistance, false, 'user constraints outrank the control');
+});
+
+test('a burst of mistakes raises a direct scope to verification support for its duration without starting helpers', () => {
+  const burst = classifyExecution({task: 'Fix a one-line typo', control: {level: 'standard', burst: {family: 'edit', slips: 2}}});
+  assert.equal(burst.tier, 'standard');assert.ok(burst.reasons.some(reason => /burst/.test(reason)));
+  assert.equal(burst.features.observer, true);assert.equal(burst.assistance.maxAgents, 0, 'a burst gets guidance, not a child agent');
+  assert.equal(classifyExecution({task: 'Fix a one-line typo', control: {level: 'standard'}}).tier, 'direct');
+});
+
+test('the controller applies route control across scopes, reports changes and clears on reset', () => {
+  const c = createAdaptiveExecutionController();
+  c.begin({task: 'Redesign the settings page layout'}, 'task');
+  const before = c.profile().cadence.observerMs;
+  assert.equal(c.setControl({level: 'earned'}), true);
+  assert.equal(c.profile().cadence.observerMs, before * 2);
+  assert.equal(c.setControl({level: 'earned'}), false, 'an unchanged control reports no change');
+  c.begin({task: 'Fix a one-line typo', scope: 'todo'}, 'todo:1');
+  assert.equal(c.profile().control.level, 'earned', 'route reliability is not scoped to a todo');
+  assert.equal(c.setControl({level: 'standard', burst: {family: 'edit', slips: 2}}), true);
+  assert.equal(c.profile().tier, 'standard');
+  assert.equal(c.setControl(undefined), true);assert.equal(c.profile().control.level, 'standard');
+  c.setControl({level: 'guarded'});c.reset();assert.equal(c.profile().control.level, 'standard');
+});
+
+test('completion assurance keeps the live route control', () => {
+  const live = classifyExecution({task: 'Format one source file', scope: 'todo', control: {level: 'guarded'}});
+  const retained = completionExecutionProfile('Fix a one-line parser comparison', ['a.js'], live);
+  assert.equal(retained.control.level, 'guarded');assert.equal(retained.scope, 'task');
+  assert.equal(completionExecutionProfile('Fix a one-line parser comparison', ['a.js']).control.level, 'standard');
 });

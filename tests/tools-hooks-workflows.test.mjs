@@ -53,6 +53,20 @@ test('audio intents stage tools that can perform the requested operation', () =>
   assert.ok(!intentBundleTools('Do not normalize audio; inspect the source instead').includes('media_edit'));
 });
 
+test('web-answer, mailbox, marketing, API and browser-action intents stage their tools on turn one', () => {
+  const staged = (prompt, ...names) => { const got = intentBundleTools(prompt); for (const name of names) assert.ok(got.includes(name), `${name} for: ${prompt}`); };
+  staged('Research the top five competitors of this product and compare their pricing pages.', 'web_search', 'fetch_content');
+  staged('Find out what the latest Node.js LTS version is and what changed.', 'web_search', 'fetch_content');
+  staged('Make this site more SEO-optimized with topic clusters for long-tail queries.', 'web_probe', 'web_search', 'fetch_content');
+  staged('Check my inbox for replies and draft follow-up emails to the ones who have not answered.', 'agentmail_messages', 'agentmail_send');
+  staged('Promote the new release on Reddit and Hacker News and write the posts.', 'web_search', 'browser_session');
+  staged('Call the GitHub REST API to list the open issues of this repository.', 'http_request');
+  staged('Log in to the admin panel and fill out the settings form.', 'browser_session');
+  const quiet = /^(?:web_search|fetch_content|agentmail_\w+|http_request|browser_session)$/;
+  for (const prompt of ['Fix the null pointer in the login handler.', 'Research the codebase structure and explain how auth works.', 'Fix the login form validation.', 'Refactor the email parser module.', 'Add a unit test for the newsletter formatter.', 'Do not search the web; use the files provided.'])
+    assert.deepEqual(intentBundleTools(prompt).filter(name => quiet.test(name)), [], prompt);
+});
+
 test('diagnostics preserve the first actual failure in the middle of long runner output', () => {
   for (const failure of ['not ok 14 - parser accepts invalid input', 'Traceback (most recent call last):', 'FAIL src/parser.test.ts', 'error[E0308]: mismatched types', 'AssertionError: expected two records', 'java.lang.IllegalStateException: missing payload', 'src/parser.c:18:4: error: incompatible types']) {
     const output = 'runner header\n' + 'successful check\n'.repeat(150) + '\n'.repeat(1000) + '\x1b[31m' + failure + '\x1b[0m\n  at parse (src/parser.ts:18:4)\n' + 'cleanup and summary\n'.repeat(150);

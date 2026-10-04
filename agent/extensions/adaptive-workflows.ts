@@ -4,9 +4,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
+import { getAgentDir } from '@yunuspi/coding-agent';
 import { createAdaptiveExecutionController, registerAdaptiveExecution, adaptiveExecutionEnabled, createAdaptiveThinkingController } from './lib/adaptive-execution.ts';
 import { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, buildPipelineContext, PIPELINE_EVIDENCE_KINDS, type PipelineSelection } from './lib/task-pipelines.ts';
 import { projectCheckCommand } from './lib/project-tests.ts';
+import { classifyToolOutcome, createCompetenceEstimator, createStepTracker, fleetRateFromAggregate, priorFromAggregate, type ControlSnapshot, type StepOutcome } from './lib/model-competence.ts';
+import { competenceStoreFile, FLEET_KEY, readCompetenceStore, writeCompetenceDeltas, type CompetenceStore } from './lib/competence-store.ts';
+
+/** One targeted sentence per burst: what keeps failing and the cheapest way out. */
+const burstNote = (family: string) => {
+  const advice = ['edit', 'bulk_edit', 'write'].includes(family)
+    ? 'Re-read the exact region with the read tool (offset and limit) and copy oldText verbatim from that output instead of retyping it from memory; if the file changed, read it again first.'
+    : family === 'bash' || family === 'bg_run'
+      ? 'Check the failing command in one minimal step (syntax, path, flags) before running the full pipeline again.'
+      : `Read the error text literally and change the arguments it names; do not resend the same ${family} input.`;
+  return `[recovery] Two ${family} calls in a row went wrong. ${advice}`;
+};
 
 export default function adaptiveWorkflows(pi: any) {
   const execution = createAdaptiveExecutionController();
@@ -16,6 +29,17 @@ export default function adaptiveWorkflows(pi: any) {
   let ledger = createPipelineLedger(), pendingInput: { text: string; id: string; signal?: AbortSignal } | undefined, acceptedId = '';
   const scopes = new Map<string, { selection: PipelineSelection; revision: string; task: string }>();
   let parentNoDelegation = false;
+  // Measured reliability of the executing route: one estimator per route used this session.
+  const competence = new Map<string, ReturnType<typeof createCompetenceEstimator>>();
+  let stepTracker = createStepTracker(), store: CompetenceStore = {}, storeFile = '', sinceFlush = 0, shownLevel = 'standard', burstFamily = '';
+  const routeOf = (ctx: any): string => { const provider = ctx?.model?.provider, id = ctx?.model?.id; return typeof provider === 'string' && typeof id === 'string' && provider && id ? `${provider}/${id}` : ''; };
+  const flushCompetence = () => {
+    sinceFlush = 0;
+    if (!storeFile) return;
+    const deltas: Record<string, ReturnType<ReturnType<typeof createCompetenceEstimator>['takeDelta']>> = {};
+    for (const [route, estimator] of competence) deltas[route] = estimator.takeDelta();
+    try { store = writeCompetenceDeltas(storeFile, deltas, Date.now()); } catch { /* advisory evidence */ }
+  };
   type Observation = { sequence: number; revision: number; tree?: string; complete: boolean };
   const changed = new Map<string, string>(), calls = new Map<string, { tool: string; scope: string; revision: string; key: string; observation?: number }>();
   type OwnedCheck = { scope: string; revision: string; key: string; callId: string; candidate: boolean; failedObserved?: boolean };
@@ -28,6 +52,11 @@ export default function adaptiveWorkflows(pi: any) {
   const enabled = () => adaptiveExecutionEnabled();
   const contentRevision = (text: string) => createHash('sha256').update(`${sourceRevision}:${text}`).digest('hex').slice(0, 20);
   const reset = (_event?: any, ctx?: any) => {
+    flushCompetence(); competence.clear(); stepTracker = createStepTracker(); shownLevel = 'standard'; burstFamily = '';
+    // Child agents (reviewers, helpers) are a different workload with their own routes; they never
+    // feed the installation's record or move its thresholds.
+    storeFile = process.env.PI_COMPETENCE_STORE === 'off' || process.env.PI_SUBAGENT_CHILD === '1' ? '' : (() => { try { return competenceStoreFile(getAgentDir()); } catch { return ''; } })();
+    store = storeFile ? readCompetenceStore(storeFile) : {};
     thinking.reset(ctx);
     dispose?.(); dispose = undefined; execution.reset(); owner = ctx?.sessionManager;
     ownerFile = owner?.getSessionFile?.() ?? ''; task = ''; scope = 'task'; revision = 'initial';
@@ -39,7 +68,44 @@ export default function adaptiveWorkflows(pi: any) {
   for (const event of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on(event, reset);
   pi.on('session_shutdown', () => reset());
   pi.on('thinking_level_select', (event: any, ctx: any) => thinking.onSelection(event, ctx));
-  pi.on('agent_settled', (_event: any, ctx: any) => thinking.restore(ctx));
+  pi.on('agent_settled', (_event: any, ctx: any) => { thinking.restore(ctx); flushCompetence(); });
+  // A different route has its own record; its evidence replaces the previous route's control.
+  pi.on('model_select', (_event: any, ctx: any) => {
+    if (!enabled() || !owns(ctx)) return;
+    const estimator = competence.get(routeOf(ctx));
+    if (execution.setControl(estimator ? controlOf(estimator.snapshot()) : undefined)) save(ctx);
+  });
+  const controlOf = (snapshot: ControlSnapshot) => ({ level: snapshot.level, ...(snapshot.burst ? { burst: snapshot.burst } : {}) });
+  const announce = (text: string, detail: string) => {
+    try { pi.sendMessage?.({ customType: 'harness-activity', content: `Oversight · ${text}`, display: true, excludeFromContext: true, details: { kind: 'intelligence.activity', label: 'Oversight', status: 'ok', detail: `${text} · ${detail}`.slice(0, 240), count: 1 } }, { triggerTurn: false }); } catch { /* visibility only */ }
+  };
+  /** Feed one classified step to the executing route's estimator; returns a recovery note when a burst begins. */
+  const observeStep = (route: string, outcome: StepOutcome, ctx: any): string | undefined => {
+    if (!route || process.env.PI_SUBAGENT_CHILD === '1') return;
+    let estimator = competence.get(route);
+    if (!estimator) {
+      const now = Date.now();
+      estimator = createCompetenceEstimator(priorFromAggregate(store[route], now), { fleetRate: fleetRateFromAggregate(store[FLEET_KEY], now) });
+      competence.set(route, estimator);
+    }
+    const snapshot = estimator.observe(outcome);
+    if (++sinceFlush >= 25) flushCompetence();
+    let note: string | undefined;
+    if (snapshot.burst && !burstFamily) { burstFamily = snapshot.burst.family; note = burstNote(burstFamily); announce('burst', `${snapshot.burst.slips} ${burstFamily} slips in a row; targeted recovery note sent`); }
+    else if (!snapshot.burst) burstFamily = '';
+    if (snapshot.level !== shownLevel) {
+      shownLevel = snapshot.level;
+      announce(snapshot.level === 'earned' ? 'earned autonomy' : snapshot.level === 'guarded' ? 'tightened' : 'standard', snapshot.reason);
+    }
+    if (execution.setControl(controlOf(snapshot))) save(ctx);
+    return note;
+  };
+  const stepOf = (event: any, ctx: any, mutated: boolean): StepOutcome | undefined => {
+    const text = (event.content ?? []).filter((row: any) => row.type === 'text').map((row: any) => row.text).join('\n');
+    const shell = ['bash', 'bg_run'].includes(event.toolName);
+    const flags = stepTracker.track({ toolName: event.toolName, args: event.input ?? {}, text, isError: event.isError === true, mutated });
+    return classifyToolOutcome({ toolName: event.toolName, isError: event.isError === true, text, check: shell && Boolean(projectCheckCommand(event.input?.command, ctx.cwd)), ...flags });
+  };
   const owns = (ctx: any) => ctx?.sessionManager === owner && ctx?.cwd === ownerCwd && (owner?.getSessionId?.() ?? '') === ownerId && (owner?.getSessionFile?.() ?? '') === ownerFile;
   const refreshRevision = () => {
     sourceRevision = createHash('sha256').update(JSON.stringify([sourceSeed, nativeIdentity, uncertainSource, [...changed].sort()])).digest('hex');
@@ -209,7 +275,10 @@ export default function adaptiveWorkflows(pi: any) {
     if (call.scope !== scope) {
       // Failure/progress belongs to the dispatching scope. Source bytes are
       // shared, so even its delayed write retires another scope's old checks.
-      if (mutation(event, ctx, call).changed) save(ctx);
+      const changedNow = mutation(event, ctx, call).changed;
+      if (changedNow) save(ctx);
+      const note = observeStep(routeOf(ctx), stepOf(event, ctx, changedNow)!, ctx);
+      if (note) return { content: [...(event.content ?? []), { type: 'text', text: note }] };
       return;
     }
     const before = execution.profile().tier, beforeTools = automaticNames().join('\n');
@@ -222,6 +291,7 @@ export default function adaptiveWorkflows(pi: any) {
     const incomplete = Boolean(event.details?.task?.id || event.details?.execution?.signal || event.details?.signal || /\[managed bash\] Still running/.test(text) || noTests);
     const failed = event.isError === true || typeof nativeExit === 'number' && nativeExit !== 0 || Boolean(event.details?.execution?.signal || event.details?.signal);
     const resultMutation = mutation(event, ctx, call);
+    const burstAdvice = observeStep(routeOf(ctx), stepOf(event, ctx, resultMutation.changed || resultMutation.paths.length > 0)!, ctx);
     let nativeTests: any;
     if (event.toolName === 'project_tests' && !failed && ['inspect', 'assess'].includes(event.input?.action)) {
       try {
@@ -314,7 +384,8 @@ export default function adaptiveWorkflows(pi: any) {
       }
     }
     if (before !== execution.profile().tier || beforeTools !== automaticNames().join('\n')) save(ctx);
-    if (event.isError && execution.profile().failures === 2) return { content: [...(event.content ?? []), { type: 'text', text: '[adaptive] Two unresolved failures raised support. Inspect the actual error and current source/state before retrying; preserve completed work. A passing substantive check can lower support again.' }] };
+    const notes = [burstAdvice, event.isError && execution.profile().failures === 2 ? '[adaptive] Two unresolved failures raised support. Inspect the actual error and current source/state before retrying; preserve completed work. A passing substantive check can lower support again.' : undefined].filter((note): note is string => Boolean(note));
+    if (notes.length) return { content: [...(event.content ?? []), ...notes.map(text => ({ type: 'text', text }))] };
   });
   pi.registerTool({
     name: 'task_pipeline', label: 'Task pipeline',

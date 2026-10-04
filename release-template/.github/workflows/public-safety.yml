@@ -70,6 +70,10 @@ jobs:
         env:
           PI_LOCAL_LM: 'off'
         run: node agent/scripts/adaptive-execution-bench.mjs
+      - name: Check competence control calibration
+        env:
+          PI_LOCAL_LM: 'off'
+        run: node agent/scripts/competence-replay-bench.mjs
 
   # The manifest supports Node >=22.19.0 while the full suite runs on 24. This
   # lane keeps the minimum runtime honest with the deterministic, prerequisite-

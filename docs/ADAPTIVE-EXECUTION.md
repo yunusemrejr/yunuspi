@@ -106,6 +106,21 @@ Set `PI_ADAPTIVE_EXECUTION=off` (or `0`) to restore established automatic
 assistance and reviewer admission. Existing subsystem switches, configured
 preferences and user opt-outs remain effective.
 
+## Measured reliability control
+
+The tier above comes from the task and its failures. A second input, the
+measured reliability of the executing route, adjusts only optional
+coordination: a route with a long clean record (an `earned` level) gets lighter
+observer cadence, one reviewer fewer for complex work, no automatic helper for
+open-ended work alone and no copy review of a small verified change; a route
+whose slip rate is credibly above the fleet's (`guarded`) gets the opposite,
+and a short burst of slips gets a targeted recovery note. The level comes from
+decayed, interval-bounded counts of classified tool outcomes compared with the
+installation's own rate, never from a model name, and it cannot touch critical
+scope, user constraints, required checks or deliberate tool calls. See
+[competence control](COMPETENCE-CONTROL.md) for the estimator, the measured
+calibration and `PI_COMPETENCE_STORE=off`.
+
 ## Verification and benchmark
 
 Run the policy, scheduler, helper and completion-review regressions:
@@ -113,6 +128,7 @@ Run the policy, scheduler, helper and completion-review regressions:
 ```sh
 PI_LOCAL_LM=off node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/automatic-helper-lifecycle.test.mjs tests/skill-discovery-runner.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
 PI_LOCAL_LM=off node agent/scripts/adaptive-execution-bench.mjs
+PI_LOCAL_LM=off node agent/scripts/competence-replay-bench.mjs
 ```
 
 The benchmark replays the actual observer scheduler for the same simulated
@@ -143,6 +159,16 @@ Observed foreground test receipts retain bounded head/tail diagnostics with
 explicit omission or protected-material withholding. Reviewers receive the current
 planned receipts directly, so a test-only review needs no temporary log artifact.
 Actual visual/interaction captures remain necessary for those claims.
+
+Because direct work starts small, requests whose answer lives outside the repo
+stage the matching tools for the first model turn instead of relying on a
+discovery round trip the model may not make (one recorded SEO session ran 190
+calls without a single web search). Web research, SEO, marketing posts, mailbox
+work, HTTP API calls and browser actions (log in, fill out a form) each stage
+their own small bundle; negative cases stay quiet (bug fixes, "research the
+codebase", HTML email templates, prompts that say not to search). The bundles
+are intent patterns in `lib/tool-discovery.ts`; the host tool ceiling still
+applies.
 
 CI runs `tool-efficiency-bench.mjs` to enforce the deterministic schema-count and
 output-size contracts while preserving required checks and blockers. Its fixture

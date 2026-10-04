@@ -11,6 +11,7 @@ import {
 DOUBLE_RECOMMENDED_LIMITS,
 	doubleRouteLabel,
 	formatDoubleStatus,
+	isDoubleAcknowledgement,
 	isDoubleTransientFailure,
 	mergeDoubleGaps,
 	packageDoubleStreams,
@@ -21,6 +22,7 @@ DOUBLE_RECOMMENDED_LIMITS,
 	type DoubleStreamOutcome,
 	type DoubleStreamStatus,
 } from "../../../lib/double.ts";
+import { extractRequirements } from "../../../lib/requirement-ledger.ts";
 
 /**
  * Double mode — harness adapter.
@@ -34,11 +36,16 @@ DOUBLE_RECOMMENDED_LIMITS,
  *
  * Flow per user turn while ON:
  *   1. Pin the current session route (provider/id + thinking); never substitute.
- *   2. Prepare one shared context packet; launch stream A and stream B
- *      concurrently with fork context and a read-only tool ceiling.
+ *   2. Prepare one shared context packet; launch stream A, then stream B once
+ *      A has made its first progress (its prompt prefix is cached by then; a
+ *      bounded wait covers silent routes), with fork context and a read-only
+ *      tool ceiling. A and B prompts share every byte except their closing angle.
  *   3. Reconcile via one lightweight same-route pass (compare → challenge →
  *      reconcile → commit); degrade deterministically when it cannot run.
- *   4. Inject exactly one directive message; the normal turn commits to it.
+ *   4. Inject exactly one directive message; the normal turn weighs it against
+ *      the user's own words. The system prompt is never modified: an override
+ *      alternating with harness wakes (which skip Double) would invalidate the
+ *      whole cached conversation on every flip.
  */
 export const DOUBLE_RUNNER = Symbol.for("yunus-pi.double-runner.v1");
 export const DOUBLE_PROGRESS = "double-progress";
@@ -50,7 +57,7 @@ type Launch = (
 	id: string,
 	params: SubagentParamsLike,
 	signal: AbortSignal,
-	onUpdate: undefined,
+	onUpdate: ((update: unknown) => void) | undefined,
 	ctx: ExtensionContext,
 ) => Promise<any>;
 
@@ -60,6 +67,8 @@ export const DOUBLE_LIMITS = Object.freeze({
 	streamMs: 150_000,
 	/** Lightweight reconciliation ceiling, well under one stream budget. */
 	synthesisMs: 60_000,
+	/** Stream B starts when A reports its first progress (its shared prefix is then cached) or after this wait. */
+	warmWaitMs: 6_000,
 	tokensPerStream: 96_000,
 	tokensReconcile: 32_000,
 	toolsPerStream: 16,
@@ -83,6 +92,8 @@ export const DOUBLE_READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "git_info"]
 export interface DoubleRunnerDeps {
 	launch: Launch;
 	now?: () => number;
+	/** Override of DOUBLE_LIMITS.warmWaitMs; 0 launches both streams together. */
+	warmWaitMs?: number;
 }
 
 const visibleText = (value: unknown, limit: number) =>
@@ -267,6 +278,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	let sessionEpoch = 0;
 	let enabled = false;
 	let capabilityWarned = false;
+	let acknowledgementNoted = false;
 
 	const doubleEnabled = () => enabled && (process.env.PI_DOUBLE ?? "on").toLowerCase() !== "off";
 
@@ -285,6 +297,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	pi.on?.("session_start", (_event: any, ctx: any) => {
 		enabled = false;
 		capabilityWarned = false;
+		acknowledgementNoted = false;
 		try {
 			const entries = ctx?.sessionManager?.getEntries?.() ?? [];
 			for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -336,6 +349,14 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		if (inputFromExtension) return undefined;
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		if (!prompt.trim()) return undefined;
+		if (isDoubleAcknowledgement(prompt)) {
+			// Nothing new to analyze twice; the streams would only re-read the transcript.
+			if (!acknowledgementNoted) {
+				acknowledgementNoted = true;
+				try { (ctx as any)?.ui?.notify?.("Double: a bare acknowledgement needs no twin pass; this turn continues single.", "info"); } catch {}
+			}
+			return undefined;
+		}
 		const ref = modelRefOf(ctx?.model);
 		if (!ref) return undefined;
 		let route: string;
@@ -393,11 +414,15 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			skillNames: skillNamesOf(event?.systemPromptOptions),
 			extra: `Active model: ${route}${thinking ? ` (thinking: ${thinking})` : ""}. Double mode is ON for this session; both streams use this same route.`,
 		};
+		// Deterministic requirement anchor from the user's own words, shared by both streams, the
+		// reconciliation and the directive so every stage is checked against the same list.
+		let requirements: string[] = [];
+		try { requirements = extractRequirements(prompt).items.slice(0, 8); } catch { /* the literal prompt stays authoritative */ }
 		let streamTaskA: string;
 		let streamTaskB: string;
 		try {
-			streamTaskA = buildDoubleStreamTask({ stream: "A", task: prompt, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
-			streamTaskB = buildDoubleStreamTask({ stream: "B", task: prompt, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
+			streamTaskA = buildDoubleStreamTask({ stream: "A", task: prompt, requirements, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
+			streamTaskB = buildDoubleStreamTask({ stream: "B", task: prompt, requirements, context: shared, maxTaskChars: DOUBLE_LIMITS.maxTaskChars }).task;
 		} catch {
 			return undefined;
 		}
@@ -474,7 +499,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		// Each stream attempt leaves 30s of the shared deadline for reconciliation.
 		const streamWindow = () => Math.min(DOUBLE_LIMITS.streamMs, Math.max(1, Math.floor(deadlineAt - now()) - 30_000));
 
-		const runStream = async (stream: DoubleStreamId, task: string): Promise<DoubleStreamOutcome> => {
+		const runStream = async (stream: DoubleStreamId, task: string, onProgress?: () => void): Promise<DoubleStreamOutcome> => {
 			const startedAt = now();
 			const scopeId = stream === "A" ? "double-A" : "double-B";
 			const label = `Double stream ${stream}`;
@@ -497,7 +522,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				let work: Promise<any> | undefined;
 				try {
 					const timeoutMs = streamWindow();
-					work = deps.launch(runId, launchParams(task, timeoutMs, DOUBLE_LIMITS.tokensPerStream, DOUBLE_LIMITS.toolsPerStream, label), signal, undefined, ctx);
+					work = deps.launch(runId, launchParams(task, timeoutMs, DOUBLE_LIMITS.tokensPerStream, DOUBLE_LIMITS.toolsPerStream, label), signal, onProgress ? () => onProgress() : undefined, ctx);
 					const result = await boundedAwait(work, signal);
 					const returnedRow = rawResultRow(result);
 					const rawRow = {
@@ -571,7 +596,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		const runReconcile = async (outcomeA: DoubleStreamOutcome, outcomeB: DoubleStreamOutcome): Promise<{ text: string; gap: string }> => {
 			let reconcileTask: string;
 			try {
-				reconcileTask = buildDoubleReconcileTask({ task: prompt, outcomeA, outcomeB, maxTaskChars: DOUBLE_LIMITS.maxTaskChars, maxStreamTextChars: DOUBLE_LIMITS.maxStreamChars }).task;
+				reconcileTask = buildDoubleReconcileTask({ task: prompt, requirements, outcomeA, outcomeB, maxTaskChars: DOUBLE_LIMITS.maxTaskChars, maxStreamTextChars: DOUBLE_LIMITS.maxStreamChars }).task;
 			} catch {
 				return { text: "", gap: "" };
 			}
@@ -623,7 +648,23 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		try {
 			setStatus(`Double A ∥ B · ${route}`);
 			progress("Independent A ∥ B", "started");
-			const [outcomeA, outcomeB] = await Promise.all([runStream("A", streamTaskA), runStream("B", streamTaskB)]);
+			// B starts when A first reports progress: that means A's request is accepted and the prefix
+			// both streams share is cached. A failing or finishing A opens the gate too, and the wait is
+			// bounded so a route that is silent until it finishes costs at most warmWaitMs.
+			let openWarm!: () => void;
+			const warm = new Promise<void>((resolve) => { openWarm = resolve; });
+			const waitForWarm = (ms: number) => new Promise<void>((resolve) => {
+				if (ms <= 0) { resolve(); return; }
+				const timer = setTimeout(done, ms);
+				timer.unref?.();
+				function done() { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); }
+				signal.addEventListener("abort", done, { once: true });
+				void warm.then(done);
+			});
+			const [outcomeA, outcomeB] = await Promise.all([
+				runStream("A", streamTaskA, openWarm).finally(openWarm),
+				waitForWarm(deps.warmWaitMs ?? DOUBLE_LIMITS.warmWaitMs).then(() => runStream("B", streamTaskB)),
+			]);
 			let packaged: ReturnType<typeof packageDoubleStreams>;
 			try {
 				packaged = packageDoubleStreams(outcomeA, outcomeB);
@@ -649,6 +690,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			try {
 				({ directive, degraded } = buildDoubleDirective({
 					ref,
+					requirements,
 					...(reconciled.text ? { reconcileText: reconciled.text } : {}),
 					...(reconciled.gap ? { reconcileGap: reconciled.gap } : {}),
 					outcomeA,
@@ -661,11 +703,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			progress("Unified action", degraded ? "ready · partial" : "ready", undefined, directive.slice(0, 2500));
 			setStatus(undefined);
 			statusOwner = undefined;
-			const systemNote = `\n\nDouble mode reconciled two independent ${route} analyses into this turn's directive message. Commit to its single path; challenge its open questions against live evidence instead of re-running both analyses.`;
-			return {
-				message: { customType: DOUBLE_DIRECTIVE_TYPE, content: directive, display: true },
-				systemPrompt: typeof event?.systemPrompt === "string" ? `${event.systemPrompt}${systemNote}` : undefined,
-			};
+			return { message: { customType: DOUBLE_DIRECTIVE_TYPE, content: directive, display: true } };
 		} finally {
 			clearTimeout(deadlineTimer);
 			if (statusOwner === statusToken) {

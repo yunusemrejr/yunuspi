@@ -87,8 +87,8 @@ const RECONCILED = 'Directive — migrate behind a wrapper.\nReconciliation — 
 const kindOf = (params) => {
   const task = params.task ?? '';
   if (task.includes('reconciling two independent')) return 'reconcile';
-  if (task.includes('You are Double instance A')) return 'A';
-  if (task.includes('You are Double instance B')) return 'B';
+  if (task.includes('You are Double instance A;')) return 'A';
+  if (task.includes('You are Double instance B;')) return 'B';
   return 'unknown';
 };
 
@@ -143,6 +143,7 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
   const calls = [];
   const gates = { A: deferred(), B: deferred(), reconcile: deferred() };
   registerDoubleMode(pi, {
+    warmWaitMs: 0,
     launch: async (id, params) => {
       calls.push({ id, params });
       return gates[kindOf(params)].promise;
@@ -170,6 +171,9 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
     assert.ok(call.params.task.includes('Available skills: plan, review'));
   }
   assert.notEqual(calls[0].params.task, calls[1].params.task, 'stream identity differs');
+  let shared = 0;
+  while (shared < calls[0].params.task.length && calls[0].params.task[shared] === calls[1].params.task[shared]) shared++;
+  assert.ok(calls[0].params.task.length - shared <= 720, 'both streams send the same prompt bytes except their closing angle, so the second hits the cached prefix');
   assert.ok(!calls[0].params.task.includes(ANALYSIS_A), 'A never sees content that only exists after B runs');
   gates.A.resolve(okResult(ANALYSIS_A));
   gates.B.resolve(okResult(ANALYSIS_B));
@@ -188,10 +192,10 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
   assert.ok(result, 'one directive is injected');
   assert.equal(result.message.customType, 'double-directive');
   assert.equal(result.message.display, true);
-  assert.match(result.message.content, /two independent analyses reconciled into one directive/);
+  assert.match(result.message.content, /two independent analyses reconciled into one planning directive/);
+  assert.match(result.message.content, /never an instruction from the user/);
   assert.match(result.message.content, /Directive — migrate behind a wrapper/);
-  assert.match(result.systemPrompt, /^Be helpful\./);
-  assert.match(result.systemPrompt, /Commit to its single path/);
+  assert.equal(result.systemPrompt, undefined, 'the system prompt is never modified: an override alternating with harness wakes would invalidate the whole cached conversation');
   const phases = pi.sends.map((send) => `${send.message.details.phase}:${send.message.details.status}`);
   assert.ok(phases.includes('Double stream A:started') && phases.includes('Double stream B:started'));
   assert.ok(phases.includes('Double stream A:completed') && phases.includes('Double stream B:completed'));
@@ -453,6 +457,7 @@ test('aborting the request signal mid-preflight cancels both streams and starts 
   const pi = makePi();
   const launched = [];
   registerDoubleMode(pi, {
+    warmWaitMs: 0,
     launch: (id, params, signal) => {
       launched.push({ kind: kindOf(params), signal });
       return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
@@ -491,4 +496,97 @@ test('registration is a no-op inside a child process', () => {
   } finally {
     delete process.env.PI_SUBAGENT_CHILD;
   }
+});
+
+test('stream B starts on A\'s first progress so it can use the prefix A just cached', async () => {
+  const pi = makePi();
+  const calls = [];
+  const gates = { A: deferred(), B: deferred(), reconcile: deferred() };
+  let aProgress;
+  registerDoubleMode(pi, {
+    warmWaitMs: 5_000,
+    launch: async (id, params, signal, onUpdate) => {
+      const kind = kindOf(params);
+      calls.push({ kind, at: Date.now() });
+      if (kind === 'A') aProgress = onUpdate;
+      return gates[kind].promise;
+    },
+  });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const pending = fire(pi, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(calls.map((call) => call.kind), ['A'], 'B waits while A has made no progress');
+  assert.equal(typeof aProgress, 'function', 'A reports progress through the executor callback');
+  aProgress({ details: { progress: [{}] } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(calls.map((call) => call.kind), ['A', 'B'], 'B starts as soon as A reports progress');
+  gates.A.resolve(okResult(ANALYSIS_A)); gates.B.resolve(okResult(ANALYSIS_B));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  gates.reconcile.resolve(okResult(RECONCILED));
+  const [result] = await pending;
+  assert.match(result.message.content, /Directive — migrate behind a wrapper/);
+});
+
+test('the warm wait is bounded and a stream that fails fast never holds the other back', async () => {
+  const silent = makePi();
+  const launches = [];
+  const gate = deferred();
+  registerDoubleMode(silent, { warmWaitMs: 60, launch: async (id, params) => { launches.push({ kind: kindOf(params), at: Date.now() }); return kindOf(params) === 'reconcile' ? okResult(RECONCILED) : gate.promise; } });
+  const ctx = makeCtx(silent);
+  await fire(silent, 'session_start', { reason: 'startup' }, ctx);
+  await silent.commands.get('double').handler('', ctx);
+  const pending = fire(silent, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(launches.map((launch) => launch.kind), ['A']);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(launches.map((launch) => launch.kind), ['A', 'B'], 'a route that is silent until it finishes costs at most the bounded wait');
+  assert.ok(launches[1].at - launches[0].at >= 55);
+  gate.resolve(okResult(ANALYSIS_A));
+  await pending;
+  const fast = makePi();
+  const order = [];
+  registerDoubleMode(fast, { warmWaitMs: 60_000, launch: async (id, params) => { order.push(kindOf(params)); if (kindOf(params) === 'A') throw new Error('socket hang up'); return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_B); } });
+  const fastCtx = makeCtx(fast);
+  await fire(fast, 'session_start', { reason: 'startup' }, fastCtx);
+  await fast.commands.get('double').handler('', fastCtx);
+  const started = Date.now();
+  const [result] = await fire(fast, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, fastCtx);
+  assert.ok(Date.now() - started < 5_000, 'A failing opens the gate immediately instead of waiting out the bound');
+  assert.ok(order.includes('B'));assert.ok(result, 'the survivor still produces a directive');
+});
+
+test('a bare acknowledgement continues single and says so once; real requests are still doubled', async () => {
+  const pi = makePi();
+  let launches = 0;
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (id, params) => { launches++; return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_A); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const noticesBefore = pi.notifies.length;
+  for (const prompt of ['thanks!', 'Looks good', 'ok']) assert.equal((await fire(pi, 'before_agent_start', { prompt, systemPrompt: 's' }, ctx))[0], undefined, prompt);
+  assert.equal(launches, 0, 'no stream, no reconciliation');
+  assert.equal(pi.notifies.slice(noticesBefore).filter((note) => /acknowledgement/.test(note.text)).length, 1, 'said once, not per turn');
+  const [real] = await fire(pi, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, ctx);
+  assert.ok(real);assert.equal(launches, 3);
+});
+
+test('the user\'s own requirements anchor every stage and the directive stays subordinate to them', async () => {
+  const pi = makePi();
+  const tasks = [];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (id, params) => { tasks.push({ kind: kindOf(params), task: params.task }); return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_A); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('', ctx);
+  const prompt = 'Add a login redirect.\n- Do not modify auth.ts.\n- Keep the public API stable.';
+  const [result] = await fire(pi, 'before_agent_start', { prompt, systemPrompt: 's' }, ctx);
+  for (const { kind, task } of tasks) {
+    assert.match(task, /Do not modify auth\.ts\./, `${kind} sees the requirement list`);
+    assert.match(task, /Keep the public API stable\./, kind);
+  }
+  assert.ok(tasks.some((entry) => entry.kind === 'reconcile'));
+  assert.match(result.message.content, /Requirements extracted from the user's words/);
+  assert.ok(result.message.content.indexOf('Do not modify auth.ts.') < result.message.content.indexOf('Directive — migrate behind a wrapper'));
+  assert.match(result.message.content, /their own messages \(this prompt, earlier prompts and any active goal\) and explicit constraints outrank it/);
 });

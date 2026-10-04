@@ -3211,7 +3211,7 @@
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 314
+        "line": 327
       },
       {
         "name": "effort",
@@ -4051,7 +4051,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 773,
+        "line": 781,
         "kind": "literal"
       },
       {
@@ -4208,7 +4208,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 319,
+        "line": 390,
         "kind": "literal"
       },
       {
@@ -4226,7 +4226,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 367,
+        "line": 378,
         "kind": "literal"
       },
       {
@@ -4607,7 +4607,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 773,
+        "line": 781,
         "kind": "literal"
       },
       {
@@ -4685,7 +4685,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 319,
+        "line": 390,
         "kind": "literal"
       },
       {
@@ -4697,7 +4697,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 367,
+        "line": 378,
         "kind": "literal"
       },
       {
@@ -4975,7 +4975,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 701,
+      "sourceFiles": 703,
       "registrationSites": 85,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 133,
@@ -7861,6 +7861,10 @@
       {
         "name": "CODE-QUALITY.md",
         "path": "docs/CODE-QUALITY.md"
+      },
+      {
+        "name": "COMPETENCE-CONTROL.md",
+        "path": "docs/COMPETENCE-CONTROL.md"
       },
       {
         "name": "CONTEXT-AUDIT.md",

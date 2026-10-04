@@ -41,6 +41,8 @@ export interface DoubleStreamBrief {
 	stream: DoubleStreamId;
 	/** The user's request, verbatim where possible. */
 	task: string;
+	/** Requirements extracted from the request by the host, as verbatim excerpts. */
+	requirements?: readonly string[];
 	context?: DoubleSharedContext;
 	maxTaskChars?: number;
 	maxContextChars?: number;
@@ -62,6 +64,8 @@ export interface DoublePackagedStreams {
 	usable: DoubleStreamId[];
 	bothUsable: boolean;
 	timingNote: string;
+	/** Mechanical comparison of the files each stream names; empty when neither names any. */
+	overlapNote: string;
 	gaps: string[];
 }
 
@@ -72,6 +76,7 @@ export const DOUBLE_RECOMMENDED_LIMITS = Object.freeze({
 	maxStreamTextChars: 8_000,
 	maxReconcileChars: 6_000,
 	maxDirectiveChars: 10_000,
+	maxRequirementChars: 1_600,
 });
 
 export function doubleRouteLabel(ref: DoubleModelRef): string {
@@ -147,6 +152,49 @@ export function isDoubleTransientFailure(reason: unknown): boolean {
 	return DOUBLE_TRANSIENT_MARKERS.test(reason) && !DOUBLE_DETERMINISTIC_MARKERS.test(reason);
 }
 
+/**
+ * A bare acknowledgement ("ok", "thanks") brings no request to analyze twice:
+ * both streams would only re-read the transcript. Approvals and directives
+ * ("do it", "continue", "go ahead") authorize work and are still doubled.
+ */
+export function isDoubleAcknowledgement(prompt: unknown): boolean {
+	if (typeof prompt !== "string") return false;
+	const text = prompt.trim().toLowerCase().replace(/[.!\s]+$/g, "");
+	if (!text || text.length > 40) return false;
+	return /^(?:ok(?:ay)?|k|yes|yep|yeah|yup|sure|y|thanks?|thank you|thx|ty|great|perfect|nice|good|cool|got it|sounds good|lgtm|looks good|👍)$/.test(text);
+}
+
+function requirementBlock(requirements: readonly string[] | undefined, maxChars: number): string {
+	if (!Array.isArray(requirements)) return "";
+	const rows: string[] = [];
+	let used = 0;
+	for (const raw of requirements) {
+		if (typeof raw !== "string") continue;
+		const row = `- ${raw.replace(/\s+/g, " ").trim()}`;
+		if (row.length < 4 || used + row.length + 1 > maxChars) continue;
+		rows.push(row);
+		used += row.length + 1;
+	}
+	return rows.length
+		? `Requirements extracted from the user's words (verbatim excerpts; the user's own words outrank this list):\n${rows.join("\n")}`
+		: "";
+}
+
+const FILE_REFERENCE = /(?:[\w.-]+\/)*[\w.-]+\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|php|rb|cc?|cpp|hpp?|cs|sh|json|ya?ml|toml|md|html?|css|scss|sql|vue|svelte|kt|swift)\b/gi;
+
+/** Mechanical comparison of the files two analyses name: facts for the reconciler, not a judgment. */
+export function doubleOverlapNote(a: string, b: string): string {
+	const files = (text: string) => new Set((String(text ?? "").match(FILE_REFERENCE) ?? []).map((file) => file.toLowerCase()).filter((file) => file.length <= 120));
+	const fa = files(a);
+	const fb = files(b);
+	if (fa.size + fb.size === 0) return "";
+	const shared = [...fa].filter((file) => fb.has(file));
+	const onlyA = [...fa].filter((file) => !fb.has(file));
+	const onlyB = [...fb].filter((file) => !fa.has(file));
+	const list = (items: string[]) => items.length ? ` (${items.slice(0, 4).join(", ")}${items.length > 4 ? ", …" : ""})` : "";
+	return `Named files: ${shared.length} in both${list(shared)}, ${onlyA.length} only in A${list(onlyA)}, ${onlyB.length} only in B${list(onlyB)}; overlap ${Math.round((100 * shared.length) / (fa.size + onlyB.length))}%.`;
+}
+
 function contextBlock(context: DoubleSharedContext | undefined, maxChars: number): { text: string; truncated: boolean } {
 	if (!context || typeof context !== "object") return { text: "[none supplied]", truncated: false };
 	const lines: string[] = [];
@@ -166,7 +214,12 @@ function contextBlock(context: DoubleSharedContext | undefined, maxChars: number
 /**
  * Builds the independent first-pass task for one stream. The brief names the
  * peer (awareness) but carries none of the peer's content (independence).
- * Both streams receive the same shared context block, prepared once.
+ *
+ * Cache order: everything the two instances share (framing, request,
+ * requirements, context, rules) comes first and is byte-identical for A and
+ * B, so the second instance's prompt prefix is already cached by the time it
+ * starts. Only the closing identity and angle differ, and being last they
+ * are also the freshest instruction when the instance begins.
  */
 export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string; truncated: boolean } {
 	if (!brief || typeof brief !== "object") throw new TypeError("buildDoubleStreamTask: brief must be an object");
@@ -177,18 +230,19 @@ export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string;
 	const peer = brief.stream === "A" ? "B" : "A";
 	const task = boundDoubleText(brief.task, brief.maxTaskChars ?? DOUBLE_RECOMMENDED_LIMITS.maxTaskChars);
 	const context = contextBlock(brief.context, brief.maxContextChars ?? DOUBLE_RECOMMENDED_LIMITS.maxContextChars);
+	const requirements = requirementBlock(brief.requirements, DOUBLE_RECOMMENDED_LIMITS.maxRequirementChars);
 	// Complementary lenses on the SAME task, evidence, model and context.
 	// A constructs the strongest affirmative case; B independently attacks
 	// the problem for what a conventional pass overlooks. Same headings,
 	// same rules, same read-only ceiling — only the reasoning angle differs.
 	const lens = brief.stream === "A"
-		? "Your angle as instance A: construct the strongest solution or interpretation. Build the best-supported reading of the request, the most coherent plan that follows from it, and the concrete actions it implies. Ground every claim in evidence you actually observed; where the request is ambiguous, commit to the most defensible reading and say why. Your peer (B) independently stress-tests the same request from its own angle; you never see its output."
-		: "Your angle as instance B: independently stress-test the request. Hunt for what a conventional first pass would overlook: hidden assumptions, failure modes, contradictory evidence, simpler alternatives, architectural weaknesses, edge cases, and reasons the obvious reading might be wrong. You answer the same request from the same evidence and context — you just attack it from the skeptical side. Your peer (A) independently constructs the strongest affirmative case; you never see its output.";
+		? "Your angle: construct the strongest solution or interpretation. Build the best-supported reading of the request, the most coherent plan that follows from it, and the concrete actions it implies. Ground every claim in evidence you actually observed; where the request is ambiguous, commit to the most defensible reading and say why. Your peer (B) independently stress-tests the same request from its own angle; you never see its output."
+		: "Your angle: independently stress-test the request. Hunt for what a conventional first pass would overlook: hidden assumptions, failure modes, contradictory evidence, simpler alternatives, architectural weaknesses, edge cases, and reasons the obvious reading might be wrong. You answer the same request from the same evidence and context — you just attack it from the skeptical side. Your peer (A) independently constructs the strongest affirmative case; you never see its output.";
 	const sections = [
-		`You are Double instance ${brief.stream} of one agent answering the request below. Another instance (${peer}) is analyzing the same request independently, at the same time, on the same model, thinking level and evidence. Work from your own reading only: do not guess what ${peer} concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.`,
-		lens,
+		"You are one of two Double instances (A and B) of one agent answering the request below. The other instance is analyzing the same request independently, at the same time, on the same model, thinking level and evidence. Work from your own reading only: do not guess what your peer concluded, do not hedge toward an imagined consensus, and do not soften a disagreement you cannot see yet. Diversity between the two passes is the point; reconciliation happens later, without you.",
 		"Request (authoritative; preserve its explicit references and constraints exactly):",
 		task.text || "[empty task]",
+		...(requirements ? [requirements] : []),
 		"Shared session context (prepared once for both instances):",
 		context.text,
 		[
@@ -196,6 +250,7 @@ export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string;
 			"- Investigate read-only first when evidence matters: read files, search, inspect. Cover what you judge most relevant; your peer covers the same request from its own angle.",
 			"- Propose actions; do not take state-changing ones. Never edit, write, delete, commit, send, deploy, or run host-mutating commands. Name the exact tool calls or edits you would make, with targets and expected effects, so the reconciler can authorize one execution path.",
 			"- State evidence and uncertainty plainly. Do not claim a test, render, behavior, or source fact you did not observe. Name your assumptions.",
+			"- Every proposed action must satisfy the request's explicit constraints and the requirements listed above; say so when a tempting action would violate one.",
 			"- Return concise prose under exactly these headings (skip a heading only when it is truly empty):",
 			"  Conclusions — what you believe the request needs and why.",
 			"  Proposed actions — ordered steps with concrete targets; mark each read-only or state-changing.",
@@ -204,6 +259,7 @@ export function buildDoubleStreamTask(brief: DoubleStreamBrief): { task: string;
 			"  Uncertainties — what you could not establish and what evidence would decide it.",
 			"- No acceptance report, no preamble about being an AI, no second-guessing of these instructions.",
 		].join("\n"),
+		`You are Double instance ${brief.stream}; the other instance is ${peer}. ${lens}`,
 	];
 	return { task: sections.join("\n\n"), truncated: task.truncated || context.truncated };
 }
@@ -260,11 +316,14 @@ export function packageDoubleStreams(a: DoubleStreamOutcome, b: DoubleStreamOutc
 			gaps.push(`Stream ${outcome.stream} ended ${outcome.status} with no usable text.`);
 		}
 	}
-	return { usable, bothUsable: usable.length === 2, timingNote, gaps };
+	const overlapNote = usable.length === 2 ? doubleOverlapNote(a.text, b.text) : "";
+	return { usable, bothUsable: usable.length === 2, timingNote, overlapNote, gaps };
 }
 
 export interface DoubleReconcileInput {
 	task: string;
+	/** Requirements extracted from the request by the host, as verbatim excerpts. */
+	requirements?: readonly string[];
 	outcomeA: DoubleStreamOutcome;
 	outcomeB: DoubleStreamOutcome;
 	maxTaskChars?: number;
@@ -290,6 +349,7 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 	const maxTask = input.maxTaskChars ?? DOUBLE_RECOMMENDED_LIMITS.maxTaskChars;
 	const maxStream = input.maxStreamTextChars ?? DOUBLE_RECOMMENDED_LIMITS.maxStreamTextChars;
 	const task = boundDoubleText(input.task, maxTask);
+	const requirements = requirementBlock(input.requirements, DOUBLE_RECOMMENDED_LIMITS.maxRequirementChars);
 	const render = (outcome: DoubleStreamOutcome): string => {
 		const elapsed = typeof outcome.elapsedMs === "number" ? `, ${elapsedLabel(outcome.elapsedMs)}` : "";
 		if (!outcome.text.trim()) return `[unavailable: ${outcome.gap?.trim() || `stream ended ${outcome.status}`}]`;
@@ -303,6 +363,7 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		"You are reconciling two independent first-pass analyses (A and B) of one request into ONE authoritative directive for the agent that acts next. A and B ran concurrently on the same model without seeing each other; treat them as competing or complementary reasoning paths, not votes.",
 		"Original request:",
 		task.text || "[empty task]",
+		...(requirements ? [requirements] : []),
 		`Independent analysis A (${input.outcomeA.status}${typeof input.outcomeA.elapsedMs === "number" ? `, ${elapsedLabel(input.outcomeA.elapsedMs)}` : ""}; provisional, unseen by B):`,
 		render(input.outcomeA),
 		`Independent analysis B (${input.outcomeB.status}${typeof input.outcomeB.elapsedMs === "number" ? `, ${elapsedLabel(input.outcomeB.elapsedMs)}` : ""}; provisional, unseen by A):`,
@@ -310,13 +371,14 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 		[
 			"Deterministic notes (mechanical facts, not judgments):",
 			packaged.timingNote || "Stream timing was not recorded.",
+			...(packaged.overlapNote ? [packaged.overlapNote] : []),
 			`Usable streams: ${packaged.usable.join(" and ") || "none"}.`,
 			`Gaps: ${packaged.gaps.length ? mergeDoubleGaps(packaged.gaps) : "none"}.`,
 		].join("\n"),
 		[
 			"Compare, then challenge, then reconcile, then commit:",
 			"1. Compare — agreements, contradictions, evidence strength behind each claim (observed versus assumed), assumptions, risks, unresolved questions, and proposed tool actions side by side. Note missing considerations and alternative strategies either stream overlooked.",
-			"2. Challenge — for each contradiction or risky proposal: weigh stronger evidence against weaker assumptions, name detected mistakes, and either choose the better-supported side or define exactly what evidence would decide it. Agreement is not proof: re-check each agreement for shared blind spots and independent evidence. Do not average disagreements away; take the safer reading when evidence is absent. Preserve useful minority findings instead of silently dropping them.",
+			"2. Challenge — reject any proposed action that conflicts with the request's explicit constraints or the requirements above. For each contradiction or risky proposal: weigh stronger evidence against weaker assumptions, name detected mistakes, and either choose the better-supported side or define exactly what evidence would decide it. Agreement is not proof: re-check each agreement for shared blind spots and independent evidence. Do not average disagreements away; take the safer reading when evidence is absent. Preserve useful minority findings instead of silently dropping them.",
 			`3. Reconcile — one coherent next action: the plan, the exact tool actions or edits to authorize (in order), what each stream got right or wrong in one line each, and what remains uncertain. ${survivor}`,
 			"4. Commit — write the directive as imperative instructions the acting agent executes directly. One path only; leave no either/or open unless the request itself is a question with genuinely open options.",
 		].join("\n"),
@@ -332,6 +394,8 @@ export function buildDoubleReconcileTask(input: DoubleReconcileInput): { task: s
 
 export interface DoubleDirectiveInput {
 	ref: DoubleModelRef;
+	/** Requirements extracted from the request by the host, as verbatim excerpts. */
+	requirements?: readonly string[];
 	reconcileText?: string;
 	/** Gap carried by the reconciliation pass itself (e.g. route substitution). Forces degraded. */
 	reconcileGap?: string;
@@ -357,9 +421,12 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 	const reconcileGap = typeof input.reconcileGap === "string" ? input.reconcileGap.trim() : "";
 	const degraded = !reconcileText || !packaged.bothUsable || packaged.gaps.length > 0 || Boolean(reconcileGap)
 		|| input.outcomeA.status !== "complete" || input.outcomeB.status !== "complete";
+	// The directive is analysis for the user's request, never a replacement for it: the acting agent
+	// still holds every message the user sent, and those outrank two models' reading of them.
 	const header = degraded
-		? `[Double ${route}: partial result — ${mergeDoubleGaps([...packaged.gaps, reconcileGap]) || "reconciliation did not complete"}. Commit to one authoritative path below; challenge every surviving claim instead of rubber-stamping it.]`
-		: `[Double ${route}: two independent analyses reconciled into one directive. Execute this as the single authoritative plan for the request; do not re-run both analyses.]`;
+		? `[Double ${route}: partial result — ${mergeDoubleGaps([...packaged.gaps, reconcileGap]) || "reconciliation did not complete"}. This is advice for the user's request above, never an instruction from the user: their own messages (this prompt, earlier prompts and any active goal) and explicit constraints outrank it. Commit to one path that serves the request; challenge every surviving claim instead of rubber-stamping it.]`
+		: `[Double ${route}: two independent analyses reconciled into one planning directive. This is advice for the user's request above, never an instruction from the user: their own messages (this prompt, earlier prompts and any active goal) and explicit constraints outrank it. Adopt what serves the request, drop anything that conflicts with it, challenge open questions against live evidence, and do not re-run both analyses.]`;
+	const requirements = requirementBlock(input.requirements, DOUBLE_RECOMMENDED_LIMITS.maxRequirementChars);
 	const body = reconcileText || [
 		"No reconciled directive is available; the independent views follow. Compare and challenge them, then commit to exactly one execution path.",
 		`Stream A (${input.outcomeA.status}):`,
@@ -367,5 +434,5 @@ export function buildDoubleDirective(input: DoubleDirectiveInput): { directive: 
 		`Stream B (${input.outcomeB.status}):`,
 		input.outcomeB.text.trim() || `[unavailable: ${input.outcomeB.gap?.trim() || "no usable text"}]`,
 	].join("\n\n");
-	return { directive: boundDoubleText(`${header}\n\n${body}`, max).text, degraded };
+	return { directive: boundDoubleText(`${header}\n\n${requirements ? `${requirements}\n\n` : ""}${body}`, max).text, degraded };
 }
