@@ -713,8 +713,10 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 
 		const launchParams = (task: string, timeoutMs: number, tokens: number, tools: number, label: string, spec: RouteSpec): SubagentParamsLike => ({
 			agent: "automatic-free-assistant",
-			model: spec.route,
-			...(spec.thinking ? { thinking: spec.thinking } : {}),
+			// The subagent tool has no per-run thinking field (its `thinking` is for watchdog.configure only), so the
+			// pinned level travels as the model's own suffix; without it the child silently runs the agent default, off.
+			// "off" is the absence of a suffix: the executor strips it because providers reject a literal ":off".
+			model: spec.thinking && spec.thinking !== "off" ? `${spec.route}:${spec.thinking}` : spec.route,
 			modelOrigin: "explicit",
 			context: forkable ? "fork" : "fresh",
 			async: false,

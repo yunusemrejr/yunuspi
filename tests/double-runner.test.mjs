@@ -172,8 +172,8 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
   // Both streams launched before either finished: genuinely concurrent.
   assert.deepEqual(calls.map((call) => kindOf(call.params)).sort(), ['A', 'B']);
   for (const call of calls) {
-    assert.equal(call.params.model, 'openrouter/glm-5.3-flash', 'same route, never substituted');
-    assert.equal(call.params.thinking, 'medium', 'same thinking configuration');
+    assert.equal(call.params.model, 'openrouter/glm-5.3-flash:medium', 'same route, never substituted, thinking pinned as the model suffix the executor honors');
+    assert.equal(call.params.thinking, undefined, 'the subagent tool has no per-run thinking field; a stray one is silently ignored');
     assert.equal(call.params.context, 'fork', 'full session context');
     assert.equal(call.params.modelOrigin, 'explicit');
     assert.deepEqual(call.params.capabilityCeiling.allowedTools, ['read', 'grep', 'find', 'ls', 'git_info']);
@@ -191,7 +191,7 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
   await new Promise((resolve) => setImmediate(resolve));
   const reconcile = calls.find((call) => kindOf(call.params) === 'reconcile');
   assert.ok(reconcile, 'reconciliation runs after both streams finish');
-  assert.equal(reconcile.params.model, 'openrouter/glm-5.3-flash');
+  assert.equal(reconcile.params.model, 'openrouter/glm-5.3-flash:medium');
   assert.ok(reconcile.params.task.includes(ANALYSIS_A));
   assert.ok(reconcile.params.task.includes(ANALYSIS_B));
   assert.match(reconcile.params.task, /1\. Compare/);

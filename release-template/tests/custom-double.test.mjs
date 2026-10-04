@@ -14,6 +14,7 @@ const { registerDoubleMode, DOUBLE_RUNNER } = await import(url('pi-subagents/src
 const lib = await import(url('lib/double.ts'));
 const board = await import(url('lib/reviewer-board.ts'));
 const pairLib = await import(url('pi-subagents/src/extension/double-pair.ts'));
+const { resolveEffectiveThinking, splitKnownThinkingSuffix } = await import(url('pi-subagents/src/shared/model-info.ts'));
 
 const PI_DOUBLE = process.env.PI_DOUBLE;
 // Forking needs the parent session file to exist on disk.
@@ -291,10 +292,13 @@ test('a turn runs each stream on its own route and thinking, reconciles on the c
   // Different routes share no prompt cache, so there is no staggering: both launched before either answered.
   assert.deepEqual(calls.map(kindOf).sort(), ['A', 'B']);
   const byKind = Object.fromEntries(calls.map((params) => [kindOf(params), params]));
-  assert.equal(byKind.A.model, 'deepseek/deepseek-flash');
-  assert.equal(byKind.A.thinking, 'low');
-  assert.equal(byKind.B.model, 'zai/glm-5.3-flash');
-  assert.equal(byKind.B.thinking, 'high');
+  assert.equal(byKind.A.model, 'deepseek/deepseek-flash:low');
+  assert.equal(byKind.B.model, 'zai/glm-5.3-flash:high');
+  for (const params of calls) assert.equal(params.thinking, undefined, 'thinking travels as the model suffix, the only place the executor reads it');
+  // The executor's own parser (what the child actually runs with) reads the pinned level back from the route.
+  assert.equal(resolveEffectiveThinking(byKind.A.model, 'off'), 'low');
+  assert.equal(resolveEffectiveThinking(byKind.B.model, 'off'), 'high');
+  assert.equal(splitKnownThinkingSuffix(byKind.B.model).baseModel, 'zai/glm-5.3-flash');
   for (const params of calls) {
     assert.equal(params.modelOrigin, 'explicit');
     assert.equal(params.context, 'fork');
@@ -307,8 +311,7 @@ test('a turn runs each stream on its own route and thinking, reconciles on the c
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
   const reconcile = calls.find((params) => kindOf(params) === 'reconcile');
-  assert.equal(reconcile.model, 'zai/glm-5.3-flash', 'reconcile=b runs on B');
-  assert.equal(reconcile.thinking, 'high');
+  assert.equal(reconcile.model, 'zai/glm-5.3-flash:high', 'reconcile=b runs on B, at B\'s thinking level');
   assert.match(reconcile.task, /two different models/);
   gate('reconcile').resolve(okResult('Directive — add the redirect.\nReconciliation — agreed.', { model: 'zai/glm-5.3-flash', thinking: 'high' }));
   const [result] = await pending;
@@ -322,7 +325,7 @@ test('a turn runs each stream on its own route and thinking, reconciles on the c
 });
 
 test('reconcile=session runs on the session model, and reconcile=a on stream A', async () => {
-  for (const [choice, expected] of [['session', 'openrouter/glm-5.3-flash'], ['a', 'deepseek/deepseek-flash']]) {
+  for (const [choice, expected] of [['session', 'openrouter/glm-5.3-flash:high'], ['a', 'deepseek/deepseek-flash:high']]) {
     const pi = makePi();
     const seen = {};
     registerDoubleMode(pi, { agentDir: () => tmpAgentDir(), launch: async (_id, params) => { seen[kindOf(params)] = params; return okResult(`${kindOf(params)} text`); } });
@@ -418,7 +421,7 @@ test('a chosen model whose window cannot hold the transcript is skipped with a s
   assert.equal(seen.filter((params) => kindOf(params) === 'A').length, 0, 'the too-small route was never launched');
   assert.equal(seen.filter((params) => kindOf(params) === 'B').length, 1);
   const reconcile = seen.find((params) => kindOf(params) === 'reconcile');
-  assert.equal(reconcile.model, 'openrouter/glm-5.3-flash', 'a reconciliation that cannot fit runs on the session model');
+  assert.equal(reconcile.model, 'openrouter/glm-5.3-flash:high', 'a reconciliation that cannot fit runs on the session model');
   assert.match(result.message.content, /partial result/);
   assert.match(result.message.content, /Double stream A was not started: deepseek\/deepseek-flash has a 64k-token window and the session transcript it must read is about 91k tokens/);
   assert.match(result.message.content, /Reconciliation ran on the session model openrouter\/glm-5\.3-flash because deepseek\/deepseek-flash has a 64k-token window/);
@@ -489,4 +492,19 @@ test('first-turn tool staging cannot switch the explicit mode off: a registered 
   await bare.commands.get('double').handler('on', bareCtx);
   assert.equal((await fire(bare, 'before_agent_start', { prompt: 'Fix it.', systemPrompt: 's' }, bareCtx))[0], undefined);
   assert.equal(bare.notifies.filter((row) => /needs the subagent capability/.test(row.text)).length, 1);
+});
+
+test('an off pin adds no suffix: the executor would reject a literal ":off" route', async () => {
+  const pi = makePi();
+  pi.thinkingLevel = 'off';
+  const seen = [];
+  registerDoubleMode(pi, { agentDir: () => tmpAgentDir(), launch: async (_id, params) => { seen.push(params); return okResult(`${kindOf(params)} text`); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('custom-double').handler('deepseek/deepseek-flash:off zai/glm-5.3-flash:low', ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Fix the redirect.', systemPrompt: 's' }, ctx);
+  const byKind = Object.fromEntries(seen.map((params) => [kindOf(params), params]));
+  assert.equal(byKind.A.model, 'deepseek/deepseek-flash');
+  assert.equal(byKind.B.model, 'zai/glm-5.3-flash:low');
+  assert.equal(byKind.reconcile.model, 'deepseek/deepseek-flash', 'reconcile=a runs on A, which is pinned off');
 });
