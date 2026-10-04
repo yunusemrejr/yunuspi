@@ -1085,11 +1085,11 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 #### video-studio
 
-Produce code-first videos: Remotion projects driven by one master video.json timeline, reusable SVG/Canvas primitives, local Piper narration with measured durations, seeded procedural music/sfx, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.
+Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, local Piper narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.
 
-**Entrypoints:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `audio_synth`
+**Entrypoints:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`
 
-**Catalog tool pointers:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `audio_synth`, `video_frames`, `media_info`, `audio_analyze`
+**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_qa`, `narration_tts`, `audio_synth`, `media_pipeline`, `video_frames`, `media_info`, `audio_analyze`
 
 **Options:**
 
@@ -1097,10 +1097,13 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 - `mode`: stills with contact sheet, preview of a scene or seconds range, or final. Values: `stills`, `preview`, `final`.
 - `action`: Project init/check/install or narration status/install/synthesize.
 - `kind`: Procedural audio music bed or sound effect. Values: `music`, `sfx`.
+- `look`: derive (default) builds the look from the subject, suggest lists curated looks; variation and accent re-roll or anchor it.
+- `rig|lights|material|shadow|anchors`: video_shot: Blender camera move, lighting, material, ground shadow and named 3D anchors for pinned annotations.
+- `approach|query`: motion_examples: search, get or copy worked examples (html, blender, merge, ffmpeg, python). Values: `html`, `blender`, `merge`, `ffmpeg`, `python`.
 
-**Related records:** `creative-studio`, `web-and-media`, `background-tasks`
+**Related records:** `creative-studio`, `web-and-media`, `background-tasks`, `3d-studio`
 
-**Source:** [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts), [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../../agent/skills/procedural-audio/scripts/synth.py)
+**Source:** [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-looks.ts`](../../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/motion-library.ts`](../../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../../agent/skills/motion-approaches/SKILL.md)
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
@@ -1110,7 +1113,7 @@ Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS insta
 
 **Entrypoints:** `blender_run`, `blender_render`, `blender_export`, `splat_train`, `splat_preview`
 
-**Catalog tool pointers:** `blender_setup`, `blender_run`, `blender_inspect`, `blender_render`, `blender_export`, `splat_setup`, `splat_train`, `splat_preview`, `video_frames`, `media_info`
+**Catalog tool pointers:** `blender_setup`, `blender_run`, `blender_inspect`, `blender_render`, `blender_export`, `video_shot`, `splat_setup`, `splat_train`, `splat_preview`, `video_frames`, `media_info`
 
 **Options:**
 
@@ -1260,11 +1263,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 725; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 115; factory)
-- `asset_register` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 275; factory)
+- `asset_register` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 266; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 258; factory)
 - `audio_mix` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 280; factory)
-- `audio_synth` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 57; factory)
+- `audio_synth` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 80; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 574; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 827; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 781; literal)
@@ -1289,8 +1292,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
 - `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
 - `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 22; factory)
-- `creative_compare` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 362; factory)
-- `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 135; factory)
+- `creative_compare` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 353; factory)
+- `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 126; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 137; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
 - `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 98; literal)
@@ -1308,7 +1311,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 165; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
-- `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 321; factory)
+- `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 312; factory)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 257; factory)
 - `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
@@ -1324,9 +1327,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2079; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 499; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
-- `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 224; factory)
+- `motion_examples` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 92; factory)
+- `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 215; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 263; factory)
-- `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 53; factory)
+- `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 76; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 821; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 132; literal)
@@ -1365,23 +1369,24 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 780; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
-- `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 245; factory)
+- `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 236; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 273; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 258; literal)
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 410; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 389; literal)
-- `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 212; factory)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 390; literal)
+- `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 203; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 133; factory)
-- `video_assets` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 47; factory)
+- `video_assets` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 70; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 279; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 256; factory)
-- `video_project` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 25; factory)
-- `video_qa` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 43; factory)
-- `video_render` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 39; factory)
-- `visual_review` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 176; factory)
+- `video_project` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 27; factory)
+- `video_qa` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 66; factory)
+- `video_render` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 62; factory)
+- `video_shot` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 44; factory)
+- `visual_review` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 167; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 88; literal)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
@@ -1393,7 +1398,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
-- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `ui_explore`, `visual_review` (lines 103)
+- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `ui_explore`, `visual_review` (lines 94)
 - [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `splat_preview`, `splat_setup`, `splat_train` (lines 15)
 - [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 20)
 - [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)
@@ -1408,7 +1413,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1666, 2254, 2408, 2807)
 - [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
 - [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
-- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_synth`, `narration_tts`, `video_assets`, `video_project`, `video_qa`, `video_render` (lines 14)
+- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_synth`, `motion_examples`, `narration_tts`, `video_assets`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 16)
 
 ### Literal slash commands
 
@@ -1734,6 +1739,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/model-routing-metrics.ts`](../../agent/extensions/lib/model-routing-metrics.ts)
 - [`agent/extensions/lib/model-routing-store.ts`](../../agent/extensions/lib/model-routing-store.ts)
 - [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts)
+- [`agent/extensions/lib/motion-library.ts`](../../agent/extensions/lib/motion-library.ts)
 - [`agent/extensions/lib/music-score.ts`](../../agent/extensions/lib/music-score.ts)
 - [`agent/extensions/lib/needle-assets.mjs`](../../agent/extensions/lib/needle-assets.mjs)
 - [`agent/extensions/lib/needle-embedding-cache.mjs`](../../agent/extensions/lib/needle-embedding-cache.mjs)
@@ -1824,9 +1830,11 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/ui-doctrine.ts`](../../agent/extensions/lib/ui-doctrine.ts)
 - [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts)
 - [`agent/extensions/lib/video-assets.ts`](../../agent/extensions/lib/video-assets.ts)
+- [`agent/extensions/lib/video-derive.ts`](../../agent/extensions/lib/video-derive.ts)
 - [`agent/extensions/lib/video-looks.ts`](../../agent/extensions/lib/video-looks.ts)
 - [`agent/extensions/lib/video-motion.ts`](../../agent/extensions/lib/video-motion.ts)
 - [`agent/extensions/lib/video-publish.ts`](../../agent/extensions/lib/video-publish.ts)
+- [`agent/extensions/lib/video-shot.ts`](../../agent/extensions/lib/video-shot.ts)
 - [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts)
 - [`agent/extensions/lib/workspace-write-lease.ts`](../../agent/extensions/lib/workspace-write-lease.ts)
 - [`agent/extensions/lib/worktree-checkpoint.ts`](../../agent/extensions/lib/worktree-checkpoint.ts)
@@ -1987,7 +1995,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 169 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 170 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
@@ -2082,6 +2090,7 @@ The exporter includes 169 public skill directories. This list is a path inventor
 - `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../../agent/skills/model-evaluation/SKILL.md)
 - `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../../agent/skills/modern-frontend-frameworks/SKILL.md)
 - `motion` — [`agent/skills/motion/SKILL.md`](../../agent/skills/motion/SKILL.md)
+- `motion-approaches` — [`agent/skills/motion-approaches/SKILL.md`](../../agent/skills/motion-approaches/SKILL.md)
 - `motion-graphics-production` — [`agent/skills/motion-graphics-production/SKILL.md`](../../agent/skills/motion-graphics-production/SKILL.md)
 - `multi-developer-pipelines` — [`agent/skills/multi-developer-pipelines/SKILL.md`](../../agent/skills/multi-developer-pipelines/SKILL.md)
 - `music-composition` — [`agent/skills/music-composition/SKILL.md`](../../agent/skills/music-composition/SKILL.md)
