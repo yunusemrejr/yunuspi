@@ -82,6 +82,14 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     const fresh = await call({ action: 'snapshot' });
     const scoped = await call({ action: 'snapshot', ref: fresh.targets.find(row => row.name === 'Search').ref });
     assert.equal(scoped.targets.length, 1);
+    // Every observation hands out fresh refs; a ref for a unique, unchanged control still works one observation later, and says so.
+    const pair = (await call({ action: 'snapshot' })).targets, searchRef = pair.find(row => row.name === 'Search').ref, draftRef = pair.find(row => row.name === 'Draft').ref;
+    await call({ action: 'fill', ref: searchRef, text: 'first field' });
+    const second = await call({ action: 'fill', ref: draftRef, text: 'second field through an older ref' });
+    assert.deepEqual(Object.keys(second.refRemapped), [draftRef]); assert.match(second.refNote, /use the refs in targets/);
+    assert.equal((await call({ action: 'verify', selector: 'label textarea', text: 'second field through an older ref' })).verification.matches, true);
+    const ambiguous = (await call({ action: 'snapshot' })).targets;
+    assert.equal(ambiguous.filter(row => row.name === 'Search').length, 1);
     const renamed = (await call({ action: 'snapshot' })).targets.find(row => row.name === 'Replace me').ref;
     await call({ action: 'evaluate', script: "document.querySelector('#replace').textContent='Changed meaning'; return true;" });
     assert.equal((await raw({ action: 'click', session, ref: renamed })).isError, true);

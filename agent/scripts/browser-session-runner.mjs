@@ -192,7 +192,7 @@ export async function runBrowserSession(input, output) {
               child.close().catch(() => {});
               return;
             }
-            const tab = { id: `tab-${++tabSequence}`, page: child, logs: pageLogs(child), network: createBrowserEvents(), refs: new Map(), markers: new Map(), dialog: null };
+            const tab = { id: `tab-${++tabSequence}`, page: child, logs: pageLogs(child), network: createBrowserEvents(), refs: new Map(), retired: new Map(), markers: new Map(), dialog: null };
             tabs.set(tab.id, tab);
             const { logs, network } = tab;
             const record = (kind, extra) => logs.record(kind, extra);
@@ -293,10 +293,22 @@ export async function runBrowserSession(input, output) {
           typeof p.ref === "string" || Number.isInteger(p.marker) ||
           (typeof p.selector === "string" && p.selector.length > 0) ||
           typeof p.role === "string";
+        // Every observation hands out fresh refs, so a model that fills two fields in a row holds one stale ref after the
+        // first fill. A retired ref is honoured only when the page URL is unchanged and exactly one live element has the
+        // same tag, role and non-empty name: the criterion that already decides whether a ref is still valid.
+        let remapped;
+        const remapRetired = (tab, ref) => {
+          const old = tab.retired.get(ref);
+          if (!old || !old.identity.name || old.url !== safeBrowserUrl(tab.page.url())) return undefined;
+          const same = [...tab.refs.entries()].filter(([, row]) => row.identity.tag === old.identity.tag && row.identity.name === old.identity.name && row.identity.role === old.identity.role);
+          if (same.length !== 1) return undefined;
+          remapped = { ...remapped, [ref]: same[0][0] };
+          return same[0][1];
+        };
         const locate = async () => {
           if (p.ref || Number.isInteger(p.marker)) {
             const tab = activeTab();
-            const target = p.ref ? tab.refs.get(p.ref) : tab.markers.get(p.marker);
+            const target = p.ref ? tab.refs.get(p.ref) ?? remapRetired(tab, p.ref) : tab.markers.get(p.marker);
             const validate = new Function("el", "expected", `const collect = ${collectBrowserTargets.toString()}; if (!el.isConnected) return false; const row = collect(el, { limit: 1 }).rows[0]; return !!row && row.tag === expected.tag && row.name === expected.name && row.role === expected.role;`);
             if (!target || !await target.handle.evaluate(validate, target.identity).catch(() => false))
               throw Error("Stale browser reference; capture snapshot or markers again");
@@ -345,7 +357,13 @@ export async function runBrowserSession(input, output) {
           const store = markers ? tab.markers : tab.refs;
           const root = action === "snapshot" && hasLocatorTarget() ? await locate() : surface.locator(":root");
           const set = await root.evaluateHandle(collectBrowserTargets, { limit: MARKER_LIMIT, viewportOnly: markers });
-          const old = [...store.values()]; store.clear();
+          const old = [...store.values()];
+          if (!markers) { // remember what each ref meant, for the stale-reference recovery above
+            const where = safeBrowserUrl(tab.page.url());
+            for (const [ref, row] of store) tab.retired.set(ref, { identity: row.identity, url: where });
+            while (tab.retired.size > 400) tab.retired.delete(tab.retired.keys().next().value);
+          }
+          store.clear();
           await Promise.all(old.map(({ handle }) => handle.dispose().catch(() => {})));
           const elements = await set.getProperty("elements");
           try {
@@ -643,6 +661,7 @@ export async function runBrowserSession(input, output) {
           diagnostics: { logs: logs?.summary(), network: network?.summary() },
           untrusted: true,
           lease: lease.receipt(),
+          ...(remapped ? { refRemapped: remapped, refNote: "A ref from an earlier observation was matched to the single element with the same tag, role and name; use the refs in targets from now on." } : {}),
           ...result,
         };
         output.write(JSON.stringify({ id, result }) + "\n");
