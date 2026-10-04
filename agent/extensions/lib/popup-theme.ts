@@ -58,7 +58,7 @@ export const POPUP_CSS = [
   "details.group>summary:hover,details.item>summary:hover,.usage-component>summary:hover{background:var(--sunk)}",
   "details>summary:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:3px}",
   ".group-title{font-weight:650;white-space:nowrap}",
-  ".group-meta{margin-left:auto;color:var(--ink2);font-size:12.5px;text-align:right}",
+  ".group-meta{margin-left:auto;min-width:0;color:var(--ink2);font-size:12.5px;text-align:right;overflow-wrap:anywhere}",
   ".group-body{padding:4px 2px 18px 18px;border-left:1px solid var(--rule);margin:0 0 6px 3px}",
   "details.item{border-bottom:1px solid var(--rule2)}",
   "details.item:last-child{border-bottom:0}",
@@ -139,7 +139,7 @@ export const POPUP_CSS = [
   ".skill-evidence li{display:block;padding:8px 0;border-top:1px solid var(--rule2);font-size:12.5px}",
   ".skill-evidence small{display:block;color:var(--ink3);margin:3px 0}",
   ".skill-evidence code{display:block;overflow-wrap:anywhere;color:var(--ink2);font-size:12px}",
-  "@media(max-width:720px){main{padding:20px 14px 40px}.usage-components{grid-template-columns:1fr}.usage-heading{align-items:flex-start;flex-direction:column;gap:6px}.usage-snapshot{text-align:left}.group-meta{max-width:46%;font-size:12px}.item-meta{display:none}.stat+.stat{border-left:0;padding-left:0}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{padding-right:10px}.usage-history li{grid-template-columns:1fr;gap:3px}.facts-grid,.used-report .facts-grid,.usage-component .facts-grid{grid-template-columns:104px minmax(0,1fr)}.cmdgrid{grid-template-columns:1fr}.cmdgrid dt{border-bottom:0;padding-bottom:0}}",
+  "@media(max-width:720px){main{padding:20px 14px 40px}.usage-components{grid-template-columns:1fr}.usage-heading{align-items:flex-start;flex-direction:column;gap:6px}.usage-snapshot{text-align:left}.group-title{white-space:normal;min-width:0}.group-meta{max-width:46%;font-size:12px}.item-meta{display:none}.stat+.stat{border-left:0;padding-left:0}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.stat{padding-right:10px}.usage-history li{grid-template-columns:1fr;gap:3px}.facts-grid,.used-report .facts-grid,.usage-component .facts-grid{grid-template-columns:104px minmax(0,1fr)}.cmdgrid{grid-template-columns:1fr}.cmdgrid dt{border-bottom:0;padding-bottom:0}}",
   "@media(prefers-reduced-motion:reduce){details>summary::before{transition:none}}",
 ].join("\n");
 

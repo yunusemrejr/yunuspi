@@ -172,3 +172,37 @@ test('system prompt copy button writes the prompt text', async (t) => {
   assert.equal(await page.locator('#copy-prompt-status').innerText(), 'Copied.');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '# Role\nYou are exact & careful <b>.');
 });
+
+test('no report page overflows a phone screen even in the widest common fallback fonts', async (t) => {
+  // Machines differ in which fonts system-ui resolves to; CI runners fall back to
+  // DejaVu, which is wider than most. Force it so the layout is checked against
+  // the worst case rather than whatever this machine happens to have.
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 360, height: 800 } });
+  const entry = (provider, model, usage) => ({ type: 'message', message: { role: 'assistant', provider, model, content: [{ type: 'text', text: 'ok' }], usage } });
+  const summary = signals.buildUsedSummary([
+    entry('openrouter', 'a-very-long-vendor/an-extremely-long-model-identifier-v2.5-preview', { input: 1234567, cacheRead: 98765432, cacheWrite: 123456, output: 654321 }),
+    entry('deepseek', 'deepseek-v4-flash', { input: 900, cacheRead: 14000, cacheWrite: 0, output: 410 }),
+  ]);
+  const report = errorsLib.collectSessionErrors([
+    { type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'e1', name: 'bash', arguments: { command: 'x' } }] } },
+    { type: 'message', message: { role: 'toolResult', toolCallId: 'e1', toolName: 'bash', isError: true, content: [{ type: 'text', text: 'a_really_long_unbroken_error_identifier_'.repeat(8) }] } },
+  ]);
+  const pages = {
+    used: signals.usedSummaryHtml(summary),
+    errors: signals.errorsHtml(report),
+    commands: signals.commandsHtml([{ name: 'a-rather-long-command-name-here', description: 'Describes something at some length so that it must wrap', source: 'extension' }]),
+    prompt: signals.sysPromptHtml({ at: 'now', model: 'vendor/some-long-model-name', truncated: false, tools: ['tool_one', 'tool_two_longer_name'], toolCount: 2, system: '# Heading one\n' + 'unbroken_'.repeat(30) + '\n## Heading two\ntext' }),
+  };
+  for (const [name, body] of Object.entries(pages)) {
+    await page.setContent(signals.renderPopupHtml(name, body));
+    await page.addStyleTag({ content: ':root{--sans:"DejaVu Sans",sans-serif;--mono:"DejaVu Sans Mono",monospace}' });
+    await page.evaluate(() => document.querySelectorAll('details').forEach((node) => { node.open = true; }));
+    const offenders = await page.evaluate(() => [...document.querySelectorAll('body *')]
+      .filter((node) => node.getClientRects().length && node.getBoundingClientRect().right > innerWidth + 0.5)
+      .slice(0, 5).map((node) => `${node.tagName}.${node.className}`));
+    assert.deepEqual(offenders, [], `${name}: nothing extends past the viewport`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name}: no horizontal scroll`);
+  }
+});
