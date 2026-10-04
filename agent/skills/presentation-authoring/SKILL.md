@@ -5,6 +5,8 @@ description: "Create and edit PowerPoint PPTX or LibreOffice Impress ODP present
 
 # Presentation authoring
 
+Harness tools: `office_doc read` reads an existing deck (slide text, notes, layouts) and `office_doc verify` reports empty slides, empty placeholders, dense slides, tiny type and duplicate titles; after saving with python-pptx or an application, run `office_doc render` and look at every slide, then `deliverable_check` the final file. These tools do not build decks.
+
 Identify audience, narrative, aspect ratio, existing template and required editable output. Inspect the source deck's masters, layouts, fonts, notes and embedded objects before editing. Preserve the user's content and branding; give each slide one clear claim supported by its actual evidence.
 
 Read [layout and authoring](references/layout-authoring.md) for reliable object creation and chart handling. Read [verification and interoperability](references/verification-interoperability.md) for rendering, existing-deck fidelity, Impress, Keynote or other format transitions. Load details only for the active workflow.

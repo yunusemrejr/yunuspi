@@ -989,6 +989,22 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/3D-STUDIO.md",
 	}),
 	capability({
+		id: "office-and-deliverables",
+		group: "web_media",
+		summary: "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results, and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them.",
+		entrypoints: ["office_doc", "deliverable_check"],
+		tools: ["office_doc", "deliverable_check", "render_see", "video_frames", "audio_analyze", "data_query"],
+		options: [
+			option("action", "office_doc operation.", ["read", "verify", "build", "render"]),
+			option("spec", "build content: docx {title, blocks:[heading|paragraph|bullets|numbered|table|image|quote|code|pagebreak], page, font, header, footer} or xlsx {sheets:[{name, columns, rows, totals, freeze, filter}]}; strings starting with = are formulas."),
+			option("paths", "deliverable_check files (1 to 8, relative to the working directory or absolute)."),
+			option("PI_DELIVERABLES", "Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available.", ["on", "off"]),
+		],
+		related: ["creative-studio", "video-studio", "quality-review", "background-tasks"],
+		sourceFiles: ["agent/extensions/deliverables.ts", "agent/extensions/lib/office-read.ts", "agent/extensions/lib/office-build.ts", "agent/extensions/lib/sheet-formula.ts", "agent/extensions/lib/office-zip.ts", "agent/extensions/lib/xml-lite.ts", "agent/extensions/lib/office-render.ts", "agent/extensions/lib/deliverable-inspect.ts", "agent/extensions/lib/deliverable-ledger.ts", "agent/skills/spreadsheet-authoring/SKILL.md", "agent/skills/word-document-authoring/SKILL.md", "agent/skills/presentation-authoring/SKILL.md"],
+		doc: "agent/public-template/docs/OFFICE-AND-DELIVERABLES.md",
+	}),
+	capability({
 		id: "design-studio",
 		group: "web_media",
 		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",

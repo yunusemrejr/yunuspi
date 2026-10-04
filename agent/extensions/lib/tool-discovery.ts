@@ -118,12 +118,18 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
   { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
   { skill: 'gaussian-splatting', tools: ['splat_setup', 'splat_train', 'splat_preview', 'blender_export', 'video_frames'] },
+  // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
+  { skill: 'spreadsheet-authoring', tools: ['office_doc', 'deliverable_check'] },
+  { skill: 'word-document-authoring', tools: ['office_doc', 'deliverable_check'] },
+  { skill: 'presentation-authoring', tools: ['office_doc', 'deliverable_check'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
 // `acting` marks a pattern that already contains its own action verb (log in, fill out), so it is tested
 // against every clause instead of only clauses led by a verb from the shared skill-routing task list.
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[]; acting?: boolean }> = [
+  // Producing a finished file (document, PDF, video, audio) stages the check that opens it: a script printing "Saved x" proves nothing about x.
+  { pattern: /\b(?:create|make|generate|produce|export|render|build|prepare|save|convert)\b[^.\n]{0,70}\b(?:pdf|docx|xlsx|pptx|mp4|webm|mov|wav|mp3|video|audio (?:file|track)|podcast|spreadsheet|slide deck|invoice|resume|r[eé]sum[eé])\b/i, tools: ['deliverable_check'] },
   // SEO is technical (crawl, canonical, structured data) and research (queries, competitors, SERPs): stage both.
   { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['web_probe', 'web_search', 'fetch_content'] },
   // Work whose answer lives on the web stages search and page reading with the first turn instead of

@@ -88,6 +88,8 @@ export default function deliverables(pi: any) {
     delivered.add(key); followups++;
     const names = open.slice(0, 5).map(item => `${relative(item.path, ctx?.cwd)} (${path.extname(item.path).slice(1)})`).join(", ");
     const content = `Files produced in this session have not been opened or checked: ${names}. Call deliverable_check once with these paths, fix every error and any warning that matters, then check again. A file that is only an intermediate needs no check: say so in your answer instead. Automatic follow-up ${followups}/${MAX_FOLLOWUPS}.`;
+    // The follow-up tells the model to call deliverable_check: make sure its schema is on the wire for that turn.
+    try { pi.events?.emit?.("adaptive-pipeline-selection", { sessionManager: ctx?.sessionManager, beforeStart: true, names: ["deliverable_check"] }); } catch { /* discovery host is optional */ }
     try { await pi.sendMessage({ customType: "deliverable-followup", content, display: false }, { deliverAs: "followUp", triggerTurn: true }); }
     catch { delivered.delete(key); followups--; }
   });

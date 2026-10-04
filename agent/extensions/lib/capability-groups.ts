@@ -129,6 +129,8 @@ const normalize = (value: unknown) => (typeof value === "string" ? value : "")
 // "session" or "process" pulling unrelated capabilities into operations.
 const NAME_OVERRIDES: readonly Readonly<{ id: string; pattern: RegExp }>[] = [
   {id: "media", pattern: /^scene (?:create|render)$/i},
+  // Their descriptions list image, video and audio as inputs; the family is documents and deliverables.
+  {id: "documents", pattern: /^(?:office doc|deliverable check)$/i},
   {id: "web", pattern: /^design audit$/i},
   {id: "operations", pattern: /(?:^| )(?:subagent|swarm|fusion|council|bg|checkpoint|obs|session|process)(?: |$)/i},
   {id: "web", pattern: /(?:^| )(?:http|browser|web)(?: |$)/i},
