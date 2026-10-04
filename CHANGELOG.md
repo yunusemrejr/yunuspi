@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.2 — 2026-10-04
+
+**A new video project starts from worked motion.** A live run of 0.23.1 read the motion-approaches skill, was nudged at its first Blender write and still built a 3D scene from scratch. The `video_project` init result now carries a starter kit by role (titles and kinetic type, a shader backdrop, a data reveal, a lit 3D object with anchors, labels that follow 3D features), each with its summary and the `motion_examples` copy command; it is by role rather than topic because an example describes a technique, and a test checks every id against the catalogue.
+
+**Office and folder work holds up under a mid-tier model.** Live trials drove five fixes. `fs_organize` leaves files that a symlink points at in place. The xlsx calculator covers about 100 functions (SUMIF, COUNTIF, VLOOKUP, INDEX/MATCH, XLOOKUP, IFS, TEXT, dates, statistics, whole-column references), checked against LibreOffice, and post-2007 functions are stored with the `_xlfn.` prefix Excel requires (the reader flags workbooks that lack it). xlsx `totals` accept a header as a string, a list, a comma-separated string, `true`, or no sum at all, and refuse a total over the label column (a flash model passed `sum:"Total"` and was told column "T" did not exist). The Guardian counts opening a produced document, a `deliverable_check` or an `fs_organize` verify as verification. Data-wrangling requests get a profile-then-reconcile checklist.
+
+**Every tool says where a missing path probably is.** The nearest-folder and same-name-elsewhere hint that `read`, `ls`, `grep`, `find` and `edit` give is now appended to any failed result whose text names a missing path (ENOENT, Python's Errno 2, `cannot access`, `x: No such file or directory`, `X does not exist`) when the path is really absent: a live video run sent `blender_run` a script one folder off and got a bare "does not exist".
+
+**Paid advice is not thrown away for a quote.** An Observer note that copied 48 or more characters of the user's request or the provider's thinking was discarded whole; the copied span is now cut out and marked `[…]` and the rest delivered. A note that is little more than the copy is still refused.
+
+**Double does not relaunch a stream into a known cooldown.** A live run spent its one relaunch on a route the provider gate had already put in a 50-minute cooldown after a 429; the second attempt was refused as excluded and the directive carried both failures. Provider-gate deferrals now count as deterministic. A live `/custom-double` run with pinned thinking levels completed both streams on their own routes with no substitution.
+
+**A file the loader cannot parse no longer reaches main.** A commit in this release briefly left `deliverables.ts` unparseable (quotes inside its `office_doc` description), which would have dropped `office_doc`, `deliverable_check`, the unopened-file tracker and the binary-aware read at load; the full suite caught it before any deploy. Per-file tests import libraries and the existing parse test uses esbuild, which also accepts syntax the extension loader (jiti) rejects, as `lib/capability-audit.ts` showed. `scripts/check-syntax.mjs` parses with jiti; the pre-push hook runs it over the pushed changes and `source-integrity` over every shipped extension file.
+
+**Clearer outage notices.** A helper that was unavailable showed `JEV · unavailable; fallback retained · unavailable`; the reason is no longer repeated. The release-template README carries the video-studio row.
+
 ## 0.23.1 — 2026-10-04
 
 **Video shots resolve project-relative paths and leave nothing behind on a bad one.** A live run of 0.23.0 gave `video_shot` `dir:"tide-gauge"` and `blend:"blender/tide-gauge.blend"`; the path was resolved against the workspace instead of the project, and the failed call had already created `public/shots/<name>`, so the retry was refused as "already exists". Files are now looked up in the project first, every input is resolved before any folder is created, a shot folder without a `shot.json` (the remains of a failed render) is replaced without `replace:true`, and a shot never saves its rigged scene over the source `.blend`.
