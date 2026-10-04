@@ -1253,7 +1253,7 @@ export default function (pi: ExtensionAPI) {
 		const sc = opts.results.filter(r => !r.error).length;
 		const tr = opts.results.reduce((sum, r) => sum + r.results.length, 0);
 		if (opts.results.length > 0 && sc === 0) {
-			const error = `All ${opts.results.length} search queries failed:\n${opts.results.map(r => `- ${compactFailure(r.query)}: ${compactFailure(r.error ?? "unknown search failure")}`).join("\n")}\nTry a different provider or fetch a known source URL directly.`;
+			const error = `All ${opts.results.length} search queries failed:\n${opts.results.map(r => `- ${compactFailure(r.query)}: ${compactFailure(r.error ?? "unknown search failure")}`).join("\n")}\nTry a different provider or fetch a known source URL directly. For technical topics the keyless indexes still work while general search cools down: provider "hackernews" (launches, discussion), "stackexchange" (Stack Overflow), "npm" (packages), or the github_search tool for repositories and issues.`;
 			return {
 				content: [{ type: "text", text: error }],
 				details: {
