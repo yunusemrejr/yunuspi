@@ -4,7 +4,7 @@ import { packetRequirements } from '../../../lib/requirement-ledger.ts';
 import { beginHarnessActivity, type ActivityOutcome } from '../../../lib/harness-activity.ts';
 import { registerSkillDiscoveryRunner } from "./skill-discovery-runner.ts";
 import { assistanceMemberRouteCandidate, planAssistance, selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
-import { plannerActive } from "../../../lib/reviewer-board.ts";
+import { plannerActive, publishReviewerNote, reviewerSessionKey } from "../../../lib/reviewer-board.ts";
 import { recentUnreliableRoutes } from "../runs/shared/run-history.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { AUTOMATIC_HELPER_LIMITS, REVIEW_LIMITS } from "../runs/shared/automatic-budgets.ts";
@@ -109,6 +109,15 @@ export function automaticFusionBody(results: unknown, maxBodyChars = 10000): str
  if (fused.unresolvedConflicts?.length) body.push(`Unresolved conflicts: ${fused.unresolvedConflicts.join(", ")}.`);
  if (fused.truncated) body.push(`Fusion excerpt truncated; verify retained evidence${omitted.length ? `; omitted sources: ${[...new Set(omitted)].join(", ")}` : ""}.`);
  return body.join("\n\n");
+}
+
+/** What an automatic helper team (subagent, swarm or fusion) handed the agent, in a few lines for the
+ * peers that must not repeat or contradict it: the reviewers and Double read the same board. */
+export function automaticHelpersDigest(content: string, max = 420): string {
+	const flat = String(content ?? "").replace(/\s+/g, " ").trim();
+	const lead = "Automatic helper team (advisory): ";
+	if (!flat) return `${lead}no readable report.`;
+	return lead + (flat.length > max - lead.length ? `${flat.slice(0, max - lead.length - 1).trimEnd()}…` : flat);
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -690,7 +699,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
   const assistanceDeadline = AbortSignal.timeout(AUTOMATIC_HELPER_LIMITS.deadlineMs + AUTOMATIC_HELPER_LIMITS.cleanupGraceMs);
   const signal = AbortSignal.any([controller.signal, assistanceDeadline, ...(ctx.signal ? [ctx.signal] : [])]);
   void group(ctx, signal).then(content => {
-   if (content && epoch === generation && !signal.aborted) return pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});
+   if (content && epoch === generation && !signal.aborted) {try{publishReviewerNote(reviewerSessionKey(ctx),"assist",automaticHelpersDigest(content),[],Date.now());}catch{}return pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});}
   }).catch(error => {if(epoch===generation && !signal.aborted) console.warn("[autonomous-recovery] free assistance failed:",error);})
   .finally(()=>{controller.abort();if(assistance===controller)assistance=undefined;});
  };
@@ -971,7 +980,10 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				const helper = assistance = new AbortController();
 				const helperSignal = AbortSignal.any([helper.signal, event.signal, AbortSignal.timeout(25000)]);
 				void group(ctx, helperSignal, event.message.errorMessage).then(content => {
-					if (content && epoch === generation && !helperSignal.aborted) pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});
+					if (content && epoch === generation && !helperSignal.aborted) {
+						try { publishReviewerNote(reviewerSessionKey(ctx), "assist", automaticHelpersDigest(content), [], Date.now()); } catch { /* the board is best-effort */ }
+						pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});
+					}
 				}).catch(() => {}).finally(() => {helper.abort();if(assistance===helper)assistance=undefined;});
 			}
 			const primaryDecision = evaluateRoute({ provider: primary.provider, model: primary.id, now: now() });

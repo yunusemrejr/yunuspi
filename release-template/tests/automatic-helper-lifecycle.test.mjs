@@ -15,7 +15,7 @@ Object.assign(process.env,{
 });
 delete process.env.PI_SUBAGENT_CHILD;
 const load=p=>import(pathToFileURL(path.join(agent,p)));
-const {registerAutonomousRecovery,automaticFusionBody,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
+const {registerAutonomousRecovery,automaticFusionBody,automaticHelpersDigest,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
 const {registerPlannerStatus}=await load('extensions/lib/reviewer-board.ts');
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
@@ -250,4 +250,20 @@ test('Double mode already analyses the prompt twice, so no third proactive team 
  await after.input(prompt);await after.emit('before_agent_start',{prompt});await tick();
  assert.equal(after.calls.length,1,'turning Double off restores the helper');
  await after.emit('session_shutdown');await fx.emit('session_shutdown');
+});
+
+test('the automatic helper team tells the shared board what it handed the agent',async()=>{
+ const board=await load('extensions/lib/reviewer-board.ts');
+ const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
+ const fx=fixture({primary:{...model,provider:'parent'}});
+ await fx.input(prompt);await fx.emit('before_agent_start',{prompt});
+ for(let i=0;i<50&&!fx.messages.length;i++)await tick();
+ assert.equal(fx.messages.length,1,'the helper report reached the agent');
+ const note=board.peerReviewerNotes(board.reviewerSessionKey(fx.ctx),'observer').find(row=>row.reviewer==='assist');
+ assert.ok(note,'the reviewers and Double can see it');
+ assert.match(note.note,/^Automatic helper team \(advisory\): .*additive/);
+ assert.equal(board.reviewerLabel('assist'),'Automatic helpers');
+ assert.match(automaticHelpersDigest(''),/no readable report/);
+ assert.ok(automaticHelpersDigest('word. '.repeat(400)).length<=420);
+ await fx.emit('session_shutdown');
 });

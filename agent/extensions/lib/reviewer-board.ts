@@ -3,14 +3,14 @@ import { randomUUID } from 'node:crypto';
 /** Everything that can put a note on the board. The three reviewers observe the
  * session; Double and the scope council deliberate before it, and say what they
  * told the agent through the same board so no one repeats or contradicts them. */
-export type ReviewerSource = 'guardian' | 'observer' | 'watchmaker' | 'double' | 'council';
+export type ReviewerSource = 'guardian' | 'observer' | 'watchmaker' | 'double' | 'council' | 'assist';
 const REVIEWER_LABELS: Record<ReviewerSource, string> = {
-  guardian: 'Guardian', observer: 'Observer', watchmaker: 'Watchmaker', double: 'Double mode', council: 'Scope council',
+  guardian: 'Guardian', observer: 'Observer', watchmaker: 'Watchmaker', double: 'Double mode', council: 'Scope council', assist: 'Automatic helpers',
 };
 export const reviewerLabel = (reviewer: string): string => REVIEWER_LABELS[reviewer as ReviewerSource] ?? 'A peer';
 
 /** Shared note board for one session. Each source (the reviewers, Guardian, Double,
- * the scope council) publishes its latest delivered note; the others see it as
+ * the scope council, the automatic helper team) publishes its latest delivered note; the others see it as
  * evidence and suppress a restatement, so the agent is not told the same thing
  * twice or pulled in opposite directions by sources blind to each other.
  * In-process and bounded; nothing persists. */

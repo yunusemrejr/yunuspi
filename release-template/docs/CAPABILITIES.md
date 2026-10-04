@@ -1929,7 +1929,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 167 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 168 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)

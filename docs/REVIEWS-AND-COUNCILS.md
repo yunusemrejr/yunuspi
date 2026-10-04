@@ -130,10 +130,12 @@ What differs from the twin mode, and what does not:
 
 ### One board for every planner and reviewer
 
-Double and the scope council now say what they told the agent on the same
-in-process board the Guardian, the session observer and Mr. Watchmaker already
-used, and read it back. The reviewers see "Double mode already told the agent
-…" and "Scope council already told the agent …" beside each other's notes, so a
+Double, the scope council and the automatic helper team (the single helper,
+swarm or fusion that planning starts on its own) now say what they told the agent
+on the same in-process board the Guardian, the session observer and
+Mr. Watchmaker already used, and read it back. The reviewers see "Double mode
+already told the agent …", "Scope council already told the agent …" and
+"Automatic helpers already told the agent …" beside each other's notes, so a
 note that merely restates a directive is suppressed instead of delivered twice.
 While Double is on, both reviewers get one evidence row naming the mode and the
 two routes, so they do not recommend repeating a deliberation the harness
