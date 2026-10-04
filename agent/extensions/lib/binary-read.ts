@@ -12,8 +12,9 @@ import path from "node:path";
 import { run, probe } from "./media-process.ts";
 import { officeKindForPath, readOffice } from "./office-read.ts";
 import { openZip } from "./office-zip.ts";
+import { openLegacyOffice, isLegacyOffice } from "./office-render.ts";
 
-export type BinaryKind = "pdf" | "office" | "zip" | "archive" | "sqlite" | "media" | "font" | "executable" | "other";
+export type BinaryKind = "pdf" | "office" | "legacy" | "zip" | "archive" | "sqlite" | "media" | "font" | "executable" | "other";
 export type BinaryView = { kind: BinaryKind; label: string; text: string; opened: boolean; facts: Record<string, unknown> };
 
 /** True when the first bytes are not text: a NUL byte, or many control characters. UTF-16 and UTF-8 byte-order marks mean text. */
@@ -33,6 +34,11 @@ export function sniffKind(head: Buffer, file: string): { kind: BinaryKind; label
   const extension = path.extname(file).toLowerCase();
   if (ascii(head, 0, 5) === "%PDF-") return { kind: "pdf", label: "PDF document" };
   if (head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05)) return officeKindForPath(file) ? { kind: "office", label: `${extension.slice(1).toUpperCase()} document` } : { kind: "zip", label: "ZIP archive" };
+  if (ascii(head, 0, 5) === "{\\rtf") return { kind: "legacy", label: "Rich Text Format document" };
+  if (head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0 && head[4] === 0xa1 && head[5] === 0xb1) {
+    const label = /^\.(?:doc|dot)$/.test(extension) ? "Word 97-2003 document" : /^\.(?:xls|xlt)$/.test(extension) ? "Excel 97-2003 workbook" : /^\.(?:ppt|pps|pot)$/.test(extension) ? "PowerPoint 97-2003 presentation" : "legacy Microsoft compound file";
+    return { kind: isLegacyOffice(file) ? "legacy" : "other", label };
+  }
   if (ascii(head, 0, 15) === "SQLite format 3") return { kind: "sqlite", label: "SQLite database" };
   if (head[0] === 0x1f && head[1] === 0x8b) return { kind: "archive", label: "gzip-compressed data" };
   if (ascii(head, 0, 6) === "7z\xbc\xaf\x27\x1c" || ascii(head, 0, 4) === "Rar!" || ascii(head, 257, 262) === "ustar" || (head[0] === 0x42 && head[1] === 0x5a && head[2] === 0x68) || (head[0] === 0xfd && ascii(head, 1, 5) === "7zXZ")) return { kind: "archive", label: "compressed archive" };
@@ -115,6 +121,15 @@ export async function describeBinary(file: string, options: { offset?: number; m
       const errors = read.findings.filter(finding => finding.severity === "error").slice(0, 3).map(finding => `- ${finding.message}`);
       part = { text: `${read.text}${read.truncated ? "\n[Text cut. office_doc read with maxChars (up to 60000) or sheet shows more.]" : ""}${errors.length ? `\n\nProblems found while opening it:\n${errors.join("\n")}` : ""}\n\nFor structure, formulas, slide notes and every finding use office_doc read or verify.`, opened: true, facts: { words: read.words, findings: read.findings.length } };
     } catch (error: any) { part = { text: `Could not open it as a document (${String(error?.message ?? error).slice(0, 160)}). deliverable_check reports what is wrong with it.`, opened: false, facts: {} }; }
+  }
+  else if (kind === "legacy") {
+    try {
+      const converted = await openLegacyOffice(file, { signal: options.signal });
+      try {
+        const read = readOffice(converted.path, { maxChars: Math.min(maxChars, 20000) });
+        part = { text: `${read.text}${read.truncated ? "\n[Text cut. office_doc read with maxChars (up to 60000) or sheet shows more.]" : ""}\n\nThis is the content of a LibreOffice conversion to ${converted.kind.toUpperCase()}; the original is unchanged. To edit it, run office_doc convert with to:"${converted.kind}" and work on the copy.`, opened: true, facts: { convertedTo: converted.kind } };
+      } finally { converted.cleanup(); }
+    } catch (error: any) { part = { text: `This is a legacy format that needs LibreOffice to read (${String(error?.message ?? error).slice(0, 200)}). Where LibreOffice is installed, office_doc read or office_doc convert (to docx, xlsx or pptx) opens it.`, opened: false, facts: {} }; }
   }
   else if (kind === "zip") part = zipView(file);
   else if (kind === "sqlite") part = await sqliteView(file, options.signal);

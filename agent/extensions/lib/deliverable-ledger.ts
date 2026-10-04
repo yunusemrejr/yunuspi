@@ -53,6 +53,8 @@ export function createDeliverableLedger() {
     /** Has this session produced the file (at any bytes)? */
     isProduced: (file: string): boolean => produced.has(path.resolve(file)),
     producedPaths: (): string[] => [...produced.keys()],
+    /** How the session produced the file ("write", "bash", "office_doc", "convert"), when it did. */
+    originOf: (file: string): string | undefined => produced.get(path.resolve(file))?.via,
     reset() { produced.clear(); checked.clear(); },
     snapshot: () => ({ produced: produced.size, checked: checked.size }),
   };

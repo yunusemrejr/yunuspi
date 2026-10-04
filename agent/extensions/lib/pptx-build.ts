@@ -62,17 +62,17 @@ function lineCount(text: string, size: number, widthPt: number, bold = false): n
 const plain = (text: string) => inlineRuns(text).map(run => run.text).join("");
 
 type Item = { text: string; level: number };
-function flatten(value: unknown, level = 0, out: Item[] = []): Item[] {
-  if (value === undefined || value === null) return out;
+function flatten(value: unknown, level = 0, out: Item[] = [], depth = 0): Item[] {
+  if (value === undefined || value === null || depth > 8 || out.length > PPTX_LIMITS.items * 4) return out;
   if (typeof value === "string") {
     for (const line of clean(value).split("\n")) { const text = line.replace(/^\s*(?:[-*•–]|\d+[.)])\s+/, "").trim(); if (text) out.push({ text, level }); }
   } else if (typeof value === "number" || typeof value === "boolean") out.push({ text: String(value), level });
-  else if (Array.isArray(value)) for (const entry of value) flatten(entry, Array.isArray(entry) ? Math.min(level + 1, 2) : level, out);
+  else if (Array.isArray(value)) for (const entry of value) flatten(entry, Array.isArray(entry) ? Math.min(level + 1, 2) : level, out, depth + 1);
   else if (typeof value === "object") {
     const entry = value as { text?: unknown; level?: unknown; items?: unknown; children?: unknown };
     const own = Number.isInteger(entry.level) ? Math.min(Math.max(entry.level as number, 0), 2) : level;
     if (typeof entry.text === "string" && entry.text.trim()) out.push({ text: clean(entry.text).replace(/\n+/g, " ").trim(), level: own });
-    flatten(entry.items ?? entry.children, Math.min(own + 1, 2), out);
+    flatten(entry.items ?? entry.children, Math.min(own + 1, 2), out, depth + 1);
   }
   return out;
 }
@@ -232,6 +232,7 @@ export function buildPptx(spec: PptxSpec, readImage: (path: string) => Buffer, n
       if (!items.length && slide.text) items.push(...flatten(clean(slide.text).split(/\n{2,}/)));
       const { size, chunks } = fitList(items, BODY.w, BODY.h, [28, 26, 24, 22, 20], 20);
       if (chunks.length > 1) { split += chunks.length - 1; warnings.push(`${label}: ${items.length} bullets do not fit at a readable size, so they continue over ${chunks.length} slides`); }
+      if (chunks.some(chunk => listHeight(chunk, size, BODY.w) > BODY.h)) warnings.push(`${label}: one bullet is longer than a slide can hold at a readable size; shorten it or move the detail to the notes`);
       chunks.forEach((chunk, page) => {
         const ctx = slideContext();
         const shapes = titleShape(ctx, pageTitle(page, chunks.length)) + bulletBox(ctx, "Content", BODY, chunk, size, 'idx="1"') + footer(ctx, number());

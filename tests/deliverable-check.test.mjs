@@ -311,3 +311,11 @@ test('office_doc render: pdfPath converts an Office file to a checked PDF in one
     assert.equal(folders.length, 1); assert.deepEqual(fs.readdirSync(path.join(dir, folders[0])).filter(name => name.endsWith('.pdf')), [], 'the PDF is not duplicated beside the page images');
   }
 });
+
+test('ledger: the way a file was produced is remembered, and a rewrite keeps the latest way', () => {
+  const dir = tmp(), ledger = createDeliverableLedger(), file = put(dir, 'a.docx', 'x');
+  assert.equal(ledger.originOf(file), undefined); assert.equal(ledger.isProduced(file), false);
+  ledger.noteProduced(file, 'convert'); assert.equal(ledger.originOf(file), 'convert'); assert.equal(ledger.isProduced(file), true);
+  assert.deepEqual(ledger.producedPaths(), [file]);
+  fs.writeFileSync(file, 'xx'); ledger.noteProduced(file, 'bash'); assert.equal(ledger.originOf(file), 'bash');
+});

@@ -17,7 +17,7 @@ import { inspectDeliverable } from "./lib/deliverable-inspect.ts";
 import { readOffice, officeKindForPath, type Finding } from "./lib/office-read.ts";
 import { buildDocx, buildXlsx } from "./lib/office-build.ts";
 import { buildPptx } from "./lib/pptx-build.ts";
-import { renderOffice } from "./lib/office-render.ts";
+import { renderOffice, convertOffice, openLegacyOffice, isLegacyOffice, CONVERT_TARGETS } from "./lib/office-render.ts";
 import { createDeliverableLedger, commandMayProduceFiles, plausibleDeliverable, scanRecentDeliverables, isDeliverableName, type Observed } from "./lib/deliverable-ledger.ts";
 import { registerContinuationSource, collectContinuationLines } from "./lib/continuation-notice.ts";
 import { isSessionStopped } from "./lib/session-stop.ts";
@@ -46,7 +46,7 @@ export default function deliverables(pi: any) {
   /** Specifics a produced document states that the session never saw (see lib/specifics.ts); nothing for files the user supplied. */
   const SPECIFICS_KIND = /\.(?:docx|pptx|odt|odp|pdf)$/i;
   const specificFindings = async (file: string, ctx: any, signal?: AbortSignal): Promise<Finding[]> => {
-    if ((process.env.PI_SPECIFICS ?? "on").toLowerCase() === "off" || !SPECIFICS_KIND.test(file) || !ledger.isProduced(file) || typeof ctx?.sessionManager?.getBranch !== "function") return [];
+    if ((process.env.PI_SPECIFICS ?? "on").toLowerCase() === "off" || !SPECIFICS_KIND.test(file) || !ledger.isProduced(file) || ledger.originOf(file) === "convert" || typeof ctx?.sessionManager?.getBranch !== "function") return [];
     try {
       const evidence = await collectEvidence(ctx.sessionManager.getBranch(), { cwd: ctx.cwd || process.cwd(), produced: ledger.producedPaths(), signal });
       if (!evidence.length) return [];
@@ -101,14 +101,14 @@ export default function deliverables(pi: any) {
     const raw = event.input?.path ?? event.input?.file_path;
     if (typeof raw !== "string" || !raw || (event.content ?? []).some((row: any) => row?.type === "image")) return;
     const shown = (event.content ?? []).filter((row: any) => row?.type === "text").map((row: any) => String(row.text)).join("\n");
-    if (event.isError ? !/Offset \d+ is beyond end of file/.test(shown) : !(/[\u0000\uFFFD]/.test(shown) || /^%PDF-|^SQLite format 3/.test(shown))) return;
+    if (event.isError ? !/Offset \d+ is beyond end of file/.test(shown) : !(/[\u0000\uFFFD]/.test(shown) || /^%PDF-|^SQLite format 3|^\{\\rtf/.test(shown))) return;
     try {
       const file = canonicalMutationPath(textPath(raw.replace(/^@/, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~")), ctx?.cwd ?? process.cwd());
       const stat = fs.statSync(file);
       if (!stat.isFile() || stat.size === 0) return;
       const fd = fs.openSync(file, "r"); let head: Buffer;
       try { head = Buffer.alloc(Math.min(8192, stat.size)); fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
-      if (!looksBinary(head) && !["pdf", "sqlite"].includes(sniffKind(head, file).kind)) return; // an ASCII-only PDF is still not readable as text
+      if (!looksBinary(head) && !["pdf", "sqlite", "legacy"].includes(sniffKind(head, file).kind)) return; // an ASCII-only PDF is still not readable as text
       const view = await describeBinary(file, { offset: typeof event.input?.offset === "number" ? event.input.offset : undefined, signal: ctx?.signal, head });
       if (view.opened) ledger.noteChecked(file, "pass");
       return { content: [{ type: "text", text: view.text }], details: { ...(event.details ?? {}), binaryView: view.facts }, isError: false };
@@ -170,14 +170,16 @@ export default function deliverables(pi: any) {
   pi.registerTool({
     name: "office_doc",
     label: "Office Document",
-    description: "Read, verify, build and render Office documents with no office suite. read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx, .xlsx or .pptx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:true|{label,sum:'Amount'|['Amount','C']}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, ROUND, SUMIF(S), COUNTIF(S), AVERAGEIF(S), IF, IFS, IFERROR, VLOOKUP, INDEX, MATCH, XLOOKUP, TEXT, LEFT, CONCAT, TEXTJOIN, DATE, EDATE and more, with cross-sheet and whole-column refs; newer functions get the _xlfn. prefix automatically) and errors like #DIV/0! are reported. pptx spec: {title, author, size:'16:9'|'4:3', font, accent:'#2563EB', dark:true, footer, slides:[{title, subtitle, notes, bullets:[text|{text,level}|[sub-bullets]]} | {title, columns:[{heading,bullets}]} | {title, image:{path,alt,caption}, bullets} | {title, table:{header,rows}} | {title, quote:{text,cite}} | {title, text} | {layout:'section', title}]}; the first slide without body is the title slide, every layout is placed and measured for you, and a list or table that cannot fit at a readable size continues on a numbered '(2/3)' slide instead of overflowing. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice); it also converts any docx/xlsx/pptx/odt/ods/odp to PDF: pass pdfPath (a .pdf inside the workspace; overwrite:true to replace one) and pages:0 to skip the page images.",
-    promptSnippet: "Read, verify, build (docx/xlsx/pptx) and render Office documents",
+    description: "Read, verify, build, render and convert Office documents with no office suite (render and convert use LibreOffice when installed). read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx, .xlsx or .pptx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:true|{label,sum:'Amount'|['Amount','C']}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, ROUND, SUMIF(S), COUNTIF(S), AVERAGEIF(S), IF, IFS, IFERROR, VLOOKUP, INDEX, MATCH, XLOOKUP, TEXT, LEFT, CONCAT, TEXTJOIN, DATE, EDATE and more, with cross-sheet and whole-column refs; newer functions get the _xlfn. prefix automatically) and errors like #DIV/0! are reported. pptx spec: {title, author, size:'16:9'|'4:3', font, accent:'#2563EB', dark:true, footer, slides:[{title, subtitle, notes, bullets:[text|{text,level}|[sub-bullets]]} | {title, columns:[{heading,bullets}]} | {title, image:{path,alt,caption}, bullets} | {title, table:{header,rows}} | {title, quote:{text,cite}} | {title, text} | {layout:'section', title}]}; the first slide without body is the title slide, every layout is placed and measured for you, and a list or table that cannot fit at a readable size continues on a numbered '(2/3)' slide instead of overflowing. convert: LibreOffice converts any Office, OpenDocument or RTF file (including legacy doc, xls, ppt) to docx, xlsx, pptx, pdf, odt, ods, odp, doc, xls, ppt, rtf, txt, html or csv (one csv per sheet): pass to and optionally outPath (inside the workspace; overwrite:true to replace); read of a legacy doc, xls, ppt or rtf converts it for you. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice); it also converts any docx/xlsx/pptx/odt/ods/odp to PDF: pass pdfPath (a .pdf inside the workspace; overwrite:true to replace one) and pages:0 to skip the page images.",
+    promptSnippet: "Read, verify, build (docx/xlsx/pptx), render and convert Office documents",
     parameters: Type.Object({
-      action: choices(["read", "verify", "build", "render"]),
+      action: choices(["read", "verify", "build", "render", "convert"]),
       path: localPath,
       spec: Type.Optional(Type.Object({}, { additionalProperties: true, description: "build: the docx, xlsx or pptx spec described above" })),
       format: Type.Optional(choices(["docx", "xlsx", "pptx"], "build: only needed when path has no .docx/.xlsx/.pptx extension")),
-      overwrite: Type.Optional(Type.Boolean({ description: "build, or render with pdfPath: replace an existing file" })),
+      to: Type.Optional(choices(CONVERT_TARGETS, "convert: the format to write")),
+      outPath: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "convert: where to write the result (inside the workspace; default: next to the source with the new extension). An existing file needs overwrite:true" })),
+      overwrite: Type.Optional(Type.Boolean({ description: "build, convert, or render with pdfPath: replace an existing file" })),
       sheet: Type.Optional(Type.String({ maxLength: 31, description: "read: only this sheet" })),
       maxChars: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
       pages: Type.Optional(Type.Integer({ minimum: 0, maximum: 8, description: "render: pages to rasterize (default 3; 0 for the PDF only)" })),
@@ -187,7 +189,7 @@ export default function deliverables(pi: any) {
     prepareArguments(input: any) {
       if (!input || typeof input !== "object") return input;
       const spec = typeof input.spec === "string" ? (() => { try { return JSON.parse(input.spec); } catch { return input.spec; } })() : input.spec;
-      return { ...input, ...(spec !== undefined ? { spec } : {}), action: input.action ?? (input.spec ? "build" : "read") };
+      return { ...input, ...(spec !== undefined ? { spec } : {}), action: input.action ?? (input.spec ? "build" : input.to ? "convert" : "read") };
     },
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       const cwd = ctx?.cwd || process.cwd(), deadline = AbortSignal.timeout(240_000), bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -195,8 +197,12 @@ export default function deliverables(pi: any) {
       const file = canonicalMutationPath(textPath(params.path), root);
       if (params.action === "read" || params.action === "verify") {
         if (!fs.existsSync(file)) throw new Error(`${relative(file, cwd)} does not exist`);
-        const read = readOffice(file, { maxChars: params.action === "verify" ? 400 : params.maxChars, sheet: params.sheet });
-        read.findings.push(...await specificFindings(file, ctx, bounded));
+        // A legacy doc, xls, ppt or rtf is read through a LibreOffice conversion to its modern twin; the original stays untouched.
+        const legacy = isLegacyOffice(file) ? await openLegacyOffice(file, { signal: bounded }) : undefined;
+        let read: ReturnType<typeof readOffice>;
+        try { read = readOffice(legacy?.path ?? file, { maxChars: params.action === "verify" ? 400 : params.maxChars, sheet: params.sheet }); } finally { legacy?.cleanup(); }
+        if (legacy) read.findings.unshift({ severity: "info", code: "converted-legacy", message: `${path.extname(file).slice(1).toUpperCase()} is a legacy format; this is the content of a LibreOffice conversion to ${legacy.kind.toUpperCase()}`, hint: `To edit or build on it, run office_doc convert with to:"${legacy.kind}" and work on the converted copy` });
+        else read.findings.push(...await specificFindings(file, ctx, bounded));
         ledger.noteChecked(file, statusOf(read.findings));
         const { findings, text: body, ...rest } = read;
         const result: any = { ...rest, path: relative(file, cwd), status: statusOf(findings), findings: compact(findings, 14) };
@@ -232,6 +238,34 @@ export default function deliverables(pi: any) {
             : pdfTarget ? `The PDF is at ${relative(pdfTarget, cwd)}${verification?.status === "fail" ? ", but its check failed: read the findings" : ", and its check passed; pass pages (1 to 8) to also see page images"}.` : "Only the PDF was written; pass pages (1 to 8) to also see page images.";
           return text({ ...rendered, pdf: relative(pdf, cwd), pngs: rendered.pngs.map(png => relative(png, cwd)), ...(verification ? { verification } : {}), note });
         } catch (error) { fs.rmSync(outDir, { recursive: true, force: true }); throw error; }
+      }
+      if (params.action === "convert") {
+        const to = String(params.to ?? "").toLowerCase();
+        if (!CONVERT_TARGETS.includes(to)) throw new Error(`convert needs to: one of ${CONVERT_TARGETS.join(", ")}`);
+        if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`${relative(file, cwd)} is not an existing file`);
+        const base = params.outPath !== undefined ? canonicalMutationPath(textPath(params.outPath), root) : path.join(path.dirname(file), `${path.basename(file, path.extname(file))}.${to}`);
+        const wanted = base.toLowerCase().endsWith(`.${to}`) ? base : `${base}.${to}`;
+        if (!containsPath(root, wanted)) throw new Error("convert writes inside the current workspace; choose a path below the working directory");
+        const denial = selfMutationDenial(wanted, root); if (denial) throw new Error(denial);
+        if (wanted === file) throw new Error("the converted file would replace its source; choose another outPath");
+        const outDir = path.dirname(wanted), name = path.basename(wanted, path.extname(wanted));
+        fs.mkdirSync(outDir, { recursive: true });
+        const staged = fs.mkdtempSync(path.join(outDir, ".convert-"));
+        try {
+          const { files, engine } = await convertOffice(file, to, staged, { name, signal: bounded });
+          const written: Array<{ path: string; bytes: number; status: string; findings: ReturnType<typeof compact> }> = [];
+          for (const made of files) {
+            const target = path.join(outDir, path.basename(made));
+            if (fs.existsSync(target) && params.overwrite !== true) throw new Error(`${relative(target, cwd)} already exists. Pass overwrite:true to replace it or choose another outPath.`);
+          }
+          for (const made of files) {
+            const target = path.join(outDir, path.basename(made)); fs.renameSync(made, target);
+            const inspection = await inspectDeliverable(target, { cwd, signal: bounded });
+            ledger.noteProduced(target, "convert"); ledger.noteChecked(target, inspection.status); // a format change adds no content of its own
+            written.push({ path: relative(target, cwd), bytes: inspection.bytes, status: inspection.status, findings: compact(inspection.findings, 6) });
+          }
+          return text({ action: "convert", from: relative(file, cwd), to, engine, files: written, note: files.length > 1 ? "A workbook with several sheets becomes one csv per sheet." : "Converted by LibreOffice; layout can differ slightly from the original, so look at it (office_doc render, or read it) before relying on it." });
+        } finally { fs.rmSync(staged, { recursive: true, force: true }); }
       }
       // build
       const kind = /\.docx$/i.test(file) ? "docx" : /\.xlsx$/i.test(file) ? "xlsx" : /\.pptx$/i.test(file) ? "pptx" : params.format;
