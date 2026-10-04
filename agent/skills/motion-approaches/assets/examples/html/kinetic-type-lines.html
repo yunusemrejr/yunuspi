@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kinetic typography with focus pull</title>
+<!--
+APPROACH  vanilla DOM + closed-form springs; every glyph is a pure function of t
+CONCEPTS  1) Intl.Segmenter splits real grapheme clusters (accents, emoji, ligature-safe), not UTF-16 units
+          2) per-line clip masks: text rises out of a window instead of fading, which reads as typesetting, not as a slideshow
+          3) reading-rhythm scheduling: each word starts after the previous one's syllable weight, not on a fixed grid
+          4) focus pull: while a *focus* word is active the rest of the line dims, then the line settles
+          5) optical alignment: the first glyph's side bearing is measured and cancelled so the left edge looks straight
+USE       props.text.lines = ["Plain words and *one that matters*", ...]; props.theme from the look; duration defaults to 7s
+-->
+<style>
+  :root { --bg:#14100c; --ink:#f1e9dc; --muted:#8f8272; --accent:#f0a23a; --accent2:#5dd6c4; --display: "Times New Roman", serif; --text: sans-serif; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); }
+  body.transparent { background: transparent; }
+  #stage { position: absolute; inset: 0; display: grid; align-content: center; padding: 0 9vw; row-gap: 1.2vh; }
+  .line { overflow: clip; padding: .06em 0 .14em; font: 700 11.5vh/1 var(--display); letter-spacing: -.015em; white-space: nowrap; }
+  .word { display: inline-block; white-space: pre; position: relative; }
+  .g { display: inline-block; will-change: transform; }
+  .focus .ul { position: absolute; left: 0; right: 0; bottom: .02em; height: .07em; background: var(--accent); transform-origin: left; }
+</style>
+<body><main id="stage"></main>
+<script>
+const P = Object.assign({ duration: 7, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, ink: P.theme.ink, muted: P.theme.muted, accent: P.theme.accent, accent2: P.theme.accent2, display: P.theme.display && `"${P.theme.display}", serif`, text: P.theme.text && `"${P.theme.text}", sans-serif` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+
+const lines = P.text.lines ?? ["Measure what", "the *water* does,", "not what we *say*"];
+const spring = (s, stiffness = 210, damping = 17) => {            // closed-form damped spring, 0 -> 1, no integration state
+  if (s <= 0) return 0;
+  const w = Math.sqrt(stiffness), z = damping / (2 * w), wd = w * Math.sqrt(Math.max(1e-6, 1 - z * z));
+  return 1 - Math.exp(-z * w * s) * (Math.cos(wd * s) + (z * w / wd) * Math.sin(wd * s));
+};
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const syllables = w => Math.max(1, (w.toLowerCase().match(/[aeiouy]+/g) ?? []).length);
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+// Build DOM once: lines > words > glyphs. Timing is assigned from reading rhythm.
+const model = []; let clock = 0.35;
+const stage = document.getElementById("stage");
+for (const text of lines) {
+  const row = document.createElement("div"); row.className = "line"; stage.append(row);
+  const words = [];
+  for (const raw of text.split(" ")) {
+    const focus = raw.startsWith("*") || raw.endsWith("*"), plain = raw.replaceAll("*", "");
+    const el = document.createElement("span"); el.className = "word" + (focus ? " focus" : ""); row.append(el, " ");
+    const glyphs = [...segmenter.segment(plain)].map(({ segment }) => { const g = document.createElement("span"); g.className = "g"; g.textContent = segment; el.append(g); return g; });
+    if (focus) { const ul = document.createElement("i"); ul.className = "ul"; el.append(ul); }
+    words.push({ el, glyphs, focus, start: clock, ul: el.querySelector(".ul") });
+    clock += 0.11 + 0.05 * syllables(plain);                       // heavier words take longer to land
+  }
+  model.push({ row, words }); clock += 0.18;                       // breath between lines
+}
+const exitAt = Math.max(P.duration - 0.8, clock + 1.2);
+
+window.renderFrame = async t => {
+  await ready;
+  const glyphGap = 0.018;
+  for (const { row, words } of model) {
+    // optical alignment: cancel the first glyph's left bearing so ragged-left looks straight
+    if (row.dataset.bearing === undefined) { const g = words[0].glyphs[0], m = document.createElement("canvas").getContext("2d"); m.font = getComputedStyle(g).font; row.dataset.bearing = String(m.measureText(g.textContent).actualBoundingBoxLeft || 0); row.style.marginLeft = `${Number(row.dataset.bearing)}px`; }
+    for (const w of words) {
+      const focusPhase = w.focus ? clamp((t - w.start - 0.25) / 0.35) * (1 - clamp((t - (w.start + 1.4)) / 0.5)) : 0;
+      w.glyphs.forEach((g, i) => {
+        const rise = spring(t - w.start - i * glyphGap), leave = clamp((t - exitAt - w.start * 0.04) / 0.45);
+        g.style.transform = `translateY(${(1 - rise) * 118 - leave * 118}%)`;
+      });
+      // focus pull: the focus word brightens and gets an underline; every other word steps back while it is active
+      w.el.style.color = w.focus ? `color-mix(in oklab, var(--accent) ${Math.round(focusPhase * 100)}%, var(--ink))` : "";
+      if (w.ul) w.ul.style.transform = `scaleX(${spring(t - w.start - 0.3, 120, 18) * (1 - clamp((t - exitAt) / 0.4))})`;
+    }
+  }
+  const dim = model.map(({ words }) => Math.max(...words.map(w => w.focus ? clamp((t - w.start - 0.25) / 0.35) * (1 - clamp((t - (w.start + 1.4)) / 0.5)) : 0)));
+  model.forEach(({ words }, i) => words.forEach(w => { if (!w.focus) w.el.style.opacity = String(1 - 0.5 * dim[i]); }));
+};
+</script>

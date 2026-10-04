@@ -288,11 +288,11 @@ test("video requests route to the direction skill without catching players or ed
   assert.ok(route("procedural-audio").intent.test("add background music and a whoosh"));
 });
 
-test("video studio registers six lazily discovered tools", async () => {
+test("video studio registers eight lazily discovered tools", async () => {
   const tools = [];
   const extension = await import(pathToFileURL(path.join(agent, "extensions/video-studio.ts")).href);
   extension.default({ registerTool: (tool) => tools.push(tool) });
-  assert.deepEqual(tools.map((t) => t.name).sort(), ["audio_synth", "narration_tts", "video_assets", "video_project", "video_qa", "video_render"]);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["audio_synth", "motion_examples", "narration_tts", "video_assets", "video_project", "video_qa", "video_render", "video_shot"]);
   const { CORE_TOOLS } = await import(pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts")).href);
   for (const tool of tools) {
     assert.equal(CORE_TOOLS.has(tool.name), false, `${tool.name} stays off-wire until tool_search enables it`);

@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Seekable CSS title sequence</title>
+<!--
+APPROACH  vanilla CSS keyframes + Web Animations API, seeked from one clock
+CONCEPTS  1) every motion is declared in CSS (hand-editable, diffable, works as a live web animation)
+          2) export seeks all animations to t with document.getAnimations(): no JS animation loop to drift
+          3) @property registers typed custom properties, so gradients, angles and numbers interpolate
+          4) CSS linear() carries a sampled damped spring: physical settle without a library
+USE       node ~/.pi/agent/skills/motion-graphics-production/scripts/render.mjs waapi-timeline.html OUTDIR 6 30 1280 720
+-->
+<style>
+  @property --sweep { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+  @property --count { syntax: "<integer>"; inherits: false; initial-value: 0; }
+  :root { --bg:#10130f; --ink:#ecefe3; --muted:#8a9684; --accent:#d8f061; --accent2:#f2884b; --display: Georgia, serif; --text: system-ui, sans-serif; --mono: ui-monospace, monospace;
+          --spring: linear(0); --stagger: 90ms; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--text); }
+  body.transparent { background: transparent; }
+  .stage { position: absolute; inset: 0; display: grid; align-content: end; padding: 9vh 8vw; }
+  /* a conic sweep whose angle is a registered property: the browser interpolates the gradient itself */
+  .dial { position: absolute; right: 9vw; top: 14vh; width: 34vh; aspect-ratio: 1; border-radius: 50%;
+          background: conic-gradient(from -90deg, var(--accent) var(--sweep), color-mix(in oklab, var(--ink) 12%, transparent) 0);
+          -webkit-mask: radial-gradient(circle, transparent 62%, #000 63%); mask: radial-gradient(circle, transparent 62%, #000 63%);
+          animation: sweep 2.2s cubic-bezier(.65,0,.2,1) .4s both; }
+  .figure { position: absolute; right: 9vw; top: 14vh; width: 34vh; aspect-ratio: 1; display: grid; place-content: center; text-align: center;
+            font: 700 9vh/1 var(--display); counter-reset: n var(--count); animation: tally 2.2s cubic-bezier(.65,0,.2,1) .4s both; }
+  .figure::after { content: counter(n) "%"; font-variant-numeric: tabular-nums; }
+  .kicker { font: 600 2.4vh var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); overflow: clip; }
+  .kicker span { display: inline-block; animation: rise .9s var(--spring) .15s both; }
+  h1 { font: 800 15vh/.95 var(--display); letter-spacing: -.02em; margin: 2vh 0 3vh; max-width: 14ch; text-wrap: balance; }
+  /* each line sits in a clip mask; the word inside rises on the spring with a CSS-variable stagger */
+  h1 .line { display: block; overflow: clip; padding-bottom: .08em; }
+  h1 .w { display: inline-block; animation: rise 1.1s var(--spring) calc(.45s + var(--i) * var(--stagger)) both; }
+  h1 .hot { color: var(--accent2); }
+  .rule { height: .6vh; width: 22vw; background: var(--accent); transform-origin: left; animation: grow 1.1s cubic-bezier(.65,0,.2,1) 1.5s both; }
+  .sub { margin-top: 3vh; font-size: 3.2vh; color: var(--muted); max-width: 34ch; animation: fade .9s ease-out 1.9s both; }
+  @keyframes rise  { from { transform: translateY(110%) } to { transform: none } }
+  @keyframes grow  { from { transform: scaleX(0) } to { transform: none } }
+  @keyframes fade  { from { opacity: 0; translate: 0 1.2vh } to { opacity: 1; translate: 0 0 } }
+  @keyframes sweep { to { --sweep: 252deg } }
+  @keyframes tally { to { --count: 70 } }
+</style>
+<body>
+<div class="dial"></div><div class="figure"></div>
+<main class="stage">
+  <div class="kicker"><span id="kicker"></span></div>
+  <h1 id="title"></h1>
+  <div class="rule"></div>
+  <p class="sub" id="sub"></p>
+</main>
+<script>
+const P = Object.assign({ duration: 6, transparent: false, theme: {}, fonts: {}, text: {} },
+  window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+const css = document.documentElement.style, T = P.theme;
+for (const [k, v] of Object.entries({ bg: T.background, ink: T.ink, muted: T.muted, accent: T.accent, accent2: T.accent2, display: T.display && `"${T.display}", Georgia, serif`, text: T.text && `"${T.text}", system-ui, sans-serif`, mono: T.mono && `"${T.mono}", ui-monospace, monospace` })) if (v) css.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const words = Object.assign({ kicker: "Field report 04", title: "The *tide* keeps\nbetter time", sub: "Seventy percent of the shoreline is moving, and the clock is the water." }, P.text);
+kicker.textContent = words.kicker; sub.textContent = words.sub;
+let index = 0;
+title.innerHTML = words.title.split("\n").map(line => `<span class="line">${line.split(" ").map(w => `<span class="w${w.startsWith("*") ? " hot" : ""}" style="--i:${index++}">${w.replaceAll("*", "")}</span>`).join(" ")}</span>`).join("");
+
+// A damped spring sampled into CSS linear(): x(t) = 1 - e^(-zeta*w*t) * (cos(wd*t) + zeta*w/wd * sin(wd*t))
+function springEasing(stiffness = 150, damping = 13, mass = 1, samples = 40, seconds = 1.1) {
+  const w = Math.sqrt(stiffness / mass), zeta = damping / (2 * Math.sqrt(stiffness * mass)), wd = w * Math.sqrt(1 - zeta * zeta);
+  const at = s => 1 - Math.exp(-zeta * w * s) * (Math.cos(wd * s) + zeta * w / wd * Math.sin(wd * s));
+  return `linear(${Array.from({ length: samples + 1 }, (_, i) => at(i / samples * seconds).toFixed(4)).join(", ")})`;
+}
+css.setProperty("--spring", springEasing());
+const ready = (async () => {
+  for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); }
+  await document.fonts.ready;
+})();
+
+// The one clock. Pausing every animation and setting currentTime makes CSS a pure function of t.
+window.renderFrame = async (t) => {
+  await ready;
+  for (const a of document.getAnimations()) { a.pause(); a.currentTime = t * 1000; }
+  await new Promise(r => requestAnimationFrame(() => r()));
+};
+// In a browser tab the same CSS plays on its own; only the exporter pauses and seeks it.
+</script>

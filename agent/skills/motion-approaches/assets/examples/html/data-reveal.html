@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Data reveal: draw-on line, area wipe, odometer and a leader-line annotation</title>
+<!--
+APPROACH  hand-built SVG chart; each mark is a pure function of progress, with the story told by choreography
+CONCEPTS  1) draw-on with pathLength=1 so stroke-dashoffset is a 0..1 trim for any curve
+          2) area under the curve revealed by a clipPath rect that follows the same progress, so fill and stroke stay locked
+          3) odometer: each digit is a vertical strip translated by the current value, rolling like a mechanical counter
+          4) direct labelling: the annotation names the peak at the peak, with a leader that draws after the line arrives (no legend)
+          5) honesty: with no props.series the page plots a labelled PLACEHOLDER series; real numbers go in props.series = [{x, y}]
+USE       props.series, props.text.{title,unit,note}; props.theme; the callout targets the highest point automatically
+-->
+<style>
+  :root { --bg:#f4f1ea; --surface:#fffdf8; --ink:#1b1a17; --muted:#6f6a5f; --accent:#0e6b57; --accent2:#c2410c; --display: Georgia, serif; --text: system-ui, sans-serif; --mono: ui-monospace, monospace; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--text); }
+  body.transparent { background: transparent; }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .t { font: 700 44px var(--display); fill: var(--ink); } .m { font: 500 22px var(--mono); fill: var(--muted); letter-spacing: .04em; } .v { font: 800 130px var(--display); fill: var(--ink); } .n { font: 600 26px var(--text); fill: var(--ink); }
+  .ph { font: 600 18px var(--mono); letter-spacing: .14em; fill: var(--accent2); }
+</style>
+<body>
+<svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet">
+  <defs><clipPath id="wipe"><rect id="wiper" x="140" y="0" width="0" height="900"/></clipPath><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".28"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+  <text class="t" x="140" y="120" id="title"></text><text class="m" x="140" y="160" id="unit"></text><text class="ph" x="1460" y="860" text-anchor="end" id="placeholder"></text>
+  <g id="grid"></g>
+  <path id="area" fill="url(#fill)" clip-path="url(#wipe)"/><path id="line" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" pathLength="1" stroke-dasharray="1 1"/>
+  <g id="peak" opacity="0"><circle r="11" fill="var(--surface)" stroke="var(--accent2)" stroke-width="4"/><path id="leader" fill="none" stroke="var(--ink)" stroke-width="2" pathLength="1" stroke-dasharray="1 1"/><text class="n" id="note"></text></g>
+  <g id="odo" transform="translate(140 790)"><clipPath id="digits"><rect x="0" y="-118" width="560" height="140"/></clipPath><g clip-path="url(#digits)" id="strips"></g></g>
+</svg>
+<script>
+const P = Object.assign({ duration: 6, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, surface: P.theme.surface, ink: P.theme.ink, muted: P.theme.muted, accent: P.theme.accent, accent2: P.theme.accent2, display: P.theme.display && `"${P.theme.display}", Georgia, serif`, text: P.theme.text && `"${P.theme.text}", system-ui, sans-serif`, mono: P.theme.mono && `"${P.theme.mono}", ui-monospace, monospace` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+const smoothstep = t => t * t * (3 - 2 * t), $ = id => document.getElementById(id), clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v)), ease = t => 1 - (1 - t) ** 3, inOut = t => t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+const series = P.series ?? Array.from({ length: 48 }, (_, i) => ({ x: i, y: 40 + 22 * Math.sin(i / 6) + 14 * Math.sin(i / 2.3 + 1) + i * 0.9 }));
+if (!P.series) $("placeholder").textContent = "PLACEHOLDER SERIES - pass props.series";
+$("title").textContent = P.text.title ?? "Level over time"; $("unit").textContent = P.text.unit ?? "units";
+const X0 = 140, X1 = 1460, Y0 = 700, Y1 = 310, ys = series.map(s => s.y), lo = Math.min(...ys), hi = Math.max(...ys);
+const px = i => X0 + (X1 - X0) * i / (series.length - 1), py = y => Y0 - (Y0 - Y1) * (y - lo) / (hi - lo || 1);
+const d = series.map((s, i) => `${i ? "L" : "M"} ${px(i).toFixed(1)} ${py(s.y).toFixed(1)}`).join(" ");
+$("line").setAttribute("d", d); $("area").setAttribute("d", `${d} L ${X1} ${Y0} L ${X0} ${Y0} Z`);
+$("grid").innerHTML = [0, 0.5, 1].map(f => `<line x1="${X0}" x2="${X1}" y1="${Y0 - (Y0 - Y1) * f}" y2="${Y0 - (Y0 - Y1) * f}" stroke="var(--muted)" stroke-opacity="${f ? .22 : .6}" stroke-width="${f ? 1 : 2}"/><text class="m" x="${X0 - 16}" y="${Y0 - (Y0 - Y1) * f + 7}" text-anchor="end">${(lo + (hi - lo) * f).toFixed(0)}</text>`).join("");
+const peakIndex = ys.indexOf(hi), peak = $("peak");
+const side = peakIndex < series.length / 2 ? 1 : -1;                    // the note goes toward the side with room
+$("note").textContent = P.text.note ?? "highest reading"; $("leader").setAttribute("d", `M ${px(peakIndex)} ${py(hi)} L ${px(peakIndex) + 60 * side} ${py(hi) - 90} L ${px(peakIndex) + 280 * side} ${py(hi) - 90}`);
+$("note").setAttribute("x", px(peakIndex) + 290 * side); $("note").setAttribute("y", py(hi) - 100); $("note").setAttribute("text-anchor", side > 0 ? "start" : "end");
+// odometer: one strip per digit of the final value (rows 0-9 plus a second 0 so 9 -> 0 rolls on), each translated to the digit it should show at value v
+// small-magnitude series (under 20) read with one decimal, so a tide of 0.84 m does not round to 1
+const decimals = P.decimals ?? (Math.max(...ys.map(Math.abs)) < 20 ? 1 : 0), scale = 10 ** decimals;
+const final = Math.round(Math.abs(ys.at(-1)) * scale), digits = String(final).padStart(decimals + 1, "0").split(""); const strips = $("strips");
+const dotAt = decimals ? digits.length - decimals : -1, gap = k => 78 * k + (dotAt >= 0 && k >= dotAt ? 34 : 0);
+digits.forEach((_, k) => { const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.setAttribute("transform", `translate(${gap(k)} 0)`); g.innerHTML = Array.from({ length: 11 }, (_, n) => `<text class="v" x="0" y="${n * 140}">${n % 10}</text>`).join("");
+  strips.append(g); g.dataset.k = k; });
+if (dotAt >= 0) { const dot = document.createElementNS("http://www.w3.org/2000/svg", "text"); dot.setAttribute("class", "v"); dot.setAttribute("x", gap(dotAt) - 30); dot.setAttribute("y", 0); dot.textContent = "."; $("odo").append(dot); }
+window.renderFrame = async t => {
+  await ready;
+  const u = clamp(t / P.duration), draw = inOut(clamp(u / 0.62));
+  $("line").setAttribute("stroke-dashoffset", String(1 - draw)); $("wiper").setAttribute("width", String((X1 - X0) * draw + 2));
+  const showPeak = clamp((u - 0.62) / 0.1), leader = clamp((u - 0.66) / 0.14);
+  peak.setAttribute("opacity", String(showPeak)); peak.firstElementChild.setAttribute("transform", `translate(${px(peakIndex)} ${py(hi)}) scale(${ease(showPeak)})`);
+  $("leader").setAttribute("stroke-dashoffset", String(1 - ease(leader))); $("note").setAttribute("opacity", String(clamp((leader - 0.5) * 2)));
+  const value = final * draw;                                            // the counter follows the line's own progress
+  // mechanical carry: a digit rolls only while the digit below it wraps (its last 15%); the lowest digit rolls continuously
+  [...strips.children].forEach((g, k) => { const place = 10 ** (digits.length - 1 - k), x = value / place, whole = Math.floor(x), carry = k === digits.length - 1 ? x - whole : clamp((x - whole - 0.85) / 0.15), roll = (whole + smoothstep(carry)) % 10; g.setAttribute("transform", `translate(${gap(k)} ${-roll * 140})`); });
+};
+</script>

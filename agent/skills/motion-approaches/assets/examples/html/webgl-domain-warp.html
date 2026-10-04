@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebGL2 domain-warped field with contour lines</title>
+<!--
+APPROACH  one fragment shader on a full-screen triangle; the GPU (or software GL in headless) draws every pixel as f(x, y, t)
+CONCEPTS  1) domain warping: fbm(p + fbm(p + fbm(p))) turns plain noise into organic, fluid structure
+          2) seamless loop: time walks a circle through the noise volume (cos, sin), so frame N equals frame 0
+          3) palette by structure, not by gradient: bands and ridge highlights are chosen from the field's value and slope,
+             then tinted with the look's own colours, so the surface reads as a material and not a screensaver
+          4) contour lines from fract(f * k) give a map-like precision layer for almost free
+          5) frame-deterministic grain: hashed per pixel and per frame number, never Math.random
+USE       props.theme (background, surface, accent, accent2, ink); props.scale (render resolution fraction); loops every `duration` s
+-->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+<body><canvas id="c"></canvas>
+<script>
+const P = Object.assign({ duration: 10, transparent: false, scale: 1, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+const T = Object.assign({ background: "#101820", surface: "#1d3b45", accent: "#e8b85c", accent2: "#d9704f", ink: "#f4efe6" }, P.theme);
+const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+const canvas = document.getElementById("c");
+canvas.width = Math.round(innerWidth * P.scale); canvas.height = Math.round(innerHeight * P.scale);
+const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true, alpha: false, antialias: false });
+const vert = `#version 300 es
+void main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+const frag = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uPhase; uniform float uFrame;
+uniform vec3 cBg, cSurface, cA, cB, cInk;
+out vec4 o;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
+float fbm(vec2 p) { float a = 0.5, s = 0.0; mat2 r = mat2(0.8, -0.6, 0.6, 0.8); for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = r * p * 2.03 + 11.7; a *= 0.5; } return s; }
+float field(vec2 p) {
+  vec2 loop = 0.55 * vec2(cos(uPhase), sin(uPhase));               // time = a circle in noise space: a perfect loop
+  vec2 q = vec2(fbm(p * 0.8 + loop), fbm(p * 0.8 + vec2(5.2, 1.3) - loop));
+  vec2 r = vec2(fbm(p + 2.1 * q + vec2(1.7, 9.2) + loop.yx), fbm(p + 2.1 * q + vec2(8.3, 2.8) - loop.yx));
+  return fbm(p + 2.1 * r);
+}
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y, p = uv * 2.6;
+  float f = field(p), e = 2.0 / uRes.y * 2.6;
+  vec2 grad = vec2(field(p + vec2(e, 0)) - field(p - vec2(e, 0)), field(p + vec2(0, e)) - field(p - vec2(0, e))) / (2.0 * e);
+  float slope = clamp(length(grad) * 0.9, 0.0, 1.0), lit = clamp(0.5 + 0.9 * dot(normalize(grad + 1e-5), normalize(vec2(-0.6, 0.8))) * slope, 0.0, 1.0);
+  vec3 col = mix(cBg, cSurface, smoothstep(0.25, 0.62, f));        // base material by field value
+  col = mix(col, cA, smoothstep(0.55, 0.9, f) * (0.35 + 0.65 * lit));// highlights follow value and light direction
+  col = mix(col, cB, smoothstep(0.72, 0.95, f) * slope * 0.8);      // a second hue only on the steepest ridges
+  float band = smoothstep(0.035, 0.0, abs(fract(f * 9.0) - 0.5) - 0.455); // thin contour lines
+  col = mix(col, cInk, band * 0.16);
+  col *= 1.0 - 0.45 * dot(uv, uv);                                   // vignette
+  col += (hash(gl_FragCoord.xy + uFrame * 17.0) - 0.5) * 0.035;      // deterministic grain
+  o = vec4(col, 1.0);
+}`;
+function compile(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const program = gl.createProgram(); gl.attachShader(program, compile(gl.VERTEX_SHADER, vert)); gl.attachShader(program, compile(gl.FRAGMENT_SHADER, frag)); gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+gl.useProgram(program); gl.bindVertexArray(gl.createVertexArray()); gl.viewport(0, 0, canvas.width, canvas.height);
+const set3 = (name, hex) => gl.uniform3fv(gl.getUniformLocation(program, name), rgb(hex));
+set3("cBg", T.background); set3("cSurface", T.surface); set3("cA", T.accent); set3("cB", T.accent2); set3("cInk", T.ink);
+gl.uniform2f(gl.getUniformLocation(program, "uRes"), canvas.width, canvas.height);
+const phase = gl.getUniformLocation(program, "uPhase"), frameNo = gl.getUniformLocation(program, "uFrame");
+window.renderFrame = async t => {
+  gl.uniform1f(phase, (t % P.duration) / P.duration * Math.PI * 2); gl.uniform1f(frameNo, Math.round(t * 30) % 4096);
+  gl.drawArrays(gl.TRIANGLES, 0, 3); gl.finish();
+};
+</script>

@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Blender shot + 2D annotations tracked to 3D anchors, in plain HTML</title>
+<!--
+APPROACH  merge of two approaches without a framework: an RGBA image sequence from Blender (video_shot) drawn on a canvas, with SVG
+          annotations positioned from the per-frame anchor projections Blender exported (anchors.json)
+TAGS      labels callouts annotations pinned tracking following 3D object features anchors occlusion overlay hybrid
+CONCEPTS  1) the 3D renderer owns the camera and the object; the page owns type, rules and timing. Anchors are the contract between them:
+             Blender projects named 3D points to screen space for every frame, so a label never drifts off the feature it names
+          2) frame-exact playback: images are decoded on demand (img.decode()) and cached, so a seek to any t draws that exact frame
+          3) blending between rendered frames lets a 12 fps render play smoothly at 30 fps for slow camera moves; a looping shot wraps, any other holds its last frame
+          4) occlusion: an anchor's visible flag fades its annotation when the feature turns behind the object
+          5) fonts and palette arrive as props from the film's look, so the overlay is typeset like every other scene
+USE       props.shot = "shots/gauge" (a folder with shot.json, anchors.json and frame-0001.png ... relative to this page, or under a
+          Remotion project's public/); props.notes = [{ anchor: "Anchor_Dial", text: "Dial", sub: "knurled, 40 ridges", at: 1.2, dx: 220, dy: -140 }]
+-->
+<style>
+  :root { --bg:#10181c; --ink:#eef2f0; --muted:#8aa0a6; --accent:#e9a63d; --text: system-ui, sans-serif; --mono: ui-monospace, monospace; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--text); }
+  body.transparent { background: transparent; }
+  canvas, svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .t { font: 700 30px var(--text); fill: var(--ink); } .s { font: 500 20px var(--mono); fill: var(--muted); }
+</style>
+<body><canvas id="c"></canvas><svg id="o"></svg>
+<script>
+const P = Object.assign({ duration: 4, transparent: false, shot: "shot", notes: [], theme: {}, fonts: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, ink: P.theme.ink, muted: P.theme.muted, accent: P.theme.accent, text: P.theme.text && `"${P.theme.text}", system-ui, sans-serif`, mono: P.theme.mono && `"${P.theme.mono}", ui-monospace, monospace` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const fontsReady = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d"), svg = document.getElementById("o"), W = canvas.width = innerWidth, H = canvas.height = innerHeight;
+svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+const NS = "http://www.w3.org/2000/svg", clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v)), ease = t => 1 - (1 - t) ** 3;
+const load = url => new Promise((ok, fail) => { const x = new XMLHttpRequest(); x.open("GET", url); x.onload = () => ok(JSON.parse(x.responseText)); x.onerror = () => fail(new Error(`cannot read ${url}`)); x.send(); });   // XHR, because fetch() refuses file:// while XHR works under the exporter and over http in Remotion
+const ready = (async () => {
+  const meta = await load(`${P.shot}/shot.json`), track = meta.anchors ? await load(`${P.shot}/${meta.anchors}`) : null;
+  return { meta, track, images: new Map() };
+})();
+async function image(state, index) {                                         // decode on demand; the cache keeps seeks cheap
+  if (!state.images.has(index)) { const img = new Image(); img.src = `${P.shot}/frame-${String(index + 1).padStart(4, "0")}.png`; state.images.set(index, img.decode().then(() => img)); }
+  return state.images.get(index);
+}
+window.renderFrame = async t => {
+  await fontsReady; const state = await ready, { meta, track } = state;
+  const raw = t * meta.fps, pos = meta.loop ? raw % meta.frames : Math.min(raw, meta.frames - 1), a = Math.floor(pos), b = meta.loop ? (a + 1) % meta.frames : Math.min(a + 1, meta.frames - 1), mix = pos - a;   // loops wrap; other shots hold their last frame
+  const k = Math.min(W / meta.width, H / meta.height), w = meta.width * k, h = meta.height * k, x0 = (W - w) / 2, y0 = (H - h) / 2;   // contain
+  ctx.clearRect(0, 0, W, H); if (!P.transparent) { ctx.fillStyle = getComputedStyle(document.body).backgroundColor; ctx.fillRect(0, 0, W, H); }
+  ctx.drawImage(await image(state, a), x0, y0, w, h);
+  if (mix > 0.02) { ctx.globalAlpha = mix; ctx.drawImage(await image(state, b), x0, y0, w, h); ctx.globalAlpha = 1; }
+  svg.replaceChildren();
+  if (!track) return;
+  for (const note of P.notes) {
+    const A = track.frames[a]?.anchors[note.anchor], B = track.frames[b]?.anchors[note.anchor]; if (!A || !B) continue;
+    const px = x0 + (A.x + (B.x - A.x) * mix) * w, py = y0 + (A.y + (B.y - A.y) * mix) * h, seen = (A.visible ? 1 - mix : 0) + (B.visible ? mix : 0);
+    const draw = ease(clamp((t - (note.at ?? 0)) / 0.7)); if (draw <= 0 || seen <= 0.01) continue;
+    let dx = note.dx ?? (px < W / 2 ? -200 : 200); if ((px + dx < 260 && dx < 0) || (px + dx > W - 260 && dx > 0)) dx = -dx;   // a label never leaves the frame: flip it to the other side
+    const dy = note.dy ?? -130, ex = px + dx, ey = py + dy, side = dx >= 0 ? 1 : -1;
+    const g = document.createElementNS(NS, "g"); g.setAttribute("opacity", seen); svg.append(g);
+    g.innerHTML = `<circle cx="${px}" cy="${py}" r="15" fill="none" stroke="var(--ink)" stroke-width="1.5" opacity="${draw * 0.9}"/><circle cx="${px}" cy="${py}" r="11" fill="none" stroke="var(--accent)" stroke-width="3" opacity="${draw}"/>
+      <path d="M ${px} ${py} L ${ex - 34 * side} ${ey} L ${ex} ${ey}" pathLength="1" stroke-dasharray="1" stroke-dashoffset="${1 - draw}" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      <text class="t" x="${ex + 14 * side}" y="${ey - 12}" text-anchor="${side > 0 ? "start" : "end"}" opacity="${clamp((draw - 0.5) * 2)}">${note.text}</text>
+      ${note.sub ? `<text class="s" x="${ex + 14 * side}" y="${ey + 22}" text-anchor="${side > 0 ? "start" : "end"}" opacity="${clamp((draw - 0.6) * 2.5)}">${note.sub}</text>` : ""}`;
+  }
+};
+</script>

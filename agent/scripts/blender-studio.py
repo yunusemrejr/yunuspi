@@ -1,7 +1,7 @@
 """Headless Blender worker for the YunusPi blender_* tools.
 
 Runs inside Blender (`blender -b [file.blend] -P blender-studio.py -- request.json`).
-The request JSON carries one `op` (inspect, render, export, dataset); the
+The request JSON carries one `op` (inspect, render, export, dataset, splat_preview, shot); the
 result is printed as a single `YUNUSPI_RESULT {json}` line so the harness
 can parse it out of Blender's own stdout noise. Everything here uses the
 data API with deterministic names and never deletes user objects.
@@ -533,7 +533,540 @@ def op_splat_preview(req):
     return {"files": files, "splats": int(total), "shown": int(len(xyz)), "center": [round(float(c), 4) for c in center], "extent": round(extent, 4), "radius": round(distance, 4), "seconds": round(time.time() - started, 1), "render": summarize_render(scene)}
 
 
-OPS = {"inspect": op_inspect, "render": op_render, "export": op_export, "dataset": op_dataset, "splat_preview": op_splat_preview}
+# ───────────────────────────── shots for video projects ─────────────────────────────
+# A shot is a short camera move around one subject, rendered as an RGBA image
+# sequence with a manifest and per-frame screen positions of named anchors, so
+# a video timeline can composite it and pin 2D annotations to 3D features.
+
+SUBJECT_TYPES = {"MESH", "CURVE", "FONT", "SURFACE", "META"}
+
+
+def srgb_to_linear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def hex_color(value, fallback):
+    """#rrggbb -> linear RGBA tuple (Blender colours are scene-linear)."""
+    text = value if isinstance(value, str) else fallback
+    text = text.strip().lstrip("#")
+    if len(text) != 6:
+        text = fallback.lstrip("#")
+    r, g, b = (int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    return (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0)
+
+
+def mix_color(a, b, t):
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3)) + (1.0,)
+
+
+def subject_objects(scene):
+    return [o for o in scene.objects if o.type in SUBJECT_TYPES and not o.hide_render and not o.name.startswith("YP_")]
+
+
+def subject_bounds(scene):
+    from mathutils import Vector
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    lo = Vector((math.inf,) * 3)
+    hi = Vector((-math.inf,) * 3)
+    for obj in subject_objects(scene):
+        evaluated = obj.evaluated_get(depsgraph)
+        for corner in evaluated.bound_box:
+            world = obj.matrix_world @ Vector(corner)
+            lo = Vector(min(a, b) for a, b in zip(lo, world))
+            hi = Vector(max(a, b) for a, b in zip(hi, world))
+    if lo.x == math.inf:
+        raise RuntimeError("the shot has no renderable subject (mesh, curve or text object)")
+    center = (lo + hi) / 2
+    radius = max((Vector(c) - center).length for c in [(x, y, z) for x in (lo.x, hi.x) for y in (lo.y, hi.y) for z in (lo.z, hi.z)])
+    return lo, hi, center, max(radius, 1e-4)
+
+
+def clear_scene_objects():
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def import_model(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".glb", ".gltf"):
+        bpy.ops.import_scene.gltf(filepath=path)
+    elif ext == ".obj":
+        bpy.ops.wm.obj_import(filepath=path)
+    elif ext == ".ply":
+        bpy.ops.wm.ply_import(filepath=path)
+    elif ext == ".stl":
+        bpy.ops.wm.stl_import(filepath=path)
+    elif ext == ".fbx":
+        bpy.ops.import_scene.fbx(filepath=path)
+    else:
+        raise RuntimeError(f"model format {ext} is not supported; use glb, gltf, obj, ply, stl or fbx")
+
+
+def make_title(spec):
+    """Extruded, bevelled 3D text standing upright and facing the default camera (-Y)."""
+    curve = bpy.data.curves.new("YP_TitleCurve", "FONT")
+    curve.body = str(spec.get("text") or "TITLE")[:120]
+    curve.size = 1.0
+    curve.extrude = float(spec.get("depth") or 0.18)
+    curve.bevel_depth = float(spec.get("bevel") or 0.025)
+    curve.bevel_resolution = 4
+    curve.align_x = "CENTER"
+    curve.align_y = "CENTER"
+    curve.space_line = 0.9
+    if spec.get("font"):
+        curve.font = bpy.data.fonts.load(spec["font"])
+    obj = bpy.data.objects.new("Title", curve)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.rotation_euler = (math.radians(90), 0, 0)
+    return obj
+
+
+def principled(name, color, kind):
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    node = material.node_tree.nodes.get("Principled BSDF")
+    node.inputs["Base Color"].default_value = color
+    settings = {
+        "clay": {"Roughness": 0.62, "Metallic": 0.0},
+        "satin": {"Roughness": 0.38, "Metallic": 0.55},
+        "metal": {"Roughness": 0.24, "Metallic": 1.0},
+        "glass": {"Roughness": 0.04, "Metallic": 0.0, "Transmission Weight": 1.0, "IOR": 1.45},
+        "glow": {"Roughness": 0.5, "Metallic": 0.0},
+    }[kind]
+    for key, value in settings.items():
+        if key in node.inputs:
+            node.inputs[key].default_value = value
+    if kind == "glow":
+        for key in ("Emission Color", "Emission"):
+            if key in node.inputs:
+                node.inputs[key].default_value = color
+        if "Emission Strength" in node.inputs:
+            node.inputs["Emission Strength"].default_value = 2.5
+    return material
+
+
+def override_materials(scene, kind, color):
+    material = principled(f"YP_{kind}", color, kind)
+    for obj in subject_objects(scene):
+        if obj.type in {"MESH", "CURVE", "FONT", "SURFACE"}:
+            obj.data.materials.clear()
+            obj.data.materials.append(material)
+
+
+def ease_curve(t, kind):
+    t = max(0.0, min(1.0, t))
+    if kind == "linear":
+        return t
+    if kind == "out":
+        return 1 - (1 - t) ** 3
+    if kind == "in":
+        return t ** 3
+    return t * t * (3 - 2 * t)
+
+
+def camera_pose(rig, t, p):
+    """Camera azimuth (degrees from -Y toward +X), elevation (degrees) and a distance factor at progress t."""
+    a0, el, deg = p["azimuth"], p["elevation"], p["degrees"]
+    e = ease_curve(t, p["ease"])
+    if rig == "turntable":
+        return a0 + deg * t, el, 1.0
+    if rig == "orbit":
+        return a0 + deg * (e - 0.5), el + 3.0 * math.sin(math.pi * e), 1.0
+    if rig == "push-in":
+        return a0 + 6.0 * e, el, 1.0 + (p["travel"] - 1.0) * e
+    if rig == "pull-out":
+        return a0 + 6.0 * e, el, p["travel"] + (1.0 - p["travel"]) * e
+    if rig == "crane":
+        return a0 + deg * 0.5 * e, el + (p["elevation_end"] - el) * e, 0.85 + 0.3 * e
+    if rig == "drift":
+        w = 2 * math.pi * t
+        return a0 + 2.6 * math.sin(w) + 1.1 * math.sin(2 * w + 0.8), el + 1.4 * math.sin(w + 1.7), 1.0 + 0.012 * math.sin(w + 0.4)
+    return a0, el, 1.0
+
+
+LOOPING_RIGS = {"turntable", "drift"}
+RIGS = ("turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static")
+
+
+def add_studio_lights(scene, center, radius, preset, key_color, rim_color, strength):
+    """Area lights sized to the subject: a large soft key, a dim opposing fill and a rim for separation."""
+    from mathutils import Vector
+
+    def area(name, azimuth, elevation, distance, size, power, color):
+        az, el = math.radians(azimuth), math.radians(elevation)
+        data = bpy.data.lights.new(f"YP_{name}", "AREA")
+        data.shape = "RECTANGLE"
+        data.size = size
+        data.size_y = size * 0.7
+        data.energy = power * strength * (distance / 4.0) ** 2
+        data.color = color[:3]
+        obj = bpy.data.objects.new(f"YP_{name}", data)
+        scene.collection.objects.link(obj)
+        obj.location = center + Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el))) * distance
+        look_at(obj, center)
+        return obj
+
+    d = radius * 3.2
+    if preset == "softbox":
+        area("Key", -42, 38, d, radius * 3.4, 520, key_color)
+        area("Fill", 58, 14, d * 1.1, radius * 4.0, 120, mix_color(key_color, rim_color, 0.5))
+        area("Rim", 155, 28, d, radius * 2.2, 560, rim_color)
+    elif preset == "rim":
+        area("RimL", 128, 22, d, radius * 2.0, 760, rim_color)
+        area("RimR", -138, 26, d, radius * 2.0, 520, key_color)
+        area("Fill", -20, 10, d * 1.3, radius * 3.0, 40, key_color)
+    elif preset == "top":
+        area("Top", 0, 82, d, radius * 5.0, 620, key_color)
+        area("Fill", -60, 12, d * 1.2, radius * 3.5, 90, mix_color(key_color, rim_color, 0.4))
+        area("Rim", 150, 20, d, radius * 2.0, 360, rim_color)
+    elif preset == "overcast":
+        area("Dome", 0, 70, d * 1.2, radius * 8.0, 520, key_color)
+        area("Fill", 180, 30, d * 1.2, radius * 6.0, 180, mix_color(key_color, rim_color, 0.3))
+
+
+def shot_lens_distance(scene, cam_data, radius, margin):
+    aspect = scene.render.resolution_x / max(1, scene.render.resolution_y)
+    hfov = 2 * math.atan(cam_data.sensor_width / (2 * cam_data.lens))
+    vfov = 2 * math.atan(math.tan(hfov / 2) / aspect)
+    half = min(hfov, vfov) / 2
+    return radius / math.sin(half) * margin
+
+
+def anchor_points(spec, lo, hi, center):
+    """Resolve anchor specs to callables returning a world-space point (Vector) at the current frame."""
+    from mathutils import Vector
+    named = {
+        "bbox:top": Vector((center.x, center.y, hi.z)), "bbox:bottom": Vector((center.x, center.y, lo.z)),
+        "bbox:left": Vector((lo.x, center.y, center.z)), "bbox:right": Vector((hi.x, center.y, center.z)),
+        "bbox:front": Vector((center.x, lo.y, center.z)), "bbox:back": Vector((center.x, hi.y, center.z)),
+        "bbox:center": center.copy(),
+    }
+    out = {}
+    for item in spec:
+        name = str(item)
+        if name in named:
+            out[name.split(":", 1)[1] if name.startswith("bbox:") else name] = (lambda point=named[name]: point)
+        elif name in bpy.data.objects:
+            out[name] = (lambda obj=bpy.data.objects[name]: obj.matrix_world.translation.copy())
+        else:
+            raise RuntimeError(f"anchor {name!r} is neither an object in the scene nor one of {sorted(named)}")
+    return out
+
+
+def write_png(path, rgba):
+    """Write an 8-bit RGBA PNG from an H x W x 4 uint8 array (top row first) without extra libraries."""
+    import struct
+    import zlib
+    height, width, _ = rgba.shape
+    raw = b"".join(b"\x00" + rgba[y].tobytes() for y in range(height))
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    with open(path, "wb") as handle:
+        handle.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def read_pixels(path, raw=False):
+    """Load a rendered image as an H x W x 4 float array, top row first. raw keeps the stored (display) values."""
+    import numpy
+    image = bpy.data.images.load(path)
+    try:
+        if raw:
+            image.colorspace_settings.name = "Non-Color"
+        data = numpy.empty(len(image.pixels), dtype=numpy.float32)
+        image.pixels.foreach_get(data)
+        return data.reshape(image.size[1], image.size[0], 4)[::-1].copy()
+    finally:
+        bpy.data.images.remove(image)
+
+
+def render_pass(scene, render, path):
+    render.filepath = path
+    bpy.ops.render.render(write_still=True, scene=scene.name)
+    if not os.path.exists(path):
+        raise RuntimeError(f"Blender reported success but {path} was not written")
+
+
+def box_blur(values, radius):
+    """Separable box blur of an H x W array through cumulative sums (edges clamp)."""
+    import numpy
+    out = values.astype(numpy.float32)
+    for axis in (0, 1):
+        padded = numpy.concatenate([numpy.repeat(numpy.take(out, [0], axis=axis), radius, axis=axis), out, numpy.repeat(numpy.take(out, [-1], axis=axis), radius, axis=axis)], axis=axis)
+        total = numpy.cumsum(padded, axis=axis, dtype=numpy.float64)
+        head = numpy.take(total, range(2 * radius, total.shape[axis]), axis=axis)
+        tail = numpy.concatenate([numpy.zeros_like(numpy.take(total, [0], axis=axis)), numpy.take(total, range(0, total.shape[axis] - 2 * radius - 1), axis=axis)], axis=axis)
+        out = ((head - tail) / (2 * radius + 1)).astype(numpy.float32)
+    return out
+
+
+def soft_shadow_layer(scene, render, floor, contact, subjects, work_path, samples):
+    """Ground shadow as an alpha map: the floor lit with the subject casting shadows, divided by the floor lit
+    without them. Works in EEVEE, which has no shadow catcher; the lights and softness are the scene's own.
+    The passes are scene-linear EXR so bright floors never clip and the ratio stays physical."""
+    import numpy
+    settings = render.image_settings
+    saved = (render.film_transparent, settings.file_format, settings.color_depth, settings.color_mode, scene.eevee.taa_render_samples if render.engine == "BLENDER_EEVEE" else None)
+    floor.visible_camera = True
+    contact.hide_render = False
+    render.film_transparent = False
+    settings.file_format, settings.color_depth, settings.color_mode = "OPEN_EXR", "16", "RGBA"
+    if saved[4] is not None:
+        scene.eevee.taa_render_samples = samples
+    exr = work_path.replace(".png", ".exr")
+    try:
+        for obj in subjects:
+            obj.visible_camera = False
+        render_pass(scene, render, exr)
+        shadowed = read_pixels(exr)
+        for obj in subjects:
+            obj.visible_shadow = False
+        os.remove(exr)
+        render_pass(scene, render, exr)
+        open_floor = read_pixels(exr)
+    finally:
+        for obj in subjects:
+            obj.visible_camera = True
+            obj.visible_shadow = True
+        floor.visible_camera = False
+        contact.hide_render = True
+        render.film_transparent = saved[0]
+        settings.file_format, settings.color_depth, settings.color_mode = saved[1], saved[2], saved[3]
+        if saved[4] is not None:
+            scene.eevee.taa_render_samples = saved[4]
+        if os.path.exists(exr):
+            os.remove(exr)
+    weights = numpy.array([0.2126, 0.7152, 0.0722], dtype=numpy.float32)
+    lit, free = shadowed[..., :3] @ weights, open_floor[..., :3] @ weights
+    # Few-sample EEVEE shadows are noisy; a small box blur reads as the penumbra they stand for.
+    radius_px = max(2, render.resolution_x * render.resolution_percentage // 100 // 320)
+    shadow = box_blur(numpy.clip(1.0 - lit / numpy.maximum(free, 1e-4), 0.0, 1.0), radius_px)
+    # The shadowed floor itself, normalised, is the lighting a flat background borrows: a pool of light with falloff and the shadow in it.
+    pool = box_blur(lit, radius_px) / max(float(numpy.percentile(free, 98)), 1e-4)
+    return shadow, pool
+
+
+def composite_shot(beauty, layers, shadow_rgb, strength, flat):
+    """Subject over its ground shadow, or over a flat colour lit by the same floor pool, straight alpha, uint8."""
+    import numpy
+    alpha_b = beauty[..., 3:4]
+    if flat is not None:
+        base = numpy.array(flat[:3], dtype=numpy.float32)
+        if layers is not None:
+            base = base * (0.4 + 1.0 * numpy.clip(layers[1], 0.0, 1.25))[..., None]
+        base = numpy.clip(numpy.broadcast_to(base, beauty[..., :3].shape), 0.0, 1.0)
+        out = beauty[..., :3] * alpha_b + base * (1.0 - alpha_b)
+        return (numpy.clip(numpy.concatenate([out, numpy.ones_like(alpha_b)], axis=-1), 0, 1) * 255 + 0.5).astype("uint8")
+    alpha_s = (layers[0][..., None] * strength) if layers is not None else numpy.zeros_like(alpha_b)
+    color_s = numpy.broadcast_to(numpy.array(shadow_rgb[:3], dtype=numpy.float32), beauty[..., :3].shape)
+    out_a = alpha_b + alpha_s * (1.0 - alpha_b)
+    out_c = (beauty[..., :3] * alpha_b + color_s * alpha_s * (1.0 - alpha_b)) / numpy.maximum(out_a, 1e-6)
+    return (numpy.clip(numpy.concatenate([out_c, out_a], axis=-1), 0, 1) * 255 + 0.5).astype("uint8")
+
+
+def display_hex(value, fallback):
+    """#rrggbb -> display-space floats (what a PNG stores), for compositing outside Blender's colour pipeline."""
+    text = (value if isinstance(value, str) else fallback).strip().lstrip("#")
+    if len(text) != 6:
+        text = fallback.lstrip("#")
+    return tuple(int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def op_shot(req):
+    from bpy_extras.object_utils import world_to_camera_view
+    from mathutils import Vector
+    scene = bpy.context.scene
+    started = time.time()
+    source = req.get("source") or "blend"
+    if source != "blend":
+        clear_scene_objects()
+        for light in list(bpy.data.lights):
+            bpy.data.lights.remove(light)
+        if source == "model":
+            import_model(req["model"])
+        elif source == "title":
+            make_title(req.get("title") or {})
+        else:
+            raise RuntimeError(f"unknown shot source {source}")
+    elif not subject_objects(scene):
+        raise RuntimeError("the .blend has no renderable subject object")
+    palette = req.get("palette") or {}
+    accent = hex_color(palette.get("accent"), "#D9A441")
+    accent2 = hex_color(palette.get("accent2"), "#4A8FA3")
+    ground = hex_color(palette.get("background"), "#181A1B")
+    if req.get("material") and req["material"] != "keep":
+        override_materials(scene, req["material"], hex_color(req.get("color"), palette.get("accent") or "#D9A441"))
+    elif source != "blend" and not any(m.users for m in bpy.data.materials if m.name != "Dots Stroke"):
+        override_materials(scene, "clay", hex_color(req.get("color"), palette.get("accent") or "#D9A441"))
+    bpy.context.view_layer.update()
+    # The subject's own animation (letters dropping in, a rig turning) plays on the blend's clock; the shot clock maps onto it.
+    blend_fps = scene.render.fps / (scene.render.fps_base or 1.0)
+    blend_start, blend_end = scene.frame_start, scene.frame_end
+    shot_fps = float(req.get("fps") or 30)
+    shot_count = max(2, int(round(float(req.get("seconds") or 4) * shot_fps)))
+    blend_frame = lambda k: min(blend_end, blend_start + int(round(k / shot_fps * blend_fps)))
+    scene.frame_set(blend_frame(shot_count - 1))
+    lo, hi, center, radius = subject_bounds(scene)
+
+    # The beauty pass is always transparent; a flat background is composited afterwards so the shadow layer can sit under the subject.
+    render = apply_render_settings(scene, {**req, "format": "PNG", "transparent": True})
+    render.image_settings.color_mode = "RGBA"
+    try:
+        scene.view_settings.view_transform = "Khronos PBR Neutral"
+    except TypeError:
+        scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "None"
+    world = scene.world or bpy.data.worlds.new("YP_World")
+    scene.world = world
+    world.use_nodes = True
+    background = world.node_tree.nodes.get("Background")
+    background.inputs["Color"].default_value = mix_color(ground, (1, 1, 1, 1), 0.04)
+    background.inputs["Strength"].default_value = float(req.get("ambient", 0.35))
+
+    preset = req.get("lights") or "softbox"
+    if preset != "scene":
+        for light in [o for o in scene.objects if o.type == "LIGHT" and not o.name.startswith("YP_")]:
+            bpy.data.objects.remove(light, do_unlink=True)
+        add_studio_lights(scene, center, radius, preset, mix_color(hex_color("#FFF3E2", "#FFF3E2"), accent, 0.06), mix_color(accent2, (1, 1, 1, 1), 0.25), float(req.get("lightStrength", 1.0)))
+
+    # shadow: "none" (floating subject), "soft" (EEVEE-friendly ground shadow composited per frame) or "catcher" (Cycles shadow catcher).
+    shadow_mode = req.get("shadow") or ("none" if source == "title" else "soft")
+    if shadow_mode not in ("none", "soft", "catcher"):
+        raise RuntimeError("shadow must be none, soft or catcher")
+    floor = contact_obj = None
+    if shadow_mode != "none":
+        size = radius * 40
+        mesh = bpy.data.meshes.new("YP_GroundMesh")
+        mesh.from_pydata([(-size, -size, 0), (size, -size, 0), (size, size, 0), (-size, size, 0)], [], [(0, 1, 2, 3)])
+        floor = bpy.data.objects.new("YP_Ground", mesh)
+        scene.collection.objects.link(floor)
+        floor.location = (0, 0, lo.z - 0.0005 * radius)
+        floor.data.materials.append(principled("YP_GroundMat", (0.8, 0.8, 0.8, 1.0), "clay"))
+        if shadow_mode == "catcher":
+            floor.is_shadow_catcher = True
+        else:
+            floor.visible_camera = False
+            # A soft overhead light that exists only in the shadow passes: it grounds the subject with a contact shadow.
+            contact = bpy.data.lights.new("YP_Contact", "AREA")
+            contact.size = radius * 7.0
+            contact.energy = 2600 * float(req.get("lightStrength", 1.0)) * (radius * 3.2 / 4.0) ** 2
+            contact_obj = bpy.data.objects.new("YP_Contact", contact)
+            scene.collection.objects.link(contact_obj)
+            contact_obj.location = center + Vector((0, 0, radius * 3.2))
+            contact_obj.rotation_euler = (0, 0, 0)
+            contact_obj.hide_render = True
+
+    cam_data = bpy.data.cameras.new("YP_Camera")
+    cam_data.sensor_fit = "HORIZONTAL"
+    cam_data.sensor_width = 36.0
+    cam_data.lens = float(req.get("lensMm") or 60)
+    cam = bpy.data.objects.new("YP_Camera", cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    offset = req.get("offset") or [0, 0]
+    # Blender shifts the camera frame, so the subject moves the opposite way; negate so a positive offset moves the subject right and up.
+    cam_data.shift_x, cam_data.shift_y = -float(offset[0]), -float(offset[1])
+    if req.get("fStop"):
+        cam_data.dof.use_dof = True
+        cam_data.dof.aperture_fstop = float(req["fStop"])
+    if req.get("motionBlur"):
+        scene.render.use_motion_blur = True
+
+    rig = req.get("rig") or "turntable"
+    if rig not in RIGS:
+        raise RuntimeError(f"rig must be one of {', '.join(RIGS)}")
+    fps, count = shot_fps, shot_count
+    params = {
+        "azimuth": float(req.get("azimuth", 28)), "elevation": float(req.get("elevation", 20)), "ease": req.get("ease") or "inOut",
+        "degrees": float(req.get("degrees", 360 if rig == "turntable" else 70 if rig == "orbit" else 80)),
+        "travel": float(req.get("travel", 0.62)), "elevation_end": float(req.get("elevationEnd", 36)),
+    }
+    base_distance = shot_lens_distance(scene, cam_data, radius, float(req.get("margin", 1.18)))
+    anchors = anchor_points(req.get("anchors") or [], lo, hi, center)
+    poses = []
+    for k in range(count):
+        t = k / count if rig in LOOPING_RIGS else k / (count - 1)
+        azimuth, elevation, factor = camera_pose(rig, t, params)
+        az, el = math.radians(azimuth), math.radians(elevation)
+        d = base_distance * factor
+        poses.append((center + Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el))) * d, d))
+
+    def aim(k):
+        cam.location, distance = poses[k]
+        look_at(cam, center)
+        if cam_data.dof.use_dof:
+            cam_data.dof.focus_distance = distance
+
+    out_dir = req["outputDir"]
+    os.makedirs(out_dir, exist_ok=True)
+    files, track = [], []
+    subjects = subject_objects(scene)
+    flat_background = None if req.get("transparent", True) else display_hex(palette.get("background"), "#181A1B")
+    shadow_color = (0.0, 0.0, 0.0)
+    for frame in range(1, count + 1):
+        scene.frame_set(blend_frame(frame - 1))
+        aim(frame - 1)
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        target = os.path.join(out_dir, f"frame-{frame:04d}.png")
+        t0 = time.time()
+        render_pass(scene, render, target)
+        if shadow_mode == "soft" or flat_background is not None:
+            beauty = read_pixels(target, raw=True)
+            layers = soft_shadow_layer(scene, render, floor, contact_obj, subjects, os.path.join(out_dir, ".pass.png"), int(req.get("shadowSamples") or 20)) if shadow_mode == "soft" else None
+            write_png(target, composite_shot(beauty, layers, shadow_color, float(req.get("shadowStrength", 0.62)), flat_background))
+        files.append({"frame": frame, "path": target, "bytes": os.path.getsize(target), "seconds": round(time.time() - t0, 2)})
+        if anchors:
+            row = {}
+            for name, locate in anchors.items():
+                point = locate()
+                u, v, depth = world_to_camera_view(scene, cam, point)
+                visible = depth > 0 and 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0
+                if visible:
+                    direction = point - cam.matrix_world.translation
+                    distance = direction.length
+                    hit, _loc, _n, _i, _obj, _m = scene.ray_cast(depsgraph, cam.matrix_world.translation, direction.normalized(), distance=distance)
+                    # A hit nearer than the anchor means something stands in front of it.
+                    if hit and (_loc - cam.matrix_world.translation).length < distance - radius * 0.03:
+                        visible = False
+                row[name] = {"x": round(u, 5), "y": round(1.0 - v, 5), "depth": round(depth, 4), "visible": bool(visible)}
+            track.append({"frame": frame, "anchors": row})
+        sys.stdout.write(f"YUNUSPI_PROGRESS shot frame {frame}/{count} in {time.time() - t0:.1f}s\n")
+        sys.stdout.flush()
+    anchors_file = None
+    if track:
+        anchors_file = os.path.join(out_dir, "anchors.json")
+        with open(anchors_file, "w", encoding="utf-8") as handle:
+            json.dump({"format": "yunuspi-shot-anchors-v1", "origin": "top-left", "units": "fraction of frame", "fps": fps, "names": list(anchors), "frames": track}, handle)
+    if req.get("save"):
+        # The editable copy carries the camera move as keyframes on the subject's own timeline.
+        edit = bpy.context.preferences.edit
+        previous_interpolation = edit.keyframe_new_interpolation_type
+        edit.keyframe_new_interpolation_type = "LINEAR"
+        try:
+            for k in range(count):
+                aim(k)
+                cam.keyframe_insert("location", frame=blend_frame(k))
+                cam.keyframe_insert("rotation_euler", frame=blend_frame(k))
+        finally:
+            edit.keyframe_new_interpolation_type = previous_interpolation
+        os.makedirs(os.path.dirname(req["save"]) or ".", exist_ok=True)
+        bpy.ops.wm.save_as_mainfile(filepath=req["save"], copy=True)
+    summary = summarize_render(scene)
+    manifest = {
+        "format": "yunuspi-shot-v1", "name": req.get("name"), "rig": rig, "loop": rig in LOOPING_RIGS, "fps": fps, "frames": count,
+        "width": summary["effective"][0], "height": summary["effective"][1], "alpha": flat_background is None,
+        "pattern": "frame-%04d.png", "anchors": "anchors.json" if anchors_file else None, "anchorNames": list(anchors),
+        "engine": summary["engine"], "samples": summary.get("samples"), "blender": bpy.app.version_string, "subject": {"center": [round(c, 4) for c in center], "radius": round(radius, 4)},
+        "secondsPerFrame": round((time.time() - started) / max(1, len(files)), 2),
+    }
+    with open(os.path.join(out_dir, "shot.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=1)
+    return {"files": files, "manifest": manifest, "anchorsFile": anchors_file, "render": summary, "seconds": round(time.time() - started, 2)}
+
+
+OPS = {"inspect": op_inspect, "render": op_render, "export": op_export, "dataset": op_dataset, "splat_preview": op_splat_preview, "shot": op_shot}
 
 
 def main():

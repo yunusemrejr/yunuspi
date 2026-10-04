@@ -7,7 +7,7 @@ export type FontChoice = { package: string; family: string; weights: number[] };
 export type LookTheme = {
   background: string; surface: string; ink: string; muted: string; accent: string; accent2: string; danger: string;
   display: string; text: string; mono: string;
-  backdrop: "lattice" | "rules" | "halftone" | "contour" | "none";
+  backdrop: "lattice" | "rules" | "halftone" | "contour" | "ticks" | "flow" | "none";
   /** Display face weight/tracking: heavy grotesques want tight tracking, serifs none. */
   displayWeight: number; displayTracking: number;
   caption: "solid" | "outline" | "plain";
@@ -21,6 +21,8 @@ export type Look = {
   theme: LookTheme;
   fonts: FontChoice[];
   audio: { music: { style: string; bpm: number; key: string; mode: "major" | "minor" | "dorian" }; voice: { voice: string; style: string } };
+  /** Present on looks built from a brief (video-derive.ts): the seed, variation and traits that produced it. */
+  derived?: { seed: number; variation: number; hue: number; harmony: string; domains: string[]; character: Record<string, number> };
 };
 
 const plexMono: FontChoice = { package: "ibm-plex-mono", family: "IBM Plex Mono", weights: [400, 500] };
@@ -179,5 +181,40 @@ export function lintDesign(spec: any): LintIssue[] {
   scan(spec?.title); scenes.forEach((scene) => { scan(scene.narration); scan(scene.props); });
   if (left.length) err("placeholder", `Template placeholder text is still present: ${[...new Set(left)].map((s) => JSON.stringify(s)).join(", ")}.`);
   if (scenes.length >= 4 && new Set(scenes.map((scene) => scene.component)).size === 1) warn("identical-scenes", `All ${scenes.length} scenes use the ${scenes[0].component} component; a sequence of identical layouts reads as a slideshow.`);
+  const lengths = scenes.map((scene) => Number(scene.seconds)).filter((value) => Number.isFinite(value) && value > 0);
+  if (lengths.length >= 5) {
+    const mean = lengths.reduce((sum, value) => sum + value, 0) / lengths.length;
+    const spread = Math.sqrt(lengths.reduce((sum, value) => sum + (value - mean) ** 2, 0) / lengths.length) / mean;
+    if (spread < 0.1) warn("metronome", `All ${lengths.length} scenes run about ${mean.toFixed(1)}s; cutting on a fixed beat reads as a template. Let the idea set each length: short for a claim, long for something to study.`);
+  }
+  const transitions = scenes.map((scene) => scene.transition?.type).filter((type) => typeof type === "string" && type !== "none");
+  if (transitions.length >= 4 && new Set(transitions).size === 1) warn("transition-monotony", `Every transition is "${transitions[0]}"; keep one family for continuity but vary its direction or length on purpose, and let the hero moment break the pattern.`);
+  return issues;
+}
+
+/** Findings about default-looking or non-deterministic scene code. `files` maps a project path to its text.
+ * Strings, comments and the theme-derived values the template supplies are not flagged. */
+export function lintSource(files: Record<string, string>, allow: ReadonlySet<string> = new Set()): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const add = (severity: LintIssue["severity"], id: string, message: string) => { if (!allow.has(id)) issues.push({ severity, id, message }); };
+  for (const [file, raw] of Object.entries(files)) {
+    const text = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const where = (pattern: RegExp) => { const hit = pattern.exec(text); return hit ? `${file}:${text.slice(0, hit.index).split("\n").length}` : null; };
+    const random = where(/\bMath\.random\s*\(|\bDate\.now\s*\(|\bperformance\.now\s*\(|\bnew Date\s*\(\s*\)|\bsetTimeout\s*\(|\bsetInterval\s*\(/);
+    if (random) add("error", "nondeterministic", `${random}: Math.random, Date.now, timers and performance.now make frames differ between preview and final; derive values from useCurrentFrame() and rng(seed).`);
+    const glow = where(/box-?[sS]hadow\s*:\s*[`"'][^`"']*0(?:px)?\s+0(?:px)?\s+(?:[2-9]\d|1\d\d)px[^`"']*(?:#|rgba?\(\s*(?!0\s*,\s*0\s*,\s*0))/);
+    if (glow) add("warn", "glow-halo", `${glow}: a coloured glow halo is decoration, not light; use a real shadow (black, offset) or let contrast carry the emphasis.`);
+    for (const gradient of text.matchAll(/gradient\(([^)]*)\)/g)) {
+      const hot = [...gradient[1].matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => hsl(`#${m[1]}`)).filter((c) => c && c.s > 0.45 && c.h >= 235 && c.h <= 335);
+      if (hot.length >= 2) { add("warn", "violet-gradient", `${file}: a gradient between indigo/violet/magenta stops is the loudest machine-made tell; build the wash from the look's own accents (useTheme()).`); break; }
+    }
+    const rail = where(/border-?[lL]eft\s*:\s*[`"']?\s*\$?\{?[^`"';]*\b(?:[3-9]|1\d)px\s+solid/);
+    if (rail) add("warn", "accent-rail", `${rail}: a thick coloured left rail on a block is a generic card tell; give the block structure with spacing and type instead.`);
+    const family = where(/fontFamily\s*:\s*[`"'](?:Inter|Roboto|Poppins|Montserrat|Open Sans|Arial|Helvetica|system-ui|sans-serif)\b/i);
+    if (family) add("warn", "hard-coded-font", `${family}: scenes take their faces from useTheme() (display, text, mono); a hard-coded default family bypasses the look.`);
+    const colors = new Set([...text.matchAll(/["'`]#[0-9a-fA-F]{6}["'`]/g)].map((m) => m[0].toLowerCase()));
+    if (colors.size >= 6 && !/useTheme\s*\(/.test(text)) add("warn", "off-palette", `${file}: ${colors.size} hard-coded colours and no useTheme(); colours outside the look drift from the film's palette and from re-skinning with video_project action:"look".`);
+    if (/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)) add("warn", "emoji-icons", `${file}: emoji stand in for drawn icons; use SVG shapes or type so the glyph set matches the look.`);
+  }
   return issues;
 }

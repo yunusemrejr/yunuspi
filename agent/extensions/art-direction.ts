@@ -17,7 +17,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import {
-  directionSummary, normalizeDirection, parseDirectionFile, renderDirectionBrief,
+  directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
   type CreativeDirection,
 } from "./lib/creative-direction.ts";
 import {
@@ -60,16 +60,7 @@ const sessionOf = (ctx: any): { sid: string; state: SessionCreative } => {
 const isChild = () => process.env.PI_SUBAGENT_CHILD === "1";
 
 async function projectDirectionFile(cwd: string): Promise<string> {
-  const root = await fs.realpath(cwd);
-  return path.join(root, ".pi", "creative-direction.json");
-}
-
-async function readProjectDirection(cwd: string): Promise<CreativeDirection | undefined> {
-  try {
-    return parseDirectionFile(await fs.readFile(await projectDirectionFile(cwd), "utf8"));
-  } catch {
-    return undefined;
-  }
+  return projectDirectionPath(await fs.realpath(cwd));
 }
 
 async function writeProjectDirection(cwd: string, direction: CreativeDirection): Promise<string> {

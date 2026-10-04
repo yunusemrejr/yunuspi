@@ -12,6 +12,20 @@ export const ease = {
   in: Easing.bezier(0.7, 0, 0.84, 0),
 };
 
+/** Named motion personalities. Choose one for the film and use it for most moves; a different
+ * feel on one hero moment reads as intent, while cycling through all of them reads as noise.
+ * snap: decisive, long settle (data arriving, UI emphasis). glide: calm camera-like travel.
+ * weighted: heavy objects, committed middle, soft stop. overshoot: playful, passes and returns.
+ * anticipate: dips back before it goes. stepped: mechanical eighths (tickers, odometers). */
+export const feel = {
+  snap: Easing.bezier(0.2, 0, 0, 1),
+  glide: Easing.bezier(0.33, 0, 0.12, 1),
+  weighted: Easing.bezier(0.7, 0, 0.2, 1),
+  overshoot: Easing.bezier(0.34, 1.45, 0.64, 1),
+  anticipate: Easing.bezier(0.6, -0.35, 0.25, 1),
+  stepped: (t: number) => Math.floor(t * 8) / 8,
+} as const;
+
 /** 0→1 progress starting at `at` over `frames`, clamped and eased. */
 export function progress(frame: number, at: number, frames: number, easing = ease.out): number {
   return interpolate(frame, [at, at + Math.max(1, frames)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing });

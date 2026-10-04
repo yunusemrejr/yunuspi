@@ -52,7 +52,7 @@ function requireBlender(): string {
 async function workspaceRoot(cwd: string) { return fs.realpath(cwd); }
 
 /** Any readable local file (a .blend may live outside the workspace, e.g. a shared asset library). */
-async function readablePath(value: unknown, cwd: string): Promise<string> {
+export async function readablePath(value: unknown, cwd: string): Promise<string> {
   if (typeof value !== "string" || !value.trim() || /[\x00-\x1f]/.test(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) throw new Error("Use a local filesystem path, not a URL");
   const file = canonicalMutationPath(value, await workspaceRoot(cwd));
   const stat = await fs.stat(file).catch(() => { throw new Error(`${file} does not exist`); });

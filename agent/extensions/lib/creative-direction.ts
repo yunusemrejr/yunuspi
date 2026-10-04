@@ -15,6 +15,9 @@
  * Storage schema: `yunuspi-creative-direction-v1`.
  */
 
+import fs from "node:fs/promises";
+import path from "node:path";
+
 export const DIRECTION_FORMAT = "yunuspi-creative-direction-v1";
 /** How much expression the work calls for; the design-direction protocol reads it from the brief. */
 export const AMBITION_LEVELS = ["restrained", "balanced", "immersive"] as const;
@@ -213,6 +216,19 @@ export function parseDirectionFile(text: string): CreativeDirection | undefined 
     const updatedAt = (raw as { updatedAt?: unknown }).updatedAt;
     if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) direction.updatedAt = updatedAt;
     return direction;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Path of the project-scope direction file under a workspace root. */
+export const projectDirectionPath = (root: string): string => path.join(root, ".pi", "creative-direction.json");
+
+/** The project-scope direction of the workspace at `cwd`, for tools (video_project) that follow it without owning it.
+ * Undefined when none is stored; a damaged file degrades to no direction. */
+export async function readProjectDirection(cwd: string): Promise<CreativeDirection | undefined> {
+  try {
+    return parseDirectionFile(await fs.readFile(projectDirectionPath(await fs.realpath(cwd)), "utf8"));
   } catch {
     return undefined;
   }

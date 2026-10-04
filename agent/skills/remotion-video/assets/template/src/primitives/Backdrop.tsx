@@ -4,10 +4,11 @@ import { rng, useCanvas, useTheme } from "../theme";
 
 /** Quiet procedural ground that belongs to the look: "lattice" drifting dots,
  * "rules" ruled verticals, "halftone" a dot screen swelling around slow
- * centres, "contour" flowing iso-lines, "none" a clean field. Every kind
+ * centres, "contour" flowing iso-lines, "ticks" a drifting measuring scale,
+ * "flow" slow curl-noise ribbons, "none" a clean field. Every kind
  * stays below ~8% contrast so it never competes with the subject, and every
  * value is a pure function of the frame. */
-export const Backdrop: React.FC<{ seed?: number; tint?: string; density?: number; kind?: "lattice" | "rules" | "halftone" | "contour" | "none" }> = ({ seed = 7, tint, density = 1, kind }) => {
+export const Backdrop: React.FC<{ seed?: number; tint?: string; density?: number; kind?: "lattice" | "rules" | "halftone" | "contour" | "ticks" | "flow" | "none" }> = ({ seed = 7, tint, density = 1, kind }) => {
   const frame = useCurrentFrame();
   const { width, height } = useCanvas();
   const theme = useTheme();
@@ -50,6 +51,29 @@ export const Backdrop: React.FC<{ seed?: number; tint?: string; density?: number
         const r = Math.max(0, step * 0.42 * (1 - d * 2.4));
         if (r < 0.8) continue;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (family === "ticks") {
+      // a measuring scale: fine ticks every 24px with a longer one every fifth, sliding slowly, on two edges
+      const gap = 24, drift = (frame * 0.4) % (gap * 5);
+      ctx.lineWidth = 1.5;
+      for (let i = -5; i * gap < width + gap * 5; i++) {
+        const x = i * gap + drift, major = ((i % 5) + 5) % 5 === 0;
+        ctx.globalAlpha = major ? 0.13 : 0.07;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, major ? 34 : 18); ctx.moveTo(x, height); ctx.lineTo(x, height - (major ? 34 : 18)); ctx.stroke();
+      }
+    } else if (family === "flow") {
+      // slow ribbons following a smooth vector field: frame-pure, each integrated from a fixed seed point
+      const count = Math.round(70 * density), step = 18, t = frame / 300;
+      ctx.lineWidth = 1.6;
+      for (let i = 0; i < count; i++) {
+        let x = random() * width, y = random() * height;
+        ctx.globalAlpha = 0.05 + 0.05 * random();
+        ctx.beginPath(); ctx.moveTo(x, y);
+        for (let k = 0; k < 26; k++) {
+          const angle = Math.sin(x * 0.004 + t * 1.3 + seed) * 1.9 + Math.cos(y * 0.005 - t + i * 0.01) * 1.6;
+          x += Math.cos(angle) * step; y += Math.sin(angle) * step; ctx.lineTo(x, y);
+        }
+        ctx.stroke();
       }
     } else if (family === "contour") {
       const lines = Math.round(16 * density), phase = frame / 240;

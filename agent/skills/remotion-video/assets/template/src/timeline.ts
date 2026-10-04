@@ -7,7 +7,7 @@ export type Theme = {
   accent: string; accent2: string; danger: string;
   display: string; text: string; mono: string;
   /** Procedural backdrop family; "none" leaves the ground clean. */
-  backdrop?: "lattice" | "rules" | "halftone" | "contour" | "none";
+  backdrop?: "lattice" | "rules" | "halftone" | "contour" | "ticks" | "flow" | "none";
   displayWeight?: number; displayTracking?: number;
   /** Burned-in caption treatment. */
   caption?: "solid" | "outline" | "plain";
@@ -85,6 +85,12 @@ export function cue(scene: Pick<SceneSpec, "id" | "cues">, name: string, fps = s
   const seconds = scene.cues?.[name];
   if (typeof seconds !== "number") throw new Error(`Scene "${scene.id}" has no cue "${name}" in video.json`);
   return toFrames(seconds, fps);
+}
+
+/** A cue that may be absent: the scene still renders, starting at `fallbackSeconds`. */
+export function cueOr(scene: Pick<SceneSpec, "cues">, name: string, fallbackSeconds: number, fps = spec.fps): number {
+  const seconds = scene.cues?.[name];
+  return toFrames(typeof seconds === "number" ? seconds : fallbackSeconds, fps);
 }
 
 /** Absolute-frame windows where narration plays, used to duck music. */

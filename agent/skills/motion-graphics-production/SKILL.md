@@ -13,4 +13,6 @@ Make each frame a function of absolute time. Seed randomness, wait for fonts/ass
 
 Read [rendering and delivery](references/rendering.md) to use the bundled frame exporter or an existing renderer such as Blender. Render selected times first; inspect actual frames for type clipping, composition and transition continuity, then encode and review playback. Audio-reactive amplitude should be smoothed and normalized from measured signals rather than raw sample peaks.
 
+For effects beyond a starter (SVG filters, WebGL fields, kinetic type, audio-reactive scenes, 3D, Blender merges), search `motion_examples` and read the motion-approaches skill instead of writing them from memory; for transparent clips use the exporter's `--alpha`, and for projects embed the page with `HtmlScene`.
+
 Deliver editable sources and the rendered video. Verify duration, frame count, first/last frames, loop seam and audio synchronization. A clean encoder exit does not verify visual quality. For interactive embeds, preserve reduced-motion behavior and playback controls. For a video export, avoid inserting extra frames to compensate for timeline bugs.

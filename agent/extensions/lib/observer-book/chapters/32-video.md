@@ -3,10 +3,10 @@ id: video
 part: media
 title: Motion graphics and video production
 summary: Making videos from code: storyboard first, one idea per scene, visual metaphors over text slides, narration pacing and sync, kinetic typography, sound design, rendering and encoding, and reviewing actual frames.
-terms: video videos motion graphics explainer documentary remotion render rendering scene scenes storyboard narration voiceover voice speech tts subtitle captions timeline keyframe composition ffmpeg mp4 h264 frame frames fps kinetic typography transition cut music sound effects sfx trailer promo animation
+terms: video videos motion graphics explainer documentary remotion render rendering scene scenes storyboard narration voiceover voice speech tts subtitle captions timeline keyframe composition ffmpeg mp4 h264 frame frames fps kinetic typography transition cut music sound effects sfx trailer promo animation blender shader webgl html css svg 3d product hero look palette
 files: video.json .mp4 .mov .webm remotion.config.ts
-tools: video_project video_render video_qa narration_tts audio_synth video_frames media_info media_edit video_compose scene_create scene_render
-skills: code-first-video remotion-video motion-graphics-production procedural-audio terminal-video-editing video-analysis storytelling
+tools: video_project video_render video_shot motion_examples video_qa narration_tts audio_synth video_frames media_info media_edit video_compose scene_create scene_render
+skills: code-first-video remotion-video motion-graphics-production motion-approaches procedural-audio terminal-video-editing video-analysis storytelling
 ---
 
 # Motion graphics and video production
@@ -103,3 +103,29 @@ A video is a sequence of claims on the viewer's attention, each lasting a few se
 **Ask.** Does this render's format match its destination, and has the final file been decoded end to end?
 
 **Traps.** Excessive bitrates for web embeds.
+
+## Pick the approach the idea needs, and merge deliberately {#motion-approach}
+<!-- terms: approach html css js webgl shader svg blender 3d shot render composite overlay anchors merge hybrid library examples copy adapt -->
+
+**Principle.** Choose the technique per idea: a vanilla HTML page for type, shapes and shader fields; a Blender shot for lit 3D; a documented merge when the two must meet. Start from a worked example rather than from memory.
+
+**Why.** Each approach has a strength the others lack: pages give crisp type and effects cheaply, Blender gives real light, depth and camera, FFmpeg gives finish. Advanced motion written from memory tends to be the generic version of the effect; a verified example carries the details (seekable clocks, frame-pure noise, anchor projection, straight-alpha handling) that make it hold up frame by frame. Merging without a contract (shared palette, fonts, frame rate, anchors) produces layers that visibly belong to different films.
+
+**Signals.** Everything built from the same few primitives regardless of idea; 3D faked with CSS where lighting matters, or Blender used for flat type; labels that drift off the 3D feature they name; a 3D layer lit in colours unrelated to the 2D palette; no example consulted.
+
+**Ask.** What does this beat's idea need (type, shader field, lit object, UI on a device), which approach gives it, and what example did the scene start from?
+
+**Traps.** Layering two heavy effects in one scene; shipping an example's placeholder colours or fonts.
+
+## Derive the look and motion language from the subject {#derived-look}
+<!-- terms: look palette font type pair default stock generic template slop swap test originality motion language material verb rhythm easing hold -->
+
+**Principle.** Derive palette, type and motion language from the subject's material, verb and rhythm; replace every stock default with a stated decision.
+
+**Why.** The defaults of video tools (indigo or cyan-magenta glow on dark, teal and orange, cream with terracotta, one display serif or geometric sans, fade-up stagger, slow zoom, particle fields) mark a film as templated before anyone reads it. A motion language that embodies the subject (flowing and damped for water, quantised and ruled for precision, layered and masked for archives) is memorable and coherent. One signature move per scene, held long enough to read, beats constant motion.
+
+**Signals.** The same easing and entrance on every element; glow, halos or particle clouds as decoration; a palette that would suit any topic (the swap test passes); fonts chosen by habit; every scene animating at once.
+
+**Ask.** Could this scene work unchanged for another topic, and what would the subject's own material and verb do instead?
+
+**Traps.** Novelty for its own sake that costs legibility; abandoning a coherent system scene by scene.

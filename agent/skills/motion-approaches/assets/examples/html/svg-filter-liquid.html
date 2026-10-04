@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Liquid type through an SVG filter pipeline</title>
+<!--
+APPROACH  real HTML text pushed through a chain of SVG filter primitives whose parameters are functions of t
+CONCEPTS  1) feTurbulence + feDisplacementMap bends the glyphs like heat shimmer; the displacement scale is the "melt" amount
+          2) goo: blur, then an alpha-channel contrast matrix (0 0 0 18 -7) snaps soft edges into crisp, merging blobs
+          3) chromatic aberration without a library: isolate R, G and B with feColorMatrix, offset each, recombine with screen blend
+          4) a transition built from state, not from cross-fade: word A melts, word B condenses at the peak, then it solidifies
+          5) turbulence seed is constant; only baseFrequency drifts, so adjacent frames stay coherent (no flicker)
+USE       props.text.words = ["TIDE", "TIME"]; props.theme.ink/accent/background; duration defaults to 6s
+-->
+<style>
+  :root { --bg:#0e1411; --ink:#f2efe6; --accent:#ff5d3d; --display: Impact, sans-serif; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body.transparent { background: transparent; }
+  #word { position: absolute; inset: 0; display: grid; place-items: center; font: 900 31vh/1 var(--display); letter-spacing: -.02em; color: var(--ink); filter: url(#liquid); text-transform: uppercase; }
+  #word span { grid-area: 1/1; }
+</style>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="liquid" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+    <feTurbulence id="turb" type="fractalNoise" baseFrequency="0.01 0.02" numOctaves="2" seed="7" result="noise"/>
+    <feDisplacementMap id="disp" in="SourceGraphic" in2="noise" scale="0" xChannelSelector="R" yChannelSelector="G" result="bent"/>
+    <feGaussianBlur id="blur" in="bent" stdDeviation="0" result="soft"/>
+    <feColorMatrix id="goo" in="soft" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0" result="gooey"/>
+    <feColorMatrix in="gooey" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r"/>
+    <feColorMatrix in="gooey" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g"/>
+    <feColorMatrix in="gooey" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b"/>
+    <feOffset id="offR" in="r" dx="0" dy="0" result="r2"/><feOffset id="offB" in="b" dx="0" dy="0" result="b2"/>
+    <feBlend in="r2" in2="g" mode="screen" result="rg"/><feBlend in="rg" in2="b2" mode="screen"/>
+  </filter></defs></svg>
+<div id="word"></div>
+<script>
+const P = Object.assign({ duration: 6, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, ink: P.theme.ink, accent: P.theme.accent, display: P.theme.display && `"${P.theme.display}", Impact, sans-serif` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+const words = P.text.words ?? ["tide", "time"], host = document.getElementById("word");
+host.innerHTML = words.map(w => `<span>${w}</span>`).join(""); const spans = [...host.children];
+const $ = id => document.getElementById(id), clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v)), smooth = t => t * t * (3 - 2 * t);
+window.renderFrame = async t => {
+  await ready;
+  const u = (t % P.duration) / P.duration, seg = u * words.length, i = Math.floor(seg), local = seg - i;
+  // melt rises to 1 at the middle of each hold-to-hold interval and falls again; the next word takes over at the peak
+  const melt = Math.sin(clamp((local - 0.28) / 0.44) * Math.PI) ** 1.5, handoff = smooth(clamp((local - 0.46) / 0.1));
+  spans.forEach((s, k) => s.style.opacity = String(k === i % words.length ? 1 - handoff : k === (i + 1) % words.length ? handoff : 0));
+  $("turb").setAttribute("baseFrequency", `${(0.006 + 0.012 * melt).toFixed(4)} ${(0.02 + 0.02 * melt).toFixed(4)}`);
+  $("disp").setAttribute("scale", String(melt * 180));
+  $("blur").setAttribute("stdDeviation", String(melt * 14));
+  $("goo").setAttribute("values", `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${1 + melt * 17} ${-melt * 7}`);
+  $("offR").setAttribute("dx", String(melt * 14)); $("offB").setAttribute("dx", String(-melt * 14));
+  await new Promise(r => requestAnimationFrame(() => r()));
+};
+</script>

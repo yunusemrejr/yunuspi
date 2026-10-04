@@ -122,7 +122,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
 	},
 	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
 	},
 	{
@@ -149,6 +149,15 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "video-render-review", tools: ["video_render"],
 		line: "Stills need contact-sheet inspection (hierarchy, clipping, density, consistency); previews judge pacing, easing and transitions; finals need video_qa plus a listen-check. A successful render never approves itself.",
+	},
+	{
+		key: "video-shot-review", tools: ["video_shot"],
+		line: "A preview shot is half size and cheap: open its contact sheet and judge framing, lighting against the film's ground, the move and where the headline fits; adjust rig, lights, offset or palette with replace:true. Use only the listed anchors in notes, and render the delivery version once, in the background, after the look is locked.",
+	},
+	{
+		key: "motion-example-adapt", tools: ["motion_examples"],
+		when: (args) => ['get', 'copy'].includes(String(args.action)),
+		line: "An example is a technique, not the design: replace its placeholder colours and type with the film's theme and fonts, keep every frame a pure function of time, then render a few frames and view them before building further. Combine approaches only through a documented merge (HtmlScene, ShotScene notes, shot-overlay, html-as-texture, composite).",
 	},
 	{
 		key: "blender-render-review", tools: ["blender_render"],

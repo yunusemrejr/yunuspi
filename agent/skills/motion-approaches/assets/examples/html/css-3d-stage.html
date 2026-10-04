@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Flying through typography with CSS 3D and rack focus</title>
+<!--
+APPROACH  vanilla CSS 3D transforms (perspective, preserve-3d, translateZ) driven by one camera value from renderFrame
+CONCEPTS  1) a true depth stage: words are planes at different z; the camera is the world translating toward you (translateZ)
+          2) rack focus without WebGL: each plane's blur is proportional to its distance from a focal plane that itself moves
+          3) atmosphere by depth: far planes fade toward the ground colour (aerial perspective), planes behind the camera drop out
+          4) camera sway: two incommensurate sines on x/y give handheld life while the dolly stays on a smooth ease
+          5) planes keep real layout: text-wrap, kerning and web fonts behave as in any page, so edits are ordinary text edits
+USE       props.text.words = ["measure", "*the* water", ...] (a * marks the focus colour); props.theme; duration defaults to 8s
+-->
+<style>
+  :root { --bg:#0c0f0d; --ink:#ecece4; --muted:#7a857d; --accent:#e6ff5c; --display: Impact, sans-serif; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body.transparent { background: transparent; }
+  #view { position: absolute; inset: 0; perspective: 900px; perspective-origin: 50% 50%; }
+  #world { position: absolute; inset: 0; transform-style: preserve-3d; }
+  .plane { position: absolute; left: 50%; top: 50%; white-space: nowrap; font: 800 22vh/1 var(--display); letter-spacing: -.02em; color: var(--ink); text-transform: lowercase; will-change: transform, filter, opacity; }
+  .plane b { color: var(--accent); font-weight: inherit; }
+  .floor { position: absolute; left: 50%; top: 50%; width: 1px; height: 1px; transform-style: preserve-3d; }
+  .rule { position: absolute; width: 140vw; height: 2px; background: var(--muted); left: -70vw; opacity: .5; }
+</style>
+<body><div id="view"><div id="world"></div></div>
+<script>
+const P = Object.assign({ duration: 8, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, ink: P.theme.ink, muted: P.theme.muted, accent: P.theme.accent, display: P.theme.display && `"${P.theme.display}", Impact, sans-serif` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+const words = P.text.words ?? ["measure", "what the", "*water* does", "not what", "we *say*"];
+const GAP = 1400, world = document.getElementById("world");
+const planes = words.map((w, i) => {
+  const el = document.createElement("div"); el.className = "plane"; el.innerHTML = w.replace(/\*([^*]+)\*/g, "<b>$1</b>"); world.append(el);
+  const side = (i % 2 ? 1 : -1) * (14 + (i * 5) % 8);                 // alternate left/right so the path weaves and planes never stack
+  return { el, z: -i * GAP, x: side, y: (i % 2 ? -1 : 1) * (6 + (i * 3) % 7) };
+});
+const rule = document.createElement("div"); rule.className = "floor"; rule.innerHTML = planes.map((p, i) => `<div class="rule" style="transform: translate3d(0, 34vh, ${p.z - GAP / 2}px) rotateX(90deg)"></div>`).join(""); world.append(rule);
+const ease = t => t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2, clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+window.renderFrame = async t => {
+  await ready;
+  const u = clamp(t / P.duration), travel = (planes.length - 1) * GAP;
+  const cam = ease(u) * travel - 1500;                                  // dolly from 1500px in front of the first word to 1500px in front of the last
+  const sway = [Math.sin(t * 0.9) * 14 + Math.sin(t * 2.3) * 5, Math.cos(t * 0.7) * 9];
+  world.style.transform = `translate3d(${-sway[0]}px, ${-sway[1]}px, ${cam}px)`;
+  for (const p of planes) {
+    const d = p.z + cam, ahead = -d;                                    // distance in front of the camera (positive = in view)
+    const blur = Math.max(0, Math.abs(ahead - 1500) - 450) / 220;       // rack focus: sharp near 1500px ahead, soft before and after
+    const fog = clamp(1 - (ahead - 1500) / 1500), pass = clamp(ahead / 300);   // fade with distance; fade out as it passes the lens
+    p.el.style.transform = `translate3d(calc(-50% + ${p.x}vw), calc(-50% + ${p.y}vh), ${p.z}px)`;
+    p.el.style.filter = `blur(${blur.toFixed(2)}px)`; p.el.style.opacity = String(fog * pass);
+  }
+};
+</script>

@@ -12,7 +12,9 @@ import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-
 import { createRenderQueue } from "./render-queue.ts";
 import { runGuarded, throttled, type Progress } from "./guarded-process.ts";
 import { memoryBudgetMb } from "./memory-guard.ts";
-import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lookById, suggestLook } from "./video-looks.ts";
+import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lintSource, lookById, suggestLook, type FontChoice, type Look } from "./video-looks.ts";
+import { deriveLook } from "./video-derive.ts";
+import { matchAvoidSignals, readProjectDirection, renderDirectionBrief, type CreativeDirection } from "./creative-direction.ts";
 import { chapterList, descriptionDraft, formatChapters, isPublishing, planCtas, publishFindings, validatePublishSpec } from "./video-publish.ts";
 // The template's caption timing is the single source for burned-in captions
 // and sidecar subtitles; it is plain TypeScript with no Remotion imports.
@@ -100,6 +102,18 @@ export function syllables(text: unknown): number {
   }, 0);
 }
 
+/** Shots and HTML motion pages that scene props point at, so a missing file fails the check instead of the render. */
+function assetReferences(props: unknown, depth = 0): Array<{ kind: "shot" | "html"; value: string }> {
+  if (!props || typeof props !== "object" || depth > 4) return [];
+  const found: Array<{ kind: "shot" | "html"; value: string }> = [];
+  for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
+    if (typeof value === "string" && key === "shot" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(value)) found.push({ kind: "shot", value });
+    else if (typeof value === "string" && (key === "src" || key === "html") && /\.html?$/i.test(value) && !value.includes("..")) found.push({ kind: "html", value });
+    else if (value && typeof value === "object") found.push(...assetReferences(value, depth + 1));
+  }
+  return found;
+}
+
 /** Validate video.json against the template contract and derive scene times.
  * `components` are names registered in src/scenes/index.ts; `exists` checks
  * files under public/. Pure apart from those two injected facts. */
@@ -123,6 +137,10 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     const seconds = Number(raw.seconds);
     if (!Number.isFinite(seconds) || seconds < 0.5 || seconds > 600) { err("seconds must be 0.5..600", id); continue; }
     if (!components.has(raw.component)) err(`component "${raw.component}" is not registered in src/scenes/index.ts`, id);
+    for (const reference of assetReferences(raw.props)) {
+      if (reference.kind === "shot" && !exists(`shots/${reference.value}/shot.json`)) err(`shot "${reference.value}" is missing; render it with video_shot (public/shots/${reference.value}/shot.json)`, id);
+      if (reference.kind === "html" && !exists(reference.value)) err(`html motion public/${reference.value} is missing; copy it into the project (motion_examples copy) or write it under public/html/`, id);
+    }
     if (raw.cues !== undefined && !object(raw.cues)) err("cues must be an object of scene-relative seconds", id);
     for (const [name, value] of Object.entries(object(raw.cues) ? raw.cues : {})) {
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
@@ -352,6 +370,22 @@ async function registeredComponents(dir: string): Promise<Set<string>> {
   const block = /scenes\s*:[^=]*=\s*\{([\s\S]*?)\}/.exec(source)?.[1] ?? "";
   return new Set([...block.matchAll(/\b([A-Z][A-Za-z0-9_]*)\b/g)].map((m) => m[1]));
 }
+/** Text of the project's own scene components (the template's primitives are reviewed upstream). */
+async function sceneSources(dir: string): Promise<Record<string, string>> {
+  const folder = path.join(dir, "src", "scenes");
+  const names = (await fs.readdir(folder).catch(() => [] as string[])).filter((name) => /\.tsx?$/.test(name)).slice(0, 40);
+  return Object.fromEntries(await Promise.all(names.map(async (name) => [`src/scenes/${name}`, (await fs.readFile(path.join(folder, name), "utf8").catch(() => "")).slice(0, 200_000)])));
+}
+/** Preview-quality shots are drafts: warn so a final film never ships half-size 12 fps renders unnoticed. */
+async function previewShots(dir: string): Promise<Issue[]> {
+  const root = path.join(dir, "public", "shots");
+  const issues: Issue[] = [];
+  for (const name of (await fs.readdir(root).catch(() => [] as string[])).slice(0, 40)) {
+    const manifest = await fs.readFile(path.join(root, name, "shot.json"), "utf8").then(JSON.parse, () => null);
+    if (manifest?.quality === "preview") issues.push({ severity: "warn", message: `Shot "${name}" is a preview render (${manifest.width}x${manifest.height}, ${manifest.fps} fps); re-run video_shot with mode:"final" and replace:true before the final render` });
+  }
+  return issues;
+}
 async function inspectProject(dir: string) {
   const spec = await readSpec(dir);
   const components = await registeredComponents(dir);
@@ -359,7 +393,14 @@ async function inspectProject(dir: string) {
   const structural = validatePublishSpec(spec, result.seconds);
   const design = lintDesign(spec).map(({ severity, message }) => ({ severity, message: `Design: ${message}` }));
   const audience = structural.some((i) => i.severity === "error") ? [] : publishFindings(spec, result.scenes, result.seconds);
-  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...audience] };
+  const source = await sceneSources(dir);
+  const code = lintSource(source).map(({ severity, message }) => ({ severity, message: `Source: ${message}` }));
+  const previews = await previewShots(dir);
+  // The creative direction recorded at init is a contract: lint findings that name something it avoids are called out as such.
+  const direction: Issue[] = Array.isArray(spec.direction?.avoid) && spec.direction.avoid.length
+    ? matchAvoidSignals({ avoid: spec.direction.avoid }, [...design, ...code].map((issue) => issue.message)).slice(0, 4).map((hit) => ({ severity: "warn" as const, message: `Creative direction "${spec.direction.name}" avoids "${hit.avoid}": ${hit.signal.slice(0, 160)}` }))
+    : [];
+  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...code, ...previews, ...direction, ...audience] };
 }
 
 function browserExecutable(): string | undefined {
@@ -393,10 +434,53 @@ async function npmInstall(dir: string, signal: AbortSignal | undefined, progress
 
 const FORMATS: Record<string, [number, number]> = { landscape: [1920, 1080], vertical: [1080, 1920], square: [1080, 1080] };
 
+/** Music and voice defaults of a project's look: stored in video.json, or the curated look's own. */
+export const lookAudio = (spec: any): Look["audio"] | undefined => spec?.lookAudio ?? lookById(spec?.look)?.audio;
+/** The installed Piper voice that best matches `wanted`: the wanted one if installed, else any installed voice, else `wanted` (the caller then asks for an install). */
+const preferredVoice = (wanted: string): string => {
+  const installed = Object.keys(PIPER_VOICES).filter((name) => voiceFiles(name).every((file) => existsSync(file.path)));
+  return installed.includes(wanted) || !installed.length ? wanted : installed[0];
+};
+
+/** Resolve the look a request asks for. No look, or "derive", builds one from the brief (steered by the project's creative
+ * direction); "suggest" picks the closest curated look; any other value is a curated look id. */
+function resolveLook(params: any, brief: string, direction: CreativeDirection | undefined): { look: Look; note?: string } {
+  const asked = params.look;
+  if (asked !== undefined && asked !== "derive" && asked !== "suggest") {
+    const curated = lookById(asked);
+    if (!curated) throw new Error(`look must be derive, suggest or one of ${LOOKS.map((l) => l.id).join(", ")}`);
+    return { look: curated };
+  }
+  if (asked === "suggest") return { look: suggestLook(brief) };
+  const look = deriveLook(brief, { variation: params.variation, accent: params.accent, tone: params.tone, avoid: direction?.avoid });
+  return { look, note: look.rerolls.length ? `re-rolled ${look.rerolls.length} candidate(s) that read as defaults or hit the creative direction's avoid list: ${look.rerolls.join(" | ")}` : undefined };
+}
+
+/** Copy the look's Latin font files into public/fonts and describe them in fonts.json, so HTML motion pages inside the
+ * project set type in the same faces as the scenes (HtmlMotion passes them to the page). Needs installed dependencies. */
+async function syncFonts(dir: string, fonts: FontChoice[]): Promise<number> {
+  const target = path.join(dir, "public", "fonts");
+  const manifest: Record<string, Array<{ weight: number; file: string }>> = {};
+  await fs.rm(target, { recursive: true, force: true });
+  for (const font of fonts) for (const weight of font.weights) {
+    const source = path.join(dir, "node_modules", "@fontsource", font.package, "files", `${font.package}-latin-${weight}-normal.woff2`);
+    if (!existsSync(source)) continue;
+    await fs.mkdir(target, { recursive: true });
+    const file = `${font.package}-latin-${weight}.woff2`;
+    await fs.copyFile(source, path.join(target, file));
+    (manifest[font.family] ??= []).push({ weight, file });
+  }
+  if (Object.keys(manifest).length) await fs.writeFile(path.join(target, "fonts.json"), JSON.stringify(manifest, null, 1));
+  return Object.keys(manifest).length;
+}
+
 /** Write a look into the project: theme, fonts.ts and the fontsource dependencies. Returns true when packages changed. */
-async function applyLook(dir: string, spec: any, look: (typeof LOOKS)[number]): Promise<boolean> {
+async function applyLook(dir: string, spec: any, look: Look): Promise<boolean> {
   spec.look = look.id;
   spec.theme = { ...look.theme };
+  // Music and voice defaults travel with the project: a derived look has no entry in the curated list to look them up in.
+  spec.lookAudio = look.audio;
+  if (look.derived) spec.lookDerived = { ...look.derived, why: look.why }; else delete spec.lookDerived;
   await fs.writeFile(path.join(dir, "src/fonts.ts"), fontsSource(look.fonts));
   const pkgPath = path.join(dir, "package.json");
   const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
@@ -414,12 +498,14 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     const dir = await projectDir(params.dir, cwd, false);
     if (existsSync(dir)) throw new Error(`${dir} already exists; choose a new project directory`);
     if (!containsPath(await fs.realpath(cwd), dir)) throw new Error("Create video projects inside the current workspace");
-    if (params.look !== undefined && !lookById(params.look)) throw new Error(`look must be one of ${LOOKS.map((l) => l.id).join(", ")}`);
     await fs.cp(VIDEO_PATHS.template, dir, { recursive: true, errorOnExist: true });
     const spec = await readSpec(dir);
     spec.title = typeof params.title === "string" && params.title.trim() ? params.title.trim().slice(0, 120) : spec.title;
-    const look = lookById(params.look) ?? suggestLook(`${params.topic ?? ""} ${params.title ?? ""}`);
+    const direction = await readProjectDirection(cwd);
+    const brief = [params.topic, params.title, ...(direction?.intent ?? [])].filter((part) => typeof part === "string" && part.trim()).join(" ") || path.basename(dir);
+    const { look, note: lookNote } = resolveLook(params, brief, direction);
     await applyLook(dir, spec, look);
+    if (direction) spec.direction = { name: direction.name, intent: direction.intent, avoid: direction.avoid, motion: direction.motion, audio: direction.audio, updatedAt: direction.updatedAt };
     const [width, height] = FORMATS[params.format ?? "landscape"] ?? FORMATS.landscape;
     Object.assign(spec, { width, height });
     for (const key of ["fps", "width", "height"]) if (params[key] !== undefined) spec[key] = params[key];
@@ -430,9 +516,10 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     spec.publish = { intent, platforms, ...(intent === "publish" && spec.brand ? { cta: { enabled: true } } : {}) };
     if (intent === "personal") spec.captions = { ...spec.captions, enabled: params.captions === true };
     await writeSpec(dir, spec);
-    if (params.install !== false) await npmInstall(dir, signal, progress);
+    if (params.install !== false) { await npmInstall(dir, signal, progress); await syncFonts(dir, look.fonts); }
     return {
-      project: dir, installed: params.install !== false, look: { id: look.id, why: look.why, fits: look.fits, voice: look.audio.voice, music: look.audio.music },
+      project: dir, installed: params.install !== false, look: { id: look.id, derived: look.derived ? true : undefined, why: look.why, fits: look.fits, voice: look.audio.voice, music: look.audio.music, theme: { background: look.theme.background, accent: look.theme.accent, accent2: look.theme.accent2, display: look.theme.display, text: look.theme.text, backdrop: look.theme.backdrop }, note: lookNote },
+      direction: direction ? `Following creative direction "${direction.name}": avoid ${direction.avoid.join("; ") || "(nothing listed)"}` : undefined,
       intent, platforms, size: `${spec.width}x${spec.height}`,
       files: ["video.json (master timeline: look, brand, publish, scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry: TitleCard, DiagramScene, OutroScene)", "src/primitives/* (Stage, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, MediaFrame, Clip, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch, BrandBug, CtaLayer)", "src/motion.ts, src/timing.ts (beat/loop helpers), src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx), public/assets/ (fetched media)"],
       next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding; open on the payoff, not a title card", "Replace video.json scenes; build scene components from primitives (scenes do not fade themselves: transitions in video.json own entry and exit)", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", `narration_tts synthesize (voice ${look.audio.voice.voice}, style ${look.audio.voice.style}) → audio_synth music (${look.audio.music.style}, ${look.audio.music.bpm} bpm, ${look.audio.music.key} ${look.audio.music.mode}) and kind sound_design → video_project action:"cta" if a brand is set → video_render preview → final → video_qa`],
@@ -440,15 +527,26 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     };
   }
   const dir = await projectDir(params.dir, cwd);
-  if (action === "install") { await npmInstall(dir, signal, progress); return { project: dir, installed: true }; }
-  if (action === "look") {
-    const look = lookById(params.look);
-    if (!look) throw new Error(`look must be one of ${LOOKS.map((l) => `${l.id} (${l.fits})`).join("; ")}`);
+  if (action === "install") {
+    await npmInstall(dir, signal, progress);
     const spec = await readSpec(dir);
+    const fonts = await fs.readFile(path.join(dir, "src/fonts.ts"), "utf8").then((source) => [...source.matchAll(/@fontsource\/([a-z0-9-]+)\/latin-(\d+)\.css/g)], () => []);
+    const byPackage = new Map<string, number[]>();
+    for (const [, pkg, weight] of fonts) byPackage.set(pkg, [...(byPackage.get(pkg) ?? []), Number(weight)]);
+    const families = [spec.theme?.display, spec.theme?.text, spec.theme?.mono];
+    await syncFonts(dir, [...byPackage].map(([pkg, weights], index) => ({ package: pkg, family: families[index] ?? pkg, weights })));
+    return { project: dir, installed: true };
+  }
+  if (action === "look") {
+    const spec = await readSpec(dir);
+    const direction = await readProjectDirection(cwd);
+    const brief = [params.topic, spec.title, ...(direction?.intent ?? [])].filter((part) => typeof part === "string" && part.trim()).join(" ") || path.basename(dir);
+    const { look } = resolveLook({ ...params, look: params.look ?? "derive" }, brief, direction);
     const changed = await applyLook(dir, spec, look);
     await writeSpec(dir, spec);
     if (changed && params.install !== false) await npmInstall(dir, signal, progress);
-    return { project: dir, look: look.id, why: look.why, fontsChanged: changed, voice: look.audio.voice, music: look.audio.music, note: "Theme, src/fonts.ts and font packages were replaced. Scene code that hard-codes colors or font families must be updated to use useTheme()." };
+    if (params.install !== false && existsSync(path.join(dir, "node_modules"))) await syncFonts(dir, look.fonts);
+    return { project: dir, look: look.id, why: look.why, derived: look.derived ? true : undefined, theme: look.theme, fontsChanged: changed, voice: look.audio.voice, music: look.audio.music, note: "Theme, src/fonts.ts and font packages were replaced. Scene code that hard-codes colors or font families must be updated to use useTheme()." };
   }
   if (action === "cta") {
     const spec = await readSpec(dir);
@@ -481,7 +579,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
   };
 }
 
-async function contactSheet(images: Array<{ path: string; label: string }>, output: string, signal?: AbortSignal) {
+export async function contactSheet(images: Array<{ path: string; label: string }>, output: string, signal?: AbortSignal) {
   const args = [...FFMPEG_FLAGS, "-loglevel", "error"];
   for (const image of images) args.push("-i", image.path);
   args.push("-filter_complex", contactSheetFilter(images.map((i) => i.label)), "-map", "[sheet]", "-frames:v", "1", "-update", "1", output);
@@ -489,7 +587,7 @@ async function contactSheet(images: Array<{ path: string; label: string }>, outp
   return (await produced(output)).path;
 }
 
-async function freshOut(dir: string, kind: string) {
+export async function freshOut(dir: string, kind: string) {
   const out = projectWritePath(dir, "out", `${kind}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`);
   await fs.mkdir(out, { recursive: true });
   return out;
@@ -714,7 +812,7 @@ async function piperStatus() {
 
 export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const action = params.action ?? "status";
-  const voice = params.voice ?? "en_US-ryan-high";
+  let voice = params.voice ?? "en_US-ryan-high";
   if (action === "status") return piperStatus();
   if (action === "install") {
     await fs.mkdir(path.join(piperHome(), "voices"), { recursive: true, mode: 0o700 });
@@ -738,6 +836,8 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
   const lexicon = validateLexicon(params.lexicon);
   const dir = await projectDir(params.dir, cwd);
   const spec = await readSpec(dir);
+  // The look chose a voice with its music and captions; use it when installed, otherwise any installed voice before asking for a download.
+  if (params.voice === undefined) voice = preferredVoice(lookAudio(spec)?.voice.voice ?? voice);
   const only = Array.isArray(params.scenes) ? new Set(params.scenes) : undefined;
   if (!Array.isArray(spec.scenes)) throw new Error("scenes must be an array");
   const selected = spec.scenes.filter((scene: any) => !only || only.has(scene?.id));
@@ -753,7 +853,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
   if (!existsSync(piperPython()) || !voiceFiles(voice).every((f) => existsSync(f.path))) throw new Error(`Piper voice ${voice} is not installed; run narration_tts action:"install" voice:"${voice}" (downloads a pinned local model once)`);
   // Piper voices default to ~200+ wpm. speed 1 is calibrated to a documentary
   // pace (~150-170 wpm); lower is slower. The style sets pace and variability.
-  const styleName = params.style ?? lookById(spec.look)?.audio.voice.style ?? "documentary";
+  const styleName = params.style ?? lookAudio(spec)?.voice.style ?? "documentary";
   const style = VOICE_STYLES[styleName] ?? VOICE_STYLES.documentary;
   const speed = typeof params.speed === "number" ? Math.min(1.5, Math.max(0.6, params.speed)) : 1;
   await fs.mkdir(outDir, { recursive: true });
@@ -920,7 +1020,7 @@ export async function audioSynth(params: any, cwd: string, signal?: AbortSignal)
   let project: any;
   if (params.kind === "music") {
     project = await inspectProject(dir);
-    const look = lookById(project.spec.look)?.audio.music;
+    const look = lookAudio(project.spec)?.music;
     const intensity = params.intensity === "auto" || params.intensity === undefined ? autoIntensity(project.scenes, project.seconds) : params.intensity;
     Object.assign(spec, { seconds: params.seconds ?? Math.ceil(project.seconds + 1), style: params.style ?? look?.style, bpm: params.bpm ?? look?.bpm, key: params.key ?? look?.key, mode: params.mode ?? look?.mode,
       progression: params.progression, barsPerChord: params.barsPerChord, layers: params.layers, intensity, swing: params.swing, drumPattern: params.drumPattern, melodyVoice: params.melodyVoice });

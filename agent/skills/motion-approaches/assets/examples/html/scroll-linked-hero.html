@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Scroll-driven hero: one source, a website and a video</title>
+<!--
+APPROACH  CSS scroll-driven animations (animation-timeline: scroll()); no JavaScript runs any motion
+CONCEPTS  1) the page is a timeline: scrolling is the clock, so the same markup is an interactive website hero AND a video source
+             (export just sets scrollTop = t / duration * scrollable height)
+          2) animation-range slices one scroll length into phases: title in, parallax, colour shift, wipe, count-up
+          3) @property <color> lets the browser interpolate between two palette colours in oklab, for a ground that changes mood
+          4) layered parallax from translate keyframes at different distances; clip-path: inset() for a panel wipe
+          5) reduced motion: for a site, prefers-reduced-motion drops the timeline and shows the final composition
+USE       props.theme, props.text.{kicker,title,line}; works with Chrome 115+ (the harness renderer qualifies)
+-->
+<style>
+  @property --ground { syntax: "<color>"; inherits: true; initial-value: #101820; }
+  @property --pct { syntax: "<integer>"; inherits: false; initial-value: 0; }
+  :root { --a:#101820; --b:#27404d; --ink:#eef1ea; --muted:#8ea3ad; --accent:#f0b34a; --accent2:#4fd1b5; --display: Georgia, serif; --text: system-ui, sans-serif; --mono: ui-monospace, monospace; }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: auto; scrollbar-width: none; } html::-webkit-scrollbar { display: none; }
+  body { height: 520vh; background: var(--ground); color: var(--ink); font-family: var(--text); animation: mood linear both; animation-timeline: scroll(root); animation-range: 5% 80%; }
+  body.transparent { background: transparent; }
+  .stage { position: sticky; top: 0; height: 100vh; overflow: hidden; }
+  .ridge { position: absolute; left: -10%; right: -10%; bottom: 0; height: 56vh; }
+  .r1 { animation: drift1 linear both; } .r2 { animation: drift2 linear both; } .r3 { animation: drift3 linear both; }
+  .r1, .r2, .r3 { animation-timeline: scroll(root); }
+  .copy { position: absolute; left: 8vw; top: 16vh; max-width: 62vw; }
+  .kicker { font: 600 2.2vh var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); animation: fadein linear both; animation-timeline: scroll(root); animation-range: 0% 6%; }
+  h1 { font: 800 13.5vh/.96 var(--display); letter-spacing: -.02em; margin-top: 2.5vh; text-wrap: balance; }
+  h1 .ln { display: block; overflow: clip; padding-bottom: .08em; } h1 .ln span { display: inline-block; animation: up linear both; animation-timeline: scroll(root); animation-range: 2% 14%; } h1 .ln:nth-child(2) span { animation-range: 6% 18%; }
+  .panel { position: absolute; inset: 0; background: var(--accent); clip-path: inset(0 0 100% 0); animation: wipe linear both; animation-timeline: scroll(root); animation-range: 62% 78%; display: grid; place-items: center; }
+  .panel p { color: #161309; font: 800 11vh/1 var(--display); letter-spacing: -.02em; text-align: center; max-width: 16ch; }
+  .meter { position: absolute; right: 8vw; top: 16vh; font: 700 8vh/1 var(--display); font-variant-numeric: tabular-nums; counter-reset: p var(--pct); animation: count linear both; animation-timeline: scroll(root); animation-range: 14% 58%; }
+  .meter::after { content: counter(p) "%"; }
+  .meter small { display: block; font: 600 1.9vh var(--mono); letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin-top: 1vh; }
+  @keyframes mood  { from { --ground: var(--a) } to { --ground: var(--b) } }
+  @keyframes drift1 { from { translate: 0 6vh } to { translate: -8vw -2vh } }
+  @keyframes drift2 { from { translate: 0 10vh } to { translate: 7vw 2vh } }
+  @keyframes drift3 { from { translate: 0 14vh } to { translate: -14vw 6vh } }
+  @keyframes up { from { transform: translateY(110%) } to { transform: none } }
+  @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes wipe { from { clip-path: inset(0 0 100% 0) } to { clip-path: inset(0 0 0 0) } }
+  @keyframes count { to { --pct: 100 } }
+  @media (prefers-reduced-motion: reduce) { body, .r1, .r2, .r3, .kicker, h1 .ln span, .panel, .meter { animation: none !important; } .panel { display: none; } .meter { --pct: 100; } }
+</style>
+<body>
+<div class="stage">
+  <svg class="ridge r3" viewBox="0 0 1600 400" preserveAspectRatio="none"><path d="M0 220 C180 120 300 260 520 190 S860 80 1100 170 S1450 120 1600 200 V400 H0Z" fill="var(--b)" opacity=".55"/></svg>
+  <svg class="ridge r2" viewBox="0 0 1600 400" preserveAspectRatio="none"><path d="M0 260 C240 170 380 300 640 240 S980 130 1220 230 S1500 190 1600 250 V400 H0Z" fill="var(--accent2)" opacity=".28"/></svg>
+  <svg class="ridge r1" viewBox="0 0 1600 400" preserveAspectRatio="none"><path d="M0 300 C200 240 420 330 700 290 S1060 220 1280 290 S1520 270 1600 300 V400 H0Z" fill="var(--a)"/></svg>
+  <div class="copy"><div class="kicker" id="kicker"></div><h1 id="title"></h1></div>
+  <div class="meter"><small id="meter"></small></div>
+  <div class="panel"><p id="line"></p></div>
+</div>
+<script>
+const P = Object.assign({ duration: 9, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+const css = document.documentElement.style, T = P.theme;
+for (const [k, v] of Object.entries({ a: T.background, b: T.surface, ink: T.ink, muted: T.muted, accent: T.accent, accent2: T.accent2, display: T.display && `"${T.display}", Georgia, serif`, text: T.text && `"${T.text}", system-ui, sans-serif`, mono: T.mono && `"${T.mono}", ui-monospace, monospace` })) if (v) css.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const words = Object.assign({ kicker: "Scroll is the clock", title: "One page\nplays twice", line: "The same CSS is the website and the film.", meter: "of the way down" }, P.text);
+kicker.textContent = words.kicker; line.textContent = words.line; meter.textContent = words.meter;
+title.innerHTML = words.title.split("\n").map(l => `<span class="ln"><span>${l}</span></span>`).join("");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+// Export: scroll position IS time. Two animation frames let the scroll timelines resolve before the screenshot.
+window.renderFrame = async t => {
+  await ready;
+  const el = document.scrollingElement; el.scrollTop = Math.min(1, t / P.duration) * (el.scrollHeight - innerHeight);
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+};
+</script>

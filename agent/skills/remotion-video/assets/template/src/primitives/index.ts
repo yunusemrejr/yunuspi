@@ -18,4 +18,7 @@ export { Counter } from "./Counter";
 export { ProgressBar } from "./ProgressBar";
 export { Callout } from "./Callout";
 export { MediaFrame, Clip, type MediaProps } from "./MediaFrame";
+export { BlenderShot, ShotAnchor, ShotNote, shotPosition, useShot, useShotAnchor } from "./BlenderShot";
+export { HtmlMotion } from "./HtmlMotion";
+export { Grade } from "./Grade";
 export { BrandBug, CtaLayer, FollowButton, LikeButton, PromptChip, ctaVariant } from "./Cta";

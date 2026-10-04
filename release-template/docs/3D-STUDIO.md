@@ -41,6 +41,10 @@ splat_train({ dataset: ".pi/blender/dataset-…", steps: 10000, evalSplitEvery: 
 splat_preview({ path: ".pi/splats/run/splat_10000.ply", up: [0, 0, 1] })   // review with read / video_frames
 ```
 
+## Blender in a video
+
+`video_shot` renders a camera move around a `.blend`, an imported model or extruded 3D title text into a video project as a transparent RGBA image sequence, lit in the project's palette, with named anchors projected to screen space per frame so 2D annotations follow 3D features. The editable scene (with the rig) is saved in the project's `blender/` folder. See [the video studio](VIDEO-STUDIO.md#looks-blender-shots-and-motion-examples). `motion_examples` provides Blender starting points (product hero with anchors, procedural materials, camera rigs, geometry-node terrain, an HTML sequence as a device screen) and the merges with HTML and FFmpeg.
+
 ## Boundaries
 
 - Blender and Brush processes run through the shared guarded runner (`agent/extensions/lib/guarded-process.ts`): harness directories are read-only, `/dev/dri` is bound for these GPU engines only (other guarded commands keep the minimal `/dev`), the process group is killed on abort or when it exceeds the memory budget, and output tails are bounded.

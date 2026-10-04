@@ -114,7 +114,8 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
   { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
   { skill: 'gaussian-splatting', tools: ['splat_setup', 'splat_train', 'splat_preview', 'blender_export', 'video_frames'] },

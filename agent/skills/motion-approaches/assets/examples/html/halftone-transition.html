@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Halftone / ordered-dither scene transition</title>
+<!--
+APPROACH  Canvas 2D; two procedural scenes are sampled on a coarse grid and redrawn as dots whose size carries the image
+CONCEPTS  1) a transition that is part of the look: scene A becomes a halftone screen, the screen sweeps to scene B, B resolves to crisp
+          2) ordered dithering: an 8x8 Bayer threshold decides which dots exist while the sweep passes, so the change is a grain, not a fade
+          3) the sampling grid is tiny (one pixel per dot), so the work per frame is thousands of arcs, not millions of pixels
+          4) pure function of t: scene art is drawn from t as well, so even the content under the screen moves
+          5) swap sceneA/sceneB for any canvas drawing (or a pre-rendered frame) and the transition carries over unchanged
+USE       props.theme (background, ink, accent, accent2); props.duration; sweep direction is diagonal and symmetric about the midpoint
+-->
+<style> html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #e8e2d4; } body.transparent { background: transparent; } canvas { position: absolute; inset: 0; width: 100%; height: 100%; } </style>
+<body><canvas id="c"></canvas>
+<script>
+const P = Object.assign({ duration: 6, transparent: false, cell: 16, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+const T = Object.assign({ background: "#e8e2d4", ink: "#1a1b22", accent: "#d2402a", accent2: "#1f5f8b" }, P.theme);
+if (!P.transparent) document.body.style.background = T.background; else document.body.classList.add("transparent");
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d"), W = canvas.width = innerWidth, H = canvas.height = innerHeight;
+const cell = Math.max(6, Math.round(P.cell * Math.min(W, H) / 720)), cols = Math.ceil(W / cell), rows = Math.ceil(H / cell);
+const probe = Object.assign(document.createElement("canvas"), { width: cols, height: rows }), pctx = probe.getContext("2d", { willReadFrequently: true });
+const BAYER = [0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21];
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v)), smooth = t => t * t * (3 - 2 * t);
+// two stand-in scenes in "ink on light" luminance: replace with any drawing that fills (cols x rows)
+function sceneA(g, t) { g.fillStyle = "#fff"; g.fillRect(0, 0, cols, rows); g.fillStyle = "#000"; const r = rows * (0.28 + 0.03 * Math.sin(t * 2)); g.beginPath(); g.arc(cols * 0.36, rows * 0.5, r, 0, 7); g.fill(); g.fillStyle = "#777"; g.fillRect(cols * 0.58, rows * 0.2, cols * 0.28, rows * 0.6); }
+function sceneB(g, t) { g.fillStyle = "#fff"; g.fillRect(0, 0, cols, rows); g.strokeStyle = "#000"; g.lineWidth = Math.max(2, rows * 0.07); for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(0, rows * (0.15 + i * 0.14)); g.bezierCurveTo(cols * 0.3, rows * (0.05 + i * 0.14 + 0.08 * Math.sin(t * 2 + i)), cols * 0.6, rows * (0.3 + i * 0.14 - 0.08 * Math.sin(t * 2 + i)), cols, rows * (0.15 + i * 0.14)); g.stroke(); } }
+function sample(draw, t) { draw(pctx, t); const data = pctx.getImageData(0, 0, cols, rows).data, out = new Float32Array(cols * rows); for (let i = 0; i < out.length; i++) out[i] = 1 - data[i * 4] / 255; return out; }  // ink amount 0..1
+window.renderFrame = async t => {
+  const u = clamp(t / P.duration), a = sample(sceneA, t), b = sample(sceneB, t);
+  const sweep = smooth(clamp((u - 0.25) / 0.5)), resolve = smooth(clamp((u - 0.78) / 0.22)), intro = smooth(clamp(u / 0.18));
+  ctx.clearRect(0, 0, W, H); if (!P.transparent) { ctx.fillStyle = T.background; ctx.fillRect(0, 0, W, H); }
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const pos = (x / cols + y / rows) / 2;                                  // diagonal coordinate 0..1
+    const front = clamp((sweep * 1.5 - pos) * 4);                             // 0 before the sweep arrives, 1 after it passes
+    const threshold = (BAYER[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
+    const ink = front > threshold ? b[y * cols + x] : a[y * cols + x];       // ordered dither picks which scene each cell shows
+    const radius = ink * cell * 0.62 * (0.35 + 0.65 * intro) * (1 + 0.5 * resolve * (1 - ink));   // later, the dots swell into solid shapes
+    if (radius < 0.5) continue;
+    const showB = front > threshold;
+    ctx.fillStyle = showB ? T.accent : T.ink; ctx.globalAlpha = 1 - 0.0 * resolve;
+    ctx.beginPath(); ctx.arc((x + 0.5) * cell, (y + 0.5) * cell, Math.min(radius, cell * 0.72), 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+};
+</script>

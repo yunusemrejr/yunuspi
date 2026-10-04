@@ -29,6 +29,8 @@ export const Canvas: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 /** Spacing on an 8px grid; the stage keeps a 120px title-safe margin. */
 export const space = (steps: number) => steps * 8;
 export const SAFE = 120;
+/** The title-safe margin for the current canvas (SAFE, capped at 11% of the short side). */
+export const useSafe = () => { const { width, height } = useCanvas(); return Math.min(SAFE, Math.round(Math.min(width, height) * 0.11)); };
 
 /** Deterministic PRNG (mulberry32). Never use Math.random in a frame. */
 export function rng(seed: number) {

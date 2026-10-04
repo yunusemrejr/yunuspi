@@ -4,6 +4,8 @@ import { Type } from "typebox";
 import { audioSynth, narrationTts, PIPER_VOICES, SFX_TYPES, VOICE_STYLES, videoProject, videoQa, videoRender } from "./lib/video-studio.ts";
 import { LOOKS } from "./lib/video-looks.ts";
 import { videoAssets } from "./lib/video-assets.ts";
+import { SHOT_LIGHTS, SHOT_MATERIALS, SHOT_RIGS, SHOT_SHADOWS, videoShot } from "./lib/video-shot.ts";
+import { copyMotionExample, MOTION_APPROACHES, motionExample, motionGuide, searchMotion } from "./lib/motion-library.ts";
 import { PLATFORMS } from "./lib/video-publish.ts";
 import { choices } from "./lib/tool-schema.ts";
 
@@ -23,10 +25,13 @@ export default function videoStudio(pi: any) {
     });
   }
   register("video_project",
-    "Create or validate a code-first video project: Remotion (React/TypeScript) scenes driven by one master timeline video.json (look, brand, publish settings, scenes, narration text/audio, scene-relative cues, transitions, music, sfx). init scaffolds reusable primitives and an art-directed look (palette, type, backdrop, matching voice and music) chosen from the topic, with brand and platform settings; check validates timing, narration fit, design defaults, publish readiness, registry and assets; look re-skins an existing project; cta places like/follow/comment moments on the finished timeline. Read the code-first-video skill before starting a video.",
+    "Create or validate a code-first video project: Remotion (React/TypeScript) scenes driven by one master timeline video.json (look, brand, publish settings, scenes, narration text/audio, scene-relative cues, transitions, music, sfx). init scaffolds reusable primitives and an art-directed look derived from the topic (palette, type pair, backdrop, captions, matching voice and music; follows the project's creative_direct avoid list), with brand and platform settings; check validates timing, narration fit, design defaults, publish readiness, registry and assets; look re-skins an existing project; cta places like/follow/comment moments on the finished timeline. Read the code-first-video skill before starting a video.",
     Type.Object({ action: Type.Optional(choices(["init", "check", "install", "look", "cta", "feature"])), dir: localPath, title: Type.Optional(Type.String({ maxLength: 120 })),
       topic: Type.Optional(Type.String({ maxLength: 300, description: "init: subject in a few words; picks the look that fits it" })),
-      look: Type.Optional(choices(LOOKS.map((look) => look.id), "init/look: art direction; omit on init to derive it from topic/title")),
+      look: Type.Optional(choices(["derive", "suggest", ...LOOKS.map((look) => look.id)], "init/look: omit or derive builds a look from the subject (palette, type pair, backdrop, captions, music, voice; deterministic per brief, re-rolled when it reads as a default or hits the creative direction's avoid list); suggest picks the closest curated look; a curated id uses it as is")),
+      variation: Type.Optional(Type.Integer({ minimum: 0, maximum: 999, description: "init/look derive: another take on the same brief" })),
+      accent: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$", description: "init/look derive: a brand colour to build the palette around" })),
+      tone: Type.Optional(choices(["dark", "light"], "init/look derive: force the ground's tone")),
       format: Type.Optional(choices(["landscape", "vertical", "square"], "init: 1920x1080, 1080x1920 (Shorts, Reels, TikTok) or 1080x1080")),
       intent: Type.Optional(choices(["publish", "personal"], "init: publish (default) is built to perform for an audience; personal drops brand, calls to action and end screen")),
       platforms: Type.Optional(Type.Array(choices([...PLATFORMS]), { minItems: 1, maxItems: 7, description: "init: where it will be published. One platform gets its own wording (YouTube: Subscribe and a bell); several get generic Follow and Like" })),
@@ -36,6 +41,24 @@ export default function videoStudio(pi: any) {
       captions: Type.Optional(Type.Boolean({ description: "init with intent personal: burn captions in (default off)" })),
       fps: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), install: Type.Optional(Type.Boolean()) }),
     videoProject, 1_200_000);
+  register("video_shot",
+    "Render a Blender shot into a video project: a camera move around one subject (a .blend, an imported glb/obj/ply/stl/fbx, or extruded 3D title text) as an RGBA image sequence in public/shots/<name>/ with a manifest and per-frame screen positions of named anchors, lit and framed with the project's palette so the 3D belongs to the film. Rigs: turntable (loops), orbit, push-in, pull-out, crane, drift, static. Studio lights (softbox, rim, top, overcast) and a composited ground shadow keep EEVEE fast; Cycles catcher is slower. Play it with BlenderShot / the ShotScene component; ShotAnchor pins 2D callouts to 3D features (anchors: object names from the blend, or bbox:top|bottom|left|right|front|back|center). mode preview (default) is cheap and says so; final renders delivery quality. Read the blender-production and motion-approaches skills first.",
+    Type.Object({ dir: localPath, name: Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,47}$", description: "shot id; becomes public/shots/<name>" }),
+      blend: Type.Optional(localPath), model: Type.Optional(localPath),
+      title: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: 120 }), font: Type.Optional(localPath), depth: Type.Optional(Type.Number({ minimum: 0.01, maximum: 2 })), bevel: Type.Optional(Type.Number({ minimum: 0, maximum: 0.3 })) }, { description: "extruded 3D text; font must be a .ttf/.otf (Blender cannot read woff2)" })),
+      rig: Type.Optional(choices([...SHOT_RIGS], "camera move; default turntable, orbit for titles")), seconds: Type.Optional(Type.Number({ minimum: 0.5, maximum: 20 })), fps: Type.Optional(Type.Number({ minimum: 4, maximum: 60 })),
+      mode: Type.Optional(choices(["preview", "final"], "preview (default): half size, 12 fps, 16 samples; final: project size, project fps, 64 samples")),
+      width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 2160 })), scale: Type.Optional(Type.Number({ minimum: 0.1, maximum: 2 })), samples: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
+      engine: Type.Optional(choices(["EEVEE", "CYCLES"], "EEVEE default; CYCLES for glass, caustics or the shadow catcher")),
+      lights: Type.Optional(choices([...SHOT_LIGHTS], "softbox (default), rim, top, overcast, or scene to keep the blend's own lights")), lightStrength: Type.Optional(Type.Number({ minimum: 0.1, maximum: 5 })),
+      material: Type.Optional(choices([...SHOT_MATERIALS], "keep (blend/model materials) or replace with clay, satin, metal, glass or glow in `color`")), color: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$", description: "material colour; defaults to the project accent" })),
+      shadow: Type.Optional(choices([...SHOT_SHADOWS], "soft (default for blends and models): ground shadow composited per frame; none for floating subjects and titles; catcher uses Cycles")),
+      transparent: Type.Optional(Type.Boolean({ description: "default true: RGBA frames to composite in the film; false flattens onto the palette background with a lit floor" })), background: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$" })), look: Type.Optional(Type.Boolean({ description: "false ignores the project's palette" })),
+      azimuth: Type.Optional(Type.Number({ minimum: -360, maximum: 360 })), elevation: Type.Optional(Type.Number({ minimum: -80, maximum: 85 })), elevationEnd: Type.Optional(Type.Number({ minimum: -80, maximum: 85 })), degrees: Type.Optional(Type.Number({ minimum: 1, maximum: 720 })), travel: Type.Optional(Type.Number({ minimum: 0.2, maximum: 3, description: "push-in/pull-out: end distance as a fraction of start" })),
+      ease: Type.Optional(choices(["inOut", "out", "in", "linear"])), lensMm: Type.Optional(Type.Number({ minimum: 18, maximum: 200 })), margin: Type.Optional(Type.Number({ minimum: 1, maximum: 3, description: "framing margin around the subject; 1.18 default" })),
+      offset: Type.Optional(Type.Array(Type.Number({ minimum: -0.5, maximum: 0.5 }), { minItems: 2, maxItems: 2, description: "shift the subject in the frame [x, y] as fractions, to leave room for a headline" })), fStop: Type.Optional(Type.Number({ minimum: 0.7, maximum: 32 })), motionBlur: Type.Optional(Type.Boolean()),
+      anchors: Type.Optional(Type.Array(Type.String({ maxLength: 120 }), { maxItems: 16 })), replace: Type.Optional(Type.Boolean({ description: "re-render over an existing shot of this name" })) }),
+    videoShot, 3_600_000);
   register("video_render",
     "Render a video project. stills: representative frames (default one per scene at 60%, or count frames across one scene, or explicit times) plus a labeled contact sheet to inspect with read/vision. preview: low-resolution MP4 of a scene or seconds range to judge motion and timing. final: full-quality H.264/AAC with decode verification, captions, chapters and a description draft. thumbnail: the 1280x720 cover from video.json publish.thumbnail. Bundles are cached; renders are queued and run at low priority. A successful render is not visual approval.",
     Type.Object({ dir: localPath, mode: Type.Optional(choices(["stills", "preview", "final", "thumbnail"])), scene: Type.Optional(Type.String({ maxLength: 48 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 1800 }), { minItems: 1, maxItems: 24 })), from: Type.Optional(Type.Number({ minimum: 0, maximum: 1800 })), to: Type.Optional(Type.Number({ minimum: 0, maximum: 1800 })), scale: Type.Optional(Type.Number({ minimum: 0.1, maximum: 2 })), crf: Type.Optional(Type.Integer({ minimum: 1, maximum: 51 })), master: Type.Optional(Type.Boolean({ description: "final: normalize loudness to the platform target (default true); false keeps the raw mix" })) }),
@@ -66,4 +89,17 @@ export default function videoStudio(pi: any) {
       wire: Type.Optional(Type.Boolean({ description: "music: write audio.music and audio.musicBpm into video.json (default true)" })),
       type: Type.Optional(choices(SFX_TYPES, "sfx sound; required for kind sfx")), pitch: Type.Optional(Type.Number({ minimum: 0.25, maximum: 4 })) }),
     audioSynth, 360_000);
+  register("motion_examples",
+    "Worked, verified examples of advanced motion graphics in several approaches, each with the concepts it demonstrates: vanilla HTML/CSS/JS pages (seekable CSS and WAAPI timelines, @property, linear() springs, SVG morph and path-draw, SVG filter liquid, canvas flow fields, WebGL domain warping and SDF raymarching, audio-reactive fields, scroll-driven animation, CSS 3D, halftone transitions, kinetic type), Blender scripts (product hero with named anchors, procedural materials, camera rigs, 3D kinetic type, geometry-node terrain, an HTML sequence as a device screen), merges (HTML annotations pinned to Blender anchors, FFmpeg composite of a Blender shot over a rendered background), FFmpeg/libass kinetic type and numpy procedural frames. search: ranked by the words of the task (use it before writing a motion scene from memory); get: one example's concepts and, with source:true, its full file; copy: place it in a video project where the project looks for it (HTML in public/html for HtmlScene, Blender scripts in blender/scripts, tools in scripts) so you adapt a proven starting point to the film's look; approaches: the guide to choosing between them and combining them.",
+    Type.Object({ action: Type.Optional(choices(["search", "get", "copy", "approaches"])), query: Type.Optional(Type.String({ maxLength: 300, description: "search: the effect or technique wanted, in a few words" })),
+      approach: Type.Optional(choices([...MOTION_APPROACHES], "search: limit to one approach")), id: Type.Optional(Type.String({ maxLength: 120, description: "get/copy: an id from search, like html/webgl-domain-warp" })),
+      source: Type.Optional(Type.Boolean({ description: "get: include the full file" })), dir: Type.Optional(localPath), name: Type.Optional(Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,47}$", description: "copy: file name in the project (default: the example's own)" })),
+      replace: Type.Optional(Type.Boolean()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })) }),
+    async (params, cwd) => {
+      const action = params.action ?? "search";
+      if (action === "approaches") return motionGuide();
+      if (action === "get") return motionExample(String(params.id ?? ""), params.source === true);
+      if (action === "copy") return copyMotionExample(params, cwd);
+      return searchMotion(String(params.query ?? ""), params.approach, params.limit ?? 5);
+    }, 60_000);
 }

@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SVG path morph, trim-path draw-on and travel along a curve</title>
+<!--
+APPROACH  vanilla SVG; geometry is measured by the browser (getTotalLength / getPointAtLength) and animated by math
+CONCEPTS  1) morphing between unrelated shapes: resample every outline to N points by arc length, then cyclically shift and
+             optionally reverse one list so corresponding points are the closest pairs (no twisting, no self-crossing)
+          2) trim paths: pathLength=1 makes stroke-dasharray a 0..1 draw-on for any curve, whatever its real length
+          3) travel along a curve with a tangent-aligned marker (getPointAtLength at s and s+epsilon)
+          4) a <textPath> label whose startOffset rides the same progress value
+USE       props.shapes = [pathD, pathD, ...] (closed outlines) and props.curve = pathD (open); defaults demonstrate all four
+-->
+<style>
+  :root { --bg:#0d1b24; --ink:#e9f1f4; --muted:#7fa0ad; --accent:#ff7a59; --accent2:#7ee0c3; --display: serif; --text: sans-serif; }
+  * { margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--text); }
+  body.transparent { background: transparent; }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cap { font: 600 22px var(--text); letter-spacing: .12em; text-transform: uppercase; fill: var(--muted); }
+</style>
+<body>
+<svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet">
+  <path id="curve" fill="none" stroke="var(--muted)" stroke-width="2" opacity=".35"/>
+  <path id="trim" fill="none" stroke="var(--accent2)" stroke-width="6" stroke-linecap="round" pathLength="1" stroke-dasharray="1 1"/>
+  <path id="shape" fill="var(--accent)" fill-opacity=".92"/>
+  <g id="marker"><circle r="13" fill="var(--ink)"/><path d="M 13 0 L 30 0" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/></g>
+  <text class="cap"><textPath id="label" href="#curve" startOffset="0%"></textPath></text>
+  <g id="sources" visibility="hidden"></g>
+</svg>
+<script>
+const P = Object.assign({ duration: 8, transparent: false, theme: {}, fonts: {}, text: {} }, window.__PROPS__ ?? JSON.parse(new URLSearchParams(location.search).get("props") || "{}"));
+for (const [k, v] of Object.entries({ bg: P.theme.background, ink: P.theme.ink, muted: P.theme.muted, accent: P.theme.accent, accent2: P.theme.accent2, text: P.theme.text && `"${P.theme.text}", sans-serif` })) if (v) document.documentElement.style.setProperty(`--${k}`, v);
+if (P.transparent) document.body.classList.add("transparent");
+const ready = (async () => { for (const [family, files] of Object.entries(P.fonts)) for (const f of [].concat(files)) { const face = new FontFace(family, `url(${f.url})`, { weight: String(f.weight ?? 400) }); await face.load(); document.fonts.add(face); } await document.fonts.ready; })();
+
+const NS = "http://www.w3.org/2000/svg", N = 160;
+const curveD = P.curve ?? "M 120 640 C 380 640 420 300 700 300 S 1040 700 1300 520 S 1480 260 1500 260";
+const shapeDs = P.shapes ?? [
+  "M 800 250 C 960 250 1070 350 1070 470 C 1070 610 940 680 800 680 C 650 680 530 600 530 470 C 530 340 650 250 800 250 Z",   // soft blob
+  "M 800 220 A 250 250 0 1 1 799.9 220 Z",                                                                                      // circle
+  "M 800 210 L 1090 690 L 510 690 Z",                                                                                            // triangle
+];
+const sources = document.getElementById("sources");
+const outline = d => { const p = document.createElementNS(NS, "path"); p.setAttribute("d", d); sources.append(p); return p; };
+const resample = d => { const p = outline(d), L = p.getTotalLength(); return Array.from({ length: N }, (_, i) => { const q = p.getPointAtLength(i / N * L); return [q.x, q.y]; }); };
+const area = pts => pts.reduce((s, [x, y], i) => s + (x * pts[(i + 1) % pts.length][1] - pts[(i + 1) % pts.length][0] * y), 0);
+// align b to a: same winding, then the cyclic shift with the least total squared distance
+function align(a, b) {
+  if (Math.sign(area(a)) !== Math.sign(area(b))) b = [...b].reverse();
+  let best = 0, bestCost = Infinity;
+  for (let s = 0; s < N; s += 2) { let c = 0; for (let i = 0; i < N; i += 4) { const p = a[i], q = b[(i + s) % N]; c += (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; } if (c < bestCost) { bestCost = c; best = s; } }
+  return Array.from({ length: N }, (_, i) => b[(i + best) % N]);
+}
+const rings = shapeDs.map(resample); for (let i = 1; i < rings.length; i++) rings[i] = align(rings[i - 1], rings[i]);
+// Catmull-Rom through the points, written as cubic Beziers: smooth even mid-morph
+const smooth = pts => { let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`; for (let i = 0; i < pts.length; i++) { const p0 = pts[(i - 1 + pts.length) % pts.length], p1 = pts[i], p2 = pts[(i + 1) % pts.length], p3 = pts[(i + 2) % pts.length]; d += ` C ${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`; } return d + " Z"; };
+
+const curve = document.getElementById("curve"), trim = document.getElementById("trim"), shape = document.getElementById("shape"), marker = document.getElementById("marker"), label = document.getElementById("label");
+curve.setAttribute("d", curveD); trim.setAttribute("d", curveD); label.textContent = P.text.label ?? "water level over one lunar day";
+const total = curve.getTotalLength();
+const inOut = t => t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2, clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+
+window.renderFrame = async t => {
+  await ready;
+  const u = clamp(t / P.duration);
+  const draw = inOut(clamp(u / 0.45));                                  // trim path 0..1 over the first 45%
+  trim.setAttribute("stroke-dashoffset", String(1 - draw));
+  const s = draw * total, a = curve.getPointAtLength(s), b = curve.getPointAtLength(Math.min(total, s + 1));
+  marker.setAttribute("transform", `translate(${a.x} ${a.y}) rotate(${Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI})`);
+  label.setAttribute("startOffset", `${(draw * 62).toFixed(1)}%`);
+  // shape: morph through the rings after the draw-on, holding briefly on each
+  const k = clamp((u - 0.3) / 0.7) * (rings.length - 1), i = Math.min(rings.length - 2, Math.floor(k)), e = inOut(clamp((k - i - 0.2) / 0.6));
+  shape.setAttribute("d", smooth(rings[i].map((p, j) => [p[0] + (rings[i + 1][j][0] - p[0]) * e, p[1] + (rings[i + 1][j][1] - p[1]) * e])));
+  shape.setAttribute("opacity", String(clamp((u - 0.3) / 0.08)));
+};
+</script>
