@@ -1,4 +1,6 @@
 #!/bin/sh
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-exec node scripts/check-public.mjs
+refs=$(cat)
+node scripts/check-public.mjs
+printf '%s\n' "$refs" | node scripts/check-syntax.mjs --pre-push

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { transform } from 'esbuild';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -23,6 +25,20 @@ test('every shipped harness script parses without executing it', async () => {
       await transform(fs.readFileSync(file, 'utf8'), { loader, sourcefile: file, logLevel: 'silent' });
     }
   }
+});
+
+test('every shipped extension file parses with the runtime loader, which is stricter than esbuild', () => {
+  const run = files => spawnSync(process.execPath, [path.join(root, 'scripts/check-syntax.mjs'), ...files], { cwd: root, encoding: 'utf8', timeout: 120000 });
+  const extensions = [...files(path.join(root, 'agent/extensions'))].filter(file => /\.m?ts$/.test(file) && !file.endsWith('.d.ts')).map(file => path.relative(root, file));
+  const all = run(extensions);
+  assert.equal(all.status, 0, all.stderr || all.stdout);
+  const probe = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-syntax-')), 'probe.ts');
+  try {
+    fs.writeFileSync(probe, 'const description = "sum:"Amount"";\n');
+    const broken = run([probe]);
+    assert.equal(broken.status, 1);
+    assert.match(broken.stderr, /cannot be parsed by the extension loader/);
+  } finally { fs.rmSync(path.dirname(probe), { recursive: true, force: true }); }
 });
 
 test('release templates retain current tests, installer, and public safeguards', () => {

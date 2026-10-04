@@ -132,7 +132,7 @@ const IMAGE_TASK = /\b(images?|pixels?|screenshots?|mockups?|wireframes?|rendere
 const INSPECT_VERB = /\b(inspect|verify|check|review|compare|audit|validate|confirm|look|see|examine)\b/i;
 const NO_TOOLS = /\b(no tools|without tools)\b/i;
 const IMAGE_INSPECTION_TOOLS = new Set(['render_see', 'browser_session']);
-const cleanTools = (tools: readonly unknown): string[] => (Array.isArray(tools) ? tools : [])
+const cleanTools = (tools: unknown): string[] => (Array.isArray(tools) ? tools : [])
   .filter((t): t is string => typeof t === 'string' && !!t && t.length <= 128).slice(0, 128);
 /** Flag launch grants that cannot serve the task. Fail-open: malformed input
  * yields no flags. The media-blind rule caught retrospectively: a 260k-token
