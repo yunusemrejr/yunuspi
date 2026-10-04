@@ -3268,12 +3268,12 @@
       {
         "name": "custom-double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 418
+        "line": 436
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 398
+        "line": 416
       },
       {
         "name": "effort",
@@ -3885,7 +3885,7 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 375,
+        "line": 397,
         "kind": "literal"
       },
       {
@@ -4113,7 +4113,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 811,
+        "line": 812,
         "kind": "literal"
       },
       {
@@ -4525,7 +4525,7 @@
       {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
-        "line": 375,
+        "line": 397,
         "kind": "literal"
       },
       {
@@ -4669,7 +4669,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 811,
+        "line": 812,
         "kind": "literal"
       },
       {

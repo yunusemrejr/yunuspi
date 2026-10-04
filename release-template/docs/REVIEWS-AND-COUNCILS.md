@@ -58,7 +58,10 @@ carries no request, so that turn continues single and says so once. Approvals
 and directives ("do it", "continue") still authorize work and are doubled, as
 are all real requests.
 
-Progress rows show each stream and the reconciliation starting and
+While the mode is on, a footer chip (`Double ON · glm-5.3-flash ×2`, or
+`Double ON · A deepseek-flash ∥ B glm-5.3-flash`) stays visible between prompts and
+after a resume, because every prompt costs three model passes and a persistent mode
+should never be forgotten silently. Progress rows show each stream and the reconciliation starting and
 finishing; a degraded run (a stream failed, a route substituted, no
 reconciliation) stays visible in the directive and the transcript instead
 of failing the turn. Both streams account through the shared subagent cost
@@ -114,6 +117,16 @@ What differs from the twin mode, and what does not:
   directive to your own words are unchanged.
 - The agent that acts on the directive stays the session model; both streams are
   told which model that is.
+- A forked stream reads the whole session transcript, so a model whose context
+  window cannot hold it (plus the stream prompt and its read-only tool results)
+  would only fail at the provider. That stream is not started: its slot becomes a
+  stated gap ("has a 64k-token window and the session transcript it must read is
+  about 91k tokens") and the other stream carries the turn. A reconciliation route
+  that cannot hold the transcript runs on the session model instead, and the
+  directive header says so. The popup marks such models, and models whose recent
+  automatic runs mostly failed to finish (read from the same run ledger Double's
+  own streams write to), with a warning; marked models can still be chosen. The
+  twin mode never needs the check, since the session model holds its own transcript.
 
 ### One board for every planner and reviewer
 
@@ -128,7 +141,11 @@ already runs before every prompt. In the other direction, both Double streams
 receive the reviewers' most recent notes (identically, so the shared prefix stays
 byte-identical) as evidence the forked transcript does not carry. Double's own
 streams and reconciliation are counted as harness-owned runs, never as children
-the agent launched.
+the agent launched. While Double is on, the automatic assistance team
+(the proactive helper, swarm or fusion that planning would otherwise start for the
+same prompt) stands down, as it already does for the scope council: Double is the
+independent analysis of that prompt, and a third team would repeat it. Failure-driven
+assistance after repeated tool errors is unchanged.
 
 ## Session-start disclosure
 

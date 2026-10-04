@@ -424,7 +424,7 @@ const STEM_STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'then', 
  * project tests now" / "ground the next edit with project tests") overlap. */
 export const adviceStems = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? []).filter(word => !STEM_STOP.has(word)).map(word => word.slice(0, 5)));
 export const stemSimilarity = (a: Set<string>, b: Set<string>) => { const union = new Set([...a, ...b]).size; return union ? [...a].filter(stem => b.has(stem)).length / union : 0; };
-export { peerReviewerNotes, plannerStatusText, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey, type ReviewerPeerNote, type ReviewerSource } from './reviewer-board.ts';
+export { peerReviewerNotes, plannerActive, plannerStatusText, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey, type ReviewerPeerNote, type ReviewerSource } from './reviewer-board.ts';
 
 /** Persist measured billing fields only; never a response body or provider metadata. */
 export function observerUsage(raw: any, provider?: string) {

@@ -206,7 +206,7 @@ test('the popup flow adopts the confirmed pair, leaves a cancel alone, and prefi
   const pi = makePi();
   const seen = [];
   let answer = { a: { provider: 'zai', id: 'glm-5.3-flash', thinking: 'medium' }, b: { provider: 'deepseek', id: 'deepseek-flash', thinking: 'high' }, reconcile: 'b' };
-  registerDoubleMode(pi, { launch: async () => ({}), agentDir: () => dir, pickPair: async (_ctx, options) => { seen.push(options); return answer; } });
+  registerDoubleMode(pi, { launch: async () => ({}), agentDir: () => dir, unreliableRoutes: () => new Set(['zai/glm-5.3-flash']), pickPair: async (_ctx, options) => { seen.push(options); return answer; } });
   const ctx = makeCtx(pi);
   await fire(pi, 'session_start', { reason: 'startup' }, ctx);
   const command = pi.commands.get('custom-double');
@@ -214,6 +214,8 @@ test('the popup flow adopts the confirmed pair, leaves a cancel alone, and prefi
   assert.equal(seen[0].models.length, MODELS.length, 'every available model, from every provider, is offered');
   assert.deepEqual(seen[0].session, { provider: 'openrouter', id: 'glm-5.3-flash' });
   assert.equal(seen[0].sessionThinking, 'high');
+  assert.deepEqual([...seen[0].unreliable], ['zai/glm-5.3-flash'], 'the run ledger\'s unreliable routes reach the popup');
+  assert.equal(seen[0].sessionTokens, undefined, 'no usage known, nothing to mark');
   assert.equal(seen[0].initial, undefined, 'nothing remembered yet');
   assert.match(lastNotice(pi).text, /A zai\/glm-5\.3-flash ∥ B deepseek\/deepseek-flash \+ reconcile on B/);
   // Cancelling keeps the pair as it was.
@@ -396,4 +398,65 @@ test('Double and the reviewers share one board: reviewer notes go in, a directiv
   assert.equal(board.reviewerLabel('council'), 'Scope council');
   await pi.commands.get('double').handler('off', ctx);
   assert.equal(board.plannerStatusText(), undefined, 'turning Double off clears the reviewers\' evidence');
+});
+
+test('a chosen model whose window cannot hold the transcript is skipped with a stated reason; the survivor still carries the turn', async () => {
+  const pi = makePi();
+  const seen = [];
+  registerDoubleMode(pi, { agentDir: () => tmpAgentDir(), launch: async (_id, params) => { seen.push(params); return okResult(`${kindOf(params)} text`); } });
+  const sizes = MODELS.map((model) => model.provider === 'deepseek' ? { ...model, contextWindow: 64_000 } : { ...model, contextWindow: 200_000 });
+  const ctx = makeCtx(pi, { modelRegistry: { getAvailable: () => sizes }, getContextUsage: () => ({ tokens: 91_000, contextWindow: 200_000, percent: 45 }) });
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('custom-double').handler('deepseek/deepseek-flash zai/glm-5.3-flash reconcile=a', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Fix the redirect.', systemPrompt: 's' }, ctx);
+  assert.ok(result, 'the survivor and the reconciliation still produce a directive');
+  assert.equal(seen.filter((params) => kindOf(params) === 'A').length, 0, 'the too-small route was never launched');
+  assert.equal(seen.filter((params) => kindOf(params) === 'B').length, 1);
+  const reconcile = seen.find((params) => kindOf(params) === 'reconcile');
+  assert.equal(reconcile.model, 'openrouter/glm-5.3-flash', 'a reconciliation that cannot fit runs on the session model');
+  assert.match(result.message.content, /partial result/);
+  assert.match(result.message.content, /Double stream A was not started: deepseek\/deepseek-flash has a 64k-token window and the session transcript it must read is about 91k tokens/);
+  assert.match(result.message.content, /Reconciliation ran on the session model openrouter\/glm-5\.3-flash because deepseek\/deepseek-flash has a 64k-token window/);
+  assert.ok(pi.sends.some((send) => send.message.details.phase === 'Double stream A' && send.message.details.status === 'unavailable'));
+});
+
+test('the twin mode and unknown sizes never skip a stream', async () => {
+  assert.equal(lib.doubleContextFits(64_000, 91_000), false);
+  assert.equal(lib.doubleContextFits(200_000, 91_000), true);
+  assert.equal(lib.doubleContextFits(undefined, 91_000), true);
+  assert.equal(lib.doubleContextFits(64_000, undefined), true);
+  assert.equal(lib.doubleContextFits(64_000, null), true);
+  const pi = makePi();
+  const seen = [];
+  registerDoubleMode(pi, { launch: async (_id, params) => { seen.push(kindOf(params)); return okResult('text'); } });
+  const ctx = makeCtx(pi, { modelRegistry: { getAvailable: () => MODELS.map((model) => ({ ...model, contextWindow: 8_000 })) }, getContextUsage: () => ({ tokens: 91_000 }) });
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Fix it.', systemPrompt: 's' }, ctx);
+  assert.deepEqual(seen.sort(), ['A', 'B', 'reconcile'], 'the session model holds its own transcript by construction');
+});
+
+test('the footer keeps a chip while Double is on, between prompts and across resumes, and clears when it is off', async () => {
+  const pi = makePi();
+  registerDoubleMode(pi, { agentDir: () => tmpAgentDir(), launch: async (_id, params) => okResult(`${kindOf(params)} text`) });
+  const ctx = makeCtx(pi);
+  const chip = () => pi.statuses.filter((row) => row.key === 'double').at(-1)?.text;
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  assert.equal(chip(), undefined, 'off at startup: no chip');
+  await pi.commands.get('double').handler('on', ctx);
+  assert.equal(chip(), 'Double ON · glm-5.3-flash ×2');
+  await pi.commands.get('custom-double').handler('deepseek/deepseek-flash zai/glm-5.3-flash', ctx);
+  assert.equal(chip(), 'Double ON · A deepseek-flash ∥ B glm-5.3-flash');
+  await fire(pi, 'before_agent_start', { prompt: 'Fix the redirect.', systemPrompt: 's' }, ctx);
+  assert.equal(chip(), 'Double ON · A deepseek-flash ∥ B glm-5.3-flash', 'a finished run returns to the idle chip, not to blank');
+  const revived = makePi();
+  revived.entries.push(...pi.entries);
+  registerDoubleMode(revived, { agentDir: () => tmpAgentDir(), launch: async () => ({}) });
+  await fire(revived, 'session_start', { reason: 'resume' }, makeCtx(revived));
+  assert.equal(revived.statuses.filter((row) => row.key === 'double').at(-1)?.text, 'Double ON · A deepseek-flash ∥ B glm-5.3-flash', 'a resumed session shows that Double is still on');
+  await pi.commands.get('custom-double').handler('off', ctx);
+  assert.equal(chip(), undefined);
+  process.env.PI_DOUBLE = 'off';
+  await pi.commands.get('double').handler('on', ctx);
+  assert.equal(chip(), undefined, 'a disabled process never shows the chip');
 });

@@ -65,3 +65,7 @@ export function plannerStatusText(): string | undefined {
   }
   return facts.length ? facts.join(' ') : undefined;
 }
+/** True while the planner is registered and reporting (for example Double mode is on). */
+export function plannerActive(source: ReviewerSource): boolean {
+  try { return Boolean(plannerReaders().get(source)?.()); } catch { return false; }
+}

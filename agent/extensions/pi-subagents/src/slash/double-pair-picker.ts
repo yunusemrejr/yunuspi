@@ -1,6 +1,6 @@
 import { DynamicBorder, type Theme } from "@yunuspi/coding-agent";
 import { Container, fuzzyFilter, Input, matchesKey, type KeybindingsManager, Spacer, Text, type TUI } from "@yunuspi/tui";
-import type { DoubleModelRef, DoublePair, DoubleReconciler } from "../../../lib/double.ts";
+import { doubleContextFits, type DoubleModelRef, type DoublePair, type DoubleReconciler } from "../../../lib/double.ts";
 import { defaultDoubleThinking, type DoubleRegistryModel } from "../extension/double-pair.ts";
 import { getSupportedThinkingLevels, toModelInfo } from "../shared/model-info.ts";
 
@@ -16,6 +16,10 @@ export interface DoublePairPickerOptions {
 	/** The model the session runs on: listed first and the default thinking source. */
 	session?: { provider: string; id: string };
 	sessionThinking?: string;
+	/** Tokens the session transcript holds now: a forked stream must read all of it, so smaller windows are marked. */
+	sessionTokens?: number;
+	/** provider/id routes whose recent automatic runs mostly failed to finish: marked, never hidden or blocked. */
+	unreliable?: ReadonlySet<string>;
 	done: (result: DoublePairPickerResult) => void;
 }
 
@@ -151,14 +155,18 @@ export class DoublePairPicker extends Container {
 			].filter(Boolean).join(" ");
 			const badge = th.fg("muted", `[${model.provider}]`);
 			const marked = tags ? th.fg("success", ` ✓ ${tags}`) : "";
-			this.listContainer.addChild(new Text(`${cursor}${selected ? th.fg("accent", model.id) : model.id} ${badge}${marked}`, 0, 0));
+			const flaky = this.options.unreliable?.has(key) ? th.fg("warning", " ⚠ failed to finish lately") : "";
+			const small = !doubleContextFits((model as { contextWindow?: number }).contextWindow, this.options.sessionTokens)
+				? th.fg("warning", ` ⚠ window ${Math.round(((model as { contextWindow?: number }).contextWindow ?? 0) / 1000)}k < session ${Math.round((this.options.sessionTokens ?? 0) / 1000)}k`) : "";
+			this.listContainer.addChild(new Text(`${cursor}${selected ? th.fg("accent", model.id) : model.id} ${badge}${marked}${flaky}${small}`, 0, 0));
 		}
 		if (start > 0 || end < total) this.listContainer.addChild(new Text(th.fg("muted", `  (${this.selectedIndex + 1}/${total})`), 0, 0));
 		if (total === 0) this.listContainer.addChild(new Text(th.fg("muted", "  No matching models you can run"), 0, 0));
 		if (this.note) this.listContainer.addChild(new Text(th.fg("warning", `  ${this.note}`), 0, 0));
 
 		const slotName = this.active === 0 ? "A" : "B";
-		this.hintText.setText(th.fg("muted", `↑↓ move · enter ${this.rows[this.selectedIndex]?.kind === "start" ? "start" : `pick for ${slotName}`} · tab switch A/B · ctrl+t thinking · ctrl+r reconciler · esc cancel`));
+		// Two deliberate lines: a single long hint wraps mid-phrase in an 80-column terminal.
+		this.hintText.setText(th.fg("muted", `↑↓ move · enter ${this.rows[this.selectedIndex]?.kind === "start" ? "start" : `pick for ${slotName}`} · tab switch A/B · esc cancel\nctrl+t thinking level · ctrl+r reconcile on A, B or session`));
 	}
 
 	private pickModel(model: DoubleRegistryModel): void {

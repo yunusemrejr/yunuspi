@@ -1,9 +1,9 @@
 /**
  * Double mode — portable core.
  *
- * Two independent inference streams of one model behave as two cooperating
- * instances of one agent inside one session, reconciled into one decision
- * stream:
+ * Two independent inference streams behave as two cooperating instances of one
+ * agent inside one session, reconciled into one decision stream. The streams
+ * run the same model twice, or two different models the user chose (a pair):
  *
  *   Independent A ∥ Independent B → Compare → Challenge → Reconcile → Commit
  *
@@ -182,6 +182,18 @@ export function parseCustomDoubleArgs(args: unknown): CustomDoubleIntent {
 	}
 	if (tokens.length !== 2) throw new TypeError(`parseCustomDoubleArgs: expected two models. ${CUSTOM_DOUBLE_USAGE}`);
 	return { kind: "pair", a: tokens[0]!, b: tokens[1]!, ...(reconcile ? { reconcile } : {}) };
+}
+
+/**
+ * A forked stream carries the whole session transcript, so it fits a model only
+ * when the model's window holds that transcript, the stream prompt and the
+ * read-only tool results the stream reads. Unknown sizes count as fitting: the
+ * check exists to skip a launch that is certain to overflow, not to guess.
+ */
+export function doubleContextFits(contextWindow: unknown, transcriptTokens: unknown, reserveTokens = 24_000): boolean {
+	if (typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0) return true;
+	if (typeof transcriptTokens !== "number" || !Number.isFinite(transcriptTokens) || transcriptTokens < 0) return true;
+	return Math.ceil(transcriptTokens * 1.1) + reserveTokens <= contextWindow;
 }
 
 /**

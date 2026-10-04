@@ -4,6 +4,7 @@ import { packetRequirements } from '../../../lib/requirement-ledger.ts';
 import { beginHarnessActivity, type ActivityOutcome } from '../../../lib/harness-activity.ts';
 import { registerSkillDiscoveryRunner } from "./skill-discovery-runner.ts";
 import { assistanceMemberRouteCandidate, planAssistance, selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
+import { plannerActive } from "../../../lib/reviewer-board.ts";
 import { recentUnreliableRoutes } from "../runs/shared/run-history.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { AUTOMATIC_HELPER_LIMITS, REVIEW_LIMITS } from "../runs/shared/automatic-budgets.ts";
@@ -762,6 +763,9 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 			try { branch = ctx.sessionManager?.getBranch?.(); } catch { /* missing history is unknown */ }
 			try { if (scopeRequest(prompt, branch)) return; } catch { /* existing helper gates remain authoritative */ }
 		}
+		// Double mode already analyses this prompt twice and reconciles the two: a third proactive team
+		// would analyse the same request again. Failure-driven assistance (tool_result below) still applies.
+		if (plannerActive("double")) return;
 		// Prefer the smaller observation-driven skill scout over a generic single
     // investigator when a skill actually claims the prompt. Catalog existence
     // alone vetoed every single-role plan (the catalog is always present),

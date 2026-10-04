@@ -16,6 +16,7 @@ Object.assign(process.env,{
 delete process.env.PI_SUBAGENT_CHILD;
 const load=p=>import(pathToFileURL(path.join(agent,p)));
 const {registerAutonomousRecovery,automaticFusionBody,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
+const {registerPlannerStatus}=await load('extensions/lib/reviewer-board.ts');
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 const {buildModelCandidates}=await load('extensions/pi-subagents/src/runs/shared/model-fallback.ts');
@@ -229,4 +230,24 @@ test('generous helper deadlines still cancel promptly with the owning turn',asyn
  await tick();await tick();
  assert.equal(fx.messages.length,0);
  await fx.emit('session_shutdown');
+});
+
+test('Double mode already analyses the prompt twice, so no third proactive team starts, and turning Double off restores it',async t=>{
+ const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
+ assert.equal(planAssistance(prompt).mode,'subagent');
+ const control=fixture({primary:{...model,provider:'parent'}});
+ await control.input(prompt);await control.emit('before_agent_start',{prompt});await tick();
+ assert.equal(control.calls.length,1,'without Double the helper starts');
+ await control.emit('session_shutdown');
+ const dispose=registerPlannerStatus('double',()=>'ON (the session model, twice): every user prompt is analyzed twice.');
+ t.after(dispose);
+ const fx=fixture({primary:{...model,provider:'parent'}});
+ await fx.input(prompt);await fx.emit('before_agent_start',{prompt});await tick();
+ assert.equal(fx.calls.length,0,'Double supplies the independent analysis; a second proactive team would repeat it');
+ assert.equal(fx.messages.length,0);
+ dispose();
+ const after=fixture({primary:{...model,provider:'parent'}});
+ await after.input(prompt);await after.emit('before_agent_start',{prompt});await tick();
+ assert.equal(after.calls.length,1,'turning Double off restores the helper');
+ await after.emit('session_shutdown');await fx.emit('session_shutdown');
 });

@@ -210,8 +210,9 @@ test('an enabled turn doubles the pinned route concurrently, reconciles and inje
   const lifecycles = pi.entries.filter((entry) => entry.customType === 'subagent-lifecycle-v1');
   assert.equal(new Set(costs.map((entry) => entry.data.runId)).size, 3, 'A, B and reconcile all account');
   assert.equal(new Set(lifecycles.map((entry) => entry.data.runId)).size, 3);
-  assert.ok(pi.statuses.some((status) => status.key === 'double' && status.text === undefined),
-    'footer status clears at the end');
+  const doubleStatuses = pi.statuses.filter((status) => status.key === 'double');
+  assert.ok(doubleStatuses.some((status) => /^Double A ∥ B · openrouter\/glm-5\.3-flash$/.test(status.text ?? '')), 'the footer shows the run while it is in progress');
+  assert.equal(doubleStatuses.at(-1).text, 'Double ON · glm-5.3-flash ×2', 'after the run the footer returns to the idle chip: the mode is still on');
   assert.ok(pi.renderers.has(DOUBLE_PROGRESS), 'progress renderer is registered');
 });
 

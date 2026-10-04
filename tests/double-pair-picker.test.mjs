@@ -53,7 +53,7 @@ test('the popup lists every provider\'s models with the session model first and 
   const rows = view.split('\n').filter((line) => /\[[a-z]+\]/.test(line) && /→|^ {2}\S/.test(line));
   assert.match(rows[0], /→ glm-5\.3-flash \[openrouter\].*session/, 'the session model leads');
   for (const provider of ['openrouter', 'deepseek', 'zai', 'cheap', 'anthropic']) assert.match(view, new RegExp(`\\[${provider}\\]`));
-  assert.match(view, /enter pick for A · tab switch A\/B · ctrl\+t thinking · ctrl\+r reconciler · esc cancel/);
+  assert.match(view, /enter pick for A · tab switch A\/B · esc cancel\s*\n\s*ctrl\+t thinking level · ctrl\+r reconcile on A, B or session/);
 });
 
 test('search narrows across providers, enter fills A then B, and the Start row confirms', () => {
@@ -160,4 +160,26 @@ test('no match says so, and enter on nothing does nothing', () => {
   assert.match(screen(), /No matching models you can run/);
   press(KEYS.enter);
   assert.equal(results.length, 0);
+});
+
+test('a route whose recent automatic runs mostly failed is marked, never hidden or blocked', () => {
+  const { screen, press, type, results } = open({ unreliable: new Set(['zai/glm-5.3-flash']) });
+  const view = screen();
+  assert.match(view, /glm-5\.3-flash \[zai\] ⚠ failed to finish lately/);
+  assert.doesNotMatch(view, /deepseek-flash \[deepseek\] ⚠/);
+  type('zai');
+  press(KEYS.enter);
+  type('deepseek');
+  press(KEYS.enter, KEYS.enter);
+  assert.equal(results[0].confirmed, true, 'a marked route can still be chosen');
+  assert.equal(results[0].pair.a.provider, 'zai');
+});
+
+test('a model whose window cannot hold the session transcript is marked, since every stream reads all of it', () => {
+  const small = MODELS.map((model) => model.provider === 'cheap' ? { ...model, contextWindow: 64_000 } : { ...model, contextWindow: 200_000 });
+  const { screen } = open({ models: small, sessionTokens: 91_000 });
+  const view = screen();
+  assert.match(view, /plain-model \[cheap\] ⚠ window 64k < session 91k/);
+  assert.doesNotMatch(view, /deepseek-flash \[deepseek\] ⚠/);
+  assert.doesNotMatch(open({ models: small }).screen(), /⚠ window/, 'an unknown session size marks nothing');
 });
