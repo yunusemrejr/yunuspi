@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import type { ExtractedContent } from "./extract.ts";
 import type { GitHubUrlInfo } from "./github-extract.ts";
+import { encodeRepoPath, githubRest } from "./github-rest.ts";
 
 const MAX_TREE_ENTRIES = 200;
 const MAX_INLINE_FILE_CHARS = 100_000;
@@ -23,111 +24,44 @@ export async function checkGhAvailable(signal?: AbortSignal): Promise<boolean> {
 export function showGhHint(): void {
 	if (!ghHintShown) {
 		ghHintShown = true;
-		console.error("[pi-web-access] Install `gh` CLI for better GitHub repo access including private repos.");
+		console.error("[pi-web-access] Install the `gh` CLI or set GITHUB_TOKEN for private repositories and higher GitHub API limits.");
 	}
 }
 
-export async function checkRepoSize(owner: string, repo: string): Promise<number | null> {
-	if (!(await checkGhAvailable())) return null;
-
-	return new Promise((resolve) => {
-		execFile("gh", ["api", `repos/${owner}/${repo}`, "--jq", ".size"], { timeout: 10000 }, (err, stdout) => {
-			if (err) {
-				resolve(null);
-				return;
-			}
-			const kb = parseInt(stdout.trim(), 10);
-			resolve(Number.isNaN(kb) ? null : kb);
-		});
-	});
+export async function checkRepoSize(owner: string, repo: string, signal?: AbortSignal): Promise<number | null> {
+	const response = await githubRest<{ size?: unknown }>(`/repos/${owner}/${repo}`, { ...(signal ? { signal } : {}) }).catch(() => undefined);
+	const kb = response?.ok ? response.data?.size : undefined;
+	return typeof kb === "number" && Number.isFinite(kb) ? kb : null;
 }
 
-async function getDefaultBranch(owner: string, repo: string): Promise<string | null> {
-	if (!(await checkGhAvailable())) return null;
-
-	return new Promise((resolve) => {
-		execFile("gh", ["api", `repos/${owner}/${repo}`, "--jq", ".default_branch"], { timeout: 10000 }, (err, stdout) => {
-			if (err) {
-				resolve(null);
-				return;
-			}
-			const branch = stdout.trim();
-			resolve(branch || null);
-		});
-	});
+async function getDefaultBranch(owner: string, repo: string, signal?: AbortSignal): Promise<string | null> {
+	const response = await githubRest<{ default_branch?: unknown }>(`/repos/${owner}/${repo}`, { ...(signal ? { signal } : {}) }).catch(() => undefined);
+	const branch = response?.ok ? response.data?.default_branch : undefined;
+	return typeof branch === "string" && branch ? branch : null;
 }
 
-async function fetchTreeViaApi(owner: string, repo: string, ref: string): Promise<string | null> {
-	if (!(await checkGhAvailable())) return null;
-
-	return new Promise((resolve) => {
-		execFile(
-			"gh",
-			["api", `repos/${owner}/${repo}/git/trees/${ref}?recursive=1`, "--jq", ".tree[].path"],
-			{ timeout: 15000, maxBuffer: 5 * 1024 * 1024 },
-			(err, stdout) => {
-				if (err) {
-					resolve(null);
-					return;
-				}
-				const paths = stdout.trim().split("\n").filter(Boolean);
-				if (paths.length === 0) {
-					resolve(null);
-					return;
-				}
-				const truncated = paths.length > MAX_TREE_ENTRIES;
-				const display = paths.slice(0, MAX_TREE_ENTRIES).join("\n");
-				resolve(truncated ? display + `\n... (${paths.length} total entries)` : display);
-			},
-		);
-	});
+async function fetchTreeViaApi(owner: string, repo: string, ref: string, signal?: AbortSignal): Promise<string | null> {
+	const response = await githubRest<{ tree?: Array<{ path?: unknown }> }>(
+		`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
+		{ query: { recursive: 1 }, ...(signal ? { signal } : {}) },
+	).catch(() => undefined);
+	const paths = (response?.ok ? response.data?.tree ?? [] : []).map((entry) => entry.path).filter((path): path is string => typeof path === "string");
+	if (paths.length === 0) return null;
+	const truncated = paths.length > MAX_TREE_ENTRIES;
+	const display = paths.slice(0, MAX_TREE_ENTRIES).join("\n");
+	return truncated ? display + `\n... (${paths.length} total entries)` : display;
 }
 
-async function fetchReadmeViaApi(owner: string, repo: string, ref: string): Promise<string | null> {
-	if (!(await checkGhAvailable())) return null;
-
-	return new Promise((resolve) => {
-		execFile(
-			"gh",
-			["api", `repos/${owner}/${repo}/readme?ref=${ref}`, "--jq", ".content"],
-			{ timeout: 10000 },
-			(err, stdout) => {
-				if (err) {
-					resolve(null);
-					return;
-				}
-				try {
-					const decoded = Buffer.from(stdout.trim(), "base64").toString("utf-8");
-					resolve(decoded.length > 8192 ? decoded.slice(0, 8192) + "\n\n[README truncated at 8K chars]" : decoded);
-				} catch {
-					resolve(null);
-				}
-			},
-		);
-	});
+async function fetchReadmeViaApi(owner: string, repo: string, ref: string, signal?: AbortSignal): Promise<string | null> {
+	const response = await githubRest(`/repos/${owner}/${repo}/readme`, { query: { ref }, raw: true, ...(signal ? { signal } : {}) }).catch(() => undefined);
+	const text = response?.ok ? response.text : undefined;
+	if (!text) return null;
+	return text.length > 8192 ? text.slice(0, 8192) + "\n\n[README truncated at 8K chars]" : text;
 }
 
-async function fetchFileViaApi(owner: string, repo: string, path: string, ref: string): Promise<string | null> {
-	if (!(await checkGhAvailable())) return null;
-
-	return new Promise((resolve) => {
-		execFile(
-			"gh",
-			["api", `repos/${owner}/${repo}/contents/${path}?ref=${ref}`, "--jq", ".content"],
-			{ timeout: 10000, maxBuffer: 2 * 1024 * 1024 },
-			(err, stdout) => {
-				if (err) {
-					resolve(null);
-					return;
-				}
-				try {
-					resolve(Buffer.from(stdout.trim(), "base64").toString("utf-8"));
-				} catch {
-					resolve(null);
-				}
-			},
-		);
-	});
+async function fetchFileViaApi(owner: string, repo: string, path: string, ref: string, signal?: AbortSignal): Promise<string | null> {
+	const response = await githubRest(`/repos/${owner}/${repo}/contents/${encodeRepoPath(path)}`, { query: { ref }, raw: true, ...(signal ? { signal } : {}) }).catch(() => undefined);
+	return response?.ok && response.text !== undefined ? response.text : null;
 }
 
 export async function fetchViaApi(
@@ -136,8 +70,9 @@ export async function fetchViaApi(
 	repo: string,
 	info: GitHubUrlInfo,
 	sizeNote?: string,
+	signal?: AbortSignal,
 ): Promise<ExtractedContent | null> {
-	const ref = info.ref || (await getDefaultBranch(owner, repo));
+	const ref = info.ref || (await getDefaultBranch(owner, repo, signal));
 	if (!ref) return null;
 
 	const lines: string[] = [];
@@ -147,7 +82,7 @@ export async function fetchViaApi(
 	}
 
 	if (info.type === "blob" && info.path) {
-		const content = await fetchFileViaApi(owner, repo, info.path, ref);
+		const content = await fetchFileViaApi(owner, repo, info.path, ref, signal);
 		if (!content) return null;
 
 		lines.push(`## ${info.path}`);
@@ -167,8 +102,8 @@ export async function fetchViaApi(
 	}
 
 	const [tree, readme] = await Promise.all([
-		fetchTreeViaApi(owner, repo, ref),
-		fetchReadmeViaApi(owner, repo, ref),
+		fetchTreeViaApi(owner, repo, ref, signal),
+		fetchReadmeViaApi(owner, repo, ref, signal),
 	]);
 
 	if (!tree && !readme) return null;

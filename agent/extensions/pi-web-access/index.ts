@@ -7,6 +7,7 @@ import { StringEnum, type ImageContent, type TextContent } from "@yunuspi/ai/com
 import type { ExtractedContent, ExtractOptions } from "./extract.ts";
 import { normalizeFetchContentParams } from "./fetch-params.ts";
 import { registerWebProbe } from "./web-probe.ts";
+import { registerGithubSearch } from "./github-search.ts";
 import { resolveAuthFetchProfile, type AuthFetchProfile } from "./auth-fetch.ts";
 import { findContent, type FindMode } from "./content-find.ts";
 import { answerFromPage } from "./page-query.ts";
@@ -375,6 +376,9 @@ async function getProviderAvailability(ctx: ExtensionContext): Promise<ProviderA
 		searxng: !!searxngUrl(),
 		wikipedia: true,
 		crossref: true,
+		hackernews: true,
+		stackexchange: true,
+		npm: true,
 		kimi: await isKimiSearchAvailable(ctx),
 	};
 	const allSearchProviders = new Set<ResolvedSearchProvider>(ALL_SEARCH_PROVIDERS);
@@ -935,7 +939,10 @@ export default function (pi: ExtensionAPI) {
 	const webSearchEnabled = isToolEnabled(initConfig, "webSearch");
 	const sourceCheckEnabled = isToolEnabled(initConfig, "sourceCheck");
 	const fetchContentEnabled = isToolEnabled(initConfig, "fetchContent");
-	if (fetchContentEnabled) registerWebProbe(pi);
+	if (fetchContentEnabled) {
+		registerWebProbe(pi);
+		registerGithubSearch(pi);
+	}
 	const getSearchContentEnabled = isToolEnabled(initConfig, "getSearchContent");
 	// Names as registered this session, so fetch failure guidance never points
 	// at tools that are disabled or were renamed after init.

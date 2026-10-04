@@ -659,7 +659,7 @@ async function awaitCachedClone(
 		const title = info.path ? `${owner}/${repo} - ${info.path}` : `${owner}/${repo}`;
 		return { url, title, content, error: null };
 	}
-	return fetchViaApi(url, owner, repo, info);
+	return fetchViaApi(url, owner, repo, info, undefined, signal);
 }
 
 export async function extractGitHub(
@@ -684,13 +684,13 @@ export async function extractGitHub(
 	if (info.refIsFullSha) {
 		if (signal?.aborted) return null;
 		const sizeNote = `Note: Commit SHA URLs use the GitHub API instead of cloning.`;
-		return fetchViaApi(url, owner, repo, info, sizeNote);
+		return fetchViaApi(url, owner, repo, info, sizeNote, signal);
 	}
 
 	const activityId = activityMonitor.logStart({ type: "fetch", url: `github.com/${owner}/${repo}` });
 
 	if (!forceClone) {
-		const sizeKB = await checkRepoSize(owner, repo);
+		const sizeKB = await checkRepoSize(owner, repo, signal);
 		if (signal?.aborted) {
 			activityMonitor.logComplete(activityId, 0);
 			return null;
@@ -706,7 +706,7 @@ export async function extractGitHub(
 					`Note: Repository is ${Math.round(sizeMB)}MB (threshold: ${config.maxRepoSizeMB}MB). ` +
 					`Showing API-fetched content instead of full clone. Ask the user if they'd like to clone the full repo -- ` +
 					`if yes, call fetch_content again with the same URL and add forceClone: true to the params.`;
-				const apiView = await fetchViaApi(url, owner, repo, info, sizeNote);
+				const apiView = await fetchViaApi(url, owner, repo, info, sizeNote, signal);
 				if (apiView) {
 					activityMonitor.logComplete(activityId, 200);
 					return apiView;
@@ -738,7 +738,7 @@ export async function extractGitHub(
 
 	const destination = cloneDestination(config, owner, repo, info.ref);
 	if (!destination) {
-		const apiFallback = await fetchViaApi(url, owner, repo, info);
+		const apiFallback = await fetchViaApi(url, owner, repo, info, undefined, signal);
 		if (apiFallback) activityMonitor.logComplete(activityId, 200);
 		else activityMonitor.logError(activityId, "invalid clone destination");
 		return apiFallback;
@@ -760,7 +760,7 @@ export async function extractGitHub(
 			return null;
 		}
 
-		const apiFallback = await fetchViaApi(url, owner, repo, info);
+		const apiFallback = await fetchViaApi(url, owner, repo, info, undefined, signal);
 		if (apiFallback) {
 			activityMonitor.logComplete(activityId, 200);
 			return apiFallback;

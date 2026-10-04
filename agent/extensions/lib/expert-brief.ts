@@ -11,6 +11,7 @@ import { getDoctrinePack } from "./expert-doctrine.ts";
 import { buildCriticPlan, criticPlanSummary } from "./expert-critics.ts";
 import { readTasteStore, recallTaste, renderTasteContext, emptyTasteStore } from "./expert-taste.ts";
 import { isTrivialChangeRequest } from "./review-coordinator.ts";
+import { priorArtDirective, priorArtIntent, type PriorArtMode } from "./prior-art.ts";
 
 export function expertEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return !["off", "0"].includes(env.PI_EXPERT ?? "on");
@@ -42,6 +43,8 @@ export interface ExpertBrief {
     lenses: string[];
     lensesDropped: string[];
     exploration: boolean;
+    /** Set when the prompt called for a look at existing products and projects. */
+    priorArt?: PriorArtMode;
   };
 }
 
@@ -92,7 +95,18 @@ export function buildExpertBrief(input: ExpertDetectionInput & { projectId?: str
     lenses: plan.lenses.map((l) => l.lens.id), lensesDropped: plan.dropped,
     exploration: detection.openEnded && (detection.taskType === "create" || detection.taskType === "transform"),
   };
-  if (!qualified) return { ...empty, domains, taskType: detection.taskType, openEnded: detection.openEnded, detail };
+  // Looking at what already exists is cross-cutting: it does not need an excellence domain to be useful.
+  const scout = priorArtIntent(input.prompt);
+  const scoutText = scout ? priorArtDirective(scout) : "";
+  if (scout) detail.priorArt = scout.mode;
+  if (!qualified && !scout) return { ...empty, domains, taskType: detection.taskType, openEnded: detection.openEnded, detail };
+  if (!qualified) {
+    return {
+      qualified: true, domains, taskType: detection.taskType, openEnded: detection.openEnded,
+      text: scoutText, summary: `Expert brief: prior art · ${scout!.mode} (${scout!.reason}).`,
+      detail: { ...detail, doctrineChars: scoutText.length },
+    };
+  }
   const lines = [`Harness expert guidance (advisory; the user's words and project conventions win). Detected: ${domains.map((d) => EXPERT_DOMAIN_LABELS[d]).join(" + ")}; task: ${detection.taskType}.`];
   if (doctrine.text) lines.push(doctrine.text);
   const taste = renderTasteContext(tastePrefs);
@@ -104,10 +118,12 @@ export function buildExpertBrief(input: ExpertDetectionInput & { projectId?: str
   if (detection.taskType === "transform") {
     lines.push("Preserve what must survive: before broad redesign/refactor work, name the behaviors, content and contracts that stay, and verify them afterward.");
   }
+  if (scoutText) lines.push(scoutText);
   lines.push(`Critics for this task: ${plan.lenses.map((l) => l.lens.role).join("; ") || "none"}. Run cheap deterministic checks first; judge the actual artifact (pixels, renders, test/failure evidence, final prose), not source intent.`);
-  const text = lines.join("\n").slice(0, BRIEF_BUDGET);
+  const text = lines.join("\n").slice(0, BRIEF_BUDGET + (scoutText ? scoutText.length + 1 : 0));
   const summaryParts = [`${domains.map((d) => EXPERT_DOMAIN_LABELS[d]).join("+")} · ${detection.taskType}${detection.openEnded ? " · open" : ""}`];
   if (detail.exploration) summaryParts.push("explore alternatives before building");
+  if (scout) summaryParts.push(`prior art (${scout.mode})`);
   if (tastePrefs.length) summaryParts.push(`${tastePrefs.length} prior${tastePrefs.length === 1 ? "" : "s"}`);
   const planSummary = criticPlanSummary(plan);
   if (planSummary) summaryParts.push(planSummary.replace(/^Critics: /, "").replace(/\.$/, ""));

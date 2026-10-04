@@ -17,7 +17,7 @@ import { getWebSearchConfigPath } from "./utils.ts";
 // WHY: fork pruned all keyed 3rd-party SaaS search providers and gemini (user request: search
 // should use the session's default LLM). Kept: openai (session-model hosted search),
 // duckduckgo (zero-config fallback), kimi (explicit-only, Kimi Code Plan).
-export const RESOLVED_SEARCH_PROVIDERS = ["openai", "searxng", "duckduckgo", "wikipedia", "crossref", "kimi"] as const;
+export const RESOLVED_SEARCH_PROVIDERS = ["openai", "searxng", "duckduckgo", "wikipedia", "crossref", "hackernews", "stackexchange", "npm", "kimi"] as const;
 export const SEARCH_PROVIDERS = ["auto", "all", ...RESOLVED_SEARCH_PROVIDERS] as const;
 
 export type ResolvedSearchProvider = typeof RESOLVED_SEARCH_PROVIDERS[number];
@@ -333,7 +333,7 @@ async function searchWithResolvedProvider(
 			: await searchWithOpenAI(query, options, options.extensionContext);
 		return { ...result, provider };
 	}
-	if (provider === "searxng" || provider === "wikipedia" || provider === "crossref") return { ...(await searchFree(provider, query, options)), provider };
+	if (provider === "searxng" || provider === "wikipedia" || provider === "crossref" || provider === "hackernews" || provider === "stackexchange" || provider === "npm") return { ...(await searchFree(provider, query, options)), provider };
 	if (provider === "duckduckgo") return { ...(await searchWithDuckDuckGo(query, options)), provider };
 	if (provider === "kimi") return { ...(await searchWithKimi(query, options, options.extensionContext)), provider };
 	throw new Error(`Unknown search provider: ${provider}`);
@@ -346,7 +346,7 @@ async function isResolvedProviderAvailable(provider: ResolvedSearchProvider, opt
 			: isOpenAISearchAvailable(options.extensionContext);
 	}
 	if (provider === "searxng") return !!searxngUrl();
-	if (provider === "wikipedia" || provider === "crossref") return true;
+	if (provider === "wikipedia" || provider === "crossref" || provider === "hackernews" || provider === "stackexchange" || provider === "npm") return true;
 	if (provider === "duckduckgo") return isDuckDuckGoAvailable();
 	if (provider === "kimi") return isKimiSearchAvailable(options.extensionContext);
 	return false;
@@ -356,6 +356,9 @@ function providerLabel(provider: string): string {
 	if (provider === "openai") return "OpenAI";
 	if (provider === "duckduckgo") return "DuckDuckGo";
 	if (provider === "kimi") return "Kimi";
+	if (provider === "hackernews") return "Hacker News";
+	if (provider === "stackexchange") return "Stack Overflow";
+	if (provider === "npm") return "npm";
 	return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 

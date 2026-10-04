@@ -17,6 +17,10 @@ advisory and owns no routing, safety, or completion decisions.
    preservation reminders for transformations, and the critic plan. The same
    builder feeds the prompt-time advisory in `micro-intelligence.ts` and the
    `expert_director` tool, so both always agree.
+   When the prompt calls for a look at existing products and projects (an explicit
+   comparison, an open-ended improvement, or new software with an open design),
+   the brief also carries one **prior-art** paragraph, even if no excellence domain
+   qualified. See [Prior-art scouting](PRIOR-ART.md).
 3. **Explore (open work only).** Sketch 2–3 materially different approaches,
    choose with explicit criteria, record why in the plan, then execute through
    one clear owner. Existing fusion/council owners carry deliberate

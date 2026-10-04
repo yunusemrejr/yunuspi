@@ -243,6 +243,9 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   assert.ok(!firstMessages.some(message => message.customType === 'prompt-analysis-context' || message.content?.some?.(part => /Auxiliary interpretation \(advisory only|Request identity:/.test(part.text ?? ''))), 'a skipped helper contributes no auxiliary model context');
   const directAnalysis = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
   assert.equal(directAnalysis.details.attempts.length, 0, 'deterministic bookkeeping must not be presented as an inference attempt');
+  assert.equal(directAnalysis.details.skipped, 'direct-task', 'an admission decision is recorded as a decision');
+  assert.match(directAnalysis.content, /Intent analysis · initial · skipped — a direct task needs no model interpretation/);
+  assert.doesNotMatch(directAnalysis.content, /unavailable|no eligible analysis route/, 'a deliberate skip must not read as a failed route');
   const complex = 'Investigate cross-file race conditions and compare architectural alternatives in the Node.js parser.';
   await f.session.prompt(complex);
   assert.deepEqual(f.calls.map(call => call.id), ['main', 'third', 'main']);
@@ -251,6 +254,7 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   assert.ok(complexMessages.some(message => message.content?.some?.(part => part.text?.includes('Auxiliary interpretation (advisory only'))));
   const analyzed = f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').at(-1);
   assert.deepEqual(analyzed.details.attempts.map(attempt => attempt.outcome), ['complete']);
+  assert.equal(analyzed.details.skipped, undefined, 'an analysed prompt carries no skip reason');
   assert.deepEqual(f.errors, []);
 });
 

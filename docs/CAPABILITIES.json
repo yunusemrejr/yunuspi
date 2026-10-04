@@ -2322,6 +2322,7 @@
         "get_search_content",
         "web_research",
         "web_probe",
+        "github_search",
         "browser_session",
         "wait_for",
         "render_see",
@@ -2339,6 +2340,7 @@
         "get_search_content",
         "web_research",
         "web_probe",
+        "github_search",
         "browser_session",
         "wait_for",
         "render_see",
@@ -2403,6 +2405,16 @@
           "summary": "Fetch mode."
         },
         {
+          "name": "github_search.action",
+          "values": [
+            "repos",
+            "issues",
+            "code",
+            "repo"
+          ],
+          "summary": "GitHub operation: ranked repository search over several angles, a project's user requests by reactions, code search (token), or one repository's fact sheet."
+        },
+        {
           "name": "action",
           "summary": "Browser or media operation selected by the tool schema."
         },
@@ -2436,6 +2448,8 @@
         "agent/extensions/pi-web-access/index.ts",
         "agent/extensions/pi-web-access/research-jobs.ts",
         "agent/extensions/pi-web-access/web-probe.ts",
+        "agent/extensions/pi-web-access/github-search.ts",
+        "agent/extensions/pi-web-access/github-rest.ts",
         "agent/extensions/lib/browser-session.ts",
         "agent/extensions/render-and-wait.ts",
         "agent/extensions/media-tools.ts"
@@ -3046,7 +3060,7 @@
     {
       "id": "research-toolkit",
       "group": "web_media",
-      "summary": "Plan research angles and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research and verify primary sources.",
+      "summary": "Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.",
       "entrypoints": [
         "research_toolkit"
       ],
@@ -3058,6 +3072,7 @@
           "name": "action",
           "values": [
             "plan",
+            "profile",
             "lead",
             "company",
             "source"
@@ -3065,8 +3080,16 @@
           "summary": "Toolkit operation."
         },
         {
-          "name": "goal|context",
-          "summary": "Research goal and optional context for plan."
+          "name": "goal|context|mode",
+          "values": [
+            "leads",
+            "prior-art"
+          ],
+          "summary": "Research goal and optional context for plan; mode prior-art plans how to find and compare existing products and projects."
+        },
+        {
+          "name": "path",
+          "summary": "Directory to profile (default: the working directory); read-only, never reads environment files."
         },
         {
           "name": "name|company|role|domain",
@@ -3087,7 +3110,9 @@
         "safety-bounds"
       ],
       "sourceFiles": [
-        "agent/extensions/research-toolkit.ts"
+        "agent/extensions/research-toolkit.ts",
+        "agent/extensions/lib/project-profile.ts",
+        "agent/extensions/lib/prior-art.ts"
       ],
       "doc": "docs/ISOLATION-AND-WEB.md",
       "commands": []
@@ -3263,7 +3288,7 @@
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3395
+        "line": 3402
       },
       {
         "name": "custom-double",
@@ -3298,7 +3323,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3437
+        "line": 3444
       },
       {
         "name": "graph",
@@ -3443,7 +3468,7 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3485
+        "line": 3492
       },
       {
         "name": "self",
@@ -3558,7 +3583,7 @@
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3134
+        "line": 3141
       }
     ],
     "commandDynamicOwners": [
@@ -3871,14 +3896,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 196,
+        "line": 197,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 197,
+        "line": 198,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3886,6 +3911,12 @@
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
         "line": 397,
+        "kind": "literal"
+      },
+      {
+        "name": "github_search",
+        "source": "agent/extensions/pi-web-access/github-search.ts",
+        "line": 424,
         "kind": "literal"
       },
       {
@@ -3993,7 +4024,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 495,
+        "line": 499,
         "kind": "literal"
       },
       {
@@ -4125,7 +4156,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 58,
+        "line": 91,
         "kind": "literal"
       },
       {
@@ -4185,7 +4216,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 195,
+        "line": 196,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4288,7 +4319,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 378,
+        "line": 381,
         "kind": "literal"
       },
       {
@@ -4366,13 +4397,13 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 70,
+        "line": 73,
         "kind": "literal"
       },
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 194,
+        "line": 195,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4529,6 +4560,12 @@
         "kind": "literal"
       },
       {
+        "name": "github_search",
+        "source": "agent/extensions/pi-web-access/github-search.ts",
+        "line": 424,
+        "kind": "literal"
+      },
+      {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
         "line": 165,
@@ -4585,7 +4622,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 495,
+        "line": 499,
         "kind": "literal"
       },
       {
@@ -4681,7 +4718,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 58,
+        "line": 91,
         "kind": "literal"
       },
       {
@@ -4759,7 +4796,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 378,
+        "line": 381,
         "kind": "literal"
       },
       {
@@ -4777,7 +4814,7 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 70,
+        "line": 73,
         "kind": "literal"
       },
       {
@@ -4969,10 +5006,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1659,
-          2247,
-          2401,
-          2800
+          1666,
+          2254,
+          2408,
+          2807
         ],
         "knownNames": [
           "fetch_content",
@@ -5037,11 +5074,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 706,
-      "registrationSites": 85,
+      "sourceFiles": 710,
+      "registrationSites": 86,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 133,
-      "uniqueStableTools": 132,
+      "stableRegistrationRows": 134,
+      "uniqueStableTools": 133,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5703,6 +5740,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/prior-art.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/process-owner.ts",
         "exists": true
       },
@@ -5728,6 +5769,10 @@
       },
       {
         "path": "agent/extensions/lib/project-memory-retrieve.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-profile.ts",
         "exists": true
       },
       {
@@ -7673,6 +7718,10 @@
         "path": "agent/skills/presentation-authoring/SKILL.md"
       },
       {
+        "name": "prior-art-scouting",
+        "path": "agent/skills/prior-art-scouting/SKILL.md"
+      },
+      {
         "name": "procedural-animation-math",
         "path": "agent/skills/procedural-animation-math/SKILL.md"
       },
@@ -8065,6 +8114,10 @@
       {
         "name": "PLATFORMS.md",
         "path": "docs/PLATFORMS.md"
+      },
+      {
+        "name": "PRIOR-ART.md",
+        "path": "docs/PRIOR-ART.md"
       },
       {
         "name": "PROJECT-INTELLIGENCE.md",

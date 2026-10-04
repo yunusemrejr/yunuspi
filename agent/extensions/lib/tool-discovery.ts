@@ -10,6 +10,7 @@ import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillIntentSegments, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
+import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
 
 import { choices } from "./tool-schema.ts";
@@ -163,6 +164,8 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
   for (const bundle of DIRECT_BUNDLES) if ((bundle.acting ? clauses : segments).some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
+  // Open-ended work stages the scouting tools up front: the agent will not search for tools it does not know it needs.
+  if (priorArtIntent(text)) for (const name of PRIOR_ART_TOOLS) out.add(name);
   for (const part of clauses) {
     if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(part)) out.add('music_compose');
     if (/\b(?:mix|denoise|time[- ]stretch)\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(part)) out.add('audio_mix');

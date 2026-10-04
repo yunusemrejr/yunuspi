@@ -10,6 +10,9 @@ const SEARCH_PROVIDERS = [
   "duckduckgo",
   "wikipedia",
   "crossref",
+  "hackernews",
+  "stackexchange",
+  "npm",
   "kimi",
 ] as const;
 const search: typeof SearchFunction = async (...args) =>

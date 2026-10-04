@@ -105,6 +105,9 @@ interface PendingPromptAnalysis {
   route?: string;
   status: "model" | "fallback";
   attempts: PromptAnalysisAttempt[];
+  /** Set when adaptive admission chose not to spend a model on this prompt, so
+   * the notice reports a decision instead of an unavailable route. */
+  skipped?: "direct-task";
   advisory: string;
   /** Design-direction guidance also injected when the analysis fell back. */
   designGuidance: string;
@@ -396,6 +399,7 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
     source,
     status: pending.status,
     attempts: pending.attempts,
+    ...(pending.skipped ? { skipped: pending.skipped } : {}),
     ...(pending.advisory ? { advisory: pending.advisory } : {}),
     inputChars: pending.inputChars,
     excerpted: pending.excerpted,
@@ -701,10 +705,12 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
       const execution = classifyExecution({ task: prompt });
       const priorNeedsAnalysis = priorAnalysis && classifyExecution({ task: priorAnalysis.taskLabel }).features.localLm;
+      let skipped: PendingPromptAnalysis["skipped"];
       if (adaptiveExecutionEnabled() && !execution.features.localLm && !priorNeedsAnalysis) {
         // Reuse the literal fallback, preserving constraints and provenance
         // without presenting it as a model judgment or spending a turn.
         selected.routes = [];
+        skipped = "direct-task";
         metrics.skip('llm', 'direct-task');
       } else try { deps.warmup(); } catch { /* optional */ }
       const attempts: PromptAnalysisAttempt[] = [];
@@ -796,6 +802,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         ...(result.route ? { route: result.route } : {}),
         status: result.status,
         attempts,
+        ...(skipped ? { skipped } : {}),
         advisory: result.status === "fallback"
           ? [designGuidance, expertGuidance].filter(Boolean).join("\n")
           : [renderPromptAnalysisContext(analysis, selected.source, result.route), designGuidance, expertGuidance].filter(Boolean).join("\n"),
@@ -926,7 +933,9 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         pending.displayed = true;
         const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome === "truncated" ? `output limit reached${attempt.reasoningTokens ? ` (${attempt.reasoningTokens} reasoning tokens)` : ""}` : attempt.outcome === "empty" ? "returned no answer" : attempt.outcome}${attempt.recovery ? "; retrying with compact response" : ""}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
         const concise = pending.status === "fallback" ? [
-          `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
+          pending.skipped === "direct-task"
+            ? `Intent analysis · ${pending.analysis.kind} · skipped — a direct task needs no model interpretation (adaptive admission).`
+            : `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
           pending.designGuidance || pending.expertGuidance
             ? "Only local-rule guidance (design-direction, expert-domain) was added to the main agent's context; it works from your prompt as written."
             : "Nothing was added to the main agent's context; it works from your prompt as written.",

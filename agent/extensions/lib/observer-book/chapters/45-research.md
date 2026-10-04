@@ -4,8 +4,8 @@ part: science
 title: Research methodology
 summary: Finding out what is true: primary sources over summaries, dating and triangulating claims, separating facts from inferences, search strategy, timeboxing exploration, and synthesis into recommendations.
 terms: research investigate investigation search sources source citation cite reference documentation docs paper papers article web browse evidence claim fact verify compare comparison alternatives survey literature review report
-tools: web_search web_research fetch_content get_search_content research_toolkit claim_check
-skills: research scientific-paper-research evidence-first-engineering financial-statement-analysis
+tools: web_search web_research fetch_content get_search_content github_search research_toolkit claim_check
+skills: research prior-art-scouting scientific-paper-research evidence-first-engineering financial-statement-analysis
 ---
 
 # Research methodology
@@ -76,6 +76,19 @@ Research is the disciplined reduction of uncertainty. Agents research constantly
 **Ask.** What precise query—exact error text, version, official site—would find the authoritative answer?
 
 **Traps.** Endless searching when a quick experiment would answer faster.
+
+## Look at what already exists {#prior-art}
+<!-- terms: prior art existing alternatives competitors similar open source github library already solved reinvent build new product feature improve landscape market what others do -->
+
+**Principle.** Before designing something new or deciding what to improve, see how comparable products and open-source projects solved the same problem, then decide from the gaps rather than from habit.
+
+**Why.** Most problems have been met before. Existing projects show proven designs, the failure modes their users hit and the features people keep asking for; their issue trackers are the cheapest user research available. Skipping the look means rebuilding solved work or missing the obvious improvement. The look must stay bounded and end in decisions about what to adopt, adapt, reject or watch.
+
+**Signals.** A new product, library or feature designed without a mention of alternatives; an "improve it" request answered from the codebase alone; claims about what the market offers with no source.
+
+**Ask.** Which existing products or projects solve this, what do their users ask for or complain about, and which of those findings should change this work?
+
+**Traps.** Copying the market leader's feature list; borrowing code whose license does not fit; scouting when the design is already fixed; unbounded browsing instead of a decision.
 
 ## Timebox exploration, then converge {#timebox}
 <!-- terms: timebox time limit explore converge decide recommendation rabbit hole scope enough | watch: reads-no-edits(15) -->
