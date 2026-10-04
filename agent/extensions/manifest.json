@@ -223,6 +223,7 @@
     "smol-extraction.ts",
     "smol-preprocessor.ts",
     "source-check.ts",
+    "specifics.ts",
     "stable-tool-order.ts",
     "stall-core.ts",
     "svg-analysis.ts",

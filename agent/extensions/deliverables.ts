@@ -23,6 +23,7 @@ import { isSessionStopped } from "./lib/session-stop.ts";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./lib/self-mutation-guard.ts";
 import { outputFolder, textPath } from "./lib/media-process.ts";
 import { describeBinary, looksBinary, sniffKind } from "./lib/binary-read.ts";
+import { collectEvidence, documentFindings } from "./lib/specifics.ts";
 
 const MAX_FOLLOWUPS = 2;
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
@@ -40,6 +41,18 @@ export default function deliverables(pi: any) {
   let followups = 0, disposeSource: (() => void) | undefined, sessionKey: object | undefined;
   const enabled = () => (process.env.PI_DELIVERABLES ?? "on").toLowerCase() !== "off" && process.env.PI_SUBAGENT_CHILD !== "1";
   const relative = (file: string, cwd?: string) => { const rel = path.relative(cwd ?? process.cwd(), file); return rel && !rel.startsWith("..") ? rel : file; };
+
+  /** Specifics a produced document states that the session never saw (see lib/specifics.ts); nothing for files the user supplied. */
+  const SPECIFICS_KIND = /\.(?:docx|pptx|odt|odp|pdf)$/i;
+  const specificFindings = async (file: string, ctx: any, signal?: AbortSignal): Promise<Finding[]> => {
+    if ((process.env.PI_SPECIFICS ?? "on").toLowerCase() === "off" || !SPECIFICS_KIND.test(file) || !ledger.isProduced(file) || typeof ctx?.sessionManager?.getBranch !== "function") return [];
+    try {
+      const evidence = await collectEvidence(ctx.sessionManager.getBranch(), { cwd: ctx.cwd || process.cwd(), produced: ledger.producedPaths(), signal });
+      if (!evidence.length) return [];
+      const body = /\.pdf$/i.test(file) ? (await describeBinary(file, { maxChars: 60_000, signal })).text : readOffice(file, { maxChars: 60_000 }).text;
+      return documentFindings(body, evidence);
+    } catch { return []; } // a failed comparison must never turn a successful check into an error
+  };
 
   const reset = () => { ledger.reset(); started.clear(); delivered.clear(); followups = 0; disposeSource?.(); disposeSource = undefined; sessionKey = undefined; };
   for (const event of ["session_start", "session_switch", "session_tree", "session_fork", "session_shutdown"]) pi.on(event, reset);
@@ -141,8 +154,9 @@ export default function deliverables(pi: any) {
         let file: string;
         try { file = canonicalMutationPath(textPath(raw), cwd); } catch (error) { checked.push({ path: String(raw).slice(0, 200), kind: "invalid", status: "fail", findings: [{ severity: "error", code: "bad-path", message: String((error as Error).message) }], facts: {} }); continue; }
         const inspection = await inspectDeliverable(file, { cwd, signal: bounded });
-        ledger.noteChecked(inspection.path, inspection.status);
-        checked.push({ path: relative(inspection.path, cwd), kind: inspection.kind, bytes: inspection.bytes, status: inspection.status, findings: compact(inspection.findings), facts: inspection.facts });
+        const findings = [...inspection.findings, ...await specificFindings(inspection.path, ctx, bounded)], status = statusOf(findings);
+        ledger.noteChecked(inspection.path, status);
+        checked.push({ path: relative(inspection.path, cwd), kind: inspection.kind, bytes: inspection.bytes, status, findings: compact(findings), facts: inspection.facts });
       }
       const counts = ["pass", "warn", "fail"].map(status => `${checked.filter(row => row.status === status).length} ${status}`).join(", ");
       const failing = checked.filter(row => row.status === "fail").map(row => row.path);
@@ -181,6 +195,7 @@ export default function deliverables(pi: any) {
       if (params.action === "read" || params.action === "verify") {
         if (!fs.existsSync(file)) throw new Error(`${relative(file, cwd)} does not exist`);
         const read = readOffice(file, { maxChars: params.action === "verify" ? 400 : params.maxChars, sheet: params.sheet });
+        read.findings.push(...await specificFindings(file, ctx, bounded));
         ledger.noteChecked(file, statusOf(read.findings));
         const { findings, text: body, ...rest } = read;
         const result: any = { ...rest, path: relative(file, cwd), status: statusOf(findings), findings: compact(findings, 14) };
@@ -233,8 +248,10 @@ export default function deliverables(pi: any) {
       const temporary = `${target}.tmp-${randomBytes(4).toString("hex")}`;
       try { fs.writeFileSync(temporary, built.buffer, { flag: "wx" }); fs.renameSync(temporary, target); } finally { fs.rmSync(temporary, { force: true }); }
       const verification = readOffice(target, { maxChars: 200 });
+      ledger.noteProduced(target, "office_doc");
+      verification.findings.push(...await specificFindings(target, ctx, bounded));
       const status = statusOf(verification.findings);
-      ledger.noteProduced(target, "office_doc"); ledger.noteChecked(target, status);
+      ledger.noteChecked(target, status);
       return text({ action: "build", path: relative(target, cwd), kind, bytes: built.buffer.length, ...("stats" in built ? { stats: built.stats } : { sheets: built.sheets, converted: built.converted }), warnings: built.warnings, verification: { status, findings: compact(verification.findings, 8) },
         next: status === "fail" ? "The built file has errors; fix the spec and rebuild with overwrite:true." : "Built and re-read. Use action render to look at the layout, and replace any warnings' causes before delivery." });
     },

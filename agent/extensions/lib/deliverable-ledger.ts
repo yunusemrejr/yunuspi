@@ -50,6 +50,9 @@ export function createDeliverableLedger() {
       }
       return open.sort((a, b) => b.mtimeMs - a.mtimeMs);
     },
+    /** Has this session produced the file (at any bytes)? */
+    isProduced: (file: string): boolean => produced.has(path.resolve(file)),
+    producedPaths: (): string[] => [...produced.keys()],
     reset() { produced.clear(); checked.clear(); },
     snapshot: () => ({ produced: produced.size, checked: checked.size }),
   };

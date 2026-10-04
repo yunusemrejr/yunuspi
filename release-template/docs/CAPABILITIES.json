@@ -2689,7 +2689,7 @@
     {
       "id": "office-and-deliverables",
       "group": "web_media",
-      "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, post-2007 functions stored without the _xlfn. prefix, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results (about 100 functions including SUMIF, COUNTIF, VLOOKUP, INDEX/MATCH, XLOOKUP, TEXT and DATE, checked against LibreOffice), and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.",
+      "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, post-2007 functions stored without the _xlfn. prefix, numbers stored as text, empty slides), builds docx and xlsx from declarative specs with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results (about 100 functions including SUMIF, COUNTIF, VLOOKUP, INDEX/MATCH, XLOOKUP, TEXT and DATE, checked against LibreOffice), and renders PDF and PNG pages through LibreOffice. deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. For documents the session itself produced (docx, pptx, odt, odp, pdf) the checks also compare the specifics they state (emails, phone numbers, links, greeting and signature names, rooms and addresses, dates, times, amounts) with the user's words, tool output and the input files the session referenced, and warn about contact data, names and places that appeared nowhere, so a made-up room or phone number is caught instead of delivered. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.",
       "entrypoints": [
         "office_doc",
         "deliverable_check"
@@ -2734,6 +2734,14 @@
           "summary": "Set to off to disable the unopened-file tracker and its follow-ups; the tools stay available."
         },
         {
+          "name": "PI_SPECIFICS",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Set to off to stop comparing the specifics of documents this session produced (contact data, names, rooms, dates, times, amounts) with what the session was told or showed."
+        },
+        {
           "name": "PI_BINARY_READ",
           "values": [
             "on",
@@ -2757,6 +2765,7 @@
         "agent/extensions/lib/xml-lite.ts",
         "agent/extensions/lib/office-render.ts",
         "agent/extensions/lib/binary-read.ts",
+        "agent/extensions/lib/specifics.ts",
         "agent/extensions/lib/deliverable-inspect.ts",
         "agent/extensions/lib/deliverable-ledger.ts",
         "agent/skills/spreadsheet-authoring/SKILL.md",
@@ -4045,7 +4054,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 121,
+        "line": 134,
         "kind": "literal"
       },
       {
@@ -4269,7 +4278,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 155,
+        "line": 169,
         "kind": "literal"
       },
       {
@@ -4747,7 +4756,7 @@
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
-        "line": 121,
+        "line": 134,
         "kind": "literal"
       },
       {
@@ -4867,7 +4876,7 @@
       {
         "name": "office_doc",
         "source": "agent/extensions/deliverables.ts",
-        "line": 155,
+        "line": 169,
         "kind": "literal"
       },
       {
@@ -5309,7 +5318,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 725,
+      "sourceFiles": 726,
       "registrationSites": 89,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 139,
@@ -6240,6 +6249,10 @@
       },
       {
         "path": "agent/extensions/lib/source-check.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/specifics.ts",
         "exists": true
       },
       {
