@@ -124,7 +124,7 @@ def check_protected_hardlinks(protected_roots):
                     entry['links'] = max(entry['links'], int(links))
                     entry['paths'].add(candidate)
             if pending or scan.wait() != 0:
-                raise RuntimeError('protected hard-link inventory failed; check unreadable or changing protected paths')
+                raise RuntimeError('protected hard-link inventory failed; check unreadable or changing protected paths (files changing during the scan are transient: run the same command once more before changing approach)')
         finally:
             if scan.poll() is None:
                 scan.kill()
