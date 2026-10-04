@@ -15,11 +15,16 @@ import { sessionObservability } from './lib/session-observability.ts';
  * Telemetry (health sink, allowlisted fields only):
  *   session_hook.decision { hook: <rule key>, decision: "annotate", tool, count: 1 }
  */
+import nodePath from "node:path";
+import fs from "node:fs";
+import { missingPathHint } from "@yunuspi/coding-agent";
 import {
+	CORE_PATH_HINT_TOOLS,
 	isDeployCommand,
 	isEmptySearchResult,
 	isLiveByteVerification,
 	matchHook,
+	missingPathFromError,
 } from "./lib/session-hooks.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
 
@@ -41,6 +46,19 @@ export default function (pi: any) {
 
 	const enabled = (): boolean =>
 		(process.env.PI_SESSION_HOOKS ?? "on").toLowerCase() !== "off";
+
+	/** Nearest-folder and spelling hint for a path an extension tool or bash reports missing, as core read/ls/grep/find/edit give. */
+	const missingPathNote = (event: any, cwd: string): string => {
+		if (!event.isError || CORE_PATH_HINT_TOOLS.has(event.toolName)) return "";
+		try {
+			const text = (Array.isArray(event.content) ? event.content : []).filter((part: any) => part?.type === "text").map((part: any) => String(part.text)).join("\n");
+			const requested = missingPathFromError(text);
+			if (!requested) return "";
+			const resolved = nodePath.resolve(cwd, requested.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
+			if (fs.existsSync(resolved)) return "";
+			return missingPathHint(requested, resolved, cwd);
+		} catch { return ""; }
+	};
 
 	const reset = () => {
 		pending.clear();
@@ -113,12 +131,16 @@ export default function (pi: any) {
 			if (deployRole.verify && verifiesCurrent) unverifiedDeployAt = undefined;
 		}
 		pending.delete(event.toolCallId);
-		if (!enabled() || !queued) return;
+		if (!enabled()) return;
+		const content = Array.isArray(event.content) ? event.content : [];
+		const pathHint = missingPathNote(event, ctx?.cwd ?? process.cwd());
+		const hinted = pathHint ? { content: [...content, { type: "text", text: pathHint }] } : undefined;
+		if (!queued) return hinted;
 		// Structured browser failures already carry the precise recovery step.
-		if (event.isError && ['browser_session', 'render_see'].includes(event.toolName) && typeof event.details?.failure?.nextStep === 'string') return;
+		if (event.isError && ['browser_session', 'render_see'].includes(event.toolName) && typeof event.details?.failure?.nextStep === 'string') return hinted;
 		const rule = event.isError ? matchHook(event.toolName, queued.input, true, event) : queued.success;
-		if (!rule || shown.has(rule.key)) return;
-		if (rule.needsEmptyResult && !isEmptySearchResult(event.content)) return;
+		if (!rule || shown.has(rule.key)) return hinted;
+		if (rule.needsEmptyResult && !isEmptySearchResult(event.content)) return hinted;
 		shown.add(rule.key);
 
 		const sink = sessionObservability()[HEALTH_SINK];
@@ -135,10 +157,10 @@ export default function (pi: any) {
 		// The observer sees the same guidance the agent was given.
 		try { pi.events?.emit?.("harness-hook-fired", { hook: rule.key, tool: event.toolName, line: rule.line }); } catch { /* optional bridge */ }
 
-		const content = Array.isArray(event.content) ? event.content : [];
 		return {
 			content: [
 				...content,
+				...(pathHint ? [{ type: "text", text: pathHint }] : []),
 				{ type: "text", text: `[session-hooks] ${rule.line}` },
 			],
 		};

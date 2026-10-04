@@ -388,3 +388,28 @@ export function isEmptySearchResult(content: unknown): boolean {
 	if (text.length === 0) return true;
 	return /^(?:no (?:matches|files|results)\b|found 0\b)/i.test(text);
 }
+
+/** Core read/ls/grep/find/edit attach their own nearest-folder hint (core/tools/path-hints.js). */
+export const CORE_PATH_HINT_TOOLS: ReadonlySet<string> = new Set(["read", "ls", "grep", "find", "edit"]);
+
+const MISSING_PATH_PATTERNS: readonly RegExp[] = [
+	/ENOENT: no such file or directory, \w+ '([^'\n]{1,400})'/,
+	/No such file or directory: '([^'\n]{1,400})'/,
+	/cannot (?:access|open|stat) '([^'\n]{1,400})': No such file or directory/,
+	/(?:^|\n)[\w.-]+: ([^\s:'"][^:'"\n]{0,399}): No such file or directory/,
+	/(?:^|[\s"'`])((?:\/|\.{1,2}\/|~\/)[^\s'"`]{1,400}) does not exist\b/,
+];
+
+/**
+ * The path a failed tool result says is missing, or undefined. Only the first
+ * recognizable "no such file" shape counts; the caller still checks that the
+ * path is really absent before hinting, so a stale mention never yields advice.
+ */
+export function missingPathFromError(text: unknown): string | undefined {
+	if (typeof text !== "string" || !text || text.includes("Nearest existing directory")) return undefined;
+	for (const pattern of MISSING_PATH_PATTERNS) {
+		const found = pattern.exec(text)?.[1]?.trim().replace(/[.,;:]+$/, "");
+		if (found && (found.includes("/") || /\.\w{1,8}$/.test(found))) return found;
+	}
+	return undefined;
+}

@@ -4,13 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.join(root, '..', 'agent'), path.resolve(root, '..'), path.resolve(root, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/session-hooks.ts')));
 const load = file => import(pathToFileURL(path.join(agent, 'extensions', file)));
 const { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence } = await load('lib/task-pipelines.ts');
 const { testDiagnostics } = await load('lib/assurance-output.ts');
-const { matchHook } = await load('lib/session-hooks.ts');
+const hooksLib = await load('lib/session-hooks.ts');
+const { matchHook } = hooksLib;
 const { default: registerHooks } = await load('session-hooks.ts');
 const { intentBundleTools } = await load('lib/tool-discovery.ts');
 
@@ -102,6 +104,44 @@ test('hook result ownership prevents an unrelated result from consuming queued g
   call({ toolCallId: 'late', toolName: 'media_pipeline', input: {} });
   handlers.get('session_switch')();
   assert.equal(result({ toolCallId: 'late', toolName: 'media_pipeline', content: [], isError: false }, {}), undefined);
+});
+
+test('a missing path reported by an extension tool or bash gets the nearest-folder hint core tools give', () => {
+  const { missingPathFromError, CORE_PATH_HINT_TOOLS } = hooksLib;
+  assert.equal(missingPathFromError('/tmp/x/blender/scripts/tide.py does not exist'), '/tmp/x/blender/scripts/tide.py');
+  assert.equal(missingPathFromError("ENOENT: no such file or directory, open 'out/a.png'"), 'out/a.png');
+  assert.equal(missingPathFromError("[Errno 2] No such file or directory: 'data/in.csv'"), 'data/in.csv');
+  assert.equal(missingPathFromError("ls: cannot access 'docs/x': No such file or directory"), 'docs/x');
+  assert.equal(missingPathFromError('cat: notes/todo.md: No such file or directory'), 'notes/todo.md');
+  assert.equal(missingPathFromError('Nearest existing directory: /tmp\n/tmp/a/b does not exist'), undefined, 'an annotated error is left alone');
+  assert.equal(missingPathFromError('the session does not exist'), undefined, 'prose is not a path');
+  assert.ok(CORE_PATH_HINT_TOOLS.has('read') && !CORE_PATH_HINT_TOOLS.has('blender_run'));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-path-hint-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'tide', 'blender', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tide', 'blender', 'scripts', 'tide-gauge.py'), '');
+    const handlers = new Map();
+    registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
+    const call = handlers.get('tool_call'), result = handlers.get('tool_result');
+    const missing = path.join(dir, 'blender', 'scripts', 'tide-gauge.py');
+    const event = { toolCallId: 'b1', toolName: 'blender_run', input: {}, isError: true, content: [{ type: 'text', text: `${missing} does not exist` }] };
+    call(event);
+    const out = result(event, { cwd: dir });
+    const texts = out.content.map(row => row.text);
+    assert.match(texts[1], /Nearest existing directory: /);
+    assert.match(texts[1], /tide\/blender\/scripts\/tide-gauge\.py/, 'the same file found elsewhere is suggested');
+    assert.ok(texts.at(-1).startsWith('[session-hooks]'), 'the recovery line still follows');
+    const repeat = { ...event, toolCallId: 'b2' };
+    call(repeat);
+    assert.equal(result(repeat, { cwd: dir }).content.length, 2, 'the hint repeats per error; the one-time recovery line does not');
+    const core = { toolCallId: 'r1', toolName: 'read', input: {}, isError: true, content: [{ type: 'text', text: `${missing} does not exist` }] };
+    call(core);
+    assert.equal(result(core, { cwd: dir }), undefined, 'core tools carry their own hint');
+    const present = { toolCallId: 'b3', toolName: 'bash', input: { command: 'cat x' }, isError: true, content: [{ type: 'text', text: `cat: ${path.join(dir, 'tide')}: No such file or directory` }] };
+    call(present);
+    assert.equal(result(present, { cwd: dir }), undefined, 'a path that exists now gets no hint');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('offline hook compatibility checks retain the current completion acknowledgement contract', () => {
