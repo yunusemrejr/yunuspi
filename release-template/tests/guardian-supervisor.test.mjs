@@ -835,6 +835,32 @@ test("the same file range read four times without a change is flagged once; a mu
 	assert.equal(emitted[0].detail.kind, "repeated-identical-read");
 });
 
+test("opening a produced document or reading a folder move back counts as verification; building or planning does not", async (t) => {
+	const final = { type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All done. The file is ready." }] } };
+	const run = async (name, calls) => {
+		const { supervisor, emitted } = harness(name);
+		t.after(() => supervisor.dispose());
+		await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Create the workbook and tidy the scratch files.") });
+		await toolStart(supervisor, { toolCallId: "rm-1", toolName: "bash", args: { command: "rm -rf /tmp/recalc && mkdir -p /tmp/recalc" } });
+		await toolEnd(supervisor, { toolCallId: "rm-1", toolName: "bash", isError: false, text: "" });
+		for (const [index, [toolName, args]] of calls.entries()) {
+			await toolStart(supervisor, { toolCallId: `call-${index}`, toolName, args });
+			await toolEnd(supervisor, { toolCallId: `call-${index}`, toolName, isError: false, text: "{}" });
+		}
+		await supervisor.observeAgentEvent(final);
+		return emitted.filter(event => event.detail.kind === "unverified-completion").length;
+	};
+	assert.equal(await run("nothing", []), 1, "a shell change with no check is still steered");
+	for (const [name, call] of Object.entries({
+		"deliverable-check": ["deliverable_check", { paths: ["report.docx"] }], "office-read": ["office_doc", { action: "read", path: "book.xlsx" }], "office-verify": ["office_doc", { action: "verify", path: "book.xlsx" }],
+		"office-render": ["office_doc", { action: "render", path: "book.xlsx" }], "office-default": ["office_doc", { path: "book.xlsx" }], "organize-verify": ["fs_organize", { action: "verify", planId: "org-abc123" }],
+	})) assert.equal(await run(name, [call]), 0, `${name} reads the result back`);
+	for (const [name, call] of Object.entries({
+		"office-build": ["office_doc", { action: "build", path: "book.xlsx", spec: {} }], "office-build-inferred": ["office_doc", { path: "book.xlsx", spec: {} }],
+		"organize-plan": ["fs_organize", { action: "plan", path: "Downloads", by: "type" }], "organize-apply": ["fs_organize", { action: "apply", planId: "org-abc123" }],
+	})) assert.equal(await run(name, [call]), 1, `${name} is not a check of the change`);
+});
+
 test("a finished-sounding reply after unverified edits is steered once; verification or honesty prevents it", async (t) => {
 	const final = (text) => ({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] } });
 	const run = async (name, steps) => {

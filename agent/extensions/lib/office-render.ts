@@ -26,11 +26,11 @@ export function findOfficeSuite(env: NodeJS.ProcessEnv = process.env): string | 
 const isSnap = (binary: string): boolean => { try { return fs.realpathSync(binary).startsWith("/snap/") || binary.startsWith("/snap/"); } catch { return binary.startsWith("/snap/"); } };
 
 export type RenderResult = { pdf: string; pageCount?: number; pngs: string[]; engine: string; notes: string[] };
-export async function renderOffice(file: string, outDir: string, options: { pages?: number; dpi?: number; signal?: AbortSignal; binary?: string } = {}): Promise<RenderResult> {
+export async function renderOffice(file: string, outDir: string, options: { pages?: number; dpi?: number; signal?: AbortSignal; binary?: string; stagingRoot?: string } = {}): Promise<RenderResult> {
   const binary = options.binary ?? findOfficeSuite();
   if (!binary) throw new Error("No office suite is installed (LibreOffice: soffice or libreoffice), so pages cannot be rendered. Reading and verifying still work; install LibreOffice to look at layout.");
   const pages = Math.min(Math.max(Math.round(options.pages ?? 3), 0), 8), dpi = Math.min(Math.max(Math.round(options.dpi ?? 70), 40), 150);
-  const staging = fs.mkdtempSync(path.join(isSnap(binary) ? os.homedir() : os.tmpdir(), "yunuspi-render-"));
+  const staging = fs.mkdtempSync(path.join(options.stagingRoot ?? (isSnap(binary) ? os.homedir() : os.tmpdir()), "yunuspi-render-"));
   const notes: string[] = [];
   try {
     const extension = path.extname(file).toLowerCase() || ".docx", staged = path.join(staging, `input${extension}`);

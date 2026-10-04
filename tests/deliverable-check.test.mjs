@@ -272,10 +272,14 @@ test('render: without a runnable office suite the failure is plain; with one the
   await assert.rejects(renderOffice(file, dir, { binary: '/nonexistent/soffice' }), /not installed|ENOENT|spawn/i);
   if (!findOfficeSuite() || process.env.YUNUSPI_SKIP_OFFICE_RENDER === '1') return t.skip('LibreOffice is not installed (or rendering is skipped)');
   const out = path.join(dir, 'out'); fs.mkdirSync(out);
-  const rendered = await renderOffice(file, out, { pages: 1 });
-  assert.ok(fs.statSync(rendered.pdf).size > 500); assert.equal(rendered.pageCount, 1);
-  if (hasTool('pdftoppm') || spawnSync('pdftoppm', ['-v'], { stdio: 'ignore' }).status === 0) assert.equal(rendered.pngs.length, 1);
-  assert.deepEqual(fs.readdirSync(os.homedir()).filter(name => name.startsWith('yunuspi-render-')), [], 'the staging directory is removed');
+  // A private staging root below the home folder (a snap LibreOffice cannot read elsewhere): other renders running at the same time cannot touch it.
+  const stagingRoot = fs.mkdtempSync(path.join(os.homedir(), 'yunuspi-stage-test-'));
+  try {
+    const rendered = await renderOffice(file, out, { pages: 1, stagingRoot });
+    assert.ok(fs.statSync(rendered.pdf).size > 500); assert.equal(rendered.pageCount, 1);
+    if (hasTool('pdftoppm') || spawnSync('pdftoppm', ['-v'], { stdio: 'ignore' }).status === 0) assert.equal(rendered.pngs.length, 1);
+    assert.deepEqual(fs.readdirSync(stagingRoot), [], 'the staging directory is removed');
+  } finally { fs.rmSync(stagingRoot, { recursive: true, force: true }); }
 });
 
 test('office_doc render: pdfPath converts an Office file to a checked PDF in one call, with the path rules of build', { timeout: 240_000 }, async (t) => {
@@ -306,5 +310,4 @@ test('office_doc render: pdfPath converts an Office file to a checked PDF in one
     const folders = fs.readdirSync(dir).filter(name => name.startsWith('media-'));
     assert.equal(folders.length, 1); assert.deepEqual(fs.readdirSync(path.join(dir, folders[0])).filter(name => name.endsWith('.pdf')), [], 'the PDF is not duplicated beside the page images');
   }
-  assert.equal(fs.readdirSync(os.homedir()).filter(name => name.startsWith('yunuspi-render-')).length, 0, 'staging is removed');
 });

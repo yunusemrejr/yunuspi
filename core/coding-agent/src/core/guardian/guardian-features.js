@@ -209,9 +209,12 @@ export function hasExplicitRetryDirective(text) {
 // Match executable positions, never words inside echo/rg/cat arguments.
 // Deliberately conservative: a checkpoint/status/launch is not a passing check.
 const VERIFY_COMMAND = /^(?:npm (?:run )?(?:test|build|lint|check|typecheck)|pnpm (?:run )?(?:test|build|lint|check|typecheck)|yarn (?:test|build|lint|check|typecheck)|(?:npx )?(?:vitest|jest|mocha|tsc|eslint|playwright)|(?:python[23]? -m )?pytest|cargo (?:test|check|build|clippy)|go (?:test|vet|build)|ruff check|mypy|flake8|pylint|php -l|node --(?:check|test)|bash -n|shellcheck|make(?: (?:test|check|build))?|gradle|mvn|dotnet (?:test|build))(?=\s|$)/i;
-const VERIFY_TOOLS = new Set(["render_see", "syntax_check", "code_quality", "design_audit", "artifact_check", "source_check"]);
+const VERIFY_TOOLS = new Set(["render_see", "syntax_check", "code_quality", "design_audit", "artifact_check", "source_check", "deliverable_check"]);
 export function isVerificationCall(toolName, args) {
 	if (VERIFY_TOOLS.has(toolName)) return true;
+	// Opening what was produced is a check (office_doc read, verify, render); building it is not. Reading a folder move back is a check; planning or applying one is not.
+	if (toolName === "office_doc") return args?.action ? args.action !== "build" : args?.spec === undefined;
+	if (toolName === "fs_organize") return args?.action === "verify";
 	if (toolName !== "bash" && toolName !== "bg_run" || typeof args?.command !== "string" || args.command.length > MAX_STRING_LENGTH) return false;
 	// Only a leading check (optionally after a simple cd) whose exit is not
 	// masked can establish this limited execution receipt. No shell evaluation.
