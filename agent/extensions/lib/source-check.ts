@@ -15,7 +15,7 @@ type Outcome = {status:'passed'|'failed'|'unavailable'|'incomplete'; checker:str
 // Patterns precise enough to mention after an edit without being asked.
 // Audit domains cheap and precise enough to run on every edit; patterns stay on demand (code_audit).
 const AUTOMATIC_AUDIT = ['security','backend','efficiency','ui'] as const;
-const AUTOMATIC_SLOP = new Set(['placeholder-elision','placeholder-implementation','debug-leftover','swallowed-error','bare-except','commented-out-code','redundant-boolean']);
+const AUTOMATIC_SLOP = new Set(['placeholder-elision','placeholder-implementation','debug-leftover','swallowed-error','bare-except','commented-out-code','redundant-boolean','vacuous-assertion','empty-test','skipped-test']);
 const PYTHON = `import sys,json
 source=sys.stdin.buffer.read()
 try:

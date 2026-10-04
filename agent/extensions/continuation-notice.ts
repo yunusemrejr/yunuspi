@@ -1,21 +1,35 @@
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import {
   collectContinuationLines,
-  collectVerificationLines,
-  continuationWarning,
-  verificationWarning,
+  collectVerificationReceipts,
+  composeNotice,
+  stripNoticeFooters,
+  type NoticeMemory,
 } from "./lib/continuation-notice.ts";
 
-/** Appends a bounded warning to a finished answer when registered sources
- * (background tasks, queued follow-ups) will continue this session afterwards.
- * Sources stay owned by their subsystems; this hook only composes the notice.
- * Edge-triggered: the same pending set with no new evidence warns once, not
- * on every finished answer. The key resets on a fresh session, so resumed or
- * still-pending work notifies exactly once per session. */
+/** Appends one short footer to a finished answer when work will resume the
+ * session, or when the answer ends with verification still open. Sources stay
+ * owned by their subsystems; this hook only composes the footer.
+ *
+ * Edge-triggered on what the reader was last shown: an unchanged continuation
+ * or unchanged open-verification set is never repeated, a hand-off turn does
+ * not report verification that the resumed work is about to produce, and the
+ * memory resets with a fresh session so resumed work is announced once. The
+ * footer is for the transcript reader: it is removed from every model request,
+ * so the agent never reads it and cannot copy it into later answers. */
 export default function continuationNoticeExtension(pi: ExtensionAPI): void {
-  let lastKey: string | undefined;
+  let memory: NoticeMemory = {};
   pi.on("session_start", () => {
-    lastKey = undefined;
+    memory = {};
+  });
+  pi.on("context", (event) => {
+    let changed = false;
+    const messages = event.messages.map((message) => {
+      const clean = stripNoticeFooters(message);
+      if (clean !== message) changed = true;
+      return clean;
+    });
+    return changed ? { messages } : undefined;
   });
   pi.on("message_end", (event, ctx) => {
     const message = event.message;
@@ -24,19 +38,18 @@ export default function continuationNoticeExtension(pi: ExtensionAPI): void {
     // continuation already in flight or a failure the harness surfaces itself.
     if (message.stopReason !== "stop" && message.stopReason !== "length")
       return undefined;
-    const pendingMessages = ctx.hasPendingMessages();
-    const lines = collectContinuationLines(undefined, ctx.sessionManager);
-    const verification = collectVerificationLines(undefined, ctx.sessionManager);
-    const key = JSON.stringify({ lines, pendingMessages });
-    // Evidence gaps remain attached to every final answer that could otherwise
-    // claim success. Deduplication applies only to continuation announcements.
-    const warning = verificationWarning(verification) + (key === lastKey ? '' : continuationWarning(lines, pendingMessages));
-    if (!warning) return undefined;
-    lastKey = key;
+    const composed = composeNotice({
+      continuation: collectContinuationLines(undefined, ctx.sessionManager),
+      pendingMessages: ctx.hasPendingMessages(),
+      receipts: collectVerificationReceipts(4, ctx.sessionManager),
+      memory,
+    });
+    memory = composed.memory;
+    if (!composed.text) return undefined;
     let content: unknown;
     if (typeof message.content === "string")
-      content = message.content + warning;
-    else content = [...message.content, { type: "text", text: warning }];
+      content = message.content + composed.text;
+    else content = [...message.content, { type: "text", text: composed.text }];
     return { message: { ...message, content } } as { message: typeof message };
   });
 }

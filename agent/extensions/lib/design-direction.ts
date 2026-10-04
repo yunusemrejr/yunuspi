@@ -80,6 +80,7 @@ export const UI_PREFLIGHT_TELLS: readonly string[] = [
   "hype badges (NEW, BETA, AI, FAST) without meaningful state",
   "gradient-filled headline text",
   "glassmorphism panels without a floating layer",
+  "blurred colour blobs and glow halos",
   "display type at 80px or larger for ordinary pages",
   "emoji in headings, buttons or navigation",
   "decorative terminal output or pseudo-telemetry",

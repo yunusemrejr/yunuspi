@@ -53,6 +53,8 @@ export interface GateReceipt {
 	state: string;
 	count?: number;
 	line: string;
+	/** Short human wording for the transcript footer; `line` stays the full text addressed to the agent. */
+	brief?: string;
 }
 
 export const gateReceiptKey = (receipt: GateReceipt): string =>

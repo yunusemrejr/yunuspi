@@ -13,6 +13,6 @@ export function registerSubagentContinuation(state: Pick<SubagentState, 'current
     name: 'subagents', session,
     pending: () => { const count = activeCount(); return count ? [`${count} delegated ${count === 1 ? 'run is' : 'runs are'} still active; native completion notifications will report their results.`] : []; },
     verification: () => { const item = verificationText(); return item ? [item.text] : []; },
-    verificationReceipts: () => { const item = verificationText(); return item ? [{ source: 'subagents', id: 'active-runs', state: 'pending', count: item.count, line: `subagents: ${item.text}` }] : []; },
+    verificationReceipts: () => { const item = verificationText(); return item ? [{ source: 'subagents', id: 'active-runs', state: 'pending', count: item.count, line: `subagents: ${item.text}`, brief: `subagents: ${item.count} delegated ${item.count === 1 ? 'run' : 'runs'} still active` }] : []; },
   });
 }

@@ -56,6 +56,18 @@ const pass = (aspect) => ({
   gap: "",
  }),
 });
+// A reviewer that found a blocker: the review is complete but not clean, so the model still has to assess it.
+const changes = (aspect) => ({
+ aspect,
+ ok: true,
+ text: JSON.stringify({
+  outcome: "changes",
+  evidence: ["src/value.js:1 returns before negative inputs are validated; traced the caller path."],
+  findings: [{ severity: "blocking", file: "src/value.js", detail: "Negative inputs reach the caller unvalidated, so it receives bad data." }],
+  gap: "",
+ }),
+});
+const withBlocker = (req) => req.aspects.map((a, i) => (i === 0 ? changes(a.id) : pass(a.id)));
 async function fixture(t, { runner, context, beforeRefresh, dedup } = {}) {
  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quality-check-"));
  const tools = {},
@@ -184,7 +196,7 @@ test('route control moves only optional review: guarded routes get code reviewed
 
 test('a direct final todo cannot waive parent task risk or consequential changed paths',async t=>{
  for(const [task,file] of [['Fix authentication token validation','src/value.js'],['Fix the one-line parser comparison','auth.ts']]) {
-  const f=await fixture(t);f.api.input({source:'interactive',text:task});
+  const f=await fixture(t,{runner:withBlocker});f.api.input({source:'interactive',text:task});
   const dispose=registerAdaptiveExecution(f.ctx,()=>classifyExecution({task:'Format one source file',scope:'todo'}));t.after(dispose);
   await f.mutate(file,'export const value=1;');await f.settle();
   assert.equal(f.calls.length,1,task);assert.equal(f.state().status,'awaiting_assessment');assert.equal(f.state().automaticReview,undefined);
@@ -363,7 +375,7 @@ test("malformed, empty and unsupported verdicts never pass; suggestions remain n
  );
 });
 test("automatic settled review runs once; parent assessment and current tests are required; edits invalidate acceptance", async (t) => {
- const f = await fixture(t);
+ const f = await fixture(t, { runner: withBlocker });
  await f.settle();
  assert.equal(f.calls.length, 0);
  await f.mutate();
@@ -393,6 +405,7 @@ test("automatic settled review runs once; parent assessment and current tests ar
   disposition: "accepted",
   reason:
    "Reviewed current source and relevant test results; no blocking defects.",
+  dismissals: [{ id: "correctness-1", reason: "The caller validates negative inputs before this path runs, so the finding does not apply." }],
  });
  assert.equal(f.state().status, "accepted");
  await f.mutate("src/value.js", "export const value=2;");
@@ -420,7 +433,7 @@ test("automatic settled review runs once; parent assessment and current tests ar
  assert.equal(f.state().status, "blocked");
 });
 test("unresolved project checks own automatic continuation until their scoped evidence is ready", async (t) => {
- const f = await fixture(t);
+ const f = await fixture(t, { runner: withBlocker });
  await f.mutate();
  for (const need of ["assessment", "missing", "running", "failed"]) {
   f.tests({ need });
@@ -904,7 +917,7 @@ test("Stop cancels a noncooperative runner; late output and extension messages c
  assert.equal(f.state().reports.length, 0);
 });
 test("queued messages, failed delivery, reload and new user scopes retain bounded continuation semantics", async (t) => {
- const f = await fixture(t);
+ const f = await fixture(t, { runner: withBlocker });
  await f.mutate();
  f.queued(true);
  await f.settle();
@@ -930,7 +943,7 @@ test("queued messages, failed delivery, reload and new user scopes retain bounde
 test("new user input can retry unavailable capacity or a blocked review without an artificial edit", async (t) => {
  let capacity = false;
  const f = await fixture(t, {
-  runner: async (req) => (capacity ? req.aspects.map((a) => pass(a.id)) : []),
+  runner: async (req) => (capacity ? withBlocker(req) : []),
  });
  await f.mutate();
  await f.settle();
@@ -939,7 +952,7 @@ test("new user input can retry unavailable capacity or a blocked review without 
  f.api.input({ source: "interactive", text: "Retry the quality review" });
  await f.settle();
  assert.equal(f.calls.length, 2);
- assert.equal(f.state().reports[0].outcome, "pass");
+ assert.equal(f.state().reports[0].outcome, "changes");
  await f.tool({
   action: "assess",
   disposition: "blocked",
@@ -1544,7 +1557,7 @@ test('review follow-up budget is reserved while a triggered model turn edits and
   sent.push({message,options});assert.ok(sent.length<=3);
   api.message({message:{role:'custom',customType:message.customType}});
   await mutate();await api.settled({},ctx);
- }},{refresh:async()=>api.observe(await projectTestFacts(dir),false),tests:()=>({need:null}),runner:async req=>req.aspects.map(a=>pass(a.id))});
+ }},{refresh:async()=>api.observe(await projectTestFacts(dir),false),tests:()=>({need:null}),runner:async req=>withBlocker(req)});
  t.after(()=>{api.shutdown();fs.rmSync(dir,{recursive:true,force:true});});
  api.restore(ctx);await api.run(ctx);api.input({source:'interactive',text:'Implement the behavior'});await mutate();
  await api.settled({},ctx);assert.equal(sent.length,3);
@@ -1683,4 +1696,42 @@ test('a rejected assessment names the single next call instead of two contradict
  const reason='Looked at the change and it appears complete to the parent session.';
  await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason}),/must be resolved; record blocked when unavailable\..*Next: call quality_review with action "review"/s,'no review exists for this revision: run one');
  await assert.rejects(f.tool({action:'assess',disposition:'blocked',reason}),/quality_review action "review"/,'blocked is not yet valid, and the message says which call is');
+});
+
+test("a clean review with resolved checks is accepted by the harness without a model turn", async (t) => {
+ const f = await fixture(t);
+ await f.mutate();
+ await f.settle();
+ assert.equal(f.calls.length, 1);
+ assert.equal(f.state().status, "accepted");
+ assert.match(f.state().reason, /Recorded by the harness/);
+ assert.equal(f.sent.filter((entry) => entry.m.customType === "quality-review-followup").length, 0, "no follow-up turn is spent on calling assess");
+ assert.equal(f.sent.filter((entry) => entry.o?.triggerTurn).length, 0);
+ const note = f.sent.find((entry) => entry.m.customType === "harness-activity");
+ assert.ok(note && note.m.excludeFromContext === true && note.o.triggerTurn === false, "the acceptance is visible but never enters model context");
+ assert.equal(f.api.notice(), "", "an accepted revision carries no review instruction");
+ await f.settle();
+ assert.equal(f.sent.filter((entry) => entry.m.customType === "harness-activity").length, 1, "acceptance is recorded once");
+ await f.mutate("src/value.js", "export const value=2;");
+ assert.equal(f.state().status, "pending", "a later edit reopens the review");
+});
+
+test("automatic acceptance needs every reviewer clean, cited and the checks resolved", async (t) => {
+ const quiet = async (f) => { await f.mutate(); await f.settle(); return f; };
+ const blocker = await quiet(await fixture(t, { runner: withBlocker }));
+ assert.equal(blocker.state().status, "awaiting_assessment", "a blocking finding needs the model");
+ const missing = await quiet(await fixture(t, { runner: async (req) => req.aspects.map((a, i) => (i === 0 ? { aspect: a.id, ok: false, gap: "reviewer did not return" } : pass(a.id))) }));
+ assert.notEqual(missing.state().status, "accepted", "an aspect without a verdict is a limit, not a pass");
+ const uncited = await quiet(await fixture(t, { runner: async (req) => req.aspects.map((a) => ({ aspect: a.id, ok: true, text: JSON.stringify({ outcome: "pass", evidence: [], findings: [], gap: "" }) })) }));
+ assert.notEqual(uncited.state().status, "accepted", "a pass with no cited evidence is not accepted");
+ const stuck = await fixture(t);
+ await stuck.mutate();
+ stuck.tests({ need: "missing" });
+ await stuck.settle();
+ assert.notEqual(stuck.state().status, "accepted", "unresolved checks defer review and acceptance");
+ const blockedChecks = await fixture(t);
+ await blockedChecks.mutate();
+ blockedChecks.tests({ need: null, assessment: { disposition: "blocked" } });
+ await blockedChecks.settle();
+ assert.notEqual(blockedChecks.state().status, "accepted", "an explicit test blocker keeps the model in the loop");
 });

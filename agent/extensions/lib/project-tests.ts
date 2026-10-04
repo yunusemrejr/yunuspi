@@ -9,15 +9,16 @@ import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
 import { tokenizeSimple } from './bash-routing.ts';
 import { registerContinuationSource } from './continuation-notice.ts';
+import { isSessionStopped } from './session-stop.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
 
-import { choices } from "./tool-schema.ts";
+import { choices, clipRationale, RATIONALE_INTAKE } from "./tool-schema.ts";
 const ENTRY = 'project-test-checkpoint-v1';
 /** pi-background-tasks' terminal publication channel (extension-api.ts). */
 const BG_TERMINAL_CHANNEL = 'pi-background-tasks:terminal:v1';
 const MAX_FOLLOWUPS = 2;
 type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string; diagnostics?: ReturnType<typeof testDiagnostics> };
-type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[] };
+type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[]; adopted?: true };
 type ChangeAttribution = { status: 'current_session' | 'another_session' | 'unattributed'; sessionId?: string; detail?: string };
 type State = { root: string; revision: number; changed: string[]; attribution: Record<string, ChangeAttribution>; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
 const fresh = (root = ''): State => ({ root, revision: 0, changed: [], attribution: {}, checks: [], evidence: [], followups: 0, paused: false, optedOut: false });
@@ -72,7 +73,7 @@ function sanitizeRestoredAssessment(assessment: unknown, revision: number): Asse
   const checks = Array.isArray(candidate.checks) ? candidate.checks
     .filter((c: any) => c && typeof c.key === 'string' && typeof c.label === 'string')
     .map((c: any) => ({ key: c.key, label: c.label })) : [];
-  return { revision, disposition: candidate.disposition, reason: candidate.reason.slice(0, 1200), checks };
+  return { revision, disposition: candidate.disposition, reason: candidate.reason.slice(0, 1200), checks, ...(candidate.adopted === true ? { adopted: true as const } : {}) };
 }
 function sanitizeRestoredChecks(checks: unknown, revision: number): Check[] {
   if (!Array.isArray(checks)) return [];
@@ -229,6 +230,13 @@ function currentProjectCheck(state: State, key: string) {
     ?? (state.treeComplete && state.tree ? [...state.checks, ...state.evidence].findLast(c => c.key === key && c.tree === state.tree && c.outcome !== 'running') : undefined);
 }
 
+/** Reader-facing wording for each unresolved need; the agent receives its own guidance from `advice`. */
+const TEST_NEED_BRIEF: Record<string, string> = {
+  assessment: 'no verification run recorded after the latest change',
+  missing: 'planned checks have not passed since the latest change',
+  failed: 'a planned check failed',
+  running: 'checks still running',
+};
 export function projectTestNeed(state: State): string | null {
   if (!state.changed.length || state.paused || state.optedOut) return null;
   const a = state.assessment;
@@ -392,12 +400,12 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit. Receipts are bound to the observed source tree hash; reuse across scopes requires an identical tree.' });
   /** One unresolved-verification item shared by the rendered warning line and
    * the structured gate receipt, so prose and identity cannot diverge. */
-  const projectTestsVerification = (): { id: string; state: string; text: string } | undefined => {
+  const projectTestsVerification = (): { id: string; state: string; text: string; brief: string } | undefined => {
     if (!(enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length)) return undefined;
-    if (state.assessment?.disposition === 'blocked') return { id: 'blocked', state: 'blocked', text: `Blocked: ${state.assessment.reason}` };
+    if (state.assessment?.disposition === 'blocked') return { id: 'blocked', state: 'blocked', text: `Blocked: ${state.assessment.reason}`, brief: `project tests blocked: ${state.assessment.reason.replace(/\s+/g, ' ').slice(0, 80)}` };
     const need = projectTestNeed(state);
     if (!need) return undefined;
-    return { id: `need:${need}`, state: 'unresolved', text: `Current checks unresolved (${need}); command exits do not establish user-visible behavior.` };
+    return { id: `need:${need}`, state: 'unresolved', text: `Current checks unresolved (${need}); command exits do not establish user-visible behavior.`, brief: `project tests: ${TEST_NEED_BRIEF[need] ?? need}` };
   };
   const projectTestsVerificationLine = (): string[] => {
     const item = projectTestsVerification();
@@ -405,7 +413,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const projectTestsVerificationReceipt = () => {
     const item = projectTestsVerification();
-    return item ? [{ source: 'project-tests', id: item.id, revision: String(state.revision), state: item.state, count: state.changed.length, line: `project tests: ${item.text}` }] : [];
+    return item ? [{ source: 'project-tests', id: item.id, revision: String(state.revision), state: item.state, count: state.changed.length, line: `project tests: ${item.text}`, brief: item.brief }] : [];
   };
   const advice = () => {
     const need = projectTestNeed(state);
@@ -420,6 +428,21 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
             : '');
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
+  /** A recognized test runner that passed after the latest change IS the verification plan: the agent ran the
+   * checks first and recording them was bookkeeping that cost a model turn (29 of 123 measured follow-ups). The
+   * plan starts only from a pass with nothing still running; once adopted it follows every later observed runner on
+   * this revision, so a second run that fails or runs long reopens the need instead of hiding behind the first
+   * pass. An explicit assessment of this revision, wider or narrower, is never replaced. */
+  const adoptObservedChecks = () => {
+    if (!enabled() || !active || options.shadow || state.paused || state.optedOut || !state.changed.length) return;
+    const own = state.assessment?.revision === state.revision && state.assessment.adopted === true;
+    if (state.assessment?.revision === state.revision && !own) return;
+    const latest = [...new Map(state.checks.filter(c => c.revision === state.revision).map(c => [c.key, c] as const)).values()];
+    if (!own && (!latest.some(c => c.outcome === 'passed') || latest.some(c => c.outcome === 'running'))) return;
+    if (!latest.length) return;
+    state.assessment = { revision: state.revision, disposition: 'required', adopted: true, reason: `Adopted from observed runs on this revision (${latest.map(c => `${c.outcome}: ${c.label}`).join('; ').slice(0, 600)}).`, checks: latest.map(({ key, label }) => ({ key, label })) };
+    save();
+  };
   const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string }; observeOnly?: boolean }, callId: string, outcome: Check['outcome'], handle?: string, diagnostics?: ReturnType<typeof testDiagnostics>) => {
     const receipt = { ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}), ...(diagnostics ? { diagnostics } : {}) };
     // A newer failed/running/unknown receipt must retire an older reusable
@@ -433,6 +456,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       state.checks = [...state.checks.filter(c => !(c.key === receipt.key && c.revision === receipt.revision)), receipt].slice(-32);
     }
     save();
+    adoptObservedChecks();
   };
   const terminal = (task: any) => {
     if (!task?.id) return;
@@ -447,6 +471,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     check.outcome = status === 'completed' && task.exitCode === 0 && !task.signal ? 'passed'
       : ['failed', 'killed', 'timed_out'].includes(status) || typeof task.exitCode === 'number' && task.exitCode !== 0 ? 'failed' : 'unknown';
     save();
+    adoptObservedChecks();
   };
   const completesOwnedCheck = (task: any) => task?.id
     && !/^(?:running|pending|queued|starting)$/.test(task.status ?? task.state ?? '')
@@ -467,7 +492,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   const api = {
     async restore(ctx: any) {
       disposeContinuationNotice();
-      disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => projectTestsVerificationLine(), verificationReceipts: () => projectTestsVerificationReceipt(), pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
+      disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => projectTestsVerificationLine(), verificationReceipts: () => projectTestsVerificationReceipt(), pending: () => enabled() && active && !options.shadow && capable() && !isSessionStopped(ctx) && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
       epoch++; deliveryVersion++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; deliveryInFlight = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
       const ticket = epoch;
       let restoredTree: string | undefined, restoredChecks = false;
@@ -663,7 +688,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
     parameters: Type.Object({ action: choices(['inspect', 'assess']), view: Type.Optional(choices(['compact', 'detailed'])),
       disposition: Type.Optional(choices(['required', 'not_needed', 'blocked'])),
-      reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 })),
+      reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 * RATIONALE_INTAKE })),
       commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test. Put explanations in reason, never append prose or parenthetical notes. Inspect returns the exact planned commands and their receipts.' }), { maxItems: 8 })) }),
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
       const ticket = epoch;
@@ -694,7 +719,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           const observed = currentProjectCheck(state, check.key);
           if (observed && !state.checks.includes(observed)) state.checks = [...state.checks, { ...observed, revision: state.revision }].slice(-32);
         }
-        state.assessment = { revision: state.revision, disposition: params.disposition, reason: params.reason.trim().slice(0, 1200), checks };
+        state.assessment = { revision: state.revision, disposition: params.disposition, reason: clipRationale(params.reason, 1200), checks };
         save();
       }
       const splitNote = params.action === 'assess' && (params.commands ?? []).length && (params.commands ?? []).length !== (state.assessment?.checks?.length ?? 0)

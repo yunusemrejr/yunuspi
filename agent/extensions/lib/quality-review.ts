@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
+import { isSessionStopped } from './session-stop.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
 import { UI_DESIGN_POLICY, UI_POLICY_KEYS } from './slop-guidance-signals.ts';
 import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
@@ -19,7 +20,7 @@ import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
 import { registerShadowSource } from './intervention-registry.ts';
-import { choices } from "./tool-schema.ts";
+import { choices, clipRationale, RATIONALE_INTAKE } from "./tool-schema.ts";
 import { classifyExecution, currentExecutionProfile } from './adaptive-execution.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
@@ -39,12 +40,20 @@ const brief = (text: string) => text.length <= 6000 ? text : `${text.slice(0,300
 // review miss: it reads as finished while delivering the old outcome.
 const GOAL_FIDELITY = ' Goal fidelity first: compare the delivered behavior with the user request in the task. If the stated problem persists, or the change only adjusts incidental details around it, report changes with a blocking finding naming the unmet part of the request.';
 const RUBRICS: Record<string, string> = {
-  correctness: 'Trace the changed behavior, actual source owner, affected callers and failure/cancellation paths. Check compatibility and meaningful tests. Identify a concrete counterexample; do not request speculative refactors.' + GOAL_FIDELITY,
+  correctness: 'Trace the changed behavior, actual source owner, affected callers and failure/cancellation paths. Check compatibility and meaningful tests: a test that cannot fail (tautological or empty assertion, no assertion, a skip that hides a failing check, an assertion on a mock\'s own return value) is missing coverage, not coverage. Identify a concrete counterexample; do not request speculative refactors.' + GOAL_FIDELITY,
   security: 'Trace input to authorization, escaping, secret handling and data/storage boundaries. Check denied cases and migration compatibility when applicable. A filename or pattern alone is not a vulnerability.',
   interface: 'Check real task completion, native controls, keyboard/focus, responsive layout, contrast and loading/empty/error/disabled states. Review blinking live-status pills, glowing/pulsing dots, eyebrow pills above headings, invented status labels (BETA/NEW/LIVE/AI ACTIVE without backing state), work-thought narration leaked into copy, competing font roles, tiny tracked labels, effect clusters, redundant cards, fixed-coordinate content, pill clusters, hype badges, gradient text, glass panels, oversized display type, emoji chrome, fake terminal output, missing image alt, unnamed controls and skipped heading levels against the project design system and user preferences. Default to quiet truthful status text. Source cues and learned similarity only select inspection targets: require captured pixels from the actual application for appearance and actual interaction evidence for behavior, including native desktop/game windows. Offscreen renders, internal autoplay assertions, image headers and process exit zero do not prove the displayed application works. Check the normal launch path, displayed content and real input through a representative task. A failed capture is an unresolved gap; do not blame the display server without an independent probe. When outcome evidence paths are supplied, inspect them before judging; appearance and behavior claims require that evidence, never source inference. Judge identity too: a new interface should express its own brief and brand. Flag look-alike reuse of a site the user mentioned only for a link, credit or deployment, and category-default output (stock hero, untouched component-kit styling, template gradients). Hold website work to the anti-slop checklist (docs/ANTI-SLOP-CHECKLIST.md: core principle, agent decision test, final rule): every element must earn its place for this reader, and simulated state, invented proof, unrequested AI chrome and scope-creeping additions fail the decision test. That is an unmet requirement when the user asked for distinctive, elegant or non-generic design, otherwise an improvement. Block demonstrated broken behavior or unmet explicit requirements; label taste suggestions as improvements. Do not certify appearance from source or repeat redesign rounds for optional polish.' + GOAL_FIDELITY,
-  content: 'Check audience, clarity, specific supported claims, tone, links and calls to action. For public web content also check titles, headings, canonical/indexing, structured data and crawlability where relevant. Do not invent marketing facts or demand SEO for internal documentation. For promotional or public-facing copy, require specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter (anti-slop checklist docs/ANTI-SLOP-CHECKLIST.md).' + GOAL_FIDELITY,
+  content: 'Check audience, clarity, specific supported claims, tone, links and calls to action. For public web content also check titles, headings, canonical/indexing, structured data and crawlability where relevant. Do not invent marketing facts or demand SEO for internal documentation. For promotional or public-facing copy, require specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter (anti-slop checklist docs/ANTI-SLOP-CHECKLIST.md). Placeholder copy or placeholder image hosts left in shipped content (lorem ipsum, John Doe, placehold/picsum URLs) is an unfinished deliverable unless a mockup was requested.' + GOAL_FIDELITY,
   runtime: 'Check language/runtime contracts (JavaScript, PHP, Python or other touched stack), browser compatibility, resource lifetimes and WebAssembly memory/ABI/fallback behavior where relevant. Require measurements for performance claims.',
   delivery: 'Check the actual target and release configuration, backwards compatibility, environment boundaries and rollback. Distinguish local, staged and observed production behavior; never deploy or access production just to review.',
+};
+/** Reader-facing wording for each review status; the agent receives its own guidance from `advice`. */
+const QUALITY_BRIEF: Record<string, string> = {
+  awaiting_assessment: 'reviewers finished, not yet accepted',
+  reviewing: 'review still running',
+  pending: 'review not yet run on the latest changes',
+  unavailable: 'no independent reviewer returned',
+  budget_exhausted: 'review rounds used without acceptance',
 };
 export function reviewAspects(files: string[], task = '', history: any[] = [], patterns: Array<{key?: string}> = []) {
   const names = files.join('\n'), prose = task.slice(0, 6000);
@@ -291,14 +300,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   /** One unresolved-verification item shared by the rendered warning line and
    * the structured gate receipt, so prose and identity cannot diverge. */
-  const qualityVerification = (): { id: string; state: string; text: string } | undefined => {
+  const qualityVerification = (): { id: string; state: string; text: string; brief: string } | undefined => {
     if (!(enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted') || automaticReviewExempt()) return undefined;
     const current = status();
     const guidance = current === 'awaiting_assessment'
       ? 'current reviewer reports are complete. Reuse them and call quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) once with the current reports and required checks; do not launch another review just to finish.'
       : current === 'reviewing' ? 'the native review is already running; reuse its result before assessing.'
       : 'current changes have not been accepted; inspect the review evidence and remaining gaps.';
-    return { id: `status:${current}`, state: disposition === 'blocked' ? 'blocked' : 'unresolved', text: `Independent review ${current}: ${unavailableReason() || guidance}` };
+    const why = String(unavailableReason() || reason).replace(/\s+/g, ' ').trim();
+    return { id: `status:${current}`, state: disposition === 'blocked' ? 'blocked' : 'unresolved', text: `Independent review ${current}: ${unavailableReason() || guidance}`,
+      brief: `quality review: ${disposition === 'blocked' && why ? `blocked, ${why.slice(0, 80)}` : QUALITY_BRIEF[current] ?? current.replace(/_/g, ' ')}` };
   };
   const qualityVerificationLine = (): string[] => {
     const item = qualityVerification();
@@ -306,7 +317,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   const qualityVerificationReceipt = () => {
     const item = qualityVerification();
-    return item ? [{ source: 'quality-review', id: item.id, revision: String(revision), state: item.state, count: changed.length, line: `quality review: ${item.text}` }] : [];
+    return item ? [{ source: 'quality-review', id: item.id, revision: String(revision), state: item.state, count: changed.length, line: `quality review: ${item.text}`, brief: item.brief }] : [];
   };
   const status = () => !changed.length || automaticReviewExempt() ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? busy ? 'reviewing' : rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
@@ -361,6 +372,24 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     return `[quality review] Revision ${revision}: ${status()}. ${rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. Native test receipts include bounded captured diagnostics: reuse them without temporary log files. For UI/behavior work attach actual outcome captures via evidence paths.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
   };
   const automaticAdvice = () => testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
+  /** Every aspect reviewer returned cited evidence, none found a blocker, nothing is dismissed or limited, and the
+   * required project checks are resolved: exactly the state in which `assess accepted` succeeds with nothing left to
+   * adjudicate. A model turn spent only on calling assess adds latency and cost, not assurance (12 of 23 measured
+   * review follow-ups were that call), so the harness records the same disposition and says so. */
+  const cleanReview = (): boolean => {
+    if (!changed.length || disposition || reviewed !== revision || !reports.length) return false;
+    if (truncated || scopeOverflow || dispatchGap || reviewUnavailable || policyFindings.length) return false;
+    if (reports.some(r => r.outcome !== 'pass' || r.unavailable === true || r.gap.trim() || !r.evidence.length || r.findings.some(f => f.severity === 'blocking'))) return false;
+    const checks = options.tests();
+    return !(!checks?.disabled && (checks?.need || checks?.assessment?.disposition === 'blocked'));
+  };
+  const acceptCleanReview = () => {
+    const aspects = reports.map(r => r.aspect).join(', ');
+    disposition = 'accepted';
+    reason = `Recorded by the harness: ${reports.length} independent aspect review(s) (${aspects}) passed with cited evidence, no blocking findings, and the required project checks are resolved.`;
+    save(); noteDisposition();
+    try { pi.sendMessage?.({ customType: 'harness-activity', content: `Quality review · accepted automatically (${aspects})`, display: true, excludeFromContext: true, details: { kind: 'intelligence.activity', label: 'Quality review', status: 'ok', detail: `${reports.length} aspect review(s) passed with evidence; no model turn needed`, count: 1 } }, { triggerTurn: false }); } catch { /* visibility only */ }
+  };
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
   const refresh = async (ctx: any) => {
     // Every caller must await discovery; skipping an active scan can approve
@@ -615,7 +644,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     restore(ctx: any) {
       policyContext = ctx; explicitReview = false;
       disposeContinuationNotice();
-      disposeContinuationNotice = registerContinuationSource({session:ctx.sessionManager,name:'quality review',verification:() => qualityVerificationLine(),verificationReceipts:() => qualityVerificationReceipt(),pending:() => enabled() && capable() && active && !paused && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
+      disposeContinuationNotice = registerContinuationSource({session:ctx.sessionManager,name:'quality review',verification:() => qualityVerificationLine(),verificationReceipts:() => qualityVerificationReceipt(),pending:() => enabled() && capable() && active && !paused && !isSessionStopped(ctx) && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
       releaseShared();
       hashes = {}; reviewedHashes = {};
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
@@ -760,6 +789,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         } catch {} finally { if (deliveryInFlight === blockedKey) deliveryInFlight = ''; }
         return;
       }
+      if (cleanReview()) { acceptCleanReview(); return; }
       const content = advice(), key = `${revision}:${reviewed}:${status()}`;
       if (!content || delivered === key || deliveryInFlight === key) return;
       deliveryInFlight = key;
@@ -779,7 +809,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   pi.on?.('session_compact', () => { noted = ''; });
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
-    parameters:Type.Object({action:choices(['inspect','review','assess']),view:Type.Optional(choices(['compact','detailed'])),disposition:Type.Optional(choices(['accepted', 'blocked'])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome captures for reviewers (renders or behavior evidence); native test diagnostics are already supplied: existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
+    parameters:Type.Object({action:choices(['inspect','review','assess']),view:Type.Optional(choices(['compact','detailed'])),disposition:Type.Optional(choices(['accepted', 'blocked'])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200 * RATIONALE_INTAKE,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them. Longer text is kept head and tail."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome captures for reviewers (renders or behavior evidence); native test diagnostics are already supplied: existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
     async execute(_id: string, params: any, signal: any, update: any, ctx: any) {
       const ticket = generation;
       const rawRetryReason = typeof params.retryReason === 'string' ? params.retryReason.trim() : '';
@@ -863,7 +893,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           const currentReview = reviewUnavailable || Boolean(dispatchGap) || reviewed === revision && reports.length > 0;
           if (!currentReview && !verificationBlocked && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review (quality_review action "review") before recording blocked.');
         }
-        disposition = params.disposition; reason = (acceptedLimit ? `${acceptedLimit} ${params.reason.trim()}` : params.reason.trim()).slice(0,1200); save(); noteDisposition();
+        disposition = params.disposition; reason = clipRationale(acceptedLimit ? `${acceptedLimit} ${params.reason.trim()}` : params.reason.trim(),1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
       }
       signal?.throwIfAborted(); const data={...summary(true,params.action === 'inspect'),...(retryRationale ? {retryRationale} : {})};return {content:[{type:'text',text:JSON.stringify(qualityReviewOutput(data,params.view === 'detailed',params.action === 'assess'))}],details:data};

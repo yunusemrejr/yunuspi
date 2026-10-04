@@ -6,3 +6,17 @@ import { Type } from "typebox";
  * Depends on typebox only, so modules that are loaded in isolation (tests, sandboxes) can use it. */
 export const choices = (values: readonly string[], description?: string) =>
   Type.Unsafe<string>({ type: "string", enum: [...values], ...(description ? { description } : {}) });
+
+/** Largest free-text rationale a tool accepts before the call is refused, as a multiple of what the owner keeps.
+ * Over-long rationales used to fail schema validation outright: each refusal cost the agent a whole retry turn
+ * (28 measured in quality_review and project_tests) to resend text the owner would have clipped anyway. */
+export const RATIONALE_INTAKE = 4;
+
+/** Keep the head and the tail of an over-long rationale, which state the verdict first and the evidence last,
+ * and mark the omission so a reader of the clipped record knows text was removed. */
+export function clipRationale(text: string, max: number): string {
+  const flat = String(text ?? "").trim();
+  if (flat.length <= max) return flat;
+  const mark = " […] ", tail = Math.floor(max * 0.3);
+  return `${flat.slice(0, max - tail - mark.length).trimEnd()}${mark}${flat.slice(-tail).trimStart()}`;
+}

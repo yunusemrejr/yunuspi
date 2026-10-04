@@ -103,6 +103,7 @@ export default function (pi: any) {
 						verificationReceipts: () => unverifiedDeployAt === undefined ? [] : [{
 							source: "deploy", id: `deploy:${unverifiedDeployAt}:${deployRevision}`, revision: String(deployRevision),
 							state: "unverified", line: `deploy: ${deployVerificationText(unverifiedDeployAt)}`,
+							brief: `deploy at ${new Date(unverifiedDeployAt).toISOString().slice(11, 16)} UTC is not checked on the live site`,
 						}],
 					});
 				}

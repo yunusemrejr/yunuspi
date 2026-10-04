@@ -31,7 +31,7 @@ const TOUR = /guided tour|product tour|onboarding tour|welcome modal|take (?:the
 const AI_WIDGET = /\bask ai\b|ai (?:assistant|chatbot)|ai chat\b|chat with (?:our )?ai/i;
 /** The default AI-product palette: indigo/violet into purple/pink gradients,
  * as Tailwind stops or the stock hexes. A brand may own it; most do not. */
-const STOCK_PALETTE = /\bfrom-(?:indigo|violet|purple|blue)-[3-7]00\b[^"'`\n]{0,80}\b(?:via|to)-(?:purple|fuchsia|pink|violet)-[3-7]00\b|(?:linear|radial|conic)-gradient\([^)]{0,160}#(?:6366f1|4f46e5|7c3aed|8b5cf6|a855f7)\b[^)]{0,160}#(?:a855f7|ec4899|d946ef|db2777|c026d3|8b5cf6)\b/i;
+const STOCK_PALETTE = /\bbg-(?:gradient|linear)-to-[a-z]+\b[^"'`\n]{0,160}\b(?:from|via|to)-(?:purple|violet|fuchsia)-(?:[4-9]00|950)\b|\b(?:from|via|to)-(?:purple|violet|fuchsia)-(?:[4-9]00|950)\b[^"'`\n]{0,160}\bbg-(?:gradient|linear)-to-|\bfrom-(?:indigo|violet|purple|blue)-[3-7]00\b[^"'`\n]{0,80}\b(?:via|to)-(?:purple|fuchsia|pink|violet)-[3-7]00\b|(?:linear|radial|conic)-gradient\([^)]{0,160}#(?:6366f1|4f46e5|7c3aed|8b5cf6|a855f7)\b[^)]{0,160}#(?:a855f7|ec4899|d946ef|db2777|c026d3|8b5cf6)\b/i;
 const CREAM_GROUND = /(?:background(?:-color)?|--(?:[\w-]*-)?(?:background|ground|surface|paper))\s*:\s*(?:#([\da-f]{6})\b|(ivory|floralwhite|oldlace|linen)\b)/gi;
 function hasCreamGround(text: string): boolean {
   return [...text.matchAll(CREAM_GROUND)].some(match => {
@@ -316,6 +316,34 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       if (glassBlocks + glassClasses >= 2)
         out.push({key:'ui-glass-panel',skill:'ui-antipattern-review',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
     }
+    // Ambient colour washes: a large blurred, rounded, absolutely placed shape behind the content. It carries no
+    // information, adds paint cost, and is a stock generated-landing atmosphere layer.
+    const blobBlocks = blocks.filter(b => Number(/filter\s*:\s*blur\(\s*(\d+)px/i.exec(b.body)?.[1]) >= 40 && /border-radius\s*:\s*(?:50%|100%|9{3,}px)/i.test(b.body) && /position\s*:\s*(?:absolute|fixed)/i.test(b.body)).length;
+    const blobClasses = classLists.filter(list => has(list,/\s(?:absolute|fixed)\s/) && has(list,/\srounded-full\s/) && has(list,/\s(?:blur-(?:2xl|3xl)|blur-\[(?:[4-9]\d|\d{3,})px\])\s/)).length;
+    if (blobBlocks + blobClasses)
+      out.push({key:'ui-ambient-blob',skill:'anti-ai-slop',check:'A large blurred, rounded, absolutely placed colour shape (an ambient blob or aurora wash) sits behind content. It carries no information and is a stock generated-landing atmosphere layer; drop it and build depth from spacing, one real surface change or the product\'s own imagery. Keep it only when the brand owns that treatment.'});
+    // Placeholder image hosts ship as random or broken pictures.
+    if (/(?:src|srcset|href|url)\s*[=(]\s*["']?(?:https?:)?\/\/(?:via\.placeholder\.com|placehold\.(?:co|it)|placekitten\.com|placebear\.com|picsum\.photos|dummyimage\.com|lorempixel\.com|loremflickr\.com|fakeimg\.pl|source\.unsplash\.com\/random)/i.test(text))
+      out.push({key:'ui-placeholder-media',skill:'anti-ai-slop',check:'An image points at a placeholder host (placehold.co, picsum, placekitten, dummyimage, source.unsplash random). It ships as a random or broken picture: use the real asset, an honest empty state, or a drawn or generated one, and say plainly when media is missing.'});
+    // Coloured glow halos around headlines and cards: a zero-offset, wide, chromatic shadow. Neutral drop shadows,
+    // offset shadows and zero-blur focus rings are ordinary depth and stay quiet.
+    const chromatic = (color: string): boolean => {
+      const hex = /^#([\da-f]{3}|[\da-f]{6})\b/i.exec(color)?.[1], rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(color);
+      const channels = hex ? (hex.length === 3 ? [...hex].map(c => parseInt(c + c, 16)) : [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16))) : rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : undefined;
+      return channels ? Math.max(...channels) - Math.min(...channels) >= 40 : /^(?:cyan|aqua|magenta|fuchsia|purple|violet|indigo|pink|hotpink|deeppink|blue|dodgerblue|deepskyblue|lime|springgreen|orange|red)\b/i.test(color);
+    };
+    const glowRe = /(?:box|text)-shadow\s*:([^;}]{0,300})|\bdrop-shadow\(([^)]{0,200})\)/gi;
+    const glowDeclared = [...text.matchAll(glowRe)].some(m => (m[1] ?? m[2]).split(/,(?![^(]*\))/).some(layer => {
+      const parsed = /(?:^|\s)(?:inset\s+)?0(?:px)?\s+0(?:px)?\s+(\d+)px(?:\s+-?\d+px)?\s+(#[\da-f]{3,8}\b|rgba?\([^)]*\)|[a-z]+)/i.exec(layer.trim());
+      return Boolean(parsed) && Number(parsed![1]) >= 24 && chromatic(parsed![2]);
+    }));
+    const glowClasses = classLists.some(list => has(list, /\s(?:drop-)?shadow-\[0_0_(?:2[4-9]|[3-9]\d|\d{3,})px_(?:#[\da-f]{3,8}|rgba?\([^)]*\)|[a-z]+-\d{2,3})/i) || has(list, /\sshadow-(?:2xl|xl|lg)\s/) && has(list, /\sshadow-(?:indigo|purple|violet|fuchsia|pink|cyan|sky|blue|emerald|teal)-[3-6]00\/(?:[2-9]\d|\d)\s/));
+    if (glowDeclared || glowClasses)
+      out.push({key:'ui-glow-halo',skill:'anti-ai-slop',check:'A coloured glow halo (a zero-offset, wide, chromatic box/text/drop shadow) surrounds a card, button or headline. Glow carries no information and is a stock generated-UI ornament; show depth with a real surface change, spacing or a neutral offset shadow. Keep it only when the brand owns a glow system and it encodes state.'});
+    // The default generated font rotation: two or more of its members together.
+    const rotation = new Set([...text.matchAll(/\b(Inter|Space Grotesk|Geist|Instrument Serif)\b/g)].map(m => m[1]));
+    if (rotation.size >= 2)
+      out.push({key:'ui-stock-fonts',skill:'fonts',check:`${[...rotation].join(' + ')} occur together: the default generated type rotation, which signals that no typographic decision was made. Pick faces for this product's own voice and content (a pairing you would not reuse on an unrelated project), or document why this pairing fits.`});
     if (!out.some(s=>s.key==='ui-pill-cluster')) {
       const blockPills = blocks.filter(b=>/border-radius\s*:\s*999px/i.test(b.body) && /padding\s*:/i.test(b.body)).length;
       const classPills = classLists.filter(list=>has(list,/\srounded-full\s/) && !has(list,/\s(?:size|[wh])-(?:1\.5|2|2\.5|3)\s/)).length;
@@ -384,7 +412,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if (MISSION.test(visible))
       push('prose-mission-speak','copywriting','Manifesto language occurs (mission, revolutionize, democratize, the future). Verify the scale warrants it; small practical sites state what they do and for whom instead of inventing a philosophy.');
     let metricBare = false;
-    for (const match of visible.matchAll(/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d+(?:[.,]\d+)?\s*[kKmM]\+\s+(?:users|customers|teams|companies|downloads|members)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b/gi)) {
+    for (const match of visible.matchAll(/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d{2}(?:\.\d+)?%\s+uptime\b|\b\d+(?:[.,]\d+)?\s*[kKmMbB]?\+\s+(?:users|customers|teams|companies|downloads|members|deploys|deployments|developers|projects|installs|requests)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b/gi)) {
       const at = match.index ?? 0;
       if (!metricHasBasis(visible.slice(Math.max(0,at-300),at+match[0].length+300))) { metricBare = true; break; }
     }

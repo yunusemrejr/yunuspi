@@ -16,20 +16,23 @@ const {createProjectTestLifecycle}=await import(pathToFileURL(path.join(agent,'e
 const {createQualityReviewLifecycle}=await import(pathToFileURL(path.join(agent,'extensions/lib/quality-review.ts')));
 const {collectVerificationLines}=await import(pathToFileURL(path.join(agent,'extensions/lib/continuation-notice.ts')));
 
-test('settled blocked verification remains visible on each final without waking the model',()=>{
+test('open verification is reported once per distinct set, never repeated unchanged, and never promises a continuation',()=>{
  const previous=globalThis[CONTINUATION_SOURCES];globalThis[CONTINUATION_SOURCES]=[];
  try {
-  let blocked=true;const hooks={};
-  registerContinuationSource({name:'project tests',pending:()=>[],verification:()=>blocked?['Live window pixels could not be verified.']:[]});
+  let line='Live window pixels could not be verified.';const hooks={};
+  registerContinuationSource({name:'project tests',pending:()=>[],verification:()=>line?[line]:[]});
   extension({on:(name,fn)=>hooks[name]=fn});hooks.session_start();
   const event={message:{role:'assistant',stopReason:'stop',content:[{type:'text',text:'The app is ready.'}]}};
   const ctx={hasPendingMessages:()=>false};
-  for(let i=0;i<2;i++) {
-   const result=hooks.message_end(event,ctx),text=result.message.content.map(x=>x.text).join('\n');
-   assert.match(text,/Verification incomplete/);assert.match(text,/Live window pixels/);
-   assert.ok(!text.includes('will keep running'),'blocked verification creates no continuation promise');
-  }
-  blocked=false;assert.equal(hooks.message_end(event,ctx),undefined);
+  const first=hooks.message_end(event,ctx).message.content.map(x=>x.text).join('\n');
+  assert.match(first,/Verification open/);assert.match(first,/Live window pixels/);
+  assert.ok(!first.includes('continues'),'open verification creates no continuation promise');
+  assert.equal(hooks.message_end(event,ctx),undefined,'an unchanged open set is not repeated on the next final');
+  line='A different gap appeared.';
+  assert.match(hooks.message_end(event,ctx).message.content.map(x=>x.text).join('\n'),/A different gap/,'a changed set is reported');
+  line='';assert.equal(hooks.message_end(event,ctx),undefined);
+  line='A different gap appeared.';
+  assert.match(hooks.message_end(event,ctx).message.content.map(x=>x.text).join('\n'),/different gap/,'a gap that returns after being resolved is reported again');
  } finally {globalThis[CONTINUATION_SOURCES]=previous;}
 });
 
@@ -43,7 +46,7 @@ test('pi-lens warnings refer callers to the diagnostic owner instead of an absen
  assert.ok(!text.includes('.pi-lens/cache/'));
 });
 
-test('both premature finals expose active delegated work and the notice clears on native completion',()=>{
+test('a hand-off final announces active delegated work once and the notice clears on native completion',()=>{
  const previous=globalThis[CONTINUATION_SOURCES];globalThis[CONTINUATION_SOURCES]=[];
  try {
   const sessionManager={},hooks={};
@@ -56,13 +59,11 @@ test('both premature finals expose active delegated work and the notice clears o
   extension({on:(name,fn)=>hooks[name]=fn});hooks.session_start();
   const event={message:{role:'assistant',stopReason:'stop',content:[{type:'text',text:'Complete and verified.'}]}};
   const ctx={sessionManager,hasPendingMessages:()=>false};
-  for(let i=0;i<2;i++) {
-   const text=hooks.message_end(event,ctx).message.content.map(x=>x.text).join('\n');
-   assert.match(text,/Verification incomplete/);
-   assert.match(text,/1 delegated run has not finished/);
-   assert.match(text,/cannot support a completed or verified claim/);
-   assert.equal(text.includes('Continuation pending'),i===0,'continuation announcement stays deduplicated');
-  }
+  const text=hooks.message_end(event,ctx).message.content.map(x=>x.text).join('\n');
+  assert.match(text,/Session continues/);
+  assert.match(text,/1 delegated run is still active/);
+  assert.ok(!text.includes('Verification open'),'a hand-off turn does not report verification the resumed work is about to produce');
+  assert.equal(hooks.message_end(event,ctx),undefined,'the continuation announcement stays deduplicated');
   state.asyncJobs.get('audit').status='complete';
   assert.equal(hooks.message_end(event,ctx),undefined,'completed jobs cannot leave a stale pending notice');
  } finally {globalThis[CONTINUATION_SOURCES]=previous;}

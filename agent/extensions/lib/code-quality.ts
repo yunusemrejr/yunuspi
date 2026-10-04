@@ -9,6 +9,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { analyzeStructure } from "./code-structure.ts";
+import { codeLexicalMask } from "./code-lexical-mask.ts";
 import { createHash } from "node:crypto";
 import { refineQuality, protectedQualityText, type RefinementCandidate } from "./quality-refinement.ts";
 
@@ -290,6 +291,65 @@ export function findDuplicates(files: SourceFile[], options: { minTokens?: numbe
 export interface Finding { rule: string; line: number; message: string; excerpt?: string; }
 const TESTISH = /(?:^|\/)(?:tests?|__tests__|spec|specs|fixtures?|examples?|scripts?|bin|benchmarks?|e2e)\/|[._-](?:test|spec|bench|stories)\.[a-z]+$|(?:^|\/)(?:cli|main)\.[cm]?[jt]s$/i;
 
+// A green test that cannot fail is worse than no test: it reads as coverage. These
+// cues name the cases that cannot fail by construction, not weak tests in general.
+const SPEC_FILE = /(?:^|\/)(?:tests?|__tests__|spec|specs|e2e)\/|[._-](?:test|spec)\.[a-z]+$|(?:^|\/)test_[^/]+\.py$/i;
+const LITERAL = String.raw`(?:true|false|null|undefined|-?\d+(?:\.\d+)?|"[^"\\\n]*"|'[^'\\\n]*')`;
+const SAME_VALUE = String.raw`(\w+(?:\.\w+)*)`;
+const VACUOUS_JS = [
+  new RegExp(String.raw`\bexpect\(\s*(${LITERAL})\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`),
+  new RegExp(String.raw`\bexpect\(\s*${SAME_VALUE}\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\(\s*\1\s*\)`),
+  /\bexpect\(\s*(?:true|1|"[^"]+"|'[^']+')\s*\)\s*\.(?:toBeTruthy|toBeDefined)\(\)|\bexpect\(\s*(?:false|0|null|undefined)\s*\)\s*\.toBeFalsy\(\)/,
+  /\bassert(?:\.ok)?\(\s*(?:true|1)\s*[,)]/,
+  new RegExp(String.raw`\bassert\.(?:equal|strictEqual|deepEqual|deepStrictEqual)\(\s*(${LITERAL})\s*,\s*\1\s*[,)]`),
+  new RegExp(String.raw`\bassert\.(?:equal|strictEqual|deepEqual|deepStrictEqual)\(\s*${SAME_VALUE}\s*,\s*\1\s*[,)]`),
+];
+const VACUOUS_PY = [
+  /^\s*assert\s+(?:True|1)\s*(?:,.*)?$/,
+  new RegExp(String.raw`^\s*assert\s+(${LITERAL})\s*==\s*\1\s*(?:,.*)?$`),
+  /\bself\.assertTrue\(\s*True\s*[,)]/,
+  new RegExp(String.raw`\bself\.assert(?:Equal|Is)\(\s*${SAME_VALUE}\s*,\s*\1\s*[,)]`),
+];
+const ASSERTION_TOKEN = /\b(?:expect\w*|assert\w*|should\w*|verify\w*|check\w*|ensure\w*|validate\w*|must\w*|require\w*|fail|equal|strictEqual|deepEqual|throws|rejects|resolves|toMatch\w*|toBe\w*|toHave\w*|snapshot\w*|done)\b|\bt\.\w+\(|\b(?:cy|page|browser)\./i;
+
+/** Tests that pass whatever the code does: tautological assertions, empty bodies, bodies with no assertion at
+ * all and skips left in the suite. Only runs on test files; the caller's `add` restricts findings to a changed span. */
+function testSlop(file: string, source: string, rows: string[], family: Family, add: (rule: string, line: number, message: string) => void): void {
+  const js = family === "c" && /\.(?:[cm]?[jt]sx?)$/i.test(file), py = family === "python";
+  if (!(js || py) || !SPEC_FILE.test(file.replaceAll("\\", "/"))) return;
+  rows.forEach((row, i) => {
+    const line = i + 1, text = row.trim();
+    if (/^(?:\/\/|#|\*|\/\*)/.test(text)) return;
+    if ((js ? VACUOUS_JS : VACUOUS_PY).some(pattern => pattern.test(text)))
+      add("vacuous-assertion", line, "Assertion that cannot fail (a literal, or the same value on both sides): it passes whatever the code does. Assert the observable result of the code under test.");
+    const skipped = js ? /(?:\b(?:describe|it|test)\.skip\s*\(\s*["'`]|(?<![.\w])x(?:it|test|describe)\s*\()/.test(text) && !/\/\/\s*\S|\/\*/.test(text.replace(/(["'`]).*?\1/g, ""))
+      : /^@pytest\.mark\.skip(?:\(\s*\))?\s*$|^@unittest\.skip\(\s*(?:["']{2})?\s*\)/.test(text);
+    if (skipped) add("skipped-test", line, "Skipped test left in the suite without a stated reason. Fix it, delete it, or say why it is skipped; a skip must not hide a failing check.");
+  });
+  if (js) {
+    const code = codeLexicalMask(source).code;
+    // Strings are blanked in the mask, so a test call reads `test(    , () => {`: structure survives, names do not.
+    for (const match of code.matchAll(/(?<![.\w])(?:test|it)(?:\.(?:only|concurrent))?\s*\(\s*,\s*(?:async\s*)?(?:function\s*\w*\s*\(([^)]*)\)|\(([^)]*)\)\s*=>|(\w+)\s*=>)\s*\{/g)) {
+      const open = match.index! + match[0].length - 1;
+      let depth = 1, close = open + 1;
+      for (; close < code.length && depth > 0; close++) { if (code[close] === "{") depth++; else if (code[close] === "}") depth--; }
+      if (depth) continue;
+      const body = code.slice(open + 1, close - 1), at = code.slice(0, match.index!).split("\n").length;
+      if (!body.trim()) add("empty-test", at, "Test with an empty body: it always passes. Write the assertion or delete the test.");
+      else if (!ASSERTION_TOKEN.test(body) && !/\bdone\b/.test(match[1] ?? match[2] ?? match[3] ?? ""))
+        add("test-without-assertion", at, "Test body makes no assertion: it passes unless the code throws. Assert the behavior it exists to protect.");
+    }
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      if (!/^\s*(?:async\s+)?def\s+test_\w+\s*\([^)]*\)\s*(?:->[^:]+)?:\s*$/.test(rows[i])) continue;
+      const indent = /^(\s*)/.exec(rows[i])![1].length, body: string[] = [];
+      for (let j = i + 1; j < rows.length && (!rows[j].trim() || /^(\s*)/.exec(rows[j])![1].length > indent); j++) body.push(rows[j]);
+      const meaningful = body.filter(r => r.trim() && !/^\s*(?:#|"{3}|'{3}|\.\.\.\s*$|pass\s*$)/.test(r));
+      if (!meaningful.length) add("empty-test", i + 1, "Test with an empty body: it always passes. Write the assertion or delete the test.");
+    }
+  }
+}
+
 /** High-precision code smells that generated or hurried code often carries.
  * `lines` restricts findings to a changed span. */
 export function codeSlop(file: string, source: string, lines?: [number, number]): Finding[] {
@@ -348,6 +408,7 @@ export function codeSlop(file: string, source: string, lines?: [number, number])
     if (/[\u{1F300}-\u{1FAFF}\u{2705}\u{274C}\u{2728}\u{1F680}]/u.test(text) && /(?:console\.\w+|print|log(?:ger)?\.\w+|echo)\s*\(?\s*["'`]/.test(text)) add("emoji-log", line, "Emoji in log output: logs are parsed and grepped; keep them plain.");
   });
   flushCommented(rows.length);
+  testSlop(file, source, rows, family, add);
   // Swallowed errors: a catch/except whose whole body only logs or passes.
   const whole = lines ? rows.slice(Math.max(0, lines[0] - 3), lines[1] + 3).join("\n") : source;
   const base = lines ? Math.max(0, lines[0] - 3) : 0;
@@ -439,6 +500,12 @@ const PROSE_PATTERNS: Array<[RegExp, string]> = [
   [/\bas an ai\b/gi, "(cut the production narration)"], [/\bi (?:designed|built|created|crafted|chose|picked) (?:this|the)\b/gi, "the fact, not the making"],
   [/\bthis (?:section|design|redesign|page|site|hero) (?:showcases|demonstrates|highlights|embodies)\b/gi, "say what it is"], [/\bbuilt to (?:showcase|demonstrate)\b/gi, "say what it does"],
   [/\bhere'?s what (?:i|we) (?:built|designed|created)\b/gi, "(cut; name the thing)"],
+  [/\b(?:i hope this (?:helps|finds you well)|hope this helps)\b/gi, "(cut)"], [/\b(?:feel free to|don'?t hesitate to) (?:reach out|contact|ask|let)\b/gi, "(cut; give the contact or the next step)"],
+  [/\b(?:i'?d|i would) be (?:happy|glad|delighted) to\b/gi, "(cut; do it or say what you need)"], [/\bgreat question\b/gi, "(cut)"], [/\bplays? an? (?:crucial|vital|pivotal|key|significant|important) role in\b/gi, "name what it does"],
+  [/\b(?:it is|it'?s) worth (?:mentioning|highlighting|emphasi[sz]ing)(?: that)?\b/gi, "(cut; state the point)"], [/\bneedless to say\b/gi, "(cut)"], [/\brest assured\b/gi, "(cut; show the reason)"],
+  [/\b(?:comprehensive|ultimate|definitive) (?:guide|solution|suite|overview|toolkit)\b/gi, "the specific scope"], [/\b(?:one-stop(?:[- ]shop)?|all-in-one)\b/gi, "what it covers"], [/\bproduction[- ]ready\b/gi, "what was verified, and where"],
+  [/\b(?:unparalleled|unrivall?ed|second to none)\b/gi, "the specific comparison"], [/\bparadigm shift\b/gi, "the specific change"],
+  [/\bin this (?:article|guide|post|tutorial),? (?:we|i)(?:'ll| will| are going to) (?:explore|dive|look|walk|cover|discuss)\b/gi, "(cut; start with the point)"], [/\btailored to (?:your|their) (?:specific |unique )?needs\b/gi, "name the need"],
 ];
 const HEDGES = /\b(?:might|may|could|perhaps|possibly|potentially|arguably|somewhat|fairly|relatively)\b/gi;
 const FILLERS = /\b(?:very|really|just|actually|basically|literally|truly|simply|quite|extremely|incredibly)\b/gi;
@@ -472,7 +539,7 @@ function technicalPhrase(line: string, at: number, phrase: string): boolean {
     || /^(?:256[- ]bit)$/i.test(phrase) && /(?:AES|cipher|encrypt\w*|keys?|SHA|hash)/i.test(nearby)
     || /(?:word|phrase|term|replace|avoid|quot\w*)\s+["“']?$/.test(line.slice(0, at).toLowerCase());
 }
-const METRIC_CLAIM = /\b\d+(?:\.\d+)?\s*(?:x|×)\s+(?:faster|slower|better|cheaper|more|less)\b|\b\d{1,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d+(?:[.,]\d+)?\s*[kKmM]\+\s+(?:users|customers|teams|companies|downloads|members)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b(?!\d)/i;
+const METRIC_CLAIM = /\b\d+(?:\.\d+)?\s*(?:x|×)\s+(?:faster|slower|better|cheaper|more|less)\b|\b\d{1,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b|\b\d{2}(?:\.\d+)?%\s+uptime\b|\b\d+(?:[.,]\d+)?\s*[kKmMbB]?\+\s+(?:users|customers|teams|companies|downloads|members|deploys|deployments|developers|projects|installs|requests)\b|\b\d\.\d\s*\/\s*5\b|(?:^|[\s(])#1\b(?!\d)/i;
 const METRIC_BASIS = /\b(?:measured|benchmark(?:ed)?|tested|study|survey|report)\b[^.!?\n]{0,110}\b(?:on|against|with|using|of|by|from|in)\b|\b(?:n\s*=\s*\d+|sample\s+(?:size|of)\s+\d+|\d+\s+(?:verified\s+)?reviews?\s+(?:on|from)|as of\s+\w+\s+\d{4})\b/i;
 export const metricHasBasis = (text: string) => METRIC_BASIS.test(text);
 /** Prose measurements and stock-phrase findings for Markdown, text or copy.
