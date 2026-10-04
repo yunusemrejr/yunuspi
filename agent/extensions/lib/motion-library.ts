@@ -86,6 +86,28 @@ export async function searchMotion(query: string, approach?: MotionApproach, lim
 
 const brief = (example: Omit<MotionExample, "bytes">) => ({ id: example.id, approach: example.approach, title: example.title, summary: example.summary, concepts: example.concepts.map((c) => (c.length > 150 ? `${c.slice(0, 147)}...` : c)), use: example.use.slice(0, 3) });
 
+/** Worked examples for the moves a new film most often needs, by role rather than by topic (an example describes a technique, so a topic search
+ * would rank on incidental words). Each id is checked against the catalogue by a test. */
+export const STARTER_KIT: ReadonlyArray<readonly [role: string, id: string]> = [
+  ["titles and kinetic type", "html/kinetic-type-lines"],
+  ["a shader or flow-field backdrop", "html/webgl-domain-warp"],
+  ["a data or chart reveal", "html/data-reveal"],
+  ["a lit 3D object with anchors", "blender/product-hero"],
+  ["labels that follow 3D features", "merge/shot-overlay"],
+];
+
+/** Where a new project should begin: the kit above with each example's summary, and how to search for the rest. */
+export async function motionStarters() {
+  const catalog = await motionCatalog();
+  return {
+    kit: STARTER_KIT.flatMap(([role, id]) => {
+      const example = catalog.find((e) => e.id === id);
+      return example ? [{ role, id, what: example.summary.length > 110 ? `${example.summary.slice(0, 107)}...` : example.summary }] : [];
+    }),
+    use: 'Before writing motion code from scratch, place the closest example with motion_examples action:"copy" dir:"<this project>" id:"<id>", or search the full library for the effect a scene needs (action:"search" query:"..."; liquid type, SVG morphs, camera rigs, ...).',
+  };
+}
+
 export async function motionExample(id: string, withSource: boolean) {
   const example = (await motionCatalog()).find((entry) => entry.id === id || entry.file === id);
   if (!example) throw new Error(`No example "${id}". Search first (motion_examples action:"search"); ids look like html/webgl-domain-warp.`);

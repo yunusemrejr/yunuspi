@@ -5,7 +5,7 @@ import { audioSynth, narrationTts, PIPER_VOICES, SFX_TYPES, VOICE_STYLES, videoP
 import { LOOKS } from "./lib/video-looks.ts";
 import { videoAssets } from "./lib/video-assets.ts";
 import { SHOT_LIGHTS, SHOT_MATERIALS, SHOT_RIGS, SHOT_SHADOWS, videoShot } from "./lib/video-shot.ts";
-import { copyMotionExample, MOTION_APPROACHES, motionExample, motionGuide, searchMotion } from "./lib/motion-library.ts";
+import { copyMotionExample, MOTION_APPROACHES, motionExample, motionGuide, motionStarters, searchMotion } from "./lib/motion-library.ts";
 import { PLATFORMS } from "./lib/video-publish.ts";
 import { choices } from "./lib/tool-schema.ts";
 
@@ -40,7 +40,11 @@ export default function videoStudio(pi: any) {
       commentPrompt: Type.Optional(Type.String({ maxLength: 140, description: "cta: the author's own question for a comment moment" })), sharePrompt: Type.Optional(Type.String({ maxLength: 140 })),
       captions: Type.Optional(Type.Boolean({ description: "init with intent personal: burn captions in (default off)" })),
       fps: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), install: Type.Optional(Type.Boolean()) }),
-    videoProject, 1_200_000);
+    async (params, cwd, signal, progress) => {
+      const result = await videoProject(params, cwd, signal, progress);
+      // A new project starts from worked motion: the starter kit rides on the init result.
+      return params.action === "init" ? { ...result, motion: await motionStarters() } : result;
+    }, 1_200_000);
   register("video_shot",
     "Render a Blender shot into a video project: a camera move around one subject (a .blend, an imported glb/obj/ply/stl/fbx, or extruded 3D title text) as an RGBA image sequence in public/shots/<name>/ with a manifest and per-frame screen positions of named anchors, lit and framed with the project's palette so the 3D belongs to the film. Rigs: turntable (loops), orbit, push-in, pull-out, crane, drift, static. Studio lights (softbox, rim, top, overcast) and a composited ground shadow keep EEVEE fast; Cycles catcher is slower. Play it with BlenderShot / the ShotScene component; ShotAnchor pins 2D callouts to 3D features (anchors: object names from the blend, or bbox:top|bottom|left|right|front|back|center). mode preview (default) is cheap and says so; final renders delivery quality. Read the blender-production and motion-approaches skills first.",
     Type.Object({ dir: localPath, name: Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,47}$", description: "shot id; becomes public/shots/<name>" }),

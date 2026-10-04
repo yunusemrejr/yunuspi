@@ -130,3 +130,11 @@ test("FFmpeg and numpy examples produce video", { skip: rendering, timeout: 120_
     assert.ok(fs.statSync(path.join(out, "ass.mp4")).size > 2000);
   }
 });
+
+test("a new project is offered a starter kit of worked examples that exist", async () => {
+  const { kit, use } = await lib.motionStarters();
+  assert.equal(kit.length, lib.STARTER_KIT.length, "every kit id is in the catalogue");
+  assert.ok(kit.some((k) => k.id.startsWith("html/")) && kit.some((k) => k.id.startsWith("blender/")) && kit.some((k) => k.id.startsWith("merge/")));
+  for (const entry of kit) assert.ok(entry.role && entry.what.length > 20, entry.id);
+  assert.match(use, /motion_examples action:"copy"/);
+});

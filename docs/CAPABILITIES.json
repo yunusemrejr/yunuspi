@@ -3870,7 +3870,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 80,
+        "line": 84,
         "kind": "factory"
       },
       {
@@ -4233,7 +4233,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 92,
+        "line": 96,
         "kind": "factory"
       },
       {
@@ -4251,7 +4251,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 76,
+        "line": 80,
         "kind": "factory"
       },
       {
@@ -4546,7 +4546,7 @@
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 70,
+        "line": 74,
         "kind": "factory"
       },
       {
@@ -4570,19 +4570,19 @@
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 66,
+        "line": 70,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 62,
+        "line": 66,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 44,
+        "line": 48,
         "kind": "factory"
       },
       {
