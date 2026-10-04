@@ -236,7 +236,7 @@ test('office_doc: build verifies and settles the file; read, verify and path rul
   await assert.rejects(h.run('office_doc', { action: 'build', path: path.join(os.tmpdir(), 'escape.docx'), spec }, ctx), /inside the current workspace/);
   await assert.rejects(h.run('office_doc', { action: 'build', path: '../escape.docx', spec }, ctx), /inside the current workspace/);
   await assert.rejects(h.run('office_doc', { action: 'build', path: 'x.docx' }, ctx), /needs a spec object/);
-  await assert.rejects(h.run('office_doc', { action: 'build', path: 'x.txt', spec }, ctx), /\.docx or \.xlsx/);
+  await assert.rejects(h.run('office_doc', { action: 'build', path: 'x.txt', spec }, ctx), /\.docx, \.xlsx or \.pptx/);
   assert.equal((await h.run('office_doc', { action: 'build', path: 'noext', format: 'xlsx', spec: { sheets: [{ name: 'S', rows: [[1, 2, '=A1+B1']] }] } }, ctx)).details.kind, 'xlsx');
   assert.ok(fs.existsSync(path.join(dir, 'noext.xlsx')), 'the extension follows the format');
   const stringSpec = await h.run('office_doc', { action: 'build', path: 's.docx', spec: JSON.stringify(spec) }, ctx);

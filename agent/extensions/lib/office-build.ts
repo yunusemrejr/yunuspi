@@ -12,16 +12,16 @@ import { evaluateFormula, columnName, columnNumber, dynamicArrayFunctions, infer
 
 export const OFFICE_BUILD_LIMITS = Object.freeze({ blocks: 4000, tableRows: 5000, tableColumns: 30, images: 60, sheets: 40, rows: 100_000, columns: 200, cells: 1_000_000, imageBytes: 12 * 1024 * 1024 });
 
-const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+export const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 const NS_W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
-const REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
-const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+export const REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
+export const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const stamp = (date: Date) => date.toISOString().replace(/\.\d+Z$/, "Z");
 
-function coreProps(title: string | undefined, author: string | undefined, now: Date): string {
+export function coreProps(title: string | undefined, author: string | undefined, now: Date): string {
   return `${XML_HEAD}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${title ? `<dc:title>${escapeXml(title)}</dc:title>` : ""}<dc:creator>${escapeXml(author ?? "YunusPi")}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${stamp(now)}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${stamp(now)}</dcterms:modified></cp:coreProperties>`;
 }
-const appProps = (application: string) => `${XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>${escapeXml(application)}</Application></Properties>`;
+export const appProps = (application: string) => `${XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>${escapeXml(application)}</Application></Properties>`;
 const rootRels = `${XML_HEAD}<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="${REL}/officeDocument" Target="WORD_OR_XL"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="${REL}/extended-properties" Target="docProps/app.xml"/></Relationships>`;
 
 /* ───────────────────────────── docx ───────────────────────────── */
@@ -66,8 +66,8 @@ export function describeImage(data: Buffer): ImageData {
 
 const PAGE_SIZES = { A4: [11906, 16838], Letter: [12240, 15840] } as const;
 const MARGINS = { normal: 1440, narrow: 720, wide: 2160 } as const;
-const hexColor = (value: string | undefined, fallback: string): string => /^#?[0-9a-fA-F]{6}$/.test(value ?? "") ? value!.replace("#", "").toUpperCase() : fallback;
-const fontName = (value: string | undefined, fallback: string): string => value && /^[\w .&-]{1,60}$/.test(value) ? value : fallback;
+export const hexColor = (value: string | undefined, fallback: string): string => /^#?[0-9a-fA-F]{6}$/.test(value ?? "") ? value!.replace("#", "").toUpperCase() : fallback;
+export const fontName = (value: string | undefined, fallback: string): string => value && /^[\w .&-]{1,60}$/.test(value) ? value : fallback;
 
 /** `**bold**`, `*italic*`, `` `code` `` and `[text](https://…)` inside a string become runs. */
 export function inlineRuns(text: string): DocxRun[] {

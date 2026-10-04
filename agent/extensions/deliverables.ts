@@ -16,6 +16,7 @@ import { choices } from "./lib/tool-schema.ts";
 import { inspectDeliverable } from "./lib/deliverable-inspect.ts";
 import { readOffice, officeKindForPath, type Finding } from "./lib/office-read.ts";
 import { buildDocx, buildXlsx } from "./lib/office-build.ts";
+import { buildPptx } from "./lib/pptx-build.ts";
 import { renderOffice } from "./lib/office-render.ts";
 import { createDeliverableLedger, commandMayProduceFiles, plausibleDeliverable, scanRecentDeliverables, isDeliverableName, type Observed } from "./lib/deliverable-ledger.ts";
 import { registerContinuationSource, collectContinuationLines } from "./lib/continuation-notice.ts";
@@ -165,17 +166,17 @@ export default function deliverables(pi: any) {
   });
 
   /* ───────────── office_doc ───────────── */
-  const OFFICE_EXT = /\.(?:docx|xlsx)$/i;
+  const OFFICE_EXT = /\.(?:docx|xlsx|pptx)$/i;
   pi.registerTool({
     name: "office_doc",
     label: "Office Document",
-    description: "Read, verify, build and render Office documents with no office suite. read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx or .xlsx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:true|{label,sum:'Amount'|['Amount','C']}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, ROUND, SUMIF(S), COUNTIF(S), AVERAGEIF(S), IF, IFS, IFERROR, VLOOKUP, INDEX, MATCH, XLOOKUP, TEXT, LEFT, CONCAT, TEXTJOIN, DATE, EDATE and more, with cross-sheet and whole-column refs; newer functions get the _xlfn. prefix automatically) and errors like #DIV/0! are reported. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice); it also converts any docx/xlsx/pptx/odt/ods/odp to PDF: pass pdfPath (a .pdf inside the workspace; overwrite:true to replace one) and pages:0 to skip the page images.",
-    promptSnippet: "Read, verify, build (docx/xlsx) and render Office documents",
+    description: "Read, verify, build and render Office documents with no office suite. read: structured content of docx/xlsx/pptx/odt/ods/odp (headings, tables, sheet cells and formulas, slide text, notes) plus findings. verify: findings only (damaged package, unreplaced {{placeholders}}, uncalculated or error formulas, numbers stored as text, empty slides, tiny type). build: write a .docx, .xlsx or .pptx from a spec and verify it. docx spec: {title, subtitle, author, page:{size:'A4'|'Letter',orientation,margins}, font:{family,size,accent}, header, footer ('Page {page} of {pages}'), blocks:[{type:'heading',level:1-3,text}, {type:'paragraph',text with **bold** *italic* `code` [link](https://…)}, {type:'bullets'|'numbered',items:[text|{text,level}]}, {type:'table',header:[…],rows:[[…]],widths,align,style:'grid'|'plain'|'banded',caption}, {type:'image',path,width inches,alt,caption}, {type:'quote',text,cite}, {type:'code',text}, {type:'pagebreak'}]}. xlsx spec: {sheets:[{name, columns:[{header,width,format:'text'|'integer'|'decimal'|'currency'|'percent'|'date'|'datetime'}], rows:[[value|'=FORMULA'|…]], totals:true|{label,sum:'Amount'|['Amount','C']}, freeze, filter}], currency:'$'}; formulas are calculated and stored (SUM, AVERAGE, ROUND, SUMIF(S), COUNTIF(S), AVERAGEIF(S), IF, IFS, IFERROR, VLOOKUP, INDEX, MATCH, XLOOKUP, TEXT, LEFT, CONCAT, TEXTJOIN, DATE, EDATE and more, with cross-sheet and whole-column refs; newer functions get the _xlfn. prefix automatically) and errors like #DIV/0! are reported. pptx spec: {title, author, size:'16:9'|'4:3', font, accent:'#2563EB', dark:true, footer, slides:[{title, subtitle, notes, bullets:[text|{text,level}|[sub-bullets]]} | {title, columns:[{heading,bullets}]} | {title, image:{path,alt,caption}, bullets} | {title, table:{header,rows}} | {title, quote:{text,cite}} | {title, text} | {layout:'section', title}]}; the first slide without body is the title slide, every layout is placed and measured for you, and a list or table that cannot fit at a readable size continues on a numbered '(2/3)' slide instead of overflowing. render: LibreOffice → PDF plus PNG pages to look at layout (needs LibreOffice); it also converts any docx/xlsx/pptx/odt/ods/odp to PDF: pass pdfPath (a .pdf inside the workspace; overwrite:true to replace one) and pages:0 to skip the page images.",
+    promptSnippet: "Read, verify, build (docx/xlsx/pptx) and render Office documents",
     parameters: Type.Object({
       action: choices(["read", "verify", "build", "render"]),
       path: localPath,
-      spec: Type.Optional(Type.Object({}, { additionalProperties: true, description: "build: the docx or xlsx spec described above" })),
-      format: Type.Optional(choices(["docx", "xlsx"], "build: only needed when path has no .docx/.xlsx extension")),
+      spec: Type.Optional(Type.Object({}, { additionalProperties: true, description: "build: the docx, xlsx or pptx spec described above" })),
+      format: Type.Optional(choices(["docx", "xlsx", "pptx"], "build: only needed when path has no .docx/.xlsx/.pptx extension")),
       overwrite: Type.Optional(Type.Boolean({ description: "build, or render with pdfPath: replace an existing file" })),
       sheet: Type.Optional(Type.String({ maxLength: 31, description: "read: only this sheet" })),
       maxChars: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
@@ -233,17 +234,16 @@ export default function deliverables(pi: any) {
         } catch (error) { fs.rmSync(outDir, { recursive: true, force: true }); throw error; }
       }
       // build
-      const kind = /\.docx$/i.test(file) ? "docx" : /\.xlsx$/i.test(file) ? "xlsx" : params.format;
-      if (!kind) throw new Error("build writes .docx or .xlsx: give path an extension or set format");
-      if (!OFFICE_EXT.test(file) && !params.format) throw new Error("build writes .docx or .xlsx");
+      const kind = /\.docx$/i.test(file) ? "docx" : /\.xlsx$/i.test(file) ? "xlsx" : /\.pptx$/i.test(file) ? "pptx" : params.format;
+      if (!kind) throw new Error("build writes .docx, .xlsx or .pptx: give path an extension or set format");
+      if (!OFFICE_EXT.test(file) && !params.format) throw new Error("build writes .docx, .xlsx or .pptx");
       const target = OFFICE_EXT.test(file) ? file : `${file}.${kind}`;
       if (!containsPath(root, target)) throw new Error("build writes inside the current workspace; choose a path below the working directory");
       const denial = selfMutationDenial(target, root); if (denial) throw new Error(denial);
       if (fs.existsSync(target) && params.overwrite !== true) throw new Error(`${relative(target, cwd)} already exists. Pass overwrite:true to replace it or choose another name.`);
-      if (!params.spec || typeof params.spec !== "object") throw new Error(`build needs a spec object (${kind === "docx" ? "{title, blocks:[…]}" : "{sheets:[{name, columns, rows}]}"}); see the tool description for its shape`);
-      const built = kind === "docx"
-        ? buildDocx(params.spec, imagePath => { const resolved = canonicalMutationPath(textPath(imagePath), cwd); if (!fs.statSync(resolved).isFile()) throw new Error("not a file"); return fs.readFileSync(resolved); })
-        : buildXlsx(params.spec);
+      if (!params.spec || typeof params.spec !== "object") throw new Error(`build needs a spec object (${kind === "docx" ? "{title, blocks:[…]}" : kind === "pptx" ? "{title, slides:[{title, bullets}]}" : "{sheets:[{name, columns, rows}]}"}); see the tool description for its shape`);
+      const readImage = (imagePath: string) => { const resolved = canonicalMutationPath(textPath(imagePath), cwd); if (!fs.statSync(resolved).isFile()) throw new Error("not a file"); return fs.readFileSync(resolved); };
+      const built = kind === "docx" ? buildDocx(params.spec, readImage) : kind === "pptx" ? buildPptx(params.spec, readImage) : buildXlsx(params.spec);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       const temporary = `${target}.tmp-${randomBytes(4).toString("hex")}`;
       try { fs.writeFileSync(temporary, built.buffer, { flag: "wx" }); fs.renameSync(temporary, target); } finally { fs.rmSync(temporary, { force: true }); }
