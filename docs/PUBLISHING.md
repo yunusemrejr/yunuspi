@@ -22,7 +22,7 @@ Run `node scripts/version-release.mjs X.Y.Z --write` to update the product, six 
 
 The public safety workflow tests both ordinary pushes and version tags. On a `vX.Y.Z` tag, its separate release job receives contents-write permission only after the safety job succeeds. It checks the tag against the package version and publishes the corresponding changelog section for that exact commit. Existing release notes must match on rerun; the job does not move tags or rewrite releases. Push the tested commit to `main`, wait for CI, then push its annotated tag.
 
-To cut a release, push `main` first, then run `node scripts/release-tag.mjs`. It waits for the main safety run of that exact commit and only then creates and pushes the annotated tag from `package.json`. A tag pushed while main is still running (or after it failed) makes the release job fail with "no successful main safety run"; recreate the tag once main has passed (delete the remote tag and push it again on the same commit).
+To cut a release, push `main` first, then run `node scripts/release-tag.mjs`. It waits for the main safety run of that exact commit and only then creates and pushes the annotated tag from `package.json`. It looks the run up once a minute (every 20 seconds when `GITHUB_TOKEN` or `GH_TOKEN` is set) and waits out a used-up GitHub rate limit, which is 60 lookups an hour without a token and shared by everything on the machine. A tag pushed while main is still running (or after it failed) makes the release job fail with "no successful main safety run"; recreate the tag once main has passed (delete the remote tag and push it again on the same commit).
 
 ## Export changes
 

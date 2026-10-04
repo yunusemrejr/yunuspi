@@ -21,6 +21,16 @@ export function safetyState(runs, sha) {
   return mine.conclusion === 'success' ? 'passed' : 'failed';
 }
 
+/** Milliseconds to wait when GitHub refuses a lookup because the rate limit is used up (60 an hour without a
+ * token), or undefined for any other failure. */
+export function rateLimitWait(status, headers, now = Date.now()) {
+  if (status !== 403 && status !== 429) return undefined;
+  const retryAfter = Number(headers.get('retry-after')), reset = Number(headers.get('x-ratelimit-reset'));
+  if (retryAfter > 0) return retryAfter * 1000;
+  if (headers.get('x-ratelimit-remaining') === '0' && reset > 0) return Math.max(1000, reset * 1000 - now + 2000);
+  return undefined;
+}
+
 async function main() {
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   const timeoutIndex = process.argv.indexOf('--timeout-minutes');
@@ -36,16 +46,24 @@ async function main() {
   if (!match) throw Error('origin is not a GitHub repository');
   const query = new URLSearchParams({ branch: 'main', event: 'push', head_sha: sha, per_page: '20' });
   const url = `https://api.github.com/repos/${match[1]}/actions/workflows/public-safety.yml/runs?${query}`;
-  const deadline = Date.now() + limit * 60_000;
+  const deadline = Date.now() + limit * 60_000, token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  // Without a token the whole machine shares 60 lookups an hour, so poll once a minute and sit out a refusal.
+  const interval = token ? 20_000 : 60_000;
   for (;;) {
-    const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(30_000) });
-    if (response.status !== 200) throw Error(`GitHub run lookup failed (${response.status})`);
+    const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(30_000) });
+    if (response.status !== 200) {
+      const wait = rateLimitWait(response.status, response.headers);
+      if (wait === undefined || Date.now() + wait > deadline) throw Error(`GitHub run lookup failed (${response.status})`);
+      console.error(`GitHub rate limit reached; waiting ${Math.ceil(wait / 1000)}s`);
+      await new Promise(resolve => setTimeout(resolve, wait));
+      continue;
+    }
     const state = safetyState((await response.json()).workflow_runs, sha);
     if (state === 'passed') break;
     if (state === 'failed') throw Error(`The main safety run failed for ${sha.slice(0, 7)}; fix it before tagging`);
     if (Date.now() > deadline) throw Error(`The main safety run is still ${state} after ${limit} minutes; rerun later`);
     console.error(`main safety run ${state}; waiting`);
-    await new Promise(resolve => setTimeout(resolve, 20_000));
+    await new Promise(resolve => setTimeout(resolve, interval));
   }
   const existing = git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`);
   if (existing) throw Error(`${tag} already exists on origin; release tags are never moved`);
