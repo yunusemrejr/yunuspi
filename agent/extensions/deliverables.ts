@@ -22,6 +22,7 @@ import { registerContinuationSource, collectContinuationLines } from "./lib/cont
 import { isSessionStopped } from "./lib/session-stop.ts";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./lib/self-mutation-guard.ts";
 import { outputFolder, textPath } from "./lib/media-process.ts";
+import { describeBinary, looksBinary, sniffKind } from "./lib/binary-read.ts";
 
 const MAX_FOLLOWUPS = 2;
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
@@ -76,6 +77,28 @@ export default function deliverables(pi: any) {
         for (const file of scanRecentDeliverables(cwd, since)) if (plausibleDeliverable(file, cwd, seenText) && ledger.noteProduced(file, "bash")) ensureSource(ctx);
       }
     } catch { /* tracking must never turn a successful tool into an error */ }
+  });
+
+  // The native read tool decodes every non-image file as UTF-8. A PDF, Office file, archive, database or media file
+  // therefore arrives as tens of kilobytes of garbage; show what the file contains instead. Only text that already looks
+  // like binary decoding (NUL or replacement characters, or the offset error a short binary produces) costs a disk check.
+  pi.on("tool_result", async (event: any, ctx: any) => {
+    if (event?.toolName !== "read" || (process.env.PI_BINARY_READ ?? "on").toLowerCase() === "off") return;
+    const raw = event.input?.path ?? event.input?.file_path;
+    if (typeof raw !== "string" || !raw || (event.content ?? []).some((row: any) => row?.type === "image")) return;
+    const shown = (event.content ?? []).filter((row: any) => row?.type === "text").map((row: any) => String(row.text)).join("\n");
+    if (event.isError ? !/Offset \d+ is beyond end of file/.test(shown) : !(/[\u0000\uFFFD]/.test(shown) || /^%PDF-|^SQLite format 3/.test(shown))) return;
+    try {
+      const file = canonicalMutationPath(textPath(raw.replace(/^@/, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~")), ctx?.cwd ?? process.cwd());
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size === 0) return;
+      const fd = fs.openSync(file, "r"); let head: Buffer;
+      try { head = Buffer.alloc(Math.min(8192, stat.size)); fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+      if (!looksBinary(head) && !["pdf", "sqlite"].includes(sniffKind(head, file).kind)) return; // an ASCII-only PDF is still not readable as text
+      const view = await describeBinary(file, { offset: typeof event.input?.offset === "number" ? event.input.offset : undefined, signal: ctx?.signal, head });
+      if (view.opened) ledger.noteChecked(file, "pass");
+      return { content: [{ type: "text", text: view.text }], details: { ...(event.details ?? {}), binaryView: view.facts }, isError: false };
+    } catch { /* leave the native result as it is */ }
   });
 
   pi.on("agent_settled", async (_event: any, ctx: any) => {

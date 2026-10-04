@@ -61,6 +61,7 @@
     "asset-registry.ts",
     "authored-review.ts",
     "bash-routing.ts",
+    "binary-read.ts",
     "browser-session.ts",
     "bulk-edit.ts",
     "capability-audit.ts",
