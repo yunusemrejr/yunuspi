@@ -80,3 +80,12 @@ test('expanded routing ignores unrelated, negated and explain-only prompts', () 
     assert.ok(!routeSkills(prompt).some(route => route.name === name), prompt);
   }
 });
+
+test('office prompts route to the authoring skills that stage office_doc, including saves, legacy files and conversions', () => {
+  const route = (text) => (routeSkills(text, '') ?? []).map(entry => entry.name ?? entry);
+  assert.ok(route('Can you save this Word file as a PDF for me?').includes('word-document-authoring'));
+  assert.ok(route('read the contract.doc and summarize the termination clause').includes('word-document-authoring'));
+  assert.ok(route('Open invoice-2019.doc and tell me the total due, then convert prices.xls to a CSV file').includes('spreadsheet-authoring'));
+  assert.ok(route('Make a 6-slide PowerPoint deck pitch.pptx for our new product with speaker notes.').includes('presentation-authoring'));
+  assert.ok(!route('save the changes to the repository and push').includes('word-document-authoring'), 'a save that names no office document routes nowhere');
+});
