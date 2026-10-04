@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const PROBE_FLAGS = new Set(['--version', '-v', '--help', '-h']);
+
 /** Direct CLI entrypoints do not necessarily hold the launcher's flock. Keep
  * this secondary check shared by updates and installed-source verification. */
 export function activePiProcesses(core) {
@@ -13,7 +15,7 @@ export function activePiProcesses(core) {
     try {
       const args = fs.readFileSync(`/proc/${entry}/cmdline`, 'utf8').split('\0').filter(Boolean);
       let cwd;
-      const usesCore = args.some(arg => {
+      const coreArg = args.findIndex(arg => {
         if (!arg || arg.startsWith('-') || arg.includes('\n') || arg.includes('\r')) return false;
         try {
           cwd ??= fs.realpathSync(`/proc/${entry}/cwd`);
@@ -24,7 +26,9 @@ export function activePiProcesses(core) {
           throw error;
         }
       });
-      if (usesCore) found.push(Number(entry));
+      // A bare version or help probe holds no session; a polling `yunuspi --version` must not block an update forever.
+      const probe = coreArg >= 0 && args.length === coreArg + 2 && PROBE_FLAGS.has(args[coreArg + 1]);
+      if (coreArg >= 0 && !probe) found.push(Number(entry));
     } catch (error) {
       if (!['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(error.code)) throw error;
     }

@@ -167,6 +167,20 @@ test('real CLI setup preserves detection for absolute, relative and symlink entr
   const updated=f.update();assert.equal(updated.status,0,updated.stderr);assert.equal(f.backups().length,1);
 });
 
+test('a bare version or help probe is not an active core process; a session or extra arguments are',async t=>{
+  const {activePiProcesses}=await import(new URL('../agent/scripts/lib/active-core-processes.mjs',import.meta.url).href);
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-probe-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const core=path.join(root,'core'),cli=path.join(core,'dist/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
+  fs.writeFileSync(cli,"console.log('ready');setInterval(()=>{},10000);");
+  for(const [args,active] of [[['--version'],false],[['-h'],false],[[],true],[['--version','-p','hi'],true],[['-p','--version'],true]]){
+    const child=spawn(process.execPath,[cli,...args],{cwd:root,stdio:['ignore','pipe','ignore']});
+    try{
+      await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);});
+      assert.equal(activePiProcesses(core).includes(child.pid),active,JSON.stringify(args));
+    }finally{const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}
+  }
+});
+
 test('a direct CLI started during dependency staging is caught again before activation',t=>{
   const f=fixture(t),cli=path.join(f.target,'runtime/core/coding-agent/dist/cli.js');
   f.write(f.target,'runtime/core/coding-agent/dist/cli.js',activeCliFixture);
