@@ -234,7 +234,8 @@ export type XlsxSheetSpec = {
   rows: XlsxCell[][];
   headerRow?: boolean;
   freeze?: boolean | string; filter?: boolean; wrap?: boolean;
-  totals?: { label?: string; sum?: Array<string> };
+  /** A bold sum row under the data. `true`, or an object without `sum`, adds up every numeric column; `sum` names columns by header or letter, as a list or a comma-separated string. */
+  totals?: boolean | { label?: string; sum?: string | string[] };
 };
 export type XlsxSpec = { title?: string; author?: string; currency?: string; sheets: XlsxSheetSpec[] };
 export type XlsxBuild = {
@@ -356,15 +357,21 @@ export function buildXlsx(spec: XlsxSpec, now = new Date()): XlsxBuild {
     if (cellCount > OFFICE_BUILD_LIMITS.cells) throw new Error(`The workbook has more than ${OFFICE_BUILD_LIMITS.cells} cells`);
     const headerRows = hasHeader ? 1 : 0, dataLast = rowNumber;
     let totalRow: number | undefined;
-    if (sheet.totals?.sum?.length) {
+    const totalsSpec = sheet.totals === true ? {} : sheet.totals && typeof sheet.totals === "object" ? sheet.totals : undefined;
+    const named = totalsSpec ? (Array.isArray(totalsSpec.sum) ? totalsSpec.sum : typeof totalsSpec.sum === "string" ? totalsSpec.sum.split(/\s*(?:,|;|\band\b)\s*/i) : []).map(item => String(item).trim()).filter(Boolean) : [];
+    // Without named columns every column that holds numbers (a label column is never one of them) is added up.
+    const numericColumns = [...new Set(cells.filter(cell => cell.col > 1 && cell.row > headerRows && cell.row <= dataLast && (typeof cell.value === "number" || (cell.formula !== undefined && cell.value === null))).map(cell => cell.col))].sort((a, b) => a - b);
+    const targets = totalsSpec ? (named.length ? named : numericColumns.map(columnName)) : [];
+    if (targets.length) {
       totalRow = ++rowNumber;
-      const label = sheet.totals.label ?? "Total";
+      const label = totalsSpec!.label ?? "Total";
       cells.push({ col: 1, row: totalRow, value: label, style: styles.get({ bold: true, top: true }) });
-      for (const target of sheet.totals.sum) {
-        const byHeader = columnsSpec.findIndex(column => column.header?.toLowerCase() === String(target).toLowerCase()) + 1;
+      for (const target of targets) {
+        const byHeader = columnsSpec.findIndex(column => column.header?.trim().toLowerCase() === target.toLowerCase()) + 1;
         const letters = byHeader ? columnName(byHeader) : /^[A-Za-z]{1,3}$/.test(target) ? target.toUpperCase() : "";
         const col = letters ? columnNumber(letters) : 0;
-        if (!col || col > width) throw new Error(`totals.sum refers to ${JSON.stringify(target)}, which is not a column of sheet ${JSON.stringify(name)}`);
+        if (!col || col > width) throw new Error(`totals.sum refers to ${JSON.stringify(target)}, which is not a column of sheet ${JSON.stringify(name)}${columnsSpec.length ? ` (columns: ${columnsSpec.map(column => column.header).join(", ")})` : ""}`);
+        if (col === 1) throw new Error(`totals.sum cannot include column A (${JSON.stringify(target)}): the label of the total row sits there. Put a text column first, or sum another column`);
         const format = columnsSpec[col - 1]?.format ?? "decimal";
         cells.push({ col, row: totalRow, value: null, formula: `SUM(${letters}${headerRows + 1}:${letters}${dataLast})`, style: styles.get({ bold: true, top: true, format }), format });
       }

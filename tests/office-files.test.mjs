@@ -220,7 +220,7 @@ test('xlsx: errors, unsupported formulas, cross-sheet references and bad specs a
   assert.throws(() => buildXlsx({ sheets: [{ name: 'S', rows: [['x']], freeze: 'zzzz' }] }), /freeze must be/);
   const percent = buildXlsx({ sheets: [{ name: 'P', columns: [{ header: 'rate', format: 'percent' }], rows: [[12], ['5%'], [0.1]] }] });
   assert.match(percent.warnings.join('\n'), /above 1 and will display as more than 100%/);
-  const short = buildXlsx({ sheets: [{ name: 'T', columns: [{ header: 'Qty' }, { header: 'Cost', format: 'decimal' }], rows: [['a', 1], ['b', 2]], totals: { sum: ['Qty'] } }] });
+  const short = buildXlsx({ sheets: [{ name: 'T', columns: [{ header: 'Item' }, { header: 'Qty' }, { header: 'Cost', format: 'decimal' }], rows: [['a', 3, 1], ['b', 4, 2]], totals: { sum: ['Qty'] } }] });
   assert.equal(short.sheets[0].errors.length, 0, 'a header called Qty is a header, not column QTY');
 });
 
@@ -303,4 +303,28 @@ test('xlsx: dynamic-array functions are reported, and date formulas get a date f
   assert.equal(row.find(cell => cell.ref === 'C4').value, 29, 'a difference of two dates is a number of days, not a date');
   assert.equal(row.find(cell => cell.ref === 'D4').value, '2024-02-29');
   assert.match(read.findings.find(finding => finding.code === 'missing-xlfn-prefix').message, /S!A3 FILTER/, 'the reader reports the dynamic-array calls the builder could only warn about');
+});
+
+test('xlsx: totals accept a header, a letter, a list, a comma-separated string, or nothing at all', () => {
+  const rows = [['Rent', 1200, 10], ['Food', 86.4, 20], ['Transport', 45, 5]];
+  const columns = [{ header: 'Item' }, { header: 'Amount', format: 'currency' }, { header: 'Units', format: 'integer' }];
+  const totalsOf = (totals) => {
+    const built = buildXlsx({ sheets: [{ name: 'Q4', columns, rows, totals }] }), dir = tmp(), file = path.join(dir, 't.xlsx'); fs.writeFileSync(file, built.buffer);
+    const last = readOffice(file, { maxCols: 6 }).sheets[0].sample.at(-1);
+    return Object.fromEntries(last.map(cell => [cell.ref, cell.value]));
+  };
+  assert.deepEqual(totalsOf({ label: 'Grand Total', sum: 'Amount' }), { A5: 'Grand Total', B5: 1331.4 }, 'a single header as a string (a live model sent exactly this) is one column, not its letters');
+  assert.deepEqual(totalsOf({ sum: ['Amount', 'C'] }), { A5: 'Total', B5: 1331.4, C5: 35 });
+  assert.deepEqual(totalsOf({ sum: 'Amount, Units' }), { A5: 'Total', B5: 1331.4, C5: 35 }, 'a comma-separated string is a list');
+  assert.deepEqual(totalsOf({ sum: 'Amount and Units' }), { A5: 'Total', B5: 1331.4, C5: 35 });
+  assert.deepEqual(totalsOf({ sum: ' amount ' }), { A5: 'Total', B5: 1331.4 }, 'headers match without regard to case and padding');
+  assert.deepEqual(totalsOf(true), { A5: 'Total', B5: 1331.4, C5: 35 }, 'true adds up every numeric column');
+  assert.deepEqual(totalsOf({ label: 'Sum' }), { A5: 'Sum', B5: 1331.4, C5: 35 }, 'an object without sum does too');
+  assert.deepEqual(totalsOf({ sum: [] }), { A5: 'Total', B5: 1331.4, C5: 35 });
+  assert.deepEqual(Object.keys(totalsOf(undefined)), ['A4', 'B4', 'C4'], 'no totals, no extra row');
+  assert.deepEqual(Object.keys(totalsOf(false)), ['A4', 'B4', 'C4']);
+  assert.throws(() => buildXlsx({ sheets: [{ name: 'Q4', columns, rows, totals: { sum: 'Nope' } }] }), /"Nope", which is not a column of sheet "Q4" \(columns: Item, Amount, Units\)/);
+  assert.throws(() => buildXlsx({ sheets: [{ name: 'Q4', columns, rows, totals: { sum: ['A'] } }] }), /cannot include column A/);
+  const formulaColumn = buildXlsx({ sheets: [{ name: 'S', rows: [['a', 2, '=B1*3'], ['b', 4, '=B2*3']], totals: true }] });
+  assert.equal(formulaColumn.sheets[0].formulas, 4, 'formula columns are summed with the numeric ones: two cells plus two totals');
 });
