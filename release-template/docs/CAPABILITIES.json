@@ -4459,7 +4459,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 390,
+        "line": 410,
         "kind": "literal"
       },
       {
@@ -4960,7 +4960,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 390,
+        "line": 410,
         "kind": "literal"
       },
       {
