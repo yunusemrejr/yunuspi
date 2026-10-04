@@ -3916,7 +3916,7 @@
       {
         "name": "github_search",
         "source": "agent/extensions/pi-web-access/github-search.ts",
-        "line": 424,
+        "line": 422,
         "kind": "literal"
       },
       {
@@ -4562,7 +4562,7 @@
       {
         "name": "github_search",
         "source": "agent/extensions/pi-web-access/github-search.ts",
-        "line": 424,
+        "line": 422,
         "kind": "literal"
       },
       {

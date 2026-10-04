@@ -102,7 +102,9 @@ test("repository query building keeps qualifiers valid and drops injected ones",
 
 test("relaxing a zero-result query keeps the most distinctive words", () => {
   assert.equal(search.relaxQuery("zig"), undefined);
-  assert.equal(search.relaxQuery("open source terminal markdown note taking synchronization"), "terminal synchronization", "the longest distinctive words survive, in their original order");
+  assert.equal(search.relaxQuery("open source terminal markdown note taking synchronization"), "terminal markdown note", "the leading words name the subject; the qualifying tail is dropped");
+  assert.equal(search.relaxQuery("terminal note taking sync"), "terminal note taking");
+  assert.equal(search.relaxQuery("rust cli parser"), "rust cli", "a three-word phrase loses only its last word");
   assert.equal(search.relaxQuery("language:rust cli"), undefined, "qualifiers are not words to relax");
 });
 
@@ -141,7 +143,7 @@ test("repository search fuses angles, narrows a zero-result angle once and expla
   const outcome = await search.runGithubSearch({ queries: ["agent harness", "coding agent harness terminal workflow"], language: "TypeScript", limit: 5 }, { rest: restFn, now: NOW });
   assert.equal(outcome.isError, undefined);
   assert.match(outcome.text, /1\. a\/harness — ★900 · ⑂10 · TypeScript · MIT · pushed 5d ago · active · 2 angles/);
-  assert.match(outcome.text, /narrowed "coding agent harness terminal workflow"→"terminal workflow"|narrowed "coding agent harness terminal workflow"→/);
+  assert.match(outcome.text, /narrowed "coding agent harness terminal workflow"→"coding agent harness"/);
   assert.match(outcome.text, /9\/10 search calls left/);
   assert.match(outcome.text, /Next: github_search \{action:"repo"/);
   assert.ok(queries.every((q) => /fork:false archived:false/.test(q)), "forks and archived projects are excluded by default");
@@ -171,6 +173,12 @@ test("issue search ranks users' demand by reactions and marks third-party text u
   const { restFn } = withTransport(t, { "/search/issues": (url) => { sorted = url.searchParams.get("sort"); return json({ items: [issue(1, 3, "Small ask"), issue(2, 40, "Big ask")] }); } });
   const outcome = await search.runGithubSearch({ action: "issues", query: "plugin", repo: "o/r", sort: "reactions", state: "open", type: "issue" }, { rest: restFn, now: NOW });
   assert.equal(sorted, "reactions");
+  let issueQuery;
+  const second = withTransport(t, { "/search/issues": (url) => { issueQuery = url.searchParams.get("q"); return json({ items: [] }); } });
+  await search.runGithubSearch({ action: "issues", query: "plugin", repo: "o/r" }, { rest: second.restFn, now: NOW });
+  assert.match(issueQuery, /is:issue/, "users' requests are issues by default");
+  await search.runGithubSearch({ action: "issues", query: "plugin", repo: "o/r", type: "pr" }, { rest: second.restFn, now: NOW });
+  assert.match(issueQuery, /is:pr/);
   assert.ok(outcome.text.indexOf("o/r#2") < outcome.text.indexOf("o/r#1"), "the most-requested item leads");
   assert.match(outcome.text, /untrusted third-party text/);
   assert.equal(outcome.details.hits[0].reactions, 40);
