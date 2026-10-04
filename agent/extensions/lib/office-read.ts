@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { openZip, type ZipReader } from "./office-zip.ts";
 import { parseXml, XmlError, childOf, childrenOf, descendantsOf, elementsOf, textOf, type XmlNode } from "./xml-lite.ts";
+import { unprefixedFutureFunctions } from "./sheet-formula.ts";
 
 export type OfficeKind = "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp";
 export type Finding = { severity: "error" | "warn" | "info"; code: string; message: string; hint?: string; where?: string };
@@ -239,7 +240,8 @@ function readXlsx(zip: ZipReader, options: Required<Pick<ReadOptions, "maxChars"
   }
   const calcOnLoad = attr(childOf(workbook, "calcPr"), "fullCalcOnLoad") === "1" || attr(childOf(workbook, "calcPr"), "fullCalcOnLoad") === "true";
   const sheets: SheetRead[] = [], allText: string[] = [];
-  let totalFormulas = 0, totalNoResult = 0, totalErrors = 0, textAsNumber = 0, clipped = 0;
+  let totalFormulas = 0, totalNoResult = 0, totalErrors = 0, textAsNumber = 0, clipped = 0, futureCount = 0;
+  const futureHits: string[] = [];
   const sheetNodes = childrenOf(childOf(workbook, "sheets"), "sheet");
   if (workbook && sheetNodes.length === 0) findings.push({ severity: "error", code: "no-sheets", message: "The workbook lists no sheets." });
   for (const sheetNode of sheetNodes) {
@@ -273,7 +275,11 @@ function readXlsx(zip: ZipReader, options: Required<Pick<ReadOptions, "maxChars"
         if (value === null && !hasFormula) continue;
         sheet.nonEmptyCells++;
         sheet.rows = Math.max(sheet.rows, pos?.row ?? rowIndex); sheet.columns = Math.max(sheet.columns, pos?.col ?? 0);
-        if (hasFormula) { sheet.formulas++; if (value === null || value === "") sheet.formulasWithoutResult++; }
+        if (hasFormula) {
+          sheet.formulas++; if (value === null || value === "") sheet.formulasWithoutResult++;
+          const raw = textOf(formulaNode), future = unprefixedFutureFunctions(raw);
+          if (future.length) { futureCount++; if (futureHits.length < 4) futureHits.push(`${name}!${ref} ${future[0]}`); }
+        }
         if (type === "e" || (typeof value === "string" && ERROR_VALUE.test(value))) sheet.errors.push(`${ref} ${value}`);
         if (typeof value === "string" && value) allText.push(value);
         if (pos && !hasFormula) {
@@ -283,7 +289,7 @@ function readXlsx(zip: ZipReader, options: Required<Pick<ReadOptions, "maxChars"
           if (typeof value === "string" && value.length > 14 && (widths.get(pos.col) ?? 8.43) < value.length * 0.85) longText.push(pos.row * 16384 + pos.col);
         }
         if (pos) occupied.add(pos.row * 16384 + pos.col);
-        if (wanted && pos && pos.row <= options.maxRows && pos.col <= options.maxCols) grid.set(ref, { ref, value: typeof value === "string" ? clip(value, 120) : value, ...(hasFormula ? { formula: clip(textOf(formulaNode), 120) } : {}), ...(type === "e" ? { type: "error" } : {}) });
+        if (wanted && pos && pos.row <= options.maxRows && pos.col <= options.maxCols) grid.set(ref, { ref, value: typeof value === "string" ? clip(value, 120) : value, ...(hasFormula ? { formula: clip(textOf(formulaNode).replace(/_xlfn\.(?:_xlws\.)?/g, ""), 120) } : {}), ...(type === "e" ? { type: "error" } : {}) });
       }
     }
     // Text wider than its column is cut off at the next filled cell; count the cells where that happens.
@@ -303,6 +309,7 @@ function readXlsx(zip: ZipReader, options: Required<Pick<ReadOptions, "maxChars"
   }
   if (totalNoResult > 0 && !calcOnLoad) findings.push({ severity: "warn", code: "uncalculated-formulas", message: `${totalNoResult} of ${totalFormulas} formulas have no stored result.`, hint: "Excel and LibreOffice recalculate on open, but previewers, pandas and many viewers show empty cells. Recalculate and re-save (soffice --headless --convert-to xlsx) or write the formulas with a calculation-on-load flag." });
   else if (totalNoResult > 0) findings.push({ severity: "info", code: "formulas-calculate-on-open", message: `${totalNoResult} formula results are computed when the file is opened (calculation on load is set).`, hint: "Viewers that do not calculate formulas will show these cells empty." });
+  if (futureCount > 0) findings.push({ severity: "warn", code: "missing-xlfn-prefix", message: `${futureCount} formula${futureCount === 1 ? "" : "s"} call functions added after Excel 2007 without the _xlfn. prefix (${futureHits.join("; ")}).`, hint: "Excel shows #NAME? in those cells until each one is re-entered. Store the function as _xlfn.IFS(…), _xlfn.XLOOKUP(…), _xlfn.TEXTJOIN(…) (office_doc build does this), or use a classic equivalent (IF, VLOOKUP/INDEX+MATCH, &). Dynamic-array functions (FILTER, SORT, UNIQUE, SEQUENCE…) cannot be stored reliably by a script; use classic formulas." });
   if (textAsNumber > 0) findings.push({ severity: "warn", code: "numbers-as-text", message: `${textAsNumber} numeric-looking values are stored as text in columns that are otherwise numbers.`, hint: "Text-numbers do not sum, sort or chart correctly; write them as numbers with a number format." });
   if (clipped > 3) findings.push({ severity: "warn", code: "narrow-columns", message: `${clipped} text cells are wider than their column and are cut off by the neighbouring cell.`, hint: "Set column widths to fit the longest value (or wrap the text) so nothing is hidden when the sheet is opened." });
   if (zip.entries.some(entry => entry.name.startsWith("xl/externalLinks/"))) findings.push({ severity: "warn", code: "external-links", message: "The workbook links to other files.", hint: "Excel asks to update links on open; replace linked cells with values unless the link is intended." });

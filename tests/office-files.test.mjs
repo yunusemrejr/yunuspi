@@ -73,7 +73,7 @@ test('formulas: precedence, functions, cross-sheet references, errors, laziness 
   assert.equal(value('=LEN("hello")'), 5); assert.equal(value('=A1=10'), true); assert.equal(value('=A3="X"'), true, 'string comparison ignores case');
   assert.deepEqual(calc('=1/0'), { ok: false, error: '#DIV/0!' });
   assert.deepEqual(calc('=A3+1'), { ok: false, error: '#VALUE!' });
-  assert.equal(calc('=VLOOKUP(1,A1:B2,2,0)').unsupported, true);
+  assert.equal(calc('=TODAY()').unsupported, true, 'volatile functions are left to the application');
   assert.equal(calc('=NOSUCH(1)').unsupported, true);
   assert.equal(calc('=1 +').ok, false);
   assert.equal(columnName(1), 'A'); assert.equal(columnName(27), 'AA'); assert.equal(columnNumber('AB'), 28);
@@ -204,10 +204,10 @@ test('xlsx: formulas are calculated and stored, numbers and dates are typed, tot
 test('xlsx: errors, unsupported formulas, cross-sheet references and bad specs are reported at build time', () => {
   const built = buildXlsx({ sheets: [
     { name: 'Data', rows: [['n', 'v'], ['a', 2], ['b', 4]], headerRow: true },
-    { name: 'My Sheet', rows: [['=SUM(Data!B2:B3)', '=Data!B2/0', '=VLOOKUP(1,A1:B2,2,FALSE)', '=A1+B1', "='My Sheet'!A1*2"]] },
+    { name: 'My Sheet', rows: [['=SUM(Data!B2:B3)', '=Data!B2/0', '=TODAY()', '=A1+B1', "='My Sheet'!A1*2"]] },
   ] });
   const second = built.sheets[1];
-  assert.equal(second.calculated, 2); assert.equal(second.errors.length, 2, 'an error propagates to the cell that uses it'); assert.match(second.errors[0], /B1 =Data!B2\/0 → #DIV\/0!/); assert.match(second.errors[1], /D1 =A1\+B1/); assert.match(second.uncalculated[0], /VLOOKUP/);
+  assert.equal(second.calculated, 2); assert.equal(second.errors.length, 2, 'an error propagates to the cell that uses it'); assert.match(second.errors[0], /B1 =Data!B2\/0 → #DIV\/0!/); assert.match(second.errors[1], /D1 =A1\+B1/); assert.match(second.uncalculated[0], /TODAY/);
   const dir = tmp(), file = path.join(dir, 'e.xlsx'); fs.writeFileSync(file, built.buffer);
   const read = readOffice(file);
   assert.ok(codes(read, 'error').includes('formula-errors'));
@@ -263,4 +263,44 @@ test('pptx reader reports empty slides, empty placeholders, dense text, tiny typ
   assert.deepEqual(read.slides.map(s => [s.index, s.title ?? null, s.emptyPlaceholders]), [[1, 'Plan', 0], [2, 'Plan', 1], [3, null, 0], [4, 'Small', 0]]);
   assert.deepEqual([...new Set(codes(read))].sort(), ['dense-slide', 'duplicate-titles', 'empty-placeholder', 'empty-slide', 'tiny-text'].sort());
   assert.equal(read.stats.emptySlides, 1);
+});
+
+test('xlsx: functions added after Excel 2007 are stored with the _xlfn. prefix, and raw ones are reported', () => {
+  const spec = { sheets: [{ name: 'S', rows: [
+    ['n', 'v'], ['a', 2], ['b', 4],
+    ['=IFS(B2>1,"IFS(literal)",TRUE,"no")', '=XLOOKUP("b",A2:A3,B2:B3)', '=TEXTJOIN(",",TRUE,A2:A3)', '=CONCAT(A2,B2)', '=STDEV.S(B2:B3)', '=SUM(B2:B3)', '=DAYS(DATE(2024,3,1),DATE(2024,2,1))'],
+  ], headerRow: true }] };
+  const built = buildXlsx(spec), dir = tmp(), file = path.join(dir, 'future.xlsx'); fs.writeFileSync(file, built.buffer);
+  const sheetXml = openZip(built.buffer).text('xl/worksheets/sheet1.xml');
+  for (const name of ['IFS', 'XLOOKUP', 'TEXTJOIN', 'CONCAT', 'STDEV.S', 'DAYS']) assert.match(sheetXml, new RegExp(`<f>[^<]*_xlfn\\.${name.replace('.', '\\.')}\\(`), name);
+  assert.match(sheetXml, /<f>SUM\(B2:B3\)<\/f>/, 'a classic function is stored as written');
+  assert.match(sheetXml, /&quot;IFS\(literal\)&quot;/, 'text that looks like a call is left alone');
+  assert.doesNotMatch(sheetXml, /_xlfn\._xlfn\./);
+  const read = readOffice(file);
+  assert.ok(!codes(read).includes('missing-xlfn-prefix'), 'a built file stores the prefix itself');
+  const formulas = read.sheets[0].sample.flat().filter(cell => cell.formula).map(cell => cell.formula);
+  assert.ok(formulas.some(formula => formula.startsWith('IFS(')) && formulas.every(formula => !formula.includes('_xlfn')), `samples show the formula as a person typed it: ${formulas.join(' | ')}`);
+  assert.equal(built.sheets[0].errors.length, 0); assert.equal(built.sheets[0].uncalculated.length, 0, 'every one of them is calculated');
+
+  // The usual script mistake: the same file written without the prefix.
+  const zip = openZip(built.buffer);
+  const raw = writeZip(zip.entries.filter(entry => !entry.directory).map(entry => ({ name: entry.name, data: entry.name.startsWith('xl/worksheets/') ? zip.text(entry.name).replaceAll('_xlfn.', '') : zip.read(entry.name) })));
+  const rawFile = path.join(dir, 'raw.xlsx'); fs.writeFileSync(rawFile, raw);
+  const flagged = readOffice(rawFile).findings.find(finding => finding.code === 'missing-xlfn-prefix');
+  assert.equal(flagged.severity, 'warn'); assert.match(flagged.message, /6 formulas call functions added after Excel 2007 without the _xlfn\. prefix/); assert.match(flagged.message, /S!A4 IFS/); assert.match(flagged.hint, /#NAME\?/);
+  const classic = buildXlsx({ sheets: [{ name: 'S', rows: [['=SUM(1,2)', '=IFERROR(1/0,0)', '=SUMIFS(B1:B1,A1:A1,"x")', '=VLOOKUP(1,A1:B1,2,FALSE)']] }] });
+  const classicFile = path.join(dir, 'classic.xlsx'); fs.writeFileSync(classicFile, classic.buffer);
+  assert.ok(!codes(readOffice(classicFile)).includes('missing-xlfn-prefix'), 'functions that exist since Excel 2007 need no prefix');
+});
+
+test('xlsx: dynamic-array functions are reported, and date formulas get a date format', () => {
+  const built = buildXlsx({ sheets: [{ name: 'S', rows: [['a', 1], ['b', 2], ['=FILTER(A1:B2,B1:B2>1)', '=UNIQUE(A1:A2)'], ['=DATE(2024,2,29)', '=EDATE(DATE(2024,1,31),1)', '=DATE(2024,3,1)-DATE(2024,2,1)', '=TEXT(DATE(2024,2,29),"yyyy-mm-dd")']] }] });
+  assert.match(built.warnings.join('\n'), /FILTER, UNIQUE spill results/);
+  const dir = tmp(), file = path.join(dir, 'dates.xlsx'); fs.writeFileSync(file, built.buffer);
+  const read = readOffice(file, { maxCols: 8 }), row = read.sheets[0].sample.find(line => line.some(cell => cell.formula?.startsWith('DATE(2024,2,29)')));
+  assert.equal(row.find(cell => cell.ref === 'A4').value, '2024-02-29', 'DATE( shows as a date, not 45351');
+  assert.equal(row.find(cell => cell.ref === 'B4').value, '2024-02-29', 'EDATE( too');
+  assert.equal(row.find(cell => cell.ref === 'C4').value, 29, 'a difference of two dates is a number of days, not a date');
+  assert.equal(row.find(cell => cell.ref === 'D4').value, '2024-02-29');
+  assert.match(read.findings.find(finding => finding.code === 'missing-xlfn-prefix').message, /S!A3 FILTER/, 'the reader reports the dynamic-array calls the builder could only warn about');
 });

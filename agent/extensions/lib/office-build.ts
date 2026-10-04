@@ -8,7 +8,7 @@
  * a given spec so the result can be rebuilt byte for byte. */
 import { writeZip, type ZipSource } from "./office-zip.ts";
 import { escapeXml } from "./xml-lite.ts";
-import { evaluateFormula, columnName, columnNumber, type CellValue, type SheetLookup } from "./sheet-formula.ts";
+import { evaluateFormula, columnName, columnNumber, dynamicArrayFunctions, inferFormulaFormat, prefixFutureFunctions, type CellValue, type SheetExtent, type SheetLookup } from "./sheet-formula.ts";
 
 export const OFFICE_BUILD_LIMITS = Object.freeze({ blocks: 4000, tableRows: 5000, tableColumns: 30, images: 60, sheets: 40, rows: 100_000, columns: 200, cells: 1_000_000, imageBytes: 12 * 1024 * 1024 });
 
@@ -336,15 +336,16 @@ export function buildXlsx(spec: XlsxSpec, now = new Date()): XlsxBuild {
       const isHeaderRow = !columnsSpec.length && sheet.headerRow === true && index === 0;
       row.forEach((raw, c) => {
         if (raw === null || raw === undefined || raw === "") return;
-        const column = columnsSpec[c], format = (typeof raw === "object" && raw !== null ? raw.format : undefined) ?? column?.format;
+        const column = columnsSpec[c], declared = (typeof raw === "object" && raw !== null ? raw.format : undefined) ?? column?.format;
         let value: CellValue = null, formula: string | undefined;
         if (typeof raw === "object" && raw !== null) formula = String(raw.formula).replace(/^=/, "");
         else if (typeof raw === "string" && raw.startsWith("=") && raw.length > 1) formula = raw.slice(1);
         else if (typeof raw === "string") {
-          const asNumber = !isHeaderRow && format && ["integer", "decimal", "currency", "percent"].includes(format) ? numberFromText(raw, format) : undefined;
-          const asDate = !isHeaderRow && (format === "date" || format === "datetime") ? excelSerial(raw) : undefined;
+          const asNumber = !isHeaderRow && declared && ["integer", "decimal", "currency", "percent"].includes(declared) ? numberFromText(raw, declared) : undefined;
+          const asDate = !isHeaderRow && (declared === "date" || declared === "datetime") ? excelSerial(raw) : undefined;
           if (asNumber !== undefined) { value = asNumber; converted.numericStrings++; } else if (asDate !== undefined) { value = asDate; converted.dateStrings++; } else value = raw;
         } else value = raw;
+        const format = declared ?? (formula !== undefined ? inferFormulaFormat(formula) : undefined);
         const style = isHeaderRow ? headStyle(c) : styles.get({ format, wrap: sheet.wrap || (typeof value === "string" && value.includes("\n")), vertical: sheet.wrap ? "top" : undefined, align: column?.align });
         cells.push({ col: c + 1, row: rowNumber, value, formula, style, format });
         if (typeof value === "string") longest[c] = Math.max(longest[c], ...value.split("\n").map(line => Math.min(line.length, 80)));
@@ -379,11 +380,16 @@ export function buildXlsx(spec: XlsxSpec, now = new Date()): XlsxBuild {
   const grid = new Map<string, Map<string, Placed>>();
   for (const sheet of prepared) grid.set(sheet.name.toLowerCase(), new Map(sheet.cells.map(cell => [`${cell.col},${cell.row}`, cell])));
   const results = new Map<Placed, ReturnType<typeof evaluateFormula>>();
+  // Whole-column references (A:A) cover the rows that hold anything.
+  const extent: SheetExtent = (sheetName) => {
+    const sheet = prepared.find(candidate => candidate.name.toLowerCase() === (sheetName ?? "").toLowerCase());
+    return sheet ? { rows: sheet.cells.reduce((most, cell) => Math.max(most, cell.row), 0), cols: sheet.cells.reduce((most, cell) => Math.max(most, cell.col), 0) } : undefined;
+  };
   const evaluated = (cell: Placed, sheetName: string) => {
     let result = results.get(cell);
     if (!result) {
       results.set(cell, { ok: false, error: "#REF!" }); // a reference back to itself is a circular reference
-      result = evaluateFormula(cell.formula!, lookup, sheetName); results.set(cell, result);
+      result = evaluateFormula(cell.formula!, lookup, sheetName, 0, extent); results.set(cell, result);
     }
     return result;
   };
@@ -414,7 +420,7 @@ export function buildXlsx(spec: XlsxSpec, now = new Date()): XlsxBuild {
     const rowsXml = [...byRow.keys()].sort((a, b) => a - b).map(row => {
       const cells = byRow.get(row)!.sort((a, b) => a.col - b.col).map(cell => {
         const ref = `${columnName(cell.col)}${cell.row}`, s = cell.style ? ` s="${cell.style}"` : "";
-        const f = cell.formula !== undefined ? `<f>${escapeXml(cell.formula)}</f>` : "";
+        const f = cell.formula !== undefined ? `<f>${escapeXml(prefixFutureFunctions(cell.formula))}</f>` : "";
         const isError = typeof cell.value === "string" && cell.formula !== undefined && /^#[A-Z/0!?]+[!?]?$/.test(cell.value);
         if (isError) return `<c r="${ref}"${s} t="e">${f}<v>${escapeXml(String(cell.value))}</v></c>`;
         if (typeof cell.value === "number") return `<c r="${ref}"${s}>${f}<v>${Number.isFinite(cell.value) ? cell.value : 0}</v></c>`;
@@ -445,6 +451,8 @@ export function buildXlsx(spec: XlsxSpec, now = new Date()): XlsxBuild {
     ...sheetXml.map((data, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data })),
   ]);
   for (const info of report.values()) {
+    const dynamic = [...new Set((prepared.find(candidate => candidate.name === info.name)?.cells ?? []).flatMap(cell => cell.formula === undefined ? [] : dynamicArrayFunctions(cell.formula)))];
+    if (dynamic.length) warnings.push(`Sheet ${JSON.stringify(info.name)}: ${dynamic.join(", ")} spill results into neighbouring cells, which a script cannot store reliably (Excel may show #NAME? or only the first value). Use classic formulas (INDEX/MATCH, SUMIFS, COUNTIFS) instead.`);
     if (info.errors.length) warnings.push(`Sheet ${JSON.stringify(info.name)}: ${info.errors.length} formula(s) evaluate to an error (${info.errors.slice(0, 3).join("; ")}).`);
     if (info.uncalculated.length) warnings.push(`Sheet ${JSON.stringify(info.name)}: ${info.uncalculated.length} formula(s) use features the built-in calculator does not cover (${info.uncalculated.slice(0, 2).join("; ")}); they are calculated when the file is opened.`);
   }
