@@ -327,6 +327,26 @@ export default function adaptiveWorkflows(pi: any) {
         record('validation', 'execution', source, technicalFailure ? 'failed' : 'passed');
       }
     }
+    // Office documents and folder organization verify themselves; their results are the receipts.
+    if (call.revision === revision && !event.isError && !event.details?.disabled && ['fs_organize', 'office_doc', 'deliverable_check'].includes(event.toolName)) {
+      const details = event.details ?? {}, action = event.input?.action;
+      const built = ledger.receipts.some(row => row.scope === scope && row.stageId === 'implementation' && row.status === 'passed');
+      if (event.toolName === 'fs_organize') {
+        if (action === 'scan' || action === 'plan') record('discovery', 'inspection', source);
+        if (action === 'apply' && details.moved > 0) {
+          record('discovery', 'inspection', source); record('implementation', 'artifact', source);
+          record('validation', 'execution', source, details.verification?.ok === false ? 'failed' : 'passed');
+        }
+        if (action === 'verify' && built) record('validation', 'execution', source, details.ok === false ? 'failed' : 'passed');
+      } else if (event.toolName === 'office_doc' && action === 'build') {
+        record('discovery', 'inspection', source); record('implementation', 'artifact', source);
+        record('validation', 'execution', source, details.verification?.status === 'fail' ? 'failed' : 'passed');
+      } else {
+        const rows = event.toolName === 'deliverable_check' ? details.checked ?? [] : [details];
+        record('discovery', 'inspection', source);
+        if (built) record('validation', 'execution', source, rows.some((row: any) => row?.status === 'fail') ? 'failed' : 'passed');
+      }
+    }
     if (['bash', 'bg_run'].includes(event.toolName) && call.revision === revision && projectCheckCommand(command, ctx.cwd)) {
       if (failed) record('validation', 'execution', source, 'failed');
       else if (incomplete || event.toolName === 'bg_run') record('validation', 'execution', source, 'blocked');

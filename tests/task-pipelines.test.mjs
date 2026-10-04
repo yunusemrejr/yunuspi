@@ -281,3 +281,24 @@ test('ordinary imperative requests activate their pipeline even without a classi
   for (const prompt of ['Which port does the Go service use?', 'How do I configure Flask?', 'Who wrote the Python parser?', 'What model is this?', 'Tell me about the Java model', 'Describe how the audio narration works'])
     assert.deepEqual(selected(prompt).ids, [], prompt);
 });
+
+test('office documents and folder organization get their own pipelines, only for real requests', () => {
+  const office = selected('Create an Excel workbook with a monthly budget and totals');
+  assert.deepEqual(office.ids, ['office-docs']);
+  assert.ok(office.tools.includes('office_doc') && office.tools.includes('deliverable_check'));
+  assert.ok(!office.tools.includes('project_tests') && !office.tools.includes('code_quality'), 'a workbook is judged on the file, not on project tests');
+  assert.ok(selected('Make a pitch deck pptx for our seed round').ids.includes('office-docs'));
+  assert.ok(selected('Fill in the invoice template', { files: ['invoice.xlsx'] }).ids.includes('office-docs'));
+  const folders = selected('Organize my Downloads folder by file type');
+  assert.deepEqual(folders.ids, ['file-organization']);
+  assert.ok(folders.tools.includes('fs_organize'));
+  assert.match(folders.stages.find(stage => stage.id === 'discovery').check, /fs_organize scan/);
+  for (const prompt of ['my desktop is a mess, tidy it up', 'Rename all the scanned invoices in ~/Documents/scans to include the date', 'Declutter the photos folder']) assert.ok(selected(prompt).ids.includes('file-organization'), prompt);
+  for (const prompt of ['What is a spreadsheet?', 'Summarize the quarterly numbers in report.docx', 'Rename the files in the repo to kebab-case', 'Organize the functions in this module', 'Explain how a workbook differs from a worksheet'])
+    assert.deepEqual(selected(prompt).ids.filter(id => ['office-docs', 'file-organization'].includes(id)), [], prompt);
+  for (const selection of [office, folders]) {
+    for (const name of selection.skills) assert.ok(fs.existsSync(path.join(agent, 'skills', name, 'SKILL.md')), name);
+    const sources = ['deliverables.ts', 'fs-organize.ts'].map(file => fs.readFileSync(path.join(agent, 'extensions', file), 'utf8')).join('\n');
+    for (const name of selection.tools.filter(name => ['office_doc', 'deliverable_check', 'fs_organize'].includes(name))) assert.match(sources, new RegExp(`name: "${name}"`), name);
+  }
+});

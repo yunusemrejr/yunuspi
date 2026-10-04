@@ -102,6 +102,36 @@ async function waitForPolicy(f, predicate) {
   assert.fail('Native background source observation did not settle the expected policy');
 }
 
+test('folder organization and office documents settle from their own verifying results', async t => {
+  const f = fixture(t);
+  await f.emit('session_start'); await f.start('Organize my Downloads folder by file type');
+  await f.call('fs_organize', { action: 'scan', path: 'Downloads' }, { details: { files: 11 } });
+  await f.call('fs_organize', { action: 'plan', path: 'Downloads', by: 'type' }, { details: { toMove: 11, planId: 'org-abc123' } });
+  let status = await f.status();
+  assert.ok(status.evidence.some(row => row.stageId === 'discovery' && row.status === 'passed'));
+  assert.ok(!status.evidence.some(row => row.stageId === 'implementation'), 'a plan moves nothing, so it is not implementation');
+  await f.call('fs_organize', { action: 'apply', planId: 'org-abc123' }, { details: { moved: 11, verification: { ok: true } } });
+  status = await f.status();
+  for (const stage of ['implementation', 'validation']) assert.ok(status.evidence.some(row => row.stageId === stage && row.status === 'passed'), stage);
+  await f.call('fs_organize', { action: 'verify', planId: 'org-abc123' }, { details: { ok: false } });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'validation' && row.status === 'failed'), 'a failed verification reopens validation');
+  await f.call('fs_organize', { action: 'verify', planId: 'org-abc123' }, { isError: true, details: { ok: true } });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'validation' && row.status === 'failed'), 'an errored call records nothing');
+
+  await f.start('Create an Excel workbook with a monthly budget and totals');
+  await f.call('deliverable_check', { paths: ['budget.xlsx'] }, { details: { checked: [{ status: 'pass' }] } });
+  status = await f.status();
+  assert.ok(status.evidence.some(row => row.stageId === 'discovery' && row.status === 'passed'));
+  assert.ok(!status.evidence.some(row => row.stageId === 'validation'), 'checking before anything was built is not validation');
+  await f.call('office_doc', { action: 'build', path: 'budget.xlsx' }, { details: { action: 'build', verification: { status: 'warn' } } });
+  status = await f.status();
+  for (const stage of ['implementation', 'validation']) assert.ok(status.evidence.some(row => row.stageId === stage && row.status === 'passed'), stage);
+  await f.call('deliverable_check', { paths: ['budget.xlsx'] }, { details: { checked: [{ status: 'fail' }] } });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'validation' && row.status === 'failed'));
+  await f.call('office_doc', { action: 'build', path: 'budget.xlsx', overwrite: true }, { details: { action: 'build', verification: { status: 'pass' } } });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'validation' && row.status === 'passed'), 'a rebuilt, verified file settles validation again');
+});
+
 test('native media receipts settle technical stages while playback and listening stay unresolved', async t => {
   const f = fixture(t);
   await f.emit('session_start'); await f.start('Edit a video with narration and a soundtrack');
