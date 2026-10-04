@@ -66,7 +66,7 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = Object.freeze([
   Object.freeze({
     id: "documents",
     label: "Documents & Office",
-    description: "Documents, spreadsheets, presentations and office files.",
+    description: "Documents, spreadsheets, presentations, office files and folder organization.",
   }),
   Object.freeze({
     id: "business",
@@ -130,7 +130,7 @@ const normalize = (value: unknown) => (typeof value === "string" ? value : "")
 const NAME_OVERRIDES: readonly Readonly<{ id: string; pattern: RegExp }>[] = [
   {id: "media", pattern: /^scene (?:create|render)$/i},
   // Their descriptions list image, video and audio as inputs; the family is documents and deliverables.
-  {id: "documents", pattern: /^(?:office doc|deliverable check)$/i},
+  {id: "documents", pattern: /^(?:office doc|deliverable check|organize files)$/i},
   {id: "web", pattern: /^design audit$/i},
   {id: "operations", pattern: /(?:^| )(?:subagent|swarm|fusion|council|bg|checkpoint|obs|session|process)(?: |$)/i},
   {id: "web", pattern: /(?:^| )(?:http|browser|web)(?: |$)/i},

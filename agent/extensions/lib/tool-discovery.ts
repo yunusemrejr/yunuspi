@@ -122,6 +122,8 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: 'spreadsheet-authoring', tools: ['office_doc', 'deliverable_check'] },
   { skill: 'word-document-authoring', tools: ['office_doc', 'deliverable_check'] },
   { skill: 'presentation-authoring', tools: ['office_doc', 'deliverable_check'] },
+  // Sorting, renaming and cleaning up folders goes through one journaled, no-overwrite tool instead of mv and rm loops.
+  { skill: 'file-organization', tools: ['fs_organize'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
