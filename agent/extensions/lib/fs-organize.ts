@@ -134,21 +134,33 @@ export async function walk(root: string, options: { recursive: boolean; includeH
   return out;
 }
 
-/** Regular files anywhere below root, hidden included, bounded; the "nothing was lost" yardstick. */
-export function countFiles(root: string): { count: number; exact: boolean } {
+/** Regular files anywhere below root, hidden included, bounded: the "nothing was lost" yardstick. Also the files that
+ * symbolic links below root point at, because moving one of those would silently break the link. */
+export function inspectTree(root: string): { count: number; exact: boolean; linkTargets: Set<string> } {
   let count = 0, seen = 0;
-  const stack = [root];
+  const linkTargets = new Set<string>(), stack = [root];
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const entry of entries) {
-      if (++seen > MAX_WALK_ENTRIES) return { count, exact: false };
-      if (entry.isFile()) count++; else if (entry.isDirectory()) stack.push(path.join(dir, entry.name));
+      if (++seen > MAX_WALK_ENTRIES) return { count, exact: false, linkTargets };
+      if (entry.isFile()) count++;
+      else if (entry.isDirectory()) stack.push(path.join(dir, entry.name));
+      else if (entry.isSymbolicLink()) { try { linkTargets.add(path.resolve(dir, fs.readlinkSync(path.join(dir, entry.name)))); } catch { /* unreadable link: nothing to protect */ } }
     }
   }
-  return { count, exact: true };
+  return { count, exact: true, linkTargets };
 }
+/** Files that a symbolic link points at stay where they are (moving one would break the link); the skip is counted. */
+function pinnedByLink(scanned: Walk, tree: { linkTargets: Set<string> }, root: string, entry: Entry): boolean {
+  if (!tree.linkTargets.has(path.join(root, entry.rel))) return false;
+  const reason = "target of a symbolic link";
+  scanned.skipped[reason] = (scanned.skipped[reason] ?? 0) + 1;
+  const list = (scanned.examples[reason] ??= []); if (list.length < 3) list.push(entry.rel);
+  return true;
+}
+export const countFiles = (root: string): { count: number; exact: boolean } => { const { count, exact } = inspectTree(root); return { count, exact }; };
 
 /* ───────────── planning ───────────── */
 
@@ -282,6 +294,8 @@ export async function inventory(root: string, options: { recursive?: boolean; in
     oldest = Math.min(oldest, file.mtimeMs); newest = Math.max(newest, file.mtimeMs);
     if (tidyName(file.name) !== file.name) messyNames++;
   }
+  const tree = inspectTree(root);
+  for (const file of scanned.files) pinnedByLink(scanned, tree, root, file);
   const duplicates = await findDuplicates(root, scanned.files, options.signal);
   const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   return {
@@ -309,13 +323,15 @@ export async function createPlan(root: string, options: PlanOptions, deps: { jou
 
   const candidates: Candidate[] = [];
   let unchanged = 0, unmatched = 0;
-  if (requested) for (const item of requested) { const rel = item.folder ? `${item.folder}/${item.name}` : item.name; if (rel === item.entry.rel) unchanged++; else candidates.push(item); }
+  const tree = inspectTree(root);
+  const pinned = (entry: Entry) => pinnedByLink(scanned, tree, root, entry);
+  if (requested) for (const item of requested) { const rel = item.folder ? `${item.folder}/${item.name}` : item.name; if (rel === item.entry.rel) unchanged++; else if (!pinned(item.entry)) candidates.push(item); }
   else for (const entry of scanned.files) {
     deps.signal?.throwIfAborted();
     const dirOf = path.posix.dirname(entry.rel) === "." ? "" : path.posix.dirname(entry.rel);
     if (options.by === "tidy-names") {
       const name = tidyName(entry.name, style);
-      if (name === entry.name) unchanged++; else candidates.push({ entry, folder: dirOf, name, why: "tidy name" });
+      if (name === entry.name) unchanged++; else if (!pinned(entry)) candidates.push({ entry, folder: dirOf, name, why: "tidy name" });
       continue;
     }
     let folder: string | undefined;
@@ -327,6 +343,7 @@ export async function createPlan(root: string, options: PlanOptions, deps: { jou
     if (folder === undefined) { unmatched++; continue; }
     const target = [into, folder].filter(Boolean).join("/");
     if (dirOf === target || (options.recursive && (entry.rel.startsWith(`${target}/`)))) { unchanged++; continue; }
+    if (pinned(entry)) continue;
     candidates.push({ entry, folder: target, name: entry.name, why: duplicateOf.has(entry.rel) ? `identical to ${duplicateOf.get(entry.rel)}` : options.by });
   }
 
@@ -355,8 +372,7 @@ export async function createPlan(root: string, options: PlanOptions, deps: { jou
     ...(duplicates ? { duplicates: { groups: duplicates.groups.length, copies: duplicates.groups.reduce((sum, group) => sum + group.copies.length, 0), wastedBytes: duplicates.wastedBytes, incomplete: duplicates.incomplete, handling: options.duplicates === "separate" ? "later copies move to Duplicates/ (nothing is deleted)" : "reported only; pass duplicates:\"separate\" to gather them in Duplicates/" } } : {}),
   };
   if (!moves.length) return { summary: { ...summary, note: "Nothing to move: every file the rules cover is already where it belongs." } };
-  const counted = countFiles(root);
-  const plan: Plan = { id: `org-${now.toString(36)}${randomBytes(3).toString("hex")}`, root, mode: options.by, createdAt: now, options, moves, fileCount: counted.count, fileCountExact: counted.exact, status: "planned", done: [], skipped: [], createdDirs: [] };
+  const plan: Plan = { id: `org-${now.toString(36)}${randomBytes(3).toString("hex")}`, root, mode: options.by, createdAt: now, options, moves, fileCount: tree.count, fileCountExact: tree.exact, status: "planned", done: [], skipped: [], createdDirs: [] };
   savePlan(plan, deps.journalDir);
   summary.planId = plan.id;
   return { plan, summary };

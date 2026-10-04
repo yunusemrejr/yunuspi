@@ -302,3 +302,18 @@ test('office documents and folder organization get their own pipelines, only for
     for (const name of selection.tools.filter(name => ['office_doc', 'deliverable_check', 'fs_organize'].includes(name))) assert.match(sources, new RegExp(`name: "${name}"`), name);
   }
 });
+
+test('tabular data work gets a profile-then-reconcile checklist, and code work on parsers does not', () => {
+  for (const prompt of ['Clean up the customers CSV: remove duplicate rows and fix the date formats', 'Merge the three sales CSV files into one and total the revenue by region', 'Convert the JSON files to CSV', 'Sort the rows in this table by date', 'Parse the log files and summarize the errors']) {
+    const selection = selected(prompt);
+    assert.ok(selection.ids.includes('data-wrangling'), prompt);
+    assert.ok(!selection.tools.includes('project_tests'), `${prompt}: a data task is judged on reconciliation, not on project tests`);
+  }
+  const selection = selected('Merge the three sales CSV files into one and total the revenue by region');
+  assert.match(selection.stages.find(stage => stage.id === 'discovery').check, /Profile every input/);
+  assert.match(selection.stages.find(stage => stage.id === 'validation').check, /row counts in and out/);
+  assert.ok(selection.tools.includes('deliverable_check'));
+  for (const name of selection.skills) assert.ok(fs.existsSync(path.join(agent, 'skills', name, 'SKILL.md')), name);
+  for (const prompt of ['What is a CSV file?', 'Fix the CSV parser in the codebase', 'Explain how to merge two tables in SQL', 'Who exported the data?'])
+    assert.ok(!selected(prompt).ids.includes('data-wrangling'), prompt);
+});

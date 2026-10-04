@@ -4,7 +4,7 @@ import { classifyExecution, type ExecutionProfile } from './adaptive-execution.t
 export type TaskPipelineId = 'php' | 'node' | 'frontend-js' | 'vanilla-frontend' | 'react-cdn' | 'react-node' |
   'go' | 'rust' | 'java' | 'python' | 'python-flask' | 'bash' | 'c' | 'cpp' | 'linux-native' |
   'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy' |
-  'video' | 'audio' | 'svg-art' | 'debugging' | 'blender-3d' | 'seo' | 'llm-app' | 'api-automation' | 'office-docs' | 'file-organization';
+  'video' | 'audio' | 'svg-art' | 'debugging' | 'blender-3d' | 'seo' | 'llm-app' | 'api-automation' | 'office-docs' | 'file-organization' | 'data-wrangling';
 export type PipelinePhase = 'discovery' | 'implementation' | 'validation' | 'delivery';
 export const PIPELINE_EVIDENCE_KINDS = ['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live', 'playback', 'listening'] as const;
 export type PipelineEvidenceKind = (typeof PIPELINE_EVIDENCE_KINDS)[number];
@@ -40,7 +40,7 @@ export type AutomaticPipelineInput = {
 };
 
 /** Pipelines whose work is judged on the produced file or the resulting folder, not on project tests. */
-const MEDIA_ONLY: readonly TaskPipelineId[] = ['video', 'audio', 'svg-art', 'blender-3d', 'office-docs', 'file-organization'];
+const MEDIA_ONLY: readonly TaskPipelineId[] = ['video', 'audio', 'svg-art', 'blender-3d', 'office-docs', 'file-organization', 'data-wrangling'];
 
 /** A negative request must not stage the very tool it excludes. Kept shared
  * with legacy intent bundles so activation owners cannot disagree. */
@@ -101,6 +101,7 @@ const RECIPES: Record<TaskPipelineId, Recipe> = {
   'api-automation': { skills: ['api-design', 'evidence-first-engineering', 'distributed-systems'], discovery: 'Read each provider\'s auth, scope, rate-limit, pagination and webhook-delivery documentation, and inspect existing clients, secret handling and the state the workflow must persist. Define the state machine, idempotency keys and approval points before coding.', validation: 'Dry-run or sandbox the workflow first, then run a failure-injection pass (timeout, 429, 5xx, partial batch) and an idempotent re-run. Verify there are no duplicate side effects and that secrets never reach logs or prompts.', tools: ['http_request'] },
   'office-docs': { skills: ['spreadsheet-authoring', 'word-document-authoring', 'presentation-authoring'], discovery: 'Open the source, template or example first (office_doc read) and settle structure, language, units and the real data before writing. Never hand-write OOXML: build docx and xlsx from a spec with office_doc build; edit an existing file on a copy and keep the original.', validation: 'Open the produced file with office_doc read or verify, or deliverable_check, and resolve every error and warning (placeholders, uncalculated or error formulas, empty slides, damaged package). For anything a person will look at, render pages (office_doc render) and judge layout. A script printing "Saved x" is not evidence.', tools: ['office_doc', 'deliverable_check'] },
   'file-organization': { skills: ['file-organization'], discovery: 'Resolve a loosely named folder with ls or find, then run fs_organize scan on it before choosing a scheme. Do not move files with mv or find loops: they overwrite on name clashes and cannot be undone.', validation: 'fs_organize apply verifies itself: check verification.ok and the file counts, report moved and skipped counts and the folders created, and keep the planId for undo. Never delete files; identical copies go to Duplicates for the user to decide.', tools: ['fs_organize', 'ls', 'find'] },
+  'data-wrangling': { skills: ['data-analysis', 'data-lineage-validation'], discovery: 'Profile every input before transforming it: columns and types, row counts, empty and duplicate keys, encodings, date and number formats, units, and what each field means. Keep the originals untouched and write results to new files.', validation: 'Reconcile the output with the input: row counts in and out with every dropped, merged or split row accounted for, totals and distinct keys on the numeric and key columns, and a spot check of a few real rows. Look for silent type changes (lost leading zeros, mangled dates, long ids in scientific notation). Open the produced file with deliverable_check. A script that exits zero is not a reconciliation.', tools: ['deliverable_check', 'office_doc'] },
   'git-ssh-deploy': { skills: ['git-github', 'multi-developer-pipelines'], discovery: 'Inspect Git source/remote/history and the explicitly authorized SSH destination, document root, runtime, protected data and rollback path. Namecheap/GoDaddy branding does not establish account capabilities; discover actual cPanel/VPS/SSH support.', validation: 'Verify the local release/build, deployment manifest and rollback before remote promotion. Keep secrets, uploads and databases outside accidental sync; Git push alone does not prove a live deployment.', tools: ['git_info', 'ssh_plan', 'net_probe', 'env_audit'] },
 };
 
@@ -112,6 +113,8 @@ const WORK = /\b(?:build|create|implement|fix|debug|improve|refactor|edit|change
  * none of the verbs above appeared, so their skills, evidence stages and tool schemas never activated.
  * Nouns such as model, port or cut only count when imperative, and question-shaped requests never do. */
 const ACTION = /\b(?:organi[sz]e|declutter|tidy|de-?duplicate|dedupe|rename|generate|convert|export|import|automate|integrate|configure|set ?up|migrate|scrape|crawl|analy[sz]e|enhance|upgrade|rewrite|install|wire|schedule|connect|sync|ship|produce|craft|trim|composite|extend|polish|harden|benchmark|investigate|diagnose|troubleshoot|clean ?up|speed ?up|extract|parse|transcribe|translate|compress|encode|merge|restructure|scaffold|bootstrap|launch|bake|unwrap|retopologi[sz]e|port|cut|capture|record|profile|monitor|document)\b|(?:^|[.!?:]\s+)(?:please\s+)?(?:model|sculpt|animate|rig|texture|illustrate|paint|draw)\b/i;
+/** Transforming tabular data: a data verb followed by a data noun, or two or more data files named together. */
+const DATA_TASK = /\b(?:clean(?:\s|-)?up|clean|merge|join|combine|consolidate|reconcile|de-?duplicate|dedupe|normali[sz]e|transform|aggregate|pivot|split|convert|parse|extract|summari[sz]e|filter|sort|fix|repair|import|export)\b[^\n.]{0,60}\b(?:csv|tsv|jsonl|ndjson|json files?|data ?sets?|spreadsheets?|excel (?:files?|sheets?)|tables?|rows|columns|records|log files?|exports?)\b/i;
 const QUESTION = /^\s*(?:what|why|how|who|whom|whose|when|where|which|is|are|was|were|does|do|did|explain|describe|define|tell me|summari[sz]e|list|compare)\b/i;
 const IGNORED_FILE = /(?:^|\/)(?:node_modules|vendor|\.git|skills)(?:\/|$)|(?:^|\/)SKILL\.md$/i;
 
@@ -125,7 +128,8 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const ids: TaskPipelineId[] = [];
   const add = (id: TaskPipelineId, selected: boolean) => { if (selected) ids.push(id); };
   const has = (pattern: RegExp) => files.some(file => pattern.test(file));
-  const active = WORK.test(prompt) || (ACTION.test(prompt) && !QUESTION.test(prompt)) || files.length > 0;
+  const dataTask = DATA_TASK.test(prompt) && !QUESTION.test(prompt);
+  const active = WORK.test(prompt) || (ACTION.test(prompt) && !QUESTION.test(prompt)) || dataTask || files.length > 0;
   if (!active || /\b(?:no|without)\s+(?:tools?|workflows?|pipelines?)\b|\b(?:do not|don't|never)\s+(?:use|run|activate)\s+(?:any\s+)?(?:tools?|workflows?|pipelines?)\b/i.test(prompt))
     return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
 
@@ -170,6 +174,7 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const produces = /\b(?:create|make|write|build|generate|draft|prepare|produce|fill(?: in| out)?|update|edit|fix|convert|export|format|redline|compile|assemble|design|turn|populate|add)\b/i.test(prompt);
   add('office-docs', produces && (/\b(?:docx|xlsx|xlsm|pptx|odt|ods|odp|word (?:document|doc|file)s?|excel|spreadsheets?|workbooks?|powerpoint|slide deck|pitch deck|libreoffice (?:writer|calc|impress)|google sheets)\b/i.test(prompt) || has(/\.(?:docx|xlsx|xlsm|pptx|odt|ods|odp)$/i)));
   const codeContext = /\b(?:code ?base|repo(?:sitory)?|source (?:code|tree)|function|class|variables?|modules?|packages?|git|src\/)\b/i.test(prompt);
+  add('data-wrangling', DATA_TASK.test(prompt) && !codeContext && !QUESTION.test(prompt));
   add('file-organization', !codeContext && (/\b(?:organi[sz]e|declutter|tidy(?: up)?|de-?duplicate|dedupe|(?:bulk|batch)[ -]rename|rename)\b[^\n.]{0,70}\b(?:files?|folders?|director(?:y|ies)|downloads?|desktop|photos?|pictures|screenshots|scans|pdfs|invoices|receipts)\b|\b(?:sort|group|arrange|file away|clean ?up)\b[^\n.]{0,40}\b(?:downloads?|photos|pictures|screenshots|scans|invoices|receipts|desktop)\b|\b(?:messy|cluttered|disorgani[sz]ed|unsorted)\b[^\n.]{0,30}\b(?:folder|directory|downloads|desktop|files)\b|\b(?:downloads?|desktop|folder)\b[^\n.]{0,40}\b(?:a mess|messy|cluttered)\b/i.test(prompt)));
 
   if (!ids.length) return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };

@@ -165,7 +165,7 @@ test('engine: tidy-names normalizes names, keeps extensions meaningful, and reso
 test('engine: only plain files move; hidden files, symlinks, project folders and unfinished downloads stay', async () => {
   const dir = tmp(), journalDir = journal();
   put(dir, 'visible.pdf'); put(dir, '.hidden.pdf'); put(dir, 'movie.mp4.crdownload'); put(dir, '~$lock.docx'); put(dir, 'Thumbs.db');
-  fs.symlinkSync(path.join(dir, 'visible.pdf'), path.join(dir, 'link.pdf'));
+  fs.symlinkSync('nowhere.pdf', path.join(dir, 'link.pdf'));
   put(dir, 'proj/package.json', '{}'); put(dir, 'proj/readme.md');
   put(dir, 'plain/inner.pdf');
   const flat = await lib.createPlan(dir, { by: 'type' }, { journalDir });
@@ -319,3 +319,25 @@ test('tool: explicit moves arrive in any shape a model might send', async () => 
   assert.equal(tool.prepareArguments({ path: '/x', by: 'explicit', moves: [] }).by, 'moves');
 });
 function require_(tools) { fsOrganize({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), events: { emit() {}, on() {} } }); }
+
+test('engine: a file that a symbolic link points at is left in place so the link keeps working', async () => {
+  const dir = tmp(), journalDir = journal();
+  put(dir, 'notes.txt', 'target'); put(dir, 'plain.txt', 'plain'); put(dir, 'sub/shared.pdf', 'shared'); put(dir, 'sub/other.pdf', 'other');
+  fs.symlinkSync('notes.txt', path.join(dir, 'link-to-notes.txt'));
+  fs.symlinkSync(path.join(dir, 'sub', 'shared.pdf'), path.join(dir, 'abs-link.pdf'));
+  const byType = await lib.createPlan(dir, { by: 'type', recursive: true }, { journalDir });
+  assert.deepEqual(byType.plan.moves.map(move => move.from).sort(), ['plain.txt', 'sub/other.pdf']);
+  assert.equal(byType.summary.skipped['target of a symbolic link'], 2);
+  assert.deepEqual(byType.summary.skippedExamples, undefined);
+  await lib.applyPlan(byType.plan, { journalDir });
+  assert.equal(fs.readFileSync(path.join(dir, 'link-to-notes.txt'), 'utf8'), 'target', 'the relative link still resolves');
+  assert.equal(fs.readFileSync(path.join(dir, 'abs-link.pdf'), 'utf8'), 'shared', 'the absolute link still resolves');
+  const tidy = await lib.createPlan(dir, { by: 'tidy-names', style: 'kebab', recursive: true }, { journalDir });
+  assert.ok(!tidy.plan || !tidy.plan.moves.some(move => move.from === 'notes.txt'));
+  const explicit = await lib.createPlan(dir, { by: 'moves', moves: [{ from: 'notes.txt', to: 'Docs/' }, { from: 'Documents/plain.txt', to: 'Docs/' }] }, { journalDir });
+  assert.deepEqual(explicit.plan.moves.map(move => move.from), ['Documents/plain.txt']);
+  assert.equal(explicit.summary.skipped['target of a symbolic link'], 1);
+  const found = await lib.inventory(dir, { recursive: true });
+  assert.equal(found.skipped['target of a symbolic link'], 2, 'scan reports what will be left alone');
+  assert.ok(found.skippedExamples['target of a symbolic link'].includes('notes.txt'));
+});
