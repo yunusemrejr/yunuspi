@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.6 — 2026-10-05
+
+**A headless run that stalls while starting says so.** A print-mode run on the installed harness wrote nothing for 400 seconds until its timeout killed it: no event, no error, no session file, so nothing showed where it was stuck. Three faithful reruns finished in about 40 seconds, so the cause was not found. A print, json or rpc run that has not finished starting after 30 seconds now writes one line to stderr, `YunusPi is still starting after 30s (last completed step: <step>).`, using the startup steps the core already marks for `PI_TIMING`. Interactive sessions are unchanged, and the notice never keeps a finished process open.
+
+**`skill-mirrors --apply` never writes through a symbolic link.** A file or folder in your skill copy that was a link counted as missing and was then written through, overwriting what it pointed at; the backup held only the link, so that file could not be restored. Linked files are now left alone and listed so you can update them yourself; ordinary files are refreshed as before.
+
+**A workflow script that calls a helper that does not exist is told what it can use.** Models that wrote `child(...)` or another invented helper in a `workflowScript` got only `child is not defined` (seven times in recent sessions). The error now also says that a script sees `runs`, `emit`, `console`, `Promise` and `state`, and that a child is launched with `runs.run(key, { agent, task })`.
+
+**Release tagging waits out GitHub's rate limit.** `scripts/release-tag.mjs` failed when the unauthenticated GitHub API limit (60 lookups an hour, shared by the whole machine) ran out while it waited for CI, which is why 0.23.5 shipped without its tag and GitHub release. It now polls once a minute without a token (every 20 seconds with `GITHUB_TOKEN` or `GH_TOKEN`) and waits until the limit resets; any other refusal still stops the tag. 0.23.5 has been tagged on its original commit.
+
 ## 0.23.5 — 2026-10-05
 
 **Older skill copies no longer hide the shipped skills.** A skill folder listed under `skills` in `settings.json` wins over the shipped skill of the same name, without a warning, so a copy made earlier keeps hiding every later improvement. On the maintainer's machine 37 copies of an older skill library did exactly that: they told the model to run raw `ffmpeg`, `libreoffice` and another harness's commands where the shipped skills name `media_edit`, `audio_analyze`, `office_doc` and the browser tools, and none of the recent skill edits reached any model there. `scripts/skill-mirrors.mjs` lists the copies that differ and what differs; `--apply` refreshes them after copying the originals to `backups/skill-mirrors-<time>/` (a file only you have and any skill the harness does not ship are left alone); `verify-harness` reports the finding as an informational line, since a customized skill is a legitimate reason to differ. After the refresh the same cheap model built a five-slide deck in 6 turns and $0.004 where an earlier six-slide deck took 26 turns and $0.032, and normalized and trimmed a voice recording in 6 turns instead of 14.
