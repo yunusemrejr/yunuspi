@@ -33,7 +33,7 @@ import { formatMissingSessionCwdPrompt, getMissingSessionCwdIssue, MissingSessio
 import { assertValidSessionId, SessionManager } from "./core/session-manager.js";
 import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.js";
 import { SettingsManager } from "./core/settings-manager.js";
-import { printTimings, resetTimings, time } from "./core/timings.js";
+import { printTimings, resetTimings, time, watchStartupStall } from "./core/timings.js";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.js";
 import { builtInExtensions } from "./extensions/index.js";
 import { runMigrations, showDeprecationWarnings } from "./migrations.js";
@@ -480,6 +480,8 @@ export async function main(args, options) {
         }
     }
     time("parseArgs");
+    // Interactive mode draws its own screen; a headless run says when its start stalls.
+    const stopStartupStallWatch = parsed.print || parsed.mode === "json" || parsed.mode === "rpc" ? watchStartupStall() : () => { };
     if (parsed.version) {
         console.log(VERSION);
         process.exit(0);
@@ -748,6 +750,7 @@ export async function main(args, options) {
             .catch(() => { })
             .finally(() => clearTimeout(timeout));
     }
+    stopStartupStallWatch();
     if (appMode === "rpc") {
         printTimings();
         await runRpcMode(runtime);

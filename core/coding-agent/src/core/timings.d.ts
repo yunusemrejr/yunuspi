@@ -7,3 +7,4 @@ export declare function resetTimings(namespace?: TimingLabel): void;
 export declare function time(label: string, namespace?: TimingLabel): void;
 export declare function printTimings(): void;
 export {};
+export declare function watchStartupStall(afterMs?: number, write?: (text: string) => void): () => void;

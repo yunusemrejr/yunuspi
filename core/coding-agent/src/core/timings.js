@@ -4,12 +4,16 @@
  */
 const ENABLED = process.env.PI_TIMING === "1";
 const timingNamespaces = new Map();
+// The last completed main startup step, kept even without PI_TIMING so a stalled start can name it.
+let lastMainStep = "start";
 export function resetTimings(namespace = "main") {
     if (!ENABLED)
         return;
     timingNamespaces.set(namespace, { timings: [], lastTime: Date.now() });
 }
 export function time(label, namespace = "main") {
+    if (namespace === "main")
+        lastMainStep = label;
     if (!ENABLED)
         return;
     const now = Date.now();
@@ -37,4 +41,16 @@ export function printTimings() {
     for (const [namespace, timingNamespace] of timingNamespaces) {
         printTimingGroup(`Startup Timings: ${namespace}`, timingNamespace.timings);
     }
+}
+/**
+ * A print, json or rpc run writes nothing until startup finishes, so a start that stalls (an
+ * extension that never returns, a lock that is never released) looks exactly like a slow one.
+ * After `afterMs` this writes one line naming the last completed step. Returns a stop function.
+ */
+export function watchStartupStall(afterMs = 30_000, write = (text) => process.stderr.write(text)) {
+    const timer = setTimeout(() => {
+        write(`YunusPi is still starting after ${Math.round(afterMs / 1000)}s (last completed step: ${lastMainStep}).\n`);
+    }, afterMs);
+    timer.unref?.();
+    return () => clearTimeout(timer);
 }
