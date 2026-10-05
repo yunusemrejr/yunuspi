@@ -237,3 +237,20 @@ test("async launch notices preserve independent work and native wake without pol
  assert.match(notice,/Do not run sleep\/polling loops/);
  assert.doesNotMatch(notice,/Return control to the user now/);
 });
+
+test("a workflowScript calling an undefined helper is told which globals exist", async () => {
+	await assert.rejects(
+		runWorkflowScript({
+			script: 'const result = await child("one", { agent: "worker", task: "fixture" }); return result;',
+			timeoutMs: 2000,
+			launch: async () => { throw new Error("no child should launch"); },
+			status: async () => { throw new Error("no status lookup expected"); },
+		}),
+		(error) => {
+			assert.match(error.message, /child is not defined/);
+			assert.match(error.message, /sees only runs, emit, console, Promise/);
+			assert.match(error.message, /runs\.run\(key/);
+			return true;
+		},
+	);
+});

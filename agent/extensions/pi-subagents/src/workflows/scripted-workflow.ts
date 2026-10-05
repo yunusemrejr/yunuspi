@@ -792,8 +792,12 @@ function formatWorkflowScriptSyntaxError(error) {
 function formatWorkflowScriptError(error) {
   const message = error && typeof error.message === "string" ? error.message : String(error);
   const stack = error && typeof error.stack === "string" ? error.stack : "";
-  if (!stack) return message;
-  return stack.includes(message) ? stack : message + "\n" + stack;
+  // A model that invents a helper (child(...), spawn(...)) otherwise sees only "x is not defined".
+  const hint = error?.name === "ReferenceError" && / is not defined$/.test(message)
+    ? "\nA workflowScript sees only runs, emit, console, Promise (and state when enabled); launch a child with runs.run(key, { agent, task })."
+    : "";
+  if (!stack) return message + hint;
+  return (stack.includes(message) ? stack : message + "\n" + stack) + hint;
 }
 
 function isSyntaxError(error) {
