@@ -8,6 +8,8 @@ import { type Args } from "./cli/args.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { SessionManager } from "./core/session-manager.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
+export declare const STDIN_GRACE_MS = 3000;
+export declare function readPipedStdin(graceMs?: number, stdin?: NodeJS.ReadStream | import("node:stream").Readable & { isTTY?: boolean }, warn?: (text: string) => void): Promise<string | undefined>;
 export declare function createSessionManager(parsed: Args, cwd: string, sessionDir: string | undefined, settingsManager: SettingsManager): Promise<SessionManager>;
 export interface MainOptions {
     extensionFactories?: InlineExtension[];

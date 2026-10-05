@@ -48,21 +48,36 @@ const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP
  * Read all content from piped stdin.
  * Returns undefined if stdin is a TTY (interactive terminal).
  */
-async function readPipedStdin() {
+export const STDIN_GRACE_MS = 3000;
+/**
+ * Read piped stdin. When the prompt already came from the command line, `graceMs` bounds the wait for the
+ * first byte: a caller that leaves an unused pipe or socket open (agent harnesses, CI steps, cron) would
+ * otherwise hang forever with no output. Once input starts arriving, it is read to the end.
+ */
+export async function readPipedStdin(graceMs, stdin = process.stdin, warn = (text) => process.stderr.write(text)) {
     // If stdin is a TTY, we're running interactively - don't read stdin
-    if (process.stdin.isTTY) {
+    if (stdin.isTTY) {
         return undefined;
     }
     return new Promise((resolve) => {
         let data = "";
-        process.stdin.setEncoding("utf8");
-        process.stdin.on("data", (chunk) => {
+        const timer = graceMs === undefined ? undefined : setTimeout(() => {
+            stdin.removeAllListeners("data");
+            stdin.removeAllListeners("end");
+            stdin.destroy();
+            warn(`No input arrived on stdin within ${Math.round(graceMs / 1000)}s, so YunusPi continues with the prompt from the command line. Redirect stdin from /dev/null to skip this wait.\n`);
+            resolve(undefined);
+        }, graceMs);
+        stdin.setEncoding("utf8");
+        stdin.on("data", (chunk) => {
+            clearTimeout(timer);
             data += chunk;
         });
-        process.stdin.on("end", () => {
+        stdin.on("end", () => {
+            clearTimeout(timer);
             resolve(data.trim() || undefined);
         });
-        process.stdin.resume();
+        stdin.resume();
     });
 }
 function reportDiagnostics(diagnostics) {
@@ -703,7 +718,7 @@ export async function main(args, options) {
     // Read piped stdin content (if any) - skip for RPC mode which uses stdin for JSON-RPC
     let stdinContent;
     if (appMode !== "rpc") {
-        stdinContent = await readPipedStdin();
+        stdinContent = await readPipedStdin(parsed.messages.length > 0 || parsed.fileArgs.length > 0 ? STDIN_GRACE_MS : undefined);
         if (stdinContent !== undefined && appMode === "interactive") {
             appMode = "print";
         }
