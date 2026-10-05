@@ -136,9 +136,11 @@ test('first-seal context telemetry reports finite savings once, without changing
 
 const runtime = await load('extensions/lib/needle-runtime.ts');
 const assets = await load('extensions/lib/needle-assets.mjs');
+const { needlePolicy } = await load('extensions/lib/needle-policy.ts');
 const available = (await assets.verifyAssets(assets.needleAssetDir(), false).catch(() => ({ ok: false }))).ok;
 test('real Needle WASM ranks bounded observation candidates and reuses embeddings', { skip: !available && 'needle assets not installed' }, async () => {
-  const handle = runtime.createNeedleRuntime({});
+  // The live 1.5 s budget is for sessions; a cold WASM load under a parallel suite can exceed it (as in micro-intel-bench).
+  const handle = runtime.createNeedleRuntime({ policy: { ...needlePolicy(), opTimeoutMs: 10000, maxOpTimeoutMs: 30000 } });
   const raw = 'routing authentication login\n'.repeat(40) + 'routing retry exponential backoff\n'.repeat(40) + 'routing browser screenshot\n'.repeat(40);
   let successful = 0;
   const needle = async (query, candidates, topK) => {
