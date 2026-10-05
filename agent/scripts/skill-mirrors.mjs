@@ -96,20 +96,22 @@ export function findShadowed({ agentDir, home = os.homedir() }) {
 export function refreshShadowed(entries, { agentDir, now = new Date() }) {
   if (!entries.length) return { backup: undefined, refreshed: [] };
   const backup = path.join(agentDir, "backups", `skill-mirrors-${now.toISOString().replace(/[:.]/g, "-")}`);
-  const refreshed = [];
+  const refreshed = [], linked = [];
   for (const entry of entries) {
     const target = path.join(backup, path.basename(entry.root), path.relative(entry.root, entry.dir));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.cpSync(entry.dir, target, { recursive: true, errorOnExist: true, force: false });
-    const shipped = filesOf(entry.shippedDir);
+    const shipped = filesOf(entry.shippedDir), home = real(entry.dir);
     for (const [file, bytes] of shipped) {
       const out = path.join(entry.dir, file);
       fs.mkdirSync(path.dirname(out), { recursive: true });
+      // The backup holds a link, not what it points at, so writing through one would lose that file.
+      if (fs.lstatSync(out, { throwIfNoEntry: false })?.isSymbolicLink() || !inside(real(path.dirname(out)), home)) { linked.push(path.join(entry.name, file)); continue; }
       fs.writeFileSync(out, bytes);
     }
     refreshed.push(entry.name);
   }
-  return { backup, refreshed };
+  return { backup, refreshed, linked };
 }
 
 const describe = (entry) => `${entry.name}: ${entry.changed.length} file${entry.changed.length === 1 ? "" : "s"} differ (${entry.changed.slice(0, 3).join(", ")}${entry.changed.length > 3 ? ", …" : ""})${entry.externalOnly.length ? `; ${entry.externalOnly.length} extra file(s) only in your copy stay` : ""}`;
@@ -122,7 +124,7 @@ function main(argv) {
   if (flag("--apply")) {
     const result = refreshShadowed(entries, { agentDir });
     if (flag("--json")) console.log(JSON.stringify(result, null, 2));
-    else console.log(result.refreshed.length ? `Refreshed ${result.refreshed.length} skill(s) from the shipped copies; originals are in ${result.backup}\n${result.refreshed.join(", ")}` : "Nothing to refresh: no skill under your own paths differs from its shipped copy.");
+    else console.log(result.refreshed.length ? `Refreshed ${result.refreshed.length} skill(s) from the shipped copies; originals are in ${result.backup}\n${result.refreshed.join(", ")}${result.linked.length ? `\nLeft alone because they are symbolic links (update what they point at yourself): ${result.linked.join(", ")}` : ""}` : "Nothing to refresh: no skill under your own paths differs from its shipped copy.");
     return;
   }
   if (flag("--json")) { console.log(JSON.stringify(entries.map(({ name, dir, shippedDir, changed, externalOnly }) => ({ name, dir, shippedDir, changed, externalOnly })), null, 2)); return; }

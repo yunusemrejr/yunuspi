@@ -94,3 +94,20 @@ test('the command line reports by default, changes nothing without --apply, and 
   assert.match(run().stdout, /No skill under your own paths differs/);
   assert.match(run('--apply').stdout, /Nothing to refresh/);
 });
+
+test('refresh never writes through a symbolic link: the file it points at is not in the backup', () => {
+  const { tmp, agentDir, mine } = stage();
+  const elsewhere = path.join(tmp, 'elsewhere');
+  put(path.join(elsewhere, 'notes.md'), 'kept outside the skill');
+  put(path.join(elsewhere, 'tips.md'), 'my linked tips');
+  put(path.join(agentDir, 'skills', 'stale', 'tips.md'), 'shipped tips');
+  fs.rmSync(path.join(mine, 'stale', 'references'), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(mine, 'stale', 'references'));
+  fs.symlinkSync(path.join(elsewhere, 'tips.md'), path.join(mine, 'stale', 'tips.md'));
+  const result = refreshShadowed(findShadowed({ agentDir }), { agentDir });
+  assert.deepEqual(result.refreshed, ['stale']);
+  assert.deepEqual(result.linked.sort(), [path.join('stale', 'references', 'notes.md'), path.join('stale', 'tips.md')]);
+  assert.equal(fs.readFileSync(path.join(elsewhere, 'notes.md'), 'utf8'), 'kept outside the skill', 'a linked folder is not written into');
+  assert.equal(fs.readFileSync(path.join(elsewhere, 'tips.md'), 'utf8'), 'my linked tips', 'a linked file is not overwritten');
+  assert.equal(fs.readFileSync(path.join(mine, 'stale', 'SKILL.md'), 'utf8'), skill('stale', 'Use media_edit for audio.'), 'ordinary files are still refreshed');
+});
