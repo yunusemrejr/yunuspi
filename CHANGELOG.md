@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.7 — 2026-10-05
+
+**A prompt given on the command line no longer waits forever for an unused stdin.** The stall that 0.23.6 could only report is found. `yunuspi -p "prompt"` read stdin to its end whenever stdin was not a terminal, before printing anything, so a caller that leaves an unused pipe or socket open (an agent harness's shell, a CI step, a cron job) hung with no output until it was killed. On its first live occurrence the new startup notice named the step (`last completed step: createAgentSessionRuntime`, just before the stdin read), and the stuck process's stdin was an inherited socket. When the prompt comes from arguments or `@file`s, the wait for the first byte of piped input is now three seconds; after that the run continues with a note on stderr and releases the unused stdin. Input that has started arriving is still read to the end, `cat notes.txt | yunuspi -p "summarize"` works as before, and a run whose only prompt is stdin still waits for it.
+
 ## 0.23.6 — 2026-10-05
 
 **A headless run that stalls while starting says so.** A print-mode run on the installed harness wrote nothing for 400 seconds until its timeout killed it: no event, no error, no session file, so nothing showed where it was stuck. Three faithful reruns finished in about 40 seconds, so the cause was not found. A print, json or rpc run that has not finished starting after 30 seconds now writes one line to stderr, `YunusPi is still starting after 30s (last completed step: <step>).`, using the startup steps the core already marks for `PI_TIMING`. Interactive sessions are unchanged, and the notice never keeps a finished process open.
