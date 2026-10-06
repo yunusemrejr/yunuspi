@@ -173,6 +173,57 @@ test("remote redirect handling cancels discarded bodies and validates redirect b
   );
 });
 
+test("manual redirects drop origin credentials across host, port and protocol changes", async () => {
+  const { fetchRemoteUrl } = await load("extensions/pi-web-access/ssrf-protection.ts");
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+  const initial = { Authorization: "REDACTED", Cookie: "fixture=value", "Proxy-Authorization": "REDACTED", Host: "example.com", Accept: "text/plain" };
+  for (const destination of ["https://other.example/next", "https://example.com:8443/next", "http://example.com/next"]) {
+    for (const headers of [initial, new Headers(initial), Object.entries(initial)]) {
+      const calls = [];
+      const response = await fetchRemoteUrl("https://example.com/start", { headers }, { lookup, fetch: async (_url, init) => {
+        calls.push(init);
+        return calls.length === 1 ? new Response(null, { status: 302, headers: { location: destination } }) : new Response("done");
+      } });
+      await response.body.cancel();
+      const forwarded = new Headers(calls[1].headers);
+      for (const name of ["authorization", "cookie", "proxy-authorization", "host"]) assert.equal(forwarded.has(name), false, `${name} is origin scoped`);
+      assert.equal(forwarded.get("accept"), "text/plain");
+      assert.equal(new Headers(headers).get("authorization"), "REDACTED", "the caller's header collection is unchanged");
+    }
+  }
+});
+
+test("redirect method changes remove body headers and a 303 keeps HEAD", async () => {
+  const { fetchRemoteUrl } = await load("extensions/pi-web-access/ssrf-protection.ts");
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+  for (const [status, method, expected] of [[301, 'POST', 'GET'], [302, 'POST', 'GET'], [303, 'PUT', 'GET'], [303, 'HEAD', 'HEAD'], [307, 'POST', 'POST'], [308, 'POST', 'POST']]) {
+    const calls = [];
+    const response = await fetchRemoteUrl("https://example.com/start", { method, ...(method === 'HEAD' ? {} : { body: 'fixture' }), headers: { 'Content-Type': 'text/plain', 'Content-Length': '7', 'Content-Encoding': 'identity', Authorization: 'REDACTED' } }, { lookup, fetch: async (_url, init) => {
+      calls.push(init);
+      return calls.length === 1 ? new Response(null, { status, headers: { location: '/next' } }) : new Response('done');
+    } });
+    await response.body.cancel();
+    assert.equal(calls[1].method, expected);
+    const headers = new Headers(calls[1].headers);
+    assert.equal(headers.get('authorization'), 'REDACTED', 'same-origin authentication survives');
+    if (expected === 'GET') {
+      assert.equal(calls[1].body, undefined);
+      for (const name of ['content-type', 'content-length', 'content-encoding']) assert.equal(headers.has(name), false);
+    } else if (expected === 'POST') assert.equal(calls[1].body, 'fixture');
+  }
+});
+
+test("loopback permission still obeys explicit domain policy and cancelled DNS does not start", async () => {
+  const { validateRemoteUrl, lookupWithAbort } = await load("extensions/pi-web-access/ssrf-protection.ts");
+  await assert.rejects(validateRemoteUrl('http://localhost:8000/', { allowLoopback: true, domainPolicy: { allow: [], deny: ['localhost'] } }), /blocked|denied/i);
+  const controller = new AbortController();
+  let calls = 0;
+  const pending = lookupWithAbort('example.com', async () => { calls++; return []; }, controller.signal);
+  controller.abort();
+  await assert.rejects(pending, /abort/i);
+  assert.equal(calls, 0);
+});
+
 test("search pacing shares reservations between processes and obeys cancellation and Retry-After", async () => {
   clearPace();
   const {

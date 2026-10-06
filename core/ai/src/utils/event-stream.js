@@ -1,6 +1,7 @@
 // Generic event stream class for async iteration
 export class EventStream {
     queue = [];
+    queueHead = 0;
     waiting = [];
     done = false;
     finalResultPromise;
@@ -29,22 +30,39 @@ export class EventStream {
         else {
             this.queue.push(event);
         }
+        // A terminal push is sufficient to close the stream. Producers are
+        // not required to call end() again, and every parked reader must wake.
+        if (this.done) this.finishWaiting();
     }
     end(result) {
         this.done = true;
         if (result !== undefined) {
             this.resolveFinalResult(result);
         }
-        // Notify all waiting consumers that we're done
-        while (this.waiting.length > 0) {
-            const waiter = this.waiting.shift();
+        this.finishWaiting();
+    }
+    finishWaiting() {
+        for (const waiter of this.waiting) {
             waiter({ value: undefined, done: true });
         }
+        this.waiting = [];
     }
     async *[Symbol.asyncIterator]() {
         while (true) {
-            if (this.queue.length > 0) {
-                yield this.queue.shift();
+            if (this.queueHead < this.queue.length) {
+                const value = this.queue[this.queueHead];
+                this.queue[this.queueHead++] = undefined;
+                // Amortized constant-time dequeue, releasing consumed values
+                // immediately and keeping the backing array bounded.
+                if (this.queueHead === this.queue.length) {
+                    this.queue = [];
+                    this.queueHead = 0;
+                }
+                else if (this.queueHead >= 1024 && this.queueHead * 2 >= this.queue.length) {
+                    this.queue = this.queue.slice(this.queueHead);
+                    this.queueHead = 0;
+                }
+                yield value;
             }
             else if (this.done) {
                 return;

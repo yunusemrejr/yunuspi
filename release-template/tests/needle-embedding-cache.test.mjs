@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) => fs.existsSync(path.join(p, "extensions/lib/needle-embedding-cache.mjs")));
@@ -75,4 +76,45 @@ test("two connections share one file without losing writes", () => {
   assert.deepEqual([...b.get("from-a")], [...vec(6, 7)]);
   assert.deepEqual([...a.get("from-b")], [...vec(6, 8)]);
   a.close(); b.close();
+});
+
+test("a stale model connection cannot read or overwrite a new model's embeddings", () => {
+  const file = tmp();
+  const a = openEmbeddingDisk({ path: file, fingerprint: "old-model", dim: 6 });
+  const b = openEmbeddingDisk({ path: file, fingerprint: "new-model", dim: 6 });
+  try {
+    a.set("old-only", vec(6, 1));
+    assert.equal(b.get("old-only"), undefined);
+    b.set("shared-text", vec(6, 2));
+    assert.equal(a.get("shared-text"), undefined);
+    a.set("shared-text", vec(6, 3));
+    assert.deepEqual([...b.get("shared-text")], [...vec(6, 2)]);
+    assert.equal(a.size(), 0);
+    assert.equal(b.size(), 1);
+    for (let i = 0; i < 512; i++) a.set(`stale-${i}`, vec(6, i));
+    assert.equal(b.size(), 1, "stale retention cannot prune the new model");
+  } finally { a.close(); b.close(); }
+});
+
+test("invalid retention and vectors are ignored without disabling a healthy cache", () => {
+  const file = tmp();
+  for (const maxRows of [NaN, Infinity, -1, 0, 1.5]) assert.equal(openEmbeddingDisk({ path: file, fingerprint: "m", dim: 4, maxRows }), null);
+  for (const keepRows of [NaN, Infinity, -1, 0, 1.5]) assert.equal(openEmbeddingDisk({ path: file, fingerprint: "m", dim: 4, keepRows }), null);
+  const store = openEmbeddingDisk({ path: file, fingerprint: "m", dim: 4 });
+  try {
+    store.set("nan", new Float32Array([NaN, 1, 2, 3]));
+    store.set("infinite", new Float32Array([Infinity, 1, 2, 3]));
+    for (let i = 0; i < 4; i++) { store.get({}); store.set({}, vec(4, i)); }
+    assert.equal(store.size(), 0);
+    store.set("valid", vec(4, 2));
+    assert.deepEqual([...store.get("valid")], [...vec(4, 2)]);
+  } finally { store.close(); }
+});
+
+test("an incompatible SQLite schema disables the optional cache without throwing", () => {
+  const file = tmp();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  try { db.exec("CREATE TABLE emb(wrong_column TEXT)"); } finally { db.close(); }
+  assert.equal(openEmbeddingDisk({ path: file, fingerprint: "m", dim: 4 }), null);
 });

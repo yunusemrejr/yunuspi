@@ -30,39 +30,48 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 export function openEmbeddingDisk(options) {
   const { path, fingerprint, dim } = options;
   const maxRows = options.maxRows ?? EMBEDDING_CACHE_MAX_ROWS;
-  const keepRows = Math.min(options.keepRows ?? EMBEDDING_CACHE_KEEP_ROWS, maxRows);
-  if (typeof path !== "string" || !path || typeof fingerprint !== "string" || !Number.isSafeInteger(dim) || dim <= 0) return null;
+  const requestedKeepRows = options.keepRows ?? EMBEDDING_CACHE_KEEP_ROWS;
+  const keepRows = Math.min(requestedKeepRows, maxRows);
+  if (typeof path !== "string" || !path || typeof fingerprint !== "string" || !fingerprint || !Number.isSafeInteger(dim) || dim <= 0 ||
+      !Number.isSafeInteger(maxRows) || maxRows <= 0 || !Number.isSafeInteger(requestedKeepRows) || requestedKeepRows <= 0) return null;
   let db;
+  let read, write, count, prune;
+  const identity = `${fingerprint}:${dim}`;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     db = new DatabaseSync(path);
     db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=2000;");
     db.exec("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL); CREATE TABLE IF NOT EXISTS emb(key TEXT PRIMARY KEY, vec BLOB NOT NULL);");
-    const identity = `${fingerprint}:${dim}`;
     const stored = db.prepare("SELECT v FROM meta WHERE k = 'identity'").get();
     if (stored?.v !== identity) {
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.exec("DELETE FROM emb");
-        db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES ('identity', ?)").run(identity);
+        // Another opener may have initialized the same model while we waited
+        // for the write lock. Recheck before discarding its completed work.
+        if (db.prepare("SELECT v FROM meta WHERE k = 'identity'").get()?.v !== identity) {
+          db.exec("DELETE FROM emb");
+          db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES ('identity', ?)").run(identity);
+        }
         db.exec("COMMIT");
       } catch (error) { try { db.exec("ROLLBACK"); } catch { /* connection state is reset below */ } throw error; }
     }
+    // Old workers can retain a connection across a model update. Guard each
+    // statement atomically, so they neither read nor overwrite the new model.
+    read = db.prepare("SELECT vec FROM emb WHERE key = ? AND (SELECT v FROM meta WHERE k = 'identity') = ?");
+    write = db.prepare("INSERT OR REPLACE INTO emb(key, vec) SELECT ?, ? WHERE (SELECT v FROM meta WHERE k = 'identity') = ?");
+    count = db.prepare("SELECT CASE WHEN (SELECT v FROM meta WHERE k = 'identity') = ? THEN (SELECT COUNT(*) FROM emb) ELSE 0 END AS n");
+    prune = db.prepare("DELETE FROM emb WHERE (SELECT v FROM meta WHERE k = 'identity') = ? AND rowid <= (SELECT rowid FROM emb ORDER BY rowid DESC LIMIT 1 OFFSET ?)");
   } catch {
     try { db?.close(); } catch { /* closed or never opened */ }
     return null;
   }
-  const read = db.prepare("SELECT vec FROM emb WHERE key = ?");
-  const write = db.prepare("INSERT OR REPLACE INTO emb(key, vec) VALUES (?, ?)");
-  const count = db.prepare("SELECT COUNT(*) AS n FROM emb");
-  const prune = db.prepare("DELETE FROM emb WHERE rowid <= (SELECT rowid FROM emb ORDER BY rowid DESC LIMIT 1 OFFSET ?)");
   let errors = 0, writes = 0, dead = false;
   const fail = () => { if (++errors >= MAX_CONSECUTIVE_ERRORS) { dead = true; try { db.close(); } catch { /* already closed */ } } };
   return {
     get(key) {
-      if (dead) return undefined;
+      if (dead || typeof key !== "string" || !key) return undefined;
       try {
-        const row = read.get(key);
+        const row = read.get(key, identity);
         errors = 0;
         const blob = row?.vec;
         if (!blob || blob.byteLength !== dim * 4) return undefined;
@@ -75,16 +84,17 @@ export function openEmbeddingDisk(options) {
       } catch { fail(); return undefined; }
     },
     set(key, vector) {
-      if (dead || !(vector instanceof Float32Array) || vector.length !== dim) return;
+      if (dead || typeof key !== "string" || !key || !(vector instanceof Float32Array) || vector.length !== dim) return;
+      for (const value of vector) if (!Number.isFinite(value)) return;
       try {
-        write.run(key, new Uint8Array(vector.buffer, vector.byteOffset, dim * 4));
+        const result = write.run(key, new Uint8Array(vector.buffer, vector.byteOffset, dim * 4), identity);
         errors = 0;
-        if (++writes % PRUNE_EVERY_WRITES === 0 && count.get().n > maxRows) prune.run(keepRows);
+        if (result.changes && ++writes % PRUNE_EVERY_WRITES === 0 && count.get(identity).n > maxRows) prune.run(identity, keepRows);
       } catch { fail(); }
     },
     size() {
       if (dead) return 0;
-      try { return count.get().n; } catch { fail(); return 0; }
+      try { return count.get(identity).n; } catch { fail(); return 0; }
     },
     close() {
       dead = true;

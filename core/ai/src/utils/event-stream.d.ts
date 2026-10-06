@@ -1,6 +1,7 @@
 import type { AssistantMessage, AssistantMessageEvent } from "../types.ts";
 export declare class EventStream<T, R = T> implements AsyncIterable<T> {
     private queue;
+    private queueHead;
     private waiting;
     private done;
     private finalResultPromise;
@@ -10,6 +11,7 @@ export declare class EventStream<T, R = T> implements AsyncIterable<T> {
     constructor(isComplete: (event: T) => boolean, extractResult: (event: T) => R);
     push(event: T): void;
     end(result?: R): void;
+    private finishWaiting;
     [Symbol.asyncIterator](): AsyncIterator<T>;
     result(): Promise<R>;
 }

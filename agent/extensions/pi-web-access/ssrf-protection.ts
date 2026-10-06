@@ -204,7 +204,10 @@ function throwIfAborted(signal?: AbortSignal): void {
  */
 export async function lookupWithAbort(hostname: string, lookup: Lookup, signal?: AbortSignal): Promise<LookupAddress[]> {
 	throwIfAborted(signal);
-	const lookupPromise = Promise.resolve().then(() => lookup(hostname));
+    const lookupPromise = Promise.resolve().then(() => {
+        throwIfAborted(signal);
+        return lookup(hostname);
+    });
 	if (!signal) return lookupPromise;
 
 	let onAbort: (() => void) | undefined;
@@ -231,6 +234,8 @@ export async function validateRemoteUrl(rawUrl: string | URL, options: Validatio
 
 	const hostname = normalizeHostname(url.hostname);
 	if (!hostname) throw new Error("URL must include a hostname");
+	const allowRanges = parseAllowRanges(options.allowRanges);
+	assertDomainPolicy(hostname, options.domainPolicy);
 	if (hostname === "localhost") {
 		if (options.allowLoopback === true) return url;
 		throw new Error(`Blocked internal hostname: ${hostname}`);
@@ -238,9 +243,6 @@ export async function validateRemoteUrl(rawUrl: string | URL, options: Validatio
 	if (hostname.endsWith(".localhost")) {
 		throw new Error(`Blocked internal hostname: ${hostname}`);
 	}
-
-	const allowRanges = parseAllowRanges(options.allowRanges);
-	assertDomainPolicy(hostname, options.domainPolicy);
 
 	if (net.isIP(hostname)) {
 		const addressAllowRanges = options.allowLoopback === true
@@ -290,6 +292,7 @@ export async function fetchRemoteUrl(
 		: init;
 
 	for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+		throwIfAborted(validationSignal);
 		const response = await fetchImpl(current, { ...requestInit, redirect: "manual" });
 		if (!REDIRECT_STATUSES.has(response.status)) return response;
 
@@ -303,9 +306,19 @@ export async function fetchRemoteUrl(
 
 		const from = current;
 		current = await validateRemoteUrl(new URL(location, current), validationOptions);
-		if (response.status === 303 || ((response.status === 301 || response.status === 302) && requestInit.method?.toUpperCase() === "POST")) {
+		const method = requestInit.method?.toUpperCase() ?? "GET";
+		if ((response.status === 303 && method !== "GET" && method !== "HEAD") || ((response.status === 301 || response.status === 302) && method === "POST")) {
 			const { body: _body, ...nextInit } = requestInit;
-			requestInit = { ...nextInit, method: "GET" };
+			const headers = new Headers(nextInit.headers);
+			for (const name of ["content-encoding", "content-language", "content-location", "content-type", "content-length"]) headers.delete(name);
+			requestInit = { ...nextInit, headers: Object.fromEntries(headers), method: "GET" };
+		}
+		if (from.origin !== current.origin) {
+			// Manual hops bypass Fetch's automatic origin credential filtering.
+			// Never forward a source origin's credentials or Host override.
+			const headers = new Headers(requestInit.headers);
+			for (const name of ["authorization", "proxy-authorization", "cookie", "host"]) headers.delete(name);
+			requestInit = { ...requestInit, headers: Object.fromEntries(headers) };
 		}
 		if (options.onRedirect) requestInit = options.onRedirect({ from, to: current, init: requestInit, response });
 	}

@@ -2,11 +2,35 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const lib = path.join(import.meta.dirname, "..", "agent/extensions/lib");
 const guard = await import(pathToFileURL(path.join(lib, "memory-guard.ts")).href);
 const studio = await import(pathToFileURL(path.join(lib, "video-studio.ts")).href);
+
+test("large process trees count each descendant exactly once and exclude unrelated processes", () => {
+  const readdir = fs.readdirSync, read = fs.readFileSync;
+  const count = 7000;
+  fs.readdirSync = () => Array.from({ length: count + 1 }, (_, i) => String(i + 1000));
+  fs.readFileSync = file => {
+    const pid = Number(String(file).split('/')[2]);
+    const fields = Array(22).fill('0');
+    fields[0] = 'S';
+    fields[1] = String(pid === 1000 || pid === 1000 + count ? 1 : pid - 1);
+    fields[21] = '256';
+    return `${pid} (synthetic worker) ${fields.join(' ')}`;
+  };
+  syncBuiltinESMExports();
+  try {
+    const usage = guard.treeUsage(1000);
+    assert.equal(usage.pids.length, count);
+    assert.equal(new Set(usage.pids).size, count);
+    assert.equal(usage.mb, count);
+    assert.equal(usage.pids.at(-1), 1000 + count - 1);
+  } finally { fs.readdirSync = readdir; fs.readFileSync = read; syncBuiltinESMExports(); }
+});
 
 test("tree usage counts a process and its children", async () => {
   const child = spawn("sh", ["-c", "node -e 'const b = Buffer.alloc(120 * 1024 * 1024, 1); setTimeout(() => {}, 4000)' & wait"], { stdio: "ignore" });

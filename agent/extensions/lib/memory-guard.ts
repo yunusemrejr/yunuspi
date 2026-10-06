@@ -41,8 +41,21 @@ export function treeUsage(rootPid: number): { mb: number; pids: number[] } {
       } catch { /* exited while scanning */ }
     }
   } catch { return { mb: 0, pids: [rootPid] }; }
+  const children = new Map<number, number[]>();
+  for (const [pid, row] of rows) {
+    const siblings = children.get(row.ppid);
+    if (siblings) siblings.push(pid);
+    else children.set(row.ppid, [pid]);
+  }
   const pids = [rootPid];
-  for (let i = 0; i < pids.length; i++) for (const [pid, row] of rows) if (row.ppid === pids[i] && !pids.includes(pid)) pids.push(pid);
+  const seen = new Set(pids);
+  for (let i = 0; i < pids.length; i++) {
+    for (const pid of children.get(pids[i]) ?? []) {
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      pids.push(pid);
+    }
+  }
   return { mb: Math.round(pids.reduce((sum, pid) => sum + (rows.get(pid)?.rssKb ?? 0), 0) / MB), pids };
 }
 

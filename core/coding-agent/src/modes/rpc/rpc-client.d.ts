@@ -12,7 +12,7 @@ import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.t
 import type { JsonAgentSessionEvent } from "../json-event.ts";
 import type { RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
 export interface RpcClientOptions {
-    /** Path to the CLI entry point (default: searches for dist/cli.js) */
+    /** Path to the CLI entry point (default: this owned runtime's cli.js) */
     cliPath?: string;
     /** Working directory for the agent */
     cwd?: string;
@@ -37,6 +37,7 @@ export declare class RpcClient {
     private stopReadingStdout;
     private eventListeners;
     private pendingRequests;
+    private eventWaiters;
     private requestId;
     private stderr;
     private exitError;
@@ -246,6 +247,7 @@ export declare class RpcClient {
      */
     promptAndWait(message: string, images?: ImageContent[], timeout?: number): Promise<JsonAgentSessionEvent[]>;
     private handleLine;
+    private createEventWaiter;
     private createProcessExitError;
     private rejectPendingRequests;
     private send;

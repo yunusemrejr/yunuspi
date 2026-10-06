@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.8 — 2026-10-06
+
+**Finished streams release every reader.** A terminal event previously woke only one waiting reader unless the producer called `end` separately. All readers now finish, queued events retain their order, and draining large queues uses amortized constant-time removal.
+
+**RPC failures settle promptly.** Failed prompt and mutation responses now reject instead of appearing successful. Stopping the client or losing its child rejects outstanding commands and event waits, removes their timers and listeners, and permits a clean restart. One settled event reaches every waiter even when another subscriber unsubscribes or throws. The client launches its own runtime with the current Node executable, and diagnostic stderr is bounded.
+
+**Long subprocess output stays bounded and readable.** Progress lines and stdout/stderr tails preserve split UTF-8. A command printing megabytes without a newline keeps a bounded tail with an explicit omission marker; progress callback errors stop the owned process instead of escaping into the host. Cancellation prevents further buffered progress, and invalid deadlines fail before spawning.
+
+**Process-tree memory checks scale with the tree.** The watchdog builds parent-to-child links once rather than scanning every process for every descendant. A synthetic 7,000-process chain fell from about 1.6 seconds to 44 milliseconds on the audit machine. Fragmented RPC JSONL records likewise scan only incoming chunks and release buffered data when detached.
+
+**Embedding cache connections stay with their model.** A worker holding an old SQLite connection could read or overwrite another model's vectors after the cache identity changed. Every operation now checks the connection's model identity atomically; incompatible schemas and invalid vectors remain recoverable cache misses.
+
+**Redirects keep credentials within their origin.** Cross-origin hops strip authorization, cookies and explicit host headers. Redirects that change a request to GET remove its body headers, while 303 preserves GET and HEAD. Explicit domain restrictions also apply to loopback shortcuts, and an aborted request does not start another DNS lookup or redirect fetch.
+
+**Office ZIPs reject ambiguous archives and read their own output.** Duplicate names, encrypted or multi-disk entries, unsafe names and central-directory overruns are refused. An end-of-directory signature inside a ZIP comment no longer hides the actual directory. Highly compressible entries are stored without compression when needed to stay within the reader's expansion limit.
+
 ## 0.23.7 — 2026-10-05
 
 **A prompt given on the command line no longer waits forever for an unused stdin.** The stall that 0.23.6 could only report is found. `yunuspi -p "prompt"` read stdin to its end whenever stdin was not a terminal, before printing anything, so a caller that leaves an unused pipe or socket open (an agent harness's shell, a CI step, a cron job) hung with no output until it was killed. On its first live occurrence the new startup notice named the step (`last completed step: createAgentSessionRuntime`, just before the stdin read), and the stuck process's stdin was an inherited socket. When the prompt comes from arguments or `@file`s, the wait for the first byte of piped input is now three seconds; after that the run continues with a note on stderr and releases the unused stdin. Input that has started arriving is still read to the end, `cat notes.txt | yunuspi -p "summarize"` works as before, and a run whose only prompt is stdin still waits for it.

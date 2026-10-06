@@ -16,6 +16,33 @@ const { readOffice, placeholderHits } = await lib('office-read.ts');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'office-files-'));
 const codes = (read, severity) => read.findings.filter(f => !severity || f.severity === severity).map(f => f.code);
+
+test('zip: repetitive generated entries remain readable under the same bomb limits', () => {
+  const text = 'x'.repeat(1_000_000);
+  const zip = openZip(writeZip([{ name: 'repetitive.txt', data: text }]));
+  assert.equal(zip.read('repetitive.txt').length, text.length);
+  assert.equal(zip.integrityProblems().length, 0);
+});
+
+test('zip: duplicate names and forged central directory lengths are rejected', () => {
+  const buffer = writeZip([{ name: 'first.txt', data: 'A' }, { name: 'other.txt', data: 'B' }]);
+  const duplicate = Buffer.from(buffer), eocd = buffer.length - 22;
+  const central = buffer.readUInt32LE(eocd + 16);
+  duplicate.copy(duplicate, central + 46 + 9 + 46, central + 46, central + 46 + 9);
+  assert.throws(() => openZip(duplicate), /Duplicate entry name/);
+  const truncated = Buffer.from(buffer);
+  truncated.writeUInt32LE(46, eocd + 12);
+  assert.throws(() => openZip(truncated), /declared bounds|malformed/);
+  assert.equal(safeEntryName('C:/outside.txt'), false);
+});
+
+test('zip: an end-record signature within an archive comment is not mistaken for the real end', () => {
+  const buffer = writeZip([{ name: 'a.txt', data: 'hello' }]);
+  const commented = Buffer.concat([buffer, Buffer.alloc(30)]);
+  commented.writeUInt16LE(30, buffer.length - 2);
+  commented.writeUInt32LE(0x06054b50, buffer.length);
+  assert.equal(openZip(commented).text('a.txt'), 'hello');
+});
 /** A valid 8x8 PNG made from raw zlib data, so tests need no image library. */
 function png(width = 8, height = 8) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
