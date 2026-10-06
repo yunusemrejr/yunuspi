@@ -318,3 +318,23 @@ test('tabular data work gets a profile-then-reconcile checklist, and code work o
   for (const prompt of ['What is a CSV file?', 'Fix the CSV parser in the codebase', 'Explain how to merge two tables in SQL', 'Who exported the data?'])
     assert.ok(!selected(prompt).ids.includes('data-wrangling'), prompt);
 });
+
+test('research, reinforcement learning and edge work stage executable evidence without confusing preparation with execution', () => {
+  const research = selected('Research recent papers about embedding quality and write a report');
+  assert.ok(research.ids.includes('research')); assert.ok(research.tools.includes('research_toolkit'));
+  assert.ok(research.stages.some(stage => stage.id === 'research-evidence'));
+  assert.ok(!selected('Research the codebase structure and explain auth').ids.includes('research'));
+  assert.deepEqual(selected('What is reinforcement learning?').ids, []);
+  const local = selected('Train my small neural model for an edge device with reinforcement learning');
+  for (const id of ['ai-ml', 'reinforcement-learning', 'edge-ml']) assert.ok(local.ids.includes(id));
+  assert.ok(local.tools.includes('ml_lab'));
+  assert.ok(local.stages.some(stage => stage.id === 'training-smoke'));
+  assert.ok(local.stages.some(stage => stage.id === 'model-evaluation'));
+  assert.ok(!selected('Prepare a Colab notebook for training an embedding model').stages.some(stage => stage.id === 'training-smoke'));
+  const code = selected('Refactor Python source to remove redundant classes and improve code quality');
+  assert.ok(code.stages.some(stage => stage.id === 'source-quality'));
+  const ledger = createPipelineLedger();
+  record(code, ledger, 'discovery', 'inspection'); record(code, ledger, 'implementation', 'artifact'); record(code, ledger, 'validation', 'execution');
+  assert.throws(() => record(code, ledger, 'delivery', 'artifact'), /unresolved/);
+  record(code, ledger, 'source-quality', 'inspection'); record(code, ledger, 'delivery', 'artifact');
+});

@@ -818,3 +818,38 @@ test('the competence store can be disabled and never changes behavior for sessio
   for (let i = 0; i < 30; i++) await f.call('read', { path: `file-${i}.txt` }, { content: [{ type: 'text', text: `contents ${i}` }] });
   assert.equal(currentExecutionProfile(f.ctx).control.level, 'standard', 'no model route means no measurement');
 });
+
+test('research dossier gaps block native stages and complete current evidence settles inspection', async t => {
+  const f = fixture(t);
+  await f.emit('session_start');
+  await f.start('Research recent papers on embedding quality and write a report');
+  assert.deepEqual((await f.status()).pipelines, ['research']);
+  for (const [stageId, evidenceKind] of [['discovery', 'inspection'], ['implementation', 'artifact']])
+    await f.runTool({ action: 'record', stageId, status: 'passed', evidenceKind, source: 'workspace:research-draft' });
+  const result = claimsWithGaps => ({ details: { operation: 'dossier', counts: { claims: 2, claimsWithGaps } } });
+  await f.call('research_toolkit', { action: 'dossier' }, result(1));
+  let state = await f.status();
+  for (const stageId of ['research-evidence', 'validation'])
+    assert.ok(state.evidence.some(row => row.stageId === stageId && row.status === 'blocked'));
+  await f.call('research_toolkit', { action: 'dossier' }, result(0));
+  state = await f.status();
+  for (const stageId of ['research-evidence', 'validation'])
+    assert.ok(state.evidence.some(row => row.stageId === stageId && row.status === 'passed'));
+  await f.call('research_toolkit', { action: 'dossier' }, { isError: true, ...result(0) });
+  assert.ok((await f.status()).pending.some(row => row.id === 'delivery'), 'an evidence check is not report delivery');
+});
+
+test('native source baseline keeps missing coverage unresolved and rejects stale revision results', async t => {
+  const f = await prepared(t, 'Refactor Python source to remove redundant classes and improve code quality');
+  const details = scope => ({ details: { operation: 'baseline', status: 'inspected', scope: { targetFiles: 1, truncated: false, missingFocus: [], ...scope } } });
+  await f.call('code_quality', { operation: 'baseline' }, details({ missingFocus: ['unreadable.py'] }));
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'source-quality' && row.status === 'blocked'));
+  await f.call('code_quality', { operation: 'baseline' }, details({}));
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'source-quality' && row.status === 'passed'));
+  const old = await f.beginCall('code_quality', { operation: 'baseline' });
+  await f.write('parser.mjs', 'export const value = 2;\n');
+  await f.finish(old, details({}));
+  assert.ok(!(await f.status()).evidence.some(row => row.stageId === 'source-quality' && row.status === 'passed'), 'source changes retire the baseline even when its result arrives late');
+  await f.call('code_quality', { operation: 'baseline' }, details({ truncated: true }));
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'source-quality' && row.status === 'blocked'));
+});

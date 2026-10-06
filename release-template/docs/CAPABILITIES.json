@@ -2124,7 +2124,7 @@
     {
       "id": "code-quality",
       "group": "engineering",
-      "summary": "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.",
+      "summary": "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby or bounded cross-directory code. baseline combines source slop/security/backend/UI cues, DRY groups and structure in one call. Advisory evidence with file:line, not a quality score.",
       "entrypoints": [
         "code_quality"
       ],
@@ -2139,6 +2139,7 @@
         {
           "name": "operation",
           "values": [
+            "baseline",
             "duplicates",
             "slop",
             "prose",
@@ -3267,9 +3268,67 @@
       "commands": []
     },
     {
+      "id": "ml-lab",
+      "group": "engineering",
+      "summary": "Executable ML baseline: split/content/group/time leakage checks, classification/regression slice metrics and paired baseline intervals, correct RL termination/truncation targets, host/memory preflight, static Colab notebook checks and resumable CPU MLP, offline tabular Q, embedding and LoRA training recipes. No hidden model calls, dependency installation or cloud allocation. Actual trainers run through existing execution/background owners and preserve checkpoints, hashes and metrics.",
+      "entrypoints": [
+        "ml_lab"
+      ],
+      "tools": [
+        "ml_lab",
+        "bg_run",
+        "bg_status",
+        "bg_logs",
+        "browser_session",
+        "sys_probe",
+        "env_audit"
+      ],
+      "options": [
+        {
+          "name": "operation",
+          "values": [
+            "preflight",
+            "split_audit",
+            "evaluate",
+            "rl_targets",
+            "notebook",
+            "recipe"
+          ],
+          "summary": "Bounded deterministic check or executable recipe."
+        },
+        {
+          "name": "path|data",
+          "summary": "Workspace JSON/ipynb snapshot or inline operation data; files up to 256 KiB."
+        },
+        {
+          "name": "recipe",
+          "values": [
+            "tiny_mlp",
+            "tabular_q",
+            "embedding",
+            "lora"
+          ],
+          "summary": "Trainer contract with smoke/resume argv and a staged Colab notebook."
+        }
+      ],
+      "related": [
+        "code-quality",
+        "web-and-media",
+        "memory-evidence"
+      ],
+      "sourceFiles": [
+        "agent/extensions/ml-lab.ts",
+        "agent/extensions/lib/ml-lab.ts",
+        "agent/scripts/ml-lab.py",
+        "agent/scripts/ml-transformer-train.py"
+      ],
+      "doc": "docs/RESEARCH-CODE-ML.md",
+      "commands": []
+    },
+    {
       "id": "research-toolkit",
       "group": "web_media",
-      "summary": "Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.",
+      "summary": "Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. dossier checks exact source quotations/hashes, duplicate snapshots and claim coverage, exposes contradictory citation labels, and builds an attributable Markdown report. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.",
       "entrypoints": [
         "research_toolkit"
       ],
@@ -3284,7 +3343,8 @@
             "profile",
             "lead",
             "company",
-            "source"
+            "source",
+            "dossier"
           ],
           "summary": "Toolkit operation."
         },
@@ -3321,7 +3381,8 @@
       "sourceFiles": [
         "agent/extensions/research-toolkit.ts",
         "agent/extensions/lib/project-profile.ts",
-        "agent/extensions/lib/prior-art.ts"
+        "agent/extensions/lib/prior-art.ts",
+        "agent/extensions/lib/research-evidence.ts"
       ],
       "doc": "docs/ISOLATION-AND-WEB.md",
       "commands": []
@@ -4303,6 +4364,12 @@
         "kind": "literal"
       },
       {
+        "name": "ml_lab",
+        "source": "agent/extensions/ml-lab.ts",
+        "line": 11,
+        "kind": "literal"
+      },
+      {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
         "line": 108,
@@ -4443,7 +4510,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 91,
+        "line": 93,
         "kind": "literal"
       },
       {
@@ -4594,7 +4661,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 410,
+        "line": 422,
         "kind": "literal"
       },
       {
@@ -4955,6 +5022,12 @@
         "kind": "literal"
       },
       {
+        "name": "ml_lab",
+        "source": "agent/extensions/ml-lab.ts",
+        "line": 11,
+        "kind": "literal"
+      },
+      {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
         "line": 821,
@@ -5047,7 +5120,7 @@
       {
         "name": "research_toolkit",
         "source": "agent/extensions/research-toolkit.ts",
-        "line": 91,
+        "line": 93,
         "kind": "literal"
       },
       {
@@ -5113,7 +5186,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 410,
+        "line": 422,
         "kind": "literal"
       },
       {
@@ -5419,11 +5492,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 734,
-      "registrationSites": 89,
+      "sourceFiles": 737,
+      "registrationSites": 90,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 151,
-      "uniqueStableTools": 150,
+      "stableRegistrationRows": 152,
+      "uniqueStableTools": 151,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5544,6 +5617,10 @@
       },
       {
         "path": "agent/extensions/micro-intelligence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/ml-lab.ts",
         "exists": true
       },
       {
@@ -6045,6 +6122,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/ml-lab.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/model-competence.ts",
         "exists": true
       },
@@ -6238,6 +6319,10 @@
       },
       {
         "path": "agent/extensions/lib/requirement-ledger.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/research-evidence.ts",
         "exists": true
       },
       {
@@ -8615,6 +8700,10 @@
       {
         "name": "RELEASE-0.23.8-VERIFICATION.md",
         "path": "docs/RELEASE-0.23.8-VERIFICATION.md"
+      },
+      {
+        "name": "RESEARCH-CODE-ML.md",
+        "path": "docs/RESEARCH-CODE-ML.md"
       },
       {
         "name": "REVIEWS-AND-COUNCILS.md",

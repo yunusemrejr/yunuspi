@@ -5,6 +5,9 @@ description: Engineer RL environments, rollout buffers, reward functions and pol
 
 # Reinforcement Learning
 
+Use `ml_lab` operation `rl_targets` for hand-computable one-step targets and `evaluate` for aligned frozen baseline comparisons with slice breakdown. The shipped `tabular_q` recipe is a bounded offline reference with deterministic resume; held-out Bellman residual alone is not learned-policy success. Evaluate the frozen policy without updates in the actual environment on distinct seeds before claiming a gain.
+
+
 Define observation, action, reward, episode boundary and evaluation objective. Check that the observation contains information available at decision time. Document partial observability rather than leaking simulator state.
 
 1. Validate reset/step shapes, dtypes, action bounds, reward scale and seed behavior with the installed environment API. Run a random or simple scripted policy before training.

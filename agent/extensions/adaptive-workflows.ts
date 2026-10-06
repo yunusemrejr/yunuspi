@@ -314,6 +314,18 @@ export default function adaptiveWorkflows(pi: any) {
         observeCheckFailure(ownedChecks.get(receipt.callId));
     }
     const source = `tool:${event.toolCallId}`;
+    if (call.revision === revision && !failed && event.toolName === 'code_quality' && event.input?.operation === 'baseline') {
+      const data = event.details;
+      if (data?.operation === 'baseline' && data.status === 'inspected' && data.scope?.targetFiles > 0)
+        record('source-quality', 'inspection', source, data.scope.truncated || data.scope.missingFocus?.length ? 'blocked' : 'passed');
+    }
+    if (call.revision === revision && !failed && event.toolName === 'research_toolkit' && event.input?.action === 'dossier') {
+      const data = event.details;
+      if (data?.operation === 'dossier' && data.counts?.claims > 0) {
+        record('research-evidence', 'inspection', source, data.counts.claimsWithGaps ? 'blocked' : 'passed');
+        if (selection.ids.every(id => id === 'research')) record('validation', 'inspection', source, data.counts.claimsWithGaps ? 'blocked' : 'passed');
+      }
+    }
     const mediaOnly = selection.ids.length > 0 && selection.ids.every(id => ['video', 'audio', 'svg-art'].includes(id));
     const inspectedSource = typeof event.details?.path === 'string' || typeof event.details?.source === 'string' || event.details?.files?.length > 0;
     if (mediaOnly && call.revision === revision && !failed && ['media_info', 'audio_analyze', 'svg_inspect'].includes(event.toolName) && inspectedSource && !event.details?.disabled) {

@@ -5,6 +5,9 @@ description: Prepare and operate Google Colab model-training workflows through n
 
 # Google Colab training
 
+Use `ml_lab` recipe for actual trainer paths and the [staged training notebook](assets/ml-lab-training.ipynb). Audit a prepared copy with `ml_lab` operation `notebook`; upload only task-authorized data/modules via the available browser or runtime connection. Its seven tagged stages separate config, preflight, data, smoke, train, evaluate and export. Training writes new run directories with resumable checkpoints and receipts; inspect existing state before rerunning a cell. No runtime is inferred from a notebook on disk.
+
+
 Choose the actual connection mode before writing execution instructions. A notebook file on disk is a prepared deliverable, not a connected runtime. Discover available browser, CLI or MCP capabilities; report which runtime was actually reached. Consumer Colab, Colab Enterprise and a local Jupyter runtime have different identity, billing and storage behavior.
 
 Read only the relevant reference:

@@ -643,25 +643,31 @@ const GENERATED = /(?:\.min\.[a-z]+|\.bundle\.js|\.generated\.[a-z]+|-lock\.json
 export interface Collected { files: SourceFile[]; skipped: number; truncated: boolean; }
 /** Collect supported source files under explicit paths, inside the workspace,
  * without following symlinks, within file-count and byte budgets. */
-export async function collectSources(cwd: string, inputs: string[], accept: (file: string) => boolean, budget: { files: number; bytes: number; fileBytes: number; avgLine?: number } = { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 }): Promise<Collected> {
+export async function collectSources(cwd: string, inputs: string[], accept: (file: string) => boolean, budget: { files: number; bytes: number; fileBytes: number; avgLine?: number } = { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 }, signal?: AbortSignal): Promise<Collected> {
   const root = await fs.realpath(cwd);
+  const { readSourceFiles } = await import('../pi-lens/context-code.mjs');
   const files: SourceFile[] = [];
   let bytes = 0, skipped = 0, truncated = false;
   const inside = (p: string) => { const r = path.relative(root, p); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
   const add = async (abs: string) => {
+    signal?.throwIfAborted();
     if (files.length >= budget.files || bytes >= budget.bytes) { truncated = true; return; }
     if (!accept(abs) || GENERATED.test(abs)) { skipped++; return; }
     const stat = await fs.lstat(abs).catch(() => undefined);
     if (!stat?.isFile() || stat.size > budget.fileBytes) { skipped++; return; }
-    const source = await fs.readFile(abs, "utf8").catch(() => undefined);
-    if (source === undefined || source.includes("\0")) { skipped++; return; }
+    if (bytes + stat.size > budget.bytes) { truncated = true; return; }
+    const snapshots = await readSourceFiles(root, [path.relative(root, abs)], signal, accept, { fileBytes: budget.fileBytes, totalBytes: budget.bytes - bytes });
+    const snapshot = snapshots.files[0];
+    if (!snapshot) { skipped++; return; }
+    const source = snapshot.source;
     // Minified or data-like files: very long average lines.
     const newlines = (source.match(/\n/g) ?? []).length + 1;
     if (source.length / newlines > (budget.avgLine ?? 400)) { skipped++; return; }
-    bytes += stat.size;
-    files.push({ path: path.relative(root, abs) || path.basename(abs), source });
+    bytes += snapshot.bytes;
+    files.push({ path: snapshot.path, source });
   };
   const walk = async (dir: string, depth: number): Promise<void> => {
+    signal?.throwIfAborted();
     if (depth > 24 || truncated) return;
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -688,34 +694,65 @@ export async function collectSources(cwd: string, inputs: string[], accept: (fil
 export async function changedFiles(cwd: string, base = "HEAD", signal?: AbortSignal): Promise<string[]> {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/~^@{}-]{0,119}$/.test(base)) throw new Error("base is not a valid revision");
   const git = (args: string[]) => exec("git", ["-c", "core.quotepath=off", ...args], { cwd, signal, timeout: 15_000, maxBuffer: 4 * 1024 * 1024 }).then(r => r.stdout);
-  const tracked = await git(["diff", "--name-only", "--relative", "--diff-filter=ACMR", base, "--"]);
-  const untracked = await git(["ls-files", "--others", "--exclude-standard"]);
-  return [...new Set([...tracked.split("\n"), ...untracked.split("\n")].map(s => s.trim()).filter(Boolean))].slice(0, 400);
+  const tracked = await git(["diff", "-z", "--name-only", "--relative", "--diff-filter=ACMR", base, "--"]);
+  const untracked = await git(["ls-files", "-z", "--others", "--exclude-standard"]);
+  return [...new Set([...tracked.split("\0"), ...untracked.split("\0")].filter(Boolean))].slice(0, 400);
 }
 export const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
-/** Same-directory files of the same language family plus other paths (for
- * example files edited earlier in the session), within small budgets. Used
- * by the edit hook to spot a new block that repeats nearby code. */
+/** Same-language candidates from recent edits, neighbours and the project.
+ * No index or project code runs. A small Git file list (or bounded directory
+ * walk without Git) catches cross-directory copies while the full on-demand
+ * duplicates operation remains the comprehensive owner. */
 export async function neighborSources(cwd: string, file: string, others: string[], budget = { files: 24, bytes: 2 * 1024 * 1024, fileBytes: 256 * 1024 }): Promise<SourceFile[]> {
   const root = await fs.realpath(cwd), family = familyOf(file);
   if (!family) return [];
+  const { readSourceFiles } = await import('../pi-lens/context-code.mjs');
   const out: SourceFile[] = [];
   let bytes = 0;
   const take = async (rel: string) => {
     if (out.length >= budget.files || bytes >= budget.bytes || rel === file || familyOf(rel) !== family || GENERATED.test(rel)) return;
     const abs = path.resolve(root, rel), relative = path.relative(root, abs);
-    if (relative.startsWith("..") || path.isAbsolute(relative) || out.some(f => f.path === relative)) return;
+    if (relative.startsWith("..") || path.isAbsolute(relative) || relative.split(path.sep).some(part => IGNORED_DIRS.test(part) || /^(?:fixtures?|generated|release-template|public-template)$/i.test(part)) || out.some(f => f.path === relative)) return;
     const stat = await fs.lstat(abs).catch(() => undefined);
-    if (!stat?.isFile() || stat.size > budget.fileBytes) return;
-    const source = await fs.readFile(abs, "utf8").catch(() => undefined);
-    if (source === undefined || source.includes("\0")) return;
-    bytes += stat.size; out.push({ path: relative, source });
+    if (!stat?.isFile() || stat.size > budget.fileBytes || bytes + stat.size > budget.bytes) return;
+    const data = await readSourceFiles(root, [relative], undefined, (name: string) => familyOf(name) === family);
+    const snapshot = data.files[0];
+    if (!snapshot || snapshot.source.length / (snapshot.source.split('\n').length || 1) > 400) return;
+    bytes += Buffer.byteLength(snapshot.source); out.push({ path: relative, source: snapshot.source });
   };
-  for (const other of others) await take(other);
+  for (const other of others.slice(-12)) await take(other);
   const dir = path.dirname(path.resolve(root, file));
   const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) if (entry.isFile()) await take(path.relative(root, path.join(dir, entry.name)));
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 120)) {
+    if (out.length >= Math.ceil(budget.files / 2)) break;
+    if (entry.isFile()) await take(path.relative(root, path.join(dir, entry.name)));
+  }
+  let candidates: string[] = [];
+  try {
+    const result = await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, timeout: 1500, maxBuffer: 1024 * 1024 });
+    candidates = result.stdout.split('\0').filter(Boolean).slice(0, 10000);
+  } catch {
+    // Non-Git projects still get a bounded breadth-first cross-folder scan.
+    const queue = [root]; let visited = 0;
+    while (queue.length && visited < 240 && candidates.length < 1000) {
+      const current = queue.shift()!;
+      const rows = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
+      for (const entry of rows.slice(0, 240 - visited)) {
+        visited++;
+        const abs = path.join(current, entry.name);
+        if (entry.isDirectory() && !IGNORED_DIRS.test(entry.name) && !/^(?:fixtures?|generated|release-template|public-template)$/i.test(entry.name)) queue.push(abs);
+        else if (entry.isFile()) candidates.push(path.relative(root, abs));
+      }
+    }
+  }
+  const terms = path.basename(file).toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
+  const rank = (candidate: string) => terms.filter(word => candidate.toLowerCase().includes(word)).length * 2 + Number(path.extname(candidate) === path.extname(file));
+  candidates = candidates.filter(candidate => familyOf(candidate) === family).sort((a, b) => rank(b) - rank(a) || a.localeCompare(b));
+  for (const candidate of candidates.slice(0, 200)) {
+    if (out.length >= budget.files || bytes >= budget.bytes) break;
+    await take(candidate);
+  }
   return out;
 }
 
@@ -728,14 +765,37 @@ const compactFinding = (file: string) => (f: Finding) => ({ file, line: f.line, 
 /** Run one code_quality operation. Results are bounded, located and advisory. */
 export async function codeQuality(params: any, cwd: string, signal?: AbortSignal, parserFor?: (ext: string) => Promise<any>, refinement: { pi?: unknown; judge?: any } = {}) {
   const operation = params.operation;
-  if (!["duplicates", "slop", "prose", "complexity", "structure"].includes(operation)) throw new Error("operation must be duplicates, slop, prose, complexity or structure");
+  if (!["baseline", "duplicates", "slop", "prose", "complexity", "structure"].includes(operation)) throw new Error("operation must be baseline, duplicates, slop, prose, complexity or structure");
   const limit = Math.max(1, Math.min(80, Number.isInteger(params.limit) ? params.limit : 25));
   const changed = params.changed === true ? await changedFiles(cwd, params.base ?? "HEAD", signal) : undefined;
   const accept = operation === "prose" ? PROSE : CODE;
   const inputs: string[] = Array.isArray(params.paths) && params.paths.length ? params.paths.slice(0, 64).map(String) : [];
+  if (operation === 'baseline') {
+    const scope = await collectSources(cwd, inputs.length ? inputs : ['.'], CODE, undefined, signal);
+    signal?.throwIfAborted();
+    const focus = changed ? new Set(changed.filter(CODE)) : undefined;
+    const targets = focus ? scope.files.filter(file => focus.has(file.path)) : scope.files;
+    const { auditSource } = await import('./code-audit.ts');
+    const duplicates = findDuplicates(scope.files, { focus, minTokens: params.minTokens, minLines: params.minLines, limit });
+    const findings = targets.flatMap(file => [
+      ...codeSlop(file.path, file.source).map(compactFinding(file.path)),
+      ...auditSource(file.path, file.source, { domains: ['security', 'backend', 'efficiency', 'ui'], minSeverity: 'medium' }).map((finding: any) => ({ ...finding, file: file.path })),
+    ]);
+    const structure = analyzeStructure(scope.files);
+    const counts: Record<string, number> = {};
+    for (const finding of findings) counts[finding.rule] = (counts[finding.rule] ?? 0) + 1;
+    return { operation, status: targets.length ? 'inspected' : 'no_source_changes',
+      scope: { files: scope.files.length, targetFiles: targets.length, skipped: scope.skipped, truncated: scope.truncated || duplicates.truncated,
+        missingFocus: focus ? [...focus].filter(file => !scope.files.some(row => row.path === file)) : [] },
+      sourceRevision: digest(scope.files.map(file => `${file.path}:${digest(file.source)}`).sort().join('\n')),
+      counts, findings: findings.slice(0, limit), omittedFindings: Math.max(0, findings.length - limit),
+      duplicates: { groups: duplicates.groups, duplicatedLines: duplicates.duplicatedLines, truncated: duplicates.truncated },
+      structure, next: 'Inspect each located cue, reuse the established owner and retain intentional repetition. Run syntax_check and project linters/types/tests for affected files; inspect actual UI pixels/contrast and input states for interface changes.',
+      note: 'A combined deterministic source baseline, not a correctness/security certification. No project code or linter runs. Source findings are advisory and unchanged copies are indexed for DRY comparison. Coverage limits remain explicit.' };
+  }
   if (operation === "duplicates") {
     // Index the whole requested scope; report clones that touch the focus.
-    const scope = await collectSources(cwd, inputs.length ? inputs : ["."], accept);
+    const scope = await collectSources(cwd, inputs.length ? inputs : ["."], accept, undefined, signal);
     const focus = changed ? new Set(changed.filter(accept)) : undefined;
     if (changed && !focus!.size) return { operation, changed: 0, note: "No changed source files against the base revision." };
     const report = findDuplicates(scope.files, { minTokens: params.minTokens, minLines: params.minLines, mode: params.mode, focus, limit });
@@ -750,14 +810,14 @@ export async function codeQuality(params: any, cwd: string, signal?: AbortSignal
   }
   if (operation === "structure") {
     // The whole graph is needed to know who imports whom, so index the requested scope and ignore changed-only focus.
-    const scope = await collectSources(cwd, inputs.length ? inputs : ["."], CODE, { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 });
+    const scope = await collectSources(cwd, inputs.length ? inputs : ["."], CODE, { files: 1500, bytes: 24 * 1024 * 1024, fileBytes: 512 * 1024 }, signal);
     const manifest = await fs.readFile(path.join(cwd, "package.json"), "utf8").then((text) => JSON.parse(text), () => undefined);
     const report = analyzeStructure(scope.files, manifest, !inputs.length, limit);
     return { operation, scope: { files: report.files, edges: report.edges, skipped: scope.skipped, truncated: scope.truncated }, ...report, files: undefined, edges: undefined,
       note: "Lexical import graph (JS/TS relative imports, Python packages). Cycles are worth breaking when the files must load in a fixed order; orphans are candidates for deletion or missing wiring, not proof of dead code; large files and hotspots are candidates for splitting. Aliases and dynamic imports are not resolved." };
   }
   const targets = changed ? changed.filter(accept) : [];
-  const scope = await collectSources(cwd, changed ? (targets.length ? targets : []) : inputs.length ? inputs : ["."], accept, { files: operation === "prose" ? 200 : 400, bytes: 12 * 1024 * 1024, fileBytes: 512 * 1024 });
+  const scope = await collectSources(cwd, changed ? (targets.length ? targets : []) : inputs.length ? inputs : ["."], accept, { files: operation === "prose" ? 200 : 400, bytes: 12 * 1024 * 1024, fileBytes: 512 * 1024 }, signal);
   if (changed && !targets.length) return { operation, changed: 0, note: "No changed files of this kind against the base revision." };
   if (operation === "prose") {
     const files = scope.files.map(file => ({ file: file.path, report: proseReport(file.source) })).filter(row => row.report.words > 0 || row.report.findings.length > 0);

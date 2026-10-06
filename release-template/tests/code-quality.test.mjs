@@ -266,6 +266,37 @@ test("git_info review flags risky additions and drafts a commit header; blame su
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('edit hooks find cross-directory clones and refuse symlinked external candidates', async t => {
+  const dir = workspace(), outside = workspace();
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); });
+  write(dir, 'billing/original.js', ORIGINAL);
+  write(dir, 'checkout/copy.js', RENAMED);
+  write(outside, 'external.js', ORIGINAL);
+  fs.symlinkSync(outside, path.join(dir, 'external'));
+  const neighbours = await cq.neighborSources(dir, 'checkout/copy.js', ['external/external.js']);
+  assert.ok(neighbours.some(file => file.path === 'billing/original.js'));
+  assert.ok(!neighbours.some(file => file.path.includes('external')));
+  const hooks = new Map();
+  registerSourceCheck({ registerTool() {}, on: (name, handler) => hooks.set(name, handler) });
+  const note = await hooks.get('tool_result')({ toolName: 'write', input: { path: 'checkout/copy.js' }, content: [], isError: false }, { cwd: dir });
+  assert.ok(note?.details.codeQuality.clones.length);
+  assert.match(note.details.codeQuality.coverage, /Bounded/);
+});
+
+test('baseline combines changed-source cues with unchanged DRY candidates and reports coverage', async t => {
+  const dir = workspace(); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  write(dir, 'src/cart.js', ORIGINAL);
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['add', '.'], { cwd: dir });
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.org', 'commit', '-qm', 'baseline'], { cwd: dir });
+  write(dir, 'new/order.js', RENAMED + '\nthrow new Error("Not implemented");\n');
+  const report = await cq.codeQuality({ operation: 'baseline', changed: true, minTokens: 40 }, dir);
+  assert.equal(report.status, 'inspected'); assert.equal(report.scope.targetFiles, 1);
+  assert.ok(report.duplicates.groups.length); assert.ok(report.counts['placeholder-implementation']);
+  assert.match(report.sourceRevision, /^[a-f0-9]{16}$/);
+  assert.deepEqual(report.scope.missingFocus, []);
+});
+
 test("git_info outside a repository reports no Git state instead of failing", async () => {
   const gitTools = (await import(pathToFileURL(path.join(agentRoot, "extensions/git-tools.ts")))).default;
   const tools = new Map();

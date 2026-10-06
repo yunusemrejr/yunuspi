@@ -6,6 +6,9 @@ description: Research technical questions using primary sources, literature sear
 
 # Research
 
+Use `web_research` for bounded source collection (up to 24 reads, two workers) and its SHA256/query-ranked passages. Read the complete cached context with `get_search_content`. Save an attributable JSON collection of sources and claims, then run `research_toolkit` action `dossier` with its workspace path. It checks quotes, duplicate snapshots and evidence gaps; relations and primary-source labels remain your reviewed interpretations. Ask for `view:report` for attributed Markdown. See [Research, code and ML controls](../../../docs/RESEARCH-CODE-ML.md).
+
+
 ## Frame before you search
 
 Write the question as a **falsifiable, answerable statement**: not "is Rust better?" but "for <this service type>, does Rust reduce p99 latency or memory vs the current Go impl at ≤ 2× dev time?" If you can't state what would count as an answer, the research will produce vibes.

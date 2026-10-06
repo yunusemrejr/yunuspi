@@ -72,8 +72,10 @@ export async function inspectSource(filename, source) {
     return base;
   } finally { tree.delete(); }
 }
-export async function readSourceFiles(cwd, paths, signal, accept = file => /\.(?:[cm]?[jt]sx?|py|cpp|cc|c|h|hpp|rs|go|java|css|html|sql|sh)$/i.test(file)) {
+export async function readSourceFiles(cwd, paths, signal, accept = file => /\.(?:[cm]?[jt]sx?|py|cpp|cc|c|h|hpp|rs|go|java|css|html|sql|sh)$/i.test(file), budget = {}) {
   if(!Array.isArray(paths)||!paths.length||paths.length>20) throw new Error('Provide 1–20 explicit source file paths');
+  const maxFile=budget.fileBytes??MAX_FILE, maxTotal=budget.totalBytes??MAX_TOTAL;
+  if(!Number.isInteger(maxFile)||maxFile<1||maxFile>1048576||!Number.isInteger(maxTotal)||maxTotal<1||maxTotal>33554432)throw new Error('Invalid source snapshot byte budgets');
   const root=await fs.realpath(cwd); const files=[], errors=[]; let bytes=0;
   for(const supplied of [...new Set(paths)]) {
     if(signal?.aborted) throw new Error('Cancelled');
@@ -88,19 +90,21 @@ export async function readSourceFiles(cwd, paths, signal, accept = file => /\.(?
         const stat=await handle.stat();
         if(process.platform==='linux') {
           const opened=await fs.realpath(`/proc/self/fd/${handle.fd}`), rel=path.relative(root,opened);
-          if(rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))throw new Error('Opened file escapes workspace');
+          if(opened!==resolved||rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))throw new Error('Opened file changed or escapes workspace');
         }
-        if(!stat.isFile()||stat.size>MAX_FILE||bytes+stat.size>MAX_TOTAL) throw new Error('Source file or aggregate byte budget exceeded');
-        const buffer=Buffer.alloc(MAX_FILE+1); let length=0;
+        if(!stat.isFile()||stat.size>maxFile||bytes+stat.size>maxTotal) throw new Error('Source file or aggregate byte budget exceeded');
+        const buffer=Buffer.alloc(maxFile+1); let length=0;
         while(length<buffer.length) {
           if(signal?.aborted)throw new Error('Cancelled');
           const read=await handle.read(buffer,length,buffer.length-length,length);
           if(!read.bytesRead)break;
           length+=read.bytesRead;
         }
-        if(length>MAX_FILE||bytes+length>MAX_TOTAL) throw new Error('Source grew beyond byte budget');
+        if(length>maxFile||bytes+length>maxTotal) throw new Error('Source grew beyond byte budget');
         const after=await handle.stat();
         if(length!==stat.size||after.size!==stat.size||after.mtimeMs!==stat.mtimeMs||after.ctimeMs!==stat.ctimeMs)throw new Error('Source changed while reading; retry');
+        if(await fs.realpath(path.resolve(root,supplied))!==resolved)throw new Error('Source path changed while reading; retry');
+        if(process.platform==='linux'&&await fs.realpath(`/proc/self/fd/${handle.fd}`)!==resolved)throw new Error('Opened source changed while reading; retry');
         source=new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,length)); bytes+=length;
         if(source.includes('\0')) throw new Error('Binary source refused');
       } finally {await handle.close();}

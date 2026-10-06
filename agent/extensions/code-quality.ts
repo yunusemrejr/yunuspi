@@ -9,13 +9,13 @@ export default function codeQualityTools(pi: any) {
   pi.registerTool({
     name: "code_quality",
     label: "Code quality",
-    description: "Local source checks with exact locations and compact coverage. duplicates finds token clones (renamed or exact); slop finds placeholders, leftovers, swallowed errors, redundant logic and unused imports; prose checks reader copy, metric basis and English readability while excluding code/quotes/non-reader HTML; complexity measures JS/TS/Python functions; structure checks lexical import graphs. Optional prose semantic triage batches at most eight ambiguous excerpts through the configured cached Jev/Kev route; it retains every deterministic finding. semantic:false disables it. view:detailed includes excerpts and all bounded measurements. No project code runs; cues cannot prove correctness.",
+    description: "Local source checks with exact locations and compact coverage. baseline combines changed-source slop/security/backend/UI cues, project-wide DRY groups and import structure in one call; it names follow-up syntax/linters/tests and real UI checks. duplicates finds token clones (renamed or exact); slop finds placeholders, leftovers, swallowed errors, redundant logic and unused imports; prose checks reader copy, metric basis and English readability while excluding code/quotes/non-reader HTML; complexity measures JS/TS/Python functions; structure checks lexical import graphs. Optional prose semantic triage batches at most eight ambiguous excerpts through the configured cached Jev/Kev route; it retains every deterministic finding. semantic:false disables it. view:detailed includes excerpts and all bounded measurements. No project code runs; cues cannot prove correctness.",
     promptSnippet: "Find duplicated code, code slop, prose slop and complexity hotspots",
     promptGuidelines: [
       "Before claiming a refactor or feature is clean, run code_quality duplicates with changed:true to catch copy-pasted logic, and slop on the changed files.",
     ],
     parameters: Type.Object({
-      operation: choices(["duplicates", "slop", "prose", "complexity", "structure"]),
+      operation: choices(["baseline", "duplicates", "slop", "prose", "complexity", "structure"]),
       paths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 64, description: "Files or directories inside the workspace; default is the workspace root" })),
       changed: Type.Optional(Type.Boolean({ description: "Focus on files changed against base plus untracked files" })),
       base: Type.Optional(Type.String({ minLength: 1, maxLength: 120, description: "Base revision for changed (default HEAD)" })),
@@ -34,7 +34,9 @@ export default function codeQualityTools(pi: any) {
       const parserFor = params.operation === "complexity" ? (await import("./pi-lens/semantic-radar/extract.mjs")).parserFor : undefined;
       const result = await codeQuality(params, ctx?.cwd || process.cwd(), bounded, parserFor, { pi });
       let text = JSON.stringify(params.view === "detailed" ? result : compactQualityReport(result));
-      if (text.length > 24_000) text = JSON.stringify({ ...result, truncated: true, findings: (result as any).findings?.slice(0, 20), clones: (result as any).clones?.slice(0, 10), files: (result as any).files?.slice?.(0, 6) });
+      if (text.length > 24_000) text = JSON.stringify({ operation: result.operation, scope: result.scope, counts: result.counts, sourceRevision: result.sourceRevision, outputTruncated: true,
+        findings: (result as any).findings?.slice(0, 10).map(({ file, line, rule, message }: any) => ({ file, line, rule, message })),
+        next: 'Use narrower paths or individual operations with detailed view; full bounded evidence remains in details.' });
       return { content: [{ type: "text", text }], details: result };
     },
   });

@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { matchesDomainFilters, normalizeDomainFilters } from "./duckduckgo.ts";
+import { researchPassages, sourceDigest } from "../lib/research-evidence.ts";
 
 /** Registrable-ish domain: the last two labels, three for common two-part
  * public suffixes (example.co.uk). Good enough for diversity accounting. */
@@ -225,11 +226,18 @@ export async function runResearchWork(
       try {
         const result = await readSource(row.url, signal);
         signal.throwIfAborted();
+        const sourceText = String(result.content ?? '');
+        const analyzedText = sourceText.slice(0, 2_000_000);
+        const evidence = { ...researchPassages(analyzedText, queries.join(' '), 1800),
+          sha256: sourceDigest(sourceText), sourceChars: sourceText.length,
+          analyzedChars: analyzedText.length, analysisTruncated: analyzedText.length < sourceText.length,
+          truncated: sourceText.length > 1800 };
         Object.assign(receipt, {
           state:
             result.error || !result.content?.trim() ? "unavailable" : "read",
           title: result.title?.slice(0, 300) ?? "",
-          excerpt: result.content?.slice(0, 2400) ?? "",
+          excerpt: result.content?.slice(0, 600) ?? "",
+          evidence,
           truncated: (result.content?.length ?? 0) > 2400,
           ...(result.error
             ? { error: String(result.error).slice(0, 400) }

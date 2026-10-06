@@ -322,7 +322,9 @@ test("background research recovers failed discovery, reads known sources concurr
     });
     assert.equal(reads.length, 1);
     assert.equal(pages.details.results.length, 1);
-    assert.equal(pages.details.results[0].excerpt.length, 2400);
+    assert.equal(pages.details.results[0].excerpt.length, 600);
+    assert.ok(pages.details.results[0].evidence.sampledChars <= 1800);
+    assert.match(pages.details.results[0].evidence.sha256, /^[a-f0-9]{64}$/);
     assert.equal(pages.details.results[0].truncated, true);
     assert.equal(harness.notices.length, 1);
   } finally {

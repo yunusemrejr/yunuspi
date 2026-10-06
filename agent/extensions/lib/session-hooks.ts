@@ -69,6 +69,11 @@ const isBrowserMutation = (args: HookArgs) =>
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
+  { key: 'ml-data-evaluation', tools: ['ml_lab'],
+    line: 'Inspect coverage and unresolved findings. A prepared recipe/notebook is not an executed model or connected runtime. Keep splits, data/config hashes, finite smoke/save/reload/resume receipts and frozen baseline evaluation; RL time limits preserve bootstrap from the final observation.' },
+  { key: 'research-dossier-evidence', tools: ['research_toolkit'], when: args => args.action === 'dossier',
+    line: 'Exact quote matches establish snapshot provenance only. Inspect full context, source authority, dates/periods/units, copied-source independence and contradictory labels before publishing interpretations. Reuse cached source slices; unknown evidence stays unknown.' },
+
   { key: 'image-generation-evidence', tools: ['image_generate'], when: args => ['generate', 'edit'].includes(String(args.action)),
     line: 'Use the exact requested model and supported image parameters. Keep reference/mask provenance and inspect the returned pixels for edit intent, identity, alpha and integration; decoded output does not establish a successful edit. Do not retry paid generation with a different model without a task reason.' },
   { key: 'image-conversion-evidence', tools: ['image_convert'],

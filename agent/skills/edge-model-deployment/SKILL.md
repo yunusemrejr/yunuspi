@@ -5,6 +5,9 @@ description: "Deploy and optimize ML on microcontrollers, SBCs and heterogeneous
 
 # Edge Model Deployment
 
+Use `ml_lab` preflight for explicit lower-bound memory arithmetic and evaluate for the same-case original/exported predictions and baseline slices. Keep calibration on training only. The local tiny_mlp JSON export is a reference format; measure real device inference and quantization error before calling an edge model deployed.
+
+
 Use for ESP/Arduino-class devices, Raspberry Pi, Intel/AMD systems and Apple silicon. Match the exact board, chip, runtime and operators rather than assuming a vendor-wide capability.
 
 ## Working method

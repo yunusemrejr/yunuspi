@@ -197,7 +197,7 @@ export default function registerSourceCheck(pi: any) {
   // Audit findings already mentioned this session: an edit elsewhere in the file must not repeat them.
   const announced = new Set<string>();
   // Files written this session: a new block is compared with them and with
-  // its directory neighbours, which is where copy-paste usually comes from.
+  // its neighbours and bounded cross-directory candidates. The explicit duplicates tool covers the full requested source scope.
   const edited: string[] = [];
   const reset = () => {generation++; checks = 0; seen.clear(); announced.clear(); edited.length = 0;};
   for (const event of ['session_start','session_switch','session_tree','session_shutdown']) pi.on(event,reset);
@@ -267,7 +267,7 @@ export default function registerSourceCheck(pi: any) {
       ];
       const more = audit.some(f => f.severity === 'high') ? ' A high-severity cue was found: code_audit({changed:true}) checks the rest of this change.' : '';
       return {content:[...event.content,{type:'text',text:`Code review (advisory): ${parts.join('; ')}. Keep intentional behavior; no automatic retry is required.${more}`}],
-        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise},...(slop.length||clones.length?{codeQuality:{slop,clones}}:{}),...(audit.length?{codeAudit:audit}:{})}};
+        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise},...(slop.length||clones.length?{codeQuality:{slop,clones,coverage:'Bounded neighbours and cross-directory candidates; use code_quality duplicates for the full source scope'}}:{}),...(audit.length?{codeAudit:audit}:{})}};
     } catch { /* Advisory inspection must not turn a successful edit into a failed tool. */ }
   });
   pi.registerTool({name:'syntax_check',label:'Syntax check',

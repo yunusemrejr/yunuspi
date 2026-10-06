@@ -6,6 +6,9 @@ description: Engineer ML data pipelines, leakage prevention, reproducible traini
 
 # ML Engineering
 
+Discover `ml_lab` for preflight, split_audit, evaluate, rl_targets and notebook checks. `recipe` supplies shipped tiny_mlp, tabular_q, embedding and lora trainer paths and smoke/resume argv; run `--help` and `--check` first. Use the existing `bg_run` owner for long jobs, preserve task ids and durable checkpoints, and inspect metrics with the frozen baseline. Local CPU recipes install nothing; transformer recipes need a locked environment and immutable model revisions. See [Executable controls](../../../docs/RESEARCH-CODE-ML.md).
+
+
 ## Principle: it's a data system first, a model second
 
 Most production ML bugs are data bugs. The model is a compiled artifact of the pipeline state; if the pipeline is wrong, a better model ships the same bug at higher speed.

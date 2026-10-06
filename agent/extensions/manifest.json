@@ -53,7 +53,8 @@
     "art-direction.ts",
     "goal.ts",
     "adaptive-workflows.ts",
-    "blender-studio.ts"
+    "blender-studio.ts",
+    "ml-lab.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -264,7 +265,9 @@
     "elevenlabs.ts",
     "media-sync.ts",
     "video-browser.ts",
-    "video-segments.ts"
+    "video-segments.ts",
+    "ml-lab.ts",
+    "research-evidence.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

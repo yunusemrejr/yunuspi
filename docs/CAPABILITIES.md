@@ -281,7 +281,7 @@ Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, call
 
 #### code-quality
 
-Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.
+Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby or bounded cross-directory code. baseline combines source slop/security/backend/UI cues, DRY groups and structure in one call. Advisory evidence with file:line, not a quality score.
 
 **Entrypoints:** `code_quality`
 
@@ -289,7 +289,7 @@ Measure duplication, code slop, prose quality and complexity without installing 
 
 **Options:**
 
-- `operation`: Measurement to run. Values: `duplicates`, `slop`, `prose`, `complexity`, `structure`.
+- `operation`: Measurement to run. Values: `baseline`, `duplicates`, `slop`, `prose`, `complexity`, `structure`.
 - `paths`: Files or directories inside the workspace; default is the workspace root.
 - `changed|base`: Focus on files changed against a revision plus untracked files.
 - `mode|minTokens|minLines`: Clone matching: renamed (identifiers and literals ignored) or exact, and size thresholds.
@@ -427,6 +427,26 @@ Search explicit workspace roots and local Maildir/mbox exports with scan limits,
 **Source:** [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts), [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py), [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
+
+#### ml-lab
+
+Executable ML baseline: split/content/group/time leakage checks, classification/regression slice metrics and paired baseline intervals, correct RL termination/truncation targets, host/memory preflight, static Colab notebook checks and resumable CPU MLP, offline tabular Q, embedding and LoRA training recipes. No hidden model calls, dependency installation or cloud allocation. Actual trainers run through existing execution/background owners and preserve checkpoints, hashes and metrics.
+
+**Entrypoints:** `ml_lab`
+
+**Catalog tool pointers:** `ml_lab`, `bg_run`, `bg_status`, `bg_logs`, `browser_session`, `sys_probe`, `env_audit`
+
+**Options:**
+
+- `operation`: Bounded deterministic check or executable recipe. Values: `preflight`, `split_audit`, `evaluate`, `rl_targets`, `notebook`, `recipe`.
+- `path|data`: Workspace JSON/ipynb snapshot or inline operation data; files up to 256 KiB.
+- `recipe`: Trainer contract with smoke/resume argv and a staged Colab notebook. Values: `tiny_mlp`, `tabular_q`, `embedding`, `lora`.
+
+**Related records:** `code-quality`, `web-and-media`, `memory-evidence`
+
+**Source:** [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts), [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts), [`agent/scripts/ml-lab.py`](../agent/scripts/ml-lab.py), [`agent/scripts/ml-transformer-train.py`](../agent/scripts/ml-transformer-train.py)
+
+**Documentation:** [`docs/RESEARCH-CODE-ML.md`](RESEARCH-CODE-ML.md)
 
 ### memory
 
@@ -1229,7 +1249,7 @@ Close the creative loop around one shared direction. creative_direct owns the st
 
 #### research-toolkit
 
-Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.
+Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. dossier checks exact source quotations/hashes, duplicate snapshots and claim coverage, exposes contradictory citation labels, and builds an attributable Markdown report. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.
 
 **Entrypoints:** `research_toolkit`
 
@@ -1237,7 +1257,7 @@ Plan research angles (market or prior-art), profile the local project for compar
 
 **Options:**
 
-- `action`: Toolkit operation. Values: `plan`, `profile`, `lead`, `company`, `source`.
+- `action`: Toolkit operation. Values: `plan`, `profile`, `lead`, `company`, `source`, `dossier`.
 - `goal|context|mode`: Research goal and optional context for plan; mode prior-art plans how to find and compare existing products and projects. Values: `leads`, `prior-art`.
 - `path`: Directory to profile (default: the working directory); read-only, never reads environment files.
 - `name|company|role|domain`: Candidate identity fields for lead/company.
@@ -1246,7 +1266,7 @@ Plan research angles (market or prior-art), profile the local project for compar
 
 **Related records:** `web-and-media`, `memory-evidence`, `safety-bounds`
 
-**Source:** [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts), [`agent/extensions/lib/project-profile.ts`](../agent/extensions/lib/project-profile.ts), [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts)
+**Source:** [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts), [`agent/extensions/lib/project-profile.ts`](../agent/extensions/lib/project-profile.ts), [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts), [`agent/extensions/lib/research-evidence.ts`](../agent/extensions/lib/research-evidence.ts)
 
 **Documentation:** [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
 
@@ -1339,6 +1359,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 499; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
+- `ml_lab` — [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts) (line 11; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 108; factory)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 216; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 263; factory)
@@ -1362,7 +1383,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 560; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 812; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 250; literal)
-- `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 91; literal)
+- `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 93; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 273; factory)
 - `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 274; factory)
@@ -1387,7 +1408,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 273; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 410; literal)
+- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 422; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 430; literal)
@@ -1628,6 +1649,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts)
 - [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts)
+- [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts)
 - [`agent/extensions/model-config.ts`](../agent/extensions/model-config.ts)
 - [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts)
 - [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts)
@@ -1755,6 +1777,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/memory-redaction.ts`](../agent/extensions/lib/memory-redaction.ts)
 - [`agent/extensions/lib/metrics-panel.ts`](../agent/extensions/lib/metrics-panel.ts)
 - [`agent/extensions/lib/mini-preprocessor.ts`](../agent/extensions/lib/mini-preprocessor.ts)
+- [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts)
 - [`agent/extensions/lib/model-competence.ts`](../agent/extensions/lib/model-competence.ts)
 - [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
@@ -1804,6 +1827,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/render-queue.ts`](../agent/extensions/lib/render-queue.ts)
 - [`agent/extensions/lib/request-compat.ts`](../agent/extensions/lib/request-compat.ts)
 - [`agent/extensions/lib/requirement-ledger.ts`](../agent/extensions/lib/requirement-ledger.ts)
+- [`agent/extensions/lib/research-evidence.ts`](../agent/extensions/lib/research-evidence.ts)
 - [`agent/extensions/lib/retry-policy.ts`](../agent/extensions/lib/retry-policy.ts)
 - [`agent/extensions/lib/review-coordinator.ts`](../agent/extensions/lib/review-coordinator.ts)
 - [`agent/extensions/lib/reviewer-board.ts`](../agent/extensions/lib/reviewer-board.ts)
@@ -2256,6 +2280,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/RELEASE-0.17.0-VERIFICATION.md`](RELEASE-0.17.0-VERIFICATION.md)
 - [`docs/RELEASE-0.18.0-VERIFICATION.md`](RELEASE-0.18.0-VERIFICATION.md)
 - [`docs/RELEASE-0.23.8-VERIFICATION.md`](RELEASE-0.23.8-VERIFICATION.md)
+- [`docs/RESEARCH-CODE-ML.md`](RESEARCH-CODE-ML.md)
 - [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 - [`docs/SANDBOXES.md`](SANDBOXES.md)
 - [`docs/SCREENSHOTS.md`](SCREENSHOTS.md)

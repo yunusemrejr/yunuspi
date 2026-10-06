@@ -1,0 +1,8 @@
+# Optional transformer environment; install Torch for the actual CPU/CUDA runtime
+# separately from its official index, then install these tested API versions.
+transformers==5.19.0
+sentence-transformers==6.1.0
+peft==0.21.2
+datasets==5.1.0
+accelerate==1.15.0
+safetensors==0.8.0
