@@ -1029,9 +1029,9 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "design-studio",
 		group: "web_media",
-		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
-		entrypoints: ["image_analyze", "image_crop", "image_trace", "image_create", "visual_diff"],
-		tools: ["image_analyze", "image_crop", "image_trace", "image_create", "visual_diff", "render_see", "design_audit"],
+		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. image_convert makes framed/rotated alpha-aware PNG/JPEG/WebP batches; image_understand uses the selected vision model with hashed crop/scale evidence. Pixel measurements and model observations remain evidence, not design intent.",
+		entrypoints: ["image_understand", "image_convert", "image_analyze", "image_crop", "image_trace", "image_create", "visual_diff"],
+		tools: ["image_understand", "image_convert", "image_analyze", "image_crop", "image_trace", "image_create", "visual_diff", "render_see", "design_audit"],
 		options: [
 			option("path|url", "Local image, or an http(s) image downloaded once through the SSRF-guarded fetcher and kept locally."),
 			option("scale|referenceScale", "Reference pixel ratio (2 for @2x exports); inferred from common export widths."),
@@ -1043,15 +1043,15 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("outputDir", "Artifacts default to the git-ignored .pi/design folder in the workspace."),
 		],
 		related: ["rendered-design-review", "web-and-media", "artifact-numeric-checks"],
-		sourceFiles: ["agent/extensions/design-studio.ts", "agent/extensions/lib/design-studio.ts", "agent/extensions/lib/image-analysis.ts", "agent/extensions/lib/image-synth.ts", "agent/scripts/render-capture.mjs", "agent/skills/mockup-to-code/SKILL.md"],
+		sourceFiles: ["agent/extensions/design-studio.ts", "agent/extensions/lib/design-studio.ts", "agent/extensions/lib/image-analysis.ts", "agent/extensions/lib/image-convert.ts", "agent/extensions/lib/image-understand.ts", "agent/extensions/lib/image-synth.ts", "agent/scripts/render-capture.mjs", "agent/skills/mockup-to-code/SKILL.md"],
 		doc: "agent/public-template/docs/DESIGN-STUDIO.md",
 	}),
 	capability({
 		id: "art-direction",
 		group: "web_media",
-		summary: "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
-		entrypoints: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_inspect", "asset_register", "image_generate", "creative_compare"],
-		tools: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_inspect", "asset_register", "image_generate", "creative_compare", "render_see", "design_audit", "image_analyze", "visual_diff"],
+		summary: "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_render exports authored CSS/SMIL/data-keyframe SVG to sampled PNGs or narrated H.264 with clock/clipping diagnostics; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+		entrypoints: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_render", "svg_inspect", "asset_register", "image_generate", "creative_compare"],
+		tools: ["creative_direct", "visual_review", "ui_explore", "motion_inspect", "svg_render", "svg_inspect", "asset_register", "image_generate", "creative_compare", "render_see", "design_audit", "image_analyze", "visual_diff"],
 		options: [
 			option("action", "Direction set/get/brief/status/clear; review run/record/status; SVG inspect/matrix; asset register/get/search/usage; image status/brief/generate/edit."),
 			option("direction", "Structured brief object: intent, hierarchy.primary, visual, avoid, motion, audio, references."),
@@ -1062,7 +1062,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("prompt|negative|aspect|size|seed", "Generation brief: prompt plus direction/role constraints; configured backend required."),
 		],
 		related: ["design-studio", "rendered-design-review", "creative-studio", "video-studio"],
-		sourceFiles: ["agent/extensions/art-direction.ts", "agent/extensions/lib/creative-direction.ts", "agent/extensions/lib/creative-qa.ts", "agent/extensions/lib/motion-inspect.ts", "agent/extensions/lib/svg-inspect.ts", "agent/extensions/lib/asset-registry.ts", "agent/extensions/lib/gltf-inspect.ts", "agent/extensions/lib/video-motion.ts", "agent/extensions/lib/image-generate.ts", "agent/scripts/render-capture.mjs"],
+		sourceFiles: ["agent/extensions/art-direction.ts", "agent/extensions/lib/creative-direction.ts", "agent/extensions/lib/creative-qa.ts", "agent/extensions/lib/motion-inspect.ts", "agent/extensions/lib/svg-inspect.ts", "agent/extensions/lib/svg-render.ts", "agent/extensions/lib/asset-registry.ts", "agent/extensions/lib/gltf-inspect.ts", "agent/extensions/lib/video-motion.ts", "agent/extensions/lib/image-generate.ts", "agent/scripts/render-capture.mjs"],
 		doc: "agent/public-template/docs/ART-DIRECTION.md",
 	}),
 	capability({

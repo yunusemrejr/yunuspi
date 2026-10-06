@@ -23,3 +23,5 @@ When a prompt clearly asks for image-to-code work ("turn this mockup into a webs
 ## Limits
 
 Everything returned is a measurement or a guess from pixels. Font sizes are ink-height estimates (about ±15%; all-caps text reads small); roles and component groupings are heuristics; the analyzer sees one viewport and one state, so hover, focus, motion, responsive behavior and fonts must be decided from the brief and design doctrine. Crops from a mockup are placeholders unless the user supplied final assets. A `close` diff is structural fidelity, not proof that the page is good: check other widths, states and accessibility too.
+
+`image_understand` uses real attachments through the selected vision model; `image_convert` preserves originals with explicit fit, alpha, rotation and encoding receipts. See [media creation](MEDIA-CREATION.md) for limits and workflows.

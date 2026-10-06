@@ -2857,8 +2857,10 @@
     {
       "id": "design-studio",
       "group": "web_media",
-      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
+      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. image_convert makes framed/rotated alpha-aware PNG/JPEG/WebP batches; image_understand uses the selected vision model with hashed crop/scale evidence. Pixel measurements and model observations remain evidence, not design intent.",
       "entrypoints": [
+        "image_understand",
+        "image_convert",
         "image_analyze",
         "image_crop",
         "image_trace",
@@ -2866,6 +2868,8 @@
         "visual_diff"
       ],
       "tools": [
+        "image_understand",
+        "image_convert",
         "image_analyze",
         "image_crop",
         "image_trace",
@@ -2924,6 +2928,8 @@
         "agent/extensions/design-studio.ts",
         "agent/extensions/lib/design-studio.ts",
         "agent/extensions/lib/image-analysis.ts",
+        "agent/extensions/lib/image-convert.ts",
+        "agent/extensions/lib/image-understand.ts",
         "agent/extensions/lib/image-synth.ts",
         "agent/scripts/render-capture.mjs",
         "agent/skills/mockup-to-code/SKILL.md"
@@ -2934,12 +2940,13 @@
     {
       "id": "art-direction",
       "group": "web_media",
-      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_render exports authored CSS/SMIL/data-keyframe SVG to sampled PNGs or narrated H.264 with clock/clipping diagnostics; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
       "entrypoints": [
         "creative_direct",
         "visual_review",
         "ui_explore",
         "motion_inspect",
+        "svg_render",
         "svg_inspect",
         "asset_register",
         "image_generate",
@@ -2950,6 +2957,7 @@
         "visual_review",
         "ui_explore",
         "motion_inspect",
+        "svg_render",
         "svg_inspect",
         "asset_register",
         "image_generate",
@@ -3001,6 +3009,7 @@
         "agent/extensions/lib/creative-qa.ts",
         "agent/extensions/lib/motion-inspect.ts",
         "agent/extensions/lib/svg-inspect.ts",
+        "agent/extensions/lib/svg-render.ts",
         "agent/extensions/lib/asset-registry.ts",
         "agent/extensions/lib/gltf-inspect.ts",
         "agent/extensions/lib/video-motion.ts",
@@ -3861,7 +3870,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 266,
+        "line": 271,
         "kind": "factory"
       },
       {
@@ -4036,13 +4045,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 353,
+        "line": 364,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 126,
+        "line": 127,
         "kind": "factory"
       },
       {
@@ -4150,15 +4159,51 @@
         "kind": "literal"
       },
       {
+        "name": "image_analyze",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 38,
+        "kind": "factory"
+      },
+      {
+        "name": "image_convert",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 33,
+        "kind": "factory"
+      },
+      {
+        "name": "image_create",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 55,
+        "kind": "factory"
+      },
+      {
+        "name": "image_crop",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 42,
+        "kind": "factory"
+      },
+      {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 312,
+        "line": 317,
         "kind": "factory"
       },
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
         "line": 257,
+        "kind": "factory"
+      },
+      {
+        "name": "image_trace",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 49,
+        "kind": "factory"
+      },
+      {
+        "name": "image_understand",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 35,
         "kind": "factory"
       },
       {
@@ -4194,7 +4239,7 @@
       {
         "name": "media_pipeline",
         "source": "agent/extensions/media-tools.ts",
-        "line": 281,
+        "line": 283,
         "kind": "factory"
       },
       {
@@ -4254,7 +4299,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 215,
+        "line": 216,
         "kind": "factory"
       },
       {
@@ -4501,6 +4546,12 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
+        "line": 241,
+        "kind": "factory"
+      },
+      {
+        "name": "svg_render",
+        "source": "agent/extensions/art-direction.ts",
         "line": 236,
         "kind": "factory"
       },
@@ -4543,13 +4594,13 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 429,
+        "line": 430,
         "kind": "literal"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 203,
+        "line": 204,
         "kind": "factory"
       },
       {
@@ -4601,9 +4652,15 @@
         "kind": "factory"
       },
       {
+        "name": "visual_diff",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 64,
+        "kind": "factory"
+      },
+      {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 167,
+        "line": 168,
         "kind": "factory"
       },
       {
@@ -5044,7 +5101,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 429,
+        "line": 430,
         "kind": "literal"
       },
       {
@@ -5079,7 +5136,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          94
+          95
         ],
         "knownNames": [
           "asset_register",
@@ -5088,6 +5145,7 @@
           "image_generate",
           "motion_inspect",
           "svg_inspect",
+          "svg_render",
           "ui_explore",
           "visual_review"
         ]
@@ -5117,7 +5175,16 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          20
+          23
+        ],
+        "knownNames": [
+          "image_analyze",
+          "image_convert",
+          "image_create",
+          "image_crop",
+          "image_trace",
+          "image_understand",
+          "visual_diff"
         ]
       },
       {
@@ -5324,11 +5391,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 727,
+      "sourceFiles": 730,
       "registrationSites": 89,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 139,
-      "uniqueStableTools": 138,
+      "stableRegistrationRows": 147,
+      "uniqueStableTools": 146,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5850,11 +5917,19 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/image-convert.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/image-generate.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/image-synth.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/image-understand.ts",
         "exists": true
       },
       {
@@ -6287,6 +6362,10 @@
       },
       {
         "path": "agent/extensions/lib/svg-inspect.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/svg-render.ts",
         "exists": true
       },
       {
@@ -8412,6 +8491,10 @@
       {
         "name": "LOCAL-INTELLIGENCE.md",
         "path": "docs/LOCAL-INTELLIGENCE.md"
+      },
+      {
+        "name": "MEDIA-CREATION.md",
+        "path": "docs/MEDIA-CREATION.md"
       },
       {
         "name": "MEDIA-PREFLIGHT.md",

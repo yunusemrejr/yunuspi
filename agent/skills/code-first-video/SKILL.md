@@ -29,3 +29,5 @@ Render within the machine's memory: iterate at `preview` scale or a small `width
 See the [worked example](assets/example-attention/README.md) for a complete small project and the defects its review rounds caught.
 
 A successful render, a passing `video_qa` or a clean type check is never evidence that the video looks or sounds good. Only viewed frames, watched motion and measured, listened-to audio are.
+
+For a compact SVG or Three.js delivery without a Remotion project, `media_pipeline` accepts an animation source, standalone narration and an editable music score; voice/music roles activate ducking and final AAC measurements. `narration_tts action:"speak"` returns WAV and SRT/VTT timing independently. Resolve narration overruns rather than trimming words. SVG data tracks and CSS/SMIL share an absolute export clock.

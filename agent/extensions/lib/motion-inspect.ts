@@ -184,6 +184,7 @@ export async function motionInspectRun(
   // Inventory first: full pass plus a reduced-motion pass for parity.
   const probeFile = path.join(dir, "inventory.png");
   const full = await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, includeState: true, animationInventory: true }, probeFile, cwd, signal);
+  const smil = full?.conditions?.animationSample?.smil ?? { roots: 0, sampled: 0, omitted: 0 };
   const fullInventory: unknown = full?.animationInventory ?? full?.conditions?.animationSample?.descriptors ?? [];
   let reducedInventory: unknown = [];
   let reducedPass: "disabled" | "checked" | "failed" = params.reducedMotion === false ? "disabled" : "failed";
@@ -233,7 +234,7 @@ export async function motionInspectRun(
   const temporal: MotionFinding[] = [];
   if (reducedPass === "failed") temporal.push({ severity: "WARN", id: "reduced-motion-unverified", detail: "Reduced-motion capture failed; preference handling remains unknown.", evidence: [reducedError ?? "capture unavailable"] });
   let reducedPixels: { changedShare: number; meanDelta: number; files: string[] } | undefined;
-  if (reducedPass === "checked" && analysis.count > 0) {
+  if (reducedPass === "checked" && (analysis.count > 0 || smil.roots > 0)) {
     const reducedFrames: Array<{ file: string; img: Rgba }> = [];
     for (const timeMs of [0, Math.min(durationMs, 333)]) {
       const dest = path.join(dir, `reduce-${timeMs}.png`);
@@ -250,7 +251,7 @@ export async function motionInspectRun(
   }
   const dead = samples.filter((s) => s.flag === "dead");
   const jumps = samples.filter((s) => s.flag === "jump");
-  if (analysis.count > 0 && dead.length >= Math.ceil((samples.length - 1) / 2)) temporal.push({ severity: "WARN", id: "dead-time", detail: `${dead.length} of ${samples.length - 1} sampled intervals show no pixel change — same loop phase, an intentional hold or animation outside the sampled clock (JS/rAF, scroll); inspect playback`, evidence: dead.slice(0, 5).map((s) => `t=${s.timeMs}ms Δ=${s.meanDelta}`) });
+  if ((analysis.count > 0 || smil.roots > 0) && dead.length >= Math.ceil((samples.length - 1) / 2)) temporal.push({ severity: "WARN", id: "dead-time", detail: `${dead.length} of ${samples.length - 1} sampled intervals show no pixel change — same loop phase, an intentional hold or animation outside the sampled clock (JS/rAF, scroll); inspect playback`, evidence: dead.slice(0, 5).map((s) => `t=${s.timeMs}ms Δ=${s.meanDelta}`) });
   for (const jump of jumps.slice(0, 3)) temporal.push({ severity: "WARN", id: "jump", detail: `t=${jump.timeMs}ms: large ${(jump.changedShare! * 100).toFixed(1)}% difference between sparse frames; motion and intentional cuts can both explain it, so inspect playback`, evidence: [jump.file] });
   // A random run endpoint is not a loop boundary. Seek the explicit local
   // period only when every infinite animation shares a known duration/offset.
@@ -278,8 +279,8 @@ export async function motionInspectRun(
   const findings = [...analysis.findings, ...temporal];
   const report = {
     source: params.source, revision: await sourceRevision(params.source, cwd), at: new Date().toISOString(),
-    dir: relative(cwd, dir), durationMs, sampledClock: "CSS/WAAPI document timeline only; JS/rAF, scroll timelines, frames and not-yet-created animations are invisible to sampling; each animation is sought to its own local time",
-    inventory: { count: analysis.count, infinite: analysis.infinite, maxConcurrent: analysis.maxConcurrent, distinctDurationsMs: analysis.distinctDurations, transformOwners: analysis.transformOwners, layoutAnimations: analysis.layoutAnimations, reducedMotion: analysis.reducedMotion },
+    dir: relative(cwd, dir), durationMs, sampledClock: "CSS/WAAPI document timeline and SVG SMIL roots; JS/rAF, scroll timelines, frames and not-yet-created animations are invisible to sampling; each animation is sought to its own local time",
+    inventory: { smil, count: analysis.count, infinite: analysis.infinite, maxConcurrent: analysis.maxConcurrent, distinctDurationsMs: analysis.distinctDurations, transformOwners: analysis.transformOwners, layoutAnimations: analysis.layoutAnimations, reducedMotion: analysis.reducedMotion },
     timeline: renderMotionTimeline(sanitizeDescriptors(fullInventory), durationMs),
     descriptors: sanitizeDescriptors(fullInventory).slice(0, 40),
     samples: samples.map((s) => ({ ...s })),

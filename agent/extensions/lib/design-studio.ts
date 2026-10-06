@@ -106,7 +106,7 @@ export async function probeImage(bytes: Buffer, signal?: AbortSignal): Promise<{
 /** Decode to RGBA, optionally cropping (source pixels) and bounding the
  * output by width and total pixels. Returns the scale applied. Callers
  * that already probed these bytes pass `probed` to skip a repeat ffprobe. */
-export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; maxPixels?: number; crop?: Box; exactWidth?: number; upscale?: number; probed?: { width: number; height: number } } = {}, signal?: AbortSignal): Promise<Decoded> {
+export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; maxPixels?: number; crop?: Box; exactWidth?: number; exactHeight?: number; upscale?: number; probed?: { width: number; height: number } } = {}, signal?: AbortSignal): Promise<Decoded> {
   const info = options.probed ?? await probeImage(bytes, signal);
   const crop = options.crop ? clampBox(options.crop, info.width, info.height) : undefined;
   const inW = crop?.width ?? info.width, inH = crop?.height ?? info.height;
@@ -117,9 +117,13 @@ export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; m
     outW = Math.min(maxWidth, inW * (options.upscale ?? 1), Math.floor(Math.sqrt(maxPixels * inW / inH)));
   }
   outW = Math.max(1, Math.round(outW));
-  const outH = Math.max(1, Math.round(inH * outW / inW));
-  const filters = [...(crop ? [`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`] : []), ...(outW !== inW ? [`scale=${outW}:${outH}:flags=${outW < inW ? "area" : "lanczos"}`] : [])];
-  const out = await pipe("ffmpeg", ["-hide_banner", "-nostdin", "-v", "error", "-threads", "2", ...INPUT, "-max_pixels", String(DECODE_MAX_PIXELS), "-i", "pipe:0", "-frames:v", "1",
+  const outH = options.exactHeight ?? Math.max(1, Math.round(inH * outW / inW));
+  if (options.exactHeight !== undefined && options.exactWidth === undefined) throw Error("exactHeight requires exactWidth");
+  if (!Number.isSafeInteger(outW) || !Number.isSafeInteger(outH) || outW < 1 || outH < 1 || outW * outH > Math.min(DECODE_MAX_PIXELS, options.maxPixels ?? 40000000)) throw Error("Requested decoded dimensions exceed the pixel bound");
+  const filters = [...(crop ? [`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`] : []), ...(outW !== inW || outH !== inH ? [`scale=${outW}:${outH}:flags=${outW < inW || outH < inH ? "area" : "lanczos"}`] : [])];
+  // Crops and source coordinates use stored pixel axes. Auto-rotating from
+  // EXIF would invalidate the probed dimensions and region coordinates.
+  const out = await pipe("ffmpeg", ["-hide_banner", "-nostdin", "-v", "error", "-threads", "2", ...INPUT, "-max_pixels", String(DECODE_MAX_PIXELS), "-noautorotate", "-i", "pipe:0", "-frames:v", "1",
     ...(filters.length ? ["-vf", filters.join(",")] : []), "-pix_fmt", "rgba", "-c:v", "pam", "-f", "image2pipe", "pipe:1"], bytes, outW * outH * 4 + 4096, signal);
   const header = /^P7\nWIDTH (\d+)\nHEIGHT (\d+)\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n/.exec(out.subarray(0, 128).toString("latin1"));
   if (!header) throw new Error("Decoder returned an unexpected frame format");

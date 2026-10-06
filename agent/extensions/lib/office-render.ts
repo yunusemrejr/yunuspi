@@ -12,6 +12,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runGuarded } from "./guarded-process.ts";
+import { memoryBudgetMb } from "./memory-guard.ts";
 
 const execFileAsync = promisify(execFile);
 const CANDIDATES = ["soffice", "libreoffice"];
@@ -37,7 +38,9 @@ async function convertStaged(file: string, filter: string, options: { signal?: A
     const extension = path.extname(file).toLowerCase() || ".docx", staged = path.join(staging, `input${extension}`);
     fs.copyFileSync(file, staged);
     await runGuarded(binary, ["--headless", "--norestore", "--nologo", `-env:UserInstallation=file://${path.join(staging, "profile")}`, "--convert-to", filter, "--outdir", staging, staged],
-      { cwd: staging, signal: options.signal, timeoutMs: 150_000, guard: false, memoryMb: 2500 });
+      // Office startup and conversion share the host-aware media budget.
+      // Small Calc workbooks can exceed 2.5GB with some suite builds; cap at 4GB.
+      { cwd: staging, signal: options.signal, timeoutMs: 150_000, guard: false, memoryMb: Math.min(4096, memoryBudgetMb()) });
     return { staging, engine: path.basename(binary), cleanup };
   } catch (error) { cleanup(); throw error; }
 }

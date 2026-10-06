@@ -13,7 +13,7 @@ import { Readable, Transform } from "node:stream";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { runGuarded, throttled, type Progress } from "./guarded-process.ts";
 import { memoryBudgetMb } from "./memory-guard.ts";
-import { FFMPEG_FLAGS, produced, run } from "./media-process.ts";
+import { FFMPEG_FLAGS, produced, run, inputArgs, probe, integer, number } from "./media-process.ts";
 import { contactSheetFilter } from "./video-studio.ts";
 
 const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -177,7 +177,9 @@ const DEADLINE = { inspect: 300_000, render: 3_500_000, export: 900_000, dataset
 
 export async function blenderInspect(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const blend = await readablePath(params.blend, cwd);
-  const result = await blenderWorker({ op: "inspect" }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.inspect, progress });
+  const frames = params.frames === undefined ? undefined : frameList({ frames: params.frames }, 1);
+  if (frames && frames.length > 12) throw Error("Inspect up to 12 evaluated animation frames per call");
+  const result = await blenderWorker({ op: "inspect", frames, scene: params.scene }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.inspect, progress });
   const { ok: _ok, op: _op, ...scene } = result;
   const warnings: string[] = [];
   if (!scene.render?.camera) warnings.push("No active camera: set scene.camera before rendering");
@@ -186,54 +188,99 @@ export async function blenderInspect(params: any, cwd: string, signal?: AbortSig
   return { ...scene, warnings };
 }
 
-function frameList(params: any, fallback: number): number[] {
-  if (Array.isArray(params.frames) && params.frames.length) return params.frames.map((f: number) => Math.round(f));
+export function frameList(params: any, fallback: number): number[] {
+  if (params.frames !== undefined) {
+    if (!Array.isArray(params.frames) || !params.frames.length || params.frames.length > 2000) throw Error("frames accepts 1..2000 integers");
+    if (["from", "to", "step", "frame"].some(key => params[key] !== undefined)) throw Error("Provide frames or a frame/range, not both");
+    const frames = params.frames.map((f: number) => integer(f, 1, -100000, 1000000, "frame"));
+    if (new Set(frames).size !== frames.length) throw Error("Duplicate render frames are not supported");
+    return frames;
+  }
   if (params.from !== undefined || params.to !== undefined) {
-    const from = Math.round(params.from ?? params.to), to = Math.round(params.to ?? params.from);
+    if (params.frame !== undefined) throw Error("Provide frame or from/to, not both");
+    const from = integer(params.from ?? params.to, 1, -100000, 1000000, "from"), to = integer(params.to ?? params.from, 1, -100000, 1000000, "to");
     if (to < from) throw new Error("to must be >= from");
-    const step = Math.max(1, Math.round(params.step ?? 1));
+    const step = integer(params.step, 1, 1, 100, "step");
+    if (Math.floor((to - from) / step) + 1 > 2000) throw Error("Render at most 2000 frames per call; split long animations");
     const frames: number[] = [];
     for (let f = from; f <= to; f += step) frames.push(f);
     if (frames.length > 2000) throw new Error("Render at most 2000 frames per call; split long animations");
     return frames;
   }
-  return [Math.round(params.frame ?? fallback)];
+  if (params.step !== undefined) throw Error("step requires from/to");
+  return [integer(params.frame, fallback, -100000, 1000000, "frame")];
+}
+
+export function sequenceTiming(files: Array<{ frame: number }>, fps: number, retime = false) {
+  number(fps, 24, 0.01, 120, "fps");
+  if (!files.length || files.length > 2000) throw Error("Sequence needs 1..2000 frames");
+  const repeats = files.map((file, i) => {
+    if (!Number.isSafeInteger(file.frame)) throw Error("Sequence frame indices must be integers");
+    if (retime || i === files.length - 1) return 1;
+    const gap = files[i + 1].frame - file.frame;
+    if (gap < 1) throw Error("Animation frames must be in increasing source order");
+    return gap;
+  });
+  const frames = repeats.reduce((a, b) => a + b, 0);
+  if (frames > 2000) throw Error("Assembled timeline exceeds 2000 frames; narrow the range or pass fps to retime the samples explicitly");
+  return { repeats, frames, fps, seconds: frames / fps, retimed: retime, sourceRange: [files[0].frame, files.at(-1)!.frame], timing: retime ? "Each rendered sample occupies 1/fps seconds (explicit retiming)." : "Source frame gaps are held at the scene's fps; the last sample occupies one source frame. No rendered sample is silently dropped." };
 }
 
 /** Render still frames or an animation (image sequence plus an H.264 preview via ffmpeg). */
 export async function blenderRender(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const blend = await readablePath(params.blend, cwd);
-  const outputDir = await freshOutputDir(params.outputDir, cwd, "render");
   const mode = params.mode ?? "still";
+  if (!["still", "preview", "animation"].includes(mode)) throw Error("mode must be still, preview or animation");
   const frames = frameList(params, 1);
   if (mode === "still" && frames.length > 24) throw new Error('mode "still" renders up to 24 frames; use mode "animation" for sequences');
-  const scale = params.scale ?? (mode === "preview" ? 0.25 : 1);
-  const samples = params.samples ?? (mode === "preview" ? 16 : undefined);
+  if (mode === "animation" && frames.some((frame, i) => i > 0 && frame <= frames[i - 1])) throw Error("Animation frames must be in increasing source order");
+  const scale = number(params.scale, mode === "preview" ? 0.25 : 1, 0.05, 2, "scale");
+  const samples = params.samples === undefined ? (mode === "preview" ? 16 : undefined) : integer(params.samples, 16, 1, 4096, "samples");
+  if (params.fps !== undefined) number(params.fps, 24, 1, 120, "fps");
+  const crf = integer(params.crf, 18, 1, 51, "crf");
+  const outputDir = await freshOutputDir(params.outputDir, cwd, "render");
   const req = { op: "render", outputDir, frames, scene: params.scene, camera: params.camera, engine: params.engine, width: params.width, height: params.height, scale, samples, denoise: params.denoise, transparent: params.transparent, format: params.format, threads: params.threads, stem: mode === "animation" ? "frame" : "still" };
   const result = await blenderWorker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.render, progress });
   const files: Array<{ frame: number; path: string; bytes: number; seconds: number }> = result.files;
   const out: any = { mode, outputDir, render: result.render, frames: files.length, seconds: result.seconds, files: files.slice(0, 48) };
-  Object.assign(out, await assembleSequence(outputDir, files, { fps: params.fps ?? result.render.fps ?? 24, crf: params.crf ?? 18, stem: "frame", video: mode === "animation" }, signal));
+  Object.assign(out, await assembleSequence(outputDir, files, { fps: params.fps ?? result.render.fps ?? 24, crf, stem: "frame", video: mode === "animation", retime: params.fps !== undefined }, signal));
   out.review = mode === "still" ? "Open the frame(s) with read and judge composition, lighting, clipping and materials before any longer render." : mode === "preview" ? "Low-resolution, low-sample check: judge motion and framing, not shading noise." : "Inspect the contact sheet and play animation.mp4 (video_frames samples transitions); a finished render is not visual approval.";
+  await fs.writeFile(path.join(outputDir, "render.json"), JSON.stringify(out, null, 2) + "\n", { flag: "wx" });
   return out;
 }
 
 /** Contact sheet (up to 12 labelled frames) and, when asked, an H.264 preview from a rendered image sequence. */
-export async function assembleSequence(outputDir: string, files: Array<{ frame: number; path: string }>, options: { fps: number; crf: number; stem: string; video?: boolean }, signal?: AbortSignal) {
-  const out: { contactSheet?: string; contactSheetError?: string; video?: string; videoError?: string; fps?: number } = {};
+export async function assembleSequence(outputDir: string, files: Array<{ frame: number; path: string }>, options: { fps: number; crf: number; stem: string; video?: boolean; retime?: boolean }, signal?: AbortSignal) {
+  const out: any = {};
   const labelled = files.filter((_, i) => files.length <= 12 || i % Math.ceil(files.length / 12) === 0).slice(0, 12).map((f) => ({ path: f.path, label: `f${f.frame}` }));
   if (labelled.length > 1 && /\.(png|jpe?g|webp)$/i.test(labelled[0].path)) {
     const sheet = path.join(outputDir, "contact-sheet.png");
     const args = [...FFMPEG_FLAGS, "-loglevel", "error"];
     for (const image of labelled) args.push("-i", image.path);
     args.push("-filter_complex", contactSheetFilter(labelled.map((i) => i.label)), "-map", "[sheet]", "-frames:v", "1", "-update", "1", sheet);
-    await run("ffmpeg", args, signal, 60_000).then(() => { out.contactSheet = sheet; }, (error) => { out.contactSheetError = error.message; });
+    await run("ffmpeg", args, signal, 60_000).then(() => { out.contactSheet = sheet; }, (error) => { if (signal?.aborted) throw error; out.contactSheetError = error.message; });
   }
   if ((options.video ?? true) && files.length > 1 && /\.(png|jpe?g)$/i.test(files[0].path)) {
     const video = path.join(outputDir, "animation.mp4");
-    const ext = path.extname(files[0].path);
-    await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", "-framerate", String(options.fps), "-start_number", String(files[0].frame), "-i", path.join(outputDir, `${options.stem}-%04d${ext}`), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", String(options.crf), "-movflags", "+faststart", video], signal, 600_000)
-      .then(async () => { out.video = (await produced(video)).path; out.fps = options.fps; }, (error) => { out.videoError = `image sequence rendered but mp4 assembly failed: ${error.message}`; });
+    let staging: string | undefined;
+    try {
+      const timing = sequenceTiming(files, options.fps, options.retime);
+      const ext = path.extname(files[0].path).toLowerCase();
+      if (files.some(file => path.extname(file.path).toLowerCase() !== ext)) throw Error("Sequence images must share a format");
+      staging = await fs.mkdtemp(path.join(outputDir, ".assembly-"));
+      let index = 0;
+      for (let i = 0; i < files.length; i++) for (let k = 0; k < timing.repeats[i]; k++) {
+        signal?.throwIfAborted();
+        const dest = path.join(staging, `${String(index++).padStart(6, "0")}${ext}`);
+        await fs.link(files[i].path, dest).catch(async error => { if (error.code !== "EXDEV") throw error; await fs.copyFile(files[i].path, dest, fs.constants.COPYFILE_EXCL); });
+      }
+      await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", "-framerate", String(options.fps), "-i", path.join(staging, `%06d${ext}`), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", String(options.crf), "-movflags", "+faststart", video], signal, 600000);
+      const info = await probe(video, signal);
+      await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(video, 0), "-f", "null", "-"], signal, 600000);
+      if (Math.abs(Number(info.format?.duration) - timing.seconds) > Math.max(0.05, 1 / options.fps)) throw Error("Assembled video duration differs from the source-frame timeline");
+      Object.assign(out, { video: (await produced(video)).path, fps: options.fps, sequence: timing, decodeVerified: true });
+    } catch (error: any) { await fs.rm(video, { force: true }); if (signal?.aborted) throw error; out.videoError = `image sequence rendered but mp4 assembly failed: ${error.message}`; }
+    finally { if (staging) await fs.rm(staging, { recursive: true, force: true }); }
   }
   return out;
 }

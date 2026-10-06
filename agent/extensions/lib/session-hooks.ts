@@ -69,6 +69,16 @@ const isBrowserMutation = (args: HookArgs) =>
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
+  { key: 'image-generation-evidence', tools: ['image_generate'], when: args => ['generate', 'edit'].includes(String(args.action)),
+    line: 'Use the exact requested model and supported image parameters. Keep reference/mask provenance and inspect the returned pixels for edit intent, identity, alpha and integration; decoded output does not establish a successful edit. Do not retry paid generation with a different model without a task reason.' },
+  { key: 'image-conversion-evidence', tools: ['image_convert'],
+    line: 'Check conversion.json for source hashes, dimensions, fit and alpha handling. Inspect the output crop/matte at its delivery size; PNG/WebP alpha and JPEG backgrounds have different semantics. Keep the originals.' },
+  { key: 'image-understanding-evidence', tools: ['image_understand'], when: args => args.action === undefined || args.action === 'analyze',
+    line: 'Tie observations to the returned image hashes and original/sent/crop coordinates. Treat model descriptions as inference; verify consequential text/numbers against the source. A frame comparison cannot establish motion between those frames.' },
+  { key: 'svg-export-clock', tools: ['svg_render'],
+    line: 'Inspect the contact sheet and timestamped samples for clipping, ownership collisions and expected motion. Review encoded cadence/loop evidence and actual playback; CSS/SMIL/data keyframes share the export clock, while reduced-motion design and artistic approval remain separate checks.' },
+  { key: 'svg-author-render', tools: ['write', 'edit'], when: args => typeof args.path === 'string' && /\.svg$/i.test(args.path),
+    line: 'Run svg_inspect on this revision and svg_render at the intended sizes and motion timestamps. Fix unresolved IDs, path/keyframe topology, clipped filters and conflicting transform owners; inspect pixels before proceeding.' },
   {
     key: 'media-pipeline-evidence', tools: ['media_pipeline'],
     line: 'Reuse the stage receipts and completed artifacts. Resolve failed technical QA, then inspect playback for edit intent, motion, sync and audible quality; mastering measurements do not establish artistic approval.',
@@ -124,7 +134,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
 	},
 	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "svg_render", "image_generate", "image_convert", "image_understand", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
 	},
 	{
@@ -190,7 +200,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "narration-fit", tools: ["narration_tts"],
-		when: (args) => args.action === 'synthesize',
+		when: (args) => ['synthesize', 'speak'].includes(String(args.action)),
 		line: "After synthesis, re-time scene cues to the spoken words, resolve overruns and fast pacing, and keep a pronunciation lexicon for names and acronyms instead of respelling narration text.",
 	},
 	{

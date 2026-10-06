@@ -113,9 +113,9 @@ export const DIRECT_CORE_TOOLS = new Set([
  * (one source of truth); attached images count as the reference for an
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
-  { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
+  { skill: 'mockup-to-code', tools: ['image_understand', 'image_convert', 'image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
   { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
   { skill: 'gaussian-splatting', tools: ['splat_setup', 'splat_train', 'splat_preview', 'blender_export', 'video_frames'] },
@@ -147,12 +147,13 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
   { pattern: /\b(?:linux|systemd|cgroup|memory pressure|disk pressure|listening port|service unit)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|failure|resource|unavailable|slow)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:linux|systemd|cgroup|service unit)\b/i, tools: ['sys_probe'] },
   { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
   { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['motion_inspect', 'media_info'] },
+  { pattern: /\b(?:image editing|image generation|image converting|image understanding|edit (?:an? |the |this )?(?:image|photo)|generate (?:an? |the |this )?image|convert (?:an? |the |this )?image)\b/i, tools: ['image_generate', 'image_understand', 'image_convert'] },
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
   { pattern: /\b(?:code_quality|refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality'] },
   // Security, backend, efficiency and UI-source audits: staged for work that ships to users or handles untrusted input.
   { pattern: /\b(?:security (?:audit|review|hardening|scan)|audit (?:the |this |my )?(?:code|backend|api|app|security)|vulnerabilit\w*|owasp|injection|xss|csrf|ssrf|hardcoded (?:secrets?|credentials?)|leaked? (?:secrets?|keys?)|(?:rest|http|graphql|backend|server-side|web) (?:api|service|server)s?|backend (?:code|engineering|service)s?|endpoints?|middleware|n\+1|slow quer(?:y|ies)|rate limit\w*|authentication|authorization|auth (?:flow|system|middleware)|login (?:flow|system)|sql (?:query|queries|injection)|performance (?:audit|review|bugs?|issues?)|coding (?:patterns?|best practices?)|anti-?patterns?|accessibility (?:audit|review|issues?))\b/i, tools: ['code_audit'] },
-  { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect'] },
+  { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect', 'svg_render'] },
   { pattern: /\b(?:git(?:hub)?|commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit|repository history|release (?:process|pipeline|version|tag))\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with
   // the first turn instead of waiting for a late discovery heuristic.

@@ -118,7 +118,7 @@ test('OpenRouter uses the native image route, preserves usage and sends edits as
   assert.equal(images.resolveImageBackend(env, true).keySource, 'session provider');
   assert.equal(images.resolveImageBackend({ ...env, OPENROUTER_API_KEY: 'TEST_image_fixture_only' }).keySource, 'OPENROUTER_API_KEY');
   assert.equal(images.imageBackendEnvironment({ OPENROUTER_API_KEY: 'TEST_image_fixture_only' }, false, 'fixture/selected').PI_IMAGE_BACKEND, 'openrouter');
-  assert.equal(images.imageBackendEnvironment({ ...fixtureEnv, OPENROUTER_API_KEY: 'TEST_image_fixture_only' }, true, 'fixture/selected').PI_IMAGE_MODEL, 'fixture/image');
+  assert.equal(images.imageBackendEnvironment({ ...fixtureEnv, OPENROUTER_API_KEY: 'TEST_image_fixture_only' }, true, 'fixture/selected').PI_IMAGE_MODEL, 'fixture/selected');
   assert.equal(images.resolveImageBackend({ PI_IMAGE_BACKEND: 'off', OPENROUTER_API_KEY: 'TEST_image_fixture_only' }).configured, false);
   const requests = [], usage = [];
   globalThis.fetch = async (url, options) => {

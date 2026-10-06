@@ -6,7 +6,8 @@ import { createWriteStream, existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
+import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run, number } from "./media-process.ts";
+import { studioFolder } from "./design-studio.ts";
 import { masterMedia } from "./audio-studio.ts";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
@@ -810,8 +811,48 @@ async function piperStatus() {
   return { engine: "piper", packages: PIPER_PACKAGES, installed, wordAlignment: await piperHasAlignment(), styles: Object.keys(VOICE_STYLES), home: piperHome(), voices };
 }
 
+export function planNarration(params: any) {
+  if (typeof params.text !== "string" || !params.text.trim() || params.text.length > 8000) throw Error("Narration needs text of 1..8000 characters");
+  const text = params.text.trim(), display = text.replace(/\s+/g, " ");
+  if (estimateSeconds(display) > 120) throw Error("Standalone narration is bounded to about 120 seconds; split the script");
+  const lexicon = validateLexicon(params.lexicon), spoken = applyLexicon(text, lexicon);
+  const voice = params.voice ?? "en_US-ryan-high", style = params.style ?? "documentary";
+  if (!PIPER_VOICES[voice]) throw Error(`Unknown Piper voice ${voice}`);
+  if (!VOICE_STYLES[style]) throw Error(`Unknown narration style ${style}`);
+  const speed = number(params.speed, 1, 0.6, 1.5, "speed");
+  if (!existsSync(piperPython()) || !voiceFiles(voice).every(f => existsSync(f.path))) throw Error(`Piper voice ${voice} is not installed; run narration_tts action:install voice:${voice}`);
+  return { text, display, spoken, counts: display.split(" ").map(token => spokenWordCount(token, lexicon)), voice, style, speed };
+}
+
+export async function narrationSpeak(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
+  const plan = planNarration(params), style = VOICE_STYLES[plan.style];
+  signal?.throwIfAborted();
+  const dir = await studioFolder(params.outputDir, cwd, "narration"), requestPath = path.join(dir, "request.json");
+  try {
+    await fs.writeFile(requestPath, JSON.stringify({ model: voiceFiles(plan.voice)[0].path, outDir: dir, threads: Math.min(4, Math.max(1, Math.floor(os.availableParallelism() / 3))), lengthScale: style.length / plan.speed, noiseScale: style.noise, noiseW: style.noiseW, sentenceSilence: style.sentence, paragraphSilence: style.paragraph, scenes: [{ id: "voice", text: plan.spoken.text, display: plan.display, counts: plan.counts }] }), { flag: "wx" });
+    let result: any;
+    await runGuarded(piperPython(), ["-I", VIDEO_PATHS.narrate, requestPath], { cwd: dir, signal, timeoutMs: 180000, nice: 10, onLine: line => { if (line.startsWith("NARRATE_RESULT ")) result = JSON.parse(line.slice(15)); else if (line.startsWith("NARRATE_PROGRESS ")) progress?.("Synthesizing standalone narration"); } });
+    const made = result?.scenes?.find((scene: any) => scene.id === "voice");
+    if (!made) throw Error("Narration worker returned no speech");
+    const raw = path.join(dir, "voice.raw.wav"), file = path.join(dir, "narration.wav");
+    const mastered = await masterNarration(raw, file, signal);
+    const seconds = Number((await probe(file, signal)).format?.duration);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 120) throw Error("Narration rendered outside the 0..120 second delivery bound");
+    const track = captionChunks(plan.display, seconds, 7, 42, made.words).map(chunk => ({ text: chunk.text, start: chunk.start, end: chunk.end }));
+    await fs.writeFile(path.join(dir, "captions.srt"), toSrt(track), { flag: "wx" });
+    await fs.writeFile(path.join(dir, "captions.vtt"), toVtt(track), { flag: "wx" });
+    await fs.rm(raw, { force: true });
+    const delivery = { voice: plan.voice, style: plan.style, speed: plan.speed, artifact: await produced(file), seconds, timing: made.exact ? "measured" : "estimated", words: made.words, captions: { srt: path.join(dir, "captions.srt"), vtt: path.join(dir, "captions.vtt") }, loudnessLufs: mastered.lufs, lexiconEdits: plan.spoken.edits, note: "Local Piper speech; listen for intelligibility, pacing and pronunciation. Caption timing is labeled measured or estimated. Use role:voice in audio_mix/media_pipeline to duck a music bed." };
+    await fs.writeFile(path.join(dir, "narration.json"), JSON.stringify(delivery, null, 2) + "\n", { flag: "wx" });
+    signal?.throwIfAborted();
+    return delivery;
+  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+  finally { await fs.rm(requestPath, { force: true }); }
+}
+
 export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const action = params.action ?? "status";
+  if (action === "speak") return narrationSpeak(params, cwd, signal, progress);
   let voice = params.voice ?? "en_US-ryan-high";
   if (action === "status") return piperStatus();
   if (action === "install") {

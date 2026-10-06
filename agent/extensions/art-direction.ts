@@ -34,6 +34,7 @@ import { registerContinuationSource } from "./lib/continuation-notice.ts";
 import { captureToFile } from "./render-and-wait.ts";
 import { sniffImage } from "./lib/design-studio.ts";
 import { choices } from "./lib/tool-schema.ts";
+import { svgRender } from "./lib/svg-render.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const strList = (maxItems: number, maxLength: number) => Type.Array(Type.String({ maxLength }), { maxItems });
@@ -213,7 +214,7 @@ export default function artDirection(pi: any) {
 
   // ── motion_inspect ──
   register("motion_inspect",
-    "Inspect running motion as a system: enumerate main-frame CSS/WAAPI animations (target, timing, iterations, animated properties), render an ASCII timeline, and flag concurrency, transform-owner collisions, layout-property animation, duration soup, infinite loops and possible shared-target transform owners. Temporal QA samples animation-local clock frames; reduced-motion failures require unchanged infinite transform timing plus actual moving reduced-state pixels. Known equal-period loops get endpoint-parity evidence; arbitrary first/last samples cannot prove seams. Encoded-video cadence/loop QA uses media_info action motion. JS/rAF, scroll timelines and cross-frame choreography are out of scope and reported unknown.",
+    "Inspect running motion as a system: enumerate main-frame CSS/WAAPI animations (target, timing, iterations, animated properties), render an ASCII timeline, and flag concurrency, transform-owner collisions, layout-property animation, duration soup, infinite loops and possible shared-target transform owners. Temporal QA samples animation-local CSS/WAAPI frames and seeks SVG SMIL roots; reduced-motion failures require unchanged infinite transform timing plus actual moving reduced-state pixels. Known equal-period loops get endpoint-parity evidence; arbitrary first/last samples cannot prove seams. Encoded-video cadence/loop QA uses media_info action motion. JS/rAF, scroll timelines and cross-frame choreography are out of scope and reported unknown.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
       width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
@@ -232,9 +233,13 @@ export default function artDirection(pi: any) {
       return { result: report };
     }, 600_000);
 
+  register("svg_render", "Render raw SVG source or a saved SVG to timestamped PNG frames or a deterministic H.264 video. CSS/WAAPI, SMIL and explicit data-keyframe tracks share an absolute-time clock. Tracks target existing element IDs and interpolate attributes, colors, transforms or same-topology cubic paths; no arbitrary JS or external assets. Returns editable source/tracks, samples, contact sheet, approximate clipping/owner diagnostics and decoded-video cadence/loop QA. Audio may attach a local narration/music mix to video. PNG frames support transparency; video requires a matte. Inspect actual pixels/playback before approval.",
+    Type.Object({ path: Type.Optional(localPath), svg: Type.Optional(Type.String({ minLength: 1, maxLength: 65536 })), mode: Type.Optional(choices(["frames", "video"])), times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 30 }), { minItems: 1, maxItems: 12 })), duration: Type.Optional(Type.Number({ minimum: 0.1, maximum: 30 })), fps: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 1080 })), background: Type.Optional(Type.String({ pattern: "^(transparent|#[0-9a-fA-F]{6})$" })), audio: Type.Optional(localPath), reducedMotion: Type.Optional(Type.Boolean()), loop: Type.Optional(Type.Boolean()), tracks: Type.Optional(Type.Array(Type.Object({ target: Type.String({ minLength: 1, maxLength: 128 }), property: choices(["x", "y", "cx", "cy", "r", "rx", "ry", "width", "height", "opacity", "fill", "stroke", "stroke-width", "stroke-dashoffset", "transform", "d", "viewBox"]), keys: Type.Array(Type.Object({ time: Type.Number({ minimum: 0, maximum: 30 }), value: Type.Union([Type.Number(), Type.String({ maxLength: 8192 })]), ease: Type.Optional(choices(["linear", "smooth", "hold"])) }), { minItems: 2, maxItems: 64 }) }), { maxItems: 64 })), outputDir: Type.Optional(localPath) }),
+    async (params, ctx, signal) => { const result = await svgRender(params, ctx.cwd as string, signal); return { result, pixels: result.contactSheet.path }; }, 240000);
+
   // ── svg_inspect ──
   register("svg_inspect",
-    "Measure SVG engineering: viewBox, bounds, stroke language, fills, defs (gradients, filters incl. default regions, masks, clipPaths), id collisions, unresolved fragment refs, transform stacks, accessibility, path complexity and optical center/padding/mass proxies. paths (2..24 files) adds set-consistency review flagging the sibling that drifted (stroke, corners, mass, center, padding, canvas). action review gives each file a score and verdict with fixes (clipped art, missing viewBox, hard-coded colour where currentColor belongs, node bloat, primitives drawn as paths, embedded rasters, live text, active content, size potential); optimize:true also writes a lossless cleaned copy to a fresh git-ignored folder after verifying shapes and bounds are unchanged (originals untouched). matrix rasterizes representative sizes with ink-coverage proxies for legibility judgment. Bounds apply translate/scale only; rotation stays approximate and is disclosed. Runs automatically on saved .svg files.",
+    "Measure SVG engineering: viewBox, bounds, stroke language, fills, defs (gradients, filters incl. default regions, masks, clipPaths), id collisions, unresolved fragment refs, transform stacks, accessibility, path complexity and optical center/padding/mass proxies. paths (2..24 files) adds set-consistency review flagging the sibling that drifted (stroke, corners, mass, center, padding, canvas). action review gives each file a score and verdict with fixes (clipped art, missing viewBox, hard-coded colour where currentColor belongs, node bloat, primitives drawn as paths, embedded rasters, live text, active content, size potential); optimize:true also writes a lossless cleaned copy to a fresh git-ignored folder after verifying shapes and bounds are unchanged (originals untouched). matrix rasterizes representative sizes with ink-coverage proxies for legibility judgment. Bounds apply translate, scale, rotation, skew and matrix transforms; sampled curves and unsupported paint retain explicit approximation limits. Runs automatically on saved .svg files.",
     Type.Object({
       action: Type.Optional(choices(["inspect", "review", "matrix"])),
       path: Type.Optional(localPath),
@@ -310,20 +315,26 @@ export default function artDirection(pi: any) {
 
   // ── image_generate ──
   register("image_generate",
-    "Generative imagery inside the creative loop. status lists configured backend and available OpenRouter image models; generate/edit accept an explicit model from that catalog. Existing OpenRouter credentials enable that route when no backend is configured; PI_IMAGE_BACKEND/MODEL keep precedence. brief merges prompt, direction and role constraints without inference. Outputs are decode-verified and registered, with pixels returned for review. OpenRouter edit supplies a reference image; masks require openai-compatible. PI_IMAGE_API_URL/API_KEY optionally override configuration. Deterministic plates stay on image_create.",
+    "Generative imagery inside the creative loop. status lists the bundled OpenRouter image catalog; refresh:true discovers its current Images API models for transport:images. generate/edit accept an exact model overriding the environment for this call. edit supports path or 1..5 references, inputFidelity on supported models, and validated transparent PNG masks with openai-compatible. GPT Image requests omit unsupported legacy response_format/seed. Format/compression/transparency/quality are explicit. Outputs are decode-verified, registered and returned for review; no cheaper fallback or paid retry is selected automatically.",
     Type.Object({
       action: choices(["status", "brief", "generate", "edit"]),
-      model: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Exact image model id; status lists the native OpenRouter catalog. PI_IMAGE_MODEL takes precedence when configured." })),
+      model: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Exact model id; overrides PI_IMAGE_MODEL only for this call" })),
+      refresh: Type.Optional(Type.Boolean({ description: "status: fetch current OpenRouter Images API catalog" })),
+      transport: Type.Optional(choices(["chat", "images"], "OpenRouter: existing chat-image route (default), or native Images API")),
       prompt: Type.Optional(Type.String({ maxLength: 4000 })),
       path: Type.Optional(localPath),
+      references: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 5 })),
       mask: Type.Optional(localPath),
       role: Type.Optional(choices(["hero-focal", "editorial-support", "diagram", "texture", "icon", "illustration", "background", "product-shot", "avatar", "generic"])),
       negative: Type.Optional(strList(16, 200)),
       aspect: Type.Optional(choices(["square", "landscape", "portrait"])),
-      size: Type.Optional(Type.String({ maxLength: 32 })),
+      aspectRatio: Type.Optional(Type.String({ pattern: "^(auto|[1-9][0-9]?:[1-9][0-9]?)$", description: "OpenRouter ratio, e.g.16:9; use size or aspectRatio" })), resolution: Type.Optional(choices(["512", "1K", "2K", "4K"], "OpenRouter resolution; must be supported by the chosen model")), size: Type.Optional(Type.String({ maxLength: 32 })),
       seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 4294967295 })),
       transparent: Type.Optional(Type.Boolean()),
       quality: Type.Optional(Type.String({ maxLength: 32 })),
+      format: Type.Optional(choices(["png", "jpeg", "webp"])),
+      compression: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })),
+      inputFidelity: Type.Optional(choices(["low", "high"])),
     }),
     async (params, ctx, signal) => {
       const ownerSession = ctx.sessionManager?.getSessionId?.();
@@ -331,7 +342,7 @@ export default function artDirection(pi: any) {
       const providerKey = params.action !== "brief" && (!backendName || backendName === "openrouter") && !process.env.PI_IMAGE_API_KEY && !process.env.OPENROUTER_API_KEY
         ? await ctx.modelRegistry?.getApiKeyForProvider?.("openrouter") : undefined;
       signal.throwIfAborted();
-      if (params.action === "status") return { result: await imageBackendStatus(process.env, !!providerKey) };
+      if (params.action === "status") return { result: await imageBackendStatus(process.env, !!providerKey, { refresh: params.refresh, key: process.env.PI_IMAGE_API_KEY ?? process.env.OPENROUTER_API_KEY ?? providerKey, signal }) };
       const { state } = sessionOf(ctx);
       const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
       if (params.action === "brief") return { result: buildGenerationBrief(direction, params) };
@@ -339,7 +350,7 @@ export default function artDirection(pi: any) {
       const usageId = randomUUID();
       const runtime = { providerKey, onUsage: (usage: unknown, status: string) => {
         if (ctx.sessionManager?.getSessionId?.() !== ownerSession) return;
-        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: "openrouter", model: imageEnv.PI_IMAGE_MODEL?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
+        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: imageEnv.PI_IMAGE_BACKEND === "openrouter" ? "openrouter" : "openai-compatible", model: imageEnv.PI_IMAGE_MODEL?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
       } };
       if (params.action === "generate") {
         const run = await imageGenerateRun(params, ctx.cwd as string, signal, direction, imageEnv, runtime);

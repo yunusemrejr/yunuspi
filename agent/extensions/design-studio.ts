@@ -7,6 +7,9 @@ import { imageAnalyze, imageCrop, imageTrace, visualDiff } from "./lib/design-st
 import { imageCreate, SYNTH_OPS } from "./lib/image-synth.ts";
 import { captureToFile } from "./render-and-wait.ts";
 import { choices } from "./lib/tool-schema.ts";
+import { imageConvert } from "./lib/image-convert.ts";
+import { imageUnderstand } from "./lib/image-understand.ts";
+import { randomUUID } from "node:crypto";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const url = Type.String({ minLength: 8, maxLength: 2048, pattern: "^https?://" });
@@ -16,17 +19,22 @@ const outputDir = Type.Optional(Type.String({ minLength: 1, maxLength: 4096, des
 const scale = Type.Optional(Type.Number({ minimum: 0.5, maximum: 4, description: "Device pixel ratio of the reference export (2 for @2x). Inferred from common export widths when omitted" }));
 
 export default function designStudio(pi: any) {
-  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal) => Promise<any>, deadlineMs: number) {
+  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, ctx?: any) => Promise<any>, deadlineMs: number) {
     pi.registerTool({
       name, label: name.replaceAll("_", " "), description, parameters,
       async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
         const deadline = AbortSignal.timeout(deadlineMs);
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
-        const result = await handler(params, ctx?.cwd || process.cwd(), bounded);
+        const result = await handler(params, ctx?.cwd || process.cwd(), bounded, ctx);
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });
   }
+  register("image_convert", "Convert 1..12 local still images to PNG/JPEG/WebP with explicit contain/cover/stretch framing, width/height, clockwise rotation, flips and alpha/matte control. PNG/WebP keep alpha unless background is given; JPEG uses a white or explicit matte. Decode-verified outputs and source hashes go to a fresh workspace folder; originals and batch order are preserved. Animated GIF/APNG/WebP require a video/frame workflow. No uploads.",
+    Type.Object({ path: Type.Optional(localPath), paths: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 12 })), width: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })), height: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })), fit: Type.Optional(choices(["contain", "cover", "stretch"])), rotate: Type.Optional(choices([0, 90, 180, 270])), flipX: Type.Optional(Type.Boolean()), flipY: Type.Optional(Type.Boolean()), background: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$" })), format: Type.Optional(choices(["png", "jpg", "webp"])), quality: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })), outputDir }), imageConvert, 180000);
+  register("image_understand", "Ask a vision model about 1..8 local images: content, composition, visible defects, references or sampled-frame comparisons. Uses the current image-capable model or an explicit provider/model for this call; models lists authenticated vision choices. Returns observations, usage and source hash/crop/scale evidence. region isolates small details in one image; maxWidth bounds sent pixels. Files are sent to the selected provider; image_analyze and image_ocr remain local alternatives for measurements and printed text.",
+    Type.Object({ action: Type.Optional(choices(["analyze", "models"])), path: Type.Optional(localPath), paths: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 8 })), prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), provider: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), region: Type.Optional(box), maxWidth: Type.Optional(Type.Integer({ minimum: 256, maximum: 2560 })), maxTokens: Type.Optional(Type.Integer({ minimum: 128, maximum: 8192 })) }),
+    (params, cwd, signal, ctx) => { const id = randomUUID(), session = ctx?.sessionManager?.getSessionId?.(); return imageUnderstand(params, cwd, signal, ctx, { onUsage: (usage, status, model) => { if (ctx?.sessionManager?.getSessionId?.() !== session) return; try { pi.appendEntry?.("auxiliary-model-usage-v1", { id, owner: "image-understand", provider: model.provider, model: model.id, status, ...(usage === undefined ? {} : { usage }) }); } catch {} } }); }, 180000);
   register("image_analyze",
     "Turn a design reference (mockup, screenshot; local path or http(s) URL) into a build plan: page bands with guessed roles (navigation, hero, feature grid, footer), blocks classified as text, flat/container (CSS), gradient (CSS), icon (SVG), image (raster) or divider, palette with roles and contrast, type scale, spacing unit, container width, columns and repeated components, all in CSS px. Writes design-map.json, an annotated overlay.png (block ids by kind) and tokens.css. ocr:true attaches recognized copy to text blocks. Estimates, not the designer's intent: look at the overlay. The mockup-to-code skill owns the workflow.",
     Type.Object({ ...source, scale, ocr: Type.Optional(Type.Boolean()), language: Type.Optional(Type.String({ pattern: "^[A-Za-z]{2,3}([+][A-Za-z]{2,3})*$", maxLength: 31 })), maxWidth: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })), maxBlocks: Type.Optional(Type.Integer({ minimum: 8, maximum: 400 })), outputDir }),

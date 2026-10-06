@@ -150,11 +150,11 @@ test('real Needle WASM ranks bounded observation candidates and reuses embedding
     return result;
   };
   try {
-    // Startup belongs outside the interactive retrieval stage's 2 s budget.
-    // Exercise a real forward pass first; production fail-open deadlines stay
-    // covered by the deterministic retrieval tests above.
-    const warm = await handle.embed(['Initialize an independent retrieval fixture.']);
-    assert.equal(warm.ok, true, JSON.stringify(warm));
+    // Warm the exact bounded candidates outside the live retrieval deadline.
+    // Raising the worker budget alone does not change the owner's stage clock.
+    let warm;
+    await retrieveObservation(raw, 'routing authentication login', { needle: (query, candidates, topK) => (warm = handle.rank({ query, candidates, topK })) });
+    assert.equal((await warm).ok, true);
     const start = performance.now();
     const first = await retrieveObservation(raw, 'routing authentication login', { needle });
     const second = await retrieveObservation(raw, 'routing authentication login', { needle });

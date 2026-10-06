@@ -466,7 +466,7 @@ function addTargetedNames({ file, source, relativePath, stable, owners }) {
 		});
 	};
 
-	if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/blender-studio.ts" || relativePath === "extensions/art-direction.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") {
+	if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/design-studio.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/blender-studio.ts" || relativePath === "extensions/art-direction.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") {
 		addRows(extractFactoryNames(source, "register"), "factory");
 	}
 

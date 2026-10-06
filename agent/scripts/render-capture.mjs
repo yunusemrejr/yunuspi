@@ -539,7 +539,13 @@ async function renderCaptureOnce(p, output, signal) {
             } catch { return { index, kind: "unknown", target: "?", durationMs: null, delayMs: 0, iterations: 1, playbackRate: 1, properties: [] }; }
           };
           const descriptors = animations.slice(0, 40).map(describe);
+          const smilRoots = [...document.querySelectorAll('svg')].filter(root => root.querySelector('animate,animateMotion,animateTransform,set'));
+          let smilSampled = 0;
           if (timeMs !== null) {
+            for (const root of smilRoots.slice(0, 64)) {
+              try { root.pauseAnimations(); root.setCurrentTime(timeMs / 1000); smilSampled++; }
+              catch { failed++; }
+            }
             for (const animation of animations.slice(0, 200)) {
               if (animation.timeline !== document.timeline) { unsupported++; continue; }
               try {
@@ -551,10 +557,10 @@ async function renderCaptureOnce(p, output, signal) {
           }
           return {
             sampled, unsupported, failed, omitted: Math.max(0, animations.length - 200),
-            total: animations.length, descriptors,
+            total: animations.length, descriptors, smil: { roots: smilRoots.length, sampled: smilSampled, omitted: Math.max(0, smilRoots.length - 64) },
             note: timeMs === null
-              ? "Inventory only: no animation was paused or moved. Main-frame document-timeline CSS/WAAPI animations; excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed."
-              : "Each currently discoverable main-frame document-timeline CSS/WAAPI animation paused at its own local time. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
+              ? "Inventory only: no animation was paused or moved. Main-frame CSS/WAAPI animations and SVG SMIL roots; excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed."
+              : "Each main-frame CSS/WAAPI animation and SVG SMIL root paused at the requested local seconds. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
           };
         }, conditions.animationTimeMs);
       stage = "inspection";

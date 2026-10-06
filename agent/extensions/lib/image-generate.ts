@@ -21,6 +21,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { redactSecrets } from "./memory-redaction.ts";
 import { sniffImage, decodeImage } from "./design-studio.ts";
 import { qaFolder } from "./creative-qa.ts";
@@ -50,10 +51,11 @@ const SETUP = "Set PI_IMAGE_BACKEND=openai-compatible or openrouter and PI_IMAGE
 /** Resolve backend configuration without touching secrets beyond presence.
  * Pure over env. */
 export function imageBackendEnvironment(env: Record<string, string | undefined>, providerKeyAvailable = false, selectedModel?: unknown) {
+  if (selectedModel !== undefined && (typeof selectedModel !== "string" || !selectedModel.trim())) throw Error("model must be a nonempty exact provider id");
   return {
     ...env,
     ...(!env.PI_IMAGE_BACKEND?.trim() && !env.PI_IMAGE_API_URL && (env.OPENROUTER_API_KEY || providerKeyAvailable) ? { PI_IMAGE_BACKEND: "openrouter" } : {}),
-    ...(!env.PI_IMAGE_MODEL?.trim() && typeof selectedModel === "string" && selectedModel.trim() ? { PI_IMAGE_MODEL: selectedModel.trim() } : {}),
+    ...(typeof selectedModel === "string" && selectedModel.trim() ? { PI_IMAGE_MODEL: selectedModel.trim() } : {}),
   };
 }
 
@@ -67,7 +69,8 @@ export function resolveImageBackend(env: Record<string, string | undefined> = pr
   const apiUrl = (env.PI_IMAGE_API_URL ?? (name === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1")).trim().replace(/\/+$/, "");
   const urlError = validateApiUrl(apiUrl);
   if (urlError) return { configured: false, name, reason: urlError, setup: SETUP };
-  const model = (env.PI_IMAGE_MODEL ?? "").trim().slice(0, 128);
+  const model = (env.PI_IMAGE_MODEL ?? "").trim();
+  if (model.length > 200) return { configured: false, name, apiUrl, reason: "Image model id exceeds 200 characters; use its exact provider id.", setup: SETUP };
   if (!model) return { configured: false, name, apiUrl, reason: "PI_IMAGE_MODEL is required: set the backend's image model id explicitly.", setup: SETUP };
   const fallback = name === "openrouter" ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY";
   const keySource = env.PI_IMAGE_API_KEY ? "PI_IMAGE_API_KEY" : env[fallback] ? fallback : name === "openrouter" && providerKeyAvailable ? "session provider" : "";
@@ -75,13 +78,23 @@ export function resolveImageBackend(env: Record<string, string | undefined> = pr
   return { configured: true, name, apiUrl, model, keySource };
 }
 
-export async function imageBackendStatus(env: Record<string, string | undefined> = process.env, providerKeyAvailable = false) {
+export async function imageBackendStatus(env: Record<string, string | undefined> = process.env, providerKeyAvailable = false, options: { refresh?: boolean; key?: string; signal?: AbortSignal } = {}) {
   const status = resolveImageBackend(env, providerKeyAvailable);
   if (status.name !== "openrouter") return status;
+  if (options.refresh) {
+    const bounded = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
+    const response = await fetch(`${status.apiUrl ?? "https://openrouter.ai/api/v1"}/images/models`, { headers: options.key ? { authorization: `Bearer ${options.key}` } : {}, signal: bounded });
+    const body = await responseText(response, bounded);
+    if (!response.ok) throw Error(`Image catalog refused (${response.status}): ${redactSecrets(body).slice(0, 300)}`);
+    const payload = JSON.parse(body);
+    if (!Array.isArray(payload.data)) throw Error("Image catalog returned no model array");
+    const models = payload.data.filter((m: any) => typeof m.id === "string").map((m: any) => ({ id: m.id, name: m.name, input: m.input_modalities ?? m.architecture?.input_modalities, output: m.output_modalities ?? m.architecture?.output_modalities, supportedParameters: m.supported_parameters, pricing: m.pricing }));
+    return { ...status, availableModels: models.slice(0, 128), modelsTotal: models.length, catalog: "live images/models", transport: "images", selection: "Use the exact id with transport:images. Catalog presence does not verify generation; no model is selected automatically." };
+  }
   const { builtinImagesProviders } = await import("@yunuspi/ai/providers/all");
   const models = builtinImagesProviders().find(provider => provider.id === "openrouter")!.getModels();
-  return { ...status, availableModels: models.slice(0, 64).map(model => ({ id: model.id, acceptsReference: model.input.includes("image") })), modelsTotal: models.length,
-    selection: "Pass model with generate/edit, or set PI_IMAGE_MODEL. Explicit backend/model configuration takes precedence. The bundled catalog is discovery data; provider availability and generation are verified only by the request." };
+  return { ...status, availableModels: models.slice(0, 64).map(model => ({ id: model.id, acceptsReference: model.input.includes("image") })), modelsTotal: models.length, catalog: "bundled chat image models",
+    selection: "Pass model with generate/edit to override PI_IMAGE_MODEL for this call. refresh:true discovers the live Images API catalog for transport:images. No fallback model or paid retry is selected automatically." };
 }
 
 /** API base URL policy: https anywhere, http loopback only, no embedded
@@ -139,19 +152,39 @@ export function buildGenerationBrief(
 }
 
 /** Shape the OpenAI-compatible request body. Pure (key attached at send). */
-export function buildImageRequest(brief: GenerationBrief, params: { seed?: unknown; transparent?: unknown; quality?: unknown; model: string }) {
+export function buildImageRequest(brief: GenerationBrief, params: { seed?: unknown; transparent?: unknown; quality?: unknown; model: string; format?: unknown; compression?: unknown; inputFidelity?: unknown }) {
+  const gpt = /^(?:openai\/)?(?:gpt-image-|chatgpt-image-)/i.test(params.model);
   const body: Record<string, unknown> = {
     model: params.model,
-    prompt: brief.negative.length ? `${brief.prompt}\n\nAvoid: ${brief.negative.join("; ")}` : brief.prompt,
+    prompt: [brief.prompt, ...(brief.constraints.length ? [`Composition constraints: ${brief.constraints.join("; ")}`] : []), ...(brief.direction ? [`Creative direction: ${brief.direction}`] : []), ...(brief.negative.length ? [`Avoid: ${brief.negative.join("; ")}`] : [])].join("\n\n"),
     size: brief.size,
-    response_format: "b64_json",
+    ...(!gpt ? { response_format: "b64_json" } : {}),
   };
   if (params.seed !== undefined) {
-    const seed = Math.floor(Number(params.seed));
-    if (Number.isFinite(seed)) body.seed = seed;
+    if (!Number.isSafeInteger(params.seed) || Number(params.seed) < 0 || Number(params.seed) > 4294967295) throw Error("seed must be an integer 0..4294967295");
+    if (gpt) throw Error("GPT Image does not support seed; omit it rather than claiming reproducible generation");
+    body.seed = params.seed;
   }
+  if (params.transparent !== undefined && typeof params.transparent !== "boolean") throw Error("transparent must be boolean");
   if (params.transparent === true) body.background = "transparent";
+  if (params.transparent === false) body.background = "opaque";
   if (typeof params.quality === "string" && params.quality.trim()) body.quality = params.quality.trim().slice(0, 32);
+  if (params.format !== undefined) {
+    if (!["png", "jpeg", "webp"].includes(String(params.format))) throw Error("format must be png, jpeg or webp");
+    if (params.transparent && params.format === "jpeg") throw Error("Transparent output requires PNG or WebP");
+    body.output_format = params.format;
+  }
+  if (params.compression !== undefined) {
+    if (!["jpeg", "webp"].includes(String(params.format))) throw Error("compression requires format jpeg or webp");
+    if (!Number.isInteger(params.compression) || Number(params.compression) < 0 || Number(params.compression) > 100) throw Error("compression must be an integer 0..100");
+    body.output_compression = params.compression;
+  }
+  if (params.inputFidelity !== undefined) {
+    if (!["low", "high"].includes(String(params.inputFidelity))) throw Error("inputFidelity must be low or high");
+    if (gpt && !/^(?:openai\/)?gpt-image-1(?:\.5|-mini)?$/.test(params.model)) throw Error("This GPT Image model does not accept inputFidelity; omit it");
+    if (/gpt-image-1-mini$/.test(params.model) && params.inputFidelity !== "low") throw Error("gpt-image-1-mini supports only low inputFidelity");
+    body.input_fidelity = params.inputFidelity;
+  }
   return body;
 }
 
@@ -224,19 +257,79 @@ type ImageRuntime = { providerKey?: string; onUsage?: (usage: unknown, status: "
 const backendKey = (backend: BackendStatus, env: Record<string, string | undefined>, runtime: ImageRuntime) =>
   env.PI_IMAGE_API_KEY ?? (backend.name === "openrouter" ? env.OPENROUTER_API_KEY ?? runtime.providerKey : env.OPENAI_API_KEY) ?? "";
 
-async function openRouterImage(brief: GenerationBrief, params: any, backend: BackendStatus, key: string, signal: AbortSignal | undefined, runtime: ImageRuntime, reference?: Buffer) {
+/** Native HTTP counters use different names from the SDK journal. Preserve
+ * reported billing/cache evidence without inventing a zero charge. */
+export function imageUsage(raw: any) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  if (raw.input !== undefined || raw.output !== undefined) return raw;
+  const count = (n: unknown) => Number.isSafeInteger(n) && Number(n) >= 0;
+  const prompt = raw.prompt_tokens ?? raw.input_tokens, output = raw.completion_tokens ?? raw.output_tokens;
+  const details = raw.prompt_tokens_details ?? raw.input_tokens_details;
+  const cached = details?.cached_tokens, written = details?.cache_write_tokens;
+  const cacheRead = count(cached) ? cached : 0, cacheWrite = count(written) ? written : 0;
+  const usage: Record<string, unknown> = { cacheReadReported: count(cached) && (!count(prompt) || cacheRead <= prompt) };
+  if (count(prompt) && cacheRead + cacheWrite <= prompt) usage.input = prompt - cacheRead - cacheWrite;
+  if (count(output)) usage.output = output;
+  if (count(cached)) usage.cacheRead = cached;
+  if (count(written)) usage.cacheWrite = written;
+  if (count(raw.total_tokens)) usage.totalTokens = raw.total_tokens;
+  if (count(raw.completion_tokens_details?.reasoning_tokens)) usage.reasoning = raw.completion_tokens_details.reasoning_tokens;
+  if (typeof raw.cost === "number" && Number.isFinite(raw.cost) && raw.cost >= 0) usage.cost = { total: raw.cost, source: "provider-reported", complete: true };
+  else if (raw.cost && typeof raw.cost === "object") usage.cost = raw.cost;
+  return usage;
+}
+
+async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefined, request: (active: AbortSignal) => Promise<any>) {
+  const active = signal ? AbortSignal.any([signal, AbortSignal.timeout(240000)]) : AbortSignal.timeout(240000);
+  active.throwIfAborted();
+  let payload: any;
+  runtime.onUsage?.(undefined, "pending");
+  try {
+    payload = await request(active);
+    const bytes = await imageBytesFromPayload(payload, active);
+    active.throwIfAborted();
+    const usage = imageUsage(payload.usage);
+    runtime.onUsage?.(usage, "completed");
+    return { bytes, usage: usage ?? null, rawUsage: payload.usage ?? null };
+  } catch (error) {
+    runtime.onUsage?.(imageUsage(payload?.usage), active.aborted ? active.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
+    throw error;
+  }
+}
+
+export function routerImageOptions(body: Record<string, unknown>, params: any, native = false) {
+  if (params.aspectRatio !== undefined && (typeof params.aspectRatio !== "string" || !/^(?:auto|[1-9]\d?:[1-9]\d?)$/.test(params.aspectRatio))) throw Error("aspectRatio must be auto or a positive ratio such as 16:9");
+  if (params.resolution !== undefined && !["512", "1K", "2K", "4K"].includes(params.resolution)) throw Error("resolution must be 512, 1K, 2K or 4K");
+  if (params.aspectRatio !== undefined && params.size !== undefined) throw Error("Choose size or aspectRatio rather than conflicting dimensions");
+  if (params.aspectRatio !== undefined) body.aspect_ratio = params.aspectRatio;
+  if (params.resolution !== undefined) body.resolution = params.resolution;
+  if (native) {
+    delete body.response_format;
+    if (params.size === undefined) {
+      body.aspect_ratio ??= params.aspect === "landscape" ? "3:2" : params.aspect === "portrait" ? "2:3" : "1:1";
+      delete body.size;
+    }
+  }
+  return body;
+}
+
+async function openRouterImage(brief: GenerationBrief, params: any, backend: BackendStatus, key: string, signal: AbortSignal | undefined, runtime: ImageRuntime, references: Buffer[] = []) {
   const { builtinImagesProviders } = await import("@yunuspi/ai/providers/all");
   const provider = builtinImagesProviders().find(provider => provider.id === "openrouter")!;
   const known = provider.getModels().find(model => model.id === backend.model);
   const model = { ...known, id: backend.model!, name: backend.model!, provider: "openrouter", api: "openrouter-images", baseUrl: backend.apiUrl!, input: known?.input ?? ["text", "image"], output: known?.output ?? ["image"] };
-  if (reference && !model.input.includes("image")) throw new Error("The configured image model does not accept reference images");
+  if (references.length && !model.input.includes("image")) throw new Error("The configured image model does not accept reference images");
   const body = buildImageRequest(brief, { ...params, model: backend.model! });
   const imageConfig: Record<string, unknown> = { size: brief.size };
   if (body.quality) imageConfig.quality = body.quality;
   if (body.background) imageConfig.background = body.background;
+  if (body.output_format) imageConfig.output_format = body.output_format;
+  if (body.output_compression !== undefined) imageConfig.output_compression = body.output_compression;
+  if (body.input_fidelity) imageConfig.input_fidelity = body.input_fidelity;
+  routerImageOptions(imageConfig, params);
   const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(240_000)]) : AbortSignal.timeout(240_000);
   const input: any[] = [{ type: "text", text: body.prompt }];
-  if (reference) {
+  for (const reference of references) {
     const format = sniffImage(reference);
     if (!format) throw new Error("Reference is not a recognized image");
     await decodeImage(reference, { maxWidth: 512, maxPixels: 512 * 512 }, bounded);
@@ -244,7 +337,8 @@ async function openRouterImage(brief: GenerationBrief, params: any, backend: Bac
   }
   bounded.throwIfAborted();
   runtime.onUsage?.(undefined, "pending");
-  const result = await provider.generateImages(model as any, { input }, {
+  let result;
+  try { result = await provider.generateImages(model as any, { input }, {
     apiKey: key, signal: bounded, timeoutMs: 240_000, maxRetries: 0,
     onPayload: (payload: any) => ({ ...payload, image_config: imageConfig, ...(body.seed === undefined ? {} : { seed: body.seed }) }),
     fetch: async (url, options) => {
@@ -252,7 +346,10 @@ async function openRouterImage(brief: GenerationBrief, params: any, backend: Bac
       const text = await responseText(response, bounded);
       return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
     },
-  });
+  }); } catch (error) {
+    runtime.onUsage?.(undefined, bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
+    throw error;
+  }
   runtime.onUsage?.(result.usage, bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : result.stopReason === "aborted" ? "cancelled" : result.stopReason === "stop" ? "completed" : "failed");
   bounded.throwIfAborted();
   if (result.stopReason !== "stop") throw new Error(`Image backend failed: ${redactSecrets(result.errorMessage ?? result.stopReason).slice(0, 400)}`);
@@ -262,7 +359,7 @@ async function openRouterImage(brief: GenerationBrief, params: any, backend: Bac
 }
 
 async function storeGenerated(
-  bytes: Buffer, brief: GenerationBrief, params: { seed?: unknown; transparent?: unknown; quality?: unknown },
+  bytes: Buffer, brief: GenerationBrief, params: { seed?: unknown; transparent?: unknown; quality?: unknown; compression?: unknown; format?: unknown; transport?: unknown; size?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown },
   backend: BackendStatus, kind: "generated" | "authored", cwd: string, signal: AbortSignal | undefined,
   extra: Record<string, unknown> = {},
 ) {
@@ -277,11 +374,15 @@ async function storeGenerated(
     await fs.writeFile(file, bytes, { flag: "wx" });
     const receipt = {
       backend: backend.name, apiUrl: backend.apiUrl, model: backend.model,
-      size: brief.size, role: brief.role,
+      size: backend.name === "openrouter" && params.transport === "images" && params.size === undefined ? null : brief.size, role: brief.role,
+      aspectRatio: params.aspectRatio ?? params.aspect ?? null, resolution: params.resolution ?? null,
       seed: params.seed ?? null, transparent: params.transparent === true,
+      transparencyRequested: params.transparent ?? null, alphaObservedInPreview: decoded.data.some((v, i) => i % 4 === 3 && v < 255),
+      requestedFormat: params.format ?? null, compression: params.compression ?? null,
+      transport: backend.name === "openrouter" ? params.transport ?? "chat" : "images",
       ...(typeof params.quality === "string" ? { quality: params.quality.slice(0, 32) } : {}),
       direction: brief.direction, constraints: brief.constraints,
-      bytes: bytes.length, format, width: decoded.sourceWidth, height: decoded.sourceHeight, decodeVerified: true, ...extra,
+      bytes: bytes.length, hash: createHash("sha256").update(bytes).digest("hex"), format, width: decoded.sourceWidth, height: decoded.sourceHeight, decodeVerified: true, ...extra,
     };
     await fs.writeFile(path.join(dir, "receipt.json"), JSON.stringify({ ...receipt, prompt: brief.prompt, negative: brief.negative }, null, 1) + "\n", { flag: "wx" });
     signal?.throwIfAborted();
@@ -296,32 +397,41 @@ async function storeGenerated(
 }
 
 export async function imageGenerateRun(
-  params: { model?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; aspect?: unknown; size?: unknown; seed?: unknown; transparent?: unknown; quality?: unknown },
+  params: { model?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown; size?: unknown; seed?: unknown; transparent?: unknown; quality?: unknown; format?: unknown; compression?: unknown; transport?: unknown; inputFidelity?: unknown },
   cwd: string, signal: AbortSignal | undefined, direction?: CreativeDirection, env: Record<string, string | undefined> = process.env, runtime: ImageRuntime = {},
 ) {
   env = imageBackendEnvironment(env, !!runtime.providerKey, params.model);
   const backend = resolveImageBackend(env, !!runtime.providerKey);
   if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
+  if (backend.name !== "openrouter" && (params.aspectRatio !== undefined || params.resolution !== undefined)) throw Error("aspectRatio/resolution require OpenRouter; use size with compatible backends");
   const brief = buildGenerationBrief(direction, params);
   const key = backendKey(backend, env, runtime);
-  if (backend.name === "openrouter") {
+  if (params.inputFidelity !== undefined) throw Error("inputFidelity requires edit with reference images");
+  if (params.transport !== undefined && !["images", "chat"].includes(String(params.transport))) throw Error("transport must be images or chat");
+  if (backend.name !== "openrouter" && params.transport === "chat") throw Error("chat transport requires OpenRouter");
+  if (backend.name === "openrouter" && params.transport !== "images") {
     const bytes = await openRouterImage(brief, params, backend, key, signal, runtime);
     return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal);
   }
-  const payload = await postJson(backend.apiUrl!, key, "/images/generations", buildImageRequest(brief, { ...params, model: backend.model! }), signal, 240_000);
-  const bytes = await imageBytesFromPayload(payload, signal);
+  const body = buildImageRequest(brief, { ...params, model: backend.model! });
+  if (backend.name === "openrouter") routerImageOptions(body, params, true);
+  const { bytes, usage } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, "/images/generations", body, active, 240_000));
   signal?.throwIfAborted();
-  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal);
+  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { usage });
 }
 
 export async function imageEditRun(
-  params: { model?: unknown; path?: unknown; mask?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; size?: unknown; seed?: unknown },
+  params: { model?: unknown; path?: unknown; references?: unknown; mask?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown; size?: unknown; seed?: unknown; transparent?: unknown; quality?: unknown; format?: unknown; compression?: unknown; inputFidelity?: unknown; transport?: unknown },
   cwd: string, signal: AbortSignal | undefined, direction?: CreativeDirection, env: Record<string, string | undefined> = process.env, runtime: ImageRuntime = {},
 ) {
   env = imageBackendEnvironment(env, !!runtime.providerKey, params.model);
   const backend = resolveImageBackend(env, !!runtime.providerKey);
   if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
-  if (typeof params.path !== "string" || !params.path) throw new Error("image_edit needs path (source image in the workspace)");
+  if (backend.name !== "openrouter" && (params.aspectRatio !== undefined || params.resolution !== undefined)) throw Error("aspectRatio/resolution require OpenRouter; use size with compatible backends");
+  if (backend.name === "openrouter" && params.mask !== undefined) throw new Error("Masked edits require the openai-compatible backend; OpenRouter reference edits do not define mask semantics");
+  const inputs = params.references === undefined ? [params.path] : params.references;
+  if (params.references !== undefined && params.path !== undefined) throw Error("Provide path or references, not both");
+  if (!Array.isArray(inputs) || !inputs.length || inputs.length > 5 || inputs.some(p => typeof p !== "string" || !p)) throw Error("image_edit needs path or 1..5 references (source images in the workspace)");
   const root = realRoot(cwd);
   const resolveIn = async (value: string): Promise<string> => {
     const candidate = path.resolve(root, value.replace(/^@/, ""));
@@ -333,40 +443,59 @@ export async function imageEditRun(
     if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error("Edit inputs must be regular files under 20 MiB");
     return resolved;
   };
-  const imageFile = await resolveIn(params.path);
+  const imageFiles: string[] = [], references: Buffer[] = [];
+  let totalBytes = 0;
+  for (const input of inputs) {
+    signal?.throwIfAborted();
+    const file = await resolveIn(input as string), bytes = await fs.readFile(file);
+    totalBytes += bytes.length;
+    if (totalBytes > 40 * 1024 * 1024) throw Error("Reference images exceed the aggregate 40 MiB bound");
+    if (!["png", "jpeg", "webp"].includes(sniffImage(bytes) ?? "")) throw Error("Edit references must be PNG, JPEG or WebP");
+    await decodeImage(bytes, { maxWidth: 512, maxPixels: 512 * 512 }, signal);
+    imageFiles.push(file); references.push(bytes);
+  }
+  const imageFile = imageFiles[0];
   const maskFile = typeof params.mask === "string" && params.mask ? await resolveIn(params.mask) : undefined;
+  let maskBytes: Buffer | undefined;
+  if (maskFile) {
+    maskBytes = await fs.readFile(maskFile);
+    if (totalBytes + maskBytes.length > 40 * 1024 * 1024) throw Error("Edit references and mask exceed the aggregate 40 MiB bound");
+    if (sniffImage(maskBytes) !== "png") throw Error("Edit mask must be PNG with transparency");
+    const { probeImage } = await import("./design-studio.ts");
+    const imageInfo = await probeImage(references[0], signal), maskInfo = await probeImage(maskBytes, signal);
+    if (imageInfo.width !== maskInfo.width || imageInfo.height !== maskInfo.height) throw Error("Mask dimensions must match the first reference image");
+    if (maskInfo.width * maskInfo.height > 16000000) throw Error("Mask validation exceeds 16M pixels");
+    const mask = await decodeImage(maskBytes, {}, signal);
+    if (!mask.data.some((v, i) => i % 4 === 3 && v === 0)) throw Error("Mask has no fully transparent editable pixels; use alpha 0 where edits belong");
+  }
   const brief = buildGenerationBrief(direction, params);
+  const body = buildImageRequest(brief, { ...params, model: backend.model! });
+  const extra = { editOf: relative(cwd, imageFile), references: imageFiles.map(f => relative(cwd, f)), referenceHashes: references.map(bytes => createHash("sha256").update(bytes).digest("hex")), ...(maskFile ? { mask: relative(cwd, maskFile), maskHash: createHash("sha256").update(maskBytes!).digest("hex") } : {}), ...(params.inputFidelity ? { inputFidelity: params.inputFidelity } : {}) };
+  if (params.transport !== undefined && !["images", "chat"].includes(String(params.transport))) throw Error("transport must be images or chat");
   if (backend.name === "openrouter") {
     if (maskFile) throw new Error("Masked edits require the openai-compatible backend; OpenRouter reference edits do not define mask semantics");
-    const bytes = await openRouterImage(brief, params, backend, backendKey(backend, env, runtime), signal, runtime, await fs.readFile(imageFile));
-    return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { editOf: relative(cwd, imageFile) });
+    let bytes: Buffer;
+    if (params.transport === "images") {
+      routerImageOptions(body, params, true);
+      body.input_references = references.map(bytes => ({ type: "image_url", image_url: { url: `data:image/${sniffImage(bytes)};base64,${bytes.toString("base64")}` } }));
+      const generated = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, backendKey(backend, env, runtime), "/images/generations", body, active, 240000));
+      bytes = generated.bytes;
+      Object.assign(extra, { usage: generated.usage });
+    } else bytes = await openRouterImage(brief, params, backend, backendKey(backend, env, runtime), signal, runtime, references);
+    return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, extra);
   }
+  if (params.transport === "chat") throw Error("chat transport requires OpenRouter");
   const form = new FormData();
-  form.set("model", backend.model!);
-  form.set("prompt", brief.negative.length ? `${brief.prompt}\n\nAvoid: ${brief.negative.join("; ")}` : brief.prompt);
-  form.set("size", brief.size);
-  form.set("response_format", "b64_json");
-  if (params.seed !== undefined && Number.isFinite(Math.floor(Number(params.seed)))) form.set("seed", String(Math.floor(Number(params.seed))));
-  form.set("image", new Blob([await fs.readFile(imageFile)]), path.basename(imageFile));
-  if (maskFile) form.set("mask", new Blob([await fs.readFile(maskFile)]), path.basename(maskFile));
-  const deadline = AbortSignal.timeout(240_000);
-  const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  for (const [key, value] of Object.entries(body)) form.set(key, String(value));
+  for (let i = 0; i < references.length; i++) form.append(references.length > 1 ? "image[]" : "image", new Blob([references[i]], { type: `image/${sniffImage(references[i])}` }), path.basename(imageFiles[i]));
+  if (maskFile && maskBytes) form.set("mask", new Blob([maskBytes], { type: "image/png" }), path.basename(maskFile));
   const key = env.PI_IMAGE_API_KEY ?? env.OPENAI_API_KEY ?? "";
-  let response: Response;
-  try {
-    response = await fetch(`${backend.apiUrl}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: bounded });
-  } catch (error: any) {
-    throw new Error(`Image backend unreachable: ${redactSecrets(String(error?.message ?? error)).slice(0, 300)}`);
-  }
-  const text = await responseText(response, bounded);
-  if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
-  let payload: any;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error("Image backend returned a non-JSON payload");
-  }
-  const bytes = await imageBytesFromPayload(payload, signal);
+  const { bytes, usage } = await nativeImage(runtime, signal, async active => {
+    const response = await fetch(`${backend.apiUrl}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: active });
+    const text = await responseText(response, active);
+    if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
+    try { return JSON.parse(text); } catch { throw new Error("Image backend returned a non-JSON payload"); }
+  });
   signal?.throwIfAborted();
-  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { editOf: relative(cwd, imageFile), ...(maskFile ? { mask: relative(cwd, maskFile) } : {}) });
+  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { ...extra, usage });
 }

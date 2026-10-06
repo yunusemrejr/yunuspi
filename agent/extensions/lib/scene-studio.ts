@@ -5,6 +5,7 @@ import { validateScene, scenePreset, sampleKeys, SCENE_LIMITS } from '../../scri
 import { sceneRuntime } from '../../scripts/scene-runtime.mjs';
 import { FFMPEG_FLAGS, inputArgs, inputFile, number, outputFolder, probe, produced, requireStream, run } from './media-process.ts';
 import { createRenderQueue } from './render-queue.ts';
+import { videoMotion } from './video-motion.ts';
 
 const require = createRequire(new URL('../../npm/package.json', import.meta.url));
 const dataModule = (source: string) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
@@ -147,6 +148,7 @@ export async function sceneRender(params: any, cwd: string, signal?: AbortSignal
     }
     await fs.rm(frameDir, { recursive: true });
     const result = { source: file, mode, poster: await produced(poster), samples, ...(video ? { video, output, decodeVerified: true } : {}), frames, fps: scene.fps, width: scene.width, height: scene.height, duration: mode === 'video' ? frames / scene.fps : 0, metrics, audio: audio ?? null, timing: 'Frames sample absolute time i/fps, ending before duration; encoded duration rounds up to a whole frame. Pixel identity is only expected for the same renderer/platform.', note: 'Actual Three.js/WebGL pixels. Inspect composition and representative motion/audio before calling the result finished.' };
+    if (video && frames > 1) (result as any).motion = await videoMotion({ path: video.path, duration: Math.min(30, frames / scene.fps), expectedFps: scene.fps }, cwd, bounded);
     await fs.writeFile(path.join(dir, 'render.json'), JSON.stringify(result, null, 2) + '\n', { flag: 'wx' });
     bounded.throwIfAborted();
     return result;

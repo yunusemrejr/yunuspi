@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.23.10 — 2026-10-06
+
+**Image workflows use actual provider contracts and pixels.** GPT Image requests omit unsupported response_format/seed, enforce encoding and fidelity compatibility, and validate edit masks/references before upload. Explicit model IDs override only that call. OpenRouter live image-catalog discovery and native Images API transport complement existing chat generation; usage failures/cancellation settle without paid retries. New direct vision inference preserves provider authentication and current thinking, with hashed/cropped attachment evidence. New raster conversion supports bounded batches, alpha/mattes, fit, rotation and decode receipts while preserving originals. Stored pixel axes keep EXIF orientation from invalidating crop coordinates.
+
+**Authored SVG becomes reproducible media.** A new isolated SVG renderer samples CSS/WAAPI, SMIL and validated programmatic attribute tracks at absolute timestamps, producing transparent PNG samples or decoded H.264 video with contact sheets, owner/clipping diagnostics and cadence/loop checks. Source scripts and network are blocked. Page motion inspection also samples discoverable SMIL roots; Three.js exports retain decoded motion diagnostics.
+
+**Narration and music compose with 2D and 3D timelines.** Standalone local Piper narration produces mastered WAV and SRT/VTT captions without requiring a Remotion project. The media pipeline accepts SVG and Three.js animation, narration and editable score music, ducks music under voice, measures final encoded audio and rejects narration overruns before rendering.
+
+**Blender animation inspection and stepped export retain their meaning.** Inspection reads layered/slotted action channels and evaluated world transforms. Stepped source frames now assemble into a contiguous encoded sequence without losing source timing; explicit fps performs documented uniform retiming, and fractional scene fps is preserved. Original renders remain intact and outputs are decoded/probed before success.
+
+Guarded Office visual conversions also use the host-aware media budget capped at 4 GB; a small local Calc conversion exceeded the former fixed 2.5 GB limit. Real WASM retrieval tests warm their exact candidates outside the live stage deadline without widening production waits.
+
+Tool discovery, task pipelines, skills and lifecycle hooks expose these workflows with source/pixel/playback/listening evidence. See [media creation](docs/MEDIA-CREATION.md) for examples and concrete limits.
+
 ## 0.23.9 — 2026-10-06
 
 **Skills guide decisions without blocking tools.** Parent, child, full-catalog and explicit skill prompts treat skills as reference guides and documentation. Useful steps can be adapted or skipped even when a guide calls them mandatory. The former strict skill-read setting now behaves as advisory, and UI writes proceed without a forced design-skill read. Discovery, optional suggestions, truthful read tracking and tool safety boundaries remain available.

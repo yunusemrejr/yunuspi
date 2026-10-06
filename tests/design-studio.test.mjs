@@ -286,7 +286,7 @@ test("outputs stay inside the workspace and tools register with bounded schemas"
   await assert.rejects(studio.imageAnalyze({ path: mock, outputDir: os.tmpdir() }, work), /inside the current workspace/);
   const tools = new Map();
   register({ registerTool: definition => tools.set(definition.name, definition) });
-  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_create", "image_crop", "image_trace", "visual_diff"]);
+  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_convert", "image_create", "image_crop", "image_trace", "image_understand", "visual_diff"]);
   for (const tool of tools.values()) assert.ok(tool.description.length > 200 && tool.description.length < 900, tool.name);
   const out = await tools.get("image_trace").execute("t", { path: mock, region: { x: 80, y: 24, width: 32, height: 32 }, colors: 1 }, undefined, undefined, { cwd: work });
   assert.equal(out.details.verdict, "good");

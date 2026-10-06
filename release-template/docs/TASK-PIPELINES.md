@@ -27,6 +27,7 @@ Selection follows the evidence available at task, subtask or todo scope. New fil
 | Algorithms and AI/ML | Input contract/invariants/scale or objective/data splits/baseline; oracle/invariant checks or leakage-free fixed evaluation and measured performance. |
 | Fine-tuning and Colab | Immutable model/tokenizer revisions, data hashes/masking, hardware, checkpoints and actual connection mode; appropriate preparation checks or real training smoke/resume/export/evaluation evidence. |
 | UI/UX and desloppification | Existing design doctrine before palette/type/layout; actual application pixels and interaction, swap test, accessibility and relevant states. |
+| Image media | Exact provider/model, reference/mask constraints, direct vision evidence and original-preserving conversion; decoded pixels and review at intended sizes. |
 | Video | Source metadata and timeline constraints; decoded delivery output, followed by playback review for pacing, transitions and sound/image fit. |
 | Audio | Source metadata and signal analysis; decoded delivery output and measured mastering checks, followed by listening review. |
 | SVG art | Transformed geometry, visible bounds and disclosed approximation limits; rendered pixels at intended sizes. |

@@ -81,7 +81,9 @@ def summarize_render(scene):
         "resolution": [render.resolution_x, render.resolution_y],
         "scale": render.resolution_percentage,
         "effective": [int(render.resolution_x * render.resolution_percentage / 100), int(render.resolution_y * render.resolution_percentage / 100)],
-        "fps": scene.render.fps,
+        "fps": scene.render.fps / scene.render.fps_base,
+        "fpsNumerator": scene.render.fps,
+        "fpsBase": scene.render.fps_base,
         "frames": [scene.frame_start, scene.frame_end],
         "format": render.image_settings.file_format,
         "camera": scene.camera.name if scene.camera else None,
@@ -95,8 +97,55 @@ def summarize_render(scene):
     return out
 
 
+def animation_summary(owner):
+    """Read legacy and layered/slotted Actions without relying on removed APIs."""
+    data = getattr(owner, "animation_data", None)
+    if not data:
+        return None
+    action = data.action
+    curves = []
+    if action:
+        slot = getattr(data, "action_slot", None)
+        for layer in getattr(action, "layers", []):
+            for strip in layer.strips:
+                for bag in getattr(strip, "channelbags", []):
+                    if slot is None or bag.slot_handle == slot.handle:
+                        curves.extend(bag.fcurves)
+        if not curves:
+            curves.extend(getattr(action, "fcurves", []))
+    details = []
+    key_count = 0
+    for curve in curves:
+        key_count += len(curve.keyframe_points)
+        if len(details) >= 64:
+            continue
+        points = list(curve.keyframe_points)
+        times = [float(point.co.x) for point in points]
+        details.append({"path": curve.data_path, "index": curve.array_index,
+                        "keys": len(points), "range": [min(times), max(times)] if times else None,
+                        "interpolation": sorted(set(point.interpolation for point in points)),
+                        "extrapolation": curve.extrapolation, "muted": curve.mute,
+                        "modifiers": [modifier.type for modifier in curve.modifiers],
+                        "duplicateTimes": len(times) - len(set(times))})
+    tracks = [{"name": track.name, "muted": track.mute,
+               "strips": [{"name": strip.name, "from": strip.frame_start, "to": strip.frame_end,
+                           "scale": strip.scale, "repeat": strip.repeat, "influence": strip.influence,
+                           "action": strip.action.name if strip.action else None} for strip in list(track.strips)[:32]]}
+              for track in list(data.nla_tracks)[:32]]
+    return {"action": action.name if action else None,
+            "frame_range": vec(action.frame_range) if action else None,
+            "slot": getattr(getattr(data, "action_slot", None), "identifier", None),
+            "curves": len(curves), "keys": key_count, "channels": details,
+            "truncated": len(curves) > 64, "drivers": len(data.drivers), "nla": tracks,
+            "scope": "Stored animation channels and driver/NLA counts; evaluated samples include their combined scene effect."}
+
+
 def op_inspect(req):
     scene = bpy.context.scene
+    if req.get("scene"):
+        scene = bpy.data.scenes[req["scene"]]
+    if bpy.context.window:
+        bpy.context.window.scene = scene
     objects = []
     for obj in bpy.data.objects:
         entry = {
@@ -123,9 +172,12 @@ def op_inspect(req):
         if obj.type == "LIGHT":
             light = obj.data
             entry["light"] = {"type": light.type, "energy": round(light.energy, 3), "color": vec(light.color)}
-        if obj.animation_data and obj.animation_data.action:
-            action = obj.animation_data.action
-            entry["animation"] = {"action": action.name, "frame_range": vec(action.frame_range)}
+        animation = animation_summary(obj)
+        if animation:
+            entry["animation"] = animation
+        data_animation = animation_summary(obj.data) if obj.data else None
+        if data_animation:
+            entry["dataAnimation"] = data_animation
         objects.append(entry)
     missing = []
     for image in bpy.data.images:
@@ -135,6 +187,21 @@ def op_inspect(req):
         if not os.path.exists(bpy.path.abspath(library.filepath)):
             missing.append(bpy.path.abspath(library.filepath))
     world = scene.world
+    samples = []
+    original_frame, original_subframe = scene.frame_current, scene.frame_subframe
+    try:
+        for frame in req.get("frames", []):
+            scene.frame_set(int(frame))
+            graph = bpy.context.evaluated_depsgraph_get()
+            sampled = []
+            for obj in list(scene.objects)[:512]:
+                evaluated = obj.evaluated_get(graph)
+                sampled.append({"name": obj.name, "worldMatrix": [[round(float(v), 6) for v in row] for row in evaluated.matrix_world],
+                                "dimensions": vec(evaluated.dimensions), "visible": not obj.hide_render})
+            samples.append({"frame": frame, "seconds": (frame - scene.frame_start) / (scene.render.fps / scene.render.fps_base),
+                            "objects": sampled, "truncated": len(scene.objects) > 512})
+    finally:
+        scene.frame_set(original_frame, subframe=original_subframe)
     return {
         "blender": bpy.app.version_string,
         "file": bpy.data.filepath or None,
@@ -149,6 +216,7 @@ def op_inspect(req):
         "cameras": [o.name for o in bpy.data.objects if o.type == "CAMERA"],
         "lights": [o.name for o in bpy.data.objects if o.type == "LIGHT"],
         "missingFiles": missing,
+        "animationSamples": samples,
         "counts": {"objects": len(bpy.data.objects), "meshes": len(bpy.data.meshes), "materials": len(bpy.data.materials), "images": len(bpy.data.images)},
     }
 

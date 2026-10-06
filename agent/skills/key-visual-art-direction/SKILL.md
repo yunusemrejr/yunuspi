@@ -55,3 +55,5 @@ Look at the actual pixels, not the JSON:
 ## Anti-slop for visuals
 
 Reject: the default purple-to-pink gradient blob with no subject; generic floating spheres; lens flares and sparkles as decoration; neon glow on everything (bloom on everything = bloom on nothing); centered-everything with no light direction; mismatched shadows; stock "3D icon" clay figures; text baked into the render (keep type live and editable); motion that loops with a visible jump. Each element must have a job: light, form, space or story.
+
+Use `image_generate` with the exact chosen capable model; an explicit model overrides the environment for this call. Query live OpenRouter image models with status refresh and use images transport explicitly. Preserve reference/mask provenance and inspect identity and alpha. `image_understand` can inspect pixels through the current vision model, while `image_convert` prepares crops/mattes/formats without touching originals. Both inferred observations and successful decoding need visible review.

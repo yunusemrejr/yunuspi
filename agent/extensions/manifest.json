@@ -257,7 +257,10 @@
     "blender-studio.ts",
     "guarded-process.ts",
     "splat-studio.ts",
-    "xml-lite.ts"
+    "xml-lite.ts",
+    "image-convert.ts",
+    "image-understand.ts",
+    "svg-render.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

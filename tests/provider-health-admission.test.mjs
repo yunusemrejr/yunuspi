@@ -54,13 +54,14 @@ test('a held state lock cannot let a request bypass an existing cooldown', async
   health.recordFailure({ provider: 'p', model: 'm', errorMessage: '429 too many requests' });
   fs.mkdirSync(lockDir); // fresh, so it is never taken over as stale
   try {
-    const started = Date.now();
+    const started = performance.now();
     await assert.rejects(
       () => health.gateRequest({ provider: 'p', model: 'm', estTokens: 10 }),
       (error) => error?.code === 'PI_AUTONOMOUS_REQUEST_DENIED',
       'cooldown evaluation is lock-free, so the denial survives a held lock',
     );
-    assert.ok(Date.now() - started < 8000);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 8000, `held-lock denial completes within the existing bound (${Math.round(elapsed)}ms)`);
   } finally {
     fs.rmSync(lockDir, { recursive: true, force: true });
   }
@@ -73,12 +74,12 @@ test('waiting for a held lock yields to the event loop and stops on abort', asyn
     const controller = new AbortController();
     let ticks = 0;
     const timer = setInterval(() => { ticks++; }, 10);
-    const started = Date.now();
+    const started = performance.now();
     const pending = health.mutateHealthAsync(() => undefined, controller.signal);
     setTimeout(() => controller.abort(), 200);
     await assert.rejects(() => pending);
     clearInterval(timer);
-    assert.ok(Date.now() - started < 1500, 'abort ends the lock wait promptly');
+    assert.ok(performance.now() - started < 1500, 'abort ends the lock wait promptly');
     assert.ok(ticks >= 5, `event loop kept running while waiting (ticks=${ticks})`);
   } finally {
     fs.rmSync(lockDir, { recursive: true, force: true });

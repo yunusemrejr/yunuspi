@@ -78,3 +78,5 @@ Mastering is optional for focused tools and `media_pipeline` (`targetLufs`). The
 - Remotion is free for individuals and small teams; companies above its threshold need a Remotion company license.
 
 Automated checks find technical defects only. A successful render or a clean `video_qa` is not visual approval: the skills require agents to view contact sheets and frames, review motion in previews, and check narration timing and loudness before delivery.
+
+Standalone speech is available through `narration_tts action:"speak"`. `media_pipeline` combines SVG/Three.js timelines, voice, captions and ducked music; Blender inspection exposes evaluated animation frames, and stepped renders retain source timing. See [media creation](MEDIA-CREATION.md).
