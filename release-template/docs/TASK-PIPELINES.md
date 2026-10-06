@@ -26,6 +26,9 @@ Selection follows the evidence available at task, subtask or todo scope. New fil
 | Local webapps | Host/port ownership, start/stop, data boundaries and backend connection; a representative browser-to-backend task and cleanup. |
 | Algorithms and AI/ML | Input contract/invariants/scale or objective/data splits/baseline; oracle/invariant checks or leakage-free fixed evaluation and measured performance. |
 | Fine-tuning and Colab | Immutable model/tokenizer revisions, data hashes/masking, hardware, checkpoints and actual connection mode; appropriate preparation checks or real training smoke/resume/export/evaluation evidence. |
+| Research | Question/date/version scope, query-ranked source reads and cached text; exact quotation/hash dossiers, copied-source grouping, contradictions and explicit evidence gaps. Subject nouns in a literature report do not activate training or code production. |
+| Reinforcement learning | Actual environment transitions and random/scripted baseline; terminal/truncated final-observation bootstraps, finite updates and frozen policy evaluation on separate seeds. |
+| Edge models | Actual ISA/runtime and RAM/latency budgets; train-only calibration, original/exported prediction comparison and measured inference on the target. |
 | UI/UX and desloppification | Existing design doctrine before palette/type/layout; actual application pixels and interaction, swap test, accessibility and relevant states. |
 | Image media | Exact provider/model, reference/mask constraints, direct vision evidence and original-preserving conversion; decoded pixels and review at intended sizes. |
 | Video | Source metadata and timeline constraints; decoded delivery output, followed by playback review for pacing, transitions and sound/image fit. |
@@ -67,6 +70,14 @@ For trivial changes, a reasoned assessment may establish that additional behavio
 - `buildPipelineContext(selection, ledger, {scope, revision, maxChars?})` returns a bounded next-step hint or nothing when no workflow applies or all stages passed.
 
 Runtime hooks provide the selector with relevant request/file metadata and update activation through the existing tool-discovery owner. Source changes must update the content identity; a task-local revision counter alone is insufficient across reloads. Pipeline receipts are session evidence, not deployment authority or a public data export.
+
+Source audit/refactor requests add `source-quality`. A current `code_quality`
+baseline can settle its inspection; truncated or missing focus coverage remains
+blocked. Research adds `research-evidence`: dossier gaps keep it blocked, while
+complete current quotations settle inspection without certifying interpretation.
+`ml_lab` and the shipped trainers support data/smoke/evaluation stages, but static
+arrays and prepared notebooks cannot claim model execution or cloud connection.
+See [research, code and ML controls](RESEARCH-CODE-ML.md) for tool contracts.
 
 Required inferred schemas stay available during automatic continuations and are released when a new accepted user request no longer needs them. Deliberately selected tools retain their existing authority. Aborted replacement input cannot swap the current workflow or activate an unrelated bundle.
 

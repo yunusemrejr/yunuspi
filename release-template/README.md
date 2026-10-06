@@ -10,7 +10,7 @@ YunusPi is a full agent harness built on its own owned core, an independent line
 
 The aim is practical: spend context on the task instead of on instructions, reuse what the harness already proved, and keep one agent clearly responsible for the outcome.
 
-[Media creation](docs/MEDIA-CREATION.md) · [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
+[Research, code and ML](docs/RESEARCH-CODE-ML.md) · [Media creation](docs/MEDIA-CREATION.md) · [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
@@ -64,7 +64,7 @@ The capability index explains entry points, supported options, related abilities
 | Area | Available capabilities |
 | --- | --- |
 | Understand and change code | Symbol, AST and language-server inspection; scoped context; batch edits; syntax diagnostics; review evidence; snapshots. [Source checks](docs/SKILLS-AND-CHECKS.md) |
-| Keep code clean | Clone and DRY detection, code-slop and prose checks, complexity, pre-commit review and blame, and a commit guard for secrets and conflict markers. [Code quality](docs/CODE-QUALITY.md) |
+| Keep code clean | Cross-directory clone checks, changed-source DRY/security/structure baselines, code-slop and prose checks, complexity, pre-commit review and blame, and a commit guard for secrets and conflict markers. [Code quality](docs/CODE-QUALITY.md) |
 | Audit for defects | Static security, backend, efficiency, pattern and UI-source audits that also run after every edit, and SVG analysis (clipped art, theming, bloat, icon-set consistency) with a verified lossless optimizer. [Static audits](docs/CODE-AUDIT.md) |
 | Build from a design | Mockup and screenshot analysis into bands, blocks, palette, type scale and tokens; asset cutting and SVG tracing; rendered visual comparison against the reference. [Design studio](docs/DESIGN-STUDIO.md) |
 | Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
@@ -76,6 +76,7 @@ The capability index explains entry points, supported options, related abilities
 | Reach people by email | Send and read mail through AgentMail with an environment-provided key, bounded recipients, compact inbox previews and opt-in message bodies. [Email and outreach](docs/EMAIL.md) |
 | Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; code-first video with a look derived from the subject, timestamped ElevenLabs or local narration, synced captions, frame/cut audits, resumable long renders, timed browser takes and Blender shots with material detail whose annotations follow 3D features and a library of worked motion examples (vanilla HTML/CSS/JS/WebGL/SVG, Blender, FFmpeg, numpy); headless Blender scenes, renders and exports plus Gaussian-splat training (Brush, any Vulkan GPU) with fidelity sheets and turntables; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) · [Video studio](docs/VIDEO-STUDIO.md) · [3D studio](docs/3D-STUDIO.md) |
 | Inspect and experiment | Structured-data and API tools, local utility MCP tools, and disposable sandboxes with resource limits. [Utility tools](agent/extensions/lib/utility-mcp/README.md) · [Sandboxes](docs/SANDBOXES.md) |
+| Research and train | Query-ranked source passages, quotation/hash dossiers, leakage audits, held-out baseline metrics, terminal/truncated RL checks, resumable CPU/embedding/LoRA recipes and a staged Colab notebook. [Research, code and ML controls](docs/RESEARCH-CODE-ML.md) |
 
 Some capabilities need additional software or provider access. Browser rendering requires its browser runtime; media processing needs tools such as FFmpeg, and text extraction needs Tesseract. Optional local preprocessing requires a separately installed model environment. Model weights, paid subscriptions and credentials are not bundled.
 

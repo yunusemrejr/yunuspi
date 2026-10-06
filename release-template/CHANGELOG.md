@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.25.0 — 2026-10-06
+
+**Research keeps attributable evidence through synthesis.** Background research accepts up to 24 page reads and returns query-ranked passages with exact locations, complete-text hashes and explicit analysis limits. The new dossier action checks quotations and expected hashes, merges duplicate URL/text components, retains contradictions and missing authority/date coverage, and produces paginated source/claim receipts or an attributed report. Caller interpretations remain reviewable; matching text never certifies a claim.
+
+**Source quality compares changed code with existing owners.** One baseline combines DRY groups, structure and changed-source security/backend/efficiency/UI cues. Edit hooks now consider bounded candidates across directories. Stable shared snapshot reads reject workspace escapes, changing files and oversized work. Native source-quality stages remain unresolved on missing coverage and retire when source changes; existing linters, tests and pixel/interaction checks keep their distinct evidence requirements.
+
+**ML workflows have executable reference trainers and explicit quality evidence.** `ml_lab` audits content/entity/time split leakage, computes held-out metrics, slice errors and paired baseline intervals, checks terminal/truncated Bellman targets, inspects notebook stages and locates training recipes. Bounded CPU MLP and offline Q trainers save reproducible checkpoints. Embedding and causal LoRA entrypoints use prepared Hugging Face environments, immutable model/data identities, finite smoke runs, fixed schedule horizons, complete native resume and export. Evaluation preserves training RNG; offline tiny-model tests compare resumed and uninterrupted exported weights.
+
+**Research, RL, edge models and Colab are discoverable through the existing workflow owners.** Skills and native stage controls distinguish static preparation, executed training, frozen evaluation and target/runtime evidence. The tagged Colab notebook separates setup, data, smoke, training, evaluation and export without claiming a connected GPU. Results are bounded and paginated. The selected model, thinking mode and existing media capabilities retain their settings.
+
 ## 0.24.0 — 2026-10-06
 
 **Video production becomes reusable across selected models.** Native timed browser takes provide eased cursors, click rings, typing and scrolling, with observed event and source-frame timestamps. Blender shots add optional scale-aware brushed-metal, ceramic and organic material detail, preserving original material nodes and source models. Tool discovery and production guides connect these tools to the existing master timeline and review workflow without changing the selected LLM or thinking mode.
