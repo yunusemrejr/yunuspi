@@ -3,4 +3,5 @@ set -eu
 cd "$(git rev-parse --show-toplevel)"
 refs=$(cat)
 node scripts/check-public.mjs
+node agent/scripts/generate-capabilities-doc.mjs --root "$PWD" --check
 printf '%s\n' "$refs" | node scripts/check-syntax.mjs --pre-push

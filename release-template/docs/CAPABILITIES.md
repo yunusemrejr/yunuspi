@@ -2234,6 +2234,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/RECOVERY-AND-TESTING.md`](RECOVERY-AND-TESTING.md)
 - [`docs/RELEASE-0.17.0-VERIFICATION.md`](RELEASE-0.17.0-VERIFICATION.md)
 - [`docs/RELEASE-0.18.0-VERIFICATION.md`](RELEASE-0.18.0-VERIFICATION.md)
+- [`docs/RELEASE-0.23.8-VERIFICATION.md`](RELEASE-0.23.8-VERIFICATION.md)
 - [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 - [`docs/SANDBOXES.md`](SANDBOXES.md)
 - [`docs/SCREENSHOTS.md`](SCREENSHOTS.md)

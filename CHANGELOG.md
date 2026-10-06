@@ -16,6 +16,8 @@
 
 **Office ZIPs reject ambiguous archives and read their own output.** Duplicate names, encrypted or multi-disk entries, unsafe names and central-directory overruns are refused. An end-of-directory signature inside a ZIP comment no longer hides the actual directory. Highly compressible entries are stored without compression when needed to stay within the reader's expansion limit.
 
+**Pushes check capability-document freshness locally.** The public push hook checks the generated inventory before uploading, so a new document cannot leave its index stale until GitHub runs the complete suite.
+
 ## 0.23.7 — 2026-10-05
 
 **A prompt given on the command line no longer waits forever for an unused stdin.** The stall that 0.23.6 could only report is found. `yunuspi -p "prompt"` read stdin to its end whenever stdin was not a terminal, before printing anything, so a caller that leaves an unused pipe or socket open (an agent harness's shell, a CI step, a cron job) hung with no output until it was killed. On its first live occurrence the new startup notice named the step (`last completed step: createAgentSessionRuntime`, just before the stdin read), and the stuck process's stdin was an inherited socket. When the prompt comes from arguments or `@file`s, the wait for the first byte of piped input is now three seconds; after that the run continues with a note on stderr and releases the unused stdin. Input that has started arriving is still read to the end, `cat notes.txt | yunuspi -p "summarize"` works as before, and a run whose only prompt is stdin still waits for it.
