@@ -1,7 +1,7 @@
 import { localLm, skillRelevancePrefix, skillRelevancePrompt, SKILL_RELEVANCE_EXAMPLES, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
- * Deterministic routes remain authoritative; optional asynchronous discovery
+ * Deterministic routes prioritize advice; optional asynchronous discovery
  * offers bounded catalog-backed advice. Tool-output prose is never authority. */
 import { createSkillDiscoveryController } from "./skill-discovery-controller.ts";
 import { createContextAnchor } from "./context-anchor.ts";
@@ -73,7 +73,6 @@ const GENERIC_CONTEXT_TERMS = new Set(["self", "json", "public", "content", "con
 export function createRelevantGuidance(pi: any) {
   let searchController = new AbortController();
   const cancelSearches = () => { searchController.abort(); searchController = new AbortController(); };
-  let anchorContext = createContextAnchor();
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null, skillFingerprint = '';
@@ -129,19 +128,14 @@ export function createRelevantGuidance(pi: any) {
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
   const bulkFiles = new Map<string, string[]>();
-  // Skill routing is advisory by default. The native read gate and its
-  // persistent checklist are deliberately opt-in because a relevant hint is
-  // useful context, while forcing a read/defer round-trip for every task adds
-  // ceremony and can stall ordinary work. Keep `off` as the explicit opt-out
-  // for the inspect surface too; `required` is the only strict mode.
-  const reviewMode = (): 'required' | 'off' | 'advisory' => {
-    if (process.env.PI_SKILL_REVIEW === 'required') return 'required';
+  // Skills remain documentation even in installations with the old required
+  // setting. Preserve routing, discovery and honest read status, never a gate.
+  const reviewMode = (): 'off' | 'advisory' => {
     if (process.env.PI_SKILL_REVIEW === 'off') return 'off';
     return 'advisory';
   };
   const reviewAvailable = () => enabled() && !skillReviewDisabled && reviewMode() !== 'off'
     && tools().has('read') && tools().has('skill_review');
-  const reviewEnabled = () => reviewAvailable() && reviewMode() === 'required';
   const trackReview = (skill: Skill, reason: string, origin: 'task' | 'file') => {
     if (skillReviewDisabled) return;
     if (!reviewTargets.has(skill.file) && reviewTargets.size >= 32) {
@@ -165,7 +159,7 @@ export function createRelevantGuidance(pi: any) {
   // The default route offers one concrete optional match in each category.
   // Keep the selected identity and reason: replacing those with generic browse
   // instructions throws away the work of both deterministic and async routing.
-  // Strict review mode retains its separate read checkpoint and safety contract.
+  // Skills never impose a read checkpoint or alter a tool's safety contract.
   // Advisory discovery is available by default. Its controller owns the
   // observation threshold, explicit opt-out, request budget and cancellation.
   const advisoryInvitation = (hint: Hint): Hint | undefined => {
@@ -199,7 +193,7 @@ export function createRelevantGuidance(pi: any) {
       ? `Optional workflow: ${JSON.stringify(skill.name)} — ${JSON.stringify(summary(hint.reason ?? skill.description, 180))}. Read ${JSON.stringify(skill.file)} if useful; ${tracked ? 'skill_review({action:"inspect"}) lists its tracked checks.' : 'no review step is required.'}`
       : kind === 'workflow'
         ? 'Optional workflow discovery: skill_review can search installed workflows if useful for the current step.'
-        : `Optional capability (${JSON.stringify(hint.tool)}): ${summary(hint.text, 420)} ${active.has(hint.tool!) ? 'Use only if useful; no extra call is required.' : `If useful, preview tool_search({query:${JSON.stringify(hint.tool)}}) to check this session's availability.`}`;
+        : `Relevant tool (${JSON.stringify(hint.tool)}): ${summary(hint.text, 420)} ${active.has(hint.tool!) ? 'Use it for this step when its contract fits the action and retain the result evidence.' : `Preview tool_search({query:${JSON.stringify(hint.tool)},detail:true}) to check inputs and this session's availability, then enable and use it when relevant.`}`;
     return {
       ...hint,
       // A fresh shared topic key avoids stale receipts for the old concrete
@@ -537,7 +531,7 @@ export function createRelevantGuidance(pi: any) {
       if (/\b(research|search)\b/i.test(part) && /\b(background|multiple|several|thorough|comprehensive)\b/i.test(part))
         utilityHint('web_research','Research discovery: web_research runs 2–12 distinct supplied queries in background with shared provider pacing. Read the retained query receipts after completion; unavailable/empty results do not prove absence. Respect cooldowns and verify primary sources before concluding.');
       if (/\b(agentmail|agent.?mail)\b/i.test(part) || (/\b(emails?|mail|mailbox(?:es)?|inbox(?:es)?)\b/i.test(part) && /\b(send|search|find|connect|read|list|triage|outreach|reply|forward)\b/i.test(part) && !/\b(thunderbird|imap|smtp|mbox|maildir)\b/i.test(part)))
-        utilityHint('agentmail_send','Email via AgentMail (explicitly named capability): use agentmail_status to confirm the configured inbox, agentmail_search to find mail by topic, agentmail_messages to list compact inbox rows, agentmail_message for one full read, and agentmail_send for a bounded send with a required subject. Bypass generic repeated discovery: one tool_search({kind:"capabilities",id:"agentmail-email",enable:true}) stages the complete email bundle. For Thunderbird, local mailbox files, or other IMAP servers, read the email skill first. Keep the API key in the environment; never persist, log, or echo it.');
+        utilityHint('agentmail_send','Email via AgentMail (explicitly named capability): use agentmail_status to confirm the configured inbox, agentmail_search to find mail by topic, agentmail_messages to list compact inbox rows, agentmail_message for one full read, and agentmail_send for a bounded send with a required subject. Bypass generic repeated discovery: one tool_search({kind:"capabilities",id:"agentmail-email",enable:true}) stages the complete email bundle. For Thunderbird, local mailbox files, or other IMAP servers, consult the email guide when useful. Keep the API key in the environment; never persist, log, or echo it.');
       if (/\b(lead|leads|prospect|prospects|company|companies|contact|contacts)\b/i.test(part) && /\b(research|find|discover|lookup|enrich|qualify|outreach|list)\b/i.test(part))
         utilityHint('research_toolkit','Lead/company/contact research (composable, provenance-aware): research_toolkit plans query angles, records lead/company candidates with source URLs and retrieved-at evidence, and gathers source notes with hashes. Compose it with web_search/fetch_content/web_research for retrieval, then verify primary sources before outreach. One tool_search({kind:"capabilities",id:"research-toolkit",enable:true}) stages the bundle.');
       if (/\b(sandbox(?:es)?|isolated? (?:experiment|test|reproduction)s?|disposable|scratch environment|without (?:affecting|changing|touching) (?:the )?(?:project|workspace))\b/i.test(part))
@@ -626,10 +620,9 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
-  // The embedded design-slop skill is demanded whenever the agent is doing
+  // The embedded design reference is offered when the agent is doing
   // interface work (Jev-settled for requests, deterministic for UI files).
-  // Independent of skill-review mode: this is a standing doctrine, not a
-  // per-task route, and it clears itself the moment the skill is read.
+  // This offers design reference advice; it never prevents interface work.
   const uiDoctrine = createUiDoctrine({
     skillFile: () => skills.find(skill => skill.name === UI_DOCTRINE_SKILL)?.file,
     isRead: file => read.has(file),
@@ -647,12 +640,11 @@ export function createRelevantGuidance(pi: any) {
     pi.appendEntry?.(ENTRY, data);
   };
   const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), topicOffers: [...topicOffers].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills], diag:[diagnosticCount,diagSuggestedAt] });
-  // A workflow checkpoint, not a correctness verdict or a security boundary.
-  // Deterministic task/file routes qualify; weak lexical suggestions never gate.
+  // Reference status, not a correctness verdict or a security boundary.
   // Reading remains the native tool's job so delivery cannot masquerade as use.
   const reviewStatus = () => [...reviewTargets.values()].map(({skill, reason}) => ({
     name: skill.name, path: skill.file, reason,
-    status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'needs_review',
+    status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'unread',
     ...(deferredSkills.has(skill.file) ? { justification: deferredSkills.get(skill.file) } : {}),
   }));
   const FILLER = new Set(['use','using','please','find','get','show','list','skill','skills','workflow','workflows','relevant','appropriate','best','good','right','proper','some','any','help','helpful','needed','need','needs','for','with','about','related']);
@@ -743,31 +735,17 @@ export function createRelevantGuidance(pi: any) {
     const skills = all.slice(offset, offset + limit);
     return {skills, offset, limit, remaining: Math.max(0, all.length - offset - skills.length)};
   };
-  // Keep unresolved reads and applicable checks on the wire. A delivered hint
-  // must not disappear forever, and this must not enqueue extra model turns.
+  // Remove obsolete required-read context on resume; optional UI advice uses
+  // the existing stable anchor and never enqueues extra model turns.
   pi.on?.('context', (event: any, ctx: any) => {
     let messages = event.messages.filter((m: any) => m.customType !== REVIEW_CONTEXT && m.customType !== UI_DOCTRINE_CONTEXT);
-    // The design-slop demand stays on the wire until the skill is read, in
-    // every review mode.
-    const uiText = enabled() && !(ctx && ctx.cwd !== cwd) ? uiDoctrine.contextText() : undefined;
+    const uiText = reviewAvailable() && !readOnlyPrompt && !(ctx && ctx.cwd !== cwd) ? uiDoctrine.contextText() : undefined;
     if (uiText) messages = uiDoctrineAnchor(messages,{role:'custom',customType:UI_DOCTRINE_CONTEXT,content:uiText,display:false,timestamp:0},requestNumber);
-    if (!reviewEnabled() || ctx && ctx.cwd !== cwd)
-      return messages.length !== event.messages.length || uiText ? {messages} : undefined;
-    const status = reviewStatus().filter(s => s.status !== 'deferred');
-    const selected = [...status.filter(s => s.status === 'needs_review').slice(0,3), ...status.filter(s => s.status === 'read').slice(-2)];
-    if (!selected.length) return messages.length !== event.messages.length || uiText ? {messages} : undefined;
-    const text = ['[Applicable skills]', 'Read relevant SKILL.md files before using their workflow; apply the listed checks and retain result evidence. A suggestion is not a read, and a read is not proof of application.',
-      ...selected.map(s => `${s.status === 'read' ? 'Apply (read)' : 'Read required'}: ${JSON.stringify(s.path)} — ${s.reason}`),
-      tools().has('skill_review') ? 'Use skill_review inspect for all targets; defer only with a task-specific reason. User instructions take precedence.' : 'If a skill does not apply or cannot be read, state the task-specific reason. User instructions take precedence.',
-    ].join('\n');
-    // Keep unchanged guidance at its first boundary; changed read status goes
-    // after the new evidence, without invalidating the earlier request prefix.
-    const guidance = {role:'custom',customType:REVIEW_CONTEXT,content:text.slice(0,2800),display:false,timestamp:0};
-    return {messages:anchorContext(messages,guidance,requestNumber)};
+    return messages.length !== event.messages.length || uiText ? {messages} : undefined;
   });
   pi.registerTool?.({
     name: 'skill_review', label: 'Skill review',
-    description: 'Browse compact groups or search the bounded installed skill catalogue, and inspect applicable task/file skill status. Read a selected SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Browse/search are advisory and never create a review obligation.',
+    description: 'Find optional skill guides and documentation: browse groups, search installed metadata, inspect task/file suggestions and read status, or dismiss a suggestion with defer. Consult a selected SKILL.md with read when useful. Skills never gate tool use or create a review obligation.',
     parameters: Type.Object({
       action: choices(['browse', 'inspect', 'defer', 'search']),
       skill: Type.Optional(Type.String({maxLength:512})),
@@ -814,40 +792,30 @@ export function createRelevantGuidance(pi: any) {
         try { pi.appendEntry?.('skill-review-decision', {requestNumber, skill:target.skill.name, disposition:'deferred', reason:input.reason.trim()}); } catch {}
         try { persist(); } catch {}
       }
-      const result = {enabled:reviewEnabled(), available:reviewAvailable(), mode:reviewMode(), ...reviewPage(input.limit,input.offset), scope:'Deterministic task and file routes; at most two reads requested per operation. Discovery and skill reads remain available. Reads do not prove application.'};
+      const result = {enabled:false, available:reviewAvailable(), mode:reviewMode(), ...reviewPage(input.limit,input.offset), scope:'Optional reference suggestions from task and file routes; unread skills never block tools and no read or deferral is required. Reads do not prove application.'};
       return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
     },
   });
   return {
     beforeToolCall(event: any) {
-      if (enabled() && !readOnlyPrompt && (event.toolName === 'edit' || event.toolName === 'write') && typeof event.input?.path === 'string') {
-        const reason = uiDoctrine.gate(checkpointPath(event.input.path, cwd), typeof event.input.content === 'string' ? event.input.content : undefined);
-        if (reason) return { block: true, reason };
-      }
-      if (!reviewEnabled()) return;
-      const shellRead = event.toolName === 'bash' && typeof event.input?.command === 'string' ? classifyBashCommand(event.input.command)?.readTarget : undefined;
-      if (shellRead && skills.some(skill => skill.file === checkpointPath(shellRead.path, cwd))) return;
+      if (!reviewAvailable() || readOnlyPrompt) return;
       const supplied = event.input?.path ?? event.input?.file_path;
       const mutation = ['edit','write'].includes(event.toolName) || event.toolName === 'bulk_edit' && event.input?.action === 'apply';
-      const file = typeof supplied === 'string' && supplied.length <= 4096 ? checkpointPath(supplied,cwd) : '';
-      const excluded = (value: string) => /SKILL\.md$/i.test(value) || /(?:^|\/)(?:node_modules|vendor|dist|build|generated|backups)(?:\/|$)/i.test(value);
-      if (file && excluded(file)) return;
+      if (!mutation) return;
       const suppliedFiles = event.toolName === 'bulk_edit' ? bulkFiles.get(event.input?.token) ?? event.input?.files : event.input?.paths;
-      const files = [file, ...(Array.isArray(suppliedFiles) ? suppliedFiles.slice(0,200).filter((p: any) => typeof p === 'string').map((p: string) => checkpointPath(p,cwd)) : [])].filter(p => p && !excluded(p));
-      const applicable = mutation ? files.flatMap(file => routeSkillsPrecise('',file).slice(0,2))
-        .map(route => ({skill:skills.find(s => s.name === route.name), reason:route.check}))
-        .filter((entry): entry is {skill:Skill;reason:string} => !!entry.skill) : [];
-      for (const entry of applicable) trackReview(entry.skill,entry.reason,'file');
-      // Source reads and discovery stay open. The task checkpoint also covers
-      // research, browser/media work and shell/delegated execution, not just edits.
-      const execution = mutation || ['bash','sandbox_run','web_search','web_research','browser_session','render_see','media_edit','music_compose','data_query'].includes(event.toolName)
-        || event.toolName === 'subagent' && !event.input?.action;
-      if (!execution) return;
-      const currentFiles = new Set(applicable.map(entry => entry.skill.file));
-      const needed = [...reviewTargets.values()].filter(({skill,origin}) =>
-        (origin === 'task' && (!mutation || !currentFiles.size || !skillRoutes.find(route => route.name === skill.name)?.file) || currentFiles.has(skill.file)) && !read.has(skill.file) && !deferredSkills.has(skill.file)).slice(0,2);
-      if (!needed.length) return;
-      return {block:true,reason:`Before ${event.toolName}${file ? ` on ${JSON.stringify(supplied)}` : ''}, read the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, apply the relevant checks, then retry. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Source reads and discovery remain available.`};
+      const files = [supplied, ...(Array.isArray(suppliedFiles) ? suppliedFiles.slice(0,200) : [])]
+        .filter((file): file is string => typeof file === 'string' && file.length <= 4096)
+        .map(file => checkpointPath(file,cwd));
+      for (const file of files) {
+        if (/SKILL\.md$/i.test(file) || /(?:^|\/)(?:node_modules|vendor|dist|build|generated|backups)(?:\/|$)/i.test(file)) continue;
+        uiDoctrine.observeFile(file, typeof event.input?.content === 'string' ? event.input.content : undefined);
+        for (const route of routeSkillsPrecise('',file).slice(0,2)) {
+          const skill = skills.find(skill => skill.name === route.name);
+          if (skill) trackReview(skill,route.check,'file');
+        }
+      }
+      // Metadata and optional hints only. Tool contracts and security hooks
+      // own execution boundaries; a guide cannot veto a relevant tool.
     },
     userInput() {
       cancelSearches();
@@ -885,7 +853,6 @@ export function createRelevantGuidance(pi: any) {
     restore(ctx: any) {
       cancelSearches();
       discovery.cancel(true);
-      anchorContext = createContextAnchor();
       reviewTargets.clear(); deferredSkills.clear();
       bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();

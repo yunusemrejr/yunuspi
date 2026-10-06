@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.9 — 2026-10-06
+
+**Skills guide decisions without blocking tools.** Parent, child, full-catalog and explicit skill prompts treat skills as reference guides and documentation. Useful steps can be adapted or skipped even when a guide calls them mandatory. The former strict skill-read setting now behaves as advisory, and UI writes proceed without a forced design-skill read. Discovery, optional suggestions, truthful read tracking and tool safety boundaries remain available.
+
+**Tool discovery explains usage and reaches the next action.** Detailed previews include bounded input names, required fields, action choices and usage notes from the registered schema. Active and staged status distinguish a usable tool from one enabled for the next model turn. Exact tool requests in positive task clauses stage before the first turn without a skill route; examples, exclusions, paths and host restrictions cannot expand access. Complex pipeline scopes expose stage tracking automatically. A real SDK regression discovers and executes the native syntax checker, observes a failure, repairs the file and verifies the result.
+
 ## 0.23.8 — 2026-10-06
 
 **Finished streams release every reader.** A terminal event previously woke only one waiting reader unless the producer called `end` separately. All readers now finish, queued events retain their order, and draining large queues uses amortized constant-time removal.

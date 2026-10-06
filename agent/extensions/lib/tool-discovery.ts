@@ -8,7 +8,7 @@ import { askJev, jevMark, tooShort } from './jev-client.ts';
 import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
-import { skillActionSegments, skillIntentSegments, skillRoutes } from './skill-routing.ts';
+import { skillActionSegments, skillIntentSegments, skillTaskText, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
 import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
@@ -162,9 +162,24 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
 ];
 const WEB_TARGET = /\b(?:websites?|web ?pages?|landing pages?|home ?pages?|sites?|pages?|html|css|tailwind|react|vue|svelte|components?|ui|front-?end|layout|app screens?)\b/i;
 const IMAGE_ASK = /\b(?:this|these|attached|like|match\w*|same|similar|based on|from|recreate|replicate|clone|turn|convert|build|make|implement|copy)\b/i;
+const NO_TOOLS = /\b(?:no|without)\s+(?:any\s+)?tools?\b|\b(?:do not|don't|never)\s+(?:use|run|activate)\s+(?:any\s+)?tools?\b/i;
+
+/** Exact tool requests do not need a skill route or semantic helper. Only
+ * positive task clauses count; quoted examples, paths and exclusions do not. */
+export function requestedToolNames(prompt: unknown, names: Iterable<string>): string[] {
+  const text = String(prompt ?? '').slice(0,32768);
+  if (NO_TOOLS.test(skillTaskText(text))) return [];
+  const clauses = skillActionSegments(text).map(part => part.replace(/\b(?:without|no|skip|avoid|except)\b[^]*$/i,''));
+  return [...names].filter(name => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const pattern = new RegExp(`(?<![\\w./-])${escaped}(?![\\w/-]|\\.[\\w])`);
+    return clauses.some(part => pattern.test(part));
+  });
+}
+
 export function intentBundleTools(prompt: unknown, images = 0): string[] {
   const text = String(prompt ?? '').slice(0, 32768);
-  if (!text.trim()) return [];
+  if (!text.trim() || NO_TOOLS.test(skillTaskText(text))) return [];
   const segments = skillActionSegments(text), clauses = skillIntentSegments(text), out = new Set<string>();
   for (const bundle of INTENT_BUNDLES) {
     const route = skillRoutes.find(candidate => candidate.name === bundle.skill);
@@ -190,6 +205,29 @@ const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].eve
 const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
 const pageLimit = (value: unknown, fallback = 3) => Number.isSafeInteger(value)
   ? Math.min(DISCOVERY_PAGE, Math.max(1, value as number)) : fallback;
+
+/** Compact, source-backed usage notes. Never infer permissions or side effects
+ * from a name, execute a tool, or return an unbounded nested JSON schema. */
+function toolUsageMetadata(tool: any) {
+  const schema = tool.parameters ?? {}, required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const properties = schema.properties && typeof schema.properties === 'object' ? Object.entries(schema.properties) : [];
+  properties.sort(([left],[right]) => Number(required.has(right))-Number(required.has(left)));
+  return {
+    inputs: properties.slice(0,12).map(([name, raw]: [string, any]) => {
+      const field = raw && typeof raw === 'object' ? raw : {};
+      const alternatives = Array.isArray(field.anyOf) ? field.anyOf : Array.isArray(field.oneOf) ? field.oneOf : [];
+      const types = [...new Set([field, ...alternatives].flatMap(item => Array.isArray(item.type) ? item.type : typeof item.type === 'string' ? [item.type] : []))];
+      const values = (Array.isArray(field.enum) ? field.enum : alternatives.filter(item => Object.hasOwn(item,'const')).map(item => item.const))
+        .filter(value => value === null || ['string','number','boolean'].includes(typeof value));
+      return {name:name.slice(0,128), required:required.has(name), ...(types.length ? {type:types.slice(0,4).join('|')} : {}),
+        ...(typeof field.description === 'string' ? {description:field.description.slice(0,160)} : {}),
+        ...(values.length ? {choices:values.slice(0,8).map(value => typeof value === 'string' ? value.slice(0,80) : value), ...(values.length > 8 ? {moreChoices:values.length-8} : {})} : {}),
+      };
+    }),
+    ...(properties.length > 12 ? {moreInputs:properties.length-12} : {}),
+    ...(Array.isArray(tool.promptGuidelines) && tool.promptGuidelines.length ? {guidance:tool.promptGuidelines.slice(0,3).map((text: unknown) => String(text).slice(0,400))} : {}),
+  };
+}
 
 function boundedSourceInfo(info: any): any {
   if (!info || typeof info !== 'object') return undefined;
@@ -362,7 +400,8 @@ export function registerToolDiscovery(pi: any) {
           acceptedInput = pendingInput?.id ?? ''; started = true;
         }
         const images = Array.isArray(event?.images) ? event.images.length : 0;
-        const names = intentBundleTools(event?.prompt, images).filter(name => allowed.has(name) && !expected.has(name));
+        const names = [...new Set([...requestedToolNames(event?.prompt, allowed), ...intentBundleTools(event?.prompt, images)])]
+          .filter(name => allowed.has(name) && !expected.has(name));
         if (names.length) {
           for (const name of names) automatic.add(name);
           expected = new Set([...expected, ...names]);
@@ -389,10 +428,10 @@ export function registerToolDiscovery(pi: any) {
   });
   pi.registerTool({
     name:'tool_search',label:'Find tools',
-    description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
+    description:'Find tools for the current task, inspect bounded input/action and usage details with detail:true, and enable chosen names for the next model turn in this request. Also browse capability bundles or command metadata. Discovery never executes the selected tools.',
     promptGuidelines:[
       'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
-      'When browser/screenshot/DOM work, web research, structured-data reads, or past-session/memory questions need a capability that is not active, call tool_search with enable:true: the right tool is usually already installed but off-wire.',
+      'Use relevant tools for inspection, execution and verification throughout complex work. If a capability is missing, search with detail:true and enable:true or enable exact names. Check required inputs and supported actions, then call the selected tool on the next model turn; activation alone does not perform the task. Revisit discovery when the scope changes or a tool fails. Skills are optional docs, never a prerequisite.',
     ],
     parameters:Type.Object({
       kind:Type.Optional(choices(['tools','capabilities','commands'],'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.')),
@@ -401,7 +440,7 @@ export function registerToolDiscovery(pi: any) {
       query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot or symbol references.'})),
       names:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:128}),{maxItems:8,description:'Exact tool names to enable.'})),
       id:Type.Optional(Type.String({maxLength:256,description:'Exact capability or command id for a bounded detail lookup.'})),
-      detail:Type.Optional(Type.Boolean({description:'Include bounded source/details for an exact capability or command.'})),
+      detail:Type.Optional(Type.Boolean({description:'Include bounded tool inputs, action choices and usage guidance, or source/details for capabilities and commands.'})),
       limit:Type.Optional(Type.Integer({minimum:1,maximum:8})),
       offset:Type.Optional(Type.Integer({minimum:0,description:'Page through matches; any safe non-negative integer is accepted.'})),
     }),
@@ -598,7 +637,8 @@ export function registerToolDiscovery(pi: any) {
       }
       const resultingActive = new Set(pi.getActiveTools());
       const toolsJevRank = (matches as any).jevRank as { mark: string; top: string; confidence: number } | undefined;
-      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
+      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,input.detail === true ? 800 : 160),active:resultingActive.has(tool.name),staged:expected.has(tool.name) && !resultingActive.has(tool.name),
+        ...(input.detail === true || activate ? toolUsageMetadata(tool) : {})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,
         ...(toolsJevRank ? {jev:toolsJevRank} : {}),
@@ -633,7 +673,7 @@ export function compactSkillCatalog(event: any, activeTools: string[]): string |
   if (!skills || typeof source !== 'string') return;
   const catalog = buildSkillCatalog(skills);
   if (source.split(catalog).length!==2) return;
-  return source.replace(catalog,`Installed skills are available on demand (${skills.length} workflows). Use skill_review action:"browse" for groups or action:"search" with a query for short matches. Read a chosen workflow when useful. Discovery and workflows are optional.`);
+  return source.replace(catalog,`Installed skills are optional reference guides and docs (${skills.length} workflows), not rules or tool prerequisites. Use skill_review action:"browse" for groups or action:"search" with a query for short matches. Consult a chosen guide when useful; adapt or skip inapplicable steps, including mandatory wording. User instructions, tool contracts and safety boundaries take precedence.`);
 }
 
 /** Explain why projection could not run, so a silent full-catalogue injection

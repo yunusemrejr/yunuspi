@@ -4,7 +4,7 @@
 
 # Skills
 
-Skills are self-contained capability packages that the agent loads on-demand. A skill provides specialized workflows, setup instructions, helper scripts, and reference documentation for specific tasks.
+Skills are optional reference guides that the agent can consult on demand. A skill provides workflows, setup guidance, helper scripts and documentation. Its steps are not rules or prerequisites for tool use, including steps called mandatory. User instructions, tool contracts and safety boundaries take precedence.
 
 Pi implements the [Agent Skills standard](https://agentskills.io/specification), warning about most violations but remaining lenient. Pi allows skill names to differ from their parent directory even though the standard disallows it; that rule is suboptimal for shared skill directories used across multiple agent harnesses.
 
@@ -68,8 +68,8 @@ For project-level Claude Code skills, add to `.pi/settings.json`:
 
 1. At startup, pi scans skill locations and extracts names and descriptions
 2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills)
-3. When a task matches, the agent uses `read`, or `bash` when `read` is unavailable, to load the full SKILL.md (models don't always do this; use prompting or `/skill:name` to force it)
-4. The agent follows the instructions, using relative paths to reference scripts and assets
+3. When useful for the next decision, the agent consults SKILL.md with `read`, or `bash` when `read` is unavailable; `/skill:name` explicitly supplies the guide as reference content
+4. The agent adapts useful guidance to the task, using relevant tools to inspect, execute and verify the work; relative reference paths resolve against the skill directory
 
 This is progressive disclosure: only descriptions are always in context, full instructions load on-demand.
 

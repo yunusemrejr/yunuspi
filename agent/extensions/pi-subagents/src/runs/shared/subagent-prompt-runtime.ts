@@ -107,7 +107,7 @@ const STRUCTURED_OUTPUT_INSTRUCTIONS = [
 	"Do not rely on prose-only completion; if you do not call `structured_output`, the parent will fail this step.",
 ].join("\n");
 
-const CHILD_CAPABILITY_INSTRUCTIONS = "At each new task phase, match the needed action to your active tool descriptions and supplied skill catalog. Use an existing specialized tool before writing a replacement script; read and apply relevant skills as the work changes. Parent tool availability does not imply child availability. Report a missing required capability to the parent without widening permissions. Tool or skill counts are not quotas; use what the assigned outcome needs.";
+const CHILD_CAPABILITY_INSTRUCTIONS = "At each new task phase, match the needed action to your active tool descriptions. Use relevant tools to inspect, execute and verify work before writing replacement scripts. Skills are optional reference guides and docs, not rules or tool prerequisites: consult and adapt them when useful, including mandatory wording. User instructions, tool contracts and safety boundaries take precedence. Parent tool availability does not imply child availability. Report a missing required capability to the parent without widening permissions. Tool or skill counts are not quotas; use what the assigned outcome needs.";
 
 export const CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS = [
 	"You are a child subagent, not the parent orchestrator.",
@@ -140,7 +140,10 @@ const PARENT_ONLY_CUSTOM_MESSAGE_TYPES = new Set([
 const SUBAGENT_ORCHESTRATION_SKILL_NAME_PATTERN = /<name>\s*pi-subagents\s*<\/name>/;
 const PROJECT_CONTEXT_XML_HEADER = "\n\n<project_context>\n\n";
 const PROJECT_CONTEXT_LEGACY_HEADER = "\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\n";
-const SKILLS_HEADER = "\n\nThe following skills provide specialized instructions for specific tasks.";
+const SKILLS_HEADERS = [
+  "\n\nThe following skills provide specialized instructions for specific tasks.",
+  "\n\nSkills are optional reference guides and documentation for specific tasks, not rules or prerequisites for using tools.",
+];
 const DATE_HEADER = "\nCurrent date:";
 
 function readBooleanEnv(name: string): boolean | undefined {
@@ -262,7 +265,7 @@ export function stripProjectContext(prompt: string): string {
 	}
 	const legacyStartIndex = prompt.indexOf(PROJECT_CONTEXT_LEGACY_HEADER);
 	if (legacyStartIndex === -1) return prompt;
-	const endIndex = findSectionEnd(prompt, legacyStartIndex + PROJECT_CONTEXT_LEGACY_HEADER.length, [SKILLS_HEADER, DATE_HEADER]);
+	const endIndex = findSectionEnd(prompt, legacyStartIndex + PROJECT_CONTEXT_LEGACY_HEADER.length, [...SKILLS_HEADERS, DATE_HEADER]);
 	return `${prompt.slice(0, legacyStartIndex)}${prompt.slice(endIndex)}`;
 }
 
@@ -323,15 +326,15 @@ export function stripGlobalContext(prompt: string): string {
 	});
 	const legacyStartIndex = rewrittenXml.indexOf(PROJECT_CONTEXT_LEGACY_HEADER);
 	if (legacyStartIndex === -1) return rewrittenXml;
-	const legacyEndIndex = findSectionEnd(rewrittenXml, legacyStartIndex + PROJECT_CONTEXT_LEGACY_HEADER.length, [SKILLS_HEADER, DATE_HEADER]);
+	const legacyEndIndex = findSectionEnd(rewrittenXml, legacyStartIndex + PROJECT_CONTEXT_LEGACY_HEADER.length, [...SKILLS_HEADERS, DATE_HEADER]);
 	const legacyContext = rewrittenXml.slice(legacyStartIndex, legacyEndIndex);
 	return `${rewrittenXml.slice(0, legacyStartIndex)}${stripGlobalInstructionsFromLegacyContext(legacyContext)}${rewrittenXml.slice(legacyEndIndex)}`;
 }
 
 export function stripInheritedSkills(prompt: string): string {
-	const startIndex = prompt.indexOf(SKILLS_HEADER);
-	if (startIndex === -1) return prompt;
-	const endIndex = findSectionEnd(prompt, startIndex + SKILLS_HEADER.length, [DATE_HEADER]);
+	const startIndex = findSectionEnd(prompt, 0, SKILLS_HEADERS);
+	if (startIndex === prompt.length) return prompt;
+	const endIndex = findSectionEnd(prompt, startIndex + 1, [DATE_HEADER]);
 	return `${prompt.slice(0, startIndex)}${prompt.slice(endIndex)}`;
 }
 

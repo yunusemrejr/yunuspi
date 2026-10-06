@@ -150,6 +150,11 @@ test('real Needle WASM ranks bounded observation candidates and reuses embedding
     return result;
   };
   try {
+    // Startup belongs outside the interactive retrieval stage's 2 s budget.
+    // Exercise a real forward pass first; production fail-open deadlines stay
+    // covered by the deterministic retrieval tests above.
+    const warm = await handle.embed(['Initialize an independent retrieval fixture.']);
+    assert.equal(warm.ok, true, JSON.stringify(warm));
     const start = performance.now();
     const first = await retrieveObservation(raw, 'routing authentication login', { needle });
     const second = await retrieveObservation(raw, 'routing authentication login', { needle });

@@ -31,7 +31,7 @@ export default function blenderStudio(pi: any) {
     transparent: Type.Optional(Type.Boolean({ description: "film transparent (RGBA)" })),
   };
   register("blender_setup",
-    "Headless Blender for 3D work. status reports the binary (harness-local pinned 5.2.2 LTS, YUNUSPI_BLENDER or PATH), version, engines (EEVEE headless, Cycles CPU, Workbench), CPU threads and the memory budget every render is watched against. install downloads the pinned portable Linux build once (sha256-verified, ≈350 MB) into the harness tool directory; no system packages, no GPU assumed. Read the blender-production skill before building scenes.",
+    "Headless Blender for 3D work. status reports the binary (harness-local pinned 5.2.2 LTS, YUNUSPI_BLENDER or PATH), version, engines (EEVEE headless, Cycles CPU, Workbench), CPU threads and the memory budget every render is watched against. install downloads the pinned portable Linux build once (sha256-verified, ≈350 MB) into the harness tool directory; no system packages, no GPU assumed. The blender-production skill offers optional scene-building guidance.",
     Type.Object({ action: Type.Optional(choices(["status", "install"])) }),
     blenderSetup, 1_800_000);
   register("blender_run",

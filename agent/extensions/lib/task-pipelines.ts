@@ -60,7 +60,8 @@ export function automaticPipelineTools(selection: PipelineSelection, input: Auto
     /(?:^|\/)(?:\.git\/(?:HEAD|config|index|refs\/[^\n]+)|\.gitmodules)$/i.test(file.replaceAll('\\', '/')));
   const git = !pipelineGitExcluded(prompt) && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
     /\b(?:git(?:hub)?|commits?|committing|pull requests?|pre-?commit|rebase|repository history|release (?:process|pipeline|version|tag)|(?:push|merge) (?:the |this |my )?(?:branch|commit|changes)|push (?:to )?(?:origin|upstream))\b/i.test(prompt));
-  const control = /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
+  const control = profile.tier === 'complex' || profile.tier === 'critical' ||
+    /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
   const codeWork = selection.ids.some(id => !MEDIA_ONLY.includes(id));
   return [...new Set([
     ...selection.tools.filter(name => name === 'code_quality' ? codeWork && quality : name === 'project_tests' ? codeWork : name === 'git_info' ? git : name !== 'task_pipeline'),
@@ -186,7 +187,7 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const stages: PipelineStage[] = [
     { id: 'discovery', phase: 'discovery', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.discovery}`).join('\n'), evidenceKinds: ['inspection'], dependsOn: [], tools: ['project_intel', 'read'] },
     ...(debugging ? [{ id: 'debug-reproduction', phase: 'discovery' as const, check: 'Run the minimal reproducer and retain the observed failure before repair. Expected failure is successful reproduction evidence; missing reproduction remains blocked, not a claimed diagnosis.', evidenceKinds: ['execution' as const], dependsOn: ['discovery'], tools: ['project_tests', 'bash'] }] : []),
-    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Read only selected skills whose procedure changes the next decision; read design-slop-prevention before UI choices. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: [debugging ? 'debug-reproduction' : 'discovery'], tools: ['read', 'edit', 'write'] },
+    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Use relevant tools for each stage; consult skill guides only when they help the next decision and adapt their steps to the task. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: [debugging ? 'debug-reproduction' : 'discovery'], tools: ['read', 'edit', 'write'] },
     { id: 'validation', phase: 'validation', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.validation}`).join('\n') + '\nReuse current native execution receipts. For a low-impact change, an explicit reasoned assessment may establish that additional tests are unnecessary; an assessment cannot claim a test passed.', evidenceKinds: ['execution', 'assessment'], dependsOn: ['implementation'], tools: validationTools },
   ];
   if (ui) {
@@ -291,7 +292,7 @@ export function buildPipelineContext(selection: PipelineSelection, ledger: Pipel
   if (maxChars < 160) return undefined;
   const ready = pending.filter(stage => stage.ready);
   const header = `[Task pipelines: ${selection.ids.join(', ')}]\nScope ${coordinate.scope}; revision ${coordinate.revision}. Reuse current native receipts; do not repeat passed stages.\n`;
-  const skills = ready.some(stage => stage.phase === 'discovery') ? `Relevant skill names: ${selection.skills.join(', ')}. Read only what changes the next decision.\n` : '';
+  const skills = ready.some(stage => stage.phase === 'discovery') ? `Optional reference guides: ${selection.skills.join(', ')}. Consult only when useful; these are not tool prerequisites.\n` : '';
   const body = ready.map(stage => `${stage.id}${stage.failures ? ` (${stage.failures} failure receipts: diagnose/escalate before retrying)` : ''}: ${stage.check}`).join('\n');
   const blocked = ready.length ? '' : 'Prerequisite evidence is unresolved; inspect pipeline status before proceeding.';
   return (header + skills + body + blocked).slice(0, maxChars);

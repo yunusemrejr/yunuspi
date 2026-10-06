@@ -500,11 +500,9 @@ export function resolvePiLaunchToolPlan(
 			(tool) =>
 				!(tool.includes("/") || tool.endsWith(".ts") || tool.endsWith(".js")),
 		) ?? [];
-	if (input.requireReadTool && allowedToolSet && !allowedToolSet.has("read")) {
-		throw new Error(
-			`Capability ceiling from ${capabilityCeiling?.sources.join(", ") || "unknown source"} excludes required tool 'read' for lazy skill loading.`,
-		);
-	}
+	// Skill guides can make read useful, but never require a launch to widen its
+	// tool ceiling or fail when reading is unavailable. The existing flag only
+	// adds read to an unrestricted declared tool list.
 	const declaredBuiltinTools =
 		input.tools === undefined
 			? allowedToolSet

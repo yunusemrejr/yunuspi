@@ -684,3 +684,46 @@ test('named core tools and adaptive opt-out retain caller intent', () => {
  try{const g=fixture();g.hooks.before_agent_start({prompt:'One-line typo'},g.ctx);assert.ok(g.active().includes('subagent'));}
  finally{if(prior===undefined)delete process.env.PI_ADAPTIVE_EXECUTION;else process.env.PI_ADAPTIVE_EXECUTION=prior;}
 });
+
+test('exact specialized tool requests stage without a skill route and exclude examples, paths and negation', async () => {
+ const {requestedToolNames}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const names=['image_crop','http_request','browser_session'];
+ assert.deepEqual(requestedToolNames('Use image_crop to inspect the reference.',names),['image_crop']);
+ assert.deepEqual(requestedToolNames('Use image_crop.',names),['image_crop'],'sentence punctuation is not part of a tool name');
+ assert.deepEqual(requestedToolNames('```\nNo tools.\n```\nUse image_crop.',names),['image_crop'],'example exclusions do not override the task');
+ for(const prompt of ['Do not use image_crop.','Explain how to use image_crop.','> Use image_crop','```\nUse image_crop\n```','Read src/image_crop.ts','Use image_crop_backup','No tools. Use image_crop.'])
+  assert.deepEqual(requestedToolNames(prompt,names),[],prompt);
+ assert.deepEqual(requestedToolNames('Use http_request without browser_session, then inspect the result.',names),['http_request']);
+ assert.deepEqual(requestedToolNames('Do not use browser_session, but use http_request.',names),['http_request']);
+ const f=fixture([{name:'image_crop',description:'Crop a reference image',parameters:{type:'object'}}]);
+ f.hooks.before_agent_start({prompt:'Use image_crop to inspect the reference. No skills.'},f.ctx);
+ assert.ok(f.active().includes('image_crop'));
+ assert.equal(f.executed(),0,'staging does not perform the tool action');
+ const g=fixture([{name:'image_crop',description:'Crop a reference image'}]);
+ g.api.setActiveTools(['read','tool_search']);
+ g.hooks.before_agent_start({prompt:'Use image_crop.'},g.ctx);
+ assert.deepEqual(g.active(),['read','tool_search'],'a named request cannot expand a host ceiling');
+});
+
+test('tool detail explains inputs, actions and staged status without execution or unbounded schemas', async () => {
+ const f=fixture([{name:'structured_probe',description:'Inspect bounded records. '+ 'x'.repeat(2000),parameters:{type:'object',required:['action','path'],properties:{
+  action:{anyOf:[{type:'string',const:'inspect'},{type:'string',const:'query'}]},
+  path:{type:'string',description:'Workspace file to inspect'},
+  limit:{type:'integer'}, ...Object.fromEntries(Array.from({length:20},(_,i)=>['option_'+i,{type:'object',properties:{nested:{description:'secret nested detail'}}}]))
+ }},promptGuidelines:['Retain the result evidence.']}]);
+ const before=f.active().slice();
+ const preview=await f.call({names:['structured_probe'],enable:false,detail:true});
+ const tool=preview.details.tools[0];
+ assert.equal(tool.active,false);assert.equal(tool.staged,false);assert.equal(tool.description.length,800);
+ assert.deepEqual(tool.inputs[0],{name:'action',required:true,type:'string',choices:['inspect','query']});
+ assert.equal(tool.inputs[1].required,true);assert.equal(tool.inputs[2].required,false);
+ assert.equal(tool.inputs.length,12);assert.equal(tool.moreInputs,11);
+ assert.doesNotMatch(JSON.stringify(tool),/secret nested detail/);
+ assert.deepEqual(f.active(),before);assert.equal(f.executed(),0);
+ const activation=await f.call({names:['structured_probe']});
+ assert.equal(activation.details.tools[0].active,false);assert.equal(activation.details.tools[0].staged,true);
+ f.hooks.turn_end();
+ const live=await f.call({names:['structured_probe'],enable:false,detail:true});
+ assert.equal(live.details.tools[0].active,true);assert.equal(live.details.tools[0].staged,false);
+ assert.equal(f.executed(),0);
+});

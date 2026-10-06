@@ -1,9 +1,9 @@
-/** UI-work detection and the embedded design-slop doctrine demand.
+/** UI-work detection and optional design guidance.
  *
  * WHY: models asked for an interface with no constraints converge on the same
  * two looks (indigo/purple SaaS, cream/terracotta editorial). The harness
  * embeds `design-slop-prevention` as a skill; this module decides WHEN an agent
- * is doing interface work and demands that it reads that skill first.
+ * is doing interface work and offers that reference when useful.
  *
  * Who decides: deterministic cues frame the question (a UI file being written,
  * UI vocabulary in the request). Jev then settles the ambiguous middle in both
@@ -13,9 +13,7 @@
  * keeps the heuristic (strong cues count, weak cues do not); Jev refines, it
  * never gates. Editing a UI file is deterministic and needs no judge.
  *
- * The demand is bounded: one read per session (the read receipt persists),
- * a context reminder while unread, and at most two blocked UI writes per
- * request so an agent that ignores the reminder cannot loop or stall. */
+ * Advice is bounded and never blocks a tool or requires a skill read. */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +22,6 @@ import type { JudgeFn } from "./micro-intelligence/review.ts";
 
 export const UI_DOCTRINE_SKILL = "design-slop-prevention";
 export const UI_DOCTRINE_CONTEXT = "ui-doctrine-context";
-const MAX_BLOCKS_PER_REQUEST = 2;
 
 const STRONG_PROMPT = /\b(?:ui|ux|gui|user interfaces?|front-?end|web ?sites?|landing ?pages?|home ?pages?|web ?apps?|dashboards?|mock-?ups?|wireframes?|css|tailwind|style ?sheets?|design systems?|hero sections?|nav ?bars?|side ?bars?|modals?|re-?design|re-?style|figma|storefronts?|portfolio sites?|responsive (?:design|layout)|color palettes?|typography|onboarding flow|checkout flow|sign-?up (?:page|flow|form)|login (?:page|screen|form))\b/i;
 const WEAK_PROMPT = /\b(?:pages?|layouts?|styles?|styling|screens?|looks?|feels?|buttons?|forms?|themes?|colou?rs?|fonts?|components?|visuals?|designs?|apps?|sites?|interfaces?|widgets?|menus?|animations?|confusing|clunky|ugly|clean(?:er)?|modern|polish(?:ed)?)\b/i;
@@ -87,7 +84,6 @@ export interface UiDoctrineDeps {
 export function createUiDoctrine(deps: UiDoctrineDeps) {
   let active = "";
   let epoch = 0;
-  let blocks = 0;
   let controller: AbortController | undefined;
   // Read receipts for the fallback path, which the skill catalog does not track.
   const readHere = new Set<string>();
@@ -96,7 +92,7 @@ export function createUiDoctrine(deps: UiDoctrineDeps) {
   const activate = (reason: string) => {
     if (active) return;
     active = reason;
-    try { deps.onActive?.(reason); } catch { /* the demand must never break the turn */ }
+    try { deps.onActive?.(reason); } catch { /* advice must never break the turn */ }
   };
   const unread = () => {
     const file = doctrineFile();
@@ -109,7 +105,6 @@ export function createUiDoctrine(deps: UiDoctrineDeps) {
       controller?.abort();
       controller = undefined;
       epoch++;
-      blocks = 0;
       if (!options.keep) active = "";
       const cue = uiPromptCue(prompt);
       if (cue.strength === "none" || active) return;
@@ -125,7 +120,7 @@ export function createUiDoctrine(deps: UiDoctrineDeps) {
         })
         .catch(() => { if (mine === epoch && cue.strength === "strong") activate(named); });
     },
-    /** A successful native read of the doctrine clears the demand. */
+    /** A successful native read clears the optional reference hint. */
     noteRead(file: string) {
       if (file && file === doctrineFile()) readHere.add(file);
     },
@@ -137,20 +132,11 @@ export function createUiDoctrine(deps: UiDoctrineDeps) {
     contextText(): string | undefined {
       const file = active && unread();
       if (!file) return undefined;
-      return `[UI work: required reading]\nThis task involves user-interface or UX work (${active}). Before choosing a palette, typeface, layout or copy, read ${JSON.stringify(file)} with the native read tool and apply its procedure: ground every choice in the subject, avoid both default palettes (indigo-to-purple SaaS, cream/terracotta editorial), use only real content, run the swap test. When delegating interface work to a subagent, put this skill path in its task and tell it to read the skill first. Explicit user style instructions still win.`;
-    },
-    /** One bounded refusal of a UI write until the doctrine is read. */
-    gate(file: string, content?: string): string | undefined {
-      if (!uiFileCue(file, content)) return undefined;
-      activate("a user-interface file is being written");
-      const missing = unread();
-      if (!missing || blocks >= MAX_BLOCKS_PER_REQUEST) return undefined;
-      blocks++;
-      return `Before writing interface code, read the design-slop doctrine: ${JSON.stringify(missing)}. It is the mandatory grounding for palette, typography, layout and copy decisions (generated UIs otherwise converge on the indigo/purple SaaS or cream/terracotta look). Read it with the native read tool, apply it to this change, then retry the write. Explicit user style instructions still win.`;
+      return `[UI reference: optional]\nThis task involves interface or UX work (${active}). Consult ${JSON.stringify(file)} if useful for palette, typography, layout or copy. Adapt its guidance to the user's style and actual project. Use rendering and interaction tools to assess the result; reading a guide does not establish visual quality. Work can proceed without this read.`;
     },
     isActive: () => Boolean(active),
     cancel() { controller?.abort(); controller = undefined; epoch++; },
     /** Session boundary: nothing carries over to another session's request. */
-    reset() { controller?.abort(); controller = undefined; epoch++; active = ""; blocks = 0; },
+    reset() { controller?.abort(); controller = undefined; epoch++; active = ""; },
   };
 }

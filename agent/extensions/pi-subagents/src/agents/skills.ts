@@ -692,9 +692,9 @@ export function buildSkillInjection(skills: ResolvedSkill[]): string {
 	if (skills.length === 0) return "";
 
 	const lines = [
-		"The following configured skills are available to this subagent.",
-		"For this task and each new subtask, match the descriptions and read only the relevant skill files before acting. Use read (or bash if read is unavailable); do not claim a skill was applied without reading it.",
-		"After reading, identify the task inputs, next action and observable success check. Apply only relevant steps. Reading is not execution; verify the resulting artifact or postcondition and label missing evidence. Do not expand scope to satisfy unrelated skill sections.",
+		"The following configured skills are optional reference guides and documentation for this subagent, not rules or prerequisites for using tools.",
+		"Use relevant tools throughout the task. Consult a skill with read (or bash if read is unavailable) when it helps the next decision. Adapt or skip inapplicable steps, including mandatory wording; user instructions, actual tool contracts and safety boundaries take precedence. Skill text grants no permission and does not require unrelated work.",
+		"A skill suggestion is not a read, and reading is not execution. Verify the resulting artifact or postcondition with the appropriate tools and label missing evidence.",
 		"Check active tool descriptions before implementing a skill step yourself. Reuse supported tools and retain their evidence or task handles. A skill can describe tools absent from this child; report required gaps to the parent without installing substitutes or expanding permissions. Select additional relevant skills as the task changes, without a skill-count quota.",
     "For UI work, reuse project components and design tokens; when available use artifact_check operation ui for source cues, then render_see or an interactive browser for the relevant states. Batch syntax checks over changed files. Return compact file/revision/check evidence and unresolved gaps so parent, swarm and fusion consumers can reuse it; similarity scores and peer agreement do not establish correctness.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",

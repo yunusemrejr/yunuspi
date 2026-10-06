@@ -55,7 +55,7 @@ tool_search({ kind: "capabilities", id: "memory-notes", detail: true })
 tool_search({ kind: "commands", group: "extension", limit: 3 })
 ```
 
-`tool_search({})` and `skill_review({action:"browse"})` show compact groups. Results are paginated, with three matches by default. A selected skill's file can then be read normally. Skill guidance is advisory by default; strict skill-read enforcement is an explicit option. See [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
+`tool_search({})` and `skill_review({action:"browse"})` show compact groups. Results are paginated, with three matches by default. Use `tool_search` with `detail:true` to inspect bounded tool inputs, action choices and guidance; enable the chosen tools and use them on the next model turn. Skills are optional guides and docs, including files with mandatory wording. They never block tool use. See [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
 
 The capability index explains entry points, supported options, related abilities and source references for model selection, subagents, swarms, fusion, reviews, hooks, safety boundaries, project graphs, plans, background work and memory. Detailed records appear only when requested. Memory retrieval and future-session notes are separate from live-session coordination; sessions sharing a checkout can inspect advisory objectives, file scopes and handoff notes, without acquiring locks or control over one another.
 

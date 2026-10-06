@@ -4434,7 +4434,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 768,
+        "line": 746,
         "kind": "literal"
       },
       {
@@ -4477,7 +4477,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 937,
+        "line": 940,
         "kind": "literal"
       },
       {
@@ -4543,7 +4543,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 390,
+        "line": 429,
         "kind": "literal"
       },
       {
@@ -5008,13 +5008,13 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 768,
+        "line": 746,
         "kind": "literal"
       },
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 937,
+        "line": 940,
         "kind": "literal"
       },
       {
@@ -5044,7 +5044,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 390,
+        "line": 429,
         "kind": "literal"
       },
       {

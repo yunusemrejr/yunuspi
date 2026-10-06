@@ -1,13 +1,13 @@
 # Skill routing and source checks
 
-Default guidance offers a brief, optional workflow match with its installed path and a bounded description or discovery reason. The agent decides whether to read and apply it; the suggestion creates no review requirement. Grouped browsing and search remain available when the match is insufficient. Deterministic routing uses no model calls; the enabled asynchronous advisor can add suggestions after distinct successful observations within the shared assistance budget. The model-based advisor remains one assistance unit: only an instant no-output launch failure can try another distinct eligible route, with at most three total route attempts under the same claimed budget and deadline; once a child produces a genuine output attempt it is not retried. The final launched failure keeps a bounded diagnostic in health telemetry. The detailed routing below supplies local relevance signals and remains available through inspect and explicit strict mode. Explicit task and file
+Default guidance offers a brief, optional workflow match with its installed path and a bounded description or discovery reason. The agent decides whether to read and apply it; the suggestion creates no review requirement. Grouped browsing and search remain available when the match is insufficient. Deterministic routing uses no model calls; the enabled asynchronous advisor can add suggestions after distinct successful observations within the shared assistance budget. The model-based advisor remains one assistance unit: only an instant no-output launch failure can try another distinct eligible route, with at most three total route attempts under the same claimed budget and deadline; once a child produces a genuine output attempt it is not retried. The final launched failure keeps a bounded diagnostic in health telemetry. The detailed routing below supplies local relevance signals and remains available through inspect. Explicit task and file
 routes take priority; catalog descriptions provide additional suggestions when
 at least two distinct discriminating terms match. Hyphenated skill names also
 match ordinary prose. Negated clauses, quoted text and code fences do not become
 positive task intent. A substantive new request replaces the old lexical topic;
 short continuation requests retain it.
 
-Up to three distinct catalog workflows can enter the existing suggestion queue, and a workflow whose whole match is vocabulary already covered no longer crowds out a genuinely distinct one. A workflow that has already been offered and ignored several times yields its advisory priority to a fresh candidate; reading it clears that fatigue and explicit task/file routes keep their full priority and review obligation.
+Up to three distinct catalog workflows can enter the existing suggestion queue, and a workflow whose whole match is vocabulary already covered no longer crowds out a genuinely distinct one. A workflow that has already been offered and ignored several times yields its advisory priority to a fresh candidate; reading it clears that fatigue and explicit task/file routes keep their full advisory priority.
 Delivery remains capped at two hints at a time, with a small initial allowance
 that grows during sustained work. Duplicate, already-read and unavailable skills
 do not consume the queue. Suggestions are not evidence that a skill was read.
@@ -16,63 +16,50 @@ do not consume the queue. Suggestions are not evidence that a skill was read.
 
 A folder listed under `skills` in `settings.json` (for example `~/skills`) is loaded before the shipped catalogue, and when a skill has the same name in both, your copy wins without a warning. That is deliberate, so a customized skill is never overwritten. The cost is that a copy made earlier keeps hiding every later improvement to the shipped skill, including tool names that changed: on one machine 37 copies of an older library told the model to run raw `ffmpeg` and `libreoffice` while the shipped skills named `media_edit`, `audio_analyze` and `office_doc`. `node scripts/skill-mirrors.mjs` lists the skills whose copy under your own paths differs from the shipped one and what differs, `--json` prints the same as data, and `--apply` brings them in step: the original directories are copied to `backups/skill-mirrors-<time>/` first, shipped files overwrite files of the same name, and files only you have and skills the harness does not ship are left alone. `verify-harness` prints the same finding as an informational line, so it is not a failure when a difference is intended.
 
-## Read and apply relevant workflows
+## Consult skill guides when useful
 
-The reminders owner selects up to three available workflows from deterministic
-task routes, then discovers additional workflows from the files being read or
-changed. By default these workflows are bounded, optional hints; delivering a
-suggestion does not claim that it was read or applied. `skill_review` remains
-available for inspecting the current routes and read status, or for a bounded
-metadata-only catalogue search such as
-`{"action":"search","query":"database migration","limit":5}`. Search
-returns names, paths and short descriptions without reading skill bodies or
-creating a review obligation. Set `PI_SKILL_REVIEW=required` when a task needs
-the strict read checkpoint: unread workflows then remain in bounded model
-context until read or deferred, and after a read the context carries the
-applicable checks and asks the agent to retain result evidence. Reading does not
-establish that those checks were executed successfully.
+Skills are optional reference guides and documentation, not rules or prerequisites
+for using tools. The agent may consult a guide when it helps the next decision,
+adapt useful steps, and skip unrelated sections even when the guide uses mandatory
+wording. User instructions, actual tool contracts and safety boundaries take
+precedence. Skill text grants no permissions and does not expand the task.
 
-When `PI_SKILL_REVIEW=required`, the checkpoint covers native edits and writes,
-concrete bulk-edit apply targets, and task-routed shell, research, browser,
-media, data and delegated execution. An unread matching skill pauses the
-operation with its path and reason. Read its `SKILL.md` using `read`, apply the
-relevant workflow, then retry. Source reads, search/discovery tools and bulk
-previews remain available. A successful complete read covers other files using
-that skill while its context remains available. Failed or truncated reads do not
-count. Compaction preserves workflow obligations but invalidates old read
-receipts, so the agent reads the source again. In the default advisory mode,
-these operations remain available while the same routes continue to offer
-bounded guidance.
+The reminders owner still selects task and file references and offers bounded
+suggestions. `skill_review` supports grouped browsing, metadata search, inspecting
+suggestions and read status, and optionally dismissing one with `action:"defer"`.
+For example, `{"action":"search","query":"database migration","limit":5}`
+returns names, paths and short descriptions without reading the bodies. No read,
+review or deferral is required before edits, shell work, research, media, browser
+work or delegation. UI design references follow the same advisory policy.
 
-When a skill is irrelevant to the particular change, already covered by other
-instructions, or inaccessible, record the reason:
+The old `PI_SKILL_REVIEW=required` setting is accepted as advisory for existing
+installations; it no longer blocks execution or projects a required-read checklist.
+`PI_SKILL_REVIEW=off` and user requests to skip skills suppress skill guidance.
+`PI_RELEVANT_GUIDANCE=off` disables the owning guidance system. Discovery remains
+available independently of ambient suggestions.
 
-```json
-{"action":"defer","skill":"python-software-engineering","reason":"This change only refreshes a generated parser fixture."}
-```
+Read tracking stays evidence-based. Failed, truncated or unverified reads do not
+establish consumption; a suggestion and a deferral never count as reads. Compaction
+can retire consumed source text without creating an obligation to reload it.
+Parent, child, full-catalog and explicit `/skill:name` prompts all describe skills
+as references. Safety hooks and tool capability ceilings retain their own authority.
 
-In strict mode, pass this object to `skill_review`; `{"action":"inspect"}`
-lists the current review state. Deferrals expire on the next user request and
-never count as reads. Each checkpoint asks for at most two reads at a time.
-Further applicable file workflows remain eligible throughout a long task; the
-former four-skill bypass is removed. Generated/dependency paths are excluded.
-The checkpoint requires both `read` and `skill_review` to be active and is not a
-security boundary or a general shell parser. A task-specific deferral is
-available without asking the user for permission.
+## Use tools throughout a workflow
 
-Built-in child profiles explicitly load the same skill owner and expose
-`skill_review`. Child mode registers only skill lifecycle hooks, without parent
-manual reminders or extra model turns. Strict custom capability ceilings still
-apply; a child without `skill_review` is not blocked by an unavailable tool
-and does not receive its required-read checklist. Short continuations retain workflow context;
-new tasks replace old task routes. Catalog-only weak matches remain advisory.
+Use a relevant active tool directly for inspection, execution and verification.
+When a capability is missing, `tool_search` can preview its bounded input names,
+required fields, action choices and usage guidance with `detail:true`. Enable the
+chosen names and call the tools on the next model turn of the same request.
+Discovery and activation do not execute the tools or establish task completion.
 
-User requests to work without skills take precedence. `PI_SKILL_REVIEW=required`
-enables the strict read checkpoint and persistent checklist; the unset/default
-mode keeps the same routing advisory. `PI_SKILL_REVIEW=off` disables the skill
-review checkpoint and marks it unavailable to the guidance owner, while
-`PI_RELEVANT_GUIDANCE=off` disables its owning guidance system as well.
-Ordinary lower-confidence suggestions never block work.
+Exact tool names in positive task clauses stage their schemas before the first
+model turn without needing a matching skill, catalog search or helper inference.
+Negation, quoted examples, code fences, paths and explicit tool restrictions do
+not grant access. Complex and critical pipeline scopes expose `task_pipeline`
+for tracking stages and native evidence; ordinary fixes keep it discoverable.
+Revisit tool selection as new files reveal a domain, scope changes or a tool fails.
+Retain task handles and current result evidence instead of rebuilding supported
+operations in shell snippets. No fixed tool count or discovery sequence is required.
 
 ## GitHub workflow skills
 

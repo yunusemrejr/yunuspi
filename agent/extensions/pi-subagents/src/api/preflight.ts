@@ -316,7 +316,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	if (resolvedSkills.missing.includes("pi-subagents")) {
 		return { ok: false, code: "missing_skill", message: "The pi-subagents orchestration skill is not child-injectable.", diagnostics };
 	}
-	if (resolvedSkills.missing.length > 0) diagnostics.push({ code: "missing_skill", severity: "error", message: `Missing skills: ${resolvedSkills.missing.join(", ")}` });
+	if (resolvedSkills.missing.length > 0) diagnostics.push({ code: "missing_skill", severity: "warning", message: `Optional skill guides unavailable: ${resolvedSkills.missing.join(", ")}. Continue with the task and available tools.` });
 
 	const externalRunner = agent.runner?.type === "external-cli" || agent.runner?.type === "external-job";
 	const availableModels = normalizeAvailableModels(input.availableModels);
@@ -398,9 +398,6 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	if (!sessionDir) diagnostics.push({ code: "host_required", severity: "host-required", message: "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy." });
 	if (!externalRunner && input.availableModels === undefined && (input.model || agent.model || input.parentModel)) {
 		diagnostics.push({ code: "host_required", severity: "host-required", message: "No availableModels snapshot was supplied; model resolution may differ from the active Pi host registry." });
-	}
-	if (resolvedSkills.missing.length > 0) {
-		return { ok: false, code: "missing_skill", message: `Missing skills: ${resolvedSkills.missing.join(", ")}`, diagnostics };
 	}
 	let effectiveSystemPrompt = agent.systemPrompt?.trim() ?? "";
 	if (resolvedSkills.resolved.length > 0) {

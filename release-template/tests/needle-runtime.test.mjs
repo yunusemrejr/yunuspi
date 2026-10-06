@@ -580,7 +580,9 @@ const liveCheck = await liveAssets.verifyAssets(liveAssets.needleAssetDir(), fal
 const hasLiveAssets = liveCheck.ok === true;
 
 test("live needle wasm embeds, ranks and classifies (asset-gated)", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
-  const handle = runtime.createNeedleRuntime({});
+  // This checks native correctness and cache reuse under parallel cold loads.
+  // Interactive timeout/recovery contracts have dedicated tests above.
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), opTimeoutMs: 10000, maxOpTimeoutMs: 30000 } });
   handle.warmup();
   assert.equal(await settled(handle, "healthy", 120000), "healthy");
   assert.ok(handle.health().dim > 0);

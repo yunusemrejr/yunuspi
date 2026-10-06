@@ -1,5 +1,5 @@
-// Embedded design-slop doctrine: Jev-settled UI-work detection, the read demand
-// and its bounds. No network: the judge is mocked or Jev is switched off.
+// Embedded design-slop doctrine: Jev-settled UI-work detection, optional guidance
+// and honest read status. No network: the judge is mocked or Jev is switched off.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -84,19 +84,14 @@ test('a superseded request cannot activate the next one', async () => {
   assert.equal(doctrine.isActive(), false);
 });
 
-test('the demand is bounded: two blocked writes per request, cleared by a read', () => {
+test('UI detection offers optional guidance and a read clears it', () => {
   let read = false;
   const doctrine = createUiDoctrine({ skillFile: () => '/skills/d/SKILL.md', isRead: () => read });
-  assert.equal(doctrine.gate('src/parser.ts'), undefined, 'non-UI writes pass');
-  assert.match(doctrine.gate('src/App.tsx'), /"\/skills\/d\/SKILL\.md"/);
-  assert.ok(doctrine.gate('src/App.tsx'));
-  assert.equal(doctrine.gate('src/App.tsx'), undefined, 'third attempt proceeds; no stall');
-  assert.match(doctrine.contextText(), /required reading/);
-  doctrine.observePrompt('Style the page', { keep: true });
-  assert.ok(doctrine.gate('src/App.tsx'), 'a new request re-arms the bounded gate');
-  read = true;
-  assert.equal(doctrine.gate('src/App.tsx'), undefined);
-  assert.equal(doctrine.contextText(), undefined);
+  doctrine.observeFile('src/parser.ts');assert.equal(doctrine.contextText(),undefined);
+  doctrine.observeFile('src/App.tsx');
+  assert.match(doctrine.contextText(),/optional/);assert.match(doctrine.contextText(),/"\/skills\/d\/SKILL\.md"/);
+  assert.doesNotMatch(doctrine.contextText(),/required reading|mandatory|read.*first/);
+  read = true;assert.equal(doctrine.contextText(),undefined);
 });
 
 function fixture({ withSkill = true } = {}) {
@@ -115,17 +110,14 @@ function fixture({ withSkill = true } = {}) {
     write(file, content = '') { return g.beforeToolCall({ toolName: 'write', input: { path: path.join(dir, file), content } }); } };
 }
 
-test('guidance blocks UI writes until the skill is read, then stays out of the way', async () => {
+test('UI guidance is available while every write proceeds without a skill read', async () => {
   const f = fixture();
   f.start('Build a landing page for my bakery');
   await settle();
   assert.equal(f.context().length, 1, 'the demand rides the context while the skill is unread');
   assert.match(f.context()[0].content, new RegExp(f.skillFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  const blocked = f.write('site/index.html');
-  assert.equal(blocked.block, true);
-  assert.match(blocked.reason, /design-slop doctrine/);
-  assert.equal(f.write('site/index.html').block, true);
-  assert.equal(f.write('site/index.html'), undefined, 'bounded: the third attempt proceeds');
+  for(let i=0;i<4;i++)assert.equal(f.write('site/index.html'),undefined);
+  assert.match(f.context()[0].content,/optional/);
   f.start('Build a landing page for my bakery');
   await settle();
   f.g.record({ toolName: 'read', input: { path: f.skillFile }, isError: false, content: [{ type: 'text', text: fs.readFileSync(f.skillFile, 'utf8') }] });
@@ -145,10 +137,11 @@ test('non-interface and read-only requests are never blocked or reminded', async
   assert.equal(f.write('notes/tmp.txt'), undefined);
 });
 
-test('an editing agent is caught deterministically even when the request named no interface', () => {
+test('observed interface edits receive advice even when the request named no interface', () => {
   const f = fixture();
   f.start('Ship the feature');
-  assert.equal(f.write('src/components/Panel.tsx').block, true);
+  assert.equal(f.write('src/components/Panel.tsx'),undefined);
+  assert.match(f.context()[0].content,/optional/);
 });
 
 test('subagents without a skill catalog still learn the installed skill path', () => {
@@ -157,9 +150,8 @@ test('subagents without a skill catalog still learn the installed skill path', (
     const f = fixture({ withSkill: false });
     process.env.PI_CODING_AGENT_DIR = f.dir;
     f.start('Ship the feature');
-    const blocked = f.write('index.html');
-    assert.equal(blocked.block, true);
-    assert.ok(blocked.reason.includes(JSON.stringify(f.skillFile)));
+    assert.equal(f.write('index.html'),undefined);
+    assert.ok(f.context()[0].content.includes(JSON.stringify(f.skillFile)));
     f.g.record({ toolName: 'read', input: { path: f.skillFile }, isError: false, content: [{ type: 'text', text: 'x' }] });
     assert.equal(f.write('index.html'), undefined);
   } finally {

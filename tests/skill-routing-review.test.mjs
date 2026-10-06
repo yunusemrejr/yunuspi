@@ -13,8 +13,8 @@ const {createRelevantGuidance}=await load('extensions/lib/relevant-guidance.ts')
 const {routeSkills}=await load('extensions/lib/skill-routing.ts');
 const {buildSkillIndex,rankSkills}=await load('extensions/lib/skill-relevance.ts');
 
-// Gate tests opt into strict review explicitly. The runtime default is
-// advisory so an applicable hint does not require a read/defer round-trip.
+// Old installations can retain required mode. It must remain advisory and
+// preserve discovery and honest reference status without blocking tools.
 const inheritedSkillReview=process.env.PI_SKILL_REVIEW;
 beforeEach(()=>{process.env.PI_SKILL_REVIEW='required';});
 afterEach(()=>{
@@ -48,96 +48,78 @@ test('positive clauses route languages without importing exclusions or quoted pr
   }
 });
 
-test('catalog names match ordinary prose and several relevant workflows can be offered',()=>{
+test('catalog names match ordinary prose while delivery stays bounded and advisory',()=>{
   const skills=['orbital-mechanics','ephemeris-integrator','stellar-navigation','generic-one','generic-two','generic-three'].map(name=>({name,file:`/s/${name}/SKILL.md`,description:'Applicable workflow'}));
   assert.equal(rankSkills(buildSkillIndex(skills),'orbital mechanics')[0]?.skill.name,'orbital-mechanics');
   const f=fixture(skills.map(s=>s.name));f.start('Review orbital mechanics and ephemeris integrator with stellar navigation');
   const offers=[];
   for(let i=0;i<3;i++){const hints=f.g.candidates();offers.push(...hints.filter(h=>h.skill));f.g.commit(hints);}
-  assert.equal(new Set(offers.map(h=>h.skill)).size,3);
+  assert.equal(new Set(offers.map(h=>h.skill)).size,1,'one optional invitation per request');
   f.start('Write TypeScript');
   assert.ok(!f.g.candidates().some(h=>h.skill),'a new domain does not resurrect old lexical matches');
   f.start('Do not inspect orbital mechanics. Review ephemeris integrator');
   assert.ok(!f.g.candidates().some(h=>h.skill?.includes('orbital-mechanics')));
 });
 
-test('ignored offers, failures and partial reads cannot satisfy an exact pre-edit review',async()=>{
+test('failed and partial skill reads preserve honest status without restricting execution',async()=>{
   const f=fixture();f.start('Implement Python and TypeScript');
-  f.g.commit(f.g.candidates());
-  f.g.record({toolName:'read',input:{path:'main.py'}});
-  assert.equal(f.edit('main.py')?.block,true);
-  assert.equal(f.edit('main.py')?.block,true,'retry cannot silently bypass');
+  const status=async name=>(await f.decide({action:'inspect'})).details.skills.find(skill=>skill.name===name)?.status;
   const name='python-software-engineering';
-  f.read(name,{isError:true});assert.equal(f.edit('main.py')?.block,true);
-  f.read(name,{input:{path:`/fixture/skills/${name}/SKILL.md`,limit:5}});assert.equal(f.edit('main.py')?.block,true);
-  f.read(name,{details:{truncation:{truncated:true}}});assert.equal(f.edit('main.py')?.block,true);
-  f.read(name);assert.equal(f.edit('main.py'),undefined);
-  assert.equal(f.edit('other.py'),undefined,'one real read covers other files in the language');
-  assert.equal(f.edit('main.ts')?.block,true,'a new language receives its own applicable workflow');
-  assert.ok((await f.decide({action:'inspect'})).details.skills.some(s=>s.status==='read'));
+  f.g.commit(f.g.candidates());
+  for(const extra of [{isError:true},{input:{path:`/fixture/skills/${name}/SKILL.md`,limit:5}},{details:{truncation:{truncated:true}}}]) {
+    f.read(name,extra);assert.equal(await status(name),'unread');assert.equal(f.edit('main.py'),undefined);
+  }
+  f.read(name);assert.equal(await status(name),'read');
+  assert.equal(await status('typescript-contract-engineering'),'unread');
+  assert.equal(f.edit('main.ts'),undefined);
 });
 
-test('scoped deferrals unblock only the named workflow and expire on new input',async()=>{
+test('optional deferrals preserve their own status and expire on new input',async()=>{
   const f=fixture();f.edit('main.py');f.edit('main.ts');
   assert.equal((await f.decide({action:'defer',skill:'unknown',reason:'Not relevant to this change'})).isError,true);
-  assert.equal((await f.decide({action:'defer',skill:'python-software-engineering',reason:'skip'})).isError,true);
   await f.decide({action:'defer',skill:'python-software-engineering',reason:'Only updating a generated fixture for the parser test'});
-  assert.equal(f.edit('main.py'),undefined);assert.equal(f.edit('main.ts')?.block,true);
+  let page=(await f.decide({action:'inspect'})).details.skills;
+  assert.equal(page.find(s=>s.name==='python-software-engineering').status,'deferred');
+  assert.equal(page.find(s=>s.name==='typescript-contract-engineering').status,'unread');
   assert.ok(!f.entries.some(e=>e.data.read?.includes('/fixture/skills/python-software-engineering/SKILL.md')));
-  f.entries.push({type:'compaction'});f.g.restore(f.ctx);assert.equal(f.edit('main.py'),undefined,'task-specific deferral survives compaction');
-  f.start();assert.equal(f.edit('main.py')?.block,true);
+  f.entries.push({type:'compaction'});f.g.restore(f.ctx);
+  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='python-software-engineering').status,'deferred');
+  f.start();f.edit('main.py');
+  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='python-software-engineering').status,'unread');
 });
 
-test('read-only work, disabled skills, unavailable tools and unrelated files stay unblocked',()=>{
-  const f=fixture();
-  assert.equal(f.g.beforeToolCall({toolName:'read',input:{path:'main.py'}}),undefined);
-  for(const file of ['README.md','vendor/main.py','generated/main.ts','node_modules/main.py','SKILL.md']) assert.equal(f.edit(file),undefined,file);
-  f.start('Fix this without skills');assert.equal(f.edit('main.py'),undefined);
-  f.start('Fix this without tools');assert.equal(f.edit('main.py'),undefined);
-  f.start();f.active.splice(f.active.indexOf('skill_review'),1);assert.equal(f.edit('main.py'),undefined);
-  assert.equal(fixture([]).edit('main.py'),undefined);
+test('skill modes never block relevant execution, including old required settings',async()=>{
+  for(const mode of ['required','advisory','off']) {
+    process.env.PI_SKILL_REVIEW=mode;
+    const f=fixture(['python-software-engineering','design-slop-prevention','scientific-paper-research']);
+    f.start('Build a Python website and research scientific papers');
+    for(const event of [
+      {toolName:'edit',input:{path:'main.py'}}, {toolName:'write',input:{path:'index.html',content:'<main>Hello</main>'}},
+      {toolName:'bulk_edit',input:{action:'apply',files:['a.py']}}, {toolName:'bash',input:{command:'python main.py'}},
+      {toolName:'web_search',input:{query:'papers'}}, {toolName:'browser_session',input:{action:'open'}},
+      {toolName:'subagent',input:{task:'Inspect Python'}},
+    ]) assert.equal(f.g.beforeToolCall(event),undefined,`${mode}: ${event.toolName}`);
+    const status=await f.decide({action:'inspect'});
+    assert.equal(status.details.enabled,false);assert.equal(status.details.mode,mode==='off'?'off':'advisory');
+    assert.ok(!f.context().some(message=>message.customType==='skill-review-context'));
+    if(mode!=='off')assert.ok(status.details.skills.length>0,'advice remains available');
+  }
 });
 
-test('new file workflows remain checked after four skills and compaction invalidates reads',()=>{
+test('file-discovered references survive compaction without creating read obligations',async()=>{
   const f=fixture(['python-software-engineering','typescript-contract-engineering','php-application-engineering','rust-systems-engineering','java-platform-engineering']);
-  for(const file of ['x.py','x.ts','x.php','x.rs']) assert.equal(f.edit(file)?.block,true);
-  assert.equal(f.edit('x.java')?.block,true,'there is no lifetime four-skill bypass');
-  f.read('python-software-engineering');f.entries.push({type:'compaction'});f.g.restore(f.ctx);f.start();
-  assert.equal(f.edit('x.py')?.block,true);
+  for(const file of ['x.py','x.ts','x.php','x.rs','x.java']) assert.equal(f.edit(file),undefined);
+  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.length,5);
+  f.read('python-software-engineering');f.entries.push({type:'compaction'});f.g.restore(f.ctx);
+  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.find(s=>s.name==='python-software-engineering').status,'unread','discarded source text is not presented as retained');
+  assert.equal(f.context().length,0);assert.equal(f.edit('x.py'),undefined);
 });
 
-test('task skills survive ignored hints and continue until actually read or deferred',async()=>{
+test('old required-read context is retired while current task messages survive',()=>{
   const f=fixture();f.start('Implement Python');
-  f.g.commit(f.g.candidates());
-  for(let i=0;i<30;i++)f.g.record({toolName:'read',input:{path:'notes.md'}});
-  let messages=f.context();
-  assert.equal(messages.length,1);assert.match(messages[0].content,/Read required.*python-software-engineering/);
-  assert.equal(f.context(messages).length,1,'ephemeral context replaces itself');
-  assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}})?.block,true);
-  assert.equal(f.g.beforeToolCall({toolName:'read',input:{path:'main.py'}}),undefined);
-  f.start('Continue');assert.match(f.context()[0].content,/python-software-engineering/);
-  f.read('python-software-engineering');
-  assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
-  assert.match(f.context()[0].content,/Apply \(read\)/);
-  assert.ok(f.entries.every(entry=>entry.customType!=='skill-review-context'));
-  f.start('Implement TypeScript');
-  assert.doesNotMatch(f.context()[0].content,/python-software-engineering/,'new task replaces old task obligations');
-  await f.decide({action:'defer',skill:'typescript-contract-engineering',reason:'The assigned task is only a generated fixture inspection'});
-  assert.equal(f.context().length,0);
-});
-
-test('bulk edits and research are covered, while unavailable tools and user opt-outs remain respected',async()=>{
-  const f=fixture();
-  const preview={toolName:'bulk_edit',input:{action:'preview',files:['a.py','b.ts']}};
-  assert.equal(f.g.beforeToolCall(preview),undefined);
-  f.g.record({...preview,content:[{type:'text',text:JSON.stringify({action:'preview',token:'fixture-plan',files:[{path:'a.py'},{path:'b.ts'}]})}]});
-  assert.equal(f.g.beforeToolCall({toolName:'bulk_edit',input:{action:'apply',token:'fixture-plan'}})?.block,true);
-  f.read('python-software-engineering');f.read('typescript-contract-engineering');
-  assert.equal(f.g.beforeToolCall({toolName:'bulk_edit',input:{action:'apply',token:'fixture-plan'}}),undefined);
-  const research=fixture(['scientific-paper-research']);research.start('Research scientific papers');
-  assert.equal(research.g.beforeToolCall({toolName:'web_search',input:{query:'papers'}})?.block,true);
-  research.start('Research scientific papers without skills');assert.equal(research.context().length,0);
-  assert.equal(research.g.beforeToolCall({toolName:'web_search',input:{query:'papers'}}),undefined);
+  const user={role:'user',content:'Implement Python'};
+  const obsolete={role:'custom',customType:'skill-review-context',content:'Read required: old guide'};
+  assert.deepEqual(f.context([user,obsolete]),[user]);
 });
 
 test('default skill guidance is advisory: ordinary execution stays open and no required checklist is projected',async()=>{
@@ -152,9 +134,9 @@ test('default skill guidance is advisory: ordinary execution stays open and no r
     assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
     assert.equal(f.context().length,0,'advisory mode does not add a persistent required checklist');
     const status=await f.decide({action:'inspect'});
-    assert.equal(status.details.enabled,false,'strict enforcement is opt-in');
+    assert.equal(status.details.enabled,false,'skill enforcement stays disabled');
     assert.equal(status.details.available,true,'skill_review inspect remains available');
-    assert.ok(status.details.skills.some(s=>s.status==='needs_review'));
+    assert.ok(status.details.skills.some(s=>s.status==='unread'));
     f.g.commit(f.g.candidates());
     for(let i=0;i<30;i++)f.g.record({toolName:'read',input:{path:`src/file${i}.py`},isError:false,content:[{type:'text',text:'pass'}]});
     assert.ok(!f.g.candidates().some(h=>h.discovery),'same request does not repeatedly invite discovery');
@@ -194,25 +176,13 @@ test('skill_review search finds a non-task catalogue match without exposing the 
   }
 });
 
-test('compaction keeps the workflow obligation but requires reading its source again',()=>{
-  const f=fixture();f.start('Implement Python');f.read('python-software-engineering');
-  f.entries.push({type:'compaction'});f.g.restore(f.ctx);
-  assert.match(f.context()[0].content,/Read required.*python-software-engineering/);
-  f.read('python-software-engineering');assert.match(f.context()[0].content,/Apply \(read\)/);
-});
-
-test('file-discovered workflows survive compaction in a child without reminder delivery',()=>{
-  const f=fixture();f.g.record({toolName:'read',input:{path:'source.py'}});
-  f.entries.push({type:'compaction'});f.g.restore(f.ctx);
-  assert.match(f.context()[0].content,/Read required.*python-software-engineering/);
-  assert.equal(f.edit('source.py')?.block,true);
-});
-
-test('available child catalogs participate even after another catalog and missing routes do not consume slots',()=>{
+test('child catalogs offer real references without enforcing them',async()=>{
   const f=fixture(['python-software-engineering']);
   f.g.start({prompt:'Implement Python. Build a Blender 3D animation and an Excel workbook with a presentation.',systemPrompt:'<available_skills></available_skills>'+f.catalog},f.ctx);
-  assert.match(f.context()[0].content,/Read required.*python-software-engineering/);
-  assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}})?.block,true);
+  const page=await f.decide({action:'inspect'});
+  assert.ok(page.details.skills.some(s=>s.name==='python-software-engineering'));
+  assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
+  assert.equal(f.context().length,0);
 });
 
 test('repeatedly ignored catalog offers yield the scarce slot instead of re-filling it forever',()=>{
@@ -292,7 +262,7 @@ test('overlapping edit batches emit the same targeted recovery cue as stale edit
   assert.match(hint.text,/Read the current target region/);
 });
 
-test('a bounded read that returns the entire skill satisfies review after compaction', () => {
+test('bounded skill reads report the bytes actually returned after compaction', async () => {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'skill-full-read-'));
   const name='php-application-engineering', file=path.join(dir,name,'SKILL.md');
   const body='---\nname: php-application-engineering\n---\n\n# PHP\nVerify syntax and runtime.\n';
@@ -300,11 +270,11 @@ test('a bounded read that returns the entire skill satisfies review after compac
   try {
     const f=fixture([name],dir);f.start('Implement PHP');
     f.read(name);f.entries.push({type:'compaction'});f.g.restore(f.ctx);
-    assert.equal(f.edit('index.php')?.block,true);
+    assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'unread');
     f.read(name,{input:{path:file,limit:40},content:[{type:'text',text:body.slice(0,20)}]});
-    assert.equal(f.edit('index.php')?.block,true,'partial content cannot satisfy the workflow');
+    assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'unread','partial bytes cannot establish a full read');
     f.read(name,{input:{path:file,offset:1,limit:40},content:[{type:'text',text:body}]});
-    assert.equal(f.edit('index.php'),undefined,'reading beyond EOF returned all instructions');
+    assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'read','reading beyond EOF returned all source text');
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -320,9 +290,9 @@ test('successful Bash skill views consume verified text and suppress repeated wo
       assert.equal(f.g.beforeToolCall({ toolName: 'bash', input: { command } }), undefined, 'a known workflow read must not be blocked by its own required review');
       const record = (text, exitCode = 0) => f.g.record({ toolName: 'bash', input: { command }, details: { execution: { exitCode } }, content: [{ type: 'text', text }] });
       record(`Read ${file}`);
-      assert.equal(f.edit('parser.py')?.block, true, 'mentioning a path cannot establish consumption');
+      assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'unread','mentioning a path cannot establish consumption');
       record(output, 1);
-      assert.equal(f.edit('parser.py')?.block, true, 'a failed shell command is not a read receipt');
+      assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'unread','a failed shell command is not a read receipt');
       record(output + '\n[bash-router] Use a bounded read when useful.');
       assert.equal(f.edit('parser.py'), undefined);
       assert.equal((await f.decide({ action: 'inspect' })).details.skills.find(skill => skill.name === name).status, 'read');
@@ -337,7 +307,7 @@ test('successful Bash skill views consume verified text and suppress repeated wo
     for (const command of [`echo '${file}'`, `cat '${file}' > /dev/null`, `cat '${dir}/$WORKFLOW/SKILL.md'`, `cd '${dir}' && cat '${name}/SKILL.md'`]) {
       const f = fixture([name], dir); f.start('Implement Python');
       f.g.record({ toolName: 'bash', input: { command }, details: { execution: { exitCode: 0 } }, content: [{ type: 'text', text: body }] });
-      assert.equal(f.edit('parser.py')?.block, true, 'ambiguous commands cannot establish which workflow was viewed');
+      assert.equal((await f.decide({action:'inspect'})).details.skills[0].status,'unread','ambiguous commands cannot establish which guide was viewed');
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

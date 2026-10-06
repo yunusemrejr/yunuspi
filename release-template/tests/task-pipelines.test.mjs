@@ -197,7 +197,8 @@ test('source-quality intent and consequential or failed scopes activate quality 
   for (const profile of [{ tier: 'complex', failures: 0 }, { tier: 'critical', failures: 0 }, { tier: 'standard', failures: 2 }]) {
     const names = automatic('Fix the Node.js parser', { profile });
     assert.ok(names.includes('code_quality'));
-    assert.ok(!names.includes('git_info') && !names.includes('task_pipeline'));
+    assert.ok(!names.includes('git_info'));
+    assert.equal(names.includes('task_pipeline'),profile.tier==='complex'||profile.tier==='critical');
   }
 });
 
