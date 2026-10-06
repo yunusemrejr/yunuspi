@@ -9,6 +9,7 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { FFMPEG_FLAGS, produced, run } from "./media-process.ts";
+import { number } from './media-process.ts';
 import { blenderWorker, readablePath } from "./blender-studio.ts";
 import { contactSheet, freshOut, projectDir, projectWritePath, readSpec } from "./video-studio.ts";
 import type { Progress } from "./guarded-process.ts";
@@ -26,6 +27,14 @@ const hexOr = (value: unknown) => (typeof value === "string" && /^#[0-9a-f]{6}$/
 
 /** Sizes, frame rate and quality from the request and the project: previews are cheap and say so. */
 export function planShot(params: any, spec: any) {
+  if (params.surface) {
+    if (!['brushed-metal', 'ceramic', 'organic'].includes(params.surface.texture)) throw Error('surface.texture must be brushed-metal, ceramic or organic');
+    number(params.surface.scale, 80, 1, 1000, 'surface.scale');
+    number(params.surface.bump, 0.03, 0, 0.2, 'surface.bump');
+    number(params.surface.bevel, 0, 0, 0.03, 'surface.bevel');
+    if (params.surface.roughness !== undefined) number(params.surface.roughness, 0.4, 0, 1, 'surface.roughness');
+    if (params.surface.metallic !== undefined) number(params.surface.metallic, 0, 0, 1, 'surface.metallic');
+  }
   const mode = params.mode === "final" ? "final" : "preview";
   const projectWidth = Number(spec?.width) || 1920, projectHeight = Number(spec?.height) || 1080;
   const base = Math.min(1, 1920 / projectWidth);
@@ -94,7 +103,7 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   const request = {
     op: "shot", name, source: source === "blend" ? "blend" : source, model, title, outputDir: shotDir, save: saved,
     rig: params.rig ?? (source === "title" ? "orbit" : "turntable"), fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,
-    transparent: params.transparent !== false, palette, material: params.material ?? (source === "title" ? "satin" : "keep"), color: hexOr(params.color), lights: params.lights ?? "softbox", lightStrength: params.lightStrength,
+    transparent: params.transparent !== false, palette, material: params.material ?? (source === "title" ? "satin" : "keep"), color: hexOr(params.color), lights: params.lights ?? "softbox", lightStrength: params.lightStrength, surface: params.surface,
     shadow: params.shadow, lensMm: params.lensMm, azimuth: params.azimuth, elevation: params.elevation, elevationEnd: params.elevationEnd, degrees: params.degrees, travel: params.travel, ease: params.ease, margin: params.margin, offset: params.offset, fStop: params.fStop, motionBlur: params.motionBlur, anchors: params.anchors,
   };
   let result: any;

@@ -21,22 +21,25 @@ function hashTree(hash, dir, root) {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) { hashTree(hash, file, root); continue; }
     if (!entry.isFile()) continue;
-    const stat = fs.statSync(file);
-    // Source is hashed by content; large public media by size and mtime.
+    // Media bytes matter too: replacing an image/audio file while retaining
+    // its size/mtime must not reuse a bundle containing the previous asset.
+    // Stream synchronously in this disposable worker to keep memory bounded.
     hash.update(path.relative(root, file)).update("\0");
-    if (dir.startsWith(path.join(root, "public"))) hash.update(`${stat.size}:${stat.mtimeMs}`);
-    else hash.update(fs.readFileSync(file));
+    const fd = fs.openSync(file, 'r'), buffer = Buffer.allocUnsafe(64 * 1024);
+    try { let bytes; while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, bytes)); }
+    finally { fs.closeSync(fd); }
+    hash.update("\0");
   }
 }
 
 async function bundled() {
   const hash = createHash("sha256");
-  for (const file of ["package.json", "video.json", "tsconfig.json"]) if (fs.existsSync(path.join(project, file))) hash.update(fs.readFileSync(path.join(project, file)));
+  for (const file of ["package.json", "package-lock.json", "video.json", "tsconfig.json"]) if (fs.existsSync(path.join(project, file))) hash.update(file).update("\0").update(fs.readFileSync(path.join(project, file))).update("\0");
   hashTree(hash, path.join(project, "src"), project);
   hashTree(hash, path.join(project, "public"), project);
   const key = hash.digest("hex").slice(0, 16);
   const cache = path.join(project, ".video-cache");
-  const outDir = path.join(cache, `bundle-v2-${key}`);
+  const outDir = path.join(cache, `bundle-v3-${key}`);
   const complete = () => fs.existsSync(path.join(outDir, "index.html")) && fs.existsSync(path.join(outDir, ".complete"));
   if (complete()) return { serveUrl: outDir, cached: true };
   fs.mkdirSync(cache, { recursive: true });
@@ -85,18 +88,18 @@ async function main() {
     emit("VIDEO_RENDER_RESULT", { ...result, stills });
     return;
   }
-  const output = path.join(out, request.mode === "final" ? "final.mp4" : "preview.mp4");
+  const output = path.join(out, request.losslessAudio ? 'segment.mkv' : request.mode === "final" ? "final.mp4" : "preview.mp4");
   const frameRange = request.range ?? null;
   const started = Date.now();
   await renderer.renderMedia({
     ...common,
-    codec: "h264",
+    codec: request.losslessAudio ? 'h264-mkv' : "h264",
     outputLocation: output,
     frameRange,
-    crf: request.crf ?? (request.mode === "final" ? 18 : 28),
+    crf: request.crf ?? (request.mode === "final" || request.losslessAudio ? 18 : 28),
     pixelFormat: "yuv420p",
-    audioCodec: "aac",
-    audioBitrate: "192k",
+    audioCodec: request.losslessAudio ? 'pcm-16' : "aac",
+    ...(request.losslessAudio ? { enforceAudioTrack: true } : { audioBitrate: "192k" }),
     concurrency: request.concurrency ?? null,
     muted: request.muted === true,
     onProgress: ({ progress, renderedFrames, encodedFrames }) => emit("VIDEO_RENDER_PROGRESS", { stage: "render", percent: Math.round(progress * 100), renderedFrames, encodedFrames }),

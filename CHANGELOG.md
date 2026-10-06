@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0 — 2026-10-06
+
+**Video production becomes reusable across selected models.** Native timed browser takes provide eased cursors, click rings, typing and scrolling, with observed event and source-frame timestamps. Blender shots add optional scale-aware brushed-metal, ceramic and organic material detail, preserving original material nodes and source models. Tool discovery and production guides connect these tools to the existing master timeline and review workflow without changing the selected LLM or thinking mode.
+
+**Narration prefers ElevenLabs when configured.** Timestamped speech uses exact voice/model selection, neighbouring text context, verified paid-chunk reuse and per-scene checkpoints. Decoded PCM durations drive word offsets and captions; local Piper remains selectable. New forced alignment returns transcript coverage and loss for existing audio, while directed music and sound effects return measured, decoded assets. Cloud failures do not trigger paid retries or silent provider substitution.
+
+**Long films resume and retain timing through joins.** Segmented rendering uses contiguous global frame ranges, content fingerprints, corruption checks and checkpoints. Each call does bounded work and returns continuation parameters until assembly completes. PCM audio crosses part boundaries before final AAC assembly; the former 30-minute total timeline cap is removed while individual scene and process budgets remain.
+
+**Speech, cues and frame endings can be compared directly.** `media_sync` checks word coverage, narration crossing cuts, cue drift, repeated-word targets and encoded audio/video boundaries. A supplied music tempo can produce suggested beat/bar cue times. Forced alignment is distinguished from independent transcription, and technical success still requires viewing and listening before artistic approval.
+
 ## 0.23.10 — 2026-10-06
 
 **Image workflows use actual provider contracts and pixels.** GPT Image requests omit unsupported response_format/seed, enforce encoding and fidelity compatibility, and validate edit masks/references before upload. Explicit model IDs override only that call. OpenRouter live image-catalog discovery and native Images API transport complement existing chat generation; usage failures/cancellation settle without paid retries. New direct vision inference preserves provider authentication and current thinking, with hashed/cropped attachment evidence. New raster conversion supports bounded batches, alpha/mattes, fit, rotation and decode receipts while preserving originals. Stored pixel axes keep EXIF orientation from invalidating crop coordinates.

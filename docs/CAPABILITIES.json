@@ -3886,6 +3886,12 @@
         "kind": "factory"
       },
       {
+        "name": "audio_generate",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 90,
+        "kind": "factory"
+      },
+      {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
         "line": 280,
@@ -3894,7 +3900,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 84,
+        "line": 96,
         "kind": "factory"
       },
       {
@@ -4243,6 +4249,12 @@
         "kind": "factory"
       },
       {
+        "name": "media_sync",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 92,
+        "kind": "factory"
+      },
+      {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
         "line": 2567,
@@ -4293,7 +4305,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 96,
+        "line": 108,
         "kind": "factory"
       },
       {
@@ -4309,9 +4321,15 @@
         "kind": "factory"
       },
       {
+        "name": "narration_align",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 88,
+        "kind": "factory"
+      },
+      {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 80,
+        "line": 84,
         "kind": "factory"
       },
       {
@@ -4612,7 +4630,13 @@
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 74,
+        "line": 78,
+        "kind": "factory"
+      },
+      {
+        "name": "video_browser",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 94,
         "kind": "factory"
       },
       {
@@ -4630,25 +4654,25 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 27,
+        "line": 30,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 70,
+        "line": 74,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 66,
+        "line": 70,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 48,
+        "line": 51,
         "kind": "factory"
       },
       {
@@ -5376,13 +5400,17 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          16
+          19
         ],
         "knownNames": [
+          "audio_generate",
           "audio_synth",
+          "media_sync",
           "motion_examples",
+          "narration_align",
           "narration_tts",
           "video_assets",
+          "video_browser",
           "video_project",
           "video_qa",
           "video_render",
@@ -5391,11 +5419,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 730,
+      "sourceFiles": 734,
       "registrationSites": 89,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 147,
-      "uniqueStableTools": 146,
+      "stableRegistrationRows": 151,
+      "uniqueStableTools": 150,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5805,6 +5833,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/elevenlabs.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/execution-evidence.ts",
         "exists": true
       },
@@ -5986,6 +6018,10 @@
       },
       {
         "path": "agent/extensions/lib/media-process.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/media-sync.ts",
         "exists": true
       },
       {
@@ -6405,6 +6441,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/video-browser.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/video-derive.ts",
         "exists": true
       },
@@ -6418,6 +6458,10 @@
       },
       {
         "path": "agent/extensions/lib/video-publish.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-segments.ts",
         "exists": true
       },
       {
@@ -6888,6 +6932,10 @@
       },
       {
         "path": "agent/scripts/transaction.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/video-browser.mjs",
         "exists": true
       },
       {

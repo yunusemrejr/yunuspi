@@ -62,13 +62,15 @@ Video uses frame times `i/fps` and excludes the duration endpoint. Frames mode a
 
 ## Narration, music and 2D/3D delivery
 
-`narration_tts action:"speak"` generates standalone local Piper speech without a Remotion project. It returns a mastered WAV, word timing, SRT/VTT captions and a receipt that distinguishes measured from estimated timing. It validates voice, delivery style, speed and pronunciation lexicon, and bounds speech to 120 seconds.
+`narration_tts action:"speak"` generates standalone speech without a Remotion project, preferring timestamped ElevenLabs when `ELEVENLABS_API_KEY` is configured. `backend:"piper"` keeps local speech available after an explicit install. It returns a mastered WAV, word timing, SRT/VTT captions and a receipt that distinguishes measured from estimated timing, and bounds standalone speech to 120 seconds. `voiceId`/`model` select exact ElevenLabs identifiers; `voice` selects Piper. Cloud speed is 0.7–1.2; Piper speed is 0.6–1.5. Cloud requests send text to ElevenLabs and do not retry paid failures automatically.
 
 ```json
 {"action":"speak","text":"The shape turns as the light moves.","style":"calm","speed":1,"lexicon":{"SVG":"ess vee gee"}}
 ```
 
 `media_pipeline` can render a Three.js scene JSON or an SVG, synthesize narration, compose an editable music score, duck music under voice, encode video and measure the delivered AAC audio in one call. Narration overruns reject before video rendering, rather than silently truncating speech.
+
+For longer projects, use the [video studio](VIDEO-STUDIO.md): per-scene narration checkpoints, resumable frame-contiguous render parts, timed browser recordings, surface detail for Blender shots and `media_sync` for text/voice/cut comparisons. `narration_align` locates a supplied transcript in existing speech; `audio_generate` adds directed instrumental music and sound effects through ElevenLabs. Generated timing and duration are evidence to inspect, and alignment is not independent transcription.
 
 ```json
 {"animation":"art.svg","duration":6,"width":640,"height":640,"fps":24,"narration":{"text":"The shape turns as the light moves."},"score":{"bpm":120,"beats":4,"tracks":[{"notes":[{"pitch":57,"start":0,"duration":4}]}]},"targetLufs":-16}

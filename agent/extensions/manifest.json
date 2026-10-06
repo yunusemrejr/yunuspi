@@ -260,7 +260,11 @@
     "xml-lite.ts",
     "image-convert.ts",
     "image-understand.ts",
-    "svg-render.ts"
+    "svg-render.ts",
+    "elevenlabs.ts",
+    "media-sync.ts",
+    "video-browser.ts",
+    "video-segments.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -655,6 +659,7 @@
     "extensions/lib/utility-mcp/web-assets.mjs",
     "extensions/lib/utility-mcp/workflow.mjs",
     "scripts/video-render.mjs",
-    "scripts/blender-studio.py"
+    "scripts/blender-studio.py",
+    "scripts/video-browser.mjs"
   ]
 }

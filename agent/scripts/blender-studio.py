@@ -721,6 +721,71 @@ def override_materials(scene, kind, color):
             obj.data.materials.append(material)
 
 
+def detail_surfaces(scene, spec, radius):
+    """Opt-in, scale-aware PBR detail; copy materials so shared originals
+    retain their authored nodes. Bevel lives on the render object only."""
+    if not spec:
+        return
+    kind = spec.get("texture")
+    if kind not in ("brushed-metal", "ceramic", "organic"):
+        raise RuntimeError("unknown surface texture")
+    scale = float(spec.get("scale", 80))
+    bump = float(spec.get("bump", 0.03))
+    bevel = float(spec.get("bevel", 0))
+    if not (1 <= scale <= 1000 and 0 <= bump <= 0.2 and 0 <= bevel <= 0.03):
+        raise RuntimeError("surface detail exceeds its scale/bump/bevel bounds")
+    copied = {}
+    for obj in subject_objects(scene):
+        if obj.type not in {"MESH", "CURVE", "FONT", "SURFACE"}:
+            continue
+        for slot in obj.material_slots:
+            original = slot.material
+            if not original or not original.use_nodes:
+                continue
+            if original.name not in copied:
+                material = original.copy()
+                material.name = original.name + "_YP_detail"
+                copied[original.name] = material
+                nodes, links = material.node_tree.nodes, material.node_tree.links
+                shader = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+                if not shader:
+                    continue
+                for key, label in (("roughness", "Roughness"), ("metallic", "Metallic")):
+                    if key in spec:
+                        value = float(spec[key])
+                        if not 0 <= value <= 1:
+                            raise RuntimeError("surface roughness/metallic must be 0..1")
+                        for link in list(shader.inputs[label].links):
+                            links.remove(link)
+                        shader.inputs[label].default_value = value
+                coords = nodes.new("ShaderNodeTexCoord")
+                mapping = nodes.new("ShaderNodeMapping")
+                mapping.inputs["Scale"].default_value = (1, 1, 0.025) if kind == "brushed-metal" else (1, 1, 1)
+                noise = nodes.new("ShaderNodeTexNoise")
+                noise.inputs["Scale"].default_value = scale
+                noise.inputs["Detail"].default_value = 2 if kind == "ceramic" else 4
+                links.new(coords.outputs["Generated"], mapping.inputs["Vector"])
+                links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+                normal = nodes.new("ShaderNodeBump")
+                normal.inputs["Strength"].default_value = bump
+                normal.inputs["Distance"].default_value = max(radius, 0.001) * 0.002
+                links.new(noise.outputs["Fac"], normal.inputs["Height"])
+                if shader.inputs["Normal"].is_linked:
+                    links.new(shader.inputs["Normal"].links[0].from_socket, normal.inputs["Normal"])
+                links.new(normal.outputs["Normal"], shader.inputs["Normal"])
+                if kind == "brushed-metal" and "Anisotropic IOR Level" in shader.inputs:
+                    shader.inputs["Anisotropic IOR Level"].default_value = 0.55
+            slot.material = copied[original.name]
+        if obj.type == "MESH" and bevel > 0:
+            modifier = obj.modifiers.new("YP_EdgeHighlights", "BEVEL")
+            # Modifier width is local-space. Divide by maximum object scale
+            # so a metre-sized subject has comparable edge highlights.
+            modifier.width = radius * bevel / max(1e-6, max(abs(s) for s in obj.scale))
+            modifier.segments = 3
+            modifier.limit_method = "ANGLE"
+            modifier.harden_normals = True
+
+
 def ease_curve(t, kind):
     t = max(0.0, min(1.0, t))
     if kind == "linear":
@@ -976,6 +1041,7 @@ def op_shot(req):
     blend_frame = lambda k: min(blend_end, blend_start + int(round(k / shot_fps * blend_fps)))
     scene.frame_set(blend_frame(shot_count - 1))
     lo, hi, center, radius = subject_bounds(scene)
+    detail_surfaces(scene, req.get("surface"), radius)
 
     # The beauty pass is always transparent; a flat background is composited afterwards so the shadow layer can sit under the subject.
     render = apply_render_settings(scene, {**req, "format": "PNG", "transparent": True})

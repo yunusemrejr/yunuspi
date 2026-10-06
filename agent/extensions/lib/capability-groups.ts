@@ -128,7 +128,7 @@ const normalize = (value: unknown) => (typeof value === "string" ? value : "")
 // keeping these overrides name-only avoids common description words such as
 // "session" or "process" pulling unrelated capabilities into operations.
 const NAME_OVERRIDES: readonly Readonly<{ id: string; pattern: RegExp }>[] = [
-  {id: "media", pattern: /^scene (?:create|render)$/i},
+  {id: "media", pattern: /^(?:scene (?:create|render)|video browser|narration (?:tts|align))$/i},
   // Their descriptions list image, video and audio as inputs; the family is documents and deliverables.
   {id: "documents", pattern: /^(?:office doc|deliverable check|organize files)$/i},
   {id: "web", pattern: /^design audit$/i},

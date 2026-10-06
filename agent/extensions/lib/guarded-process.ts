@@ -12,7 +12,7 @@ import { ownProcessGroup } from "./process-owner.ts";
 export type Progress = (text: string) => void;
 /** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
  * whole process group on abort. Returns stdout/stderr tails. */
-export async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; gpu?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; onLine?: (line: string) => void }) {
+export async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; gpu?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; replaceEnv?: boolean; onLine?: (line: string) => void }) {
   options.signal?.throwIfAborted();
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0 || options.timeoutMs > 2_147_483_647) {
     throw new Error("Invalid timeoutMs: use 0 for unlimited or a finite non-negative deadline within 2147483647ms");
@@ -22,7 +22,7 @@ export async function runGuarded(command: string, args: string[], options: { cwd
   const target = options.guard === false ? niced : guardedCommand(niced.command, niced.args, { gpu: options.gpu });
   options.signal?.throwIfAborted();
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...options.env } });
+    const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: options.replaceEnv ? { ...options.env } : { ...process.env, ...options.env } });
     ownProcessGroup(child.pid);
     const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
     let stdout = "", stderr = "", pending = "", lineTruncated = false, settled = false;
