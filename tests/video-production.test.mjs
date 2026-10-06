@@ -227,7 +227,8 @@ test('browser take preflight rejects unsafe URLs, ambiguous schedules and invali
 });
 
 test('real browser take outside maintenance scope retains Chromium sandbox and captures observed state changes', { timeout: 60000 }, async t => {
-  const cwd = await workspace(t);
+  const root = await workspace(t), cwd = path.join(root, 'a-project-with-a-long-output-directory-name', 'capture');
+  await fs.mkdir(cwd, { recursive: true });
   await fs.writeFile(path.join(cwd, 'demo.html'), '<!doctype html><style>body{margin:0;background:#234;color:white;font:28px sans-serif}button{margin:50px;padding:20px}#result{margin:50px}</style><button id="go" onclick="document.body.style.background=\'#b54\';document.getElementById(\'result\').textContent=\'Visible result\'">Show result</button><p id="result">Ready</p>');
   let result;
   const params = { path: 'demo.html', seconds: 2, fps: 15, width: 640, height: 360, steps: [{ action: 'click', selector: '#go', at: .2, duration: .3 }, { action: 'wait_text', text: 'Visible result', at: 1 }] };

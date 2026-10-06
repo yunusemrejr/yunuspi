@@ -47,7 +47,9 @@ export async function videoBrowser(params: any, cwd: string, signal?: AbortSigna
   let dir: string | undefined, profile: string | undefined, request: string | undefined;
   try {
     dir = await outputFolder(params.outputDir, cwd);
-    profile = path.join(dir, 'profile'); await fs.mkdir(profile, { mode: 0o700 });
+    // Chromium creates a Unix-domain socket under TMPDIR. Keep this private
+    // path short even when the video/output project is deeply nested.
+    profile = await fs.mkdtemp('/tmp/pi-take-');
     request = path.join(dir, 'take-request.json');
     await fs.writeFile(request, JSON.stringify({ ...plan, url: params.url, local, out: dir }));
     let result: any;
