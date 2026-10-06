@@ -51,7 +51,11 @@ export async function videoBrowser(params: any, cwd: string, signal?: AbortSigna
     request = path.join(dir, 'take-request.json');
     await fs.writeFile(request, JSON.stringify({ ...plan, url: params.url, local, out: dir }));
     let result: any;
-    await runGuarded(process.execPath, [WORKER, request], { cwd, signal, timeoutMs: Math.round((plan.seconds + 90) * 1000), nice: 5, replaceEnv: true,
+    // The fixed Node worker does not execute project code. Like browser_session,
+    // launch Chromium directly with its own sandbox and disposable environment:
+    // nesting its sandbox in the harness filesystem namespace prevents startup.
+    // The shared process owner still enforces memory, deadlines and cancellation.
+    await runGuarded(process.execPath, [WORKER, request], { cwd, signal, timeoutMs: Math.round((plan.seconds + 90) * 1000), nice: 5, guard: false, replaceEnv: true,
       env: isolatedBrowserEnvironment(profile), onLine: line => {
         if (line.startsWith('BROWSER_TAKE_RESULT ')) result = JSON.parse(line.slice(20));
         else if (line.startsWith('BROWSER_TAKE_PROGRESS ')) progress?.(line.slice(22));

@@ -226,11 +226,17 @@ test('browser take preflight rejects unsafe URLs, ambiguous schedules and invali
   assert.throws(() => browser.planBrowserTake({ url: 'https://example.com', steps: [{ action: 'move', x: 5000, y: 0 }] }), /step.x/);
 });
 
-test('real browser take captures a click-driven state change and its observed frame clock', { timeout: 60000 }, async t => {
+test('real browser take outside maintenance scope retains Chromium sandbox and captures observed state changes', { timeout: 60000 }, async t => {
   const cwd = await workspace(t);
   await fs.writeFile(path.join(cwd, 'demo.html'), '<!doctype html><style>body{margin:0;background:#234;color:white;font:28px sans-serif}button{margin:50px;padding:20px}#result{margin:50px}</style><button id="go" onclick="document.body.style.background=\'#b54\';document.getElementById(\'result\').textContent=\'Visible result\'">Show result</button><p id="result">Ready</p>');
   let result;
-  try { result = await browser.videoBrowser({ path: 'demo.html', seconds: 2, fps: 15, width: 640, height: 360, steps: [{ action: 'click', selector: '#go', at: .2, duration: .3 }, { action: 'wait_text', text: 'Visible result', at: 1 }] }, cwd); }
+  const params = { path: 'demo.html', seconds: 2, fps: 15, width: 640, height: 360, steps: [{ action: 'click', selector: '#go', at: .2, duration: .3 }, { action: 'wait_text', text: 'Visible result', at: 1 }] };
+  try {
+    const moduleUrl = pathToFileURL(path.join(agent, 'extensions/lib/video-browser.ts')).href;
+    const script = `const {videoBrowser}=await import(${JSON.stringify(moduleUrl)});console.log(JSON.stringify(await videoBrowser(${JSON.stringify(params)},process.cwd())));`;
+    const captured = await exec(process.execPath, ['--input-type=module', '-e', script], { cwd, env: { ...process.env, PI_HARNESS_MUTATION_DENIED: '1' }, timeout: 50000 });
+    result = JSON.parse(captured.stdout);
+  }
   catch (error) { if (process.env.PI_BROWSER_REQUIRE === '1' || !/Executable doesn't exist|not installed|Distribution.*not found|browserType.launch/.test(error.message)) throw error; t.skip(error.message); return; }
   assert.equal(result.decodeVerified, true); assert.equal(result.frames, 30); assert.ok(result.capturedFrames > 5);
   const events = JSON.parse(await fs.readFile(result.events, 'utf8'));

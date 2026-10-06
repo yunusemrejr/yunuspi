@@ -121,4 +121,8 @@ async function main() {
     emit('BROWSER_TAKE_RESULT', { frames: count });
   } finally { await browser.close(); }
 }
-main().catch(error => { emit('BROWSER_TAKE_RESULT', { error: String(error.message).slice(0, 500) }); process.exitCode = 1; });
+main().catch(error => {
+  const message = String(error.message).split('\n').filter(line => !/<launching>|--disable-field-trial-config/.test(line)).join('\n');
+  emit('BROWSER_TAKE_RESULT', { error: message.length > 1800 ? message.slice(0, 400) + '\n…\n' + message.slice(-1300) : message });
+  process.exitCode = 1;
+});
