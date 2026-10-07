@@ -136,3 +136,25 @@ test('creative variant pixel differences use the same fractional share contract'
   });
   assert.equal(report.pairs[0].changedShare,.5,'half of the image changes, reported as a share in 0..1');
 });
+
+test('required reduced motion frames cannot be complete when their receipt or pair is missing', async t => {
+  const dir=await workspace(t),source=path.join(dir,'reduced-boundary.html');await fs.writeFile(source,'<!doctype html><title>Reduced evidence</title>');
+  const pixels=await encodeImage({width:200,height:200,data:Buffer.alloc(200*200*4,255)},'png');
+  const adapter=missing=>async(params,dest)=>{
+    await fs.writeFile(dest,pixels);
+    if(!params.temporalCapture)return {conditions:{animationSample:{descriptors:[]}}};
+    if(params.reducedMotion==='reduce'&&missing==='receipt')return {errors:[]};
+    const times=params.reducedMotion==='reduce'&&missing==='pair'?[0]:params.temporalCapture.timesMs;
+    const samples=[];for(const timeMs of times){const file=dest+'.'+timeMs+'.png';await fs.writeFile(file,pixels);samples.push({timeMs,file});}
+    return {temporalSequence:{samples,coverage:{complete:true,persistentDocument:true}}};
+  };
+  for(const missing of ['receipt','pair']){
+    const result=await motionInspectRun({source,mode:'render',width:200,height:200,samples:2},dir,undefined,adapter(missing));
+    assert.equal(result.reducedPass,'checked');assert.equal(result.coverage.reducedComplete,false);assert.equal(result.coverage.complete,false);
+    assert.ok(result.findings.some(f=>f.id==='reduced-motion-incomplete'));assert.ok(result.findings.some(f=>f.id==='temporal-coverage-incomplete'));
+  }
+  const complete=await motionInspectRun({source,mode:'render',width:200,height:200,samples:2},dir,undefined,adapter());
+  assert.equal(complete.coverage.complete,true);assert.equal(complete.coverage.reducedComplete,true);
+  const staticPage=await motionInspectRun({source,mode:'time',width:200,height:200,samples:2},dir,undefined,adapter('receipt'));
+  assert.equal(staticPage.coverage.complete,true,'a static document inventory does not request a reduced temporal pair');
+});

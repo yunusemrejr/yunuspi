@@ -251,14 +251,16 @@ export async function motionInspectRun(
   const temporal: MotionFinding[] = [];
   if (reducedPass === "failed") temporal.push({ severity: "WARN", id: "reduced-motion-unverified", detail: "Reduced-motion capture failed; preference handling remains unknown.", evidence: [reducedError ?? "capture unavailable"] });
   let reducedPixels: { changedShare: number; meanDelta: number; files: string[] } | undefined;
-  let reducedCoverage: any;
-  if (reducedPass === "checked" && (analysis.count > 0 || smil.roots > 0 || clock === 'render')) {
+  let reducedCoverage: any, reducedTemporalComplete = false;
+  const needsReducedTemporal = analysis.count > 0 || smil.roots > 0 || clock === 'render';
+  if (reducedPass === "checked" && needsReducedTemporal) {
     const reducedFrames: Array<{ file: string; img: Rgba }> = [];
     try {
       const reducedCapture = await capture({source:params.source,width,height,fullPage:false,timeoutMs:30_000,reducedMotion:'reduce',temporalCapture:{timesMs:[0,Math.min(durationMs,333)],clock}},path.join(dir,'reduce.png'),cwd,signal);
       captureReceipts.push(reducedCapture); reducedCoverage = reducedCapture.temporalSequence?.coverage;
       for (const frame of reducedCapture.temporalSequence?.samples ?? []) reducedFrames.push({file:relative(cwd,frame.file),img:await decodeImage(await fs.readFile(frame.file),{maxWidth:960,maxPixels:4_000_000},signal)});
     } catch (error:any) { if (signal?.aborted) throw error; reducedPass='failed'; reducedError=String(error?.message ?? error).slice(0,200); }
+    reducedTemporalComplete = reducedFrames.length === 2 && reducedCoverage?.complete === true;
     if (reducedFrames.length === 2) {
     const { comparison } = compareImages(reducedFrames[0].img, reducedFrames[1].img);
     reducedPixels = { changedShare: pixelChangeShare(comparison), meanDelta: Math.round(comparison.meanDelta * 100) / 100, files: reducedFrames.map(f => f.file) };
@@ -297,13 +299,14 @@ export async function motionInspectRun(
   const revision = await sourceRevision(params.source,cwd),sourceChanged = initialRevision !== revision;
   const errors = [...new Set(captureReceipts.flatMap(receipt => receipt.errors ?? []))].slice(0,6);
   const documentChanged = captureReceipts.some(receipt => receipt.conditions?.documentSha256 && full.conditions?.documentSha256 && receipt.conditions.documentSha256 !== full.conditions.documentSha256);
-  const complete = sequence.coverage?.complete === true && frames.length === times.length && !sourceChanged && !documentChanged && !errors.length && !captureReceipts.some(receipt => receipt.diagnosticsTruncated) && (reducedPass === 'disabled' || reducedPass === 'checked' && (!reducedCoverage || reducedCoverage.complete === true));
+  const reducedComplete = reducedPass === 'checked' && (!needsReducedTemporal || reducedTemporalComplete);
+  const complete = sequence.coverage?.complete === true && frames.length === times.length && !sourceChanged && !documentChanged && !errors.length && !captureReceipts.some(receipt => receipt.diagnosticsTruncated) && (reducedPass === 'disabled' || reducedComplete);
   if (!complete) temporal.push({severity:'WARN',id:'temporal-coverage-incomplete',detail:'Temporal verification is incomplete: inspect capture coverage, runtime errors, document changes and reduced-motion results before recording a pass.',evidence:[...(sourceChanged ? ['source changed during capture'] : []),...(documentChanged ? ['served document changed between passes'] : []),...errors,sequence.failure ?? 'coverage incomplete'].slice(0,6)});
   const findings = [...analysis.findings, ...temporal];
   const report = {
     source: params.source, revision, initialRevision, sourceChanged, mode:params.mode ?? 'time', at: new Date().toISOString(),
     dir: relative(cwd, dir), durationMs, sampledClock: clock === 'render' ? 'Explicit window.renderFrame(seconds), awaited in one document. The authored clock owns canvas/SVG/web choreography; it must produce the same state for the same time. Uncontrolled rAF, media, random and wall-clock state remain unknown.' : 'CSS/WAAPI document timeline and SVG SMIL roots, each sought to local time in one document. JS/rAF, scroll timelines, frames and not-yet-created animations remain outside this clock.',
-    coverage:{...sequence.coverage,complete,sourceChanged,documentChanged,reducedComplete:reducedPass==='checked'&&(!reducedCoverage||reducedCoverage.complete===true)},
+    coverage:{...sequence.coverage,complete,sourceChanged,documentChanged,reducedComplete},
     errors,documentSha256:temporalCapture.conditions?.documentSha256 ?? null,
     inventory: { smil, count: analysis.count, infinite: analysis.infinite, maxConcurrent: analysis.maxConcurrent, distinctDurationsMs: analysis.distinctDurations, transformOwners: analysis.transformOwners, layoutAnimations: analysis.layoutAnimations, reducedMotion: analysis.reducedMotion },
     timeline: renderMotionTimeline(sanitizeDescriptors(fullInventory), durationMs),
