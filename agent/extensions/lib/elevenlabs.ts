@@ -226,7 +226,7 @@ async function speechChunks(params: any, dir: string, signal?: AbortSignal, prog
     temporary.push(list);
     if (outputs.length === 1) await fs.rename(outputs[0], output);
     else {
-      await fs.writeFile(list, outputs.map(p => `file '${path.basename(p)}'`).join('\n') + '\n');
+      await atomicSpeechFile(list, outputs.map(p => `file '${path.basename(p)}'`).join('\n') + '\n');
       await run('ffmpeg', [...FFMPEG_FLAGS, '-v', 'error', '-protocol_whitelist', 'file', '-f', 'concat', '-safe', '1', '-i', list, '-c:a', 'pcm_s16le', output], signal, 300_000);
     }
     const seconds = Number((await probe(output, signal)).format?.duration);
@@ -253,7 +253,7 @@ async function speechFileExists(file: string) {
 export async function writeSpeechCaptions(dir: string, text: string, seconds: number, words: Array<{ w: string; s: number; e: number }>) {
   const track = captionChunks(text, seconds, 7, 42, words);
   const srt = path.join(dir, 'captions.srt'), vtt = path.join(dir, 'captions.vtt');
-  await fs.writeFile(srt, toSrt(track)); await fs.writeFile(vtt, toVtt(track));
+  await atomicSpeechFile(srt, toSrt(track)); await atomicSpeechFile(vtt, toVtt(track));
   return { srt, vtt };
 }
 

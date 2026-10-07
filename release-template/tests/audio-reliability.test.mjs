@@ -230,6 +230,38 @@ test('public narration recovery preserves the saved request and never submits mi
   assert.equal(requests, 1);
 });
 
+test('public recovery enforces its workspace and replaces linked scratch and caption files safely', async t => {
+  const dir = await workspace(t), external = await workspace(t), bytes = await fixtureAudio(dir);
+  const original = globalThis.fetch, prior = process.env.ELEVENLABS_API_KEY;
+  process.env.ELEVENLABS_API_KEY = env.ELEVENLABS_API_KEY;
+  t.after(() => { globalThis.fetch = original; if (prior === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = prior; });
+  let requests = 0;
+  globalThis.fetch = async (_url, options) => {
+    requests++; const body = JSON.parse(options.body);
+    return Response.json({ audio_base64: bytes.toString('base64'), alignment: alignment(body.text) });
+  };
+  const cache = path.join(dir, 'speech');
+  await eleven.elevenSpeech({ text: 'Hello world. '.repeat(12), chunkChars: 100 }, cache, undefined, undefined, env);
+  assert.equal(requests, 2);
+  globalThis.fetch = async () => { requests++; throw Error('Recovery must never fetch'); };
+  await assert.rejects(video.narrationTts({ action: 'recover', dir: cache }, external), /inside the current workspace/);
+  await fs.symlink(cache, path.join(external, 'cache-alias'));
+  await assert.rejects(video.narrationTts({ action: 'recover', dir: 'cache-alias' }, external), /inside the current workspace/);
+  const sentinels = ['speech-parts.txt', 'captions.srt', 'captions.vtt'];
+  for (const name of sentinels) {
+    const target = path.join(external, name);
+    await fs.writeFile(target, 'Existing unrelated file must remain intact.\n');
+    await fs.rm(path.join(cache, name), { force: true });
+    await fs.symlink(target, path.join(cache, name));
+  }
+  const recovered = await video.narrationTts({ action: 'recover', dir: cache }, dir);
+  assert.equal(recovered.receipts.length, 2); assert.equal(requests, 2);
+  for (const name of sentinels) assert.equal(await fs.readFile(path.join(external, name), 'utf8'), 'Existing unrelated file must remain intact.\n');
+  assert.equal((await fs.lstat(recovered.captions.srt)).isSymbolicLink(), false);
+  assert.equal((await fs.lstat(recovered.captions.vtt)).isSymbolicLink(), false);
+  await assert.rejects(fs.lstat(path.join(cache, 'speech-parts.txt')), { code: 'ENOENT' });
+});
+
 test('generated audio destinations are checked before payment and failed validation retains bytes', async t => {
   const dir = await workspace(t), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
