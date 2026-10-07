@@ -15,6 +15,8 @@ Read [content and measurement](references/content-measurement.md) for durable gr
 
 Generate public representations from the same source and test that their claims agree. Important text should be accessible without expensive client execution. Metadata and structured data describe visible facts; never fabricate ratings, authorship or freshness. Keep private material out of feeds, exports and discovery files.
 
+Use the executable `seo_toolkit` workflow when useful: plan public page purpose/content gaps, inspect built raw HTML or audit representative served URLs, and generate discovery from the reviewed canonical inventory. Its site graph checks and generated sitemap/llms/feed/entity data complement evidence-led editorial work; use report snapshots for pagination and fresh audit calls after changes. Do not treat a raw check as rendered/factual/performance approval.
+
 Automate discovery after real published changes when deployment scope authorizes it, with deduplication and bounded retries. An indexing request is not proof of crawling, indexing, ranking or citation. Do not use obsolete sitemap pings or generalize restricted indexing APIs to ordinary pages.
 
 Verify a representative page, changed page and excluded private route. Report the implemented discovery path and observed results. Growth and AI visibility remain measured outcomes, not guarantees from markup or `llms.txt`.

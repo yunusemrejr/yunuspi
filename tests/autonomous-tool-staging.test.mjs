@@ -10,6 +10,7 @@ import {SettingsManager} from '../core/coding-agent/src/core/settings-manager.js
 import {emitSessionShutdownEvent} from '../core/coding-agent/src/core/extensions/runner.js';
 import {registerToolDiscovery} from '../agent/extensions/lib/tool-discovery.ts';
 import registerSourceCheck from '../agent/extensions/lib/source-check.ts';
+import {registerSeoToolkit} from '../agent/extensions/pi-web-access/seo-toolkit.ts';
 import {formatSkillsForPrompt} from '../core/coding-agent/src/core/skills.js';
 import {formatSkillInvocation} from '../core/agent/src/harness/skills.js';
 import {formatSkillsForSystemPrompt} from '../core/agent/src/harness/system-prompt.js';
@@ -88,6 +89,7 @@ test('a missing optional guide warns in child preflight without removing tools o
 async function firstTurnTools(prompt, scriptedCalls = []) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'staging-sdk-'));
   fs.writeFileSync(path.join(cwd,'sample.js'),'export const value = ;\n');
+  fs.writeFileSync(path.join(cwd,'sample.html'),'<html lang="en"><head><title>Sensor calibration guide</title></head><body><main><h1>Calibration</h1><p>Use two measured references.</p></main></body></html>');
   const envNames = ['PI_CODING_AGENT_DIR', 'PI_JEV', 'PI_NEEDLE', 'PI_TOOL_DISCOVERY', 'PI_SUBAGENT_CHILD'];
   const previous = Object.fromEntries(envNames.map(key => [key, process.env[key]]));
   process.env.PI_CODING_AGENT_DIR = cwd; process.env.PI_JEV = 'off'; process.env.PI_NEEDLE = 'off'; process.env.PI_TOOL_DISCOVERY = 'on'; delete process.env.PI_SUBAGENT_CHILD;
@@ -95,7 +97,7 @@ async function firstTurnTools(prompt, scriptedCalls = []) {
   try {
     const settingsManager = SettingsManager.inMemory({compaction: {enabled: false}, retry: {enabled: false}});
     const loader = new DefaultResourceLoader({cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: ['design-studio.ts', 'video-studio.ts', 'code-quality.ts', 'git-tools.ts', 'desktop-session.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck]});
+      additionalExtensionPaths: ['design-studio.ts', 'video-studio.ts', 'code-quality.ts', 'git-tools.ts', 'desktop-session.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck, registerSeoToolkit]});
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
     const model = {id: 'fixture', name: 'Fixture', api: 'openai-completions', provider: 'fixture', baseUrl: 'https://invalid.example', reasoning: false, input: ['text'], cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 131072, maxTokens: 8192};
@@ -134,6 +136,28 @@ test('image-to-code, video, quality and desktop prompts put their tools on the f
 test('a named specialized tool reaches the real SDK first turn without a skill catalog', async () => {
   const tools=await firstTurnTools('Use image_crop to inspect the reference. No skills.');
   assert.ok(tools.includes('image_crop'));
+});
+
+test('public-site requests automatically expose SEO and real SDK execution inspects, repairs and generates discovery', {timeout:120_000}, async () => {
+  const repaired = '<html lang="en"><head><title>Sensor calibration guide</title><meta name="description" content="Measured two-point calibration, a worked example and known sensor limitations."><link rel="canonical" href="https://example.com/guide"><meta name="viewport" content="width=device-width"></head><body><main><h1>Calibration</h1><p>Use two measured references.</p></main></body></html>';
+  const workflow = await firstTurnTools('Create a public documentation website with a calibration guide. No skills.', [
+    {name:'seo_toolkit',arguments:{action:'plan',scope:'public',canonicalOrigin:'https://example.com',pages:[{url:'/guide',intent:'sensor calibration'}]}},
+    {name:'seo_toolkit',arguments:{action:'inspect',url:'https://example.com/guide',path:'sample.html'}},
+    {name:'write',arguments:{path:'sample.html',content:repaired}},
+    {name:'seo_toolkit',arguments:{action:'inspect',url:'https://example.com/guide',path:'sample.html'}},
+    {name:'seo_toolkit',arguments:{action:'discovery',canonicalOrigin:'https://example.com',pages:[{url:'/guide',title:'Sensor calibration guide'},{url:'/private',index:false}]}},
+  ]);
+  assert.ok(workflow.contexts[0].includes('seo_toolkit'), 'a public-site request gets native SEO before the first model turn');
+  const results = workflow.results.filter(row=>row.toolName==='seo_toolkit');
+  assert.equal(results.length,4); assert.ok(results.every(row=>!row.isError));
+  const before=JSON.parse(results[1].content[0].text),after=JSON.parse(results[2].content[0].text),discovery=JSON.parse(results[3].content[0].text);
+  assert.ok(before.findings.some(f=>f.code==='canonical-missing'));
+  assert.ok(!after.findings.some(f=>f.code==='canonical-missing'));
+  assert.notEqual(before.sha256,after.sha256);
+  assert.ok(Object.values(discovery.files).some(value=>value.includes('https://example.com/guide')));
+  assert.ok(Object.values(discovery.files).every(value=>!value.includes('/private')));
+  const privateTools=await firstTurnTools('Build an internal employee dashboard. No skills.');
+  assert.ok(!privateTools.includes('seo_toolkit'), 'private apps preserve their scope');
 });
 
 test('real SDK discovery enables and executes a native tool, preserves failure evidence, and verifies a repair', {timeout:120_000}, async () => {

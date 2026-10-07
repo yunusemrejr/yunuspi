@@ -7,6 +7,7 @@ import { StringEnum, type ImageContent, type TextContent } from "@yunuspi/ai/com
 import type { ExtractedContent, ExtractOptions } from "./extract.ts";
 import { normalizeFetchContentParams } from "./fetch-params.ts";
 import { registerWebProbe } from "./web-probe.ts";
+import { registerSeoToolkit } from "./seo-toolkit.ts";
 import { registerGithubSearch } from "./github-search.ts";
 import { resolveAuthFetchProfile, type AuthFetchProfile } from "./auth-fetch.ts";
 import { findContent, type FindMode } from "./content-find.ts";
@@ -941,6 +942,7 @@ export default function (pi: ExtensionAPI) {
 	const fetchContentEnabled = isToolEnabled(initConfig, "fetchContent");
 	if (fetchContentEnabled) {
 		registerWebProbe(pi);
+		registerSeoToolkit(pi);
 		registerGithubSearch(pi);
 	}
 	const getSearchContentEnabled = isToolEnabled(initConfig, "getSearchContent");

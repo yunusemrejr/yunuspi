@@ -15,6 +15,8 @@
  * and telemetry; this module stays unit-testable.
  */
 
+import { SEO_SURFACE } from './seo-policy.ts';
+
 export type HookArgs = Record<string, unknown>;
 
 export interface HookRule {
@@ -69,6 +71,12 @@ const isBrowserMutation = (args: HookArgs) =>
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
+  { key: 'seo-inspection-evidence', tools: ['seo_toolkit'], when: args => ['inspect', 'audit'].includes(String(args.action)),
+    line: 'Fix observed SEO errors in shared route/template/content owners and recheck the current revision. Review unknown content/schema facts and source dates; raw HTML is separate from rendered DOM, mobile interaction and Core Web Vitals. Re-audit production after deployment; submitted, crawled and indexed are different states.' },
+  { key: 'seo-discovery-parity', tools: ['seo_toolkit'], when: args => args.action === 'discovery',
+    line: 'Write the exact generated files through the project owner and preserve custom robots/access rules. Keep public inventory, canonicals, internal links, sitemap, llms/feed/schema and real source dates synchronized. Never expose private routes or fake freshness; inspect served production files after authorized publication.' },
+  { key: 'seo-discovery-source', tools: ['write', 'edit'], when: args => typeof args.path === 'string' && SEO_SURFACE.test(args.path) && !UI_FILE.test(args.path),
+    line: 'Public content/discovery changes include SEO: establish canonical host and public/private page purpose with seo_toolkit plan, inspect built HTML or audit the served site, and regenerate discovery from the same reviewed public inventory. Private/internal software stays excluded. Review original answers, topic links, genuine identity/schema and truthful dates.' },
   { key: 'ml-data-evaluation', tools: ['ml_lab'],
     line: 'Inspect coverage and unresolved findings. A prepared recipe/notebook is not an executed model or connected runtime. Keep splits, data/config hashes, finite smoke/save/reload/resume receipts and frozen baseline evaluation; RL time limits preserve bootstrap from the final observation.' },
   { key: 'research-dossier-evidence', tools: ['research_toolkit'], when: args => args.action === 'dossier',
@@ -113,7 +121,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		// not as source. Open briefs also deserve a deliberate direction.
 		key: "ui-first-render",
 		tools: ["write", "edit"],
-		line: "Render this interface (render_see) at a narrow and a wide width before building further, and judge it against the chosen design direction: hierarchy, type rhythm, color, spacing, states. A new UI deserves its own identity, not a copy of a site mentioned for links or credit.",
+		line: "Render this interface (render_see) at a narrow and a wide width before building further, and judge it against the chosen design direction: hierarchy, type rhythm, color, spacing, states. A new UI deserves its own identity, not a copy of a site mentioned for links or credit. For public website pages/routes also use seo_toolkit to establish page purpose, inspect raw HTML and verify canonical/crawl/discovery consistency; preserve private app exclusion.",
 		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
 	},
 	{
@@ -298,7 +306,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		// remote) are where "done" must be checked against the real site.
 		key: "deploy-verify-live",
 		tools: ["bash"],
-		line: "After this deploy, verify the LIVE bytes, not the push: fetch each changed asset from the production URL and compare its sha256 with the local file (curl -s URL | sha256sum). A replaced image/CSS/JS served with a long Cache-Control max-age needs a new URL (?v=hash) or a cache purge, or returning visitors keep the old bytes. Keep the previous revision reachable for rollback.",
+		line: "After this deploy, verify the LIVE bytes, not the push: fetch each changed asset from the production URL and compare its sha256 with the local file (curl -s URL | sha256sum). A replaced image/CSS/JS served with a long Cache-Control max-age needs a new URL (?v=hash) or a cache purge, or returning visitors keep the old bytes. Keep the previous revision reachable for rollback. For public pages re-run seo_toolkit audit on the production canonical origin for status/robots/canonical/sitemap/schema/links/discovery/cache parity.",
 		when: contains(DEPLOY),
 	},
 	{

@@ -202,6 +202,7 @@
     "service-probe.ts",
     "session-audit.ts",
     "session-cost.ts",
+    "seo-policy.ts",
     "session-diagnostics.ts",
     "session-errors.ts",
     "session-export-json.ts",

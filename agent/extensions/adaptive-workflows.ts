@@ -8,6 +8,7 @@ import { getAgentDir } from '@yunuspi/coding-agent';
 import { createAdaptiveExecutionController, registerAdaptiveExecution, adaptiveExecutionEnabled, createAdaptiveThinkingController } from './lib/adaptive-execution.ts';
 import { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, buildPipelineContext, PIPELINE_EVIDENCE_KINDS, type PipelineSelection } from './lib/task-pipelines.ts';
 import { projectCheckCommand } from './lib/project-tests.ts';
+import { isLiveByteVerification } from './lib/session-hooks.ts';
 import { classifyToolOutcome, createCompetenceEstimator, createStepTracker, fleetRateFromAggregate, priorFromAggregate, type ControlSnapshot, type StepOutcome } from './lib/model-competence.ts';
 import { competenceStoreFile, FLEET_KEY, readCompetenceStore, writeCompetenceDeltas, type CompetenceStore } from './lib/competence-store.ts';
 
@@ -41,7 +42,7 @@ export default function adaptiveWorkflows(pi: any) {
     try { store = writeCompetenceDeltas(storeFile, deltas, Date.now()); } catch { /* advisory evidence */ }
   };
   type Observation = { sequence: number; revision: number; tree?: string; complete: boolean };
-  const changed = new Map<string, string>(), calls = new Map<string, { tool: string; scope: string; revision: string; key: string; observation?: number }>();
+  const changed = new Map<string, string>(), calls = new Map<string, { tool: string; scope: string; revision: string; key: string; observation?: number; deployment?: string }>();
   type OwnedCheck = { scope: string; revision: string; key: string; callId: string; candidate: boolean; failedObserved?: boolean };
   const ownedChecks = new Map<string, OwnedCheck>(), backgroundChecks = new Map<string, OwnedCheck>();
   const pendingTerminals = new Map<string, { task: any; after: number }>();
@@ -251,7 +252,9 @@ export default function adaptiveWorkflows(pi: any) {
   pi.on('tool_call', (event: any, ctx: any) => {
     if (!enabled() || !owns(ctx) || !task || !event.toolCallId) return;
     const key = createHash('sha256').update(JSON.stringify([event.toolName, event.input])).digest('hex');
-    calls.set(event.toolCallId, { tool: event.toolName, scope, revision, key, observation: observation?.sequence });
+    const deployment = event.toolName === 'seo_toolkit' && event.input?.action === 'audit'
+      ? ledger.receipts.find(row => row.scope === scope && row.revision === revision && row.stageId === 'deploy-remote' && row.status === 'passed')?.source : undefined;
+    calls.set(event.toolCallId, { tool: event.toolName, scope, revision, key, observation: observation?.sequence, deployment });
     if (['bash', 'bg_run'].includes(event.toolName) && event.input?.isAgent !== true) {
       ownedChecks.set(event.toolCallId, { scope, revision, key, callId: event.toolCallId, candidate: Boolean(projectCheckCommand(event.input?.command, ctx.cwd)) });
       while (ownedChecks.size > 256) ownedChecks.delete(ownedChecks.keys().next().value!);
@@ -314,6 +317,17 @@ export default function adaptiveWorkflows(pi: any) {
         observeCheckFailure(ownedChecks.get(receipt.callId));
     }
     const source = `tool:${event.toolCallId}`;
+    if (call.revision === revision && event.toolName === 'seo_toolkit' && ['inspect', 'audit'].includes(event.input?.action)) {
+      const data = event.details;
+      const observed = data?.coverage?.rawHtml === true && (data.sha256 || data.pages?.length > 0);
+      const errors = data?.findings?.some((finding: any) => finding.severity === 'error');
+      const partial = data?.coverage?.complete === false && !data?.coverage?.boundedSample || data?.coverage?.findingsTruncated || data?.coverage?.robotsKnown === false || data?.failures?.length > 0 || data?.coverage?.reason === 'deadline';
+      const outcome = failed || errors ? 'failed' : !observed || partial ? 'blocked' : 'passed';
+      const deployed = call.deployment && ledger.receipts.some(row => row.scope === scope && row.revision === revision && row.stageId === 'deploy-remote' && row.status === 'passed' && row.source === call.deployment);
+      const origin = event.input?.canonicalOrigin;
+      if (deployed && event.input?.action === 'audit' && typeof origin === 'string' && data?.origin === origin.replace(/\/$/, '') && isLiveByteVerification('http_request', { url: origin })) record('seo-live', 'live', source, outcome);
+      else record('seo-raw', 'inspection', source, outcome);
+    }
     if (call.revision === revision && !failed && event.toolName === 'code_quality' && event.input?.operation === 'baseline') {
       const data = event.details;
       if (data?.operation === 'baseline' && data.status === 'inspected' && data.scope?.targetFiles > 0)
