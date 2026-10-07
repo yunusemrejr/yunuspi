@@ -18,6 +18,7 @@ import { deriveLook } from "./video-derive.ts";
 import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions } from './elevenlabs.ts';
 import { fileDigest, renderSegments, videoFingerprint } from './video-segments.ts';
 import { sampledColorEvidence } from './video-color-evidence.ts';
+import { videoMotion, videoLoopBoundary } from './video-motion.ts';
 import { compileStoryboard, followCamera, productionTimes, validateProductionScene } from './video-compose.ts';
 import { matchAvoidSignals, readProjectDirection, renderDirectionBrief, type CreativeDirection } from "./creative-direction.ts";
 import { inspectVideoAssets, referenceEvidence } from './video-art.ts';
@@ -939,6 +940,17 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   }, scenes)];
   if (native && (native.direction.sourceStage !== 'final' || /preview\.mp4$/.test(file))) findings.push({severity:'error',message:'This ambient output is a draft/preview; approve the source and render full delivery before recording a final pass.'});
   const [num,den]=String(video.avg_frame_rate).split('/').map(Number), deliveredFps=den?num/den:num;
+  if(params.checkMotion!==undefined && typeof params.checkMotion!=='boolean')throw Error('checkMotion must be boolean');
+  if(params.loop!==undefined && typeof params.loop!=='boolean')throw Error('loop must be boolean');
+  const loopIntent=params.loop ?? (native?.plan?.loop === true && native?.plan?.seconds===native?.plan?.loopSeconds);
+  let motionEvidence:any;
+  if((params.checkMotion===true || params.loop===true || native?.version===2) && Number(video.duration ?? duration)*deliveredFps>=2){
+    const windowSeconds=Math.min(Number(video.duration ?? duration),30,1800/deliveredFps);
+    motionEvidence=await videoMotion({path:file,duration:windowSeconds,expectedFps:deliveredFps},cwd,signal);
+    motionEvidence.coverage={seconds:windowSeconds,totalSeconds:Number(video.duration ?? duration),complete:windowSeconds>=Number(video.duration ?? duration)-1/deliveredFps};
+    if(loopIntent)motionEvidence.deliveryLoop=await videoLoopBoundary(file,Number(video.duration ?? duration),deliveredFps,motionEvidence.pixelChange.medianMeanDelta,signal);
+    for(const finding of [...motionEvidence.findings,...(motionEvidence.deliveryLoop?.findings ?? [])])findings.push({severity:finding.severity==='FAIL'?'error':'warning',message:`Decoded motion ${finding.id}: ${finding.detail}`});
+  }
   const projectMatches=!projectSpec || (video.width===projectSpec.width && video.height===projectSpec.height && Math.abs(deliveredFps-projectSpec.fps)<.001 && Math.abs(Number(video.duration ?? duration)-(scenes.at(-1)?.end ?? 0))<=1/projectSpec.fps+.01);
   if(!projectMatches)findings.push({severity:'error',message:'Delivered dimensions, frame rate or duration differ from video.json. Use the matching full-film render/project; scene labels and cue samples cannot describe this file.'});
   if(!projectMatches)scenes=[];
@@ -968,7 +980,7 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
     path: file, seconds: Number(duration.toFixed(3)), size: `${video.width}x${video.height}`, fps: video.avg_frame_rate, hasAudio: Boolean(audio),
     loudness: { integratedLufs: metrics.integratedLufs, loudnessRangeLu: metrics.loudnessRange, peakDbfs: metrics.truePeak, targetLufs },
     black: metrics.black, freeze: metrics.freeze, silence: metrics.silence,
-    findings, colorEvidence, passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
+    findings, colorEvidence, ...(motionEvidence?{motionEvidence}:{}), passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
     contactSheet: sheet,detailFrame:frames[Math.min(3,frames.length-1)]?.path,frames:frames.map((f,i)=>({...f,seconds:times[i].t})),report:path.join(out,'qa.json'),
     sampledScenes: selected.map(s => s.id), nextScene: first + selected.length < scenes.length ? first + selected.length : null,
     reviewStatus: 'unreviewed',reviews:[],projectMatches,

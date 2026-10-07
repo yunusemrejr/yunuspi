@@ -147,6 +147,34 @@ def animation_summary(owner):
             "scope": "Stored animation channels and driver/NLA counts; evaluated samples include their combined scene effect."}
 
 
+def shader_details(owner):
+    tree = owner.node_tree if owner.use_nodes else None
+    if not tree:
+        return {"nodes": 0, "surfaces": [], "textures": []}
+    names = ['Base Color', 'Roughness', 'Metallic', 'IOR', 'Alpha', 'Transmission Weight', 'Coat Weight', 'Sheen Weight', 'Emission Color', 'Emission Strength', 'Color', 'Strength']
+    surfaces = []
+    for node in tree.nodes:
+        if node.type not in ('BSDF_PRINCIPLED', 'EMISSION', 'BACKGROUND'):
+            continue
+        sockets = {}
+        for name in names:
+            socket = node.inputs.get(name)
+            if socket is None:
+                continue
+            value = getattr(socket, 'default_value', None)
+            sockets[name] = {"default": vec(value) if hasattr(value, '__iter__') else value,
+                             "linked": socket.is_linked,
+                             "sources": [{"node": link.from_node.name, "type": link.from_node.type, "socket": link.from_socket.name} for link in list(socket.links)[:4]]}
+        surfaces.append({"name": node.name, "type": node.type, "inputs": sockets})
+        if len(surfaces) >= 32:
+            break
+    textures = [{"node": node.name, "image": node.image.name, "packed": bool(node.image.packed_file),
+                 "colorSpace": node.image.colorspace_settings.name} for node in tree.nodes if node.type == 'TEX_IMAGE' and node.image]
+    return {"nodes": len(tree.nodes), "surfaces": surfaces, "textures": textures[:64],
+            "truncated": len(textures) > 64 or len(surfaces) == 32,
+            "scope": "Stored socket defaults and immediate links; linked values are not evaluated shader output."}
+
+
 def op_inspect(req):
     scene = bpy.context.scene
     if req.get("scene"):
@@ -164,12 +192,14 @@ def op_inspect(req):
             "dimensions": vec(obj.dimensions),
             "parent": obj.parent.name if obj.parent else None,
             "visible": not obj.hide_render,
+            "inScene": obj.name in scene.objects,
             "collections": [c.name for c in obj.users_collection],
         }
         if obj.type == "MESH":
             mesh = obj.data
             entry["verts"] = len(mesh.vertices)
             entry["faces"] = len(mesh.polygons)
+            entry["smoothFaces"] = sum(face.use_smooth for face in mesh.polygons)
             entry["materials"] = [m.name for m in mesh.materials if m]
         if obj.modifiers:
             entry["modifiers"] = [f"{m.name}:{m.type}" for m in obj.modifiers]
@@ -179,6 +209,8 @@ def op_inspect(req):
         if obj.type == "LIGHT":
             light = obj.data
             entry["light"] = {"type": light.type, "energy": round(light.energy, 3), "color": vec(light.color)}
+            if light.type == 'AREA':
+                entry["light"].update({"shape": light.shape, "size": light.size, "sizeY": light.size_y})
         animation = animation_summary(obj)
         if animation:
             entry["animation"] = animation
@@ -188,7 +220,7 @@ def op_inspect(req):
         objects.append(entry)
     missing = []
     for image in bpy.data.images:
-        if image.source == "FILE" and image.filepath and not os.path.exists(bpy.path.abspath(image.filepath)):
+        if image.source == "FILE" and image.filepath and not image.packed_file and not os.path.exists(bpy.path.abspath(image.filepath)):
             missing.append(bpy.path.abspath(image.filepath))
     for library in bpy.data.libraries:
         if not os.path.exists(bpy.path.abspath(library.filepath)):
@@ -216,12 +248,18 @@ def op_inspect(req):
         "scenes": [s.name for s in bpy.data.scenes],
         "units": {"system": scene.unit_settings.system, "scale_length": scene.unit_settings.scale_length, "length": scene.unit_settings.length_unit},
         "render": summarize_render(scene),
-        "world": {"name": world.name, "use_nodes": world.use_nodes} if world else None,
+        "world": {"name": world.name, "use_nodes": world.use_nodes, "shader": shader_details(world)} if world else None,
+        "colorManagement": {"viewTransform": scene.view_settings.view_transform, "look": scene.view_settings.look,
+                            "exposure": scene.view_settings.exposure, "gamma": scene.view_settings.gamma,
+                            "displayDevice": scene.display_settings.display_device},
         "collections": [{"name": c.name, "objects": len(c.objects), "hidden": c.hide_render} for c in bpy.data.collections],
         "objects": objects,
         "materials": [m.name for m in bpy.data.materials],
+        "materialDetails": [{"name": m.name, "useNodes": m.use_nodes, "diffuseColor": vec(m.diffuse_color), "shader": shader_details(m)} for m in list(bpy.data.materials)[:1024]],
+        "materialDetailsTruncated": len(bpy.data.materials) > 1024,
         "cameras": [o.name for o in bpy.data.objects if o.type == "CAMERA"],
         "lights": [o.name for o in bpy.data.objects if o.type == "LIGHT"],
+        "sceneLights": [o.name for o in scene.objects if o.type == 'LIGHT' and not o.hide_render],
         "missingFiles": missing,
         "animationSamples": samples,
         "counts": {"objects": len(bpy.data.objects), "meshes": len(bpy.data.meshes), "materials": len(bpy.data.materials), "images": len(bpy.data.images)},

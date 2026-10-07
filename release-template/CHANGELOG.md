@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.33.0 — 2026-10-08
+
+**Atmosphere evolves on the frame clock.** The native fixed-camera renderer now supports seeded evolving cloud fields, masked valley mist, rain with depth-dependent speed/length and wet-surface distortion/ripples. Independent same-canvas mattes and inward feathering protect architecture and dry regions. Complete visual loops share one periodic clock, without a duplicate closing frame. Plans expose pixel/frame work; actual preview and delivery budgets are checked before launching. These are editable image-space effects, not reconstructed geometry, fluids or volumetric clouds.
+
+**Review includes actual motion and the delivery seam.** Native renders return decoded start, interior and last-frame comparisons. QA automatically measures atmosphere cadence and held frames over a bounded window, states its coverage and inspects the actual last-to-first delivery transition. Other video routes can request the same checks. Pixel timing and loop measurements remain separate from visual, playback and audio approval.
+
+**Procedural props have specific construction.** The motion library adds an original curved-fabric umbrella with authored gores, seam piping, ribs, ferrule, shaft and bent handle, quiet paper staging and editable loop keys. Blender inspection exposes material socket defaults and immediate links, texture color spaces/packing, color management, world shaders, smooth-face counts and selected-scene lighting. Packed images no longer trigger false missing-file warnings; unrelated scene lights no longer imply usable illumination. Native Blender and encoded-video regressions cover these behaviors.
+
 ## 0.32.0 — 2026-10-08
 
 **Fixed environments keep authored detail.** `video_ambient` plans, previews and renders an approved image or Blender plate with a locked camera, inspected sky mask/skyline, deterministic rain and diffuse lightning. RGB composition avoids the unintended magenta cast caused by screen-blending neutral overlays in YUV. Recipes preserve source identities, brief and references. The route is image-based atmosphere, with explicit limits on geometry, cloud evolution and reflections.

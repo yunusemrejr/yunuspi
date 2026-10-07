@@ -53,11 +53,34 @@ export async function videoMotion(params: any, cwd: string, signal?: AbortSignal
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yunuspi-motion-'));
   try {
     const dest = path.join(dir, 'proxy.gray');
-    const result = await run('ffmpeg', [...FFMPEG_FLAGS, '-loglevel', 'info', ...inputArgs(file, start), '-t', String(duration), '-map', `0:${stream.index}`, '-an', '-vf', 'scale=64:64,format=gray,showinfo', '-fps_mode', 'passthrough', '-frames:v', String(VIDEO_MOTION_LIMITS.frames + 1), '-c:v', 'rawvideo', '-f', 'rawvideo', dest], signal, 120000);
+    // Trim before showinfo: an output-only -t can log a decoded boundary
+    // frame that is subsequently discarded, leaving PTS/pixel counts unequal.
+    const result = await run('ffmpeg', [...FFMPEG_FLAGS, '-loglevel', 'info', ...inputArgs(file, start), '-t', String(duration), '-map', `0:${stream.index}`, '-an', '-vf', `trim=duration=${duration},scale=64:64,format=gray,showinfo`, '-fps_mode', 'passthrough', '-frames:v', String(VIDEO_MOTION_LIMITS.frames + 1), '-c:v', 'rawvideo', '-f', 'rawvideo', dest], signal, 120000);
     const pixels = await fs.readFile(dest), area = VIDEO_MOTION_LIMITS.width * VIDEO_MOTION_LIMITS.height;
     if (pixels.length > VIDEO_MOTION_LIMITS.frames * area) throw Error('Motion QA exceeds 1800 frames; shorten the window. No silent subsampling is performed.');
     const times = [...result.stderr.matchAll(/\bn:\s*\d+\s+pts:\s*-?\d+\s+pts_time:([\d.e+-]+)/g)].map(m => start + Number(m[1]));
     const report = analyzeDecodedMotion(times, pixels, { loop: params.loop, expectedFps: params.expectedFps });
     return { source: file, window: { start, requestedDuration: duration }, ...report, timestampOrigin: 'Seconds from source presentation start (post-seek PTS + requested start).', proxyBytes: pixels.length };
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+}
+
+/** Inspect the delivery boundary, including for films longer than the motion
+ * window. A small proxy is temporal evidence, never an artistic pass. */
+export async function videoLoopBoundary(file:string,seconds:number,fps:number,normalDelta:number,signal?:AbortSignal) {
+  number(seconds,1,.01,86400,'seconds');number(fps,24,1,120,'fps');
+  const area=VIDEO_MOTION_LIMITS.width*VIDEO_MOTION_LIMITS.height, pixels:Buffer[]=[];
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'yunuspi-loop-'));
+  try {
+    const times=[0,Math.max(0,seconds-2/fps),Math.max(0,seconds-1/fps)];
+    for(let i=0;i<times.length;i++){
+      const out=path.join(dir,`${i}.gray`);
+      await run('ffmpeg',[...FFMPEG_FLAGS,'-v','error',...inputArgs(file,times[i]),'-an','-vf','scale=64:64,format=gray','-frames:v','1','-c:v','rawvideo','-f','rawvideo',out],signal,30000);
+      const frame=await fs.readFile(out);if(frame.length!==area)throw Error('Loop evidence did not decode the requested boundary frame');pixels.push(frame);
+    }
+    const delta=(a:Buffer,b:Buffer)=>{let sum=0;for(let i=0;i<area;i++)sum+=Math.abs(a[i]-b[i]);return sum/area;};
+    const lastToFirstMeanPixelDelta=delta(pixels[2],pixels[0]),lastAdjacentMeanPixelDelta=delta(pixels[2],pixels[1]);
+    const baseline=Math.max(normalDelta,lastAdjacentMeanPixelDelta),ratio=baseline>.01?lastToFirstMeanPixelDelta/baseline:null;
+    const findings=lastToFirstMeanPixelDelta>2 && (ratio===null || ratio>4)?[{id:'delivery-loop-boundary',severity:'WARN' as const,detail:'The actual final→first decoded frame change exceeds normal motion. Inspect the delivery seam; a cut, reset or non-periodic effect may be present.'}]:[];
+    return {times,lastToFirstMeanPixelDelta:round(lastToFirstMeanPixelDelta),lastAdjacentMeanPixelDelta:round(lastAdjacentMeanPixelDelta),ratio:ratio===null?null:round(ratio),findings,evidence:'First and final two decoded delivery frames, 64x64 grayscale. Audio seam and perceptual loop smoothness remain unverified.'};
+  } finally {await fs.rm(dir,{recursive:true,force:true});}
 }

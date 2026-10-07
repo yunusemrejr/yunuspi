@@ -100,6 +100,7 @@ export const STARTER_KIT: ReadonlyArray<readonly [role: string, id: string]> = [
   ["a shader or flow-field backdrop", "html/webgl-domain-warp"],
   ["a data or chart reveal", "html/data-reveal"],
   ["a lit 3D object with anchors", "blender/product-hero"],
+  ["an editorial prop with authored curved fabric", "blender/editorial-umbrella"],
   ["labels that follow 3D features", "merge/shot-overlay"],
 ];
 

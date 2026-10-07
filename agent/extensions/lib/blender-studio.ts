@@ -198,7 +198,7 @@ export async function blenderInspect(params: any, cwd: string, signal?: AbortSig
   const warnings: string[] = [];
   if (!scene.render?.camera) warnings.push("No active camera: set scene.camera before rendering");
   if (scene.missingFiles?.length) warnings.push(`${scene.missingFiles.length} linked file(s) are missing; textures or libraries will render pink or empty`);
-  if (!scene.lights?.length && scene.render?.engine !== "BLENDER_WORKBENCH") warnings.push("No lights (and no world lighting check): EEVEE/Cycles renders may be black");
+  if (!(scene.sceneLights ?? scene.lights)?.length && scene.render?.engine !== "BLENDER_WORKBENCH") warnings.push("No visible lights in the selected scene: inspect world shader strength and emissive surfaces before assuming EEVEE/Cycles illumination");
   return { ...scene, warnings };
 }
 

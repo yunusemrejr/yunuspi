@@ -13,6 +13,7 @@ A film's motion is chosen per idea, not per habit. Start native staging with `vi
 |---|---|---|
 | Typography, shapes, data marks, morphs, draw-on, liquid or halftone effects, shader fields, 2D/2.5D worlds | Vanilla HTML page exposing `window.renderFrame(t)` | `HtmlScene` (or `render.mjs` for a standalone clip) |
 | Real 3D form: product, object, lit materials, depth of field, camera moves, extruded type, terrain | Blender scene + `video_shot` | `ShotScene` / `BlenderShot` (RGBA frames + anchors) |
+| A detailed fixed-camera environment with moving atmosphere | `video_ambient` plus authored sky/fog/rain/wet-surface mattes | Decoded MP4 with start/interior/end review frames; 2.5D, without reconstructed geometry |
 | 3D with crisp typography and annotations that follow it | HTML or Remotion layer over the shot, pinned to anchors | `ShotScene` notes, or `merge/shot-overlay.html` |
 | UI or footage living on a tracked device | Native laptop/phone plus a `screen` video layer; use baked emission textures when reflections need screen content | `video_shot scene` + compose `hero.screen`, or `blender/html-as-texture.py` |
 | Stacks of effects, a shared grade, or output without a browser | FFmpeg filter graphs and libass; numpy for math-heavy frames | `merge/composite.mjs`, `ffmpeg/`, `python/` |
@@ -26,6 +27,7 @@ Read [choosing](references/choosing.md) for the full matrix, costs and failure m
 - One signature move per scene, supported by quiet. Decide the hero motion first, then what must stay still around it.
 - Preview small and cheap, judge frames, then render final. `video_shot` previews at half size; vanilla pages render at 640x360 for review; software WebGL scales with `props.scale`.
 - Verify by viewing: contact sheets of real frames, not exit codes.
+- Inspect shader defaults/links and the intended scene's lights with `blender_inspect`; judge actual material appearance in pixels. `blender/editorial-umbrella` demonstrates curved fabric construction and editable loop keys. For ambient loops, review complete playback and the actual last-to-first seam; a shorter preview retains the full clock and does not prove loop closure.
 
 ## References
 

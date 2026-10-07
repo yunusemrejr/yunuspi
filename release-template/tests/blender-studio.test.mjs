@@ -109,20 +109,54 @@ test("blender builds, inspects, renders, exports and captures a dataset headless
 import bpy, json
 bpy.ops.mesh.primitive_uv_sphere_add(radius=1, location=(0, 0, 0))
 ball = bpy.context.object; ball.name = "Ball"
+for face in ball.data.polygons: face.use_smooth = True
+material = bpy.data.materials.new('InspectionFabric'); material.use_nodes = True
+shader = material.node_tree.nodes.get('Principled BSDF')
+shader.inputs['Roughness'].default_value = 0.37
+shader.inputs['Metallic'].default_value = 0.65
+noise = material.node_tree.nodes.new('ShaderNodeTexNoise')
+material.node_tree.links.new(noise.outputs['Color'], shader.inputs['Base Color'])
+image = bpy.data.images.new('PackedInspectionTexture', width=1, height=1)
+image.filepath_raw = ${JSON.stringify(path.join(dir, 'packed-source.png'))}
+image.file_format = 'PNG'; image.save()
+image = bpy.data.images.load(image.filepath_raw)
+image.pack(); image.filepath = '//missing-but-packed.png'
+texture = material.node_tree.nodes.new('ShaderNodeTexImage'); texture.image = image
+ball.data.materials.append(material)
 bpy.data.objects['Cube'].hide_render = True
+bpy.data.objects['Light'].hide_render = True
+other = bpy.data.scenes.new('UnrelatedScene')
+other_light = bpy.data.objects.new('UnrelatedLight', bpy.data.lights.new('UnrelatedLightData', 'POINT'))
+other.collection.objects.link(other_light)
 scene = bpy.context.scene; scene.frame_end = 3
 ball.location = (0, 0, 0); ball.keyframe_insert('location', frame=1)
 ball.location = (0, 0, 1); ball.keyframe_insert('location', frame=3)
 bpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(blend)})
 print("YUNUSPI_RESULT " + json.dumps({"objects": len(bpy.data.objects)}))
 ` }, dir);
-  assert.equal(made.result.objects, 4);
+  assert.equal(made.result.objects, 5);
   assert.ok(made.written.includes("scene.blend"));
   await assert.rejects(blender.blenderRun({ code: "raise RuntimeError('boom')" }, dir), /RuntimeError: boom/);
   const info = await blender.blenderInspect({ blend }, dir);
   assert.ok(info.objects.some((o) => o.name === "Ball" && o.type === "MESH" && o.animation));
   assert.equal(info.render.camera, "Camera");
   assert.deepEqual(info.render.frames, [1, 3]);
+  const fabric = info.materialDetails.find((m) => m.name === "InspectionFabric");
+  const inputs = fabric.shader.surfaces.find((s) => s.type === "BSDF_PRINCIPLED").inputs;
+  assert.ok(Math.abs(inputs.Roughness.default - 0.37) < 1e-5);
+  assert.ok(Math.abs(inputs.Metallic.default - 0.65) < 1e-5);
+  assert.equal(inputs["Base Color"].linked, true);
+  assert.equal(inputs["Base Color"].sources[0].type, "TEX_NOISE");
+  assert.equal(fabric.shader.textures[0].packed, true);
+  assert.ok(fabric.shader.textures[0].colorSpace);
+  assert.ok(info.colorManagement.viewTransform);
+  assert.ok(info.world.shader.surfaces.length);
+  assert.equal(info.objects.find((o) => o.name === "Ball").inScene, true);
+  assert.ok(info.objects.find((o) => o.name === "Ball").smoothFaces > 0);
+  assert.deepEqual(info.sceneLights, []);
+  assert.equal(info.objects.find((o) => o.name === 'UnrelatedLight').inScene, false);
+  assert.ok(info.warnings.some((w) => w.includes('selected scene')));
+  assert.equal(info.missingFiles.some((f) => String(f).includes('missing-but-packed')), false);
   const still = await blender.blenderRender({ blend, mode: "still", width: 64, height: 36, engine: "WORKBENCH" }, dir);
   assert.equal(still.files.length, 1);
   assert.ok(fs.statSync(still.files[0].path).size > 100);
