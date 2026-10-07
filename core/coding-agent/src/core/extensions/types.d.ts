@@ -228,6 +228,8 @@ export interface ExtensionContext {
     scopedModels: readonly ScopedModel[];
     /** Independent image, video, speech, music and SFX choices from /models. */
     readonly mediaModels: import("../media-models.js").MediaModelSelections;
+    /** Apply media choices independently of the LLM. Persist only when requested. */
+    setMediaModels(selections: import("../media-models.js").MediaModelSelections, options?: { persist?: boolean }): Promise<void>;
     /** Current thinking level, when provided by the session runtime. */
     thinkingLevel?: ThinkingLevel;
     /** Whether the agent is idle (not streaming) */
@@ -1308,6 +1310,7 @@ export interface ExtensionContextActions {
     getModel: () => Model<any> | undefined;
     getScopedModels: () => readonly ScopedModel[];
     getMediaModels?: () => import("../media-models.js").MediaModelSelections;
+    setMediaModels?: (selections: import("../media-models.js").MediaModelSelections, options?: { persist?: boolean }) => Promise<void>;
     isIdle: () => boolean;
     isProjectTrusted: () => boolean;
     getSignal: () => AbortSignal | undefined;

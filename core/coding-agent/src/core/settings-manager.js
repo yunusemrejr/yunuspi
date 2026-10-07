@@ -925,6 +925,16 @@ export class SettingsManager {
             this.save();
         }
     }
+    /** Report a successful media save only after the storage write is verified. */
+    async saveMediaModels(selections) {
+        const expected = normalizeMediaModels(selections);
+        this.setMediaModels(expected, true);
+        await this.flush();
+        const saved = normalizeMediaModels(SettingsManager.loadFromStorage(this.storage, "global").mediaModels);
+        if (JSON.stringify(saved) !== JSON.stringify(expected)) {
+            throw new Error("Media choices apply to this session, but could not be saved. Check settings storage and reload before retrying.");
+        }
+    }
     getEnabledModels() {
         return this.settings.enabledModels;
     }

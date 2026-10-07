@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.1 — 2026-10-07
+
+**The `/models` browser page selects media models directly.** Images, Video and Audio sections provide searchable public catalogs, capability details and separate speech, music and SFX choices. Session use and verified persistent saves share the runtime SettingsManager without changing LLM roles, the current model or thinking. Saved routes survive offline catalog failures; capability-scoped writes reject foreign origins, stale session revisions and invalid choices. The terminal `/scoped-models` picker retains its keyboard tabs.
+
+This release includes 0.27's capability-aware image/video planning, resumable single-submission hosted clips, alpha image cards, shared staggered 3D arrays, editable camera paths and local arranged audio for mixed Blender/browser/video productions.
+
 ## Unreleased
 
 - Compact terminal footer with consistent KPI labels, a dedicated model/effort row, prioritized status previews and expandable accounting/helper details through the existing tool-expansion shortcut.
@@ -26,7 +32,7 @@ Native revision-bound SEO receipts distinguish failed or unavailable raw evidenc
 
 ## 0.27.0 — 2026-10-07
 
-**Media models are independent choices in `/models`.** Images, Video and Audio tabs select image, clip, speech, music and SFX routes without changing the language model, thinking or cycling scope. Public image/video catalogs refresh lazily with bounded reads. Session choices persist only on Ctrl+S; local Blender/Piper/procedural routes and selected ElevenLabs routes remain available.
+**Media models are independent choices in `/scoped-models`.** Images, Video and Audio tabs select image, clip, speech, music and SFX routes without changing the language model, thinking or cycling scope. Public image/video catalogs refresh lazily with bounded reads. Session choices persist only on Ctrl+S; local Blender/Piper/procedural routes and selected ElevenLabs routes remain available.
 
 **Hosted generation has concrete preflight and recovery.** Image plans filter live reference/alpha/aspect capabilities and conservative fixed prices; native OpenRouter image requests use the dedicated `/images` endpoint and pin the quoted provider. Video plans use duration/resolution/frame capabilities and recognized prices; one paid submission writes a durable content-keyed receipt, status/download resume without paid retry, and downloaded clips retain usage, hashes and decode evidence. Estimates are not provider spending limits. Unknown pricing remains unknown.
 

@@ -79,6 +79,7 @@ export declare class ExtensionRunner {
     private getModel;
     private getScopedModels;
     private getMediaModels;
+    private setMediaModelsFn;
     private isIdleFn;
     private isProjectTrustedFn;
     private getSignalFn;

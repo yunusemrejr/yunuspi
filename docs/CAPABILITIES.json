@@ -2675,6 +2675,7 @@
         "agent/extensions/lib/video-shot.ts",
         "agent/extensions/lib/video-generate.ts",
         "agent/extensions/lib/media-model-routing.ts",
+        "agent/extensions/model-routing-config.ts",
         "core/coding-agent/src/core/media-models.js",
         "core/coding-agent/src/modes/interactive/components/scoped-models-selector.js",
         "agent/extensions/lib/motion-library.ts",
@@ -3771,7 +3772,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 427
+        "line": 482
       },
       {
         "name": "obs",

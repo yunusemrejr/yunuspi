@@ -199,3 +199,6 @@ second, and so on) instead of cloning the first model. Councils and other
 multi-model workflows favor distinct model identities first. When more agents
 are needed than viable preferences, suitable entries are reused and the
 existing autonomous selector fills the remaining gaps.
+
+
+The `/models` browser editor also has **Images**, **Video** and **Audio** sections. Those choices use the session's SettingsManager media fields, with separate **Use for session** and **Save media choices** actions. They do not edit this LLM preferences document or change the current language model, thinking level or cycling list. See [Video studio](VIDEO-STUDIO.md) for generation capabilities, budget planning and local alternatives.

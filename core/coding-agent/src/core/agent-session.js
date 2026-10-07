@@ -2287,6 +2287,10 @@ export class AgentSession {
             getModel: () => this.model,
             getScopedModels: () => this._scopedModels,
             getMediaModels: () => this.settingsManager.getMediaModels(),
+            setMediaModels: async (selections, options) => {
+                if (options?.persist === true) await this.settingsManager.saveMediaModels(selections);
+                else this.settingsManager.setMediaModels(selections);
+            },
             isIdle: () => this.isIdle,
             isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
             getSignal: () => this.agent.signal,

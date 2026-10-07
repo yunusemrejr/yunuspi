@@ -312,6 +312,8 @@ export declare class SettingsManager {
     private sessionMediaModels?;
     getMediaModels(): MediaModelSelections;
     setMediaModels(selections: MediaModelSelections, persist?: boolean): void;
+    /** Persist and verify the media fields without changing LLM preferences. */
+    saveMediaModels(selections: MediaModelSelections): Promise<void>;
     getEnabledModels(): string[] | undefined;
     getDefaultTools(): string[] | undefined;
     setEnabledModels(patterns: string[] | undefined): void;

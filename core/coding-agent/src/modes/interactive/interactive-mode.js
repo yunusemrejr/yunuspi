@@ -4341,8 +4341,10 @@ export class InteractiveMode {
             }, {
                 onMediaChange: (selections) => this.settingsManager.setMediaModels(selections),
                 onMediaPersist: (selections) => {
-                    this.settingsManager.setMediaModels(selections, true);
-                    this.showStatus("Media model choices saved to settings");
+                    void this.settingsManager.saveMediaModels(selections).then(
+                        () => this.showStatus("Media model choices saved to settings"),
+                        error => this.showWarning(error.message),
+                    );
                 },
                 onChange: (enabledIds) => {
                     selectionChanged = true;

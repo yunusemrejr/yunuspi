@@ -86,7 +86,7 @@ test('quotes keep unknown billing unknown and include image variants, references
 });
 
 
-test('interactive /models refreshes media within its selector and ignores late results after close', async t => {
+test('interactive /scoped-models refreshes media within its selector and ignores late results after close', async t => {
   initTheme('dark', false); setKeybindings(new KeybindingsManager());
   const previous = globalThis.fetch, offline = process.env.PI_OFFLINE;
   delete process.env.PI_OFFLINE;
@@ -108,4 +108,17 @@ test('interactive /models refreshes media within its selector and ignores late r
   assert.match(selection.component.render(100).join('\n'), /Fresh catalog model/);
   const before = renders; selection.dispose();
   await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(renders, before);
+});
+
+
+test('media save verifies storage failures instead of reporting a false success', async () => {
+  let stored = JSON.stringify({ mediaModels: { speech: 'local/piper' } });
+  const settings = SettingsManager.fromStorage({ withLock(scope, fn) {
+    if (scope === 'project') return;
+    const next = fn(stored);
+    if (next !== undefined) throw Error('fixture storage unavailable');
+  } });
+  await assert.rejects(settings.saveMediaModels({ image: 'openrouter/auto' }), /could not be saved/);
+  assert.deepEqual(settings.getMediaModels(), { image: 'openrouter/auto' });
+  assert.deepEqual(JSON.parse(stored).mediaModels, { speech: 'local/piper' });
 });

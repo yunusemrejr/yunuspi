@@ -150,6 +150,7 @@ export class ExtensionRunner {
     getModel = () => undefined;
     getScopedModels = () => [];
     getMediaModels = () => ({});
+    setMediaModelsFn = async () => { throw new Error("Media model settings are not available in this session."); };
     isIdleFn = () => true;
     isProjectTrustedFn = () => true;
     getSignalFn = () => undefined;
@@ -199,6 +200,7 @@ export class ExtensionRunner {
         this.getModel = contextActions.getModel;
         this.getScopedModels = contextActions.getScopedModels;
         this.getMediaModels = contextActions.getMediaModels ?? (() => ({}));
+        this.setMediaModelsFn = contextActions.setMediaModels ?? (async () => { throw new Error("Media model settings are not available in this session."); });
         this.isIdleFn = contextActions.isIdle;
         this.isProjectTrustedFn = contextActions.isProjectTrusted;
         this.getSignalFn = contextActions.getSignal;
@@ -574,6 +576,10 @@ export class ExtensionRunner {
             get mediaModels() {
                 runner.assertActive();
                 return { ...runner.getMediaModels() };
+            },
+            setMediaModels: async (selections, options) => {
+                runner.assertActive();
+                await runner.setMediaModelsFn(selections, options);
             },
             get thinkingLevel() {
                 runner.assertActive();
