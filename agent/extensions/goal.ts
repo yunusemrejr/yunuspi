@@ -12,9 +12,10 @@ import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
 import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
+import { collectVerificationReceipts } from './lib/continuation-notice.ts';
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalIsLive, goalKickoff, goalSummary,
-	parseGoalArgs, recordEvidence, restoreGoal, setCriteria, stopGate, MAX_CRITERIA, type GoalState,
+	parseGoalArgs, recordEvidence, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
 
 const ENTRY = "goal-state-v1";
@@ -53,6 +54,13 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_switch", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
+	pi.on('input', (event, ctx) => {
+		if (event.source !== 'interactive' && event.source !== 'rpc') return;
+		const next = reopenRejectedGoal(goal, event.originalText ?? event.text);
+		if (!next) return;
+		unverifiedWrites = 0; refused.clear(); persist(next, ctx);
+		ctx.ui?.notify?.('Goal reopened for your correction; prior completion evidence needs verification on the revised result.', 'info');
+	});
 
 	pi.on("context", (event) => {
 		const messages = event.messages.filter((message: any) => message.customType !== CONTEXT);
@@ -63,11 +71,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	// A resumed session with a live goal must be able to record evidence even
 	// though tool discovery starts from the small default tool set.
-	pi.on("before_agent_start", () => {
+	pi.on("before_agent_start", (_event, ctx) => {
 		try {
-			if (!goalIsLive(goal)) return;
-			const active = pi.getActiveTools();
-			if (!active.includes("goal")) pi.setActiveTools([...active, "goal"]);
+			pi.events?.emit('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['goal'], persistent: goalIsLive(goal), beforeStart: true });
 		} catch { /* discovery still stages the tool from the kickoff marker */ }
 	});
 
@@ -198,7 +204,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					return text("Goal marked blocked and shown to the user. Stop and wait for their answer; /goal resume continues afterwards.");
 				}
 				case "complete": {
-					const decision = goalCompletionGate(goal, { unverifiedWrites, refused });
+					const decision = goalCompletionGate(goal, { unverifiedWrites, refused, verification: collectVerificationReceipts(32, ctx.sessionManager) });
 					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");

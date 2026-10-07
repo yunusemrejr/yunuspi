@@ -17,6 +17,7 @@ import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lintSou
 import { deriveLook } from "./video-derive.ts";
 import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions } from './elevenlabs.ts';
 import { fileDigest, renderSegments, videoFingerprint } from './video-segments.ts';
+import { sampledColorEvidence } from './video-color-evidence.ts';
 import { compileStoryboard, followCamera, productionTimes, validateProductionScene } from './video-compose.ts';
 import { matchAvoidSignals, readProjectDirection, renderDirectionBrief, type CreativeDirection } from "./creative-direction.ts";
 import { inspectVideoAssets, referenceEvidence } from './video-art.ts';
@@ -848,9 +849,19 @@ export function criticalReviewTimes(scene: TimedScene, raw: any, fps: number): n
 }
 
 const QA_CRITERIA=['art-direction','composition','typography','motion','sync','audio'];
+async function ambientRecipe(file: string) {
+  const recipePath = path.join(path.dirname(file),'ambient.json');
+  try {
+    if ((await fs.stat(recipePath)).size > 256*1024) return undefined;
+    const recipe = JSON.parse(await fs.readFile(recipePath,'utf8'));
+    if (recipe.output !== file || recipe.direction?.camera !== 'locked' || recipe.direction?.colorSpace !== 'RGB') return undefined;
+    return { ...recipe, path:recipePath };
+  } catch { return undefined; }
+}
 async function qaIdentity(file: string, dir: string | undefined, signal?: AbortSignal, references: any[] = []) {
   const current=await referenceEvidence(references.map(r=>r.source),dir ?? path.dirname(file),signal);
-  return {video:await fileDigest(file,signal),project:dir?await videoFingerprint(dir,{purpose:'video-qa-v2'},signal):null,references:createHash('sha256').update(JSON.stringify(current)).digest('hex')};
+  const recipe = await ambientRecipe(file);
+  return {renderRecipe: recipe ? await fileDigest(recipe.path,signal) : null, video:await fileDigest(file,signal),project:dir?await videoFingerprint(dir,{purpose:'video-qa-v2'},signal):null,references:createHash('sha256').update(JSON.stringify(current)).digest('hex')};
 }
 
 /** Existing QA artifacts own their reviews. Technical passes never populate
@@ -861,11 +872,22 @@ async function qaReview(params: any, cwd: string, signal?: AbortSignal) {
   const report=JSON.parse(await fs.readFile(reportPath,'utf8'));
   if(report.format!=='yunuspi-video-qa-v2' || report.path!==file || !report.identity)throw Error('Use the qa.json returned by video_qa analyze for this video');
   const identity=await qaIdentity(file,report.project,signal,report.references ?? []);
+  if(params.action==='supersede') {
+    const replacement = await inputFile(params.replacement,cwd);
+    if(replacement === file) throw Error('A replacement must be a different delivered video');
+    if(!(await probe(replacement,signal)).streams.some((s:any)=>s.codec_type==='video')) throw Error('The replacement needs a decoded video stream');
+    if(typeof params.reason!=='string' || params.reason.trim().length<12 || params.reason.length>1200) throw Error('Superseding a delivery needs a concrete reason');
+    const denial=selfMutationDenial(reportPath,await fs.realpath(cwd));if(denial)throw Error(denial);
+    report.supersededBy={path:replacement,sha256:await fileDigest(replacement,signal),reason:params.reason.trim(),at:new Date().toISOString()};
+    await fs.writeFile(reportPath,JSON.stringify(report,null,2)+'\n');
+    return {path:file,report:reportPath,reportSha256:await fileDigest(reportPath,signal),supersededBy:report.supersededBy,deliveryReady:false,note:'The rejected delivery remains preserved. Its replacement requires its own current video_qa analysis and visual/playback/listening review.'};
+  }
   let evidenceChanged=false;
   for(const sample of report.evidence ?? []) if(await fileDigest(sample.path,signal).catch(()=>null)!==sample.sha256)evidenceChanged=true;
   signal?.throwIfAborted();
-  const stale=identity.video!==report.identity.video || identity.project!==report.identity.project || identity.references!==report.identity.references || evidenceChanged;
-  if(params.action==='status') return {report:reportPath,stale,reviewStatus:stale?'stale':report.reviewStatus,reviews:report.reviews ?? [],sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Verdicts are explicit reviewer attestations on this evidence scope; technical checks do not establish design, playback or listening quality'};
+  const stale=identity.video!==report.identity.video || identity.project!==report.identity.project || identity.references!==report.identity.references || (identity.renderRecipe ?? null)!==(report.identity.renderRecipe ?? null) || evidenceChanged;
+  if(params.action==='status') return {path:file,identity,report:reportPath,reportSha256:await fileDigest(reportPath,signal),stale,supersededBy:report.supersededBy,deliveryReady:!report.supersededBy && !stale && report.passedAutomatedChecks === true && report.reviewStatus === 'passed',reviewStatus:stale?'stale':report.reviewStatus,reviews:report.reviews ?? [],sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Verdicts are explicit reviewer attestations on this evidence scope; technical checks do not establish design, playback or listening quality'};
+  if(report.supersededBy) throw Error('This delivery was superseded. Analyze and review the replacement; the old take cannot be approved again through this report.');
   if(stale)throw Error('QA evidence is stale: video or project bytes changed. Analyze the current render before recording verdicts.');
   const denial=selfMutationDenial(reportPath,await fs.realpath(cwd));if(denial)throw Error(denial);
   if(!Array.isArray(params.reviews) || !params.reviews.length || params.reviews.length>6)throw Error('record needs 1..6 explicit review verdicts');
@@ -881,12 +903,12 @@ async function qaReview(params: any, cwd: string, signal?: AbortSignal) {
   const required=QA_CRITERIA.filter(c=>report.hasAudio || !['audio','sync'].includes(c));
   report.reviewStatus=report.reviews.some((r: any)=>r.verdict==='fail')?'needs-work':required.every(c=>reviews.get(c)?.verdict==='pass')?(report.nextScene!==null || report.startScene>0?'passed-scope':'passed'):'partial';
   await fs.writeFile(reportPath,JSON.stringify(report,null,2)+'\n');
-  return {report:reportPath,reviewStatus:report.reviewStatus,deliveryReady:report.passedAutomatedChecks && report.reviewStatus==='passed',reviews:report.reviews,sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Recorded review attestations; automated technical checks remain separate'};
+  return {path:file,identity,report:reportPath,reportSha256:await fileDigest(reportPath,signal),reviewStatus:report.reviewStatus,deliveryReady:report.passedAutomatedChecks && report.reviewStatus==='passed',reviews:report.reviews,sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Recorded review attestations; automated technical checks remain separate'};
 }
 
 export async function videoQa(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
-  if(['record','status'].includes(params.action))return qaReview(params,cwd,signal);
-  if(params.action!==undefined && params.action!=='analyze')throw Error('action must be analyze, record or status');
+  if(['record','status','supersede'].includes(params.action))return qaReview(params,cwd,signal);
+  if(params.action!==undefined && params.action!=='analyze')throw Error('action must be analyze, record, status or supersede');
   const file = await inputFile(params.path, cwd);
   const info = await probe(file, signal);
   const video = info.streams?.find((s: any) => s.codec_type === "video");
@@ -900,7 +922,10 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   let platformTarget = -16;
   const dir=params.dir?await projectDir(params.dir,cwd):undefined;
   if (dir) { const project = await inspectProject(dir); projectSpec = project.spec; scenes = project.scenes; timelineIssues = project.issues; assets=project.assets; platformTarget = targetLoudness(project.spec); }
-  const references=await referenceEvidence(projectSpec?.direction?.references ?? [],dir ?? cwd,signal);
+  const native = await ambientRecipe(file);
+  if(params.references!==undefined && (!Array.isArray(params.references) || params.references.length>8 || params.references.some(r=>typeof r!=='string' || !r || r.length>4096)))throw Error('references needs up to 8 image paths or reference URLs');
+  const references=await referenceEvidence(params.references ?? projectSpec?.direction?.references ?? native?.direction?.references?.map(r=>r.source) ?? [],dir ?? cwd,signal);
+
   const identity=await qaIdentity(file,dir,signal,references);
   const targetLufs = typeof params.targetLufs === "number" ? params.targetLufs : platformTarget;
   progress?.("Analyzing picture and sound (black/freeze detection, silence, EBU R128 loudness)…");
@@ -912,6 +937,7 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
     duration, hasAudio: Boolean(audio), targetLufs,
     videoDuration: Number(video.duration ?? duration), ...(audio ? { audioDuration: Number(audio.duration ?? duration) } : {}),
   }, scenes)];
+  if (native && (native.direction.sourceStage !== 'final' || /preview\.mp4$/.test(file))) findings.push({severity:'error',message:'This ambient output is a draft/preview; approve the source and render full delivery before recording a final pass.'});
   const [num,den]=String(video.avg_frame_rate).split('/').map(Number), deliveredFps=den?num/den:num;
   const projectMatches=!projectSpec || (video.width===projectSpec.width && video.height===projectSpec.height && Math.abs(deliveredFps-projectSpec.fps)<.001 && Math.abs(Number(video.duration ?? duration)-(scenes.at(-1)?.end ?? 0))<=1/projectSpec.fps+.01);
   if(!projectMatches)findings.push({severity:'error',message:'Delivered dimensions, frame rate or duration differ from video.json. Use the matching full-film render/project; scene labels and cue samples cannot describe this file.'});
@@ -934,13 +960,15 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
     frames.push({ path: framePath, label });
   }
   const sheet = await contactSheet(frames, path.join(out, "contact-sheet.png"), signal);
+  const colorEvidence = await sampledColorEvidence(frames, signal);
+  if (colorEvidence.samples.filter(sample => sample.magentaFraction > .5).length > frames.length / 2) findings.push({severity:'warning',message:'Most sampled frames are dominated by magenta RGB pixels. Compare this measured cast with the intended palette; screen/light blending in YUV instead of RGB can cause an unintended purple wash.'});
   const report = {
     format:'yunuspi-video-qa-v2',identity,project:dir ?? null,startScene:first,
-    direction:projectSpec?.direction ?? null,references,assets:assets.filter(a=>!selected.length || selected.some(s=>s.id===a.scene)),
+    direction:projectSpec?.direction ?? native?.direction ?? null,references,assets:assets.filter(a=>!selected.length || selected.some(s=>s.id===a.scene)),
     path: file, seconds: Number(duration.toFixed(3)), size: `${video.width}x${video.height}`, fps: video.avg_frame_rate, hasAudio: Boolean(audio),
     loudness: { integratedLufs: metrics.integratedLufs, loudnessRangeLu: metrics.loudnessRange, peakDbfs: metrics.truePeak, targetLufs },
     black: metrics.black, freeze: metrics.freeze, silence: metrics.silence,
-    findings, passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
+    findings, colorEvidence, passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
     contactSheet: sheet,detailFrame:frames[Math.min(3,frames.length-1)]?.path,frames:frames.map((f,i)=>({...f,seconds:times[i].t})),report:path.join(out,'qa.json'),
     sampledScenes: selected.map(s => s.id), nextScene: first + selected.length < scenes.length ? first + selected.length : null,
     reviewStatus: 'unreviewed',reviews:[],projectMatches,
@@ -950,7 +978,7 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   (report as any).evidence=await Promise.all([...frames.map(f=>f.path),sheet].map(async sample=>({path:sample,sha256:await fileDigest(sample,signal)})));
   if(await fileDigest(file,signal)!==identity.video)throw Error('Video changed during QA; analyze the stable final render again');
   await fs.writeFile(path.join(out, "qa.json"), JSON.stringify(report, null, 2) + "\n");
-  return report;
+  return {...report,reportSha256:await fileDigest(report.report,signal)};
 }
 
 // ───────────────────────────── narration (Piper) ─────────────────────────────

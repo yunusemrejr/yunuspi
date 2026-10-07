@@ -17,8 +17,15 @@ import bpy
 MARK = "YUNUSPI_RESULT "
 
 
-def emit(payload):
-    sys.stdout.write(MARK + json.dumps(payload, default=str) + "\n")
+def emit(payload, result_file=None):
+    encoded = json.dumps(payload, default=str)
+    if result_file:
+        if len(encoded.encode("utf-8")) > 32 * 1024 * 1024:
+            raise RuntimeError("structured result exceeds 32 MiB")
+        with open(result_file, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+        encoded = json.dumps({"ok": payload.get("ok"), "op": payload.get("op"), "resultWritten": True})
+    sys.stdout.write(MARK + encoded + "\n")
     sys.stdout.flush()
 
 
@@ -1649,14 +1656,15 @@ OPS = {"inspect": op_inspect, "render": op_render, "export": op_export, "dataset
 def main():
     req = request_from_argv()
     op = req.get("op")
+    result_file = req.get("resultFile")
     if op not in OPS:
-        emit({"ok": False, "error": f"unknown op {op}"})
+        emit({"ok": False, "error": f"unknown op {op}"}, result_file)
         sys.exit(2)
     try:
         result = OPS[op](req)
-        emit({"ok": True, "op": op, **result})
+        emit({"ok": True, "op": op, **result}, result_file)
     except Exception as error:  # noqa: BLE001 - reported to the harness as data
-        emit({"ok": False, "op": op, "error": f"{type(error).__name__}: {error}"})
+        emit({"ok": False, "op": op, "error": f"{type(error).__name__}: {error}"}, result_file)
         sys.exit(1)
 
 

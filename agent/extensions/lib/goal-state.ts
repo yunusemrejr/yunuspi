@@ -150,6 +150,7 @@ export interface CompletionContext {
 	unverifiedWrites: number;
 	/** Verification receipts already refused once, so the same request becomes a recorded waiver. */
 	refused: ReadonlySet<string>;
+	verification?: readonly GateReceipt[];
 }
 
 /** Completion is refused once per distinct set of gaps; the same call repeated is a recorded waiver so the user is never deadlocked. */
@@ -163,11 +164,22 @@ export function goalCompletionGate(goal: GoalState, context: CompletionContext):
 			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`,
 		});
 	}
-	return completionGateReceipts("plan-complete", receipts, context.refused);
+	return completionGateReceipts("plan-complete", [...receipts, ...(context.verification ?? [])], context.refused);
 }
 
 export function complete(goal: GoalState, waived: boolean, now = Date.now()): GoalState {
 	return { ...goal, status: "achieved", note: waived ? "Completed with recorded waiver of unresolved items." : undefined, updatedAt: now };
+}
+
+/** A direct rejection of the just-completed work reopens its evidence. Plain
+ * questions and unrelated new tasks do not silently create or resume goals. */
+export function reopenRejectedGoal(goal: GoalState | undefined, correction: string, now = Date.now()): GoalState | undefined {
+  if (goal?.status !== 'achieved' || !rejectsCompletedWork(correction)) return undefined;
+  return { ...goal, status: 'active', text: clip(`${goal.text}\nLatest user correction: ${correction}`, MAX_GOAL_TEXT),
+    criteria: goal.criteria.map(({evidence, ...criterion}) => ({ ...criterion, status: 'open' as const })), nudges: 0, stalls: 0, progressMark: '', note: undefined, updatedAt: now };
+}
+export function rejectsCompletedWork(correction: string): boolean {
+  return (/\b(?:this|it|output|result|video|film|animation|render|image)\b/i.test(correction) || /^\s*(?:please )?(?:remake|redo)\b/i.test(correction)) && /\b(?:not (?:good|right|done|finished)|terrible|remake|redo|fix (?:it|this)|looks? (?:ugly|bad)|still (?:bad|broken))\b/i.test(correction);
 }
 
 export function block(goal: GoalState, reason: string, now = Date.now()): GoalState {

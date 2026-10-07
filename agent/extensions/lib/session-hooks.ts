@@ -155,7 +155,12 @@ export const HOOK_RULES: readonly HookRule[] = [
     line: 'Carry webAsset bundle hashes, loader requirements and mobile budget warnings into the served Three.js path. A blocked preflight preserves the export: repair the gap and inspect the existing artifact before rerendering. Verify model loading, frame cost, fallback and pixels on actual devices/viewports; structure alone does not approve the asset.',
   },
 	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "svg_render", "image_generate", "image_convert", "image_understand", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
+		key: "media-rgb-composite", tools: ["bash"],
+		when: args => /ffmpeg/.test(bashCommand(args)) && /blend=.*(?:screen|addition)|maskedmerge/.test(bashCommand(args)) && !/format=(?:gbrp|rgb)/.test(bashCommand(args)),
+		line: "Screen/additive lighting must blend in RGB, with every input explicitly converted before blending; YUV black contains neutral chroma and screen blending can turn the entire frame magenta. Use video_ambient for a detailed locked-camera plate with masked weather, or a native compositor. Inspect full-size encoded RGB pixels before extending any custom FFmpeg composition.",
+	},
+	{
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_ambient", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "svg_render", "image_generate", "image_convert", "image_understand", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Keep completed artifacts and use any recovery receipt to repair local registration. A provider timeout can leave a paid outcome unknown: reconcile available receipts/status before another request and preserve the selected model. Narrow local renders or use existing background tools for long jobs.",
 	},
 	{
@@ -185,7 +190,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "motion-example-first", tools: ["write"],
-		when: (args) => typeof args.path === "string" && MOTION_FILE.test(args.path),
+		when: (args) => typeof args.path === "string" && (MOTION_FILE.test(args.path) || (/\.py$/i.test(args.path) && /\b(?:import bpy|from bpy)\b/.test(String(args.content ?? '')))),
 		line: "A hand-written first draft of advanced motion is the generic version of the effect. Before building this Blender script or HTML motion page from scratch, run motion_examples action:\"search\" for the effect and adapt the closest verified example (action:\"copy\" places it in the project), in the film's own palette and fonts.",
 	},
 	{

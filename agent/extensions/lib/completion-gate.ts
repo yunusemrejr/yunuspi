@@ -55,6 +55,8 @@ export interface GateReceipt {
 	line: string;
 	/** Short human wording for the transcript footer; `line` stays the full text addressed to the agent. */
 	brief?: string;
+	/** A repeated agent call is not a human waiver of unfinished media review. */
+	requiresUserWaiver?: boolean;
 }
 
 export const gateReceiptKey = (receipt: GateReceipt): string =>
@@ -67,13 +69,14 @@ export const gateReceiptKey = (receipt: GateReceipt): string =>
 export function completionGateReceipts(moment: "deploy" | "plan-complete", receipts: readonly GateReceipt[], refused: ReadonlySet<string>): GateDecision {
 	const key = `${moment}\0${receipts.map(gateReceiptKey).join("\n")}`;
 	if (!receipts.length) return { block: false, waived: false, key };
-	if (refused.has(key)) return { block: false, waived: true, key };
+	const protectedReview = receipts.some(receipt => receipt.requiresUserWaiver);
+	if (refused.has(key) && !protectedReview) return { block: false, waived: true, key };
 	const what = moment === "deploy" ? "Deploy" : "Completing the last open task";
 	return {
 		block: true,
 		waived: false,
 		key,
-		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\nResolve these first (run the project's real test suites; run quality_review review and assess it). If the user explicitly wants to proceed anyway, repeat the same call: it will proceed as a recorded waiver, and the final report must name each unresolved item.`,
+		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\n${protectedReview ? 'Review the current delivered media and record honest video_qa verdicts. A repeated completion call cannot approve unreviewed or failed media. Keep unavailable playback/listening review explicit; only the human user can waive it.' : "Resolve these first (run the project's real test suites; run quality_review review and assess it). If the user explicitly wants to proceed anyway, repeat the same call: it will proceed as a recorded waiver, and the final report must name each unresolved item."}`,
 	};
 }
 

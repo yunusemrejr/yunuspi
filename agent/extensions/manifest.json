@@ -250,6 +250,10 @@
     "video-generate.ts",
     "media-model-routing.ts",
     "video-compose.ts",
+    "ambient-frames.ts",
+    "video-ambient.ts",
+    "video-review-evidence.ts",
+    "video-color-evidence.ts",
     "shot-scene.ts",
     "video-studio.ts",
     "workspace-write-lease.ts",
@@ -564,6 +568,7 @@
     }
   ],
   "supportFiles": [
+    "scripts/video-ambient.mjs",
     "scripts/ui-motion-runtime.mjs",
     "scripts/render-capture.mjs",
     "scripts/render-page-state.mjs",

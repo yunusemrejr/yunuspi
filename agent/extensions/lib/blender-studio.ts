@@ -90,21 +90,34 @@ const PROGRESS_MARK = "YUNUSPI_PROGRESS ";
 export async function blenderWorker(req: Record<string, unknown>, options: { cwd: string; blend?: string; signal?: AbortSignal; timeoutMs: number; progress?: Progress; factoryStartup?: boolean }) {
   const binary = requireBlender();
   const requestPath = path.join(os.tmpdir(), `yunuspi-blender-${randomBytes(6).toString("hex")}.json`);
-  await fs.writeFile(requestPath, JSON.stringify(req), { mode: 0o600 });
+  const resultPath = `${requestPath}.result`;
   const args = ["-b", ...(options.blend ? [options.blend] : []), ...(options.factoryStartup === false ? [] : ["--factory-startup"]), "-noaudio", "--python-exit-code", "1", "-P", BLENDER_WORKER, "--", requestPath];
   let result: any;
+  const readResult = async () => {
+    const stat = await fs.lstat(resultPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024 * 1024) throw Error('Blender result exceeds its 32 MiB structured receipt bound');
+    if (stat.size) result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+  };
   const report = throttled(options.progress, 2000);
   try {
+    await fs.writeFile(resultPath, '', { mode: 0o600, flag: 'wx' });
+    await fs.writeFile(requestPath, JSON.stringify({ ...req, resultFile: resultPath }), { mode: 0o600, flag: 'wx' });
     await runGuarded(binary, args, { cwd: options.cwd, signal: options.signal, timeoutMs: options.timeoutMs, nice: 10, gpu: true, env: blenderEnv(), onLine: (line) => {
       if (line.startsWith(RESULT_MARK)) { try { result = JSON.parse(line.slice(RESULT_MARK.length)); } catch { /* keep stdout tail for the error */ } }
       else if (line.startsWith(PROGRESS_MARK)) report(line.slice(PROGRESS_MARK.length));
       else if (/^Fra:\d+ /.test(line)) report(line.replace(/\s+\|\s+/g, " · ").slice(0, 120));
     } });
+    await readResult();
+    if (result?.resultWritten) throw Error('Blender announced a structured receipt but did not write it');
   } catch (error: any) {
+    // Large scenes exceed the bounded stdout tail. The worker's private file
+    // transports the complete receipt without widening process output bounds.
+    await readResult().catch(() => {});
     if (result && result.ok === false) throw new Error(`Blender ${req.op}: ${result.error}`);
     throw error;
   } finally {
     await fs.rm(requestPath, { force: true });
+    await fs.rm(resultPath, { force: true });
   }
   if (!result) throw new Error(`Blender exited without a result for ${req.op}; the worker script did not run (check the stderr tail or Blender version)`);
   if (result.ok === false) throw new Error(`Blender ${req.op}: ${result.error}`);

@@ -1127,11 +1127,11 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 #### video-studio
 
-Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.
+Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and fixed-camera RGB atmosphere over approved detailed plates, and revision-bound visual/playback/listening review alongside technical QA.
 
-**Entrypoints:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`
+**Entrypoints:** `video_project`, `video_render`, `video_shot`, `video_ambient`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`
 
-**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_qa`, `narration_tts`, `audio_synth`, `media_pipeline`, `video_frames`, `media_info`, `audio_analyze`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`, `narration_align`, `media_sync`
+**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_ambient`, `video_qa`, `narration_tts`, `audio_synth`, `media_pipeline`, `video_frames`, `media_info`, `audio_analyze`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`, `narration_align`, `media_sync`
 
 **Options:**
 
@@ -1147,7 +1147,7 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 **Related records:** `creative-studio`, `web-and-media`, `background-tasks`, `3d-studio`
 
-**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
+**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-ambient.ts`](../agent/extensions/lib/video-ambient.ts), [`agent/extensions/lib/ambient-frames.ts`](../agent/extensions/lib/ambient-frames.ts), [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts), [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts), [`agent/scripts/video-ambient.mjs`](../agent/scripts/video-ambient.mjs), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
@@ -1338,9 +1338,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 490; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 258; factory)
-- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 137; factory)
+- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 148; factory)
 - `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 281; factory)
-- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 149; factory)
+- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 160; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 574; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 827; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 781; literal)
@@ -1381,7 +1381,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 165; literal)
+- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 171; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_analyze` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 40; factory)
@@ -1398,7 +1398,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 259; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 255; factory)
 - `media_pipeline` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 284; factory)
-- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 145; factory)
+- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 156; factory)
 - `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2567; literal)
 - `memory_read` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2427; literal)
 - `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2710; literal)
@@ -1408,11 +1408,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 499; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
 - `ml_lab` — [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts) (line 11; literal)
-- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 161; factory)
+- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 172; factory)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 425; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 264; factory)
-- `narration_align` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 135; factory)
-- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 131; factory)
+- `narration_align` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 146; factory)
+- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 142; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 821; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
@@ -1460,20 +1460,21 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 568; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 443; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 451; literal)
 - `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 414; factory)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 388; factory)
 - `ui_recipe` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 33; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 133; factory)
-- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 125; factory)
-- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 147; factory)
+- `video_ambient` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 79; factory)
+- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 136; factory)
+- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 158; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 280; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 256; factory)
-- `video_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 69; factory)
-- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 72; factory)
-- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 121; factory)
-- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 117; factory)
-- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 94; factory)
+- `video_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 76; factory)
+- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 83; factory)
+- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 132; factory)
+- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 128; factory)
+- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 105; factory)
 - `visual_diff` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 66; factory)
 - `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 342; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 102; literal)
@@ -1502,7 +1503,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1668, 2256, 2410, 2809)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
-- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_align`, `narration_tts`, `video_assets`, `video_browser`, `video_generate`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 33)
+- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_align`, `narration_tts`, `video_ambient`, `video_assets`, `video_browser`, `video_generate`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 37)
 
 ### Literal slash commands
 
@@ -1521,7 +1522,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1818)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 118)
+- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 124)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3446)
 - /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 907)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
@@ -1732,6 +1733,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 - [`agent/extensions/lib/activity-indicators.ts`](../agent/extensions/lib/activity-indicators.ts)
 - [`agent/extensions/lib/adaptive-execution.ts`](../agent/extensions/lib/adaptive-execution.ts)
+- [`agent/extensions/lib/ambient-frames.ts`](../agent/extensions/lib/ambient-frames.ts)
 - [`agent/extensions/lib/artifact-checks.ts`](../agent/extensions/lib/artifact-checks.ts)
 - [`agent/extensions/lib/asset-registry.ts`](../agent/extensions/lib/asset-registry.ts)
 - [`agent/extensions/lib/assurance-output.ts`](../agent/extensions/lib/assurance-output.ts)
@@ -1934,15 +1936,18 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/ui-doctrine.ts`](../agent/extensions/lib/ui-doctrine.ts)
 - [`agent/extensions/lib/ui-recipes.ts`](../agent/extensions/lib/ui-recipes.ts)
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts)
+- [`agent/extensions/lib/video-ambient.ts`](../agent/extensions/lib/video-ambient.ts)
 - [`agent/extensions/lib/video-art.ts`](../agent/extensions/lib/video-art.ts)
 - [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts)
 - [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts)
+- [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts)
 - [`agent/extensions/lib/video-compose.ts`](../agent/extensions/lib/video-compose.ts)
 - [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts)
 - [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts)
 - [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts)
 - [`agent/extensions/lib/video-motion.ts`](../agent/extensions/lib/video-motion.ts)
 - [`agent/extensions/lib/video-publish.ts`](../agent/extensions/lib/video-publish.ts)
+- [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts)
 - [`agent/extensions/lib/video-segments.ts`](../agent/extensions/lib/video-segments.ts)
 - [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts)
 - [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts)
@@ -2067,6 +2072,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
 - [`agent/scripts/transaction.mjs`](../agent/scripts/transaction.mjs)
 - [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs)
+- [`agent/scripts/video-ambient.mjs`](../agent/scripts/video-ambient.mjs)
 - [`agent/scripts/video-browser.mjs`](../agent/scripts/video-browser.mjs)
 - [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs)
 - [`agent/scripts/wait-condition.mjs`](../agent/scripts/wait-condition.mjs)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.32.0 — 2026-10-08
+
+**Fixed environments keep authored detail.** `video_ambient` plans, previews and renders an approved image or Blender plate with a locked camera, inspected sky mask/skyline, deterministic rain and diffuse lightning. RGB composition avoids the unintended magenta cast caused by screen-blending neutral overlays in YUV. Recipes preserve source identities, brief and references. The route is image-based atmosphere, with explicit limits on geometry, cloud evolution and reflections.
+
+**Unreviewed media cannot close a production goal.** Native finals and current QA reports feed session-owned completion receipts, including earlier QA in resumed production goals. Registered visual passes require current film/reference pixel evidence; text-only metadata cannot approve appearance. Repeated model calls cannot approve unfinished visual/playback/listening review. Changed video, reference, sampled pixels or native recipe invalidates prior verdicts. Direct human waivers retain their current evidence scope; superseded takes remain preserved while replacements need separate review. Direct rejection reopens achieved goals without resuming paused ones.
+
+**Inspection and discovery retain their owners.** Large Blender scene reports use a bounded private structured transport instead of truncated stdout. Exact provider-qualified vision IDs resolve without switching the selected model. Sampled RGB evidence and blind observations precede subjective verdicts. Goal schemas stage through discovery's ownership and survive task resets, preserving model/thinking and tool ceilings. Regression coverage includes real encoding/QA, large scene receipts and the owned SDK's next-turn tool activation.
+
 ## 0.31.0 — 2026-10-07
 
 **UI tools follow the task and its stage.** Main prompts, goals and short steering follow-ups share one adaptive selection policy. Authored purpose, exclusions and tool ceilings survive continuations; current source observations and native receipts refresh the next useful tools. New unrelated work releases the previous automatic selection. Structural shared-owner changes add bounded symbol and impact inspection before editing, with fresh inspection when scope expands.

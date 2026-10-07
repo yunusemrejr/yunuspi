@@ -115,7 +115,7 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_understand', 'image_convert', 'image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_generate', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'image_convert', 'blender_run'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'video_ambient', 'narration_tts', 'audio_synth', 'video_generate', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'image_convert', 'blender_run'] },
   { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
   { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'video_shot'] },
@@ -318,6 +318,7 @@ export function registerToolDiscovery(pi: any) {
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
   let generation = 0, manager: any;
   let automatic = new Set<string>(), explicitSelections = new Set<string>(), usedCore = new Set<string>(), namedCore = new Set<string>();
+  const sessionSelections = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
   let pendingInput: { id: string; text: string; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '';
   const excluded = (name: string, prompt = routingTask) => pipelineToolExcluded(prompt, name) || pipelineToolExcluded(authoredTask, name);
@@ -371,6 +372,7 @@ export function registerToolDiscovery(pi: any) {
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
     manager = ctx.sessionManager;
+    sessionSelections.clear();
     pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = '';
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
@@ -399,7 +401,7 @@ export function registerToolDiscovery(pi: any) {
         // discoveries and the original safety/tool ceiling. A continuation
         // still owns its current pipelines and studio stages.
         if (nextTask) {
-          for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name)) expected.delete(name);
+          for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name) && !sessionSelections.has(name)) expected.delete(name);
           authoredTask = resolveRoutingTask(authoredTask, pendingInput?.text ?? String(event?.prompt ?? '')).task;
           routingTask = authoredTask;
           for (const name of explicitSelections) if (allowed.has(name) && !pipelineToolExcluded(routingTask, name)) expected.add(name);
@@ -427,13 +429,19 @@ export function registerToolDiscovery(pi: any) {
     // schemas only from the caller's original tool ceiling.
     try {
       if (!same(flushed, new Set(pi.getActiveTools()))) return;
+      // Session owners such as /goal retain their control schema across the
+      // next authored-task reset without mutating the wire behind discovery.
+      for (const name of event.names) if (allowed.has(name) && !excluded(name)) {
+        if (event.persistent === true) sessionSelections.add(name);
+        else if (event.persistent === false && sessionSelections.delete(name) && !explicitSelections.has(name) && !CORE_TOOLS.has(name)) { expected.delete(name); wireDirty = true; }
+      }
       if (typeof event.task === 'string') routingTask = event.task;
       if (event.scope === 'task' && typeof event.task === 'string') {
         authoredTask = event.task;
         if (event.beforeStart) started = true;
       }
       for (const name of expected) if (excluded(name)) { expected.delete(name); wireDirty = true; }
-      const names = event.names.filter((name: string) => allowed.has(name) && !excluded(name) && !expected.has(name));
+      const names = event.persistent === false ? [] : event.names.filter((name: string) => allowed.has(name) && !excluded(name) && !expected.has(name));
       for (const name of names) automatic.add(name);
       if (names.length) { expected = new Set([...expected, ...names]); wireDirty = true; }
       if (typeof event.tier === 'string') stageCore(event.tier, routingTask);

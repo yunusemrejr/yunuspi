@@ -6,6 +6,7 @@ The shared tools own frame clocks, scene contracts and review evidence. Skills a
 
 | Tool | Does |
 | --- | --- |
+| `video_ambient` | `plan`, `preview` and `render` preserve an approved detailed image/Blender plate with a locked camera, masked cloud drift, deterministic rain and diffuse lightning in RGB. Saves an editable recipe, decoded MP4 and detail frame; final source declaration and separate QA review are required |
 | `video_project` | `direction` adopts the full existing creative brief; `upgrade` safely refreshes recognized compositor modules; `compose` authors native layers with fitted typography, reserved media regions, deterministic motion and tracked device screens; `init` scaffolds a project with reusable primitives (network, matrix, graph, chart, history timeline, code, particles, typography, kinetic text) and finishing layers (narration captions, audio-reactive spectrum, film grain, light leaks, camera moves, glitch) and installs pinned dependencies; `check` validates timing, cues, narration fit, transitions, captions, component registry and assets; `install` repairs dependencies |
 | `video_render` | `stills` renders critical frames, a labelled contact sheet and actual loaded-font fit/overflow evidence; `preview` renders a low-resolution scene or range; `final` renders H.264/AAC with decode verification and captions. Long films automatically use resumable parts; `segments` exposes the same bounded workflow explicitly. Bundles and completed parts are content-hash cached |
 | `video_qa` | `analyze` creates technical and reference/frame evidence; `record` stores separate art-direction/composition/type/playback/listening attestations; `status` checks stale video/project/reference/pixel identities. Black and frozen stretches (single holds of 4 s or more, and a runtime that is 35% or more static in holds of 1.5 s or more), audio/video drift, silence gaps, EBU R128 loudness, peak and range, per-scene narration audibility and paginated strips at entrances, settled states, authored gestures and final scene frames; review status remains unreviewed |
@@ -40,6 +41,23 @@ video_render({ dir: "attention-video", mode: "final" })
 video_qa({ path: "attention-video/out/final-…/final.mp4", dir: "attention-video" })
 ```
 
+## Fixed camera environments
+
+For a fixed environment, approve the full-size image or Blender render before animating it. `video_ambient` preserves that authored detail and supplies procedural weather without a generated renderer project or substitute primitive scene. Provide a same-canvas `skyMask` (white sky, black terrain/buildings) or observed normalized `skyline` points from x:0 to x:1. Inspect the derived mask and preview to keep foreground edges stationary. Image input is decoded locally with bounded image formats; colors combine in RGB before the final H.264 conversion.
+
+```js
+video_ambient({action:"plan", plate:"assets/approved-plate.png", skyMask:"assets/sky-mask.png", seconds:30, brief:"A detailed fixed-camera landscape at dusk", references:["references/landscape.png"]})
+video_ambient({action:"preview", plate:"assets/approved-plate.png", skyMask:"assets/sky-mask.png", seconds:30, clouds:0.8, rain:0.4})
+video_ambient({action:"render", stage:"final", plate:"assets/approved-plate.png", skyMask:"assets/sky-mask.png", audio:"assets/music.wav", seconds:30, lightning:[12.2], references:["references/landscape.png"]})
+video_qa({path:"<returned ambient.mp4>"})
+```
+
+This is image-based atmosphere: cloud samples drift slowly inside the mask, rain is overlaid, and lightning changes light. It does not reconstruct 3D geometry, evolve volumetric clouds, articulate objects or simulate wet-ground reflections. Use authored Blender geometry/simulation or an explicitly chosen hosted clip when those motions are essential. A still plate's inherent mist and materials remain part of that image. Intentional calm holds still appear in freeze measurements; assess them against the brief.
+
+Delivered native renders enter session-owned review tracking. `goal complete` and whole-plan completion check current QA identities; repeating the call cannot waive unfinished media review. `video_qa record` requires actual frames, playback or listening evidence for the relevant criterion. Standalone videos accept `references` without a Remotion project. Native recipe edits also invalidate reviews. Missing capabilities remain explicitly unreviewed. A direct human request such as “skip audio review” permits a recorded waiver of the current scope; synthetic prompts and model calls cannot grant it. New bytes or stale evidence require a new decision.
+
+For a rejected take, `video_qa({action:"supersede", path:"old.mp4", report:"<old qa.json>", replacement:"new.mp4", reason:"<concrete defect>"})` preserves the old file and review while tracking its replacement. The new file needs its own analysis and review. A direct correction of an achieved goal reopens its criteria and invalidates prior approval of the rejected video bytes. Paused goals retain their pause. The session tracks native QA report hashes; editing approval metadata outside the native review owner cannot close a goal.
+
 ## Native choreography and hybrid asset craft
 
 A shot layer with `subjectFit:false` retains the full Blender camera composition, including atmosphere, subject placement and reserved type space. Background-role shots default to this behavior. Foreground-only shots retain automatic subject fitting; `fit:"contain"|"cover"` controls their placement in the layer box.
@@ -54,7 +72,7 @@ Declare unfinished layers with `asset:{stage:"blockout"|"draft"|"final",descript
 
 Final shot planning preserves full 4K dimensions. Native self-contained shots can reuse verified frame/anchor/editable bytes; external blend/model dependencies are rendered afresh. Per-shot locks serialize replacements; failed or cancelled publication preserves the last good sequence and editable file. Verified cache reuse saves rendering work without granting visual approval.
 
-QA strips include cue/key/exit boundaries and the true final frame. Technical success starts with reviewStatus unreviewed. Art-direction passes name inspected reference sources, appearance needs frames/playback, motion/sync needs playback and audio needs listening. Changing local reference images, sampled pixels, project/assets or delivered bytes invalidates old verdicts. Paged reports approve their scope only. There is no automatic taste score or universal quality guarantee.
+QA strips include cue/key/exit boundaries and the true final frame. Technical success starts with reviewStatus unreviewed. Registered visual passes require current QA pixels delivered to an image-capable model or inspected through image_understand/read in this session. Art direction also requires current local reference pixels and named compared sources. Appearance needs frames/playback, motion/sync needs playback and audio needs listening. Changing local reference images, sampled pixels, project/assets or delivered bytes invalidates old verdicts. Paged reports approve their scope only. Pixel delivery proves access to evidence; the reviewer still owns its judgment.
 
 Reference studies included varied kinetic typography, product staging and editorial animation, plus the diverse collection in [Column Five's motion examples](https://www.columnfivemedia.com/best-100-motion-graphic-examples/). Those examples inform composition, continuity and craft; they are not copied assets.
 

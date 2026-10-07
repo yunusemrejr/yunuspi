@@ -2573,11 +2573,12 @@
     {
       "id": "video-studio",
       "group": "web_media",
-      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.",
+      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and fixed-camera RGB atmosphere over approved detailed plates, and revision-bound visual/playback/listening review alongside technical QA.",
       "entrypoints": [
         "video_project",
         "video_render",
         "video_shot",
+        "video_ambient",
         "motion_examples",
         "video_qa",
         "narration_tts",
@@ -2593,6 +2594,7 @@
         "video_shot",
         "motion_examples",
         "video_assets",
+        "video_ambient",
         "video_qa",
         "narration_tts",
         "audio_synth",
@@ -2670,6 +2672,11 @@
       "sourceFiles": [
         "agent/extensions/video-studio.ts",
         "agent/extensions/lib/video-studio.ts",
+        "agent/extensions/lib/video-ambient.ts",
+        "agent/extensions/lib/ambient-frames.ts",
+        "agent/extensions/lib/video-review-evidence.ts",
+        "agent/extensions/lib/video-color-evidence.ts",
+        "agent/scripts/video-ambient.mjs",
         "agent/extensions/lib/video-looks.ts",
         "agent/extensions/lib/video-derive.ts",
         "agent/extensions/lib/video-shot.ts",
@@ -3759,7 +3766,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 118
+        "line": 124
       },
       {
         "name": "google-account",
@@ -4120,7 +4127,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 137,
+        "line": 148,
         "kind": "factory"
       },
       {
@@ -4132,7 +4139,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 149,
+        "line": 160,
         "kind": "factory"
       },
       {
@@ -4381,7 +4388,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 165,
+        "line": 171,
         "kind": "literal"
       },
       {
@@ -4483,7 +4490,7 @@
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 145,
+        "line": 156,
         "kind": "factory"
       },
       {
@@ -4543,7 +4550,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 161,
+        "line": 172,
         "kind": "factory"
       },
       {
@@ -4561,13 +4568,13 @@
       {
         "name": "narration_align",
         "source": "agent/extensions/video-studio.ts",
-        "line": 135,
+        "line": 146,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 131,
+        "line": 142,
         "kind": "factory"
       },
       {
@@ -4856,7 +4863,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 443,
+        "line": 451,
         "kind": "literal"
       },
       {
@@ -4884,15 +4891,21 @@
         "kind": "factory"
       },
       {
+        "name": "video_ambient",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 79,
+        "kind": "factory"
+      },
+      {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 125,
+        "line": 136,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 147,
+        "line": 158,
         "kind": "factory"
       },
       {
@@ -4910,31 +4923,31 @@
       {
         "name": "video_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 69,
+        "line": 76,
         "kind": "factory"
       },
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 72,
+        "line": 83,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 121,
+        "line": 132,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 117,
+        "line": 128,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 94,
+        "line": 105,
         "kind": "factory"
       },
       {
@@ -5153,7 +5166,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 165,
+        "line": 171,
         "kind": "literal"
       },
       {
@@ -5399,7 +5412,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 443,
+        "line": 451,
         "kind": "literal"
       },
       {
@@ -5676,7 +5689,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          33
+          37
         ],
         "knownNames": [
           "audio_generate",
@@ -5685,6 +5698,7 @@
           "motion_examples",
           "narration_align",
           "narration_tts",
+          "video_ambient",
           "video_assets",
           "video_browser",
           "video_generate",
@@ -5696,11 +5710,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 749,
+      "sourceFiles": 753,
       "registrationSites": 91,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 156,
-      "uniqueStableTools": 155,
+      "stableRegistrationRows": 157,
+      "uniqueStableTools": 156,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5935,6 +5949,10 @@
       },
       {
         "path": "agent/extensions/lib/adaptive-execution.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/ambient-frames.ts",
         "exists": true
       },
       {
@@ -6746,6 +6764,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/video-ambient.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/video-art.ts",
         "exists": true
       },
@@ -6755,6 +6777,10 @@
       },
       {
         "path": "agent/extensions/lib/video-browser.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-color-evidence.ts",
         "exists": true
       },
       {
@@ -6779,6 +6805,10 @@
       },
       {
         "path": "agent/extensions/lib/video-publish.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-review-evidence.ts",
         "exists": true
       },
       {
@@ -7261,6 +7291,10 @@
       },
       {
         "path": "agent/scripts/ui-motion-runtime.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/video-ambient.mjs",
         "exists": true
       },
       {

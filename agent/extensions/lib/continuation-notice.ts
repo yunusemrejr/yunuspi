@@ -44,7 +44,7 @@ export const collectContinuationLines = (limit = MAX_LINES, session?: object) =>
 export const collectVerificationLines = (limit = MAX_LINES, session?: object) => collectLines('verification', limit, session);
 
 /** Sources whose pending work is a verification nudge the owner itself would deliver at the real end of the work. */
-const VERIFICATION_OWNERS = ["project tests", "quality review", "creative"] as const;
+const VERIFICATION_OWNERS = ["project tests", "quality review", "creative", "media production"] as const;
 
 /** Another subsystem (a background task, a delegated run) will resume this session by itself. Verification nudges and
  * automatic review wait for that: they would judge a tree that is about to change, spend a bounded round on a state
@@ -81,7 +81,7 @@ export function collectVerificationReceipts(limit = MAX_LINES, session?: object)
         const revision = receipt?.revision === undefined ? undefined : cleanId(receipt.revision, 80);
         const brief = receipt?.brief === undefined ? undefined : cleanId(receipt.brief, MAX_BRIEF);
         const count = typeof receipt?.count === "number" && Number.isSafeInteger(receipt.count) && receipt.count >= 0 ? receipt.count : undefined;
-        out.push({ source: cleanId(receipt?.source, 80) ?? source.name, id, ...(revision === undefined ? {} : { revision }), state, ...(count === undefined ? {} : { count }), line, ...(brief === undefined ? {} : { brief }) });
+        out.push({ source: cleanId(receipt?.source, 80) ?? source.name, id, ...(revision === undefined ? {} : { revision }), state, ...(count === undefined ? {} : { count }), line, ...(brief === undefined ? {} : { brief }), ...(receipt.requiresUserWaiver === true ? { requiresUserWaiver: true } : {}) });
         if (out.length >= limit) return out;
       }
       continue;
