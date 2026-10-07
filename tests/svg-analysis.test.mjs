@@ -29,6 +29,12 @@ test('path data parses per the SVG grammar, including fused arc flags and implic
   assert.deepEqual(parsePath('a1 1 0 01.5 2')?.[0].args,[1,1,0,0,1,0.5,2],'fused flag digits are not one number');
   assert.equal(parsePath('M1 2 Q'),undefined);
   assert.equal(parsePath('X1 2'),undefined);
+  for (const d of ['M8 8L56,,56', 'M8 8L,56 56', 'M8 8L56 56,', ',M8 8L56 56', 'M8 8,L56 56', 'M8 8L56 56,Z', 'M1e309 2']) {
+    assert.equal(parsePath(d), undefined, d);
+    assert.equal(compactPath(d), d, 'malformed path must stay untouched');
+  }
+  assert.deepEqual(parsePath('M8,8,56,56')?.map(s=>s.cmd), ['M','L']);
+  assert.deepEqual(parsePath('M.1.2L3-4')?.map(s=>s.args), [[.1,.2],[3,-4]]);
   assert.equal(compactPath('M 12.000000,2.000000 L 5.5,-3.25 z'),'M12 2L5.5-3.25z');
   assert.equal(compactPath('M0.500 0.250 l-.5 .5'),'M.5.25l-.5.5');
   assert.equal(compactPath('not a path'),'not a path','malformed data is left alone');

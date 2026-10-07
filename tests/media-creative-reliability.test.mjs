@@ -59,8 +59,14 @@ test('SVG tracks reject ignored transforms, malformed paths and multiple animati
   for (const [property, first, last, error] of [
     ['transform', 'spin(0)', 'spin(90)', /affine/],
     ['transform', 'matrix(1 0 0 1 0)', 'matrix(1 0 0 1 2)', /affine/],
+    ['transform', ',translate(1)', ',translate(2)', /affine/],
+    ['transform', 'translate(1),', 'translate(2),', /affine/],
+    ['transform', 'translate(1),,rotate(2)', 'translate(2),,rotate(3)', /affine/],
     ['d', 'M0 0C2 2', 'M1 1C3 3', /valid path/],
     ['d', 'L0 0L2 2', 'L1 1L3 3', /moveto/],
+    ['d', 'M8 8L56,,56', 'M8 8L48,,48', /valid path/],
+    ['d', 'M8 8L,56 56', 'M8 8L,48 48', /valid path/],
+    ['d', 'M8 8L56 56,', 'M8 8L48 48,', /valid path/],
   ]) await assert.rejects(prepareSvgSource({ svg: source, tracks: [track(property, first, last)] }, cwd), error);
   for (const svg of [
     source.replace('/></svg>', '><animate attributeName="transform" from="translate(0)" to="translate(1)" dur="1s"/></path></svg>'),

@@ -278,15 +278,15 @@ const multiplyMatrix = (m: Matrix, n: Matrix): Matrix => ({
 export const parseTransform = (value: string): { matrix: Matrix; trivial: boolean; valid: boolean } => {
   let matrix = { ...IDENTITY };
   let trivial = true, valid = true, end = 0;
-  const re = /([A-Za-z]+)\s*\(([^)]*)\)/g;
+  const re = /([A-Za-z]+)[ \t\r\n]*\(([^)]*)\)/g;
   let match: RegExpExecArray | null;
   let guard = 0;
   while ((match = re.exec(value)) && guard++ < 32) {
-    if (!/^[\s,]*$/.test(value.slice(end, match.index))) valid = false;
+    if (!(end ? /^[ \t\r\n]*,?[ \t\r\n]*$/ : /^[ \t\r\n]*$/).test(value.slice(end, match.index))) valid = false;
     end = re.lastIndex;
-    const body = match[2].trim();
-    const tokens = body.split(/[\s,]+/), args = tokens.map(Number);
-    if (!body || /(?:^,|,$|,\s*,)/.test(body) || tokens.some(token => !/^[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?$/.test(token)) || args.some(n => !Number.isFinite(n))) { valid = false; continue; }
+    const body = match[2].replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+    const tokens = body.split(/[ \t\r\n,]+/), args = tokens.map(Number);
+    if (!body || /(?:^,|,$|,[ \t\r\n]*,)/.test(body) || tokens.some(token => !/^[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?$/.test(token)) || args.some(n => !Number.isFinite(n))) { valid = false; continue; }
     let next: Matrix | undefined;
     if (match[1] === "translate" && [1, 2].includes(args.length)) {
       const [tx, ty = 0] = args;
@@ -312,7 +312,7 @@ export const parseTransform = (value: string): { matrix: Matrix; trivial: boolea
       else valid = false;
     }
   }
-  if (!end || !/^[\s,]*$/.test(value.slice(end))) valid = false;
+  if (!end || !/^[ \t\r\n]*$/.test(value.slice(end))) valid = false;
   return { matrix, trivial, valid };
 };
 

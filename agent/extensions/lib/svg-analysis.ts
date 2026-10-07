@@ -23,17 +23,25 @@ const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/;
 export function parsePath(d: string): Segment[] | undefined {
   const segments: Segment[] = [];
   let i = 0, cmd = "";
-  const skip = () => { while (i < d.length && /[\s,]/.test(d[i])) i++; };
-  while (skip(), i < d.length) {
-    if (/[A-Za-z]/.test(d[i])) { cmd = d[i++]; if (!(cmd.toLowerCase() in ARITY)) return undefined; if (cmd.toLowerCase() === "z") { segments.push({ cmd, args: [] }); cmd = ""; continue; } }
+  const whitespace = () => { while (i < d.length && /[ \t\r\n]/.test(d[i])) i++; };
+  while (whitespace(), i < d.length) {
+    const explicit = /[A-Za-z]/.test(d[i]);
+    if (explicit) { cmd = d[i++]; if (!(cmd.toLowerCase() in ARITY)) return undefined; if (cmd.toLowerCase() === "z") { segments.push({ cmd, args: [] }); cmd = ""; continue; } }
     else if (!cmd) return undefined;
     const lower = cmd.toLowerCase(), args: number[] = [];
     for (let k = 0; k < ARITY[lower]; k++) {
-      skip();
+      whitespace();
+      if (d[i] === ',') {
+        // A single comma separates arguments or repeated argument groups.
+        // It cannot begin a command, repeat, or trail a completed path.
+        if (explicit && k === 0) return undefined;
+        i++; whitespace();
+        if (i === d.length || d[i] === ',' || /[A-Za-z]/.test(d[i])) return undefined;
+      }
       const flag = lower === "a" && (k === 3 || k === 4);
       if (flag) { if (d[i] !== "0" && d[i] !== "1") return undefined; args.push(Number(d[i++])); continue; }
       const m = NUMBER.exec(d.slice(i));
-      if (!m) return undefined;
+      if (!m || !Number.isFinite(Number(m[0]))) return undefined;
       args.push(Number(m[0])); i += m[0].length;
     }
     segments.push({ cmd, args });

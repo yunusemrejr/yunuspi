@@ -4,12 +4,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { validateScore, composeMusic } from './music-score.ts';
+import { composeMusic, planScoreRender } from './music-score.ts';
 import { audioMix, videoCompose, prepareAudioMix, prepareVideoCompose, cachedProbe, duckingOptions, loopBudget } from './media-timeline.ts';
 import { measureAudio } from './audio-studio.ts';
 import { sceneRender, readSceneJson } from './scene-studio.ts';
 import { prepareSvgSource, svgRender } from './svg-render.ts';
 import { planNarration, narrationSpeak } from './video-studio.ts';
+import { retainedSpeechError } from './elevenlabs.ts';
 import { inputFile, number, outputFolder } from './media-process.ts';
 import { validateScene, SCENE_LIMITS } from '../../scripts/scene-model.mjs';
 
@@ -27,13 +28,13 @@ export function planMediaPipeline(params: any) {
   if (mode === 'audio' && !params.score && !params.tracks?.length && !params.narration) throw Error('Audio pipeline needs a score or tracks or narration');
   if ((params.tracks?.length ?? 0) + (params.score ? 1 : 0) + (params.narration ? 1 : 0) > 8) throw Error('The score and tracks together, including narration, accept at most 8 tracks');
   // Validate score/target before creating any output or running synthesis.
-  if (params.score !== undefined) validateScore(params.score);
   if (params.scoreRender !== undefined) {
     if (!params.score || !params.scoreRender || typeof params.scoreRender !== 'object' || Array.isArray(params.scoreRender)) throw Error('scoreRender requires a score and renderer options');
     for (const key of Object.keys(params.scoreRender)) if (!['backend', 'soundfont', 'releaseTail'].includes(key)) throw Error(`Unknown scoreRender field: ${key}`);
     if (params.scoreRender.backend && !['auto', 'soundfont', 'oscillator'].includes(params.scoreRender.backend)) throw Error('Invalid scoreRender backend');
     if (params.scoreRender.releaseTail !== undefined) number(params.scoreRender.releaseTail, 1.5, 0, 5, 'releaseTail');
   }
+  if (params.score !== undefined) planScoreRender({ ...params.scoreRender, score: params.score });
   if (params.scoreGain !== undefined && params.score === undefined) throw Error('scoreGain requires a score');
   if (params.scoreGain !== undefined) number(params.scoreGain, 0.3, 0, 4, 'scoreGain');
   if (params.targetLufs !== undefined) number(params.targetLufs, -16, -36, -8, 'targetLufs');
@@ -52,11 +53,12 @@ export function planMediaPipeline(params: any) {
 
 export async function mediaPipeline(params: any, cwd: string, signal?: AbortSignal) {
   const started = performance.now(), plan = planMediaPipeline(params);
-  if (params.score && (params.scoreRender?.backend === 'soundfont' || (params.scoreRender?.backend !== 'oscillator' && (params.scoreRender?.soundfont || process.env.YUNUSPI_SOUNDFONT)))) {
-    const font = params.scoreRender?.soundfont ?? process.env.YUNUSPI_SOUNDFONT;
-    if (!font) throw Error('SoundFont rendering needs a local SF2/SF3 bank');
-    const bank = await inputFile(font, cwd);
+  const scorePlan = params.score === undefined ? undefined : planScoreRender({ ...params.scoreRender, score: params.score });
+  const scoreRender = scorePlan ? { backend: scorePlan.backend, soundfont: scorePlan.soundfont, releaseTail: scorePlan.releaseTail } : undefined;
+  if (scorePlan?.backend === 'soundfont') {
+    const bank = await inputFile(scorePlan.soundfont, cwd);
     if (!/\.sf[23]$/i.test(bank) || (await fs.stat(bank)).size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
+    scoreRender!.soundfont = bank;
   }
   signal?.throwIfAborted();
   let animation: any, svgSource: any, animationFile: string | undefined, animationSnapshot: string | undefined;
@@ -73,7 +75,7 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
   // Resolve every source and edit option before synthesizing or allocating
   // output. The same call-local probe promises serve preflight and rendering.
   const inspect = cachedProbe(signal);
-  const duration = animation ? Math.ceil(animation.duration * animation.fps) / animation.fps : params.duration ?? (params.score ? validateScore(params.score).seconds : 30);
+  const duration = animation ? Math.ceil(animation.duration * animation.fps) / animation.fps : params.duration ?? scorePlan?.score.seconds ?? 30;
   const sourceOptions = { tracks: params.tracks ?? [], duration, ducking: false };
   const prepared = plan.mode === 'video'
     ? await prepareVideoCompose({ clips: params.clips, audio: params.tracks, transition: params.transition, transitionDuration: params.transitionDuration, includeClipAudio: params.includeClipAudio, width: params.width, height: params.height, fps: params.fps, ducking: false }, cwd, signal, inspect)
@@ -82,13 +84,14 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
   const roles = [...(prepared && 'extraTracks' in prepared ? [...prepared.clipRoles, ...prepared.extraTracks.map(track => track.role)] : prepared?.tracks.map(track => track.role) ?? []), ...(params.score ? ['music'] : []), ...(params.narration ? ['voice'] : [])];
   if (params.score) loopBudget([
     ...(prepared && 'extraTracks' in prepared ? prepared.extraTracks : prepared?.tracks ?? []),
-    { loop: true, sourceDuration: Math.min(validateScore(params.score).seconds, prepared && 'requestedDuration' in prepared ? prepared.requestedDuration : duration) },
+    { loop: true, sourceDuration: Math.min(scorePlan!.score.seconds, prepared && 'requestedDuration' in prepared ? prepared.requestedDuration : duration) },
   ]);
   duckingOptions(params.ducking, roles);
   if (params.targetLufs !== undefined && !roles.length) throw Error('Loudness normalization requires audio');
   signal?.throwIfAborted();
   const dir = await outputFolder(params.outputDir, cwd);
   const stages: Array<{ name: string; elapsedMs: number }> = [];
+  let narration: any;
   const stage = async (name: string, work: () => Promise<any>) => {
     signal?.throwIfAborted();
     const at = performance.now(), result = await work();
@@ -101,7 +104,7 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     const sceneSnapshot = animationSnapshot === undefined ? undefined : path.join(dir, 'animation.scene.json');
     if (sceneSnapshot) await fs.writeFile(sceneSnapshot, animationSnapshot!, { flag: 'wx', mode: 0o600 });
     const tracks = [...(params.tracks ?? [])];
-    let score: any, narration: any;
+    let score: any;
     if (params.narration) {
       narration = await stage('synthesize_narration', () => narrationSpeak({ ...params.narration, outputDir: dir }, cwd, signal));
       const deliveryDuration = prepared && 'requestedDuration' in prepared ? prepared.requestedDuration : duration;
@@ -109,7 +112,7 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
       tracks.push({ path: narration.artifact.path, role: 'voice' });
     }
     if (params.score) {
-      score = await stage('compose_score', () => composeMusic({ ...params.scoreRender, score: params.score, outputDir: dir }, cwd, signal));
+      score = await stage('compose_score', () => composeMusic({ ...scoreRender, score: params.score, outputDir: dir }, cwd, signal));
       tracks.push({ path: score.files.find((file: any) => file.path.endsWith('.wav')).path, role: 'music', gain: params.scoreGain ?? 0.3, loop: true });
     }
     const mixOptions = { tracks, ducking: params.ducking, targetLufs: params.targetLufs, outputDir: dir };
@@ -145,5 +148,20 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     await fs.writeFile(path.join(dir, 'pipeline.json'), JSON.stringify(result, null, 2) + '\n', { flag: 'wx' });
     signal?.throwIfAborted();
     return result;
-  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+  } catch (error) {
+    const tagged = error instanceof Error && typeof (error as any).retainedSpeechCache === 'string' ? error : undefined;
+    const retained = tagged ?? (narration?.provider === 'elevenlabs' && narration.artifact?.path ? await retainedSpeechError(path.dirname(narration.artifact.path), error) : undefined);
+    if (retained) {
+      const recovery = path.join(dir, 'pipeline-recovery.json');
+      const receipt = { pipeline: plan.mode, completedStages: stages, error: error instanceof Error ? error.message : String(error), retainedSpeechCache: (retained as any).retainedSpeechCache,
+        submissionOutcomeUnknown: (retained as any).submissionOutcomeUnknown === true,
+        ...(narration ? { narration: { artifact: narration.artifact, seconds: narration.seconds, captions: narration.captions }, reuse: "Use the retained narration artifact as a role:voice track and omit narration when rerunning the pipeline; this avoids another paid speech request." }
+          : { recovery: { tool: 'narration_tts', arguments: { action: 'recover', dir: (retained as any).retainedSpeechCache } }, reuse: "Run narration_tts action:recover on the retained cache; this cannot submit paid work. For an unknown submission outcome, inspect the checkpoint and provider history before regeneration." }) };
+      let receiptWritten = false;
+      try { await fs.writeFile(recovery, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); receiptWritten = true; }
+      catch { /* Preserve paid checkpoints even if the recovery receipt cannot be written. */ }
+      throw Object.assign(new Error(`${retained.message}; pipeline retained at ${dir}.${receiptWritten ? ` Recovery receipt: ${recovery}` : ' Could not write a recovery receipt; inspect the retained speech cache.'}`, { cause: retained }), { retainedSpeechCache: (retained as any).retainedSpeechCache, ...(receiptWritten ? { pipelineRecovery: recovery } : {}), ...((retained as any).submissionOutcomeUnknown ? { submissionOutcomeUnknown: true } : {}) });
+    }
+    await fs.rm(dir, { recursive: true, force: true }); throw error;
+  }
 }

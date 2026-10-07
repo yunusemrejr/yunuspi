@@ -22,6 +22,8 @@ GPT Image requests omit the unsupported `response_format` field and reject `seed
 
 Once a provider returns complete image bytes, the tool saves them before local decoding or registration. Cancellation after the response, corrupt image data, and registry failures keep the bytes and a `recovery.json` receipt with the observed decode/registration state and reported usage. Reuse a decoded retained image and repair its bookkeeping; inspect decode-unverified bytes before requesting another paid take. Invalid mask types never silently become an unmasked edit.
 
+URL-only provider results receive a private `download.json` checkpoint before the download, preserving the original usage and edit provenance. `image_generate action:recover path:<checkpoint>` resumes a bounded, validated GET without generation credentials or another generation request. Failed downloads keep that checkpoint; an expired URL reports failure without regenerating. Recovery keeps additional files in the checkpoint folder.
+
 The request formats follow the official [OpenAI generation](https://developers.openai.com/api/reference/resources/images/methods/generate), [OpenAI editing](https://developers.openai.com/api/reference/resources/images/methods/edit) and [OpenRouter image generation](https://openrouter.ai/docs/guides/overview/multimodal/image-generation) documentation.
 
 ## Understanding and converting images
@@ -73,6 +75,8 @@ SVG diagnostics group identical observations with their first/last frame and occ
 ```
 
 `media_pipeline` can render a Three.js scene JSON or an SVG, synthesize narration, compose an editable music score, duck music under voice, encode video and measure the delivered AAC audio in one call. Narration overruns reject before video rendering, rather than silently truncating speech.
+
+The pipeline checks the exact score renderer and local SoundFont bank before narration starts. A later failure or cancellation preserves any paid speech checkpoints and writes `pipeline-recovery.json` when possible. Reuse a completed narration artifact as a `role:voice` track and omit `narration` on the next pipeline call. An unknown submission outcome retains its checkpoint for inspection against provider history; it never silently retries payment.
 
 Three.js pipelines use a bounded, validated scene snapshot for both the audio clock and video rendering. Source edits during synthesis do not change that take. The `visual` receipt identifies the original source, editable snapshot and content hash, and retains available contact-sheet, diagnostic and motion evidence instead of discarding the renderer's review context. Media subprocesses finish closing before worker slots or failed output folders are released.
 

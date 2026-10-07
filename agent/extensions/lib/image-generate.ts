@@ -255,6 +255,8 @@ async function imageBytesFromPayload(payload: any, signal: AbortSignal | undefin
 }
 
 type ImageRuntime = { providerKey?: string; onModel?: (model: string) => void; onUsage?: (usage: unknown, status: "pending" | "completed" | "failed" | "cancelled" | "timeout") => void };
+type DownloadCheckpoint = { dir: string; receipt: string };
+const retainedDownloadError = (error: unknown, checkpoint: DownloadCheckpoint, cwd: string) => Object.assign(new Error(`${redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 600)}; paid image download checkpoint retained at ${relative(cwd, checkpoint.receipt)}. Run image_generate action:recover path:${relative(cwd, checkpoint.receipt)}; this downloads the saved result and cannot submit generation.`, { cause: error }), { retainedImageDownload: checkpoint.receipt });
 const backendKey = (backend: BackendStatus, env: Record<string, string | undefined>, runtime: ImageRuntime) =>
   env.PI_IMAGE_API_KEY ?? (backend.name === "openrouter" ? env.OPENROUTER_API_KEY ?? runtime.providerKey : env.OPENAI_API_KEY) ?? "";
 
@@ -280,21 +282,39 @@ export function imageUsage(raw: any) {
   return usage;
 }
 
-async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefined, request: (active: AbortSignal) => Promise<any>) {
+async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefined, request: (active: AbortSignal) => Promise<any>, recovery: { cwd: string; brief: GenerationBrief; params: any; backend: BackendStatus; extra?: Record<string, unknown> }) {
   const active = signal ? AbortSignal.any([signal, AbortSignal.timeout(240000)]) : AbortSignal.timeout(240000);
   active.throwIfAborted();
-  let payload: any;
+  let payload: any, completed = false, checkpoint: DownloadCheckpoint | undefined;
   runtime.onUsage?.(undefined, "pending");
   try {
     payload = await request(active);
+    const datum = payload?.data?.[0], url = !datum?.b64_json && !datum?.b64Json && typeof datum?.url === 'string' ? datum.url : undefined;
+    const usage = imageUsage(payload.usage);
+    if (url) {
+      // The generation POST has finished; a later GET/cancellation must not
+      // discard an expiring paid URL or misreport generation as cancelled.
+      completed = true;
+      try { runtime.onUsage?.(usage, 'completed'); } catch { /* completed generation survives accounting failures */ }
+      if (url.length > 8192) throw Error('Generated image URL exceeds 8192 characters');
+      const dir = await qaFolder(undefined, recovery.cwd, 'assets', 'gen-url');
+      const receipt = path.join(dir, 'download.json');
+      const params = Object.fromEntries(['seed', 'transparent', 'quality', 'compression', 'format', 'transport', 'size', 'aspect', 'aspectRatio', 'resolution'].filter(key => recovery.params[key] !== undefined).map(key => [key, recovery.params[key]]));
+      const saved = JSON.stringify({ version: 1, status: 'awaiting_download', decodeVerified: false, url, brief: recovery.brief, params, backend: recovery.backend, usage: usage ?? null, extra: recovery.extra ?? {} }) + '\n';
+      if (Buffer.byteLength(saved) > 64 * 1024) throw Error('Image download checkpoint exceeds 64 KiB');
+      const temporary = path.join(dir, 'download.json.tmp');
+      await fs.writeFile(temporary, saved, { flag: 'wx', mode: 0o600 });
+      await fs.rename(temporary, receipt);
+      checkpoint = { dir, receipt };
+    }
     const bytes = await imageBytesFromPayload(payload, active);
     // Complete bytes are a paid result. Storage owns recovery if cancellation
     // arrives now; discarding this response would encourage another charge.
-    const usage = imageUsage(payload.usage);
-    runtime.onUsage?.(usage, "completed");
-    return { bytes, usage: usage ?? null, rawUsage: payload.usage ?? null };
+    if (!completed) { completed = true; try { runtime.onUsage?.(usage, 'completed'); } catch { /* preserve received pixels */ } }
+    return { bytes, usage: usage ?? null, rawUsage: payload.usage ?? null, checkpoint };
   } catch (error) {
-    runtime.onUsage?.(imageUsage(payload?.usage), active.aborted ? active.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
+    if (!completed) runtime.onUsage?.(imageUsage(payload?.usage), active.aborted ? active.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
+    if (checkpoint) throw retainedDownloadError(error, checkpoint, recovery.cwd);
     throw error;
   }
 }
@@ -364,15 +384,20 @@ async function storeGenerated(
   bytes: Buffer, brief: GenerationBrief, params: { seed?: unknown; transparent?: unknown; quality?: unknown; compression?: unknown; format?: unknown; transport?: unknown; size?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown },
   backend: BackendStatus, kind: "generated" | "authored", cwd: string, signal: AbortSignal | undefined,
   extra: Record<string, unknown> = {},
+  checkpoint?: DownloadCheckpoint,
 ) {
   const format = sniffImage(bytes);
-  if (!format) throw new Error("Backend bytes are not a recognized image (PNG, JPEG, WebP, GIF, BMP, TIFF, QOI, PNM)");
-  const dir = await qaFolder(undefined, cwd, "assets", "gen");
+  if (!format) { const error = new Error("Backend bytes are not a recognized image (PNG, JPEG, WebP, GIF, BMP, TIFF, QOI, PNM)"); throw checkpoint ? retainedDownloadError(error, checkpoint, cwd) : error; }
+  const dir = await qaFolder(undefined, cwd, "assets", "gen").catch(error => { throw checkpoint ? retainedDownloadError(error, checkpoint, cwd) : error; });
   const file = path.join(dir, `image.${format === "jpeg" ? "jpg" : format}`);
   let retained = false, decoded: Awaited<ReturnType<typeof decodeImage>> | undefined, registration = 'unverified';
   try {
     await fs.writeFile(file, bytes, { flag: "wx", mode: 0o600 });
     retained = true;
+    if (checkpoint) {
+      await fs.unlink(checkpoint.receipt).catch(() => {});
+      await fs.rmdir(checkpoint.dir).catch(() => {}); // keep any additional caller-owned files
+    }
     // Save first, then finish bounded local decoding even when the request was
     // cancelled after its response. No new provider call is allowed here.
     decoded = await decodeImage(bytes, { maxWidth: 512, maxPixels: 512 * 512 }, AbortSignal.timeout(80_000));
@@ -403,7 +428,7 @@ async function storeGenerated(
       next: `Review the actual pixels before use: visual_review run {source: ${JSON.stringify(relative(cwd, file))}}. An attractive standalone image can still fail inside the page — integrate, render the page, and review the whole.`,
     };
   } catch (error: any) {
-    if (!retained) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+    if (!retained) { await fs.rm(dir, { recursive: true, force: true }); throw checkpoint ? retainedDownloadError(error, checkpoint, cwd) : error; }
     // Generation has already happened. A bookkeeping/cancellation failure
     // cannot justify deleting usable pixels or issuing another paid request.
     const recovery = { status: 'retained', file: relative(cwd, file), dir: relative(cwd, dir), bytes: bytes.length,
@@ -414,6 +439,27 @@ async function storeGenerated(
     await fs.writeFile(path.join(dir, 'recovery.json'), JSON.stringify(recovery, null, 2) + '\n', { flag: 'wx', mode: 0o600 }).catch(() => {});
     throw new Error(`${recovery.error}\n${decoded ? 'Decoded image' : 'Generated bytes'} retained at ${recovery.file}; recovery folder: ${recovery.dir}. ${recovery.next}`, { cause: error });
   }
+}
+
+/** Resume only the safe bounded GET for a saved provider result. No provider
+ * credential, generation POST or repeated usage journal entry is needed. */
+export async function imageRecoverRun(params: { path?: unknown }, cwd: string, signal?: AbortSignal) {
+  const root = await realRoot(cwd);
+  if (typeof params.path !== 'string' || !params.path || params.path.length > 4096) throw Error('recover requires path to a saved image download.json');
+  const file = await fs.realpath(path.resolve(root, params.path));
+  if (!containsPath(root, file)) throw Error('Image download checkpoint must stay inside the workspace');
+  const stat = await fs.stat(file);
+  if (!stat.isFile() || stat.size > 64 * 1024) throw Error('Image download checkpoint must be a regular file up to 64 KiB');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  if (saved.version !== 1 || saved.status !== 'awaiting_download' || typeof saved.url !== 'string' || !saved.url || saved.url.length > 8192 || !saved.brief || !ASSET_ROLES.includes(saved.brief.role) || typeof saved.brief.prompt !== 'string' || !saved.params || !['openrouter', 'openai-compatible'].includes(saved.backend?.name)) throw Error('Invalid image download checkpoint');
+  const checkpoint = { dir: path.dirname(file), receipt: file };
+  // Only remove harness-created checkpoint directories after saving pixels.
+  const owned = path.basename(file) === 'download.json' && /^gen-url-[a-zA-Z0-9-]+$/.test(path.basename(checkpoint.dir));
+  let bytes: Buffer;
+  try { bytes = await imageBytesFromPayload({ data: [{ url: saved.url }] }, signal); }
+  catch (error) { throw new Error(`${redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 600)}; image download checkpoint retained at ${relative(root, file)}. Retry recover while the URL remains valid; do not repeat generation.`, { cause: error }); }
+  const extra = Object.fromEntries(['editOf', 'references', 'referenceHashes', 'mask', 'maskHash', 'inputFidelity', 'quote'].filter(key => saved.extra?.[key] !== undefined).map(key => [key, saved.extra[key]]));
+  return storeGenerated(bytes, saved.brief, saved.params, saved.backend, 'generated', root, signal, { ...extra, usage: saved.usage ?? null, recovered: true }, owned ? checkpoint : undefined);
 }
 
 async function plannedImageParams(params: any, signal?: AbortSignal) {
@@ -446,8 +492,8 @@ export async function imageGenerateRun(
   const body = buildImageRequest(brief, { ...params, model: backend.model! });
   if (backend.name === "openrouter") routerImageOptions(body, params, true);
   if (planned.quote) body.provider = { only: [planned.quote.provider], allow_fallbacks: false };
-  const { bytes, usage } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, backend.name === "openrouter" ? "/images" : "/images/generations", body, active, 240_000));
-  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { usage, quote: planned.quote });
+  const { bytes, usage, checkpoint } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, backend.name === "openrouter" ? "/images" : "/images/generations", body, active, 240_000), { cwd, brief, params, backend, extra: { quote: planned.quote } });
+  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { usage, quote: planned.quote }, checkpoint);
 }
 
 export async function imageEditRun(
@@ -510,15 +556,17 @@ export async function imageEditRun(
   if (backend.name === "openrouter") {
     if (maskFile) throw new Error("Masked edits require the openai-compatible backend; OpenRouter reference edits do not define mask semantics");
     let bytes: Buffer;
+    let checkpoint: DownloadCheckpoint | undefined;
     if (params.transport === "images") {
       routerImageOptions(body, params, true);
       if (planned.quote) body.provider = { only: [planned.quote.provider], allow_fallbacks: false };
       body.input_references = references.map(bytes => ({ type: "image_url", image_url: { url: `data:image/${sniffImage(bytes)};base64,${bytes.toString("base64")}` } }));
-      const generated = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, backendKey(backend, env, runtime), "/images", body, active, 240000));
+      const generated = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, backendKey(backend, env, runtime), "/images", body, active, 240000), { cwd, brief, params, backend, extra: { ...extra, quote: planned.quote } });
       bytes = generated.bytes;
+      checkpoint = generated.checkpoint;
       Object.assign(extra, { usage: generated.usage, quote: planned.quote });
     } else bytes = await openRouterImage(brief, params, backend, backendKey(backend, env, runtime), signal, runtime, references);
-    return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, extra);
+    return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, extra, checkpoint);
   }
   if (params.transport === "chat") throw Error("chat transport requires OpenRouter");
   const form = new FormData();
@@ -526,11 +574,11 @@ export async function imageEditRun(
   for (let i = 0; i < references.length; i++) form.append(references.length > 1 ? "image[]" : "image", new Blob([references[i]], { type: `image/${sniffImage(references[i])}` }), path.basename(imageFiles[i]));
   if (maskFile && maskBytes) form.set("mask", new Blob([maskBytes], { type: "image/png" }), path.basename(maskFile));
   const key = env.PI_IMAGE_API_KEY ?? env.OPENAI_API_KEY ?? "";
-  const { bytes, usage } = await nativeImage(runtime, signal, async active => {
+  const { bytes, usage, checkpoint } = await nativeImage(runtime, signal, async active => {
     const response = await fetch(`${backend.apiUrl}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: active });
     const text = await responseText(response, active);
     if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
     try { return JSON.parse(text); } catch { throw new Error("Image backend returned a non-JSON payload"); }
-  });
-  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { ...extra, usage });
+  }, { cwd, brief, params, backend, extra });
+  return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { ...extra, usage }, checkpoint);
 }

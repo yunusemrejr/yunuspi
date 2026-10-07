@@ -775,9 +775,12 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
       const result = segmented ? await renderSegments(params, dir, spec, total, request, runRenderer, signal, report) : await runRenderer(dir, request, signal, report, timeoutMs);
       if (segmented && !result.complete) return result;
       let mastered: Awaited<ReturnType<typeof masterMedia>> | undefined;
-      if (finalMode && params.master !== false && !request.muted && (await probe(result.output, signal)).streams?.some((st: any) => st.codec_type === "audio")) mastered = await masterFinal(result.output, targetLoudness(spec), signal);
-      const info = await probe(result.output, signal);
-      await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(result.output, 0), "-f", "null", "-"], signal, timeoutMs);
+      const originalInfo = await probe(result.output, signal);
+      if (finalMode && params.master !== false && !request.muted && originalInfo.streams?.some((st: any) => st.codec_type === "audio")) mastered = await masterFinal(result.output, targetLoudness(spec), signal);
+      const info = mastered?.normalized ? await probe(result.output, signal) : originalInfo;
+      // The segment owner verified these exact delivered bytes. Mastering
+      // rewrites audio/container bytes, which must receive fresh verification.
+      if (result.decodeVerified !== true || mastered?.normalized) await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(result.output, 0), "-f", "null", "-"], signal, timeoutMs);
       // Sidecar subtitles use the same timing as the burned-in captions.
       let captions: any;
       if (finalMode) {

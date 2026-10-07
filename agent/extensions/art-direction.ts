@@ -31,7 +31,7 @@ import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
 import { normalizeAssetInput, inspectAsset, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
-import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
+import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageRecoverRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
 import { registerContinuationSource, resumesElsewhere } from "./lib/continuation-notice.ts";
 import { createCreativeEvidence } from "./lib/creative-evidence.ts";
 import { uiFileCue, uiPromptCue } from "./lib/ui-doctrine.ts";
@@ -534,9 +534,9 @@ export default function artDirection(pi: any) {
 
   // ── image_generate ──
   register("image_generate",
-    "Generative imagery inside the creative loop. /models Images sets an independent default. plan checks live capabilities and conservative pricing without generation. model:auto chooses a compatible fixed-price endpoint within maxCostUsd; no paid retry or model fallback. status lists the bundled OpenRouter image catalog; refresh:true discovers its current Images API models for transport:images. generate/edit accept an exact model overriding the environment for this call. edit supports path or 1..5 references, inputFidelity on supported models, and validated transparent PNG masks with openai-compatible. GPT Image requests omit unsupported legacy response_format/seed. Format/compression/transparency/quality are explicit. Outputs are decode-verified, registered and returned for review; no cheaper fallback or paid retry is selected automatically.",
+    "Generative imagery inside the creative loop. /models Images sets an independent default. plan checks live capabilities and conservative pricing without generation. model:auto chooses a compatible fixed-price endpoint within maxCostUsd; no paid retry or model fallback. status lists the bundled OpenRouter image catalog; refresh:true discovers its current Images API models for transport:images. generate/edit accept an exact model overriding the environment for this call. edit supports path or 1..5 references, inputFidelity on supported models, and validated transparent PNG masks with openai-compatible. GPT Image requests omit unsupported legacy response_format/seed. Format/compression/transparency/quality are explicit. recover with path to a retained download.json downloads its saved URL without generation credentials or another generation request; original usage is retained. Outputs are decode-verified, registered and returned for review; no cheaper fallback or paid retry is selected automatically.",
     Type.Object({
-      action: choices(["status", "brief", "plan", "generate", "edit"]),
+      action: choices(["status", "brief", "plan", "generate", "edit", "recover"]),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact model id or openrouter/auto; /models Images supplies the default" })),
       maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 500, description: "Native OpenRouter preflight cap; automatic choice defaults to $0.25 for one image. Unknown token/megapixel costs cannot pass this cap." })),
       refresh: Type.Optional(Type.Boolean({ description: "status: fetch current OpenRouter Images API catalog" })),
@@ -557,6 +557,7 @@ export default function artDirection(pi: any) {
       inputFidelity: Type.Optional(choices(["low", "high"])),
     }),
     async (params, ctx, signal) => {
+      if (params.action === 'recover') { const run = await imageRecoverRun(params, ctx.cwd as string, signal); return { result: run, pixels: run.file }; }
       params = selectedMediaParams(params, 'image', ctx.mediaModels);
       const selectedBackend = params.mediaProvider;
       const imageBaseEnv = { ...process.env, ...(selectedBackend ? { PI_IMAGE_BACKEND: selectedBackend } : {}), ...(params.model ? { PI_IMAGE_MODEL: params.model } : {}) };
