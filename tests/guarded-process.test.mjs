@@ -57,3 +57,18 @@ test('cancellation prevents later buffered progress and removes its listener', a
   assert.deepEqual(lines, ['first']);
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
 });
+
+test('guarded cancellation reaps the child before the caller can clean output', async () => {
+  const controller = new AbortController(); let pid;
+  await assert.rejects(run("process.stdout.write(process.pid+'\\n');setInterval(()=>{},1000)", {
+    signal: controller.signal,
+    onLine(line) { pid = Number(line); controller.abort(); },
+  }), /cancelled/);
+  assert.ok(Number.isSafeInteger(pid));
+  assert.throws(() => process.kill(pid, 0), error => error.code === 'ESRCH', 'worker is reaped when the operation settles');
+});
+
+test('cancellation from the final partial progress line remains a failure after child exit', async () => {
+  const controller = new AbortController();
+  await assert.rejects(run("process.stdout.write('final')", { signal: controller.signal, onLine() { controller.abort(); } }), /cancelled/);
+});

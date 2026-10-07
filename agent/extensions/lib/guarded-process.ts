@@ -25,7 +25,7 @@ export async function runGuarded(command: string, args: string[], options: { cwd
     const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: options.replaceEnv ? { ...options.env } : { ...process.env, ...options.env } });
     ownProcessGroup(child.pid);
     const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
-    let stdout = "", stderr = "", pending = "", lineTruncated = false, settled = false;
+    let stdout = "", stderr = "", pending = "", lineTruncated = false, settled = false, failure: Error | undefined;
     const tail = (text: string, add: string) => {
       const joined = text + add;
       let start = Math.max(0, joined.length - 200_000);
@@ -34,14 +34,23 @@ export async function runGuarded(command: string, args: string[], options: { cwd
       return joined.slice(start);
     };
     const kill = () => { if (child.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ } };
-    const timer = options.timeoutMs > 0 ? setTimeout(() => { kill(); finish(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs) : undefined;
+    const timer = options.timeoutMs > 0 ? setTimeout(() => { stop(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs) : undefined;
     timer?.unref();
     const stopWatching = child.pid ? watchMemory(child.pid, options.memoryMb ?? memoryBudgetMb(), (message, pids) => {
-      kill();
       for (const pid of pids) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
-      finish(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
+      stop(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
     }) : () => {};
-    const abort = () => { kill(); finish(new Error(`${path.basename(command)} cancelled`)); };
+    const abort = () => { stop(new Error(`${path.basename(command)} cancelled`)); };
+    function stop(error: Error) {
+      if (settled || failure) return;
+      failure = error;
+      clearTimeout(timer);
+      stopWatching();
+      options.signal?.removeEventListener("abort", abort);
+      kill();
+      // Killing is asynchronous. Release output/worker ownership only after
+      // close confirms that the child and its inherited stdio are gone.
+    }
     function finish(error?: Error) {
       if (settled) return;
       settled = true;
@@ -66,28 +75,30 @@ export async function runGuarded(command: string, args: string[], options: { cwd
         if (pending.length + part.length > 200_000) lineTruncated = true;
         pending = tail(pending, part);
       };
-      while (!settled && (newline = text.indexOf("\n", start)) >= 0) {
+      while (!settled && !failure && (newline = text.indexOf("\n", start)) >= 0) {
         append(text.slice(start, newline));
         emitLine();
         start = newline + 1;
       }
-      if (!settled) append(text.slice(start));
+      if (!settled && !failure) append(text.slice(start));
     };
-    const failProgress = (error: unknown) => { kill(); finish(error instanceof Error ? error : new Error(String(error))); };
+    const failProgress = (error: unknown) => { stop(error instanceof Error ? error : new Error(String(error))); };
     child.stdout.on("data", (chunk: Buffer) => {
-      if (settled) return;
+      if (settled || failure) return;
       try { appendStdout(stdoutDecoder.write(chunk)); } catch (error) { failProgress(error); }
     });
-    child.stderr.on("data", (chunk: Buffer) => { if (!settled) stderr = tail(stderr, stderrDecoder.write(chunk)); });
-    child.on("error", (error: any) => finish(error.code === "ENOENT" ? new Error(`${command} is not installed`) : error));
+    child.stderr.on("data", (chunk: Buffer) => { if (!settled && !failure) stderr = tail(stderr, stderrDecoder.write(chunk)); });
+    child.on("error", (error: any) => stop(error.code === "ENOENT" ? new Error(`${command} is not installed`) : error));
     child.on("close", (code) => {
       if (settled) return;
+      if (failure) { finish(failure); return; }
       try {
         appendStdout(stdoutDecoder.end());
         stderr = tail(stderr, stderrDecoder.end());
         if (pending || lineTruncated) emitLine();
-      } catch (error) { failProgress(error); return; }
-      if (code === 0) finish();
+      } catch (error) { finish(failure ?? (error instanceof Error ? error : new Error(String(error)))); return; }
+      if (failure) finish(failure);
+      else if (code === 0) finish();
       else finish(new Error(`${path.basename(command)} exited with ${code}: ${(stderr || stdout).slice(-3000)}`));
     });
     options.signal?.addEventListener("abort", abort, { once: true });
