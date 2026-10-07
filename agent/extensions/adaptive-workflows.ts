@@ -328,6 +328,18 @@ export default function adaptiveWorkflows(pi: any) {
       if (deployed && event.input?.action === 'audit' && typeof origin === 'string' && data?.origin === origin.replace(/\/$/, '') && isLiveByteVerification('http_request', { url: origin })) record('seo-live', 'live', source, outcome);
       else record('seo-raw', 'inspection', source, outcome);
     }
+    if (call.revision === revision && !failed && event.toolName === 'ui_explore' && event.details?.consistent) {
+      const data = event.details;
+      const widths = (data.cells ?? []).filter((cell: any) => cell.ok && cell.dom?.available).map((cell: any) => cell.width);
+      const coverage = widths.some((width: number) => width <= 320) && widths.some((width: number) => width >= 1024);
+      record('ui-responsive', 'inspection', source, data.status === 'fail' ? 'failed' : data.status === 'incomplete' || !coverage ? 'blocked' : 'passed');
+    }
+    if (call.revision === revision && !failed && event.toolName === 'visual_review' && event.input?.action === 'record' && event.details?.recorded) {
+      // The creative owner enforces capture, revision and pixel provenance.
+      record(selection.ids.includes('ui-quality') ? 'ui-pixels' : 'art-pixels', 'pixels', source, event.details.recorded.blocking ? 'blocked' : 'passed');
+    }
+    if (call.revision === revision && !failed && event.toolName === 'browser_session' && event.input?.action === 'verify' && event.details?.ok && event.details?.verification?.matches === true)
+      record('ui-interaction', 'interaction', source);
     if (call.revision === revision && !failed && event.toolName === 'code_quality' && event.input?.operation === 'baseline') {
       const data = event.details;
       if (data?.operation === 'baseline' && data.status === 'inspected' && data.scope?.targetFiles > 0)

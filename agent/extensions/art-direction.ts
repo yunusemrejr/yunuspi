@@ -15,7 +15,7 @@ import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.t
  * gate through the "creative" continuation source. */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import {
   directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
@@ -25,13 +25,18 @@ import {
   creativeCompareRun, creativeVerificationLines, normalizeVerdict, planCompare, planUiMatrix,
   sourceRevision, uiExploreRun, visualReviewRun,
   type QACapture, type VisualReceipt,
+  localRenderPath,
 } from "./lib/creative-qa.ts";
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
 import { normalizeAssetInput, inspectAsset, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
 import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
-import { registerContinuationSource } from "./lib/continuation-notice.ts";
+import { registerContinuationSource, resumesElsewhere } from "./lib/continuation-notice.ts";
+import { createCreativeEvidence } from "./lib/creative-evidence.ts";
+import { uiFileCue, uiPromptCue } from "./lib/ui-doctrine.ts";
+import { createContextAnchor } from "./lib/context-anchor.ts";
+import { isSessionStopped } from "./lib/session-stop.ts";
 import { captureToFile } from "./render-and-wait.ts";
 import { sniffImage } from "./lib/design-studio.ts";
 import { choices } from "./lib/tool-schema.ts";
@@ -45,19 +50,10 @@ interface SessionCreative {
   direction?: CreativeDirection;
   receipts: VisualReceipt[];
   blockingRuns: Map<string, string>;
+  evidence: ReturnType<typeof createCreativeEvidence>;
+  followups: number;
+  autoSvgStamp?: string;
 }
-
-const sessions = new Map<string, SessionCreative>();
-const sessionOf = (ctx: any): { sid: string; state: SessionCreative } => {
-  const sid = String(ctx?.sessionManager?.getSessionId?.() ?? "");
-  let state = sessions.get(sid);
-  if (!state) {
-    state = { receipts: [], blockingRuns: new Map() };
-    sessions.set(sid, state);
-    while (sessions.size > 8) sessions.delete(sessions.keys().next().value!);
-  }
-  return { sid, state };
-};
 
 const isChild = () => process.env.PI_SUBAGENT_CHILD === "1";
 
@@ -91,6 +87,137 @@ async function maybePixels(pngPath: string, cwd: string, ctx: any) {
 
 export default function artDirection(pi: any) {
   const capture: QACapture = (params, destination, cwd, signal) => captureToFile(params as any, destination, cwd, signal);
+  const sessions = new Map<string, SessionCreative>();
+  let active: any, activeKey = '', epoch = 0, disposeNotice: (() => void) | undefined;
+  const owner = Symbol('creative-session-owner');
+  const assertOwner = (ctx: any) => { if (ctx[owner] !== undefined && ctx[owner] !== epoch) throw Error('Creative tool session changed; the late result cannot approve another session.'); };
+  const anchor = createContextAnchor();
+  const calls = new Map<string, { tool: string; input: any; session: any; epoch: number }>();
+  const automatic = () => !['off', '0'].includes(process.env.PI_UI_VERIFICATION ?? 'on');
+  const sourceKey = (source: string, cwd: string) => /^https?:\/\//i.test(source) ? source : path.relative(cwd, localRenderPath(cwd, source)).replaceAll('\\', '/');
+  const sessionOf = (ctx: any): { sid: string; state: SessionCreative } => {
+    assertOwner(ctx);
+    const sid = JSON.stringify([path.resolve(ctx.cwd), ctx?.sessionManager?.getSessionId?.() ?? '']);
+    let state = sessions.get(sid);
+    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0 }; sessions.set(sid, state); }
+    while (sessions.size > 8) sessions.delete(sessions.keys().next().value!);
+    if (activeKey !== sid || active?.sessionManager !== ctx.sessionManager) {
+      disposeNotice?.(); active = ctx; activeKey = sid; epoch++;
+      const own = state;
+      disposeNotice = registerContinuationSource({ name: 'creative', session: ctx.sessionManager,
+        pending: () => automatic() && own.followups < 2 && own.evidence.gaps().length && !isSessionStopped(ctx) ? ['finish current UI and SVG verification'] : [],
+        verification: () => [...(automatic() ? own.evidence.gaps() : []), ...creativeVerificationLines(own.receipts, own.direction), ...own.blockingRuns.values()],
+        verificationReceipts: () => [...(automatic() ? own.evidence.verification() : []), ...[...creativeVerificationLines(own.receipts, own.direction), ...own.blockingRuns.values()].map(line => ({ id: line, revision: own.evidence.stamp(), state: 'unresolved', line }))].slice(0, 10).map(row => ({ source: 'creative', ...row, brief: row.line })),
+      });
+    }
+    return { sid, state };
+  };
+  const hashFile = async (file: string, cwd: string) => {
+    const root = await fs.realpath(cwd), resolved = await fs.realpath(path.resolve(cwd, file));
+    const relative = path.relative(root, resolved);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Error('UI evidence requires an existing file inside the workspace.');
+    const stat = await fs.stat(resolved);
+    if (!stat.isFile() || stat.size > 4 * 1024 * 1024) throw Error('UI evidence file exceeds its bounded read.');
+    const bytes = await fs.readFile(resolved);
+    return { file: relative.replaceAll('\\', '/'), hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.subarray(0, 24000).toString('utf8') };
+  };
+  const refresh = async (ctx: any) => {
+    const { state } = sessionOf(ctx);
+    const ticket = epoch;
+    for (const row of state.evidence.changed()) {
+      let hash = 'unavailable';
+      try { hash = (await hashFile(row.file, ctx.cwd)).hash; } catch (error: any) { if (error?.code === 'ENOENT') hash = 'missing'; }
+      if (ticket !== epoch) return state;
+      state.evidence.observe(row.file, hash, row.kind);
+    }
+    return state;
+  };
+  const observePaths = async (paths: string[], ctx: any) => {
+    if (!automatic()) return;
+    const { state } = sessionOf(ctx);
+    const ticket = epoch;
+    const candidates = paths.filter(file => /\.(?:svg|html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|php|phtml|[cm]?[jt]s)$/i.test(file));
+    if (candidates.length > 64) state.evidence.incompleteChangeCoverage();
+    for (const raw of candidates.slice(0, 64)) {
+      try {
+        const row = await hashFile(raw, ctx.cwd);
+        if (ticket !== epoch) return;
+        if (/\.svg$/i.test(row.file) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|skills|references)\//i.test(row.file)) state.evidence.observe(row.file, row.hash, 'svg');
+        else if (uiFileCue(row.file, row.content) && (/\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|php|phtml)$/i.test(row.file) || /document\.createElement|\.innerHTML\s*=|React\.createElement/.test(row.content))) state.evidence.observe(row.file, row.hash, 'ui');
+      } catch { /* the native mutation owner records unavailable paths */ }
+    }
+    if (ticket !== epoch) return;
+    await refresh(ctx);
+    if (ticket !== epoch) return;
+    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'design_audit', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', 'svg_inspect'] });
+    const svgs = state.evidence.changed().filter(row => row.kind === 'svg').slice(0, 8);
+    if (svgs.length && state.autoSvgStamp !== state.evidence.stamp()) {
+      try {
+        const report = await svgReviewRun({ paths: svgs.map(row => row.file) }, ctx.cwd);
+        if (ticket !== epoch) return;
+        for (const review of report.reviews) state.evidence.geometry(review.file, review.findings.filter(f => f.severity === 'high').length);
+        state.autoSvgStamp = state.evidence.stamp();
+        pi.appendEntry?.('creative-svg-auto-v1', { stamp: state.evidence.stamp(), reviews: report.reviews });
+      } catch { /* gaps stay open; automatic checks never prevent the edit */ }
+    }
+  };
+  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); if (ctx?.cwd) sessionOf(ctx); });
+  pi.on?.('session_shutdown', () => { epoch++; calls.clear(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
+  pi.on?.('input', (event: any, ctx: any) => { if (event.source !== 'extension' && ctx?.cwd) sessionOf(ctx).state.followups = 0; });
+  pi.on?.('before_agent_start', (event: any, ctx: any) => {
+    if (!automatic() || !ctx?.cwd) return;
+    sessionOf(ctx);
+    if (uiPromptCue(String(event.prompt ?? '')).strength !== 'strong') return;
+    return { systemPrompt: `${event.systemPrompt ?? ''}\nUI work: inspect the existing product, real content, user tasks, tokens and component states before choosing a direction. Derive hierarchy, type, color, spacing and purposeful motion from the subject and requested ambition. Avoid template gradients, fake proof, decorative status and arbitrary SVGs. Use ui_explore for 320px/mobile/tablet/desktop measurements, visual_review for current rendered judgment, and browser_session for keyboard/focus and the representative task. Repair observed defects before completion. On text-only routes use permitted image_understand for the capture; report unavailable vision explicitly. Skills are optional references. Measurements and clean source cannot prove appearance.` };
+  });
+  pi.on?.('context', async (event: any, ctx: any) => {
+    if (!automatic() || !ctx?.cwd) return;
+    const ticket = epoch, state = await refresh(ctx), gaps = state.evidence.gaps();
+    if (ticket !== epoch) return;
+    const messages = event.messages.filter((m: any) => m.customType !== 'creative-verification-context');
+    if (!gaps.length) return messages.length !== event.messages.length ? { messages } : undefined;
+    return { messages: anchor(messages, { role: 'custom', customType: 'creative-verification-context', content: `[UI verification on the current revision]\n${gaps.join('\n')}\nUse current captures; fix actual defects. Do not repeat unchanged checks or substitute source analysis for pixels. If a required route is unavailable, disclose the specific limit.`, display: false }, state.evidence.stamp()) };
+  });
+  pi.on?.('tool_call', (event: any, ctx: any) => {
+    if (!automatic() || !ctx?.cwd || typeof event.toolCallId !== 'string') return;
+    calls.set(event.toolCallId, { tool: event.toolName, input: event.input ?? {}, session: ctx.sessionManager, epoch });
+    while (calls.size > 128) calls.delete(calls.keys().next().value!);
+  });
+  pi.on?.('tool_result', async (event: any, ctx: any) => {
+    const call = calls.get(event.toolCallId);
+    if (!call || call.tool !== event.toolName || call.session !== ctx?.sessionManager || call.epoch !== epoch) return;
+    calls.delete(event.toolCallId);
+    const committed = event.details?.fileMutation?.resolved;
+    if ((!event.isError || committed) && ['write', 'edit'].includes(event.toolName) && typeof (committed ?? call.input.path) === 'string') await observePaths([committed ?? call.input.path], ctx);
+    if (call.epoch !== epoch) return;
+    const state = await refresh(ctx);
+    if (event.isError || call.epoch !== epoch) return;
+    if (event.toolName === 'image_understand' && event.details?.observations && event.details?.provider && !event.details?.truncated) {
+      for (const image of event.details.images ?? []) if (typeof image.hash === 'string' && !image.region) state.evidence.vision(image.hash);
+    }
+    if (event.toolName === 'read' && ctx.model?.input?.includes('image') && event.content?.some((part: any) => part.type === 'image')) {
+      try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd)).hash); } catch { /* unmatched pixels cannot certify a run */ }
+    }
+    if (event.toolName === 'browser_session' && event.details?.ok === true && typeof event.details.url === 'string') {
+      const action = call.input.action === 'press' && ['Tab', 'Shift+Tab', 'Enter', 'Space', 'Escape'].includes(call.input.key) ? 'keyboard' : call.input.action;
+      if (action !== 'verify' || event.details.verification?.matches === true) state.evidence.interaction(event.details.url, action);
+    }
+  });
+  pi.events?.on?.('harness:mutation-committed', async (event: any) => { if (event.ctx?.sessionManager === active?.sessionManager) await observePaths(event.paths ?? [], event.ctx); });
+  pi.events?.on?.('project-source-observed', async (event: any) => {
+    if (!automatic() || event.ctx?.sessionManager !== active?.sessionManager) return;
+    const state = sessionOf(event.ctx).state;
+    state.evidence.workspace(`${event.revision}:${event.tree ?? 'unknown'}:${event.complete === true}`);
+    await observePaths(event.paths ?? [], event.ctx);
+  });
+  pi.on?.('agent_settled', async (_event: any, ctx: any) => {
+    if (!automatic() || !ctx?.cwd || isSessionStopped(ctx) || resumesElsewhere(ctx.sessionManager) || ctx.hasPendingMessages?.()) return;
+    const ticket = epoch, state = await refresh(ctx), gaps = state.evidence.gaps();
+    if (ticket !== epoch || isSessionStopped(ctx)) return;
+    if (!gaps.length || state.followups >= 2) return;
+    state.followups++;
+    await pi.sendMessage?.({ customType: 'creative-verification-followup', content: `Complete current UI/SVG verification (${state.followups}/2 bounded follow-ups):\n${gaps.join('\n')}\nRepair demonstrated defects; retain current evidence. If vision, browser or serving access is unavailable, report the exact gap and stop retrying unchanged failures.`, display: false }, { deliverAs: 'followUp', triggerTurn: true });
+  });
 
   function register(name: string, description: string, parameters: any, handler: (params: any, ctx: any, signal: AbortSignal) => Promise<{ result: any; pixels?: string }>, deadlineMs: number) {
     pi.registerTool({
@@ -99,30 +226,29 @@ export default function artDirection(pi: any) {
         const deadline = AbortSignal.timeout(deadlineMs);
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
         const cwd = ctx?.cwd || process.cwd();
-        const { result, pixels } = await handler(params, { ...ctx, cwd }, bounded);
-        const content: any[] = [{ type: "text", text: JSON.stringify(result) }];
+        sessionOf({ ...ctx, cwd });
+        const ticket = epoch;
+        const { result, pixels } = await handler(params, { ...ctx, cwd, [owner]: ticket }, bounded);
+        bounded.throwIfAborted();
+        if (ticket !== epoch) throw Error('Creative tool session changed; the late result cannot approve another session.');
+        const content: any[] = [];
         if (pixels) {
           const image = await maybePixels(pixels, cwd, ctx);
-          if (image) content.push(image);
+          assertOwner({ [owner]: ticket });
+          if (image) {
+            content.push(image);
+            const state = sessionOf(ctx).state;
+            const hash = (await hashFile(pixels, cwd)).hash;
+            assertOwner({ [owner]: ticket });
+            state.evidence.vision(hash);
+          }
           else result.pixels = `${pixels} (open with read/vision: this model was not served pixels inline)`;
         }
+        content.unshift({ type: 'text', text: JSON.stringify(result) });
         return { content, details: result };
       },
     });
   }
-
-  registerContinuationSource({
-    name: "creative",
-    pending: () => [],
-    verification: () => {
-      const lines: string[] = [];
-      for (const state of sessions.values()) {
-        lines.push(...creativeVerificationLines(state.receipts, state.direction ? { name: state.direction.name } : undefined));
-        for (const line of state.blockingRuns.values()) lines.push(line);
-      }
-      return [...new Set(lines)].slice(0, 8);
-    },
-  });
 
   // ── creative_direct ──
   register("creative_direct",
@@ -139,6 +265,7 @@ export default function artDirection(pi: any) {
       if (params.action === "set") {
         if (isChild()) throw new Error("creative_direct set is parent-only; children read the direction with get/brief.");
         const direction = normalizeDirection(params.direction);
+        state.evidence.direction(JSON.stringify(direction));
         if (scope === "project") {
           const file = await writeProjectDirection(cwd, direction);
           state.direction = direction;
@@ -161,34 +288,44 @@ export default function artDirection(pi: any) {
       }
       if (isChild()) throw new Error("creative_direct clear is parent-only.");
       if (scope === "project") await fs.rm(await projectDirectionFile(cwd), { force: true });
-      else delete state.direction;
+      else { delete state.direction; state.evidence.direction('null'); }
       return { result: { cleared: scope } };
     }, 30_000);
 
   // ── visual_review ──
   register("visual_review",
-    "Review actual rendered output, not source inference. run captures a source (HTML/SVG path or URL) and returns structured rubric sections (accessibility, spacing, typography, composition, slop, hierarchy, distinctiveness, direction conformance) with deterministic evidence plus explicit needsVision gaps; pixels attach for vision models. record stores a judged verdict as a revision-sensitive receipt (UNKNOWN stays open); status lists receipts. Blocking verdicts hold the completion gate until a clean re-review lands.",
+    "Review actual rendered output. run captures HTML/SVG or a URL and returns runId, rubric sections, measured defects and needsVision gaps. record requires that current runId, every rubric section and delivered pixels or matching image_understand evidence for visual judgments. Repair measured FAILs or supply specific dismissals. UNKNOWN and stale evidence keep completion open. status shows current gaps. Use ui_explore for responsive states and browser_session for actual interaction.",
     Type.Object({
       action: choices(["run", "record", "status"]),
       source: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
       width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       height: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       colorScheme: Type.Optional(choices(["light", "dark"])),
+      entrypoint: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: 'Workspace UI entry file represented by this served URL; binds compiled/served captures to changed HTML when source is a URL' })),
+      runId: Type.Optional(Type.String({ maxLength: 64 })),
+      dismissals: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), reason: Type.String({ minLength: 20, maxLength: 600 }) }), { maxItems: 16 })),
       verdict: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), verdict: Type.String({ maxLength: 16 }), evidence: Type.Array(Type.String({ maxLength: 300 })) }), { minItems: 1, maxItems: 16 })),
       note: Type.Optional(Type.String({ maxLength: 1000 })),
     }),
     async (params, ctx, signal) => {
-      const { state } = sessionOf(ctx);
+      const state = await refresh(ctx);
       const cwd = ctx.cwd as string;
       if (params.action === "run") {
         if (typeof params.source !== "string" || !params.source) throw new Error("visual_review run needs a source (local HTML/SVG path or http(s) URL)");
         const direction = state.direction ?? await readProjectDirection(cwd);
-        const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction }, cwd, signal, capture);
+        state.evidence.direction(JSON.stringify(direction ?? null));
+        const surface = params.entrypoint ? (await hashFile(params.entrypoint, cwd)).file : undefined;
+        assertOwner(ctx);
+        const stamp = state.evidence.stamp();
+        const responsive = state.evidence.responsive(surface ?? (state.evidence.changed().some(row => row.file === sourceKey(params.source, cwd)) ? sourceKey(params.source, cwd) : 'application'));
+        const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction, responsive }, cwd, signal, capture);
+        await refresh(ctx);
+        state.evidence.run({ ...run, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd)).hash, false, stamp);
         return { result: run, pixels: run.file };
       }
       if (params.action === "record") {
         if (typeof params.source !== "string" || !params.source) throw new Error("visual_review record needs the reviewed source");
-        const verdict = normalizeVerdict(params.verdict);
+        const verdict = state.evidence.record({ runId: params.runId, source: sourceKey(params.source, cwd), revision: await sourceRevision(params.source, cwd), verdict: params.verdict, dismissals: params.dismissals });
         const receipt: VisualReceipt = {
           source: params.source, revision: await sourceRevision(params.source, cwd), at: Date.now(),
           sections: verdict.sections, blocking: verdict.blocking, improvements: verdict.improvements,
@@ -198,20 +335,33 @@ export default function artDirection(pi: any) {
         try { pi.appendEntry?.("creative-qa-v1", { action: "visual-record", source: receipt.source, revision: receipt.revision, blocking: receipt.blocking }); } catch { /* entries are optional */ }
         return { result: { recorded: { source: receipt.source, revision: receipt.revision, blocking: receipt.blocking, improvements: receipt.improvements }, gate: receipt.blocking ? "blocking verdicts hold completion until a clean re-review lands" : "no blocking verdict on this revision" } };
       }
-      return { result: { receipts: state.receipts.slice(-12) } };
+      return { result: { receipts: state.receipts.slice(-12), revision: state.evidence.stamp(), gaps: state.evidence.gaps() } };
     }, 300_000);
 
   // ── ui_explore ──
   register("ui_explore",
-    "Render the viewport/state matrix for a page (local HTML/SVG path or URL): mobile/tablet/desktop viewports × default, dark, reduced-motion and full-page states (bounded to 12 captures). Each cell reports DOM facts (overflow elements, missing alt, controls), rendered-pattern findings and load errors into .pi/ui-review with report.json. Viewport/state pixels, not interaction proof: keyboard, hover, menus and loading/empty/error flows need browser_session passes.",
+    "Render a responsive viewport/state matrix: defaults to narrow 320px, mobile 390px, tablet and desktop; optional dark, reduced-motion and full-page states. Up to 12 captures, every width covered before variants. Returns a pixel contact sheet, DOM geometry, controls/names, alt/load status, measured contrast, design patterns, load errors and explicit incomplete coverage. Inspect the contact sheet; keyboard, menus and loading/error tasks require browser_session.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
-      viewports: Type.Optional(Type.Array(choices(["mobile", "tablet", "desktop"]), { minItems: 1, maxItems: 4 })),
+      entrypoint: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: 'Workspace UI entry file represented by the served URL' })),
+      viewports: Type.Optional(Type.Array(choices(["narrow", "mobile", "tablet", "desktop"]), { minItems: 1, maxItems: 4 })),
       states: Type.Optional(Type.Array(choices(["default", "dark", "reduced-motion", "full"]), { minItems: 1, maxItems: 4 })),
       widths: Type.Optional(Type.Array(Type.Integer({ minimum: 200, maximum: 2048 }), { minItems: 1, maxItems: 4 })),
       outputDir: Type.Optional(localPath),
     }),
-    async (params, ctx, signal) => ({ result: await uiExploreRun(params, ctx.cwd as string, signal, capture) }), 600_000);
+    async (params, ctx, signal) => {
+      const state = await refresh(ctx);
+      const direction = state.direction ?? await readProjectDirection(ctx.cwd);
+      state.evidence.direction(JSON.stringify(direction ?? null));
+      const surface = params.entrypoint ? (await hashFile(params.entrypoint, ctx.cwd)).file : sourceKey(params.source, ctx.cwd);
+      assertOwner(ctx);
+      const stamp = state.evidence.stamp();
+      const result = await uiExploreRun(params, ctx.cwd as string, signal, capture);
+      await refresh(ctx);
+      const hash = result.preview ? (await hashFile(result.preview, ctx.cwd)).hash : '';
+      state.evidence.matrix(surface, result, stamp, hash);
+      return { result, pixels: result.preview };
+    }, 600_000);
 
   // ── motion_inspect ──
   register("motion_inspect",
@@ -253,7 +403,12 @@ export default function artDirection(pi: any) {
     }),
     async (params, ctx, signal) => {
       const { state } = sessionOf(ctx);
-      if (params.action === "review") return { result: await svgReviewRun(params, ctx.cwd as string) };
+      if (params.action === "review") {
+        await refresh(ctx);
+        const report = await svgReviewRun(params, ctx.cwd as string);
+        for (const review of report.reviews) state.evidence.geometry(review.file, review.findings.filter(f => f.severity === 'high').length);
+        return { result: report };
+      }
       if (params.action === "matrix") {
         if (typeof params.path !== "string" || !params.path) throw new Error("svg_inspect matrix needs path");
         return { result: await svgMatrixRun({ path: params.path, sizes: params.sizes }, ctx.cwd as string, signal, capture) };

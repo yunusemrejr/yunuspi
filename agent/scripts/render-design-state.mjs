@@ -8,10 +8,11 @@ export function inspectDesignState(root) {
     typography:[],spacing:[],surfacePatterns:{gradients:0,shadows:0,rounded:0},
     slopSignals:{pills:0,glowShadows:0,gradientText:0,glass:0,textGlow:0,oversizedType:0,heavyRadius:0},
     contrast:{checked:0,belowThreshold:0,indeterminate:0},findings:[],
+    svg:{sampled:0,missingViewBox:0,unresolvedRefs:0,duplicateIds:0,clippingCandidates:0,findings:[],limitations:'Inline main-document SVG sample. Fill bounds exclude stroke/filter paint; clipping candidates need pixel judgment. Hidden defs may legitimately have no viewBox. Not an optical-quality verdict.'},
     motion:{reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,running:0,infinite:0,sampled:0,truncated:false},
     limitations:'Bounded main-document computed-style sample, not an aesthetic score or accessibility certification. No text, input values or CSS URLs returned. Contrast excludes images, opacity, filters, blending, shadows, pseudo-elements and unknown backgrounds; occlusion, focus, states, canvas, frames and shadow roots need separate inspection. Repeated surfaces may be intentional. Slop-signature counts are treatment frequencies with disclosed thresholds, not verdicts. Use screenshots and the relevant design skill to judge hierarchy, originality and composition.'};
   if(!root)return result;
-  const fonts=new Map(),spaces=new Map(),slopExample={};
+  const fonts=new Map(),spaces=new Map(),slopExample={},svgIds=new Set();
   const slop=(kind,node)=>{result.slopSignals[kind]++;if(!slopExample[kind])slopExample[kind]=node;};
   const count=(map,key)=>{if(map.has(key))map.set(key,map.get(key)+1);else if(map.size<64)map.set(key,1);else result.truncated=true;};
   const round=n=>Math.round(n*100)/100;
@@ -30,8 +31,27 @@ export function inspectDesignState(root) {
   while(node){
     if(result.visited>=limit||performance.now()-started>=timeLimit){result.truncated=true;break;}result.visited++;
     const style=getComputedStyle(node),rect=node.getBoundingClientRect();
-    if(rect.width>0&&rect.height>0&&style.visibility==='visible'&&!node.closest('[hidden],[inert],[aria-hidden="true"]')){
+    if(rect.width>0&&rect.height>0&&style.visibility==='visible'&&!node.closest('[hidden],[inert]')&&(!node.closest('[aria-hidden="true"]')||node.namespaceURI==='http://www.w3.org/2000/svg')){
       result.visible++;
+      if(node.localName==='svg'&&!node.parentElement?.closest('svg')&&result.svg.sampled<24){
+        const svg=result.svg;svg.sampled++;
+        const note=(kind,facts={})=>{if(svg.findings.length<8)svg.findings.push({kind,selector:identify(node),...facts});};
+        const view=node.viewBox?.baseVal;
+        if(!view||view.width<=0||view.height<=0){svg.missingViewBox++;note('missing-viewbox');}
+        let scanned=0;const parts=document.createTreeWalker(node,NodeFilter.SHOW_ELEMENT);let child=parts.currentNode;
+        while(child){
+          if(++scanned>128||performance.now()-started>=timeLimit){result.truncated=true;break;}
+          if(child.id){if(svgIds.has(child.id)){svg.duplicateIds++;note('duplicate-id');}svgIds.add(child.id);}
+          for(const attr of ['href','xlink:href','clip-path','mask','fill','stroke','filter']){
+            const raw=child.getAttribute(attr)||'',ref=raw.startsWith('#')?raw.slice(1):/url\(\s*["']?#([^\s)'";]+)["']?\s*\)/.exec(raw)?.[1];
+            if(ref&&!document.getElementById(ref)){svg.unresolvedRefs++;note('unresolved-reference');}
+          }
+          child=parts.nextNode();
+        }
+        if(view?.width>0&&view?.height>0&&style.overflow==='hidden'){
+          try{const b=node.getBBox();if(b.width>0&&b.height>0&&(b.x<view.x-.5||b.y<view.y-.5||b.x+b.width>view.x+view.width+.5||b.y+b.height>view.y+view.height+.5)){svg.clippingCandidates++;note('fill-outside-viewbox',{bounds:{x:round(b.x),y:round(b.y),width:round(b.width),height:round(b.height)}});}}catch{/* unsupported geometry remains a pixel question */}
+        }
+      }
       const font={family:style.fontFamily.slice(0,120),sizePx:parseFloat(style.fontSize),weight:style.fontWeight,lineHeight:style.lineHeight};
       count(fonts,JSON.stringify(font));
       for(const value of [style.gap,style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft,style.marginTop,style.marginBottom]){const n=parseFloat(value);if(Number.isFinite(n)&&n>0&&n<=512)count(spaces,String(round(n)));}

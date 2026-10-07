@@ -1,5 +1,7 @@
 # Task pipelines
 
+UI work stages responsive capture, current visual judgment and real interaction separately. `ui-responsive` retains 320px/mobile/tablet/desktop measurements and inspected matrix pixels; `ui-pixels` requires actual rendered judgment; `ui-interaction` requires the representative task and keyboard/focus evidence. Source-only or stale receipts cannot substitute for them. SVG work pairs automatic structural inspection with intended-size visual review. These checks work without mandatory skill reads and preserve the caller's tool ceiling and selected model.
+
 The adaptive workflow owner selects development pipelines from the current user request, explicitly observed relevant files and inspected dependency names. `agent/extensions/lib/task-pipelines.ts` performs this selection locally. It reads no project files, launches no models or commands and injects no skill bodies. Questions and explicit workflow opt-outs return no pipelines.
 
 A request counts as work when it contains a build, fix, test or release verb, or a further action verb such as generate, convert, export, migrate, configure, automate, integrate, scrape, trim or cut (nouns such as model or port count only when imperative). Question-shaped requests (what, why, how, explain, describe, list) never activate a pipeline on a verb alone; observed project files still do.

@@ -97,7 +97,7 @@ async function firstTurnTools(prompt, scriptedCalls = []) {
   try {
     const settingsManager = SettingsManager.inMemory({compaction: {enabled: false}, retry: {enabled: false}});
     const loader = new DefaultResourceLoader({cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: ['design-studio.ts', 'video-studio.ts', 'code-quality.ts', 'git-tools.ts', 'desktop-session.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck, registerSeoToolkit]});
+      additionalExtensionPaths: ['art-direction.ts', 'design-studio.ts', 'video-studio.ts', 'code-quality.ts', 'git-tools.ts', 'desktop-session.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck, registerSeoToolkit]});
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
     const model = {id: 'fixture', name: 'Fixture', api: 'openai-completions', provider: 'fixture', baseUrl: 'https://invalid.example', reasoning: false, input: ['text'], cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 131072, maxTokens: 8192};
@@ -123,6 +123,8 @@ async function firstTurnTools(prompt, scriptedCalls = []) {
 test('image-to-code, video, quality and desktop prompts put their tools on the first model turn; plain prompts stay lean', {timeout: 120_000}, async () => {
   const design = await firstTurnTools('Turn this mockup into a website: https://example.com/landing.png');
   for (const name of ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see']) assert.ok(design.includes(name), `${name} staged for image-to-code`);
+  const ui = await firstTurnTools('Build a responsive dashboard with a customer form');
+  for (const name of ['ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct']) assert.ok(ui.includes(name), `${name} staged without skills on a text-only model`);
   const video = await firstTurnTools('Make a 60 second explainer video about how attention works');
   assert.ok(video.includes('video_project') && video.includes('narration_tts'));
   const quality = await firstTurnTools('Refactor the billing module and remove duplicated logic, then commit it');

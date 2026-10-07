@@ -647,10 +647,10 @@ async function renderCaptureOnce(p, output, signal) {
       // scheduled; clean automatic checks add no model-context payload.
       try {
         const noiseSample = await page.locator(p.selector ?? ":root").first().evaluate(inspectNoiseState, {detailed: Boolean(p.designAudit)});
-        if (p.designAudit || noiseSample.findings.length) noise = noiseSample;
+        if (p.designAudit || noiseSample.findings.length || noiseSample.truncated) noise = noiseSample;
       } catch {
         // Optional advisory evidence cannot invalidate a usable capture.
-        if (p.designAudit) noise = {status: "unavailable", findings: [], scope: "DOM noise inspection did not complete; no clean-page claim."};
+        noise = {status: "unavailable", truncated: true, findings: [], scope: "DOM noise inspection did not complete; no clean-page claim."};
       }
       stage = "capture";
       if (outputMode !== "text")

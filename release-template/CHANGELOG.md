@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.0 — 2026-10-07
+
+**UI verification activates from the work.** Interface writes and the existing source scan stage responsive, visual, interaction and SVG tools without a skill read or human reminder. Current evidence feeds the shared completion gate; at most two automatic follow-ups resolve missing checks or disclose unavailable capabilities. Model, thinking and permission ceilings remain unchanged.
+
+**Rendered facts reach the reviewer.** Responsive matrices default to 320px, mobile, tablet and desktop, cover every requested width before variants, and preserve real overflow, native control names, image load/alt status, solid-text contrast and inline SVG references. They return a contact sheet and explicit failed, capped or incomplete coverage. Automatic advisory scans disclose truncation instead of silently implying a clean page. Pixel palette guesses cannot fail text contrast.
+
+**Visual approval needs current evidence.** `visual_review record` requires the captured `runId`, every rubric section and matching pixel/vision evidence. The responsive rubric binds mobile judgment to the current inspected matrix. Changed dependencies, omitted sections, `UNKNOWN`, fabricated capture IDs and unseen pixels cannot approve quality. Measured failures need repair or a specific recorded dismissal. Interactive surfaces also require keyboard actions and a successful result verification. Separate pages, deleted files, alternative renders and session switches retain the correct ownership.
+
+**Saved SVGs receive structural review.** Shell-created SVGs enter the existing source scan, saved files receive bounded geometry checks, and rendered inline SVGs expose unresolved references, duplicate IDs and clipping candidates. Intended-size optical quality remains a pixel judgment. Design guidance starts with real product content, tasks, tokens and requested ambition; modern styling is evaluated in that context.
+
+The minimum-Node CI lane includes the evidence ledger and matrix contracts; the full browser lane exercises broken pages, text-only capture rejection, responsive proof, keyboard tasks, CSS invalidation and session cancellation. Root documentation, release templates and generated capability inventories carry the same workflow.
+
 ## 0.29.2 — 2026-10-07
 
 Built-page SEO reports now keep HTTP status and headers unknown until actual serving evidence is supplied. Private-page source inspection also keeps authentication and access status unresolved. Served-site audits retain their observed responses; local markup never certifies live indexing or access. Registered audit calls also discard transport fixture overrides, keeping private/loopback boundaries under the public tool policy.

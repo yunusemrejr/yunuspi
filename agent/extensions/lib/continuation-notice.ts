@@ -44,7 +44,7 @@ export const collectContinuationLines = (limit = MAX_LINES, session?: object) =>
 export const collectVerificationLines = (limit = MAX_LINES, session?: object) => collectLines('verification', limit, session);
 
 /** Sources whose pending work is a verification nudge the owner itself would deliver at the real end of the work. */
-const VERIFICATION_OWNERS = ["project tests", "quality review"] as const;
+const VERIFICATION_OWNERS = ["project tests", "quality review", "creative"] as const;
 
 /** Another subsystem (a background task, a delegated run) will resume this session by itself. Verification nudges and
  * automatic review wait for that: they would judge a tree that is about to change, spend a bounded round on a state

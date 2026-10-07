@@ -780,7 +780,7 @@ export function isProjectReviewSource(file) {
     !/\.(?:min|generated)\./i.test(file) &&
     (TEST_SOURCE.test(file) ||
       DELIVERY_SOURCE.test(basename) ||
-      /\.(?:html?|css|scss|sass|less|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(
+      /\.(?:html?|css|scss|sass|less|svg|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(
         file,
       ))
   );

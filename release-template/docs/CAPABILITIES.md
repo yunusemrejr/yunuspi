@@ -1260,14 +1260,16 @@ Close the creative loop around one shared direction. creative_direct owns the st
 - `action`: Direction set/get/brief/status/clear; review run/record/status; SVG inspect/matrix; asset register/get/search/usage; image status/brief/generate/edit.
 - `direction`: Structured brief object: intent, hierarchy.primary, visual, avoid, motion, audio, references.
 - `source|sources`: Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width.
-- `viewports|states`: Matrix axes: mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures.
+- `viewports|states`: Matrix axes: narrow 320px/mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures. Every width precedes variants; capped coverage stays explicit.
+- `runId|entrypoint`: Record a matching current visual capture by runId; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required.
+- `PI_UI_VERIFICATION`: Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out.
 - `verdict`: Recorded rubric sections with PASS/WARN/FAIL/UNKNOWN plus evidence lines; UNKNOWN stays open, FAIL blocks completion.
 - `role`: Asset purpose: hero-focal, editorial-support, diagram, texture, icon, illustration, background, product-shot, avatar.
 - `prompt|negative|aspect|size|seed`: Generation brief: prompt plus direction/role constraints; configured backend required.
 
 **Related records:** `design-studio`, `rendered-design-review`, `creative-studio`, `video-studio`
 
-**Source:** [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-direction.ts`](../../agent/extensions/lib/creative-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/lib/svg-inspect.ts`](../../agent/extensions/lib/svg-inspect.ts), [`agent/extensions/lib/svg-render.ts`](../../agent/extensions/lib/svg-render.ts), [`agent/extensions/lib/asset-registry.ts`](../../agent/extensions/lib/asset-registry.ts), [`agent/extensions/lib/gltf-inspect.ts`](../../agent/extensions/lib/gltf-inspect.ts), [`agent/extensions/lib/video-motion.ts`](../../agent/extensions/lib/video-motion.ts), [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts), [`agent/scripts/render-capture.mjs`](../../agent/scripts/render-capture.mjs)
+**Source:** [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-direction.ts`](../../agent/extensions/lib/creative-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/creative-evidence.ts`](../../agent/extensions/lib/creative-evidence.ts), [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/lib/svg-inspect.ts`](../../agent/extensions/lib/svg-inspect.ts), [`agent/extensions/lib/svg-render.ts`](../../agent/extensions/lib/svg-render.ts), [`agent/extensions/lib/asset-registry.ts`](../../agent/extensions/lib/asset-registry.ts), [`agent/extensions/lib/gltf-inspect.ts`](../../agent/extensions/lib/gltf-inspect.ts), [`agent/extensions/lib/video-motion.ts`](../../agent/extensions/lib/video-motion.ts), [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts), [`agent/scripts/render-capture.mjs`](../../agent/scripts/render-capture.mjs)
 
 **Documentation:** [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 
@@ -1311,7 +1313,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 725; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 115; factory)
-- `asset_register` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 272; factory)
+- `asset_register` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 427; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 258; factory)
 - `audio_generate` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 137; factory)
@@ -1341,8 +1343,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
 - `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
 - `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 22; factory)
-- `creative_compare` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 375; factory)
-- `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 128; factory)
+- `creative_compare` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 530; factory)
+- `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 254; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 137; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
 - `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 135; literal)
@@ -1364,7 +1366,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `image_convert` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 33; factory)
 - `image_create` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 55; factory)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 42; factory)
-- `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 318; factory)
+- `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 473; factory)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 257; factory)
 - `image_trace` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 49; factory)
 - `image_understand` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 35; factory)
@@ -1385,7 +1387,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
 - `ml_lab` — [`agent/extensions/ml-lab.ts`](../../agent/extensions/ml-lab.ts) (line 11; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 161; factory)
-- `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 217; factory)
+- `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 367; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 264; factory)
 - `narration_align` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 135; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 131; factory)
@@ -1428,16 +1430,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 780; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
-- `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 242; factory)
-- `svg_render` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 237; factory)
+- `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 392; factory)
+- `svg_render` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 387; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 273; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 436; literal)
+- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 448; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 125; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 431; literal)
-- `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 205; factory)
+- `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 342; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 133; factory)
 - `video_assets` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 125; factory)
 - `video_browser` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 147; factory)
@@ -1449,7 +1451,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `video_render` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 117; factory)
 - `video_shot` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 94; factory)
 - `visual_diff` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 64; factory)
-- `visual_review` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 169; factory)
+- `visual_review` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 296; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 88; literal)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
@@ -1461,7 +1463,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
-- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_explore`, `visual_review` (lines 96)
+- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_explore`, `visual_review` (lines 223)
 - [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `splat_preview`, `splat_setup`, `splat_train` (lines 15)
 - [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred; known tools: `image_analyze`, `image_convert`, `image_create`, `image_crop`, `image_trace`, `image_understand`, `visual_diff` (lines 23)
 - [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)

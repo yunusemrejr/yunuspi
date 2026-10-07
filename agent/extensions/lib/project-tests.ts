@@ -378,7 +378,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       // Publish the existing scan after both owners have observed it. Runtime
       // workflow indexing consumes this receipt instead of scanning again or
       // assuming an opaque shell command left its source unchanged.
-      try { pi.events?.emit?.('project-source-observed', { ctx, revision: workspaceRevision.current, tree: state.tree, complete: state.treeComplete, unavailable: false }); } catch { /* observation cannot prevent tools */ }
+      try { pi.events?.emit?.('project-source-observed', { ctx, revision: workspaceRevision.current, tree: state.tree, complete: state.treeComplete, unavailable: false, paths: state.changed }); } catch { /* observation cannot prevent tools */ }
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };

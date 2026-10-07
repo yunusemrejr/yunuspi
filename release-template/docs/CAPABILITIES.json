@@ -3067,7 +3067,15 @@
         },
         {
           "name": "viewports|states",
-          "summary": "Matrix axes: mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures."
+          "summary": "Matrix axes: narrow 320px/mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures. Every width precedes variants; capped coverage stays explicit."
+        },
+        {
+          "name": "runId|entrypoint",
+          "summary": "Record a matching current visual capture by runId; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required."
+        },
+        {
+          "name": "PI_UI_VERIFICATION",
+          "summary": "Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out."
         },
         {
           "name": "verdict",
@@ -3092,6 +3100,7 @@
         "agent/extensions/art-direction.ts",
         "agent/extensions/lib/creative-direction.ts",
         "agent/extensions/lib/creative-qa.ts",
+        "agent/extensions/lib/creative-evidence.ts",
         "agent/extensions/lib/motion-inspect.ts",
         "agent/extensions/lib/svg-inspect.ts",
         "agent/extensions/lib/svg-render.ts",
@@ -4015,7 +4024,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 272,
+        "line": 427,
         "kind": "factory"
       },
       {
@@ -4196,13 +4205,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 375,
+        "line": 530,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 128,
+        "line": 254,
         "kind": "factory"
       },
       {
@@ -4336,7 +4345,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 318,
+        "line": 473,
         "kind": "factory"
       },
       {
@@ -4462,7 +4471,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 217,
+        "line": 367,
         "kind": "factory"
       },
       {
@@ -4721,13 +4730,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 242,
+        "line": 392,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 237,
+        "line": 387,
         "kind": "factory"
       },
       {
@@ -4751,7 +4760,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 436,
+        "line": 448,
         "kind": "literal"
       },
       {
@@ -4775,7 +4784,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 205,
+        "line": 342,
         "kind": "factory"
       },
       {
@@ -4847,7 +4856,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 169,
+        "line": 296,
         "kind": "factory"
       },
       {
@@ -5288,7 +5297,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 436,
+        "line": 448,
         "kind": "literal"
       },
       {
@@ -5335,7 +5344,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          96
+          223
         ],
         "knownNames": [
           "asset_register",
@@ -5595,7 +5604,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 747,
+      "sourceFiles": 748,
       "registrationSites": 91,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 154,

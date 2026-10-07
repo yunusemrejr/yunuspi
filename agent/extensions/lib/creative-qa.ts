@@ -16,7 +16,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { textPath } from "./media-process.ts";
@@ -48,6 +48,7 @@ export interface QACapture {
 }
 
 export const VIEWPORT_PRESETS: Record<string, { width: number; height: number }> = {
+  narrow: { width: 320, height: 740 },
   mobile: { width: 390, height: 844 },
   tablet: { width: 834, height: 1112 },
   desktop: { width: 1440, height: 900 },
@@ -127,12 +128,12 @@ const MATRIX_MAX_CELLS = 12;
 export function planUiMatrix(params: {
   viewports?: unknown; states?: unknown; widths?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown;
 }): UiMatrixPlan {
-  const viewportNames = (Array.isArray(params.viewports) ? params.viewports : ["mobile", "desktop"]).map(String).filter((v) => VIEWPORT_PRESETS[v]);
+  const viewportNames = (Array.isArray(params.viewports) ? params.viewports : ["narrow", "mobile", "tablet", "desktop"]).map(String).filter((v) => VIEWPORT_PRESETS[v]);
   const viewports = [...new Set(viewportNames.length ? viewportNames : ["desktop"])];
   if (Array.isArray(params.widths)) {
     for (const w of params.widths.slice(0, 4)) {
       const width = Math.round(Number(w));
-      if (Number.isFinite(width) && width >= 200 && width <= 2048) viewports.push(`w${width}`);
+      if (Number.isFinite(width) && width >= 200 && width <= 2048 && !viewports.some(v => (VIEWPORT_PRESETS[v]?.width ?? Number(v.slice(1))) === width)) viewports.push(`w${width}`);
     }
   }
   const wantStates = new Set((Array.isArray(params.states) ? params.states : ["default"]).map(String));
@@ -141,10 +142,11 @@ export function planUiMatrix(params: {
   if (params.fullPage === true || wantStates.has("full")) wantStates.add("full");
   wantStates.add("default");
   const cells: MatrixCell[] = [];
-  for (const viewport of viewports.slice(0, 4)) {
-    const preset = VIEWPORT_PRESETS[viewport] ?? { width: Number(viewport.slice(1)) || 1280, height: 900 };
-    for (const state of ["default", "dark", "reduced-motion", "full"]) {
-      if (!wantStates.has(state)) continue;
+  // Cover every requested width before spending the capture budget on variants.
+  for (const state of ["default", "dark", "reduced-motion", "full"]) {
+    if (!wantStates.has(state)) continue;
+    for (const viewport of viewports) {
+      const preset = VIEWPORT_PRESETS[viewport] ?? { width: Number(viewport.slice(1)) || 1280, height: 900 };
       cells.push({
         viewport, width: preset.width, height: preset.height, state,
         colorScheme: state === "dark" ? "dark" : "light",
@@ -159,12 +161,17 @@ export function planUiMatrix(params: {
 }
 
 export interface PageStateSummary {
+  documentType?: string;
+  available: boolean;
   items: number;
   overflowElements: number;
   scopeOverflowPx: number;
   missingAlt: number;
   images: number;
   controls: number;
+  unnamedControls: number;
+  smallTargets: number;
+  brokenImages: number;
   truncated: boolean;
 }
 
@@ -172,20 +179,26 @@ export interface PageStateSummary {
  * intentional (carousels, menus); counts select inspection targets. */
 export function summarizePageState(pageState: any): PageStateSummary {
   const items = Array.isArray(pageState?.items) ? pageState.items : [];
-  let overflowElements = 0, missingAlt = 0, images = 0, controls = 0;
+  let overflowElements = 0, missingAlt = 0, images = 0, controls = 0, unnamedControls = 0, smallTargets = 0, brokenImages = 0;
   for (const item of items.slice(0, 500)) {
     if (typeof item?.horizontalOverflowPx === "number" && item.horizontalOverflowPx > 1) overflowElements++;
-    if (item?.kind === "img" || item?.role === "img" || /\bimg\b/i.test(String(item?.label ?? ""))) {
+    if (item?.tag === "img" || item?.kind === "img" || item?.role === "img") {
       images++;
       if (item?.alt === null || item?.alt === undefined) missingAlt++;
+      if (item?.image?.loadState === "unavailable") brokenImages++;
     }
-    if (typeof item?.role === "string" && /button|link|checkbox|radio|textbox|combobox|menuitem|tab|switch|slider/i.test(item.role)) controls++;
+    if (/^(?:button|input|select|textarea)$/.test(item?.tag ?? "") || item?.tag === "a" && item?.target || /^(?:button|link|checkbox|radio|textbox|combobox|menuitem|tab|switch|slider)$/.test(item?.role ?? "")) {
+      controls++;
+      if (!String(item?.name ?? item?.label ?? "").trim()) unnamedControls++;
+      if (item?.disabled !== true && item?.bounds?.width > 0 && item?.bounds?.height > 0 && (item.bounds.width < 24 || item.bounds.height < 24)) smallTargets++;
+    }
   }
   return {
-    items: items.length,
+    ...(typeof pageState?.documentType === 'string' ? { documentType: pageState.documentType } : {}),
+    available: Array.isArray(pageState?.items), items: items.length,
     overflowElements,
-    scopeOverflowPx: Math.max(0, Math.round(Number(pageState?.scopeHorizontalOverflowPx) || 0)),
-    missingAlt, images, controls,
+    scopeOverflowPx: Math.max(0, Math.round(Number(pageState?.layout?.horizontalOverflowPx ?? pageState?.layout?.scopeHorizontalOverflowPx ?? pageState?.scopeHorizontalOverflowPx) || 0)),
+    missingAlt, images, controls, unnamedControls, smallTargets, brokenImages,
     truncated: pageState?.truncated === true,
   };
 }
@@ -193,8 +206,8 @@ export function summarizePageState(pageState: any): PageStateSummary {
 export function summarizeNoise(noise: any): Array<{ key: string; detail: string }> {
   const findings = Array.isArray(noise?.findings) ? noise.findings : [];
   return findings.slice(0, 24).map((f: any) => ({
-    key: String(f?.key ?? f?.id ?? "finding").slice(0, 80),
-    detail: String(f?.detail ?? f?.detail ?? f?.message ?? "").slice(0, 240),
+    key: String(f?.kind ?? f?.key ?? f?.id ?? "finding").slice(0, 80),
+    detail: String(f?.detail ?? f?.message ?? f?.selector ?? "").slice(0, 240),
   }));
 }
 
@@ -204,6 +217,7 @@ export async function uiExploreRun(
 ) {
   if (typeof params.source !== "string" || !params.source) throw new Error("ui_explore needs a source (local HTML/SVG path or http(s) URL)");
   const plan = planUiMatrix(params);
+  const before = await sourceRevision(params.source, cwd);
   const dir = await qaFolder(params.outputDir, cwd, "ui-review", "matrix");
   const cells: any[] = [];
   for (const cell of plan.cells) {
@@ -227,20 +241,44 @@ export async function uiExploreRun(
       bytes: stat?.size ?? 0, pixels: { width: receipt?.width ?? 0, height: receipt?.height ?? 0 },
       ...(receipt?.conditions?.captureFallback ? { captureFallback: receipt.conditions.captureFallback } : {}),
       dom: summarizePageState(receipt?.pageState),
+      design: receipt?.pageState?.design ?? null,
       noise: summarizeNoise(receipt?.noise),
+      inspectionIncomplete: receipt?.noise?.truncated === true || receipt?.noise?.status === 'unavailable',
       errors: Array.isArray(receipt?.errors) ? receipt.errors.slice(0, 6) : [],
     });
   }
   const overflowCells = cells.filter((c) => c.ok && (c.dom.overflowElements > 0 || c.dom.scopeOverflowPx > 0));
   const altCells = cells.filter((c) => c.ok && c.dom.missingAlt > 0);
   const failed = cells.filter((c) => !c.ok);
+  const revision = await sourceRevision(params.source, cwd);
+  const consistent = before === revision && revision !== "missing" && !revision.startsWith("unhashed-");
+  const incomplete = !consistent || plan.capped || cells.some(c => c.ok && (!c.dom.available || !c.design || c.dom.truncated || c.design.truncated || c.inspectionIncomplete));
+  const defects = cells.filter(c => c.ok && (c.dom.brokenImages || c.dom.missingAlt || c.design?.contrast?.belowThreshold || c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds));
+  const previewCells = cells.filter(c => c.ok && c.state === 'default').slice(0, 4);
+  let preview: string | undefined;
+  if (previewCells.length) {
+    const images: Rgba[] = [];
+    for (const cell of previewCells) images.push(await decodeImage(await fs.readFile(path.resolve(cwd, cell.file)), { maxWidth: 480, maxPixels: 6_000_000 }, signal));
+    const dest = path.join(dir, 'viewports.png');
+    await fs.writeFile(dest, await encodeImage(composeRow(images, 12), 'png', { maxWidth: 1920 }, signal), { flag: 'wx' });
+    preview = relative(cwd, dest);
+  }
   const report = {
-    source: params.source, revision: await sourceRevision(params.source, cwd), at: new Date().toISOString(),
+    source: params.source, revision, consistent, at: new Date().toISOString(),
+    status: failed.length || defects.length ? "fail" : incomplete ? "incomplete" : cells.some(c => c.dom.scopeOverflowPx || c.dom.overflowElements || c.dom.unnamedControls || c.dom.smallTargets || c.noise.length || c.errors.length) ? "warn" : "measured",
+    coverage: { widths: cells.filter(c => c.ok).map(c => c.width).filter((w, i, all) => all.indexOf(w) === i), visualJudgment: "pending", interaction: "pending" },
+    preview, previewOrder: previewCells.map(c => ({ viewport: c.viewport, width: c.width, file: c.file })),
     plan: { cells: plan.cells.length, capped: plan.capped, note: plan.capped ? `Matrix capped at ${MATRIX_MAX_CELLS} captures; run again with narrower viewports/states.` : undefined },
     cells,
     findings: [
       ...overflowCells.map((c) => `${c.viewport}/${c.state}: horizontal overflow on ${c.dom.overflowElements} element(s), scope ${c.dom.scopeOverflowPx}px — inspect ${c.file} (overflow may be intentional)`),
       ...altCells.map((c) => `${c.viewport}/${c.state}: ${c.dom.missingAlt} of ${c.dom.images} sampled image(s) without alt text`),
+      ...cells.filter(c => c.ok && c.dom.brokenImages).map(c => `${c.viewport}/${c.state}: ${c.dom.brokenImages} sampled image(s) failed to load`),
+      ...cells.filter(c => c.ok && c.design?.contrast?.belowThreshold).map(c => `${c.viewport}/${c.state}: ${c.design.contrast.belowThreshold} measured solid-text contrast failure(s)`),
+      ...cells.filter(c => c.ok && (c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds)).map(c => `${c.viewport}/${c.state}: inline SVG has ${c.design.svg.unresolvedRefs} unresolved reference(s) and ${c.design.svg.duplicateIds} duplicate id(s)`),
+      ...cells.filter(c => c.ok && c.dom.unnamedControls).map(c => `${c.viewport}/${c.state}: ${c.dom.unnamedControls} sampled control(s) without a DOM-derived name; inspect accessible names`),
+      ...cells.filter(c => c.ok && c.dom.smallTargets).map(c => `${c.viewport}/${c.state}: ${c.dom.smallTargets} target(s) below 24 CSS px; check spacing, inline/equivalent/native-control exceptions before judging WCAG 2.5.8`),
+      ...(!consistent ? ["Source changed during capture or its revision is unavailable; re-capture the final revision"] : []),
       ...failed.map((c) => `${c.viewport}/${c.state}: capture failed — ${c.error}`),
     ].slice(0, 24),
     note: "Viewport/state pixels plus DOM facts, not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or design_audit follow-ups. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
@@ -277,6 +315,7 @@ export interface VisualRunOptions {
   selector?: unknown;
   direction?: CreativeDirection;
   outputDir?: unknown;
+  responsive?: { widths: number[]; status: string; findings: string[]; imageHash: string; file?: string };
 }
 
 /** Capture plus deterministic measurements and a rubric skeleton. Returns
@@ -284,6 +323,7 @@ export interface VisualRunOptions {
  * needsVision gaps elsewhere; the caller attaches pixels for vision models
  * and the agent records the judged verdict. */
 export async function visualReviewRun(options: VisualRunOptions, cwd: string, signal: AbortSignal | undefined, capture: QACapture) {
+  const before = await sourceRevision(options.source, cwd);
   const width = Math.max(200, Math.min(2048, Math.round(Number(options.width) || 1440)));
   const height = Math.max(200, Math.min(2048, Math.round(Number(options.height) || 900)));
   const dir = await qaFolder(options.outputDir, cwd, "ui-review", "review");
@@ -311,11 +351,14 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
   const push = (id: string, verdict: QAVerdict, evidence: string[], needsVision = false) =>
     sectionsOut.push({ id, verdict, evidence: evidence.filter(Boolean).slice(0, 8), ...(needsVision ? { needsVision: true } : {}) });
 
-  const lowContrast = palette.filter((c) => ["text", "muted-text"].includes(c.role) && c.contrastOnBackground < 4.5);
-  push("accessibility", lowContrast.length ? "FAIL" : dom.missingAlt > 0 ? "WARN" : "PASS", [
-    ...lowContrast.map((c) => `${c.role} ${c.hex} is ${c.contrastOnBackground}:1 on background (WCAG AA body text needs 4.5:1)`),
+  // Pixel palette roles are estimates; a photo must not fail text contrast.
+  const design = receipt?.pageState?.design;
+  const lowContrast = (design?.findings ?? []).filter((f: any) => f.kind === "solid-text-contrast");
+  push("accessibility", lowContrast.length || dom.missingAlt || dom.brokenImages ? "FAIL" : "UNKNOWN", [
+    ...lowContrast.map((f: any) => `${f.selector}: ${f.ratio}:1 below ${f.threshold}:1`),
     ...(dom.missingAlt ? [`${dom.missingAlt} sampled image(s) without alt text`] : []),
-    ...(lowContrast.length || dom.missingAlt ? [] : ["no measured text-contrast failure; keyboard/focus behavior still needs an interaction pass"]),
+    `${dom.brokenImages} sampled broken images; ${dom.unnamedControls} controls need accessible-name inspection`,
+    "Keyboard, focus, complex paint and unsampled states require separate checks; no sampled defect is not accessibility proof",
   ]);
 
   const spacingValues = [...new Set(rhythm.values.map((v) => Math.round(v)).filter((v) => v > 2))];
@@ -338,16 +381,25 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
   push("slop", noise.length >= 6 ? "WARN" : noise.length ? "WARN" : "PASS", [
     `${noise.length} rendered-pattern finding(s)${noise.length ? `: ${noise.slice(0, 6).map((n) => n.key).join("; ")}` : ""}`,
     ...(noise.length ? ["pattern hits are advisory: legitimate semantic status and justified single treatments are exempt"] : []),
-  ], noise.length > 0);
+  ], true);
 
   push("hierarchy", "UNKNOWN", ["focal competition needs rendered judgment: does one element own the first viewport, or do hero and secondary cards compete equally?"], true);
   push("distinctiveness", "UNKNOWN", [
     "resemblance to generic template patterns needs rendered judgment against the brief and named peers",
     ...(noise.length ? [`${noise.length} advisory pattern hit(s) available above for the boilerplate check`] : []),
   ], true);
+  if (/^(text\/html|application\/xhtml\+xml)$/.test(dom.documentType ?? '') || /\.html?(?:[?#].*)?$/i.test(options.source)) push('responsive', options.responsive?.status === 'fail' ? 'FAIL' : 'UNKNOWN', [
+    options.responsive ? `Current matrix: ${[...new Set(options.responsive.widths)].join(', ')} CSS px; ${options.responsive.status}; inspect ${options.responsive.file ?? 'the contact sheet'}` : 'No current responsive matrix; run ui_explore and inspect its contact sheet before recording this section',
+    ...(options.responsive?.findings ?? []),
+    'Judge narrow layout, breakpoint composition, clipped content, readable labels and intended scroll regions from the matrix pixels; a desktop capture cannot approve mobile appearance',
+  ], true);
+  if (design?.svg?.sampled) push('svg', design.svg.unresolvedRefs || design.svg.duplicateIds ? 'FAIL' : 'UNKNOWN', [
+    `${design.svg.sampled} inline SVG(s): ${design.svg.missingViewBox} missing viewBox, ${design.svg.unresolvedRefs} unresolved refs, ${design.svg.duplicateIds} duplicate IDs, ${design.svg.clippingCandidates} fill-clipping candidates`,
+    'Inspect intended-size legibility, stroke/corner consistency, optical mass and background/theme contrast; fill bounds exclude stroke/filter paint',
+  ], true);
 
   if (options.direction) {
-    const hits = matchAvoidSignals(options.direction, [...slopSignals, ...lowContrast.map((c) => `low contrast ${c.hex}`)]);
+    const hits = matchAvoidSignals(options.direction, [...slopSignals, ...lowContrast.map((c: any) => `low contrast ${c.ratio}:1 at ${c.selector}`)]);
     // What measurement cannot decide: is the chosen signature actually there, and does an immersive page hold together.
     const judged = [
       ...(options.direction.signature ? [`signature "${options.direction.signature}" must be visible in this render; a still frame shows it, motion needs two captures apart`] : []),
@@ -362,15 +414,17 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
   }
 
   const run = {
-    source: options.source, revision: await sourceRevision(options.source, cwd), at: new Date().toISOString(),
+    runId: randomUUID(), source: options.source, revision: await sourceRevision(options.source, cwd), at: new Date().toISOString(),
     file: relative(cwd, dest), dir: relative(cwd, dir),
     pixels: { width: receipt?.width ?? 0, height: receipt?.height ?? 0 },
     palette: palette.slice(0, 8).map((c) => `${c.role}: ${c.hex} (${c.contrastOnBackground}:1)`),
-    dom, noise: noise.slice(0, 12),
+    dom, design, noise: noise.slice(0, 12), errors: receipt?.errors ?? [],
+    ...(options.responsive ? { responsiveHash: options.responsive.imageHash } : {}),
     sections: sectionsOut,
     blocking: sectionsOut.filter((s) => s.verdict === "FAIL").length,
     next: "Judge the needsVision sections from the attached pixels (or open the capture), then record the verdict with visual_review action record. Deterministic PASS/FAIL stands unless the pixels prove otherwise; UNKNOWN must never be recorded as PASS without rendered judgment.",
   };
+  Object.assign(run, { consistent: before === run.revision && run.revision !== "missing" && !run.revision.startsWith("unhashed-") });
   await fs.writeFile(path.join(dir, "review.json"), JSON.stringify(run, null, 1) + "\n", { flag: "wx" });
   return run;
 }
@@ -406,7 +460,7 @@ export function normalizeVerdict(raw: unknown): { sections: QASection[]; blockin
   });
   return {
     sections,
-    blocking: sections.filter((s) => s.verdict === "FAIL").length,
+    blocking: sections.filter((s) => s.verdict === "FAIL" || s.verdict === "UNKNOWN").length,
     improvements: sections.filter((s) => s.verdict === "WARN").length,
   };
 }
@@ -427,7 +481,7 @@ export function creativeVerificationLines(receipts: readonly VisualReceipt[], di
   }
   for (const receipt of [...newest.values()].sort((a, b) => a.source.localeCompare(b.source)).slice(0, 6)) {
     if (receipt.blocking > 0) {
-      const ids = receipt.sections.filter((s) => s.verdict === "FAIL").map((s) => s.id).slice(0, 4).join(", ");
+      const ids = receipt.sections.filter((s) => s.verdict === "FAIL" || s.verdict === "UNKNOWN").map((s) => s.id).slice(0, 4).join(", ");
       lines.push(`visual review: ${receipt.blocking} blocking finding(s) open on ${receipt.source} (rev ${receipt.revision}): ${ids}`.slice(0, 280));
     }
   }

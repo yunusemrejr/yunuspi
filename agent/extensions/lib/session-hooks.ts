@@ -121,7 +121,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		// not as source. Open briefs also deserve a deliberate direction.
 		key: "ui-first-render",
 		tools: ["write", "edit"],
-		line: "Render this interface (render_see) at a narrow and a wide width before building further, and judge it against the chosen design direction: hierarchy, type rhythm, color, spacing, states. A new UI deserves its own identity, not a copy of a site mentioned for links or credit. For public website pages/routes also use seo_toolkit to establish page purpose, inspect raw HTML and verify canonical/crawl/discovery consistency; preserve private app exclusion.",
+		line: "Use ui_explore early for 320px/mobile/tablet/desktop pixels and measurements; visual_review run then record its runId and every rubric section on the current revision. Check the actual keyboard task with browser_session. Judge hierarchy, type, color, spacing, content and states against this product's identity. Text-only models need permitted vision evidence; source code cannot approve appearance. For public website pages/routes also use seo_toolkit to establish page purpose, inspect raw HTML and verify canonical/crawl/discovery consistency; preserve private app exclusion.",
 		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
 	},
 	{
@@ -134,7 +134,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		key: "visual-review-receipt",
 		tools: ["visual_review"],
 		when: (args) => args.action === 'run',
-		line: "Judge every needsVision section from the attached pixels, then record the verdict: UNKNOWN stays open and FAIL blocks completion until a clean re-review of the same revision lands. Deterministic evidence stands unless the pixels prove otherwise.",
+		line: "Judge every needsVision section from delivered pixels or permitted image_understand on this capture, then record every rubric section with this runId. UNKNOWN stays open. Changed dependencies invalidate the run; measured FAILs require repair or a specific dismissal. Reuse current evidence instead of repeating unchanged captures.",
 	},
 	{
 		key: "art-qa-evidence",

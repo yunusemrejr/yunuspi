@@ -1,7 +1,7 @@
 // Runs in the existing capture page. These are review candidates, not taste,
 // authorship detection, accessibility certification, or instructions to edit.
 export function inspectNoiseState(root, options = {}) {
-  const started = performance.now(), maxNodes = 600, maxFindings = options.detailed ? 12 : 6, maxMs = 40;
+  const started = performance.now(), maxNodes = 600, maxFindings = options.detailed ? 12 : 6, maxMs = 120;
   const result = {findings: [], visited: 0, truncated: false,
     scope: 'Visible main-document DOM sample. Patterns can be intentional; inspect these locations before changing them. No aesthetic score, input values or copied page text. New density and font counts use wholly visible text elements in the current viewport; accent checks use intersecting panels; articles, quotations, code and marked user content are excluded. CSS family declarations do not prove which font rendered. Shadow roots, frames and canvas require separate review.',
     limits: {nodes: maxNodes, findings: maxFindings, scanMs: maxMs, animations: 100, textCharsPerElement: 4096}};

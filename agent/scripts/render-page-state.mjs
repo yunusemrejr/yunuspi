@@ -35,6 +35,7 @@ export function inspectPageState(root, { selector = null, summary = false } = {}
   const overflow = el => el && Number.isFinite(el.scrollWidth) && Number.isFinite(el.clientWidth)
     ? Math.max(0, el.scrollWidth - el.clientWidth) : null;
   const result = {
+    documentType: document.contentType,
     title: clean(document.title),
     location: safeUrl(location.href),
     readyState: document.readyState,

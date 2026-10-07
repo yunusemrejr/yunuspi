@@ -107,6 +107,7 @@ jobs:
           tests/project-vector-memory.test.mjs tests/memory-embedding-coverage.test.mjs tests/jev-client.test.mjs
           tests/stream-lifecycle.test.mjs tests/rpc-client-lifecycle.test.mjs tests/guarded-process.test.mjs
           tests/needle-embedding-cache.test.mjs tests/memory-guard.test.mjs
+          tests/creative-evidence.test.mjs tests/creative-qa.test.mjs tests/ui-doctrine.test.mjs
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

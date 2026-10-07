@@ -30,7 +30,7 @@ const NARRATIVE = /^\s*(?:what|who|when|where|why|how)\s+(?:is|are|was|were|does
 const NO_UI = /\b(?:no|without|skip)\s+(?:ui|frontend|front-end|gui)\b|\b(?:backend|back-end|cli|api)[- ]only\b|\bheadless\b/i;
 const WORK_VERB = /\b(?:add|build|create|design|implement|make|redesign|restyle|fix|improve|change|update|polish|refactor|develop|craft|revamp|rework|tweak|adjust|style|prototype|generate|write)\b/i;
 
-const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|xaml|qml)$/i;
+const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|xaml|qml)$/i;
 const EXCLUDED_PATH = /(?:^|\/)(?:node_modules|vendor|dist|build|coverage|fixtures?|__fixtures__|__snapshots__|skills|references|backups)\/|\.(?:min|generated|test|spec|stories)\.|(?:^|\/)(?:SKILL|README|CHANGELOG)\.md$/i;
 const SCRIPT_FILE = /\.(?:[cm]?[jt]s|py|rs|kt|swift|dart|java|cs|lua)$/i;
 /** GUI toolkits and DOM builders: a script that draws windows or markup is interface work. */
@@ -53,6 +53,7 @@ export function uiFileCue(file: string, content?: string): boolean {
   const normalized = String(file ?? "").replaceAll("\\", "/");
   if (!normalized || EXCLUDED_PATH.test(normalized)) return false;
   if (UI_FILE.test(normalized)) return true;
+  if (/\.(?:php|phtml)$/i.test(normalized) && typeof content === 'string' && /<(?:html|body|main|form|button|nav|section|div)\b/i.test(content)) return true;
   return SCRIPT_FILE.test(normalized) && typeof content === "string" && GUI_CONTENT.test(content.slice(0, 24000));
 }
 

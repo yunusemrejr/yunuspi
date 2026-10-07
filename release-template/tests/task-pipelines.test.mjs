@@ -88,6 +88,7 @@ test('stage ordering and native evidence requirements block premature delivery a
   assert.throws(() => record(selection, ledger, 'ui-interaction', 'pixels'), /requires interaction/);
   assert.throws(() => record(selection, ledger, 'delivery', 'artifact'), /unresolved prerequisite/);
   record(selection, ledger, 'ui-pixels', 'pixels');
+  record(selection, ledger, 'ui-responsive', 'inspection');
   record(selection, ledger, 'ui-interaction', 'interaction');
   record(selection, ledger, 'seo-raw', 'inspection');
   record(selection, ledger, 'seo-content', 'assessment');
@@ -143,8 +144,8 @@ test('blocked evidence remains unresolved, context is bounded, and malformed rec
   const context = buildPipelineContext(selection, ledger, { ...coordinate, maxChars: 300 });
   assert.ok(context.length <= 300);
   assert.equal(buildPipelineContext(selection, ledger, { ...coordinate, maxChars: 100 }), undefined);
-  assert.match(selection.stages[0].check, /purple-gradient SaaS/);
-  assert.match(selection.stages[0].check, /cream\/terracotta/);
+  assert.match(selection.stages[0].check, /real content, tokens and components/);
+  assert.match(selection.stages[0].check, /template identities, fake proof/);
 });
 
 test('a plain JavaScript function receives runtime discovery without mandatory UI review', () => {

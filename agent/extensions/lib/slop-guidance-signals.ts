@@ -239,6 +239,10 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       add('ui-small-tracked-copy', 'Tiny pixel text occurs with uppercase or tracking. Inspect whether labels remain readable at real density, narrow widths and zoom; avoid using tiny uppercase metadata as the default hierarchy.');
     if ((text.match(/\bposition\s*:\s*absolute\b/gi)||[]).length >= 3)
       add('ui-fragile-placement', 'Multiple absolutely positioned elements occur together. Check whether meaningful content depends on fixed coordinates; verify long text, zoom, narrow widths and overlap. Icons and deliberate overlays may legitimately use absolute positioning.');
+    if ([...text.matchAll(/\b(min-width|width)\s*:\s*(\d+(?:\.\d+)?)px\b/gi)].some(m => Number(m[2]) >= (m[1].toLowerCase() === 'min-width' ? 321 : 720)))
+      add('ui-reflow-risk', 'A fixed or minimum width may exceed a narrow viewport. Use ui_explore at 320px and around the real breakpoint; inspect clipped controls and long content. Tables, canvases and intentional scroll regions may be justified; a partial source cue does not establish a defect.');
+    if (/<(?:html|body)\b/i.test(text) && !/<meta\b[^>]*\bname\s*=\s*["']viewport["']/i.test(text))
+      add('ui-mobile-viewport', 'A full HTML document has no observed viewport declaration. Verify the actual served head and device-width sizing; include width=device-width and an initial scale where needed. Do not disable pinch zoom. Template heads may supply the declaration elsewhere.');
     // Only explicit opaque hex pairs within one declaration block; never combine
     // values from different selectors or pretend to resolve variables/layers.
     for (const block of text.matchAll(/\{([^{}]{1,1800})\}/g)) {

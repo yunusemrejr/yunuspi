@@ -18,11 +18,12 @@ const hooks = await load("extensions/lib/session-hooks.ts");
 
 test("planUiMatrix expands viewports × states and caps at 12 captures", () => {
   const minimal = qa.planUiMatrix({});
-  assert.equal(minimal.cells.length, 2);
-  assert.deepEqual(minimal.cells.map((c) => c.viewport), ["mobile", "desktop"]);
+  assert.equal(minimal.cells.length, 4);
+  assert.deepEqual(minimal.cells.map((c) => c.viewport), ["narrow", "mobile", "tablet", "desktop"]);
   assert.ok(minimal.cells.every((c) => c.state === "default" && c.colorScheme === "light"));
-  const full = qa.planUiMatrix({ states: ["default", "dark", "reduced-motion", "full"] });
+  const full = qa.planUiMatrix({ viewports: ['mobile', 'desktop'], states: ["default", "dark", "reduced-motion", "full"] });
   assert.equal(full.cells.length, 8);
+  assert.equal(full.capped, false);
   assert.ok(full.cells.some((c) => c.state === "dark" && c.colorScheme === "dark" && c.file === "mobile-dark.png"));
   assert.ok(full.cells.some((c) => c.state === "reduced-motion" && c.reducedMotion === "reduce"));
   assert.ok(full.cells.some((c) => c.state === "full" && c.fullPage === true));
@@ -48,7 +49,7 @@ test("summarizePageState rolls up overflow, alt and controls", () => {
   assert.equal(summary.images, 2);
   assert.equal(summary.missingAlt, 1);
   assert.equal(summary.controls, 2);
-  assert.deepEqual(qa.summarizePageState(undefined), { items: 0, overflowElements: 0, scopeOverflowPx: 0, missingAlt: 0, images: 0, controls: 0, truncated: false });
+  assert.deepEqual(qa.summarizePageState(undefined), { available: false, items: 0, overflowElements: 0, scopeOverflowPx: 0, missingAlt: 0, images: 0, controls: 0, unnamedControls: 0, smallTargets: 0, brokenImages: 0, truncated: false });
 });
 
 test("inkQuadrants measures compositional balance as a proxy", () => {

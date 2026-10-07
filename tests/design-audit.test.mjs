@@ -30,6 +30,7 @@ test('ordinary DOM inspection remains lean and large design scans disclose bound
  const huge=path.join(root,'large.html');fs.writeFileSync(huge,'<style>html{background:white}p{color:#aaa}</style>'+Array.from({length:900},()=>'<p>Bounded sample</p>').join(''));
  const result=await renderCapture({source:huge,output:'text',designAudit:true},path.join(root,'unused4.png'));
  assert.equal(result.pageState.design.truncated,true);assert.ok(result.pageState.design.visited<=600);assert.ok(result.pageState.design.findings.length<=12);assert.ok(JSON.stringify(result).length<14000);
+ assert.equal(result.noise.truncated,true,'an incomplete advisory sample cannot silently imply a clean page');
 });
 
 test('native design_audit uses the existing renderer contract and rejects PDF style claims',async()=>{
