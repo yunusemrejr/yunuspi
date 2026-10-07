@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.31.0 — 2026-10-07
+
+**UI tools follow the task and its stage.** Main prompts, goals and short steering follow-ups share one adaptive selection policy. Authored purpose, exclusions and tool ceilings survive continuations; current source observations and native receipts refresh the next useful tools. New unrelated work releases the previous automatic selection. Structural shared-owner changes add bounded symbol and impact inspection before editing, with fresh inspection when scope expands.
+
+**Motion mechanics become editable code.** `ui_recipe` plans or scaffolds focus-safe entrances, layered section-relative scroll tracks and local Three.js model integration. The generated modules retain static/mobile/reduced-motion paths, one transform owner, bounded drawing and cleanup. Live `motion_inspect` scroll sampling uses one persistent document, forward/backtracking positions and reduced-motion output. Prepared code and sampled frames retain their distinct verification limits.
+
+**Device and consistency checks extend current UI evidence.** `ui_explore` preserves 320px/mobile/tablet/desktop native QA and adds touch, DPR, orientation and breakpoint neighbors with explicit omitted coverage. `ui_consistency` compares named shared roles and tokens across routes within declared variants. Measurements cannot replace the current visual rubric, inspected matrix pixels or representative keyboard/input task.
+
+**Blender exports feed the web asset path.** GLB/glTF exports carry current resource hashes, geometry counts, mobile budget warnings and decoder requirements. Three.js scaffolds fit translated models, limit DPR, handle loading/context failure and dispose owned resources. Image generation retains the exact selected model and saves decoded paid output when local receipt or registration fails, with a recovery receipt for repair.
+
+The shared direction and doctrine owners keep real product content, identity, references and intended ambition ahead of stock layouts. Root documentation, release mirrors, capability inventory and behavioral coverage describe the same tools and autonomous workflow.
+
 ## 0.30.1 — 2026-10-07
 
 Reviewed internal, authenticated, staff/member-only and local-only page purposes now stay out of SEO discovery files and crawl expansion even when their URLs look public. Raw HTML inspection uses the same purpose policy to request access/index-exclusion evidence instead of public metadata. A served fixture checks that links and sitemaps cannot override the reviewed exclusion.
