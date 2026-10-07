@@ -78,3 +78,40 @@ test('code_quality structure runs through the real collector',async()=>{
   assert.equal(result.scope.files,2);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('embedded import text cannot invent graph edges or dependencies',()=>{
+ const source = 'const fixture = `\nimport "./b.js";\n`;\nconst text = "require(\'phantom\')";\n/* import "comment-only"; */\nconst regex = /require("regex-only")/;\nimport "./real.js";';
+ const report=analyzeStructure([file('a.ts',source),file('b.ts',''),file('real.ts','')],{dependencies:{}});
+ assert.equal(report.edges,1);
+ assert.deepEqual(report.dependencies.undeclared,[]);
+ assert.ok(report.orphans.includes('b.ts'));
+ assert.ok(!report.orphans.includes('real.ts'));
+});
+
+test('Python sibling imports and aliases form the actual cycle, including multiline imports',()=>{
+ const report=analyzeStructure([
+  file('pkg/__init__.py',''),
+  file('pkg/a.py','from . import (\n b as other,\n)\n'),
+  file('pkg/b.py','from . import a # sibling\n'),
+  file('pkg/fake.py','"""\nimport pkg.a\n"""\n'),
+ ]);
+ assert.deepEqual(report.cycles,[{files:['pkg/a.py','pkg/b.py'],size:2}]);
+ assert.ok(!report.fanOut.some(row=>row.file==='pkg/fake.py'));
+});
+
+test('runtime edges exclude inline type-only imports and declarations cannot replace runtime packages',()=>{
+ const report=analyzeStructure([
+  file('a.ts','import { type B } from "./b.js";\nimport express from "express";'),
+  file('b.ts','import {a} from "./a.js";'),
+ ],{devDependencies:{'@types/express':'1'}});
+ assert.deepEqual(report.cycles,[]);
+ assert.deepEqual(report.dependencies.undeclared,['express']);
+});
+
+test('structure keeps its full collector scope beyond the smaller discovery import budget',()=>{
+ const files=Array.from({length:150},(_,i)=>file(`module-${i}.ts`,'export {};'));
+ const source=files.map(row=>`import "./${row.path}";`).join('\n');
+ const report=analyzeStructure([file('index.ts',source),...files]);
+ assert.equal(report.edges,150);
+ assert.equal(report.incomplete,undefined);
+});

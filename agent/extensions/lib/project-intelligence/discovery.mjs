@@ -26,6 +26,7 @@ import {
   isSourcePath,
   isTemplateEnvPath,
   parseCode,
+  resolveCodeImports,
   parseApiSpec,
   parseDeployment,
   parseDoc,
@@ -60,13 +61,12 @@ const LIMITS = Object.freeze({
   maxLiteral: 420,
 });
 
-const SOURCE_SCHEMA_VERSION = 2;
+const SOURCE_SCHEMA_VERSION = 3;
 // Metadata v2 replaces the old full source payload cache with compact,
 // compressed indexes.  The store remains authoritative for graph payloads;
 // this version only helps discovery decide which files need reparsing.
 const METADATA_SCHEMA_VERSION = 2;
 const COMPACT_INDEX_ENCODING = 'br-json-v1';
-const KNOWN_IMPORT_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts', '.vue', '.svelte', '.py', '.rb', '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.php'];
 
 function abortIfNeeded(signal) {
   signal?.throwIfAborted();
@@ -554,13 +554,7 @@ function buildEvidence(identity, root, relativePath, text, contentHash, context)
   if (isTemplateEnvPath(relativePath)) addClaim(fileNode.id, 'role', 'environment template', { status: 'verified', confidence: 1 });
 
   const resolveLocal = specifier => {
-    const raw = bounded(specifier, 240).replaceAll('\\', '/');
-    if (!raw || (!raw.startsWith('.') && !raw.startsWith('/'))) return null;
-    const candidate = raw.startsWith('/') ? raw.slice(1) : path.posix.normalize(path.posix.join(path.posix.dirname(relativePath), raw));
-    if (!candidate || candidate === '..' || candidate.startsWith('../')) return null;
-    const candidates = [candidate];
-    if (!path.posix.extname(candidate)) for (const suffix of KNOWN_IMPORT_EXTENSIONS) candidates.push(candidate + suffix, `${candidate}/index${suffix}`);
-    return candidates.find(value => context.knownFiles.has(value)) ?? null;
+    return resolveCodeImports(relativePath, { specifier: bounded(specifier, 240) }, context.knownFiles)[0] ?? null;
   };
 
   let parsed = {};
@@ -673,9 +667,10 @@ function buildEvidence(identity, root, relativePath, text, contentHash, context)
     }
   } else if (isSourcePath(relativePath) || /(?:^|\/)(?:migrations?|schemas?|schema)\//i.test(relativePath) || /\.(?:sql|graphql|gql)$/i.test(relativePath)) {
     parsed = parseCode(relativePath, text);
+    if (!parsed.importsComplete) addClaim(fileNode.id, 'importScanComplete', 'false', { status: 'verified', confidence: 1 });
     for (const item of parsed.imports ?? []) {
-      const local = resolveLocal(item.specifier);
-      if (local) {
+      const locals = resolveCodeImports(relativePath, item, context.knownFiles);
+      if (locals.length) for (const local of locals) {
         const target = addNode('file', fileKey(projectKey, local), local);
         addClaim(fileNode.id, 'imports', target.id, { relation: true, status: 'inferred', confidence: 0.84 });
       } else {

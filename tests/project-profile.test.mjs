@@ -87,3 +87,21 @@ test("research_toolkit plans prior-art angles, keeps the lead plan unchanged and
   assert.equal(missing.isError, true);
   assert.match(missing.error, /Cannot profile/);
 });
+
+test('profile metadata reads a bounded prefix even when the README is a huge sparse file', t => {
+  const dir = project(t, { 'README.md': '# Bounded profile\n\nUseful project facts.\n', 'app.ts': '' });
+  fs.truncateSync(path.join(dir, 'README.md'), 2 ** 31 + 1);
+  assert.equal(profileProject(dir).tagline, 'Bounded profile — Useful project facts.');
+});
+
+test('metadata symlinks never reveal external content and a depth cap marks the profile partial', t => {
+  const external = project(t, { 'package.json': JSON.stringify({ name: 'external-private-value' }), 'README.md': '# External value' });
+  const dir = project(t, { 'src/one/two/three/four/five/six/hidden.py': '' });
+  fs.symlinkSync(path.join(external, 'package.json'), path.join(dir, 'package.json'));
+  fs.symlinkSync(path.join(external, 'README.md'), path.join(dir, 'README.md'));
+  const profile = profileProject(dir);
+  assert.equal(profile.name, path.basename(dir));
+  assert.equal(profile.tagline, undefined);
+  assert.equal(profile.truncated, true);
+  assert.ok(!JSON.stringify(profile).includes('external-private-value'));
+});

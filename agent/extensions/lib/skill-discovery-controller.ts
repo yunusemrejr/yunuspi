@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { buildSkillDiscoveryRequest, parseSkillDiscoverySuggestions } from './skill-discovery.ts';
+import { buildSkillDiscoveryRequest, parseSkillDiscoveryResponse } from './skill-discovery.ts';
 import { skillEvidenceContext, type SkillInfo } from './skill-relevance.ts';
 
 const RUNNER = Symbol.for('yunus-pi.skill-discovery-runner.v1');
@@ -26,11 +26,11 @@ export function createSkillDiscoveryController(options: {
   let ctx: any, prompt = '', generation = 0, attempted = false;
   let controller: AbortController | undefined;
   const observations = new Set<string>(), files = new Set<string>(), tools = new Set<string>();
-  const seen = new Set<string>();
+  const cached = new Map<string, NonNullable<ReturnType<typeof parseSkillDiscoveryResponse>>>();
   const cancel = (clearCache = false) => {
     generation++; controller?.abort(); controller = undefined; ctx = undefined;
     observations.clear(); files.clear(); tools.clear(); attempted = false;
-    if (clearCache) seen.clear();
+    if (clearCache) cached.clear();
   };
   const permitted = () => options.enabled() && process.env.PI_OFFLINE !== '1' && process.env.PI_SUBAGENT_CHILD !== "1"
     && !['off','0'].includes(process.env.PI_SKILL_DISCOVERY ?? 'on');
@@ -88,9 +88,14 @@ export function createSkillDiscoveryController(options: {
       const request = buildSkillDiscoveryRequest(catalog, {prompt, files:[...files], tools:[...tools], observations:[skillEvidenceContext({files:[...files],tools:[...tools]})]});
       if (!request.brief || !request.catalog.length) { attempted = true; return; }
       attempted = true; // Includes unavailable/invalid outcomes: no retry loop.
-      if (seen.has(request.fingerprint)) return;
-      seen.add(request.fingerprint);
-      if (seen.size > 16) seen.delete(seen.values().next().value!);
+      const offer = (suggestions: NonNullable<ReturnType<typeof parseSkillDiscoveryResponse>>) => {
+        for (const suggestion of suggestions) {
+          const skill = options.catalog().find(item => item.name === suggestion.skill.name && item.file === suggestion.skill.file);
+          if (skill && !options.covered(skill.file)) options.offer(skill, suggestion.reason);
+        }
+      };
+      const previous = cached.get(request.fingerprint);
+      if (previous) { offer(previous); return; }
       const epoch = generation, current = ctx;
       const abort = controller = new AbortController();
       // Outer guard just past the runner's own 40s deadline (skill-discovery-runner.ts).
@@ -100,10 +105,14 @@ export function createSkillDiscoveryController(options: {
         return runner({brief:request.brief, task:prompt, candidates:request.catalog.map(skill => ({name:skill.name,description:skill.description.slice(0,160)}))}, current, signal);
       }).then(body => {
         if (epoch !== generation || signal.aborted || !permitted() || typeof body !== 'string') return;
-        for (const suggestion of parseSkillDiscoverySuggestions(body, request.catalog)) {
-          const skill = options.catalog().find(item => item.name === suggestion.skill.name && item.file === suggestion.skill.file);
-          if (skill && !options.covered(skill.file)) options.offer(skill, suggestion.reason);
-        }
+        const suggestions = parseSkillDiscoveryResponse(body, request.catalog);
+        if (!suggestions) return;
+        // Only a current, validated completion can suppress future inference.
+        // Cancelled, unavailable and malformed attempts remain retryable on the
+        // next human input, with the existing one-attempt-per-input budget.
+        cached.set(request.fingerprint, suggestions);
+        if (cached.size > 16) cached.delete(cached.keys().next().value!);
+        offer(suggestions);
       }).catch(() => { /* Unavailable discovery leaves deterministic routing intact. */ })
         .finally(() => { abort.abort(); if (controller === abort) controller = undefined; });
     },

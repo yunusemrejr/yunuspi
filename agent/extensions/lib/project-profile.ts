@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, opendirSync, readSync, statSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
 /**
@@ -10,6 +10,7 @@ import { basename, extname, join, resolve } from "node:path";
  */
 
 const MAX_FILES = 5000;
+const MAX_ENTRIES = 10000;
 const MAX_DEPTH = 6;
 const HEAD_BYTES = 64 * 1024;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", "target", "vendor", ".venv", "venv", "__pycache__", ".next", ".nuxt", ".cache", "coverage", ".turbo", "release-template"]);
@@ -62,11 +63,21 @@ export interface ProjectProfile {
 	latestTag?: string;
 }
 
-function head(path: string): string {
+function head(file: string): string {
+	let fd: number | undefined;
 	try {
-		const bytes = readFileSync(path);
-		return bytes.subarray(0, HEAD_BYTES).toString("utf8");
+		fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+		if (!fstatSync(fd).isFile()) return "";
+		const bytes = Buffer.alloc(HEAD_BYTES);
+		let used = 0;
+		while (used < bytes.length) {
+			const count = readSync(fd, bytes, used, bytes.length - used, used);
+			if (!count) break;
+			used += count;
+		}
+		return bytes.subarray(0, used).toString("utf8");
 	} catch { return ""; }
+	finally { if (fd !== undefined) closeSync(fd); }
 }
 
 function readJson(path: string): Record<string, any> | undefined {
@@ -76,7 +87,7 @@ function readJson(path: string): Record<string, any> | undefined {
 	} catch { return undefined; }
 }
 
-const oneLine = (value: unknown, limit: number): string => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, limit) : "";
+const oneLine = (value: unknown, limit: number): string => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim().slice(0, limit) : "";
 
 function detectLicense(root: string, rootNames: readonly string[], manifest?: Record<string, any>): string | undefined {
 	const declared = oneLine(typeof manifest?.license === "string" ? manifest.license : manifest?.license?.type, 40);
@@ -106,15 +117,20 @@ function readmeSummary(root: string, rootNames: readonly string[]): { tagline?: 
 		}
 		if (!paragraphDone && !/^(?:\[!\[|!\[|<)/.test(line)) paragraph += `${paragraph ? " " : ""}${oneLine(line.replace(/[*_`]/g, ""), 300)}`.slice(0, 400);
 	}
-	const text = [title, paragraph].filter(Boolean).join(" — ");
+	const text = [title, paragraph.trim()].filter(Boolean).join(" — ");
 	return { ...(text ? { tagline: text.slice(0, 420) } : {}), headings };
 }
 
 function latestTag(root: string): string | undefined {
 	const tags: string[] = [];
 	try {
+		if (!lstatSync(join(root, '.git')).isDirectory()) return undefined;
 		const refs = join(root, ".git", "refs", "tags");
-		if (existsSync(refs)) for (const name of readdirSync(refs).slice(0, 500)) tags.push(name);
+		if (existsSync(refs) && !lstatSync(join(root, '.git', 'refs')).isSymbolicLink() && !lstatSync(refs).isSymbolicLink()) {
+			const dir = opendirSync(refs);
+			try { for (let entry = dir.readSync(); entry && tags.length < 500; entry = dir.readSync()) if (entry.isFile()) tags.push(entry.name); }
+			finally { dir.closeSync(); }
+		}
 		const packed = head(join(root, ".git", "packed-refs"));
 		for (const match of packed.matchAll(/refs\/tags\/(\S+)/g)) tags.push(match[1]);
 	} catch { /* A project without readable tags simply has none to report. */ }
@@ -129,21 +145,42 @@ function latestTag(root: string): string | undefined {
 export function profileProject(directory: string): ProjectProfile {
 	const root = resolve(directory);
 	if (!statSync(root).isDirectory()) throw new Error("profile path must be a directory");
-	const rootNames = readdirSync(root).filter((name) => name !== ".env" && !name.startsWith(".env."));
-	const counts = new Map<string, number>();
-	let scanned = 0, truncated = false, sourceFiles = 0;
-	const walk = (dir: string, depth: number) => {
-		if (truncated) return;
-		let entries: import("node:fs").Dirent[];
-		try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-		for (const entry of entries) {
-			if (entry.isSymbolicLink()) continue;
-			if (entry.isDirectory()) { if (depth < MAX_DEPTH && !SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), depth + 1); continue; }
-			if (!entry.isFile()) continue;
-			if (++scanned > MAX_FILES) { truncated = true; return; }
-			const language = LANGUAGES[extname(entry.name).toLowerCase()];
-			if (language) { counts.set(language, (counts.get(language) ?? 0) + 1); sourceFiles++; }
+	const rootNames: string[] = [];
+	let truncated = false;
+	const listing = opendirSync(root);
+	try {
+		let entries = 0;
+		for (let entry = listing.readSync(); entry; entry = listing.readSync()) {
+			if (++entries > MAX_ENTRIES) { truncated = true; break; }
+			if (entry.name !== '.env' && !entry.name.startsWith('.env.')) rootNames.push(entry.name);
 		}
+	} finally { listing.closeSync(); }
+	rootNames.sort();
+	const counts = new Map<string, number>();
+	let scanned = 0, visited = 0, sourceFiles = 0, exhausted = false;
+	const walk = (dir: string, depth: number) => {
+		if (exhausted) return;
+		let entries: ReturnType<typeof opendirSync>;
+		try { entries = opendirSync(dir); } catch { truncated = true; return; }
+		try {
+			const names: import('node:fs').Dirent[] = [];
+			for (let entry = entries.readSync(); entry; entry = entries.readSync()) {
+				if (names.length >= MAX_ENTRIES - visited) { truncated = true; break; }
+				names.push(entry);
+			}
+			for (const entry of names.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+				if (exhausted || ++visited > MAX_ENTRIES) { exhausted = true; truncated = true; break; }
+				if (entry.isSymbolicLink()) continue;
+				if (entry.isDirectory()) {
+					if (!SKIP_DIRS.has(entry.name)) { if (depth < MAX_DEPTH) walk(join(dir, entry.name), depth + 1); else truncated = true; }
+					continue;
+				}
+				if (!entry.isFile()) continue;
+				if (++scanned > MAX_FILES) { exhausted = true; truncated = true; break; }
+				const language = LANGUAGES[extname(entry.name).toLowerCase()];
+				if (language) { counts.set(language, (counts.get(language) ?? 0) + 1); sourceFiles++; }
+			}
+		} finally { entries.closeSync(); }
 	};
 	walk(root, 0);
 

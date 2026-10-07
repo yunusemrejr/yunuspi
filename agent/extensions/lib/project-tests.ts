@@ -11,6 +11,7 @@ import { tokenizeSimple } from './bash-routing.ts';
 import { registerContinuationSource, resumesElsewhere } from './continuation-notice.ts';
 import { isSessionStopped } from './session-stop.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
+import { containsPath } from './path-safety.ts';
 
 import { choices, clipRationale, RATIONALE_INTAKE } from "./tool-schema.ts";
 const ENTRY = 'project-test-checkpoint-v1';
@@ -44,8 +45,7 @@ const PROJECT_HASH_FILES = 64;
 function projectContentHash(root: string, file: string): string | undefined {
   try {
     const absolute = path.resolve(root, file);
-    const relative = path.relative(root, absolute);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+    if (!containsPath(root, absolute)) return undefined;
     const stat = fs.statSync(absolute);
     if (!stat.isFile() || stat.size > PROJECT_HASH_LIMIT) return undefined;
     return `${stat.size}:${createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')}`;
@@ -116,17 +116,37 @@ function sanitizeRestoredAttribution(value: unknown, changed: string[]): Record<
  * Every rejection carries a specific reason so the caller learns the rule in
  * one round trip instead of guessing across retries. */
 type CheckVerdict = { check: { key: string; label: string } } | { reason: string };
+/** Split only unquoted AND operators. A literal test argument may itself
+ * contain &&; changing it changes the exact command receipt, not its shape. */
+function checkSegments(command: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (const match of command.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
+    if (match[0] !== '&&') continue;
+    parts.push(command.slice(start, match.index)); start = match.index! + 2;
+  }
+  parts.push(command.slice(start));
+  return parts;
+}
 function checkCommandInner(command: unknown, cwd: string, declared: boolean): CheckVerdict {
   if (typeof command !== 'string' || !command.trim()) return { reason: 'empty command' };
   if (command.length > 2000) return { reason: 'over 2000 characters' };
   if (/[$`\r\n]/.test(command)) return { reason: 'uses $expansion, backticks or newlines; pass literal values' };
   let directory = path.resolve(cwd), bodyCommand = command.trim();
-  const parts = command.split('&&');
+  const parts = checkSegments(command);
   if (parts.length === 2) {
     const prefix = tokenizeSimple(parts[0].trim());
     if (prefix?.length !== 2 || prefix[0] !== 'cd') return { reason: 'only `cd <dir> && <command>` composition is supported (no pipes, ;, || or trailing echo)' };
     directory = path.resolve(cwd, prefix[1]); bodyCommand = parts[1].trim();
-    if (path.relative(cwd, directory).startsWith('..')) return { reason: 'cd escapes the project working directory' };
+    if (!containsPath(path.resolve(cwd), directory)) return { reason: 'cd escapes the project working directory' };
+    try {
+      directory = fs.realpathSync(directory);
+      if (!containsPath(fs.realpathSync(cwd), directory)) return { reason: 'cd resolves outside the project working directory' };
+    } catch (error: any) {
+      // Plans may name a build directory before it exists. Real execution
+      // re-resolves the key; an existing but uninspectable directory stays unknown.
+      if (error?.code !== 'ENOENT') return { reason: 'cd directory cannot be inspected; establish its scope before declaring the check' };
+    }
   }
   const commandTokens = tokenizeSimple(bodyCommand);
   if (!commandTokens?.length) {
@@ -202,7 +222,7 @@ export function checkInvocation(command: unknown): { body: string; pipefail: boo
 /** Read-only reconnaissance proves nothing about behavior: never evidence. */
 const RECON = /^(?:ls|ll|cat|head|tail|less|more|find|fd|grep|rg|ag|wc|stat|file|du|df|tree|pwd|which|type|whereis|realpath|readlink|basename|dirname|date|whoami|uname|id|env|printenv|sed|awk|sort|uniq|cut|tr|diff|cmp|md5sum|sha256sum|jq|curl|wget|ps|pgrep|lsof|ss|netstat)$/;
 function reconCommand(command: string): boolean {
-  const segments = command.split('&&');
+  const segments = checkSegments(command);
   const body = segments.length === 2 && segments[0].trim().startsWith('cd ') ? segments[1] : command;
   const tokens = body.trim().split(/\s+/).filter(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
   const exe = path.basename(tokens[0] ?? '');
@@ -701,7 +721,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         // live sessions retried `node --check a && node --check b` by hand.
         const expandChain = (command: unknown): unknown[] => {
           if (typeof command !== 'string' || !command.includes('&&') || projectCheckCommand(command, ctx.cwd, true)) return [command];
-          const parts = command.split('&&').map(part => part.trim()).filter(Boolean);
+          const parts = checkSegments(command).map(part => part.trim()).filter(Boolean);
           const cd = tokenizeSimple(parts[0] ?? '');
           const prefix = cd?.length === 2 && cd[0] === 'cd' ? `${parts.shift()} && ` : '';
           const expanded = parts.map(part => prefix + part);

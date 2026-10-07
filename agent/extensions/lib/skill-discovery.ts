@@ -57,25 +57,30 @@ export function buildSkillDiscoveryRequest(skills: readonly SkillDiscoveryEntry[
   return { brief, catalog, fingerprint, truncated: catalog.some(skill => clean(skill.description, skill.description.length).length > low), skipped: undefined as string | undefined };
 }
 
-export function parseSkillDiscoverySuggestions(text: string, catalog: readonly SkillDiscoveryEntry[]): Array<{ skill: SkillDiscoveryEntry; reason: string }> {
-  if (typeof text !== 'string' || text.length > 4096) return [];
+/** Undefined is invalid/unavailable; a valid empty answer is reusable advice. */
+export function parseSkillDiscoveryResponse(text: string, catalog: readonly SkillDiscoveryEntry[]): Array<{ skill: SkillDiscoveryEntry; reason: string }> | undefined {
+  if (typeof text !== 'string' || text.length > 4096) return undefined;
   let response: unknown;
-  try { response = JSON.parse(text); } catch { return []; }
+  try { response = JSON.parse(text); } catch { return undefined; }
   const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-  if (!record(response) || Object.keys(response).length !== 1 || !Array.isArray(response.suggestions) || response.suggestions.length > SKILL_DISCOVERY_LIMITS.suggestions) return [];
+  if (!record(response) || Object.keys(response).length !== 1 || !Array.isArray(response.suggestions) || response.suggestions.length > SKILL_DISCOVERY_LIMITS.suggestions) return undefined;
   const names = new Map<string, SkillDiscoveryEntry>();
   for (const skill of catalog) {
-    if (names.has(skill.name)) return [];
+    if (names.has(skill.name)) return undefined;
     names.set(skill.name, skill);
   }
   const result: Array<{ skill: SkillDiscoveryEntry; reason: string }> = [];
   const selected = new Set<string>();
   for (const suggestion of response.suggestions) {
-    if (!record(suggestion) || Object.keys(suggestion).length !== 2 || typeof suggestion.name !== 'string' || typeof suggestion.reason !== 'string') return [];
+    if (!record(suggestion) || Object.keys(suggestion).length !== 2 || typeof suggestion.name !== 'string' || typeof suggestion.reason !== 'string') return undefined;
     const skill = names.get(suggestion.name), reason = suggestion.reason.trim();
-    if (!skill || selected.has(skill.name) || reason.length < 12 || reason.length > SKILL_DISCOVERY_LIMITS.reasonChars || /[\u0000-\u001f\u007f]/.test(reason)) return [];
+    if (!skill || selected.has(skill.name) || reason.length < 12 || reason.length > SKILL_DISCOVERY_LIMITS.reasonChars || /[\u0000-\u001f\u007f]/.test(reason)) return undefined;
     selected.add(skill.name);
     result.push({ skill, reason });
   }
   return result;
+}
+
+export function parseSkillDiscoverySuggestions(text: string, catalog: readonly SkillDiscoveryEntry[]) {
+  return parseSkillDiscoveryResponse(text, catalog) ?? [];
 }

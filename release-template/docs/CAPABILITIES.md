@@ -2316,6 +2316,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
 - [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
+- [`docs/ENGINEERING-RELIABILITY.md`](ENGINEERING-RELIABILITY.md)
 - [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
 - [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
 - [`docs/GOAL.md`](GOAL.md)

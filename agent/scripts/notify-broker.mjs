@@ -130,7 +130,6 @@ const RECOVERY_MIN_OCCURRENCES = 2;
 const MAX_DETAIL = 600;
 const MAX_ARCHIVE = 100;
 const ACTIVE_TTL_MS = 30 * 24 * HOUR; // stale active entries fall out of status
-const STALE_LOCK_MS = 15_000; // critical section is ~ms; a stale lock is dead
 const LOCK_WAIT_MS = 10_000;
 
 const SEV_RANK = { debug: 0, info: 0, warning: 1, error: 2, critical: 3 };
@@ -173,7 +172,6 @@ function parseArgs(argv) {
 function withStateLock(statePath, fn) {
   const lockDir = `${statePath}.lock`;
   const release = acquireDirectoryLock(lockDir, {
-    staleAfterMs: STALE_LOCK_MS,
     waitMs: LOCK_WAIT_MS,
     label: "state lock",
   });

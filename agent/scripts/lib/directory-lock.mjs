@@ -23,17 +23,19 @@ function waitSynchronously(delayMs) {
 
 function reclaimStaleLock(fsImpl, lockDir) {
   const entries = fsImpl.readdirSync(lockDir);
-  if (entries.length === 0) {
-    try {
-      fsImpl.rmdirSync(lockDir);
-      return true;
-    } catch (error) {
-      if (error?.code === "ENOENT") return true;
-      if (error?.code === "ENOTEMPTY" || error?.code === "EEXIST") return false;
-      throw error;
-    }
+  // Age says nothing about ownership. A paused/slow writer still owns its
+  // transaction, and an empty directory may be publishing its token. Only a
+  // positively dead process can authorize reclaiming the exact observed token.
+  if (entries.length !== 1) return false;
+  const marker = /^owner-([1-9]\d*)-[0-9a-f-]{36}$/.exec(entries[0]);
+  const ownerPid = marker ? Number(marker[1]) : 0;
+  if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0 || ownerPid > 2_147_483_647) return false;
+  try {
+    process.kill(ownerPid, 0);
+    return false;
+  } catch (error) {
+    if (error?.code !== 'ESRCH') return false;
   }
-  if (entries.length !== 1 || !entries[0].startsWith("owner-")) return false;
   const ownerPath = path.join(lockDir, entries[0]);
   const claimPath = `${lockDir}.reclaim-${process.pid}-${randomUUID()}`;
   try {
@@ -60,12 +62,12 @@ function reclaimStaleLock(fsImpl, lockDir) {
   return false;
 }
 
-/** Acquire an exclusive mkdir lock and return its best-effort release function. */
+/** Acquire an exclusive mkdir lock and return its best-effort release function.
+ * Slow/live, malformed and ownerless locks fail closed after the bounded wait. */
 export function acquireDirectoryLock(lockDir, options = {}) {
   const fsImpl = options.fs ?? fs;
   const now = options.now ?? Date.now;
   const wait = options.wait ?? waitSynchronously;
-  const staleAfterMs = options.staleAfterMs ?? 15_000;
   const waitMs = options.waitMs ?? 10_000;
   const pollMs = options.pollMs ?? 50;
   const label = options.label ?? "directory lock";
@@ -105,9 +107,8 @@ export function acquireDirectoryLock(lockDir, options = {}) {
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       try {
-        if (now() - fsImpl.statSync(lockDir).mtimeMs > staleAfterMs) {
-          if (reclaimStaleLock(fsImpl, lockDir)) continue;
-        }
+        fsImpl.statSync(lockDir);
+        if (reclaimStaleLock(fsImpl, lockDir)) continue;
       } catch (inspectionError) {
         if (inspectionError?.code === "ENOENT") {
           if (now() >= deadline) throw new Error(`${label} timeout: ${lockDir}`, { cause: inspectionError });

@@ -5,11 +5,13 @@
  * extracts names and structural clues only; discovery attaches provenance and
  * deterministic node ids to the returned descriptors.
  */
+import path from 'node:path';
+import { tokenizer } from 'acorn';
 
 const TEXT_EXTENSIONS = new Set([
   '.c', '.cc', '.cpp', '.cxx', '.cs', '.css', '.go', '.graphql', '.gql',
   '.h', '.hh', '.hpp', '.html', '.java', '.js', '.jsx', '.json', '.json5',
-  '.kt', '.kts', '.less', '.lua', '.m', '.md', '.mjs', '.mts', '.php',
+  '.kt', '.kts', '.less', '.lua', '.m', '.md', '.mjs', '.mts', '.cjs', '.cts', '.svelte', '.php',
   '.pl', '.pm', '.py', '.rb', '.rs', '.sass', '.scss', '.sh', '.sql',
   '.swift', '.toml', '.ts', '.tsx', '.txt', '.vue', '.xml', '.yaml', '.yml',
   '.zsh',
@@ -17,7 +19,7 @@ const TEXT_EXTENSIONS = new Set([
 
 const SOURCE_EXTENSIONS = new Set([
   '.c', '.cc', '.cpp', '.cxx', '.cs', '.go', '.h', '.hh', '.hpp', '.java',
-  '.js', '.jsx', '.kt', '.kts', '.lua', '.m', '.mjs', '.mts', '.php', '.pl',
+  '.js', '.jsx', '.kt', '.kts', '.lua', '.m', '.mjs', '.mts', '.cjs', '.cts', '.svelte', '.php', '.pl',
   '.gql', '.graphql', '.pm', '.py', '.rb', '.rs', '.sql', '.swift', '.ts', '.tsx', '.vue',
 ]);
 
@@ -322,21 +324,80 @@ export function parseManifest(rel, text) {
   return { manifest: 'lockfile', fields: packageManager ? { packageManager } : {}, dependencies: [], frameworks: [], scripts: [], workspaces: [] };
 }
 
-function importMatches(text, ext) {
+/** One lexical import owner for discovery and code-quality graphs. Acorn's
+ * tokenizer accepts TS declaration tokens without executing or parsing code.
+ * Unsupported/broken syntax retains prior observations and marks the scan
+ * incomplete; it never falls back to matching inside arbitrary literals. */
+export function parseImports(text, ext, limit = 128) {
   const imports = [];
-  const add = (specifier, kind = 'import') => {
+  const bySpecifier = new Map();
+  let complete = true;
+  const add = (specifier, kind = 'import', extra = {}) => {
     const value = bounded(specifier, 240);
-    if (!value || imports.some(item => item.specifier === value)) return;
-    imports.push({ specifier: value, kind });
+    if (!value) return;
+    const existing = bySpecifier.get(value);
+    if (existing) {
+      if (!extra.typeOnly) delete existing.typeOnly;
+      if (extra.members) existing.members = [...new Set([...(existing.members ?? []), ...extra.members])];
+      return;
+    }
+    if (imports.length >= limit) { complete = false; return; }
+    const item = { specifier: value, kind, ...extra };
+    imports.push(item); bySpecifier.set(value, item);
   };
-  if (['.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx', '.vue'].includes(ext)) {
-    const re = /(?:^|[;\n])\s*(?:import\s+(?:[\s\S]*?\s+from\s+)?|export\s+[\s\S]*?\s+from\s+)['"]([^'"]+)['"]|\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/gm;
-    for (const match of text.matchAll(re)) add(match[1] ?? match[2], 'javascript import');
-    const sideEffect = /\bimport\s*['"]([^'"]+)['"]/g;
-    for (const match of text.matchAll(sideEffect)) add(match[1], 'javascript import');
+  if (/^\.[cm]?[jt]sx?$/.test(ext) || ext === '.vue' || ext === '.svelte') {
+    const scripts = ext === '.vue' || ext === '.svelte'
+      ? [...text.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map(match => match[1]) : [text];
+    for (const script of scripts) {
+      const tokens = [];
+      try {
+        for (const token of tokenizer(script, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true })) tokens.push(token);
+      } catch { complete = false; }
+      const word = token => token?.type.label === 'name' || token?.type.keyword ? token.value : token?.type.label;
+      for (let i = 0; i < tokens.length; i++) {
+        const name = word(tokens[i]);
+        // A token-only scanner cannot distinguish JSX text from statements.
+        // Keep imports before its first expression boundary, then expose the
+        // gap rather than letting markup text manufacture dependencies.
+        if ((ext.endsWith('x') || /^\.[cm]?js$/.test(ext)) && tokens[i].value === '<'
+          && (tokens[i + 1]?.type.label === 'name' || tokens[i + 1]?.value === '>')
+          && ['=', '(', '[', ',', ':', '?', 'return', '=>'].includes(word(tokens[i - 1]))) { complete = false; break; }
+        if (!['import', 'export', 'require'].includes(name) || ['.', '?.'].includes(word(tokens[i - 1]))) continue;
+        const next = tokens[i + 1];
+        if (next?.type.label === '(') {
+          const literal = tokens[i + 2], after = word(tokens[i + 3]);
+          if (name !== 'export' && literal?.type.label === 'string' && (after === ')' || name === 'import' && after === ',')) add(literal.value, 'javascript import');
+          continue;
+        }
+        if (name === 'require' || word(next) === '.') continue;
+        if (name === 'import' && next?.type.label === 'string') { add(next.value, 'javascript import'); continue; }
+        const clause = [];
+        for (let j = i + 1; j < tokens.length && j - i <= 4096; j++) {
+          const current = word(tokens[j]);
+          if ([';', 'import', 'export'].includes(current)) break;
+          if (current === 'from' && tokens[j + 1]?.type.label === 'string') {
+            const members = clause.slice(1, -1).join(' ').split(',').filter(part => part.trim());
+            const typeOnly = clause[0] === 'type' && clause.length > 1
+              || clause[0] === '{' && clause.at(-1) === '}' && members.length > 0 && members.every(part => /^\s*type\s+(?!as\b)\S/.test(part));
+            add(tokens[j + 1].value, 'javascript import', typeOnly ? { typeOnly: true } : {});
+            break;
+          }
+          clause.push(current);
+        }
+      }
+    }
   } else if (ext === '.py') {
-    for (const match of text.matchAll(/^\s*from\s+([A-Za-z0-9_.-]+)\s+import\s+/gm)) add(match[1], 'python import');
-    for (const match of text.matchAll(/^\s*import\s+([A-Za-z0-9_., -]+)/gm)) for (const item of match[1].split(',')) add(item.trim().split(/\s+as\s+/)[0], 'python import');
+    // Mask comments and all string bodies, including multiline docstrings.
+    // Newlines stay in place so only real statement starts are considered.
+    const code = text.replace(/#[^\r\n]*|"""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, value => value.replace(/[^\r\n]/g, ' ')).replace(/\\\r?\n/g, ' ');
+    for (const match of code.matchAll(/^[ \t]*from\s+(\.*[\w.]*)\s+import\s+(\([^)]*\)|[^\r\n;]+)/gm)) {
+      const members = match[2].replace(/[()]/g, '').split(',').map(item => item.trim().split(/\s+as\s+/)[0]).filter(item => /^[A-Za-z_]\w*$/.test(item));
+      add(match[1], 'python import', { members });
+    }
+    for (const match of code.matchAll(/^[ \t]*import\s+([^\r\n;]+)/gm)) for (const item of match[1].split(',')) {
+      const specifier = item.trim().split(/\s+as\s+/)[0];
+      if (/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(specifier)) add(specifier, 'python import');
+    }
   } else if (ext === '.go') {
     for (const match of text.matchAll(/^\s*"([^"]+)"\s*$/gm)) add(match[1], 'go import');
   } else if (ext === '.rs') {
@@ -350,7 +411,42 @@ function importMatches(text, ext) {
   } else if (['.cs'].includes(ext)) {
     for (const match of text.matchAll(/^\s*using\s+([A-Za-z0-9_.]+)/gm)) add(match[1], 'dotnet import');
   }
-  return imports.slice(0, 128);
+  return { imports, complete };
+}
+
+/** Resolve only against observed files. Aliases and computed paths remain
+ * unknown. Keep Python package and submodule candidates separate: an imported
+ * name may be an attribute, so it forms a file edge only when that file exists. */
+export function resolveCodeImports(from, item, known) {
+  if (item.kind === 'python import') {
+    const dots = /^\.*/.exec(item.specifier)[0].length;
+    const rest = item.specifier.slice(dots).replaceAll('.', '/');
+    const directory = dots ? path.posix.join(path.posix.dirname(from), ...Array(dots - 1).fill('..')) : '';
+    const targets = new Set();
+    for (const root of dots ? [directory] : ['', 'src']) {
+      const base = path.posix.normalize(path.posix.join(root, rest));
+      if (base === '..' || base.startsWith('../')) continue;
+      const modules = [base, ...(item.members ?? []).map(member => path.posix.join(base, member))];
+      for (const module of modules) {
+        const target = [`${module}.py`, `${module}/__init__.py`].map(candidate => path.posix.normalize(candidate)).find(candidate => known.has(candidate));
+        if (target) targets.add(target);
+      }
+      if (targets.size) break;
+    }
+    return [...targets];
+  }
+  const raw = item.specifier.replaceAll('\\', '/');
+  if (!raw.startsWith('.') && !raw.startsWith('/')) return [];
+  const base = path.posix.normalize(raw.startsWith('/') ? raw.slice(1) : path.posix.join(path.posix.dirname(from), raw));
+  if (base === '..' || base.startsWith('../')) return [];
+  const candidates = [base];
+  const extension = path.posix.extname(base);
+  const counterpart = { '.js': '.ts', '.jsx': '.tsx', '.mjs': '.mts', '.cjs': '.cts' }[extension];
+  if (counterpart) candidates.push(base.slice(0, -extension.length) + counterpart);
+  if (!extension) for (const suffix of ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.vue', '.svelte', '.py', '.rb', '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.php']) candidates.push(base + suffix, `${base}/index${suffix}`);
+  if (!extension) candidates.push(`${base}/__init__.py`);
+  const target = candidates.find(candidate => known.has(candidate));
+  return target ? [target] : [];
 }
 
 function apiMatches(text, rel) {
@@ -417,8 +513,10 @@ function componentMatches(text, ext) {
 
 export function parseCode(rel, text) {
   const ext = rel.includes('.') ? '.' + rel.split('.').pop().toLowerCase() : '';
+  const scanned = parseImports(text, ext);
   return {
-    imports: importMatches(text, ext),
+    imports: scanned.imports,
+    importsComplete: scanned.complete,
     apis: apiMatches(text, rel),
     tables: schemaMatches(text, rel),
     environmentVariables: environmentMatches(text, ext),

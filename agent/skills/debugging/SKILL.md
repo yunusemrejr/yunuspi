@@ -9,7 +9,9 @@ description: Systematic debugging — reproduction, minimization, bisection, hyp
 
 **Reproduce → Minimize → Bisect → Hypothesize → Verify → Fix → Regress**
 
-Skipping steps is how bugs become three bugs.
+Choose the next step that distinguishes plausible causes. A small reproducible fix can move directly from a hypothesis to a focused regression; a full bisect, profile or independent review earns its cost when the evidence calls for it.
+
+For YunusPi's existing repository, diagnostic and verification tools, see [native engineering evidence](references/native-engineering.md). The guide is optional; current source, tool contracts and user scope govern execution.
 
 1. **Reproduce first.** No repro = no debug, only archaeology. Get a command, a payload, a click sequence that fails deterministically. "Sometimes on my machine" must become "when X runs with Y in state Z". If you can't reproduce, capture the environment (versions, config, data sample, logs, exact commands) and say so explicitly instead of guessing.
 2. **Minimize the failing case.** Smallest input, fewest lines, one file. Minimizing is *diagnosis* — each removal either kills the bug or tells you what it needs. A 40-line reproducer with one surprising line is 90% of the fix.

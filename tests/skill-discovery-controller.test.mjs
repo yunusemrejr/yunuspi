@@ -29,8 +29,28 @@ test('discovery uses distinct observations once, excludes bodies and stays advis
   f.start();f.observe('read','ui/world.css');f.observe('read','ui/index.html');await tick();assert.equal(f.calls.length,1,'identical discovery is cached');
  }finally{f.cleanup();}
 });
-test('new input cancels and discards late results',async()=>{
- const f=fixture();try{f.observe('read','one.css');f.observe('read','two.html');await tick();f.start();assert.equal(f.calls[0].signal.aborted,true);f.finish();await tick();assert.equal(f.offers.length,0);}finally{f.cleanup();}
+test('new input cancels late results without poisoning identical later discovery',async()=>{
+ const f=fixture();try{
+  f.observe('read','one.css');f.observe('read','two.html');await tick();f.start();assert.equal(f.calls[0].signal.aborted,true);f.finish();await tick();assert.equal(f.offers.length,0);
+  f.observe('read','one.css');f.observe('read','two.html');await tick();assert.equal(f.calls.length,2);
+  f.finish();await tick();assert.equal(f.offers.length,1);
+ }finally{f.cleanup();}
+});
+
+test('unavailable and malformed discovery retry on new input; validated empty advice is cached',async()=>{
+ const f=fixture();try{
+  let response;
+  globalThis[RUNNER]=(request,ctx,signal)=>{f.calls.push({request,signal});return response;};
+  const observe=()=>{f.observe('read','one.css');f.observe('read','two.html');};
+  observe();await tick();assert.equal(f.calls.length,1);
+  f.observe('read','three.css');await tick();assert.equal(f.calls.length,1,'no same-input retry loop');
+  response='{"suggestions":[{"name":"invented","reason":"A fabricated skill must not be cached"}]}';
+  f.start();observe();await tick();assert.equal(f.calls.length,2);
+  response='{"suggestions":[]}';
+  f.start();observe();await tick();assert.equal(f.calls.length,3);
+  f.start();observe();await tick();assert.equal(f.calls.length,3,'valid empty responses avoid another model invocation');
+  assert.equal(f.offers.length,0);
+ }finally{f.cleanup();}
 });
 test('offline, failed results and skill reads never launch discovery',async()=>{
  const f=fixture();try {

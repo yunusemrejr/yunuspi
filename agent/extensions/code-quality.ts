@@ -1,4 +1,4 @@
-/** code_quality: dependency-free DRY, slop, prose and complexity checks over
+/** code_quality: local DRY, slop, prose and complexity checks over
  * explicit paths, directories or the files changed against a revision. */
 import { Type } from "typebox";
 import { codeQuality, compactQualityReport } from "./lib/code-quality.ts";
