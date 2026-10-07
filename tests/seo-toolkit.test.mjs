@@ -90,6 +90,22 @@ test('XML parsing rejects malformed roots, nesting, external entities and missin
   assert.ok(validSeoDate('2026-10-01T00:00:00+03:00'), 'valid offset dates can cross a UTC day boundary');
 });
 
+test('internal and authenticated page purposes exclude public-looking paths from discovery and public-page optimization', () => {
+  const privatePages = ['internal', 'authenticated', 'intranet', 'staff-only', 'employee-only', 'members-only', 'local-only', 'non-public', 'noindex'].map((purpose, index) => ({ url: `/restricted-${index}`, purpose, title: `Restricted ${index}`, description: 'Restricted team reference', published: '2026-09-01' }));
+  const generated = buildSeoDiscovery({ canonicalOrigin: 'https://example.com', pages: [{ url: '/', title: 'Public home' }, ...privatePages] });
+  assert.deepEqual(generated.accepted, ['https://example.com/']);
+  assert.equal(generated.excluded.length, privatePages.length);
+  for (const content of Object.values(generated.files)) assert.ok(!content.includes('restricted-'));
+  for (const policy of privatePages) {
+    const url = `https://example.com${policy.url}`;
+    const served = inspectSeoDocument('<html><body><h1>Team reference</h1></body></html>', url, { status: 200, policy });
+    assert.ok(served.findings.some(row => row.code === 'excluded-indexable'), policy.purpose);
+    assert.ok(!served.findings.some(row => row.code === 'canonical-missing' || row.code === 'social-metadata'), policy.purpose);
+    const built = inspectSeoDocument('<html><body><h1>Team reference</h1></body></html>', url, { policy });
+    assert.ok(built.findings.some(row => row.code === 'excluded-access-unknown'), policy.purpose);
+  }
+});
+
 test('raw document audit detects conflicting identities, schema dates and semantics without claiming rendered/factual verification', () => {
   const html = page('https://example.com', '/guide', { extra: '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","url":"https://example.com/other","datePublished":"2026-10-01","dateModified":"2026-09-01","author":{"@type":"Person","name":"A"}}</script>',
     links: '<img src="photo.webp" alt="" loading="lazy" fetchpriority="high"><form><input type="text"></form><table><tr><td>x</td></tr></table>' }).replace('content="https://example.com/guide"', 'content="https://example.com/other"');
@@ -109,13 +125,13 @@ test('real served audit finds sitemap/noindex/link/redirect/hreflang/orphan defe
   const server = http.createServer((req, res) => {
     requested.push(req.url); res.setHeader('content-type', 'text/html');
     if (req.url === '/robots.txt') { res.setHeader('content-type', 'text/plain'); res.end(`User-agent: *\nDisallow: /blocked\nSitemap: ${base}/sitemap.xml`); return; }
-    if (req.url === '/sitemap.xml') { res.setHeader('content-type', 'application/xml'); res.end(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/guide', '/duplicate', '/orphan', '/blocked', '/noindex', '/private', '/member-only', '/old'].map(url => `<url><loc>${base}${url}</loc><lastmod>2099-01-01</lastmod></url>`).join('')}</urlset>`); return; }
+    if (req.url === '/sitemap.xml') { res.setHeader('content-type', 'application/xml'); res.end(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/guide', '/duplicate', '/orphan', '/blocked', '/noindex', '/private', '/member-only', '/team-docs', '/old'].map(url => `<url><loc>${base}${url}</loc><lastmod>2099-01-01</lastmod></url>`).join('')}</urlset>`); return; }
     if (req.url === '/llms.txt') { res.setHeader('content-type', 'text/plain'); res.end(`# Lab\n- [Bad](${base}/private)\n- [Alternate](${base}/duplicate)`); return; }
     if (req.url === '/feed.xml') { res.setHeader('content-type', 'application/rss+xml'); res.end(`<rss version="2.0"><channel><item><link>${base}/private</link><pubDate>2099-01-01</pubDate></item></channel></rss>`); return; }
     if (req.url === '/old') { res.writeHead(302, { location: '/move' }); res.end(); return; }
     if (req.url === '/move') { res.writeHead(301, { location: '/guide' }); res.end(); return; }
     if (req.url === '/broken') { res.writeHead(404); res.end(page(base, '/broken', { title: 'Not found' })); return; }
-    if (req.url === '/') { res.end(page(base, '/', { title: 'Sensor lab homepage', extra: '<link rel="alternate" type="application/rss+xml" href="/feed.xml">', links: '<a href="/guide">Calibration guide</a><a href="/broken">Reference removed</a><a href="/private">Account</a><a href="/calendar?date=2026-01-01">Calendar</a><a href="/member-only">Members</a>' })); return; }
+    if (req.url === '/') { res.end(page(base, '/', { title: 'Sensor lab homepage', extra: '<link rel="alternate" type="application/rss+xml" href="/feed.xml">', links: '<a href="/guide">Calibration guide</a><a href="/broken">Reference removed</a><a href="/private">Account</a><a href="/calendar?date=2026-01-01">Calendar</a><a href="/member-only">Members</a><a href="/team-docs">Team reference</a>' })); return; }
     if (req.url === '/guide') { res.end(page(base, '/guide', { extra: `<link rel="alternate" hreflang="de" href="${base}/duplicate">` })); return; }
     if (req.url === '/duplicate') { res.end(page(base, '/guide')); return; }
     if (req.url === '/noindex') { res.end(page(base, '/noindex', { extra: '<meta name="robots" content="noindex">' })); return; }
@@ -123,10 +139,10 @@ test('real served audit finds sitemap/noindex/link/redirect/hreflang/orphan defe
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const result = await auditSeoSite({ url: base, maxPages: 20, pages: [{ url: '/member-only', purpose: 'private' }, { url: '/orphan', intent: 'original measurements' }], allowLoopback: true });
+    const result = await auditSeoSite({ url: base, maxPages: 20, pages: [{ url: '/member-only', purpose: 'private' }, { url: '/team-docs', purpose: 'internal' }, { url: '/orphan', intent: 'original measurements' }], allowLoopback: true });
     const codes = new Set(result.findings.map(f => f.code));
     for (const code of ['sitemap-url-policy', 'sitemap-lastmod', 'sitemap-indexability', 'robots-block', 'broken-internal-link', 'redirect-chain', 'temporary-redirect', 'hreflang-reciprocity', 'orphan-in-sample', 'machine-private-url', 'machine-canonical-parity', 'feed-entry-policy', 'feed-date', 'duplicate-title']) assert.ok(codes.has(code), `${code}: ${JSON.stringify(result.findings)}`);
-    for (const url of ['/private', '/member-only', '/blocked', '/calendar?date=2026-01-01']) assert.ok(!requested.includes(url), url);
+    for (const url of ['/private', '/member-only', '/team-docs', '/blocked', '/calendar?date=2026-01-01']) assert.ok(!requested.includes(url), url);
     assert.equal(result.coverage.indexed, 'unverified'); assert.equal(result.coverage.boundedSample, true);
     assert.ok(result.coverage.requests <= 100); assert.ok(result.pages.length <= 20);
     const compact = compactSeoResult(result); assert.ok(compact.findings.length <= 12); assert.equal(compact.findingsTotal, result.findings.length);

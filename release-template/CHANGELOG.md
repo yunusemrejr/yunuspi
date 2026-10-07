@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.1 — 2026-10-07
+
+Reviewed internal, authenticated, staff/member-only and local-only page purposes now stay out of SEO discovery files and crawl expansion even when their URLs look public. Raw HTML inspection uses the same purpose policy to request access/index-exclusion evidence instead of public metadata. A served fixture checks that links and sitemaps cannot override the reviewed exclusion.
+
 ## 0.30.0 — 2026-10-07
 
 **UI verification activates from the work.** Interface writes and the existing source scan stage responsive, visual, interaction and SVG tools without a skill read or human reminder. Current evidence feeds the shared completion gate; at most two automatic follow-ups resolve missing checks or disclose unavailable capabilities. Model, thinking and permission ceilings remain unchanged.

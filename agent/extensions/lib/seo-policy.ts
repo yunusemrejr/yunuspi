@@ -37,6 +37,10 @@ export const SEO_CONTRACT = [
 ] as const;
 
 export type SeoPagePolicy = { url: string; purpose?: string; intent?: string; title?: string; description?: string; canonical?: string; index?: boolean; lastmod?: string; published?: string; links?: string[]; locale?: string };
+/** Reviewed route purpose takes precedence over a public-looking URL. */
+export function excludedSeoPage(page?: Pick<SeoPagePolicy, 'index' | 'purpose'>): boolean {
+  return page?.index === false || /\b(?:private|internal|intranet|authenticated|auth[- ]only|admin|staff[- ]only|employee[- ]only|members[- ]only|local[- ]only|staging|search|filter|duplicate|thin|noindex|non[- ]public)\b/i.test(page?.purpose ?? '');
+}
 /** A path cue is a conservative crawl exclusion, never proof of access control. */
 export function excludedSeoUrl(value: string): boolean {
   try {
@@ -62,7 +66,7 @@ export function publicSeoPages(pages: readonly SeoPagePolicy[], origin: string) 
   for (const page of pages.slice(0, 500)) {
     const url = seoUrl(page.url, origin), canonical = page.canonical ? seoUrl(page.canonical, origin) : url;
     const reason = !url ? 'invalid URL' : new URL(url).origin !== new URL(origin).origin ? 'outside canonical origin'
-      : page.index === false || /\b(?:private|admin|staging|search|filter|duplicate|thin)\b/i.test(page.purpose ?? '') ? 'excluded page purpose'
+      : excludedSeoPage(page) ? 'excluded page purpose'
       : excludedSeoUrl(url) ? 'private or crawl-trap URL cue' : new URL(url).search ? 'query URL needs explicit canonical policy'
       : canonical !== url ? 'alternate canonical' : seen.has(url) ? 'duplicate URL' : '';
     if (reason) { excluded.push({ url: url ?? String(page.url).slice(0, 200), reason }); continue; }

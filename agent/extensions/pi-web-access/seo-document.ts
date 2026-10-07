@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { parseHTML } from 'linkedom';
 import { seoSignals } from './web-probe.ts';
-import { excludedSeoUrl, seoUrl, type SeoPagePolicy } from '../lib/seo-policy.ts';
+import { excludedSeoPage, excludedSeoUrl, seoUrl, type SeoPagePolicy } from '../lib/seo-policy.ts';
 
 export type SeoFinding = { code: string; severity: 'error' | 'warning' | 'review'; url: string; message: string };
 const text = (value: unknown, max = 300) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -20,7 +20,7 @@ export function inspectSeoDocument(html: string, url: string, options: { status?
   const signals = seoSignals(document, url, base, headers, options.truncated === true, options.status ?? 200);
   const findings: SeoFinding[] = [];
   const add = (code: string, severity: SeoFinding['severity'], message: string) => { if (!findings.some(row => row.code === code && row.message === message)) findings.push({ code, severity, url, message }); };
-  const intendedIndex = options.policy?.index !== false && !excludedSeoUrl(url);
+  const intendedIndex = !excludedSeoPage(options.policy) && !excludedSeoUrl(url);
   for (const message of signals.findings) {
     if (!intendedIndex && /missing|no canonical|no og:image|0 h1|robots directive blocks/.test(String(message))) continue;
     add('page-signal', /conflicting|does not parse|outside head|HTTP [45]\d\d/.test(String(message)) ? 'error' : 'warning', String(message));

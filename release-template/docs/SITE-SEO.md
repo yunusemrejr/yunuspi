@@ -22,7 +22,7 @@ Compact reports show findings and page summaries in pages; full structured detai
 
 ## Inventory and truthful generation
 
-Page records contain `url`, optional `purpose`, `intent`, `canonical`, `index`, `title`, `description`, `locale`, actual `published` and substantive-change `lastmod`. Resolve relative paths against the canonical origin. Review actual route/auth/content behavior before setting index policy. Private, duplicate, thin, search/filter/staging purposes, alternate canonicals/origins, query URLs and duplicate URLs are excluded from generated public surfaces.
+Page records contain `url`, optional `purpose`, `intent`, `canonical`, `index`, `title`, `description`, `locale`, actual `published` and substantive-change `lastmod`. Resolve relative paths against the canonical origin. Review actual route/auth/content behavior before setting index policy. Private/internal/authenticated/staff-only/local-only, duplicate, thin and search/filter/staging purposes, alternate canonicals/origins, query URLs and duplicate URLs are excluded from generated public surfaces and crawl expansion even when the route itself looks public. Raw inspection honors the same reviewed purpose and checks exclusion/access evidence instead of requesting public metadata for those pages.
 
 ```json
 {
