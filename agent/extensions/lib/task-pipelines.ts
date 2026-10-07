@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { classifyExecution, type ExecutionProfile } from './adaptive-execution.ts';
 import { seoTaskIntent } from './seo-policy.ts';
 import { uiFileCue } from './ui-doctrine.ts';
+import { skillActionSegments, skillIntentSegments, skillTaskText } from './skill-routing.ts';
 
 export type TaskPipelineId = 'php' | 'node' | 'frontend-js' | 'vanilla-frontend' | 'react-cdn' | 'react-node' |
   'go' | 'rust' | 'java' | 'python' | 'python-flask' | 'bash' | 'c' | 'cpp' | 'linux-native' |
   'local-webapp' | 'algorithms' | 'ai-ml' | 'finetuning' | 'colab' | 'ui-quality' | 'git-ssh-deploy' |
-  'image-media' | 'video' | 'audio' | 'svg-art' | 'debugging' | 'blender-3d' | 'seo' | 'llm-app' | 'api-automation' | 'office-docs' | 'file-organization' | 'data-wrangling' | 'research' | 'reinforcement-learning' | 'edge-ml';
+  'image-media' | 'video' | 'audio' | 'svg-art' | 'debugging' | 'blender-3d' | 'seo' | 'llm-app' | 'api-automation' | 'office-docs' | 'file-organization' | 'data-wrangling' | 'research' | 'reinforcement-learning' | 'edge-ml' |
+  'ui-motion' | 'ui-scroll' | 'ui-responsive' | 'ui-consistency' | 'web-3d' | 'codebase-control';
 export type PipelinePhase = 'discovery' | 'implementation' | 'validation' | 'delivery';
 export const PIPELINE_EVIDENCE_KINDS = ['inspection', 'artifact', 'execution', 'assessment', 'pixels', 'interaction', 'evaluation', 'remote', 'live', 'playback', 'listening'] as const;
 export type PipelineEvidenceKind = (typeof PIPELINE_EVIDENCE_KINDS)[number];
@@ -32,6 +34,12 @@ export type TaskPipelineInput = {
   files?: readonly string[];
   /** Names from an inspected manifest; no dependency installation or scanning. */
   dependencies?: readonly string[] | Record<string, unknown>;
+  /** Syntax facts from explicitly read/changed source, never tool-output instructions. */
+  signals?: readonly PipelineSourceSignal[];
+  /** Inherited authored constraints are checked without routing from parent subject nouns. */
+  constraints?: string;
+  /** Model-authored subtask descriptions cannot cancel parent exclusions. */
+  inheritedConstraints?: string;
 };
 
 export type AutomaticPipelineInput = {
@@ -39,7 +47,82 @@ export type AutomaticPipelineInput = {
   /** The live scope may have escalated since initial intent selection. */
   profile?: Pick<ExecutionProfile, 'tier' | 'failures'>;
   files?: readonly string[];
+  ledger?: PipelineLedger;
+  coordinate?: PipelineCoordinate;
+  constraints?: string;
+  inheritedConstraints?: string;
 };
+
+export type PipelineSourceSignal = 'ui' | 'motion' | 'scroll' | 'responsive' | 'consistency' | 'web3d' | 'image-assets';
+export type PipelineSourceMetadata = { dependencies: string[]; signals: PipelineSourceSignal[] };
+
+/** Inspect bounded local syntax only. Comments, prose and dependency versions
+ * are not instructions, and an installed package is not evidence of execution. */
+export function inspectPipelineSource(file: string, source: string): PipelineSourceMetadata {
+  const result: PipelineSourceMetadata = { dependencies: [], signals: [] };
+  if (/(?:^|\/)package\.json$/i.test(file)) {
+    try {
+      const manifest = JSON.parse(source);
+      result.dependencies = [...new Set(['dependencies', 'devDependencies', 'peerDependencies'].flatMap(key =>
+        manifest?.[key] && typeof manifest[key] === 'object' && !Array.isArray(manifest[key]) ? Object.keys(manifest[key]) : []))].slice(0, 128);
+    } catch { /* A malformed manifest supplies no dependency evidence. */ }
+    return result;
+  }
+  if (!/\.(?:[cm]?[jt]sx?|css|scss|sass|less|html|vue|svelte)$/i.test(file)) return result;
+  const code = source.slice(0, 262144).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/<!--[^]*?-->/g, ' ').replace(/(^|[;\s])\/\/[^\n]*/gm, '$1');
+  const add = (signal: PipelineSourceSignal, observed: boolean) => { if (observed) result.signals.push(signal); };
+  add('ui', /<(?:html|main|div|section|button|canvas)\b|\b(?:document\.(?:querySelector|createElement)|createRoot\s*\()|(?:^|[{};])\s*[.#][\w-]+[^{}]*\{/m.test(code));
+  add('motion', /@keyframes\b|\banimation(?:-name)?\s*:|\.animate\s*\(|\b(?:gsap|anime)\s*\.|(?:from\s*|import\s*\()['"](?:gsap|animejs|motion|framer-motion)['"]/.test(code));
+  add('scroll', /\banimation-timeline\s*:\s*(?:scroll|view)|\b(?:ScrollTrigger|ScrollTimeline|ViewTimeline|IntersectionObserver)\b|\bscrollTrigger\s*:/.test(code));
+  add('responsive', /@(?:media|container)\b|\b(?:matchMedia|ResizeObserver)\s*\(|\bclamp\s*\(/.test(code));
+  add('consistency', /--[\w-]+\s*:|\bvar\s*\(\s*--|(?:from\s*|import\s*\()['"][^'"]*(?:tokens|theme|design-system)[^'"]*['"]/.test(code));
+  add('web3d', /(?:from\s*|import\s*\()['"](?:three(?:\/[^'"]*)?|@react-three\/[^'"]+)['"]|\bTHREE\.|\b(?:WebGLRenderer|GLTFLoader|useGLTF)\b|getContext\s*\(\s*['"]webgl2?['"]/.test(code));
+  add('image-assets', /url\s*\([^)]*\.(?:png|jpe?g|webp|avif)|<(?:img|picture)\b|(?:from\s*|import\s*\()['"][^'"]+\.(?:png|jpe?g|webp|avif)['"]/.test(code));
+  return result;
+}
+
+const UI_SUBJECT = /\b(?:UI|UX|front[- ]?end|website|web ?page|landing page|dashboard|interface|layout|hero|typography|palette|spacing|scroll|responsive|mobile|tablet|breakpoints?|webgl|three\.?js)\b/i;
+/** Short steering keeps the authored objective. Self-contained replacement
+ * tasks and factual questions start fresh; synthetic prompts never call this. */
+export function resolveRoutingTask(previous: string, next: string): { task: string; continuing: boolean } {
+  if (!previous || !next.trim()) return { task: next, continuing: false };
+  const text = skillTaskText(next);
+  const reset = /^\s*(?:new task|different task|unrelated(?: task)?|start (?:over|fresh)|forget (?:that|the previous)|instead|what|why|who|when|where|which|explain|describe|define|tell me)\b/i.test(text)
+    || /\b(?:build|create|make|start)\s+(?:me\s+)?(?:a|an|new|another|different)\b[^\n]{0,60}\b(?:app|website|project|service|tool|script|api|report|video|document)\b/i.test(text);
+  const linked = /\b(?:it|its|them|that|same|continue|keep going|remaining|still)\b/i.test(text)
+    || UI_SUBJECT.test(previous) && UI_SUBJECT.test(text) && !/\b(?:backend|database|authentication)\b/i.test(text);
+  if (reset || text.length > 1600 || !linked) return { task: next, continuing: false };
+  const boundedPrevious = previous.length > 20000 ? previous.slice(0, 14000) + '\n' + previous.slice(-6000) : previous;
+  return { task: `${boundedPrevious}\n[User follow-up]\n${next}`, continuing: true };
+}
+
+/** Last authored positive/negative directive wins, including follow-up
+ * corrections. Feature exclusions also apply to inspected source evidence. */
+function featureExcluded(prompt: string, pattern: RegExp): boolean {
+  let excluded = false;
+  for (const clause of skillTaskText(prompt).split(/\n|[.!?](?:\s|$)|;|\bbut\b/i)) {
+    if (!pattern.test(clause)) continue;
+    const negative = [...clause.matchAll(/\b(?:no|without|skip|avoid|do not|don't|never|disable|exclude)\b([^.;\n!?]{0,90})/gi)].some(match => pattern.test(match[1]));
+    if (negative) excluded = true;
+    else if (skillActionSegments(clause).length || !QUESTION.test(clause) && (WORK.test(clause) || ACTION.test(clause))) excluded = false;
+  }
+  return excluded;
+}
+
+const FEATURE_TOOLS: ReadonlyArray<{ feature: RegExp; tools: readonly string[] }> = [
+  { feature: /\b(?:git|github|version control)\b/i, tools: ['git_info'] },
+  { feature: /\b(?:motion|animations?|animated|parallax|scroll[- ]?(?:animations?|driven|story|telling)|gsap|framer.motion)\b/i, tools: ['motion_inspect', 'motion_examples'] },
+  { feature: /\b(?:scroll[- ]?(?:animations?|driven|story|telling)|scroll choreography|parallax)\b/i, tools: ['motion_inspect'] },
+  { feature: /\b(?:3d|webgl|three\.?js|gltf|glb)\b/i, tools: ['video_shot', 'asset_register', 'blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
+  { feature: /\bblender\b/i, tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
+  { feature: /\b(?:image generation|generate\w* images?|generated (?:images?|imagery))\b/i, tools: ['image_generate'] },
+  { feature: /\b(?:responsive|multi[- ]device|device matrix|breakpoints?)\b/i, tools: ['ui_explore'] },
+  { feature: /\b(?:consistency|design systems?|shared tokens?|token consistency)\b/i, tools: ['ui_consistency'] },
+];
+export function pipelineToolExcluded(prompt: string, name: string): boolean {
+  const exact = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  return featureExcluded(prompt, exact) || FEATURE_TOOLS.some(rule => rule.tools.includes(name) && featureExcluded(prompt, rule.feature));
+}
 
 /** Pipelines whose work is judged on the produced file or the resulting folder, not on project tests. */
 const MEDIA_ONLY: readonly TaskPipelineId[] = ['image-media', 'video', 'audio', 'svg-art', 'blender-3d', 'office-docs', 'file-organization', 'data-wrangling', 'research'];
@@ -47,7 +130,7 @@ const MEDIA_ONLY: readonly TaskPipelineId[] = ['image-media', 'video', 'audio', 
 /** A negative request must not stage the very tool it excludes. Kept shared
  * with legacy intent bundles so activation owners cannot disagree. */
 export const pipelineGitExcluded = (prompt: string): boolean =>
-  /\b(?:without|no)[- ]+(?:git(?:hub)?|version control)\b|\b(?:do not|don't|never)\b[^.;\n!?]{0,80}\b(?:git(?:hub)?|version control)\b/i.test(prompt);
+  featureExcluded(prompt, /\b(?:git(?:hub)?|version control)\b/i);
 
 /** A catalog lists every available stage, not every schema needed now. Both
  * initial intent and live scope activation use this single, I/O-free policy.
@@ -55,24 +138,39 @@ export const pipelineGitExcluded = (prompt: string): boolean =>
 export function automaticPipelineTools(selection: PipelineSelection, input: AutomaticPipelineInput): string[] {
   if (!selection.ids.length) return [];
   const prompt = typeof input?.prompt === 'string' ? input.prompt.slice(0, 32768) : '';
+  const constraints = typeof input?.constraints === 'string' ? input.constraints.slice(0, 32768) : prompt;
+  const excluded = (name: string) => pipelineToolExcluded(constraints, name) || Boolean(input.inheritedConstraints && pipelineToolExcluded(input.inheritedConstraints, name));
   const profile = input.profile ?? classifyExecution({ task: prompt });
   const quality = selection.stages.some(stage => stage.id === 'source-quality') || profile.tier === 'complex' || profile.tier === 'critical' || profile.failures >= 2 ||
     /\b(?:code_quality|refactor\w*|architectur\w*|code (?:quality|review|smells?)|source (?:audit|review)|(?:audit|review) (?:[\w.+/-]+ ){0,3}(?:code|source)|tech(?:nical)? debt|duplicat\w* (?:code|logic)|dead code|unused (?:code|imports?|exports?)|cyclomatic|lint(?:ing|er|s)?)\b/i.test(prompt);
   const gitMetadata = (input.files ?? []).some(file => typeof file === 'string' &&
     /(?:^|\/)(?:\.git\/(?:HEAD|config|index|refs\/[^\n]+)|\.gitmodules)$/i.test(file.replaceAll('\\', '/')));
-  const git = !pipelineGitExcluded(prompt) && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
+  const git = !excluded('git_info') && (selection.ids.includes('git-ssh-deploy') || gitMetadata ||
     /\b(?:git(?:hub)?|commits?|committing|pull requests?|pre-?commit|rebase|repository history|release (?:process|pipeline|version|tag)|(?:push|merge) (?:the |this |my )?(?:branch|commit|changes)|push (?:to )?(?:origin|upstream))\b/i.test(prompt));
-  const control = profile.tier === 'complex' || profile.tier === 'critical' ||
+  const control = selection.ids.some(id => ['ui-motion', 'ui-scroll', 'ui-responsive', 'ui-consistency', 'web-3d', 'codebase-control'].includes(id)) || profile.tier === 'complex' || profile.tier === 'critical' ||
     /\b(?:task_pipeline|pipelines?|workflows?|subtask scopes?|stage (?:status|evidence|receipts?))\b/i.test(prompt);
   const codeWork = selection.ids.some(id => !MEDIA_ONLY.includes(id));
+  const ready = input.ledger && input.coordinate ? nextPipelineStages(selection, input.ledger, input.coordinate) : selection.stages.filter(stage => stage.phase === 'discovery');
+  const currentTools = new Set(ready.flatMap(stage => stage.tools));
+  // Keep planning/building schemas usable during repair. Temporal/matrix
+  // validators appear when their prerequisites have actual evidence.
+  const deferred = new Set(['motion_inspect', 'ui_explore', 'ui_consistency']);
   return [...new Set([
-    ...selection.tools.filter(name => name === 'code_quality' ? codeWork && quality : name === 'project_tests' ? codeWork : name === 'git_info' ? git : name !== 'task_pipeline'),
-    ...(control ? ['task_pipeline'] : []),
+    ...selection.tools.filter(name => !excluded(name) && (!deferred.has(name) || currentTools.has(name)) &&
+      (name === 'code_quality' ? codeWork && quality : name === 'project_tests' ? codeWork : name === 'git_info' ? git : name !== 'task_pipeline')),
+    ...(control && !excluded('task_pipeline') ? ['task_pipeline'] : []),
+    ...(profile.failures >= 2 ? ['symbol_search', 'context_slice', 'code_audit'].filter(name => !excluded(name)) : []),
   ])];
 }
 
 type Recipe = { skills: string[]; discovery: string; validation: string; tools?: string[] };
 const RECIPES: Record<TaskPipelineId, Recipe> = {
+  'ui-motion': { skills: ['motion', 'motion-approaches'], discovery: 'Choose motion from the subject and existing design direction: one signature, focal hierarchy, transform ownership and cleanup. Use ui_recipe plan for an editable starting point; choose a static baseline and reduced-motion fallback before choreography.', validation: 'Use motion_inspect for current temporal samples and reduced-motion evidence. Inspect real playback and keyboard/focus behavior separately; sampled motion and exit zero do not establish aesthetic or interaction approval.', tools: ['creative_direct', 'ui_recipe', 'motion_examples', 'motion_inspect'] },
+  'ui-scroll': { skills: ['motion', 'browser-javascript-engineering'], discovery: 'Inspect the real scroll container, sticky owners, source timelines and content order. Plan scroll-reveal or scroll-story with ui_recipe; preserve native scrolling, direct anchor navigation and a static fallback without forcing every block to fade up.', validation: 'Use motion_inspect mode scroll for forward/backtrack positions and reduced motion on one persistent page. Check pinned content, progress boundaries, resize and keyboard navigation; unavailable coverage remains unresolved.', tools: ['creative_direct', 'ui_recipe', 'motion_inspect'] },
+  'ui-responsive': { skills: ['product-ui-verification', 'web-performance'], discovery: 'Identify content-driven breakpoints, intended devices, pointer/touch/DPR assumptions and long-content states from the existing owner. Responsive styling needs bounded served-device evidence; a CSS declaration is not device coverage.', validation: 'Use ui_explore devices and breakpoint neighbors for a bounded capture matrix. Preserve explicit omitted coverage; resolve overflow and content failures. Emulation, DOM facts and captures do not prove real hardware performance or interaction.', tools: ['ui_explore'] },
+  'ui-consistency': { skills: ['design-systems', 'accessible-interaction-design'], discovery: 'Inspect the shared component/token owner and established visual identity before local overrides. Keep a subject-specific direction with creative_direct; retain declared variants instead of making every component identical.', validation: 'Use ui_consistency on representative routes/components and tokens. Resolve measured role/token drift and missing coverage against declared variants, then judge actual pixels. No default gradient, card grid, fake metric or generic editorial formula substitutes for the product identity.', tools: ['creative_direct', 'ui_consistency'] },
+  'web-3d': { skills: ['threejs', 'web-performance'], discovery: 'Inspect the installed Three.js/renderer version, target asset format, camera/material/animation ownership and loader cleanup. Use ui_recipe three-model plan, reuse licensed assets or author a Blender asset, and register provenance. Plan a static/no-WebGL/phone/reduced-motion fallback.', validation: 'Inspect exported glTF/GLB dependencies and budgets with asset_register, then capture the actual served integration and exercise load failure, resize, reduced motion, context loss and disposal. Software-rendered pixels do not measure GPU performance.', tools: ['creative_direct', 'ui_recipe', 'asset_register', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'image_analyze', 'image_generate'] },
+  'codebase-control': { skills: ['coding-practices', 'software-engineering-wisdom'], discovery: 'Use bounded project_report/module_report, symbol_search and context_slice evidence to identify the established owner, callers, shared UI/API contracts, affected files and checks before editing. Do not infer impact from a directory name or scan every file.', validation: 'Use code_quality/code_audit for the affected revision and existing focused checks where warranted. bulk_edit preview supports a reviewable multi-file change; its apply remains an explicit agent action. Repeated failures require narrowed source/impact evidence before another attempt.', tools: ['project_report', 'module_report', 'symbol_search', 'context_slice', 'code_quality', 'code_audit', 'bulk_edit'] },
   php: { skills: ['php-application-engineering'], discovery: 'Inspect Composer PHP constraints, PHP 8+ syntax support, CLI and web SAPI versions/extensions, document root and session/filesystem rules.', validation: 'Run PHP lint on changed sources and the existing focused request/auth/database checks; check CLI versus FPM/shared-host behavior where relevant.' },
   node: { skills: ['node-runtime-engineering'], discovery: 'Inspect package scripts, lockfile, installed Node version, ESM/CJS mode and the actual service/CLI entry point.', validation: 'Use the project scripts or Node check/test runner for affected behavior, async failures, shutdown and resource cleanup.' },
   'frontend-js': { skills: ['frontend-js', 'browser-javascript-engineering'], discovery: 'Identify browser versus Node execution from the actual entry point. For browser work inspect module/load order, supported browsers and existing DOM/state conventions.', validation: 'Check modules in their actual runtime. Browser changes need relevant events, async failures, repeated mounting and cleanup checks; a pure function can use a focused local check.' },
@@ -102,7 +200,7 @@ const RECIPES: Record<TaskPipelineId, Recipe> = {
   audio: { skills: ['audio-processing', 'sound-analysis', 'music-composition'], discovery: 'Probe channels, sample rates and durations; establish voice/music/effect roles and delivery format. Discover narration_tts (ElevenLabs preferred when configured, Piper available), narration_align for supplied transcript timing, audio_generate for instrumental music/SFX, and music_compose for editable scores. Arrange longer soundtracks in sections.', validation: 'Check media_sync word/cue precision and music_grid against an authored tempo. Reuse delivered mastering measurements, then listen for intelligibility, artifacts, seams and endings; provider alignment is not independent transcription and oscillator previews do not establish instrument quality. music_compose can render real SoundFont instruments with a supplied SF2/SF3 bank and libfluidsynth; keep editable MIDI and audition release tails.', tools: ['media_info', 'audio_analyze', 'narration_tts', 'narration_align', 'audio_generate', 'music_compose', 'audio_mix', 'media_sync'] },
   'svg-art': { skills: ['custom-svg', 'svg-assessment'], discovery: 'Inspect viewBox, geometry, transforms, inherited paint, references, accessibility and the intended sizes/backgrounds. Keep the requested visual direction and a consistent icon-set grammar.', validation: 'Use svg_inspect source measurements and svg_render at intended sizes and explicit CSS/SMIL/data-track timestamps; fix owner collisions and inspect cadence/loop diagnostics. Inspect pixels for clipping, small-size legibility, optical balance and consistent visual weight; approximate geometry does not establish conformance.', tools: ['svg_inspect', 'svg_render'] },
   debugging: { skills: ['debugging'], discovery: 'Capture the actual failing command/input, first diagnostic, source location and relevant runtime versions. Use symbol_search/context_slice to follow the established owner; minimize one falsifiable hypothesis before repair.', validation: 'Rerun the same minimal reproducer after repair, then affected project checks. Preserve first-failure diagnostics and source-bound receipts; a retry, background launch or zero collected tests cannot establish a fix.', tools: ['project_tests', 'symbol_search', 'context_slice'] },
-  'blender-3d': { skills: ['blender-production', 'gaussian-splatting'], discovery: 'Inspect the saved scene or source assets with blender_inspect (units, scale, object and material inventory, polygon and texture budgets). Inspect layered keyframe channels and evaluated frames for drivers/NLA; establish source fps, destination format, axes, budgets and the look reference before modeling. video_shot action:plan validates pixel-sample work, references, shared arrays and camera paths before creating output; render a short draft first. Prefer native video_shot scene graphs for designed forms/devices and licensed imported assets for detailed heroes; preserve authored cameras and stage foreground/midground relationships before adding detail.', validation: 'Run blender_inspect on the final scene (manifold, normals, applied scale, UV coverage, budgets) and validate every exported file in its target format. Verify stepped sequence timing and delivered video decode; an explicit output fps retimes rendered samples. Inspect actual playback for motion and narration sync. A viewport or one turntable orbit is not evidence of appearance.', tools: ['blender_inspect', 'blender_render', 'blender_run', 'video_shot', 'image_generate', 'image_understand', 'image_convert', 'video_generate', 'video_assets'] },
+  'blender-3d': { skills: ['blender-production', 'gaussian-splatting'], discovery: 'Inspect the saved scene or source assets with blender_inspect (units, scale, object and material inventory, polygon and texture budgets). Inspect layered keyframe channels and evaluated frames for drivers/NLA; establish source fps, destination format, axes, budgets and the look reference before modeling. video_shot action:plan validates pixel-sample work, references, shared arrays and camera paths before creating output; render a short draft first. Prefer native video_shot scene graphs for designed forms/devices and licensed imported assets for detailed heroes; preserve authored cameras and stage foreground/midground relationships before adding detail.', validation: 'Run blender_inspect on the final scene (manifold, normals, applied scale, UV coverage, budgets) and validate every exported file in its target format. Verify stepped sequence timing and delivered video decode; an explicit output fps retimes rendered samples. Inspect actual playback for motion and narration sync. A viewport or one turntable orbit is not evidence of appearance.', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'video_shot', 'image_generate', 'image_understand', 'image_convert', 'video_generate', 'video_assets'] },
   seo: { skills: ['search-discoverability', 'organic-growth-engineering'], discovery: 'Website/content work includes SEO without an explicit SEO request. Establish public/private routes, canonical host, locales, audience questions and page purpose with seo_toolkit plan. Audit the served public site or inspect built HTML before changing common owners; private apps stay private.', validation: 'Use seo_toolkit inspect/audit and discovery for canonical/status/robots/sitemap/link graph/hreflang/schema/media/cache and synchronized public discovery files. Review useful original content, genuine identity and source dates; inspect rendered/mobile behavior, measure performance and re-audit production after authorized deployment. No fabricated claims, demand or freshness; submitted/crawled/indexed differ.', tools: ['seo_toolkit', 'web_probe', 'web_search', 'fetch_content'] },
   'llm-app': { skills: ['llm-systems-engineering', 'rag-engineering', 'model-evaluation'], discovery: 'Inspect the provider interface, prompt and tool contracts, retrieval sources, existing evals and cost and latency budgets. Freeze a representative golden set and a simple baseline before changing prompts or models.', validation: 'Validate structured outputs and tool contracts, and exercise prompt-injection, malformed-output, timeout and refusal paths. Compare against the baseline on the frozen set with a slice breakdown.' },
   'api-automation': { skills: ['api-design', 'evidence-first-engineering', 'distributed-systems'], discovery: 'Read each provider\'s auth, scope, rate-limit, pagination and webhook-delivery documentation, and inspect existing clients, secret handling and the state the workflow must persist. Define the state machine, idempotency keys and approval points before coding.', validation: 'Dry-run or sandbox the workflow first, then run a failure-injection pass (timeout, 429, 5xx, partial batch) and an idempotent re-run. Verify there are no duplicate side effects and that secrets never reach logs or prompts.', tools: ['http_request'] },
@@ -127,11 +225,16 @@ const IGNORED_FILE = /(?:^|\/)(?:node_modules|vendor|\.git|skills)(?:\/|$)|(?:^|
 
 /** Metadata-only routing: no models, commands, project crawling, or skill-body injection. */
 export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection {
-  const prompt = bounded(input?.prompt, 24000);
+  const prompt = bounded(skillTaskText(typeof input?.prompt === 'string' ? input.prompt : ''), 24000);
+  const constraints = bounded(input?.constraints, 32768) || prompt;
+  const excluded = (pattern: RegExp) => featureExcluded(constraints, pattern) || Boolean(input.inheritedConstraints && featureExcluded(input.inheritedConstraints, pattern));
   const files = (Array.isArray(input?.files) ? input.files : []).slice(-64)
     .filter(file => typeof file === 'string' && file.length <= 2048)
     .map(file => file.replaceAll('\\', '/')).filter(file => !IGNORED_FILE.test(file));
   const dependencies = new Set((Array.isArray(input?.dependencies) ? input.dependencies : Object.keys(input?.dependencies ?? {})).slice(0, 128).map(name => String(name).toLowerCase()));
+  const signals = new Set(Array.isArray(input?.signals) ? input.signals : []);
+  const clauses = unique([...skillActionSegments(prompt), ...skillIntentSegments(prompt).filter(clause => !QUESTION.test(clause) && (WORK.test(clause) || ACTION.test(clause)))]);
+  const requested = (pattern: RegExp) => clauses.some(clause => pattern.test(clause)) && !excluded(pattern);
   const ids: TaskPipelineId[] = [];
   const add = (id: TaskPipelineId, selected: boolean) => { if (selected) ids.push(id); };
   const has = (pattern: RegExp) => files.some(file => pattern.test(file));
@@ -139,13 +242,13 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const research = !QUESTION.test(prompt) && (/\bresearch\b|\b(?:investigate|analy[sz]e|read)\b[^\n]{0,60}\b(?:papers|sources|web pages|literature)\b/i.test(prompt))
     && (!/\b(?:codebase|repo(?:sitory)?|local project|project structure)\b/i.test(prompt) || /\b(?:web|online|literature|papers|github|primary sources|external sources)\b/i.test(prompt));
   const active = WORK.test(prompt) || (ACTION.test(prompt) && !QUESTION.test(prompt)) || research || dataTask || files.length > 0;
-  if (!active || /\b(?:no|without)\s+(?:tools?|workflows?|pipelines?)\b|\b(?:do not|don't|never)\s+(?:use|run|activate)\s+(?:any\s+)?(?:tools?|workflows?|pipelines?)\b/i.test(prompt))
+  if (!active || excluded(/\b(?:tools?|workflows?|pipelines?)\b/i))
     return { ids, fingerprint: 'none', skills: [], tools: [], stages: [] };
 
   const cdn = /\breact(?:\.js)?\b/i.test(prompt) && /\b(?:cdn|no[- ]build|import[- ]map|script[- ]tag)\b/i.test(prompt);
   const react = /\breact(?:\.js)?\b/i.test(prompt) || has(/\.(?:jsx|tsx)$/i) || dependencies.has('react');
   const backendOnly = /\b(?:backend|api|authentication|database)\b/i.test(prompt) && !/\b(?:front[- ]?end|layout|palette|css|html|visual|form|screen|UI|UX|render)\b/i.test(prompt);
-  const frontend = (!backendOnly && /\b(?:front[- ]?end|browser|webpage|web page|website|html|css|DOM|vanilla javascript|vanilla js)\b/i.test(prompt)) || has(/\.(?:html|css|jsx|tsx|vue|svelte)$/i) || react;
+  const frontend = (!backendOnly && /\b(?:front[- ]?end|browser|webpage|web page|website|webapp|landing page|home ?page|html|css|DOM|vanilla javascript|vanilla js)\b/i.test(prompt)) || has(/\.(?:html|css|jsx|tsx|vue|svelte)$/i) || react || signals.has('ui');
   add('php', /\bphp(?:\s*8(?:\.\d+)?\+?)?\b/i.test(prompt) || has(/\.(?:php|phtml)$/i) || has(/(?:^|\/)composer\.json$/i));
   add('node', /\bnode(?:\.js|js)?\b/i.test(prompt) || has(/\.(?:mjs|cjs)$/i) || (has(/(?:^|\/)package\.json$/i) && !cdn) || dependencies.has('express') || dependencies.has('fastify'));
   add('frontend-js', frontend || /\b(?:javascript|js)\b/i.test(prompt) || has(/\.(?:js|ts)$/i));
@@ -170,16 +273,35 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   add('research', research); add('reinforcement-learning', rl); add('edge-ml', edge);
   add('finetuning', tuning);
   add('colab', /\b(?:google )?colab\b/i.test(prompt));
-  const ui = frontend || files.some(file => uiFileCue(file)) || /\b(?:UI|UX|user interface|dashboard|app screen|desloppification|deslop|visual design|responsive design|mobile layout|typography)\b|\b(?:anti[- ]?(?:ai[- ]?)?slop|design slop)\b[^.\n]{0,60}\b(?:design|interface|layout)\b/i.test(prompt);
+  const ui = frontend || files.some(file => uiFileCue(file)) || /\b(?:UI|UX|user interface|dashboard|app screen|desloppification|deslop|visual design|responsive design|mobile layout|design[- ]systems?|typography|palette|spacing)\b|\b(?:anti[- ]?(?:ai[- ]?)?slop|design slop)\b[^.\n]{0,60}\b(?:design|interface|layout)\b/i.test(prompt)
+    || !backendOnly && requested(/\b(?:interface|layout|hero)\b/i) && !/\b(?:command[- ]line interface|network interfaces?|api interface|class interface|type interface|(?:typescript|java|go) interfaces?|interface (?:types|contracts|definitions)|memory layout|disk layout)\b/i.test(prompt);
   add('ui-quality', ui);
-  add('image-media', /\b(?:image (?:editing|generation|understanding|conver(?:t|sion))|(?:edit|generate|convert|inspect|understand|analy[sz]e) (?:the |this |an? )?(?:images?|pictures?|photos?)|image_generate|image_understand|image_convert)\b/i.test(prompt) || has(/\.(?:png|jpe?g|webp|tiff?|qoi)$/i));
-  const video = /\b(?:video|footage|storyboard|montage|motion graphics)\b/i.test(prompt) || has(/\.(?:mp4|mov|webm|mkv|avi)$/i);
+  const broadDesign = ui && requested(/\b(?:build|create|design|redesign|restyle|revamp|rework|moderni[sz]e|polish)\b|\b(?:shared (?:ui|components?|owners?|tokens?)|design systems?|multi[- ](?:page|route|component))\b/i);
+  const uiMotion = ui && !excluded(/\b(?:motion|animations?|animated|gsap|framer.motion)\b/i) &&
+    (signals.has('motion') || ['gsap', 'motion', 'framer-motion', 'animejs'].some(name => dependencies.has(name)) || requested(/\b(?:motion|animat\w*|gsap|framer.motion|kinetic|parallax)\b/i));
+  const uiScroll = ui && !excluded(/\b(?:motion|animations?|scroll[- ]?(?:animations?|driven|story|telling)|parallax)\b/i) &&
+    (signals.has('scroll') || ['lenis', '@studio-freight/lenis', 'scrolltrigger'].some(name => dependencies.has(name)) || requested(/\b(?:scroll[- ]?(?:animations?|driven|story|telling)|scroll choreography|parallax|ScrollTrigger)\b/i));
+  const responsive = ui && !excluded(/\b(?:responsive|multi[- ]device|device matrix|breakpoints?)\b/i) &&
+    (broadDesign || signals.has('responsive') || requested(/\b(?:responsive|multi[- ]device|breakpoints?|phone|mobile|tablet|portrait|landscape)\b/i));
+  const consistency = ui && !excluded(/\b(?:consistency|design systems?|shared tokens?)\b/i) &&
+    (broadDesign || signals.has('consistency') || requested(/\b(?:consisten\w*|design systems?|shared (?:ui|components?|tokens?|owners?)|token drift)\b/i));
+  const web3d = ui && !excluded(/\b(?:3d|webgl|three\.?js|gltf|glb)\b/i) &&
+    (signals.has('web3d') || ['three', '@react-three/fiber', '@react-three/drei', 'babylonjs', '@babylonjs/core'].some(name => dependencies.has(name)) || requested(/\b(?:webgl|three\.?js|3d (?:hero|web|experience|model|scene)|gltf|glb)\b/i));
+  const codeControl = requested(/\b(?:refactor\w*|architectur\w*|multi[- ]file|codebase controls?|api (?:contract|migration)|shared (?:ui|components?|owners?)|common (?:ui|components?|owners?)|cross[- ](?:module|cutting)|impact (?:analysis|discovery))\b/i)
+    || !tuning && !rl && !edge && !research && files.filter(file => /\.(?:[cm]?[jt]sx?|php|py|go|rs|java|c|cpp|css|html|vue|svelte)$/i.test(file)).length >= 3;
+  add('ui-motion', uiMotion); add('ui-scroll', uiScroll); add('ui-responsive', responsive); add('ui-consistency', consistency); add('web-3d', web3d); add('codebase-control', codeControl);
+  const imageInspection = requested(/\b(?:image (?:editing|understanding|conver(?:t|sion))|(?:edit|convert|inspect|understand|analy[sz]e) (?:the |this |an? )?(?:images?|pictures?|photos?)|image_understand|image_convert)\b/i);
+  const imageGeneration = requested(/\b(?:image generation|generate (?:the |this |an? )?(?:images?|pictures?|photos?)|image_generate)\b/i) && !pipelineToolExcluded(constraints, 'image_generate');
+  add('image-media', imageInspection || imageGeneration || has(/\.(?:png|jpe?g|webp|tiff?|qoi)$/i) || signals.has('image-assets'));
+  const video = /\b(?:video|footage|storyboard|montage)\b/i.test(prompt) || !ui && /\bmotion graphics\b/i.test(prompt) || has(/\.(?:mp4|mov|webm|mkv|avi)$/i);
   const audio = !/\b(?:no|without)\s+(?:audio|sound|music|soundtrack)\b/i.test(prompt) &&
     (/\b(?:audio|soundtrack|music|narration|voiceover|podcast|sound effects?|ducking|midi)\b/i.test(prompt) || has(/\.(?:wav|mp3|flac|ogg|aac|m4a|mid|midi)$/i));
   const art = /\b(?:svgs?|vector (?:art|icons?|illustrations?)|icon (?:set|pack)|logo (?:mark|design))\b|\.svg\b/i.test(prompt) || has(/\.svg$/i);
   const debugging = /\b(?:debug|debugging|troubleshoot|reproduce|reproducer|regression|crash|stack\s?trace)\b|\b(?:fix|investigate|diagnose)\b[^.\n]{0,80}\b(?:bug|failure|failing|error|hang|leak|race)\b/i.test(prompt);
   add('video', video); add('audio', audio); add('svg-art', art); add('debugging', debugging);
-  add('blender-3d', /\bblender\b|\bgaussian splat(?:ting)?\b|\b3d (?:model(?:l?ing)?|scene|asset|render(?:ing)?|animation)\b|\b(?:glb|gltf)\b|\bphotogrammetry\b/i.test(prompt) || has(/\.(?:blend|glb|gltf|fbx|usd[azc]?|splat)$/i));
+  add('blender-3d', !excluded(/\b(?:blender|3d|gltf|glb)\b/i) &&
+    (/\bblender\b|\bgaussian splat(?:ting)?\b|\bphotogrammetry\b/i.test(skillTaskText(prompt)) || has(/\.(?:blend|fbx|usd[azc]?|splat)$/i) ||
+      !web3d && (/\b3d (?:model(?:l?ing)?|scene|asset|render(?:ing)?|animation)\b|\b(?:glb|gltf)\b/i.test(prompt) || has(/\.(?:glb|gltf)$/i))));
   add('seo', seoTaskIntent(prompt, files).relevant);
   add('llm-app', /\b(?:llm|rag|retrieval[- ]augmented|prompt engineering|agent(?:ic)? (?:workflow|loop|system|framework)s?|tool[- ]calling|function[- ]calling|prompt injection|evals? (?:harness|suite)|ai (?:agent|assistant|chatbot)s?|chat ?bots?)\b/i.test(prompt));
   add('api-automation', /\b(?:api (?:integration|workflow|orchestration|automation)s?|workflow automation|webhooks?|(?:third[- ]party|external|multiple|several|various) apis?|idempoten\w+|rate[- ]limit\w*|scheduled (?:jobs?|tasks?)|cron jobs?|etl (?:pipeline|job)s?)\b/i.test(prompt));
@@ -205,7 +327,8 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
   const stages: PipelineStage[] = [
     { id: 'discovery', phase: 'discovery', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.discovery}`).join('\n'), evidenceKinds: ['inspection'], dependsOn: [], tools: ['project_intel', 'read'] },
     ...(debugging ? [{ id: 'debug-reproduction', phase: 'discovery' as const, check: 'Run the minimal reproducer and retain the observed failure before repair. Expected failure is successful reproduction evidence; missing reproduction remains blocked, not a claimed diagnosis.', evidenceKinds: ['execution' as const], dependsOn: ['discovery'], tools: ['project_tests', 'bash'] }] : []),
-    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Use relevant tools for each stage; consult skill guides only when they help the next decision and adapt their steps to the task. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: [debugging ? 'debug-reproduction' : 'discovery'], tools: ['read', 'edit', 'write'] },
+    ...(codeControl ? [{ id: 'source-impact', phase: 'discovery' as const, check: RECIPES['codebase-control'].discovery, evidenceKinds: ['inspection' as const], dependsOn: ['discovery'], tools: ['project_report', 'module_report', 'symbol_search', 'context_slice'] }] : []),
+    { id: 'implementation', phase: 'implementation', check: 'Implement in the established owner and preserve unrelated work. Use relevant tools for each stage; consult skill guides only when they help the next decision and adapt their steps to the task. Keep a reviewable artifact/diff.', evidenceKinds: ['artifact'], dependsOn: [...(debugging ? ['debug-reproduction'] : ['discovery']), ...(codeControl ? ['source-impact'] : [])], tools: ['read', 'edit', 'write', ...(uiMotion || uiScroll || web3d ? ['ui_recipe'] : []), ...(consistency || uiMotion || web3d ? ['creative_direct'] : []), ...(codeControl ? ['bulk_edit'] : [])] },
     { id: 'validation', phase: 'validation', check: recipes.map((recipe, i) => `${ids[i]}: ${recipe.validation}`).join('\n') + '\nReuse current native execution receipts. For a low-impact change, an explicit reasoned assessment may establish that additional tests are unnecessary; an assessment cannot claim a test passed.', evidenceKinds: research && !codeWork ? ['inspection', 'assessment'] : ['execution', 'assessment'], dependsOn: ['implementation'], tools: validationTools },
   ];
   const sourceAudit = codeWork && /\b(?:refactor\w*|code (?:quality|review)|source (?:audit|review)|architectur\w*|redundan\w*|DRY|linters?|security audit)\b/i.test(prompt);
@@ -220,6 +343,10 @@ export function selectTaskPipelines(input: TaskPipelineInput): PipelineSelection
     stages.push({ id: 'ui-pixels', phase: 'validation', check: 'Inspect current actual application pixels. Judge hierarchy, type, spacing, color, composition, SVG optical weight and identity against real content and the requested direction. Use visual_review run then record its runId and every rubric section. Text-only models use permitted image_understand for the capture. UNKNOWN, stale captures and source inference cannot approve appearance.', evidenceKinds: ['pixels'], dependsOn: ['implementation'], tools: ['visual_review', 'render_see', 'image_understand', 'quality_review'] });
     stages.push({ id: 'ui-interaction', phase: 'validation', check: 'Exercise the representative user task, keyboard/focus and relevant loading/empty/error/disabled states in the actual application. Record real interaction evidence.', evidenceKinds: ['interaction'], dependsOn: ['implementation'], tools: ['browser_session', 'quality_review'] });
   }
+  if (consistency) stages.push({ id: 'ui-consistency', phase: 'validation', check: RECIPES['ui-consistency'].validation, evidenceKinds: ['inspection'], dependsOn: ['implementation'], tools: ['ui_consistency', 'creative_direct'] });
+  if (uiMotion) stages.push({ id: 'ui-motion', phase: 'validation', check: RECIPES['ui-motion'].validation, evidenceKinds: ['inspection'], dependsOn: ['implementation'], tools: ['motion_inspect', 'browser_session'] });
+  if (uiScroll) stages.push({ id: 'ui-scroll', phase: 'validation', check: RECIPES['ui-scroll'].validation, evidenceKinds: ['inspection'], dependsOn: ['implementation'], tools: ['motion_inspect', 'browser_session'] });
+  if (web3d) stages.push({ id: 'web-3d', phase: 'validation', check: RECIPES['web-3d'].validation, evidenceKinds: ['inspection'], dependsOn: ['implementation'], tools: ['asset_register', 'render_see', 'browser_session'] });
   if (video) {
     stages.push({ id: 'video-art', phase: 'validation', check: 'Inspect full-size delivered hero/detail pixels against the creative brief and reference pixels: specific silhouettes, semantic accuracy, coherent materials/light/shadow, deliberate hierarchy and typography. Finish blockouts and draft assets. Preserve the requested style, including intentional abstract, flat or richly illustrated work; no automatic taste score replaces this review.', evidenceKinds: ['pixels'], dependsOn: ['validation'], tools: ['video_render','video_qa','image_understand'] });
     stages.push({ id: 'video-playback', phase: 'validation', check: 'Inspect actual playback of the final video for pacing, framing, motion, transitions and audio sync. A sparse contact sheet, successful decode or timeline JSON cannot establish continuous playback quality.', evidenceKinds: ['playback'], dependsOn: ['validation'], tools: ['video_frames', 'video_qa'] });
@@ -323,7 +450,15 @@ export function buildPipelineContext(selection: PipelineSelection, ledger: Pipel
   const ready = pending.filter(stage => stage.ready);
   const header = `[Task pipelines: ${selection.ids.join(', ')}]\nScope ${coordinate.scope}; revision ${coordinate.revision}. Reuse current native receipts; do not repeat passed stages.\n`;
   const skills = ready.some(stage => stage.phase === 'discovery') ? `Optional reference guides: ${selection.skills.join(', ')}. Consult only when useful; these are not tool prerequisites.\n` : '';
-  const body = ready.map(stage => `${stage.id}${stage.failures ? ` (${stage.failures} failure receipts: diagnose/escalate before retrying)` : ''}: ${stage.check}`).join('\n');
+  // Share the bound across ready stages and recipe paragraphs, so a long
+  // language recipe cannot hide the current responsive/motion/impact step.
+  const stageBudget = Math.max(80, Math.floor((maxChars - header.length - skills.length) / Math.max(1, ready.length)));
+  const body = ready.map(stage => {
+    const label = `${stage.id}${stage.failures ? ` (${stage.failures} failure receipts: diagnose/escalate before retrying)` : ''}: `;
+    const lines = stage.check.split('\n');
+    const lineBudget = Math.max(40, Math.floor((stageBudget - label.length) / lines.length));
+    return label + lines.map(line => line.length > lineBudget ? line.slice(0, Math.max(0, lineBudget - 1)) + '…' : line).join('\n');
+  }).join('\n');
   const blocked = ready.length ? '' : 'Prerequisite evidence is unresolved; inspect pipeline status before proceeding.';
   return (header + skills + body + blocked).slice(0, maxChars);
 }

@@ -131,7 +131,7 @@ const NAME_OVERRIDES: readonly Readonly<{ id: string; pattern: RegExp }>[] = [
   {id: "media", pattern: /^(?:scene (?:create|render)|video browser|narration (?:tts|align))$/i},
   // Their descriptions list image, video and audio as inputs; the family is documents and deliverables.
   {id: "documents", pattern: /^(?:office doc|deliverable check|organize files)$/i},
-  {id: "web", pattern: /^design audit$/i},
+  {id: "web", pattern: /^(?:design audit|ui recipe|ui consistency)$/i},
   {id: "operations", pattern: /(?:^| )(?:subagent|swarm|fusion|council|bg|checkpoint|obs|session|process)(?: |$)/i},
   {id: "web", pattern: /(?:^| )(?:http|browser|web)(?: |$)/i},
   {id: "engineering", pattern: /(?:^| )(?:ast|lsp|symbol|syntax|diagnostic)(?: |$)/i},

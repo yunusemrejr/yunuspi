@@ -23,7 +23,7 @@ import {
 } from "./lib/creative-direction.ts";
 import {
   creativeCompareRun, creativeVerificationLines, normalizeVerdict, planCompare, planUiMatrix,
-  sourceRevision, uiExploreRun, visualReviewRun,
+  sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun,
   type QACapture, type VisualReceipt,
   localRenderPath,
 } from "./lib/creative-qa.ts";
@@ -386,13 +386,15 @@ export default function artDirection(pi: any) {
 
   // ── ui_explore ──
   register("ui_explore",
-    "Render a responsive viewport/state matrix: defaults to narrow 320px, mobile 390px, tablet and desktop; optional dark, reduced-motion and full-page states. Up to 12 captures, every width covered before variants. Returns a pixel contact sheet, DOM geometry, controls/names, alt/load status, measured contrast, design patterns, load errors and explicit incomplete coverage. Inspect the contact sheet; keyboard, menus and loading/error tasks require browser_session.",
+    "Render a responsive device/state matrix: defaults to narrow 320px, mobile 390px, tablet and desktop. Optional devices add touch/DPR phone portrait/landscape, tablet and desktop profiles; breakpoints probe b-1/b/b+1 widths. Default, dark, reduced-motion and full-page states share 12 captures, requested widths before variants, with every omitted combination disclosed. Returns a pixel contact sheet, document hashes, actual device/media behavior, DOM geometry, controls/names, alt/load status, measured contrast, design patterns, errors and incomplete coverage. Inspect the contact sheet; keyboard, menus and loading/error tasks require browser_session.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
       entrypoint: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: 'Workspace UI entry file represented by the served URL' })),
       viewports: Type.Optional(Type.Array(choices(["narrow", "mobile", "tablet", "desktop"]), { minItems: 1, maxItems: 4 })),
       states: Type.Optional(Type.Array(choices(["default", "dark", "reduced-motion", "full"]), { minItems: 1, maxItems: 4 })),
       widths: Type.Optional(Type.Array(Type.Integer({ minimum: 200, maximum: 2048 }), { minItems: 1, maxItems: 4 })),
+      devices: Type.Optional(Type.Array(choices(["phone-portrait","phone-landscape","tablet-portrait","desktop"]),{minItems:1,maxItems:4})),
+      breakpoints: Type.Optional(Type.Array(Type.Integer({minimum:201,maximum:2047}),{minItems:1,maxItems:4,description:'CSS breakpoints; capture the immediate width on either side as well as the breakpoint'})),
       outputDir: Type.Optional(localPath),
     }),
     async (params, ctx, signal) => {
@@ -409,22 +411,37 @@ export default function artDirection(pi: any) {
       return { result, pixels: result.preview };
     }, 600_000);
 
+  register("ui_consistency",
+    "Compare shared design tokens and component roles across 2..4 local pages or HTTP(S) routes at the same viewport/theme. Explicit selectorGroups identify shared roles; data-ui-role and body/h1/navigation provide defaults. Declare intentional variants with selectorGroups.variant or data-ui-variant. Optional tokens names CSS custom properties; otherwise bounded style-token names are discovered at :root. Captures, document/source hashes and detailed snapshots use the existing isolated renderer and .pi/ui-review report. Returns measured drift and missing/truncated coverage, never an aesthetic score or interaction approval. Read-only page inspection; no component or token edits.",
+    Type.Object({
+      sources:Type.Array(Type.String({minLength:1,maxLength:4096}),{minItems:2,maxItems:4}),
+      selectorGroups:Type.Optional(Type.Array(Type.Object({name:Type.String({pattern:'^[A-Za-z][A-Za-z0-9_-]{0,63}$'}),selector:Type.String({minLength:1,maxLength:256}),variant:Type.Optional(Type.String({pattern:'^[A-Za-z][A-Za-z0-9_-]{0,63}$'}))}),{minItems:1,maxItems:12})),
+      tokens:Type.Optional(Type.Array(Type.String({pattern:'^--[A-Za-z_][A-Za-z0-9_-]{0,63}$'}),{minItems:1,maxItems:24})),
+      width:Type.Optional(Type.Integer({minimum:200,maximum:2048})),height:Type.Optional(Type.Integer({minimum:200,maximum:2048})),
+      colorScheme:Type.Optional(choices(['light','dark'])),outputDir:Type.Optional(localPath),
+    }),async(params,ctx,signal)=>({result:await uiConsistencyRun(params,ctx.cwd as string,signal,capture)}),180_000);
+
   // ── motion_inspect ──
   register("motion_inspect",
-    "Inspect running motion as a system: enumerate main-frame CSS/WAAPI animations (target, timing, iterations, animated properties), render an ASCII timeline, and flag concurrency, transform-owner collisions, layout-property animation, duration soup, infinite loops and possible shared-target transform owners. Temporal QA samples animation-local CSS/WAAPI frames and seeks SVG SMIL roots; reduced-motion failures require unchanged infinite transform timing plus actual moving reduced-state pixels. Known equal-period loops get endpoint-parity evidence; arbitrary first/last samples cannot prove seams. Encoded-video cadence/loop QA uses media_info action motion. JS/rAF, scroll timelines and cross-frame choreography are out of scope and reported unknown.",
+    "Inspect running motion with mode:time (default) or scroll. time inventories and seeks CSS/WAAPI/SMIL clocks, detects ownership/layout risks and verifies reduced-state infinite transform loops. scroll observes actual bounded progress positions in one live document, optionally backtracks, keeps JS/rAF and scroll timelines running and captures a reduced-motion pass plus stationary pixels. Selector geometry, actual scroll positions, hashes, missing coverage and screenshots accompany findings. Scroll samples cannot prove frame cadence, easing, GPU performance or appearance. time excludes JS/rAF and scroll timelines; encoded-video cadence uses media_info action motion.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
+      mode:Type.Optional(choices(['time','scroll'])),
       width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       height: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       durationMs: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
       samples: Type.Optional(Type.Integer({ minimum: 2, maximum: 9 })),
       reducedMotion: Type.Optional(Type.Boolean({ description: "Run the reduced-motion parity pass (default true)" })),
+      positions:Type.Optional(Type.Array(Type.Number({minimum:0,maximum:1}),{minItems:2,maxItems:8,description:'scroll: strictly increasing normalized document progress'})),
+      backtrack:Type.Optional(Type.Boolean({description:'scroll: return through prior positions in the same document (default true)'})),
+      settleMs:Type.Optional(Type.Integer({minimum:0,maximum:1000,description:'scroll: wait before each observation; frame timing remains unknown'})),
+      selectors:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:256}),{minItems:1,maxItems:12,description:'scroll: observed sticky/pinned/content targets; missing selectors remain unknown'})),
     }),
     async (params, ctx, signal) => {
       const { state } = sessionOf(ctx);
       const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
       const report = await motionInspectRun(params, ctx.cwd as string, signal, capture, direction);
-      const key = `motion:${report.source}`;
+      const key = `motion:${report.source}:${params.mode ?? 'time'}`;
       if (report.blocking > 0) state.blockingRuns.set(key, `motion: ${report.blocking} blocking finding(s) on ${report.source} (rev ${report.revision}): ${report.findings.filter((f: any) => f.severity === "FAIL").map((f: any) => f.id).join(", ")}`.slice(0, 280));
       else state.blockingRuns.delete(key);
       return { result: report };

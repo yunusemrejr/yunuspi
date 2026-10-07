@@ -2940,6 +2940,77 @@
       "commands": []
     },
     {
+      "id": "ui-engineering",
+      "group": "web_media",
+      "summary": "Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_recipe prepares editable focus-safe entrances, section-driven layered scroll tracks and preflighted local Blender/glTF-to-Three.js mechanics without choosing a stock visual identity or installing dependencies. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.",
+      "entrypoints": [
+        "ui_recipe",
+        "ui_explore",
+        "motion_inspect",
+        "ui_consistency"
+      ],
+      "tools": [
+        "ui_recipe",
+        "creative_direct",
+        "ui_explore",
+        "motion_inspect",
+        "ui_consistency",
+        "render_see",
+        "design_audit",
+        "visual_review",
+        "browser_session",
+        "asset_register",
+        "blender_export",
+        "image_generate"
+      ],
+      "options": [
+        {
+          "name": "ui_recipe.action|pattern",
+          "values": [
+            "scroll-reveal",
+            "scroll-story",
+            "three-model"
+          ],
+          "summary": "Plan or scaffold mechanics; the host page supplies real content and design tokens."
+        },
+        {
+          "name": "motion_inspect.mode|positions",
+          "values": [
+            "time",
+            "scroll"
+          ],
+          "summary": "time inventory or bounded live scroll progress with forward/backtracking and reduced-motion evidence."
+        },
+        {
+          "name": "ui_explore.devices|breakpoints",
+          "summary": "Touch/DPR/orientation profiles and adjacent CSS breakpoint widths; omitted cells stay explicit."
+        },
+        {
+          "name": "ui_consistency.sources|selectorGroups|tokens",
+          "summary": "Compare shared named roles within the same explicit variant and requested CSS custom properties across 2..4 routes."
+        }
+      ],
+      "related": [
+        "design-studio",
+        "art-direction",
+        "3d-studio",
+        "source-intelligence",
+        "task-pipelines"
+      ],
+      "sourceFiles": [
+        "agent/extensions/design-studio.ts",
+        "agent/extensions/lib/ui-recipes.ts",
+        "agent/scripts/ui-motion-runtime.mjs",
+        "agent/extensions/art-direction.ts",
+        "agent/extensions/lib/creative-qa.ts",
+        "agent/extensions/lib/motion-inspect.ts",
+        "agent/extensions/adaptive-workflows.ts",
+        "agent/extensions/lib/task-pipelines.ts"
+      ],
+      "doc": "docs/UI-ENGINEERING.md",
+      "commands": []
+    },
+    {
       "id": "design-studio",
       "group": "web_media",
       "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. image_convert makes framed/rotated alpha-aware PNG/JPEG/WebP batches; image_understand uses the selected vision model with hashed crop/scale evidence. Pixel measurements and model observations remain evidence, not design intent.",
@@ -3030,6 +3101,7 @@
         "creative_direct",
         "visual_review",
         "ui_explore",
+        "ui_consistency",
         "motion_inspect",
         "svg_render",
         "svg_inspect",
@@ -3041,12 +3113,14 @@
         "creative_direct",
         "visual_review",
         "ui_explore",
+        "ui_consistency",
         "motion_inspect",
         "svg_render",
         "svg_inspect",
         "asset_register",
         "image_generate",
         "creative_compare",
+        "ui_recipe",
         "render_see",
         "design_audit",
         "image_analyze",
@@ -3066,8 +3140,8 @@
           "summary": "Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width."
         },
         {
-          "name": "viewports|states",
-          "summary": "Matrix axes: narrow 320px/mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures. Every width precedes variants; capped coverage stays explicit."
+          "name": "viewports|states|devices|breakpoints",
+          "summary": "Narrow 320px/mobile/tablet/desktop plus touch/DPR/orientation profiles and breakpoint neighbors. The 12-capture bound covers widths before variants and reports omitted cells."
         },
         {
           "name": "runId|entrypoint",
@@ -3076,6 +3150,10 @@
         {
           "name": "PI_UI_VERIFICATION",
           "summary": "Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out."
+        },
+        {
+          "name": "mode|positions|backtrack",
+          "summary": "Time inventory or live scroll-mode observations, forward/backtracking and reduced-motion frames; continuous smoothness and GPU cost remain unknown."
         },
         {
           "name": "verdict",
@@ -4024,7 +4102,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 473,
+        "line": 490,
         "kind": "factory"
       },
       {
@@ -4205,7 +4283,7 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 576,
+        "line": 593,
         "kind": "factory"
       },
       {
@@ -4241,7 +4319,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 251,
+        "line": 268,
         "kind": "literal"
       },
       {
@@ -4321,31 +4399,31 @@
       {
         "name": "image_analyze",
         "source": "agent/extensions/design-studio.ts",
-        "line": 38,
+        "line": 40,
         "kind": "factory"
       },
       {
         "name": "image_convert",
         "source": "agent/extensions/design-studio.ts",
-        "line": 33,
+        "line": 35,
         "kind": "factory"
       },
       {
         "name": "image_create",
         "source": "agent/extensions/design-studio.ts",
-        "line": 55,
+        "line": 57,
         "kind": "factory"
       },
       {
         "name": "image_crop",
         "source": "agent/extensions/design-studio.ts",
-        "line": 42,
+        "line": 44,
         "kind": "factory"
       },
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 519,
+        "line": 536,
         "kind": "factory"
       },
       {
@@ -4357,13 +4435,13 @@
       {
         "name": "image_trace",
         "source": "agent/extensions/design-studio.ts",
-        "line": 49,
+        "line": 51,
         "kind": "factory"
       },
       {
         "name": "image_understand",
         "source": "agent/extensions/design-studio.ts",
-        "line": 35,
+        "line": 37,
         "kind": "factory"
       },
       {
@@ -4471,7 +4549,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 413,
+        "line": 425,
         "kind": "factory"
       },
       {
@@ -4597,7 +4675,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 250,
+        "line": 267,
         "kind": "literal"
       },
       {
@@ -4730,13 +4808,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 438,
+        "line": 455,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 433,
+        "line": 450,
         "kind": "factory"
       },
       {
@@ -4760,7 +4838,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 448,
+        "line": 568,
         "kind": "literal"
       },
       {
@@ -4778,13 +4856,25 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 431,
+        "line": 443,
         "kind": "literal"
+      },
+      {
+        "name": "ui_consistency",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 414,
+        "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
         "line": 388,
+        "kind": "factory"
+      },
+      {
+        "name": "ui_recipe",
+        "source": "agent/extensions/design-studio.ts",
+        "line": 33,
         "kind": "factory"
       },
       {
@@ -4850,7 +4940,7 @@
       {
         "name": "visual_diff",
         "source": "agent/extensions/design-studio.ts",
-        "line": 64,
+        "line": 66,
         "kind": "factory"
       },
       {
@@ -4862,7 +4952,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 88,
+        "line": 102,
         "kind": "literal"
       },
       {
@@ -5021,7 +5111,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 251,
+        "line": 268,
         "kind": "literal"
       },
       {
@@ -5219,7 +5309,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 250,
+        "line": 267,
         "kind": "literal"
       },
       {
@@ -5297,7 +5387,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 448,
+        "line": 568,
         "kind": "literal"
       },
       {
@@ -5309,13 +5399,13 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 431,
+        "line": 443,
         "kind": "literal"
       },
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 88,
+        "line": 102,
         "kind": "literal"
       },
       {
@@ -5354,6 +5444,7 @@
           "motion_inspect",
           "svg_inspect",
           "svg_render",
+          "ui_consistency",
           "ui_explore",
           "visual_review"
         ]
@@ -5383,7 +5474,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          23
+          22
         ],
         "knownNames": [
           "image_analyze",
@@ -5392,6 +5483,7 @@
           "image_crop",
           "image_trace",
           "image_understand",
+          "ui_recipe",
           "visual_diff"
         ]
       },
@@ -5604,11 +5696,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 748,
+      "sourceFiles": 749,
       "registrationSites": 91,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 154,
-      "uniqueStableTools": 153,
+      "stableRegistrationRows": 156,
+      "uniqueStableTools": 155,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -6646,6 +6738,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/ui-recipes.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/utility-client.ts",
         "exists": true
       },
@@ -7161,6 +7257,10 @@
       },
       {
         "path": "agent/scripts/transaction.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/ui-motion-runtime.mjs",
         "exists": true
       },
       {
@@ -8912,6 +9012,10 @@
       {
         "name": "TERMINAL-INTERFACE.md",
         "path": "docs/TERMINAL-INTERFACE.md"
+      },
+      {
+        "name": "UI-ENGINEERING.md",
+        "path": "docs/UI-ENGINEERING.md"
       },
       {
         "name": "UNREAL-INTEGRATION-REVIEW.md",

@@ -1,6 +1,6 @@
 import {registerBrowserSession, isolatedBrowserEnvironment} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
-import { localRenderPath } from "./lib/creative-qa.ts";
+import { localRenderPath, type CaptureParams } from "./lib/creative-qa.ts";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -62,7 +62,7 @@ const captureQueue = createRenderQueue();
  * with designAudit); animationTimeMs/animationInventory drive the deterministic
  * CSS/WAAPI clock inventory. Pixels stay on disk under the 20 MB artifact
  * bound, never on the model-attachment path. */
-export async function captureToFile(params: { source: string; width: number; height: number; fullPage: boolean; clip?: { y: number; height: number }; colorScheme?: string; reducedMotion?: string; animationTimeMs?: number; animationInventory?: boolean; designAudit?: boolean; includeState?: boolean; timeoutMs?: number }, destination: string, cwd: string, signal?: AbortSignal): Promise<any> {
+export async function captureToFile(params: CaptureParams, destination: string, cwd: string, signal?: AbortSignal): Promise<any> {
   const release = await captureQueue(signal);
   let tempRoot: string | undefined;
   try {
@@ -76,6 +76,20 @@ export async function captureToFile(params: { source: string; width: number; hei
     const stat = await fs.lstat(staged);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) throw new Error("Render returned an invalid capture artifact");
     await fs.copyFile(staged, destination, fs.constants.COPYFILE_EXCL);
+    if (details.scrollSequence) {
+      let totalBytes = 0;
+      for (const [kind,list] of [['scroll',details.scrollSequence.samples],['hold',details.scrollSequence.holds]] as const) {
+        if (!Array.isArray(list) || list.length > 17) throw Error('Render returned an invalid scroll sequence');
+        for (const [index,sample] of list.entries()) {
+          signal?.throwIfAborted();
+          const file=path.resolve(String(sample.file));
+          if (path.dirname(file)!==tempRoot || !path.basename(file).startsWith('capture.png.')) throw Error('Render returned an invalid scroll artifact path');
+          const sampleStat=await fs.lstat(file);totalBytes+=sampleStat.size;
+          if (!sampleStat.isFile() || sampleStat.isSymbolicLink() || sampleStat.size>20*1024*1024 || totalBytes>40*1024*1024) throw Error('Render scroll artifacts exceed their file/aggregate bounds');
+          const target=`${destination}.${kind}-${index}.png`;await fs.copyFile(file,target,fs.constants.COPYFILE_EXCL);sample.file=target;
+        }
+      }
+    }
     return { ...details, output: destination };
   } finally {
     if (tempRoot) await fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
@@ -129,6 +143,9 @@ export default function (pi: any) {
       selector: Type.Optional(Type.String({ maxLength: 256 })),
       colorScheme: Type.Optional(StringEnum(["light", "dark"])),
       reducedMotion: Type.Optional(StringEnum(["reduce", "no-preference"])),
+      deviceScaleFactor: Type.Optional(Type.Number({minimum:1,maximum:3,description:'Device pixel ratio; physical viewport pixels are bounded to 8M'})),
+      hasTouch: Type.Optional(Type.Boolean({description:'Emulate touch/pointer-coarse capability; this is device evidence, not an interaction pass'})),
+      isMobile: Type.Optional(Type.Boolean({description:'Emulate the mobile viewport/meta-viewport behavior'})),
       animationTimeMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 600000, description: "Pause up to 200 current main-frame document-timeline CSS/WAAPI animations at this local time each. Not JS/rAF playback, scroll timelines, or interaction; unavailable for PDF." })),
       timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 30000 })),
       page: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),

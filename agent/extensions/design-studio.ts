@@ -1,7 +1,5 @@
-/** Image-to-code tools: analyze a reference (mockup, screenshot or URL),
- * cut and vectorize its assets, compare a build against it, and synthesize
- * deterministic procedural plates. Discovered on demand through tool_search;
- * the mockup-to-code skill owns the image-to-code workflow. */
+/** Image-to-code analysis and adaptable browser mechanics. Existing adaptive
+ * workflows stage relevant tools; skills offer optional implementation guides. */
 import { Type } from "typebox";
 import { imageAnalyze, imageCrop, imageTrace, visualDiff } from "./lib/design-studio.ts";
 import { imageCreate, SYNTH_OPS } from "./lib/image-synth.ts";
@@ -10,6 +8,7 @@ import { choices } from "./lib/tool-schema.ts";
 import { imageConvert } from "./lib/image-convert.ts";
 import { imageUnderstand } from "./lib/image-understand.ts";
 import { randomUUID } from "node:crypto";
+import { uiRecipe, UI_PATTERNS } from "./lib/ui-recipes.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const url = Type.String({ minLength: 8, maxLength: 2048, pattern: "^https?://" });
@@ -30,6 +29,9 @@ export default function designStudio(pi: any) {
       },
     });
   }
+  const keyframes = Type.Array(Type.Object({ opacity: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), transform: Type.Optional(Type.String({ maxLength: 240 })) }), { minItems: 2, maxItems: 8 });
+  register("ui_recipe", "Plan or scaffold adaptable browser mechanics for scroll entrances, section-driven multi-layer motion and local Blender/glTF-to-Three.js models. Writes an editable module in a fresh workspace artifact folder; no package install, uploads, hosted generation or target-file replacement. Keeps host content/design tokens, reduced-motion/mobile static flow, one transform owner and route cleanup. three-model requires current assetPath preflight plus the real served modelUrl and caller-supplied matching THREE/GLTFLoader imports. Prepared code needs actual browser/pixel/interaction verification; use motion_inspect mode scroll, ui_explore and ui_consistency.",
+    Type.Object({ action: Type.Optional(choices(["plan", "scaffold"])), pattern: Type.Optional(choices([...UI_PATTERNS])), selector: Type.Optional(Type.String({ maxLength: 240 })), section: Type.Optional(Type.String({ maxLength: 240 })), stickySelector: Type.Optional(Type.String({ maxLength: 240 })), keyframes: Type.Optional(keyframes), durationMs: Type.Optional(Type.Number({ minimum: 80, maximum: 1600 })), easing: Type.Optional(Type.String({ maxLength: 100 })), tracks: Type.Optional(Type.Array(Type.Object({ selector: Type.String({ maxLength: 240 }), keyframes, start: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), end: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), easing: Type.Optional(Type.String({ maxLength: 100 })) }), { minItems: 1, maxItems: 12 })), mobileBelow: Type.Optional(Type.Integer({ minimum: 320, maximum: 1600 })), assetPath: Type.Optional(localPath), modelUrl: Type.Optional(Type.String({ maxLength: 2048 })), scrollSection: Type.Optional(Type.String({ maxLength: 240 })), maxDpr: Type.Optional(Type.Number({ minimum: 1, maximum: 2 })), rotationFrom: Type.Optional(Type.Number()), rotationTo: Type.Optional(Type.Number()), outputDir }), uiRecipe, 120000);
   register("image_convert", "Convert 1..12 local still images to PNG/JPEG/WebP with explicit contain/cover/stretch framing, width/height, clockwise rotation, flips and alpha/matte control. PNG/WebP keep alpha unless background is given; JPEG uses a white or explicit matte. Decode-verified outputs and source hashes go to a fresh workspace folder; originals and batch order are preserved. Animated GIF/APNG/WebP require a video/frame workflow. No uploads.",
     Type.Object({ path: Type.Optional(localPath), paths: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 12 })), width: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })), height: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })), fit: Type.Optional(choices(["contain", "cover", "stretch"])), rotate: Type.Optional(choices([0, 90, 180, 270])), flipX: Type.Optional(Type.Boolean()), flipY: Type.Optional(Type.Boolean()), background: Type.Optional(Type.String({ pattern: "^#[0-9a-fA-F]{6}$" })), format: Type.Optional(choices(["png", "jpg", "webp"])), quality: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })), outputDir }), imageConvert, 180000);
   register("image_understand", "Ask a vision model about 1..8 local images: content, composition, visible defects, references or sampled-frame comparisons. Uses the current image-capable model or an explicit provider/model for this call; models lists authenticated vision choices. Returns observations, usage and source hash/crop/scale evidence. region isolates small details in one image; maxWidth bounds sent pixels. Files are sent to the selected provider; image_analyze and image_ocr remain local alternatives for measurements and printed text.",

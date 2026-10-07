@@ -28,6 +28,7 @@ import {
 } from "./image-analysis.ts";
 import { directionSummary, matchAvoidSignals, type CreativeDirection } from "./creative-direction.ts";
 import { relativeOrAbsolute } from "./path-safety.ts";
+import { normalizeUiSnapshotOptions } from "../../scripts/render-design-state.mjs";
 
 export type QAVerdict = "PASS" | "WARN" | "FAIL" | "UNKNOWN";
 
@@ -38,13 +39,17 @@ export interface QASection {
   needsVision?: boolean;
 }
 
-export interface QACapture {
-  (params: {
+export interface CaptureParams {
     source: string; width: number; height: number; fullPage: boolean;
     colorScheme?: string; reducedMotion?: string; animationTimeMs?: number;
     timeoutMs?: number; clip?: { y: number; height: number };
     includeState?: boolean; designAudit?: boolean; animationInventory?: boolean;
-  }, destination: string, cwd: string, signal?: AbortSignal): Promise<any>;
+    deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean;
+    scrollCapture?: {positions?: number[]; backtrack?: boolean; settleMs?: number; selectors?: string[]};
+    uiSnapshot?: {groups?: Array<{name: string; selector: string; variant?: string}>; tokens?: string[]};
+}
+export interface QACapture {
+  (params: CaptureParams, destination: string, cwd: string, signal?: AbortSignal): Promise<any>;
 }
 
 export const VIEWPORT_PRESETS: Record<string, { width: number; height: number }> = {
@@ -52,6 +57,13 @@ export const VIEWPORT_PRESETS: Record<string, { width: number; height: number }>
   mobile: { width: 390, height: 844 },
   tablet: { width: 834, height: 1112 },
   desktop: { width: 1440, height: 900 },
+};
+
+export const DEVICE_PRESETS: Record<string,{width:number;height:number;deviceScaleFactor:number;hasTouch:boolean;isMobile:boolean}> = {
+  'phone-portrait': {width:390,height:844,deviceScaleFactor:2,hasTouch:true,isMobile:true},
+  'phone-landscape': {width:844,height:390,deviceScaleFactor:2,hasTouch:true,isMobile:true},
+  'tablet-portrait': {width:834,height:1112,deviceScaleFactor:2,hasTouch:true,isMobile:true},
+  desktop: {width:1440,height:900,deviceScaleFactor:1,hasTouch:false,isMobile:false},
 };
 
 const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
@@ -94,8 +106,13 @@ export function localRenderPath(cwd: string, source: string): string {
 export async function sourceRevision(source: string, cwd: string): Promise<string> {
   if (/^https?:\/\//i.test(source)) return "live";
   try {
-    const file = localRenderPath(cwd, source).replace(/[?#].*$/, "");
-    const stat = await fs.stat(file);
+    let file = localRenderPath(cwd, source),stat;
+    try {stat=await fs.stat(file);}
+    catch(error:any) {
+      const suffix=file.search(/[?#]/);
+      if(error.code!=='ENOENT'||suffix<0||!/\.html?$/i.test(file.slice(0,suffix)))throw error;
+      file=file.slice(0,suffix);stat=await fs.stat(file);
+    }
     if (!stat.isFile() || stat.size > 40 * 1024 * 1024) return `unhashed-${stat.size}`;
     return createHash("sha256").update(await fs.readFile(file)).digest("hex").slice(0, 16);
   } catch {
@@ -114,11 +131,17 @@ export interface MatrixCell {
   reducedMotion: string;
   fullPage: boolean;
   file: string;
+  deviceScaleFactor: number;
+  hasTouch: boolean;
+  isMobile: boolean;
+  breakpoint?: number;
 }
 
 export interface UiMatrixPlan {
   cells: MatrixCell[];
   capped: boolean;
+  requested: number;
+  omitted: Array<{viewport:string;state:string}>;
 }
 
 const MATRIX_MAX_CELLS = 12;
@@ -126,16 +149,22 @@ const MATRIX_MAX_CELLS = 12;
 /** Expand viewports × states into a bounded capture plan. Pure. States:
  * default, dark (color-scheme), reduced-motion, full (full-page). */
 export function planUiMatrix(params: {
-  viewports?: unknown; states?: unknown; widths?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown;
+  viewports?: unknown; states?: unknown; widths?: unknown; devices?: unknown; breakpoints?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown;
 }): UiMatrixPlan {
+  if (params.devices !== undefined && (!Array.isArray(params.devices) || !params.devices.length || params.devices.length > 4 || params.devices.some(v=>typeof v !== 'string' || !DEVICE_PRESETS[v]))) throw Error('devices requires 1..4 known device profiles');
+  if (params.breakpoints !== undefined && (!Array.isArray(params.breakpoints) || params.breakpoints.length > 4 || params.breakpoints.some(w=>!Number.isInteger(w)||w<201||w>2047))) throw Error('breakpoints requires at most 4 integer widths in 201..2047');
+  if (params.widths !== undefined && (!Array.isArray(params.widths) || params.widths.length > 4 || params.widths.some(w=>!Number.isInteger(w)||w<200||w>2048))) throw Error('widths requires at most 4 integer widths in 200..2048');
   const viewportNames = (Array.isArray(params.viewports) ? params.viewports : ["narrow", "mobile", "tablet", "desktop"]).map(String).filter((v) => VIEWPORT_PRESETS[v]);
-  const viewports = [...new Set(viewportNames.length ? viewportNames : ["desktop"])];
+  const viewports = [...new Set(params.devices ? (params.viewports ? viewportNames : []) : viewportNames.length ? viewportNames : ["desktop"])];
+  const profiles = new Map<string,any>();
+  for (const viewport of viewports) profiles.set(viewport,{...VIEWPORT_PRESETS[viewport],deviceScaleFactor:1,hasTouch:false,isMobile:false});
+  for (const device of (params.devices as string[] ?? [])) profiles.set(device,{...DEVICE_PRESETS[device]});
   if (Array.isArray(params.widths)) {
-    for (const w of params.widths.slice(0, 4)) {
-      const width = Math.round(Number(w));
-      if (Number.isFinite(width) && width >= 200 && width <= 2048 && !viewports.some(v => (VIEWPORT_PRESETS[v]?.width ?? Number(v.slice(1))) === width)) viewports.push(`w${width}`);
-    }
+    for (const width of params.widths) if (![...profiles.values()].some(profile => profile.width === width && profile.deviceScaleFactor === 1 && !profile.hasTouch && !profile.isMobile))
+      profiles.set(`w${width}`,{width,height:900,deviceScaleFactor:1,hasTouch:false,isMobile:false});
   }
+  for (const breakpoint of [...new Set(params.breakpoints as number[] ?? [])]) for (const width of [breakpoint-1,breakpoint,breakpoint+1])
+    profiles.set(`b${breakpoint}-w${width}`,{width,height:900,deviceScaleFactor:1,hasTouch:false,isMobile:false,breakpoint});
   const wantStates = new Set((Array.isArray(params.states) ? params.states : ["default"]).map(String));
   if (params.colorScheme === "dark" || wantStates.has("dark")) wantStates.add("dark");
   if (params.reducedMotion === true || wantStates.has("reduced-motion")) wantStates.add("reduced-motion");
@@ -145,19 +174,21 @@ export function planUiMatrix(params: {
   // Cover every requested width before spending the capture budget on variants.
   for (const state of ["default", "dark", "reduced-motion", "full"]) {
     if (!wantStates.has(state)) continue;
-    for (const viewport of viewports) {
-      const preset = VIEWPORT_PRESETS[viewport] ?? { width: Number(viewport.slice(1)) || 1280, height: 900 };
+    for (const [viewport,preset] of profiles) {
       cells.push({
         viewport, width: preset.width, height: preset.height, state,
         colorScheme: state === "dark" ? "dark" : "light",
         reducedMotion: state === "reduced-motion" ? "reduce" : "no-preference",
         fullPage: state === "full",
         file: `${viewport}-${state}.png`,
+        deviceScaleFactor:preset.deviceScaleFactor,hasTouch:preset.hasTouch,isMobile:preset.isMobile,
+        ...(preset.breakpoint ? {breakpoint:preset.breakpoint} : {}),
       });
     }
   }
   const capped = cells.length > MATRIX_MAX_CELLS;
-  return { cells: cells.slice(0, MATRIX_MAX_CELLS), capped };
+  if (!capped) return {cells,capped,requested:cells.length,omitted:[]};
+  return {cells:cells.slice(0,MATRIX_MAX_CELLS),capped,requested:cells.length,omitted:cells.slice(MATRIX_MAX_CELLS).map(({viewport,state})=>({viewport,state}))};
 }
 
 export interface PageStateSummary {
@@ -212,12 +243,13 @@ export function summarizeNoise(noise: any): Array<{ key: string; detail: string 
 }
 
 export async function uiExploreRun(
-  params: { source: string; viewports?: unknown; states?: unknown; widths?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown; outputDir?: unknown },
+  params: { source: string; viewports?: unknown; states?: unknown; widths?: unknown; devices?: unknown; breakpoints?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown; outputDir?: unknown },
   cwd: string, signal: AbortSignal | undefined, capture: QACapture,
 ) {
   if (typeof params.source !== "string" || !params.source) throw new Error("ui_explore needs a source (local HTML/SVG path or http(s) URL)");
   const plan = planUiMatrix(params);
-  const before = await sourceRevision(params.source, cwd);
+  signal?.throwIfAborted();
+  const initialRevision = await sourceRevision(params.source,cwd);
   const dir = await qaFolder(params.outputDir, cwd, "ui-review", "matrix");
   const cells: any[] = [];
   for (const cell of plan.cells) {
@@ -228,6 +260,7 @@ export async function uiExploreRun(
       receipt = await capture({
         source: params.source, width: cell.width, height: cell.height, fullPage: cell.fullPage,
         colorScheme: cell.colorScheme, reducedMotion: cell.reducedMotion, timeoutMs: 30_000,
+        deviceScaleFactor:cell.deviceScaleFactor,hasTouch:cell.hasTouch,isMobile:cell.isMobile,
         includeState: true, designAudit: true,
       }, dest, cwd, signal);
     } catch (error: any) {
@@ -239,9 +272,11 @@ export async function uiExploreRun(
     cells.push({
       ...cell, file: relative(cwd, dest), ok: true,
       bytes: stat?.size ?? 0, pixels: { width: receipt?.width ?? 0, height: receipt?.height ?? 0 },
+      documentSha256:receipt?.conditions?.documentSha256 ?? null,device:receipt?.conditions?.deviceObserved ?? null,
       ...(receipt?.conditions?.captureFallback ? { captureFallback: receipt.conditions.captureFallback } : {}),
       dom: summarizePageState(receipt?.pageState),
       design: receipt?.pageState?.design ?? null,
+      typography:(receipt?.pageState?.design?.typography ?? []).slice(0,5),
       noise: summarizeNoise(receipt?.noise),
       inspectionIncomplete: receipt?.noise?.truncated === true || receipt?.noise?.status === 'unavailable',
       errors: Array.isArray(receipt?.errors) ? receipt.errors.slice(0, 6) : [],
@@ -250,9 +285,9 @@ export async function uiExploreRun(
   const overflowCells = cells.filter((c) => c.ok && (c.dom.overflowElements > 0 || c.dom.scopeOverflowPx > 0));
   const altCells = cells.filter((c) => c.ok && c.dom.missingAlt > 0);
   const failed = cells.filter((c) => !c.ok);
-  const revision = await sourceRevision(params.source, cwd);
-  const consistent = before === revision && revision !== "missing" && !revision.startsWith("unhashed-");
-  const incomplete = !consistent || plan.capped || cells.some(c => c.ok && (!c.dom.available || !c.design || c.dom.truncated || c.design.truncated || c.inspectionIncomplete));
+  const revision = await sourceRevision(params.source, cwd), sourceChanged = initialRevision !== revision;
+  const consistent = !sourceChanged && revision !== "missing" && !revision.startsWith("unhashed-");
+  const incomplete = !consistent || plan.capped || cells.some(c => c.ok && (!c.dom.available || !c.design || c.dom.truncated || c.design.truncated || c.inspectionIncomplete || c.captureFallback?.incomplete));
   const defects = cells.filter(c => c.ok && (c.dom.brokenImages || c.dom.missingAlt || c.design?.contrast?.belowThreshold || c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds));
   const previewCells = cells.filter(c => c.ok);
   let preview: string | undefined;
@@ -277,11 +312,11 @@ export async function uiExploreRun(
     preview = relative(cwd, dest);
   }
   const report = {
-    source: params.source, revision, consistent, at: new Date().toISOString(),
+    source: params.source, revision, initialRevision, sourceChanged, consistent, at: new Date().toISOString(),
     status: failed.length || defects.length ? "fail" : incomplete ? "incomplete" : cells.some(c => c.dom.scopeOverflowPx || c.dom.overflowElements || c.dom.unnamedControls || c.dom.smallTargets || c.noise.length || c.errors.length) ? "warn" : "measured",
-    coverage: { widths: cells.filter(c => c.ok).map(c => c.width).filter((w, i, all) => all.indexOf(w) === i), visualJudgment: "pending", interaction: "pending" },
+    coverage: { widths: cells.filter(c => c.ok).map(c => c.width).filter((w, i, all) => all.indexOf(w) === i), requested: plan.requested, captured: cells.filter(c => c.ok).length, complete: !incomplete && !failed.length && !cells.some(c => c.ok && c.errors.length), visualJudgment: "pending", interaction: "pending" },
     preview, previewOrder: previewCells.map((c, i) => ({ viewport: c.viewport, state: c.state, width: c.width, file: c.file, row: Math.floor(i / 4), column: i % 4 })),
-    plan: { cells: plan.cells.length, capped: plan.capped, note: plan.capped ? `Matrix capped at ${MATRIX_MAX_CELLS} captures; run again with narrower viewports/states.` : undefined },
+    plan: { cells: plan.cells.length, requested: plan.requested, capped: plan.capped, omitted: plan.omitted, note: plan.capped ? `Matrix capped at ${MATRIX_MAX_CELLS} captures; omitted combinations remain unverified. Run again with narrower viewports/states.` : undefined },
     cells,
     findings: [
       ...overflowCells.map((c) => `${c.viewport}/${c.state}: horizontal overflow on ${c.dom.overflowElements} element(s), scope ${c.dom.scopeOverflowPx}px — inspect ${c.file} (overflow may be intentional)`),
@@ -298,6 +333,80 @@ export async function uiExploreRun(
   };
   await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report, null, 1) + "\n", { flag: "wx" });
   return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report };
+}
+
+// ─────────────────────────── ui_consistency ──────────────────────────────
+
+export function planUiConsistency(params: {sources?:unknown;selectorGroups?:unknown;tokens?:unknown;width?:unknown;height?:unknown;colorScheme?:unknown}) {
+  if (!Array.isArray(params.sources) || params.sources.length < 2 || params.sources.length > 4 || params.sources.some(source=>typeof source !== 'string'||!source.trim()||source.length>4096)) throw Error('ui_consistency needs 2..4 source paths or URLs');
+  const sources = [...new Set(params.sources as string[])];
+  if (sources.length < 2) throw Error('ui_consistency needs at least two distinct sources');
+  const width = params.width ?? 1440,height = params.height ?? 900;
+  if (![width,height].every(value=>Number.isInteger(value)&&Number(value)>=200&&Number(value)<=2048)) throw Error('Consistency viewport must be integer 200..2048');
+  if (params.colorScheme !== undefined && !['light','dark'].includes(String(params.colorScheme))) throw Error('colorScheme must be light or dark');
+  return {sources,width:Number(width),height:Number(height),colorScheme:params.colorScheme === 'dark'?'dark':'light',snapshot:normalizeUiSnapshotOptions({groups:params.selectorGroups,tokens:params.tokens})};
+}
+
+/** Same role/variant and media conditions are compared. Different declared
+ * variants never become drift merely because their styles differ. */
+export function compareUiSnapshots(captures:any[]) {
+  const findings:any[] = [],missing:any[] = [], variants:any[] = [];
+  const good = captures.filter(c=>c.ok&&c.snapshot);
+  if (good.length < 2) return {findings,findingsTruncated:false,missing:[{reason:'fewer-than-two-captured-sources'}],missingTruncated:false,variants,comparedTokens:0,comparedRoles:0};
+  const tokenNames = new Set<string>(good.flatMap(c=>(c.snapshot.tokens ?? []).map((t:any)=>String(t.name))));
+  const roleKeys = new Set<string>(good.flatMap(c=>(c.snapshot.roles ?? []).map((role:any)=>`${role.name}:${role.variant}`)));
+  let comparedTokens = 0,comparedRoles = 0;
+  for (const name of tokenNames) {
+    const measured = good.map(c=>({source:c.source,token:(c.snapshot.tokens ?? []).find((t:any)=>t.name===name&&t.status==='measured')}));
+    for (const c of measured.filter(c=>!c.token)) missing.push({source:c.source,token:name,reason:'token-unmeasured'});
+    const values = measured.filter(c=>c.token);
+    if (values.length < 2) continue;
+    comparedTokens++;
+    const baseline = values[0];
+    for (const current of values.slice(1)) if (current.token.value !== baseline.token.value)
+      findings.push({kind:'token-drift',severity:'WARN',token:name,baseline:{source:baseline.source,value:baseline.token.value},actual:{source:current.source,value:current.token.value},note:'Resolve against the shared token contract or document the intentional theme/route variant.'});
+  }
+  for (const key of roleKeys) {
+    const [name,variant] = key.split(':');
+    variants.push({name,variant});
+    const measured = good.map(c=>({source:c.source,roles:(c.snapshot.roles ?? []).filter((r:any)=>r.name===name&&r.variant===variant)}));
+    for (const c of measured.filter(c=>!c.roles.length)) missing.push({source:c.source,role:name,variant,reason:'shared-role-unmeasured'});
+    const values = measured.filter(c=>c.roles.length);
+    if (values.length < 2) continue;
+    comparedRoles++;
+    const baseline = values[0],signatures = baseline.roles.map((r:any)=>JSON.stringify(r.styles)).sort().join('|');
+    for (const current of values.slice(1)) {
+      if (current.roles.map((r:any)=>JSON.stringify(r.styles)).sort().join('|')===signatures) continue;
+      const a = baseline.roles[0].styles,b=current.roles[0].styles;
+      const differences = Object.keys(a).filter(property=>a[property]!==b[property]).slice(0,12).map(property=>({property,baseline:a[property],actual:b[property]}));
+      findings.push({kind:'role-drift',severity:'WARN',role:name,variant,baselineSource:baseline.source,actualSource:current.source,differences,styleCounts:[baseline.roles.length,current.roles.length],note:'Same declared role/variant has different computed styles. Confirm the shared component contract; intentional variants can use data-ui-variant or selectorGroups.variant.'});
+    }
+  }
+  for (const capture of good) {
+    for (const item of capture.snapshot.missing ?? []) missing.push({source:capture.source,...item});
+    if (capture.snapshot.truncated) missing.push({source:capture.source,reason:'snapshot-truncated'});
+  }
+  return {findings:findings.slice(0,32),findingsTruncated:findings.length>32,missing:missing.slice(0,48),missingTruncated:missing.length>48,variants:variants.slice(0,24),comparedTokens,comparedRoles};
+}
+
+export async function uiConsistencyRun(params:any,cwd:string,signal:AbortSignal|undefined,capture:QACapture) {
+  const plan = planUiConsistency(params),dir=await qaFolder(params.outputDir,cwd,'ui-review','consistency'),captures:any[]=[];
+  for (const [index,source] of plan.sources.entries()) {
+    signal?.throwIfAborted();
+    const file=path.join(dir,`source-${index}.png`),initialRevision=await sourceRevision(source,cwd);
+    try {
+      const receipt=await capture({source,width:plan.width,height:plan.height,fullPage:false,colorScheme:plan.colorScheme,uiSnapshot:plan.snapshot,timeoutMs:30000},file,cwd,signal);
+      const revision=await sourceRevision(source,cwd);
+      captures.push({source,initialRevision,revision,sourceChanged:revision!==initialRevision,ok:!!receipt.uiSnapshot,file:relative(cwd,file),documentSha256:receipt.conditions?.documentSha256 ?? null,snapshot:receipt.uiSnapshot,
+        captureComplete:!receipt.conditions?.captureFallback?.incomplete,errors:(receipt.errors ?? []).slice(0,6)});
+    } catch (error:any) {if(signal?.aborted)throw error;captures.push({source,initialRevision,revision:await sourceRevision(source,cwd),file:relative(cwd,file),ok:false,error:String(error.message ?? error).slice(0,300)});}
+  }
+  const comparison=compareUiSnapshots(captures);
+  const complete=captures.every(c=>c.ok&&!c.sourceChanged&&c.captureComplete&&!c.snapshot.truncated&&!c.errors?.length)&&!comparison.missing.length&&!comparison.findingsTruncated;
+  const report={at:new Date().toISOString(),conditions:{width:plan.width,height:plan.height,colorScheme:plan.colorScheme},coverage:{requested:plan.sources.length,captured:captures.filter(c=>c.ok).length,complete,comparedTokens:comparison.comparedTokens,comparedRoles:comparison.comparedRoles},captures,...comparison,
+    note:'Read-only computed style and token evidence from the same viewport/theme. Differences can be intentional. Missing/truncated roles, source changes, dynamic state, pseudo-elements, shadow roots and interactions remain unverified. Inspect pixels and compare the actual component contract before changing design.'};
+  const file=path.join(dir,'report.json');await fs.writeFile(file,JSON.stringify(report,null,1)+'\n',{flag:'wx'});
+  return {...report,dir:relative(cwd,dir),report:relative(cwd,file),captures:captures.map(({snapshot,...summary})=>({...summary,roles:snapshot?.roles.length ?? 0,tokens:snapshot?.tokens.length ?? 0,truncated:snapshot?.truncated ?? true}))};
 }
 
 // ─────────────────────────── visual_review ────────────────────────────────

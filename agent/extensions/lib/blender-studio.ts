@@ -15,6 +15,7 @@ import { runGuarded, throttled, type Progress } from "./guarded-process.ts";
 import { memoryBudgetMb } from "./memory-guard.ts";
 import { FFMPEG_FLAGS, produced, run, inputArgs, probe, integer, number } from "./media-process.ts";
 import { contactSheetFilter } from "./video-studio.ts";
+import { inspectGltf } from './gltf-inspect.ts';
 
 const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 export const BLENDER_WORKER = path.join(AGENT_ROOT, "scripts/blender-studio.py");
@@ -299,7 +300,19 @@ export async function blenderExport(params: any, cwd: string, signal?: AbortSign
   }
   const target = await writablePath(params.path ?? path.join(".pi", "blender", `${path.basename(blend, ".blend")}.${format}`), cwd);
   const result = await blenderWorker({ op: "export", path: target, format, objects: params.objects, applyModifiers: params.applyModifiers, animation: params.animation }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.export, progress });
-  return { format, files: result.files, objects: result.objects, next: format === "glb" ? 'Use with video_project feature:"3d" (Model3D primitive) or asset_register' : undefined };
+  const webAsset = ['glb', 'gltf'].includes(format) ? await blenderWebAsset(target, signal) : undefined;
+  return { format, files: result.files, objects: result.objects, ...(webAsset ? { webAsset, next: webAsset.status === 'inspected' ? 'Use ui_recipe pattern:"three-model" to prepare the actual served Three.js path, or video_project feature:"3d". Carry the bundle hash, mobile budget warnings and required loaders into browser/pixel verification.' : 'Export completed and is preserved. Repair the reported glTF preflight gap before importing; reuse the export instead of repeating Blender.' } : {}) };
+}
+
+/** A successful export is preserved even when browser-asset preflight fails. */
+export async function blenderWebAsset(file: string, signal?: AbortSignal) {
+  try {
+    const report = await inspectGltf(file, signal);
+    return { status: 'inspected' as const, ...report, loaders: report.extensionsRequired.filter(extension => ['KHR_draco_mesh_compression', 'EXT_meshopt_compression', 'KHR_texture_basisu'].includes(extension)), verification: { structure: 'inspected', appearance: 'unverified', browser: 'unverified' } };
+  } catch (error: any) {
+    if (signal?.aborted) throw error;
+    return { status: 'blocked' as const, error: String(error?.message ?? error).slice(0, 600), verification: { structure: 'blocked', appearance: 'unverified', browser: 'unverified' }, artifactPreserved: true };
+  }
 }
 
 /** Run an agent-authored bpy script headless; the script may print `YUNUSPI_RESULT {json}` to return structured data. */

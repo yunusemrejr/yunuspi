@@ -108,3 +108,59 @@ export function inspectDesignState(root) {
   result.limits={elements:limit,scanMs:timeLimit,findings:12,animations:100};
   return result;
 }
+
+/** Only caller-selected style tokens and shared roles are inspected. No copy,
+ * input values, URLs, arbitrary attributes or page scripts are returned. */
+export function normalizeUiSnapshotOptions(raw = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('uiSnapshot must be an object');
+  if (raw.groups !== undefined && (!Array.isArray(raw.groups) || raw.groups.length > 12)) throw Error('selectorGroups supports at most 12 groups');
+  const groups = (raw.groups ?? []).map(group => {
+    if (!group || typeof group !== 'object' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(group.name ?? '') || typeof group.selector !== 'string' || !group.selector.trim() || group.selector.length > 256)
+      throw Error('Each selector group needs a name and selector (1..256 characters)');
+    if (group.variant !== undefined && !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(group.variant)) throw Error('variant must be a short identifier');
+    return { name: group.name, selector: group.selector, ...(group.variant ? { variant: group.variant } : {}) };
+  });
+  const keys = groups.map(group => `${group.name}:${group.variant ?? ''}`);
+  if (new Set(keys).size !== keys.length) throw Error('Selector group name/variant pairs must be unique');
+  if (raw.tokens !== undefined && (!Array.isArray(raw.tokens) || raw.tokens.length > 24 || raw.tokens.some(token => typeof token !== 'string' || !/^--[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(token))))
+    throw Error('tokens supports at most 24 CSS custom property names');
+  return { groups, tokens: raw.tokens === undefined ? undefined : [...new Set(raw.tokens)] };
+}
+
+export function inspectUiSnapshot(root, options) {
+  const properties = ['color','backgroundColor','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','borderRadius','borderWidth','padding','gap'];
+  const result = { tokens: [], roles: [], missing: [], truncated: false, scanned: 0,
+    device: { devicePixelRatio, maxTouchPoints: navigator.maxTouchPoints, pointerCoarse: matchMedia('(pointer: coarse)').matches, hover: matchMedia('(hover: hover)').matches, orientation: innerWidth > innerHeight ? 'landscape' : 'portrait' },
+    limitations: 'Computed tokens and shared role styles only. Variants are declared with selectorGroups.variant or data-ui-variant. Differences may be intentional; no aesthetic or interaction approval. Hidden, shadow-root, iframe, pseudo-element and unsampled components remain uncovered.' };
+  if (!root) return result;
+  const style = getComputedStyle(root);
+  const tokenNames = options.tokens ?? Array.from(style).filter(name => /^--[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(name) && /color|font|text|space|gap|radius|border|shadow|surface|background|duration|motion|ease|size|line/i.test(name)).sort().slice(0,24);
+  for (const name of tokenNames) {
+    const value = style.getPropertyValue(name).trim();
+    result.tokens.push({ name, status: !value ? 'missing' : value.length > 200 || /url\s*\(|(?:https?|data):/i.test(value) ? 'omitted' : 'measured', ...(value && value.length <= 200 && !/url\s*\(|(?:https?|data):/i.test(value) ? { value } : {}) });
+  }
+  const groups = options.groups.length ? options.groups : [{name:'body',selector:'body'},{name:'heading-1',selector:'h1'},{name:'navigation',selector:'nav,[role="navigation"]'},{name:'component',selector:'[data-ui-role]',named:true}];
+  const started = performance.now();
+  for (const group of groups) {
+    let matches;
+    try { matches = root.querySelectorAll(group.selector); if (root.matches(group.selector)) matches = [root,...matches]; }
+    catch { result.missing.push({name:group.name,variant:group.variant ?? 'default',reason:'invalid-selector'}); continue; }
+    let visible = 0;
+    for (const node of matches) {
+      if (++result.scanned > 120 || performance.now() - started > 100 || result.roles.length >= 24) { result.truncated = true; break; }
+      const rect = node.getBoundingClientRect(), computed = getComputedStyle(node);
+      if (!rect.width || !rect.height || computed.visibility !== 'visible' || node.closest('[hidden],[inert],[aria-hidden="true"]')) continue;
+      visible++;
+      const name = group.named ? node.getAttribute('data-ui-role') : group.name;
+      if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name ?? '')) continue;
+      const declared = group.variant ?? node.getAttribute('data-ui-variant');
+      const variant = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(declared ?? '') ? declared : 'default';
+      const values = Object.fromEntries(properties.map(property => [property, String(computed[property]).slice(0,160)]));
+      if (result.roles.some(role => role.name === name && role.variant === variant && JSON.stringify(role.styles) === JSON.stringify(values))) continue;
+      result.roles.push({ name, variant, selector: group.selector.slice(0,256), styles: values });
+    }
+    if (!visible) result.missing.push({name:group.name,variant:group.variant ?? 'default',reason:matches.length ? 'no-visible-match' : 'no-match'});
+    if (result.truncated) break;
+  }
+  return result;
+}

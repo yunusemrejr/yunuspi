@@ -727,3 +727,15 @@ test('tool detail explains inputs, actions and staged status without execution o
  assert.equal(live.details.tools[0].active,true);assert.equal(live.details.tools[0].staged,false);
  assert.equal(f.executed(),0);
 });
+
+test('restored authored routing survives the first synthetic continuation and yields to new user work', async () => {
+ const f=fixture(['ui_recipe','image_generate','video_project'].map(name=>({name,description:name.replaceAll('_',' '),parameters:{type:'object'}})));
+ f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,scope:'task',task:'Build a scroll interface. No image generation.',tier:'complex',names:['ui_recipe'],beforeStart:true});
+ f.hooks.before_agent_start({prompt:'Generate a video clip and image'},f.ctx);
+ assert.ok(f.active().includes('ui_recipe'));
+ assert.ok(!f.active().includes('video_project'));assert.ok(!f.active().includes('image_generate'));
+ f.hooks.input({source:'rpc',text:'Create a video with generated images.',requestId:'new-human-task'});
+ f.hooks.before_agent_start({prompt:'Create a video with generated images.'},f.ctx);
+ assert.ok(f.active().includes('video_project'));assert.ok(f.active().includes('image_generate'));
+ assert.equal(f.executed(),0,'schema staging never executes a restored or newly selected tool');
+});

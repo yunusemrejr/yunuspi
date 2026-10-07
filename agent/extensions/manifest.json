@@ -260,6 +260,7 @@
     "media-pipeline.ts",
     "assurance-output.ts",
     "gltf-inspect.ts",
+    "ui-recipes.ts",
     "quality-refinement.ts",
     "video-motion.ts",
     "blender-studio.ts",
@@ -563,6 +564,7 @@
     }
   ],
   "supportFiles": [
+    "scripts/ui-motion-runtime.mjs",
     "scripts/render-capture.mjs",
     "scripts/render-page-state.mjs",
     "scripts/render-noise-state.mjs",

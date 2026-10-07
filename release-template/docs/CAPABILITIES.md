@@ -4,7 +4,7 @@
 
 The inventory is intentionally maintainable from two public authorities: the extension manifest and the static capability catalog. The generated JSON beside this file is the machine-readable form. No session, private configuration, credential, or live registry data is read.
 
-**Source authority:** [`agent/extensions/manifest.json`](../../agent/extensions/manifest.json) (shipped files and tombstones); [`agent/extensions/lib/harness-capabilities.ts`](../../agent/extensions/lib/harness-capabilities.ts) (capability records).
+**Source authority:** [`agent/extensions/manifest.json`](../agent/extensions/manifest.json) (shipped files and tombstones); [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) (capability records).
 
 ## Contents
 
@@ -47,7 +47,7 @@ Track explicit shell jobs in the local background registry, receive durable comp
 
 **Related records:** `subagent-dispatch`, `session-coordination`, `quick-commands`
 
-**Source:** [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts), [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../../agent/extensions/pi-background-tasks/src/core/registry.ts), [`agent/extensions/pi-background-tasks/src/core/completion-wake.ts`](../../agent/extensions/pi-background-tasks/src/core/completion-wake.ts)
+**Source:** [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts), [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../agent/extensions/pi-background-tasks/src/core/registry.ts), [`agent/extensions/pi-background-tasks/src/core/completion-wake.ts`](../agent/extensions/pi-background-tasks/src/core/completion-wake.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -73,7 +73,7 @@ Coordinate a child with its supervisor through explicit decision, interview or p
 
 **Related records:** `subagent-dispatch`, `session-coordination`, `background-tasks`
 
-**Source:** [`agent/extensions/pi-subagents/src/intercom/intercom-bridge.ts`](../../agent/extensions/pi-subagents/src/intercom/intercom-bridge.ts), [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts), [`agent/extensions/pi-subagents/src/intercom/result-intercom.ts`](../../agent/extensions/pi-subagents/src/intercom/result-intercom.ts), [`agent/extensions/pi-subagents/src/shared/types.ts`](../../agent/extensions/pi-subagents/src/shared/types.ts)
+**Source:** [`agent/extensions/pi-subagents/src/intercom/intercom-bridge.ts`](../agent/extensions/pi-subagents/src/intercom/intercom-bridge.ts), [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts), [`agent/extensions/pi-subagents/src/intercom/result-intercom.ts`](../agent/extensions/pi-subagents/src/intercom/result-intercom.ts), [`agent/extensions/pi-subagents/src/shared/types.ts`](../agent/extensions/pi-subagents/src/shared/types.ts)
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
@@ -93,7 +93,7 @@ Attach one deterministic workflow reminder to the first matching tool result (in
 
 **Related records:** `quick-commands`, `safety-bounds`
 
-**Source:** [`agent/extensions/session-hooks.ts`](../../agent/extensions/session-hooks.ts), [`agent/extensions/lib/session-hooks.ts`](../../agent/extensions/lib/session-hooks.ts)
+**Source:** [`agent/extensions/session-hooks.ts`](../agent/extensions/session-hooks.ts), [`agent/extensions/lib/session-hooks.ts`](../agent/extensions/lib/session-hooks.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -118,7 +118,7 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Related records:** `tool-catalog`, `context-diagnostics`, `todo-planning`, `background-tasks`
 
-**Source:** [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts), [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts), [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts), [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts), [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts), [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts), [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts)
+**Source:** [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts), [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts), [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts), [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts), [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -144,7 +144,7 @@ Send and read email through AgentMail (outreach and inbox triage) with an enviro
 
 **Related records:** `web-and-media`, `safety-bounds`
 
-**Source:** [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts), [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts)
+**Source:** [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts), [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts)
 
 **Documentation:** [`docs/EMAIL.md`](EMAIL.md)
 
@@ -172,7 +172,7 @@ Coordinate independent Pi sessions through checkout scope/check receipts and exp
 
 **Related records:** `todo-planning`, `background-tasks`, `safety-bounds`
 
-**Source:** [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts), [`agent/extensions/rpiv-todo/state/plan.ts`](../../agent/extensions/rpiv-todo/state/plan.ts)
+**Source:** [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts), [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
 
 **Documentation:** [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
 
@@ -199,7 +199,7 @@ Inspect selected-model full-window context occupancy and 80% automatic compactio
 
 **Related records:** `memory-retrieval`, `quick-commands`, `quality-review`
 
-**Source:** [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts), [`agent/extensions/lib/session-signals.ts`](../../agent/extensions/lib/session-signals.ts), [`agent/extensions/lib/session-audit.ts`](../../agent/extensions/lib/session-audit.ts), [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts)
+**Source:** [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts), [`agent/extensions/lib/session-signals.ts`](../agent/extensions/lib/session-signals.ts), [`agent/extensions/lib/session-audit.ts`](../agent/extensions/lib/session-audit.ts), [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -225,7 +225,7 @@ Browse and search installed SKILL.md workflows with bounded group and query page
 
 **Related records:** `tool-catalog`, `workflow-orchestration`
 
-**Source:** [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts), [`agent/extensions/lib/skill-relevance.ts`](../../agent/extensions/lib/skill-relevance.ts), [`agent/extensions/lib/capability-groups.ts`](../../agent/extensions/lib/capability-groups.ts)
+**Source:** [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts), [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts), [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
@@ -248,7 +248,7 @@ Preview active tool schemas by group or query, then explicitly enable selected n
 
 **Related records:** `skill-catalog`, `quick-commands`
 
-**Source:** [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts), [`agent/extensions/lib/capability-groups.ts`](../../agent/extensions/lib/capability-groups.ts)
+**Source:** [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts), [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -275,7 +275,7 @@ Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, call
 
 **Related records:** `quality-review`, `project-intelligence`, `safety-bounds`, `code-quality`
 
-**Source:** [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/code-noise.mjs`](../../agent/extensions/lib/code-noise.mjs), [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts), [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
+**Source:** [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/code-noise.mjs`](../agent/extensions/lib/code-noise.mjs), [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
@@ -296,7 +296,7 @@ Measure duplication, code slop, prose quality and complexity without installing 
 
 **Related records:** `source-intelligence`, `quality-review`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/code-structure.ts`](../../agent/extensions/lib/code-structure.ts), [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
+**Source:** [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 
 **Documentation:** [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 
@@ -319,7 +319,7 @@ Audit source and SVG files with local deterministic rules. Explicit quality tool
 
 **Related records:** `code-quality`, `artifact-numeric-checks`, `quality-review`, `design-studio`
 
-**Source:** [`agent/extensions/code-audit.ts`](../../agent/extensions/code-audit.ts), [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts), [`agent/extensions/lib/code-audit.ts`](../../agent/extensions/lib/code-audit.ts), [`agent/extensions/lib/svg-analysis.ts`](../../agent/extensions/lib/svg-analysis.ts), [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts)
+**Source:** [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts), [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts), [`agent/extensions/lib/svg-analysis.ts`](../agent/extensions/lib/svg-analysis.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts)
 
 **Documentation:** [`docs/CODE-AUDIT.md`](CODE-AUDIT.md)
 
@@ -341,7 +341,7 @@ Check SVG references and source cues, image/text metadata, measured frame timing
 
 **Related records:** `source-intelligence`, `web-and-media`, `safety-bounds`
 
-**Source:** [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts), [`agent/extensions/lib/svg-check.ts`](../../agent/extensions/lib/svg-check.ts), [`agent/extensions/lib/numeric-checks.ts`](../../agent/extensions/lib/numeric-checks.ts)
+**Source:** [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts), [`agent/extensions/lib/svg-check.ts`](../agent/extensions/lib/svg-check.ts), [`agent/extensions/lib/numeric-checks.ts`](../agent/extensions/lib/numeric-checks.ts)
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
@@ -363,7 +363,7 @@ Computer use inside private virtual displays: launch desktop applications (Elect
 
 **Related records:** `web-and-media`, `rendered-design-review`, `safety-bounds`
 
-**Source:** [`agent/extensions/desktop-session.ts`](../../agent/extensions/desktop-session.ts), [`agent/extensions/lib/desktop-session.ts`](../../agent/extensions/lib/desktop-session.ts), [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts)
+**Source:** [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts), [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts), [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
 
 **Documentation:** [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
 
@@ -383,7 +383,7 @@ Collect rendered typography, spacing, surface effects, solid-color text contrast
 
 **Related records:** `web-and-media`, `source-intelligence`
 
-**Source:** [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts), [`agent/scripts/render-design-state.mjs`](../../agent/scripts/render-design-state.mjs), [`agent/scripts/render-noise-state.mjs`](../../agent/scripts/render-noise-state.mjs)
+**Source:** [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts), [`agent/scripts/render-design-state.mjs`](../agent/scripts/render-design-state.mjs), [`agent/scripts/render-noise-state.mjs`](../agent/scripts/render-noise-state.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -403,7 +403,7 @@ Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset ref
 
 **Related records:** `source-intelligence`, `safety-bounds`, `rendered-design-review`
 
-**Source:** [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs), [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts)
+**Source:** [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs), [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -424,7 +424,7 @@ Search explicit workspace roots and local Maildir/mbox exports with scan limits,
 
 **Related records:** `source-intelligence`, `memory-evidence`, `safety-bounds`
 
-**Source:** [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts), [`agent/extensions/lib/utility-mcp/local_operations.py`](../../agent/extensions/lib/utility-mcp/local_operations.py), [`agent/extensions/lib/utility-mcp/net.mjs`](../../agent/extensions/lib/utility-mcp/net.mjs)
+**Source:** [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts), [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py), [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -444,7 +444,7 @@ Executable ML baseline: split/content/group/time leakage checks, classification/
 
 **Related records:** `code-quality`, `web-and-media`, `memory-evidence`
 
-**Source:** [`agent/extensions/ml-lab.ts`](../../agent/extensions/ml-lab.ts), [`agent/extensions/lib/ml-lab.ts`](../../agent/extensions/lib/ml-lab.ts), [`agent/scripts/ml-lab.py`](../../agent/scripts/ml-lab.py), [`agent/scripts/ml-transformer-train.py`](../../agent/scripts/ml-transformer-train.py)
+**Source:** [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts), [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts), [`agent/scripts/ml-lab.py`](../agent/scripts/ml-lab.py), [`agent/scripts/ml-transformer-train.py`](../agent/scripts/ml-transformer-train.py)
 
 **Documentation:** [`docs/RESEARCH-CODE-ML.md`](RESEARCH-CODE-ML.md)
 
@@ -472,7 +472,7 @@ Read durable global/project notes, scratchpad and daily logs; search prior memor
 
 **Related records:** `memory-notes`, `memory-evidence`, `context-diagnostics`
 
-**Source:** [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts), [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts)
+**Source:** [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts), [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts)
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
@@ -496,7 +496,7 @@ Record future-session notes, project-scoped decisions and checklist state, with 
 
 **Related records:** `memory-retrieval`, `memory-evidence`, `todo-planning`
 
-**Source:** [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts), [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts), [`agent/extensions/pi-memory/mutation.ts`](../../agent/extensions/pi-memory/mutation.ts)
+**Source:** [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts), [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts), [`agent/extensions/pi-memory/mutation.ts`](../agent/extensions/pi-memory/mutation.ts)
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
@@ -521,7 +521,7 @@ Keep small verbatim project observations with SHA256 provenance and retrieve unc
 
 **Related records:** `memory-notes`, `memory-retrieval`, `context-diagnostics`
 
-**Source:** [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts), [`agent/extensions/pi-memory/context-evidence.ts`](../../agent/extensions/pi-memory/context-evidence.ts), [`agent/extensions/pi-memory/context-salience.ts`](../../agent/extensions/pi-memory/context-salience.ts)
+**Source:** [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts), [`agent/extensions/pi-memory/context-evidence.ts`](../agent/extensions/pi-memory/context-evidence.ts), [`agent/extensions/pi-memory/context-salience.ts`](../agent/extensions/pi-memory/context-salience.ts)
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
@@ -550,7 +550,7 @@ List executable agents and their capabilities, inspect or edit scoped definition
 
 **Related records:** `subagent-dispatch`, `model-selection`, `provider-routing`, `skill-catalog`
 
-**Source:** [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../../agent/extensions/pi-subagents/src/agents/agent-management.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts)
+**Source:** [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts)
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
@@ -577,7 +577,7 @@ Filter the live session model registry by exact name, free eligibility, provider
 
 **Related records:** `agent-model-management`, `provider-routing`, `fusion-review`
 
-**Source:** [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../../agent/extensions/pi-subagents/src/agents/agent-management.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-selection.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-selection.ts), [`agent/extensions/pi-subagents/src/shared/model-info.ts`](../../agent/extensions/pi-subagents/src/shared/model-info.ts)
+**Source:** [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-selection.ts`](../agent/extensions/pi-subagents/src/runs/shared/model-selection.ts), [`agent/extensions/pi-subagents/src/shared/model-info.ts`](../agent/extensions/pi-subagents/src/shared/model-info.ts)
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
@@ -600,7 +600,7 @@ Inspect and persist OpenRouter provider selection pins for the selected model, w
 
 **Related records:** `model-selection`, `agent-model-management`
 
-**Source:** [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts), [`agent/extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts`](../../agent/extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts)
+**Source:** [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts), [`agent/extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts`](../agent/extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts)
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
@@ -620,7 +620,7 @@ Prefer explicit per-role model/provider choices from llm_preferences.json, with 
 
 **Related records:** `model-selection`, `provider-routing`, `agent-model-management`
 
-**Source:** [`agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts`](../../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts), [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts), [`agent/extensions/lib/model-routing-store.ts`](../../agent/extensions/lib/model-routing-store.ts), [`agent/extensions/lib/model-routing-metrics.ts`](../../agent/extensions/lib/model-routing-metrics.ts)
+**Source:** [`agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts`](../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts`](../agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`agent/extensions/lib/model-routing-store.ts`](../agent/extensions/lib/model-routing-store.ts), [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
 
 **Documentation:** [`docs/LLM-PREFERENCES.md`](LLM-PREFERENCES.md)
 
@@ -640,7 +640,7 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 **Related records:** `memory-evidence`, `context-diagnostics`, `skill-catalog`
 
-**Source:** [`agent/extensions/lib/local-intelligence.mjs`](../../agent/extensions/lib/local-intelligence.mjs), [`agent/extensions/lib/mini-preprocessor.ts`](../../agent/extensions/lib/mini-preprocessor.ts), [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts)
+**Source:** [`agent/extensions/lib/local-intelligence.mjs`](../agent/extensions/lib/local-intelligence.mjs), [`agent/extensions/lib/mini-preprocessor.ts`](../agent/extensions/lib/mini-preprocessor.ts), [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts)
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
@@ -663,7 +663,7 @@ Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source sel
 
 **Related records:** `local-intelligence`, `tool-catalog`, `skill-catalog`, `context-diagnostics`
 
-**Source:** [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../../agent/extensions/lib/micro-intelligence/metrics.ts)
+**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
 
 **Documentation:** [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 
@@ -700,7 +700,7 @@ Launch one child, native parallel tasks or a sequential chain with explicit cont
 
 **Related records:** `workflow-orchestration`, `agent-model-management`, `background-tasks`, `swarm-execution`, `fusion-review`
 
-**Source:** [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/extension/public-execution.ts`](../../agent/extensions/pi-subagents/src/extension/public-execution.ts), [`agent/extensions/pi-subagents/src/intercom/result-intercom.ts`](../../agent/extensions/pi-subagents/src/intercom/result-intercom.ts)
+**Source:** [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/extension/public-execution.ts`](../agent/extensions/pi-subagents/src/extension/public-execution.ts), [`agent/extensions/pi-subagents/src/intercom/result-intercom.ts`](../agent/extensions/pi-subagents/src/intercom/result-intercom.ts)
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
@@ -730,7 +730,7 @@ Run extension-owned review/run-ci resources or repeatable prompt workflows with 
 
 **Related records:** `subagent-dispatch`, `prompt-workflows`, `quality-review`
 
-**Source:** [`agent/extensions/pi-subagents/src/workflows/workflow-resources.ts`](../../agent/extensions/pi-subagents/src/workflows/workflow-resources.ts), [`agent/extensions/pi-subagents/src/extension/public-execution.ts`](../../agent/extensions/pi-subagents/src/extension/public-execution.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts)
+**Source:** [`agent/extensions/pi-subagents/src/workflows/workflow-resources.ts`](../agent/extensions/pi-subagents/src/workflows/workflow-resources.ts), [`agent/extensions/pi-subagents/src/extension/public-execution.ts`](../agent/extensions/pi-subagents/src/extension/public-execution.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts)
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
@@ -756,7 +756,7 @@ Discover package, user and project Markdown prompt workflows, substitute positio
 
 **Related records:** `workflow-orchestration`, `subagent-dispatch`
 
-**Source:** [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts), [`agent/extensions/pi-subagents/src/shared/prompt-resources.ts`](../../agent/extensions/pi-subagents/src/shared/prompt-resources.ts)
+**Source:** [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts), [`agent/extensions/pi-subagents/src/shared/prompt-resources.ts`](../agent/extensions/pi-subagents/src/shared/prompt-resources.ts)
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
@@ -779,7 +779,7 @@ Run separable child investigations in parallel and preserve each outcome, failur
 
 **Related records:** `subagent-dispatch`, `fusion-review`, `todo-planning`, `agent-model-management`
 
-**Source:** [`agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts`](../../agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts), [`agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts`](../../agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts)
+**Source:** [`agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts`](../agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts), [`agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts`](../agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts)
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
@@ -804,7 +804,7 @@ Merge child outputs deterministically with provenance, retaining duplicate, comp
 
 **Related records:** `subagent-dispatch`, `swarm-execution`, `quality-review`
 
-**Source:** [`agent/extensions/pi-subagents/src/runs/shared/fusion.ts`](../../agent/extensions/pi-subagents/src/runs/shared/fusion.ts), [`agent/extensions/pi-subagents/src/workflows/recovery-seam.ts`](../../agent/extensions/pi-subagents/src/workflows/recovery-seam.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts)
+**Source:** [`agent/extensions/pi-subagents/src/runs/shared/fusion.ts`](../agent/extensions/pi-subagents/src/runs/shared/fusion.ts), [`agent/extensions/pi-subagents/src/workflows/recovery-seam.ts`](../agent/extensions/pi-subagents/src/workflows/recovery-seam.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts)
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
@@ -825,7 +825,7 @@ Session mode that analyzes every user request twice before the agent starts and 
 
 **Related records:** `scope-council`, `fusion-review`, `swarm-execution`, `subagent-dispatch`
 
-**Source:** [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts), [`agent/extensions/pi-subagents/src/extension/double-pair.ts`](../../agent/extensions/pi-subagents/src/extension/double-pair.ts), [`agent/extensions/pi-subagents/src/slash/double-pair-picker.ts`](../../agent/extensions/pi-subagents/src/slash/double-pair-picker.ts), [`agent/extensions/lib/double.ts`](../../agent/extensions/lib/double.ts), [`agent/extensions/lib/reviewer-board.ts`](../../agent/extensions/lib/reviewer-board.ts)
+**Source:** [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts), [`agent/extensions/pi-subagents/src/extension/double-pair.ts`](../agent/extensions/pi-subagents/src/extension/double-pair.ts), [`agent/extensions/pi-subagents/src/slash/double-pair-picker.ts`](../agent/extensions/pi-subagents/src/slash/double-pair-picker.ts), [`agent/extensions/lib/double.ts`](../agent/extensions/lib/double.ts), [`agent/extensions/lib/reviewer-board.ts`](../agent/extensions/lib/reviewer-board.ts)
 
 **Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 
@@ -854,7 +854,7 @@ Maintain a durable hierarchical plan with dependencies, execution annotations, f
 
 **Related records:** `session-coordination`, `swarm-execution`, `fusion-review`, `memory-notes`
 
-**Source:** [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts), [`agent/extensions/rpiv-todo/state/plan.ts`](../../agent/extensions/rpiv-todo/state/plan.ts)
+**Source:** [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts), [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
 
 **Documentation:** [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
 
@@ -876,7 +876,7 @@ Set a /goal for work that matters: the demand becomes numbered acceptance criter
 
 **Related records:** `todo-planning`, `session-coordination`
 
-**Source:** [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts), [`agent/extensions/lib/goal-state.ts`](../../agent/extensions/lib/goal-state.ts), [`agent/extensions/lib/completion-gate.ts`](../../agent/extensions/lib/completion-gate.ts)
+**Source:** [`agent/extensions/goal.ts`](../agent/extensions/goal.ts), [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts), [`agent/extensions/lib/completion-gate.ts`](../agent/extensions/lib/completion-gate.ts)
 
 **Documentation:** [`docs/GOAL.md`](GOAL.md)
 
@@ -905,7 +905,7 @@ Query and maintain project-scoped architecture and dependency evidence, inspect 
 
 **Related records:** `scope-council`, `quality-review`, `todo-planning`, `source-intelligence`
 
-**Source:** [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts), [`agent/extensions/lib/project-intelligence/query.mjs`](../../agent/extensions/lib/project-intelligence/query.mjs), [`agent/extensions/lib/project-intelligence/store.mjs`](../../agent/extensions/lib/project-intelligence/store.mjs)
+**Source:** [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts), [`agent/extensions/lib/project-intelligence/query.mjs`](../agent/extensions/lib/project-intelligence/query.mjs), [`agent/extensions/lib/project-intelligence/store.mjs`](../agent/extensions/lib/project-intelligence/store.mjs)
 
 **Documentation:** [`docs/PROJECT-INTELLIGENCE.md`](PROJECT-INTELLIGENCE.md)
 
@@ -929,7 +929,7 @@ Automatically deliberate over open-ended change scope with preservation and mean
 
 **Related records:** `project-intelligence`, `quality-review`, `subagent-dispatch`
 
-**Source:** [`agent/extensions/pi-subagents/src/extension/scope-council-runner.ts`](../../agent/extensions/pi-subagents/src/extension/scope-council-runner.ts), [`agent/extensions/lib/scope-deliberation.ts`](../../agent/extensions/lib/scope-deliberation.ts)
+**Source:** [`agent/extensions/pi-subagents/src/extension/scope-council-runner.ts`](../agent/extensions/pi-subagents/src/extension/scope-council-runner.ts), [`agent/extensions/lib/scope-deliberation.ts`](../agent/extensions/lib/scope-deliberation.ts)
 
 **Documentation:** [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 
@@ -950,7 +950,7 @@ Run or inspect bounded read-only aspect reviews, then accept or block only with 
 
 **Related records:** `scope-council`, `project-intelligence`, `source-intelligence`
 
-**Source:** [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts), [`agent/extensions/lib/quality-review-signals.ts`](../../agent/extensions/lib/quality-review-signals.ts)
+**Source:** [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts), [`agent/extensions/lib/quality-review-signals.ts`](../agent/extensions/lib/quality-review-signals.ts)
 
 **Documentation:** [`docs/RECOVERY-AND-TESTING.md`](RECOVERY-AND-TESTING.md)
 
@@ -971,7 +971,7 @@ Coordinate distinct review kinds (quality, project, error) with trivial-work sup
 
 **Related records:** `quality-review`, `scope-council`, `subagent-dispatch`
 
-**Source:** [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
+**Source:** [`agent/extensions/lib/review-coordinator.ts`](../agent/extensions/lib/review-coordinator.ts)
 
 **Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 
@@ -991,7 +991,7 @@ Domain-excellence coordination: infer excellence domains from a request, load bo
 
 **Related records:** `quality-review`, `review-coordination`, `session-observer`, `micro-intelligence`
 
-**Source:** [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts), [`agent/extensions/lib/expert-brief.ts`](../../agent/extensions/lib/expert-brief.ts), [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts), [`agent/extensions/lib/expert-doctrine.ts`](../../agent/extensions/lib/expert-doctrine.ts), [`agent/extensions/lib/expert-critics.ts`](../../agent/extensions/lib/expert-critics.ts), [`agent/extensions/lib/expert-convergence.ts`](../../agent/extensions/lib/expert-convergence.ts), [`agent/extensions/lib/expert-taste.ts`](../../agent/extensions/lib/expert-taste.ts)
+**Source:** [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts), [`agent/extensions/lib/expert-brief.ts`](../agent/extensions/lib/expert-brief.ts), [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts), [`agent/extensions/lib/expert-doctrine.ts`](../agent/extensions/lib/expert-doctrine.ts), [`agent/extensions/lib/expert-critics.ts`](../agent/extensions/lib/expert-critics.ts), [`agent/extensions/lib/expert-convergence.ts`](../agent/extensions/lib/expert-convergence.ts), [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
 
 **Documentation:** [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
 
@@ -1013,7 +1013,7 @@ Periodic independent reviewer that talks to the main agent about the live sessio
 
 **Related records:** `quality-review`, `review-coordination`, `micro-intelligence`, `session-coordination`
 
-**Source:** [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts), [`agent/extensions/lib/session-observer.ts`](../../agent/extensions/lib/session-observer.ts), [`agent/extensions/lib/observer-book.ts`](../../agent/extensions/lib/observer-book.ts)
+**Source:** [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts), [`agent/extensions/lib/session-observer.ts`](../agent/extensions/lib/session-observer.ts), [`agent/extensions/lib/observer-book.ts`](../agent/extensions/lib/observer-book.ts)
 
 **Documentation:** [`docs/SESSION-OBSERVER.md`](SESSION-OBSERVER.md)
 
@@ -1041,7 +1041,7 @@ Inspect host/session dependencies and device candidates before guarded operation
 
 **Related records:** `session-coordination`, `subagent-dispatch`, `quick-commands`
 
-**Source:** [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts), [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts), [`agent/extensions/lib/host-operation-safety.ts`](../../agent/extensions/lib/host-operation-safety.ts), [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts), [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
+**Source:** [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts), [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts), [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts), [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts), [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts)
 
 **Documentation:** [`docs/SECURITY.md`](SECURITY.md)
 
@@ -1065,7 +1065,7 @@ Proactive public-site SEO: route purpose and content planning, built HTML inspec
 
 **Related records:** `web-and-media`, `workflow-orchestration`, `source-intelligence`
 
-**Source:** [`agent/extensions/pi-web-access/seo-toolkit.ts`](../../agent/extensions/pi-web-access/seo-toolkit.ts), [`agent/extensions/pi-web-access/seo-document.ts`](../../agent/extensions/pi-web-access/seo-document.ts), [`agent/extensions/pi-web-access/seo-audit.ts`](../../agent/extensions/pi-web-access/seo-audit.ts), [`agent/extensions/pi-web-access/seo-discovery.ts`](../../agent/extensions/pi-web-access/seo-discovery.ts), [`agent/extensions/lib/seo-policy.ts`](../../agent/extensions/lib/seo-policy.ts), [`agent/extensions/lib/task-pipelines.ts`](../../agent/extensions/lib/task-pipelines.ts), [`agent/extensions/lib/session-hooks.ts`](../../agent/extensions/lib/session-hooks.ts)
+**Source:** [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts), [`agent/extensions/pi-web-access/seo-document.ts`](../agent/extensions/pi-web-access/seo-document.ts), [`agent/extensions/pi-web-access/seo-audit.ts`](../agent/extensions/pi-web-access/seo-audit.ts), [`agent/extensions/pi-web-access/seo-discovery.ts`](../agent/extensions/pi-web-access/seo-discovery.ts), [`agent/extensions/lib/seo-policy.ts`](../agent/extensions/lib/seo-policy.ts), [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts), [`agent/extensions/lib/session-hooks.ts`](../agent/extensions/lib/session-hooks.ts)
 
 **Documentation:** [`docs/SITE-SEO.md`](SITE-SEO.md)
 
@@ -1100,7 +1100,7 @@ Search and read web sources, operate browser tabs with DOM refs, screenshots, co
 
 **Related records:** `source-intelligence`, `safety-bounds`, `background-tasks`
 
-**Source:** [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts), [`agent/extensions/pi-web-access/research-jobs.ts`](../../agent/extensions/pi-web-access/research-jobs.ts), [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts), [`agent/extensions/pi-web-access/github-search.ts`](../../agent/extensions/pi-web-access/github-search.ts), [`agent/extensions/pi-web-access/github-rest.ts`](../../agent/extensions/pi-web-access/github-rest.ts), [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts), [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts), [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts)
+**Source:** [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts), [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts), [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts), [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts), [`agent/extensions/pi-web-access/github-rest.ts`](../agent/extensions/pi-web-access/github-rest.ts), [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts), [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts), [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts)
 
 **Documentation:** [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
 
@@ -1121,7 +1121,7 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 **Related records:** `web-and-media`, `artifact-numeric-checks`, `background-tasks`
 
-**Source:** [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts), [`agent/extensions/lib/scene-studio.ts`](../../agent/extensions/lib/scene-studio.ts), [`agent/extensions/lib/media-timeline.ts`](../../agent/extensions/lib/media-timeline.ts), [`agent/scripts/scene-runtime.mjs`](../../agent/scripts/scene-runtime.mjs)
+**Source:** [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts), [`agent/extensions/lib/scene-studio.ts`](../agent/extensions/lib/scene-studio.ts), [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts), [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -1147,7 +1147,7 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 **Related records:** `creative-studio`, `web-and-media`, `background-tasks`, `3d-studio`
 
-**Source:** [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-looks.ts`](../../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../../agent/skills/motion-approaches/SKILL.md)
+**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
@@ -1170,7 +1170,7 @@ Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS insta
 
 **Related records:** `video-studio`, `creative-studio`, `web-and-media`, `background-tasks`
 
-**Source:** [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts), [`agent/extensions/lib/blender-studio.ts`](../../agent/extensions/lib/blender-studio.ts), [`agent/extensions/lib/splat-studio.ts`](../../agent/extensions/lib/splat-studio.ts), [`agent/extensions/lib/guarded-process.ts`](../../agent/extensions/lib/guarded-process.ts), [`agent/scripts/blender-studio.py`](../../agent/scripts/blender-studio.py), [`agent/skills/blender-production/SKILL.md`](../../agent/skills/blender-production/SKILL.md), [`agent/skills/gaussian-splatting/SKILL.md`](../../agent/skills/gaussian-splatting/SKILL.md)
+**Source:** [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts), [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts), [`agent/extensions/lib/splat-studio.ts`](../agent/extensions/lib/splat-studio.ts), [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts), [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py), [`agent/skills/blender-production/SKILL.md`](../agent/skills/blender-production/SKILL.md), [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
 
 **Documentation:** [`docs/3D-STUDIO.md`](3D-STUDIO.md)
 
@@ -1195,7 +1195,7 @@ Read, build, verify and render Office files with no office suite, and open any p
 
 **Related records:** `creative-studio`, `video-studio`, `quality-review`, `background-tasks`
 
-**Source:** [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/binary-read.ts`](../../agent/extensions/lib/binary-read.ts), [`agent/extensions/lib/specifics.ts`](../../agent/extensions/lib/specifics.ts), [`agent/extensions/lib/pptx-build.ts`](../../agent/extensions/lib/pptx-build.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../../agent/skills/presentation-authoring/SKILL.md)
+**Source:** [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/binary-read.ts`](../agent/extensions/lib/binary-read.ts), [`agent/extensions/lib/specifics.ts`](../agent/extensions/lib/specifics.ts), [`agent/extensions/lib/pptx-build.ts`](../agent/extensions/lib/pptx-build.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../agent/skills/presentation-authoring/SKILL.md)
 
 **Documentation:** [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
 
@@ -1218,9 +1218,30 @@ Sort, rename and clean up a folder of files without losing any. fs_organize work
 
 **Related records:** `office-and-deliverables`, `bulk-edit`, `background-tasks`
 
-**Source:** [`agent/extensions/fs-organize.ts`](../../agent/extensions/fs-organize.ts), [`agent/extensions/lib/fs-organize.ts`](../../agent/extensions/lib/fs-organize.ts), [`agent/skills/file-organization/SKILL.md`](../../agent/skills/file-organization/SKILL.md)
+**Source:** [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts), [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts), [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
 
 **Documentation:** [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
+
+#### ui-engineering
+
+Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_recipe prepares editable focus-safe entrances, section-driven layered scroll tracks and preflighted local Blender/glTF-to-Three.js mechanics without choosing a stock visual identity or installing dependencies. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.
+
+**Entrypoints:** `ui_recipe`, `ui_explore`, `motion_inspect`, `ui_consistency`
+
+**Catalog tool pointers:** `ui_recipe`, `creative_direct`, `ui_explore`, `motion_inspect`, `ui_consistency`, `render_see`, `design_audit`, `visual_review`, `browser_session`, `asset_register`, `blender_export`, `image_generate`
+
+**Options:**
+
+- `ui_recipe.action|pattern`: Plan or scaffold mechanics; the host page supplies real content and design tokens. Values: `scroll-reveal`, `scroll-story`, `three-model`.
+- `motion_inspect.mode|positions`: time inventory or bounded live scroll progress with forward/backtracking and reduced-motion evidence. Values: `time`, `scroll`.
+- `ui_explore.devices|breakpoints`: Touch/DPR/orientation profiles and adjacent CSS breakpoint widths; omitted cells stay explicit.
+- `ui_consistency.sources|selectorGroups|tokens`: Compare shared named roles within the same explicit variant and requested CSS custom properties across 2..4 routes.
+
+**Related records:** `design-studio`, `art-direction`, `3d-studio`, `source-intelligence`, `task-pipelines`
+
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/ui-recipes.ts`](../agent/extensions/lib/ui-recipes.ts), [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs), [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts), [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts)
+
+**Documentation:** [`docs/UI-ENGINEERING.md`](UI-ENGINEERING.md)
 
 #### design-studio
 
@@ -1243,7 +1264,7 @@ Turn design references into code. image_analyze maps a mockup, screenshot or ima
 
 **Related records:** `rendered-design-review`, `web-and-media`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-convert.ts`](../../agent/extensions/lib/image-convert.ts), [`agent/extensions/lib/image-understand.ts`](../../agent/extensions/lib/image-understand.ts), [`agent/extensions/lib/image-synth.ts`](../../agent/extensions/lib/image-synth.ts), [`agent/scripts/render-capture.mjs`](../../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../../agent/skills/mockup-to-code/SKILL.md)
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-convert.ts`](../agent/extensions/lib/image-convert.ts), [`agent/extensions/lib/image-understand.ts`](../agent/extensions/lib/image-understand.ts), [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
 
 **Documentation:** [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
 
@@ -1251,25 +1272,26 @@ Turn design references into code. image_analyze maps a mockup, screenshot or ima
 
 Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_render exports authored CSS/SMIL/data-keyframe SVG to sampled PNGs or narrated H.264 with clock/clipping diagnostics; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.
 
-**Entrypoints:** `creative_direct`, `visual_review`, `ui_explore`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`
+**Entrypoints:** `creative_direct`, `visual_review`, `ui_explore`, `ui_consistency`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`
 
-**Catalog tool pointers:** `creative_direct`, `visual_review`, `ui_explore`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`, `render_see`, `design_audit`, `image_analyze`, `visual_diff`
+**Catalog tool pointers:** `creative_direct`, `visual_review`, `ui_explore`, `ui_consistency`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`, `ui_recipe`, `render_see`, `design_audit`, `image_analyze`, `visual_diff`
 
 **Options:**
 
 - `action`: Direction set/get/brief/status/clear; review run/record/status; SVG inspect/matrix; asset register/get/search/usage; image status/brief/generate/edit.
 - `direction`: Structured brief object: intent, hierarchy.primary, visual, avoid, motion, audio, references.
 - `source|sources`: Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width.
-- `viewports|states`: Matrix axes: narrow 320px/mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures. Every width precedes variants; capped coverage stays explicit.
+- `viewports|states|devices|breakpoints`: Narrow 320px/mobile/tablet/desktop plus touch/DPR/orientation profiles and breakpoint neighbors. The 12-capture bound covers widths before variants and reports omitted cells.
 - `runId|entrypoint`: Record a matching current visual capture by runId; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required.
 - `PI_UI_VERIFICATION`: Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out.
+- `mode|positions|backtrack`: Time inventory or live scroll-mode observations, forward/backtracking and reduced-motion frames; continuous smoothness and GPU cost remain unknown.
 - `verdict`: Recorded rubric sections with PASS/WARN/FAIL/UNKNOWN plus evidence lines; UNKNOWN stays open, FAIL blocks completion.
 - `role`: Asset purpose: hero-focal, editorial-support, diagram, texture, icon, illustration, background, product-shot, avatar.
 - `prompt|negative|aspect|size|seed`: Generation brief: prompt plus direction/role constraints; configured backend required.
 
 **Related records:** `design-studio`, `rendered-design-review`, `creative-studio`, `video-studio`
 
-**Source:** [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-direction.ts`](../../agent/extensions/lib/creative-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/creative-evidence.ts`](../../agent/extensions/lib/creative-evidence.ts), [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/lib/svg-inspect.ts`](../../agent/extensions/lib/svg-inspect.ts), [`agent/extensions/lib/svg-render.ts`](../../agent/extensions/lib/svg-render.ts), [`agent/extensions/lib/asset-registry.ts`](../../agent/extensions/lib/asset-registry.ts), [`agent/extensions/lib/gltf-inspect.ts`](../../agent/extensions/lib/gltf-inspect.ts), [`agent/extensions/lib/video-motion.ts`](../../agent/extensions/lib/video-motion.ts), [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts), [`agent/scripts/render-capture.mjs`](../../agent/scripts/render-capture.mjs)
+**Source:** [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-direction.ts`](../agent/extensions/lib/creative-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/creative-evidence.ts`](../agent/extensions/lib/creative-evidence.ts), [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/lib/svg-inspect.ts`](../agent/extensions/lib/svg-inspect.ts), [`agent/extensions/lib/svg-render.ts`](../agent/extensions/lib/svg-render.ts), [`agent/extensions/lib/asset-registry.ts`](../agent/extensions/lib/asset-registry.ts), [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts), [`agent/extensions/lib/video-motion.ts`](../agent/extensions/lib/video-motion.ts), [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs)
 
 **Documentation:** [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 
@@ -1292,7 +1314,7 @@ Plan research angles (market or prior-art), profile the local project for compar
 
 **Related records:** `web-and-media`, `memory-evidence`, `safety-bounds`
 
-**Source:** [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts), [`agent/extensions/lib/project-profile.ts`](../../agent/extensions/lib/project-profile.ts), [`agent/extensions/lib/prior-art.ts`](../../agent/extensions/lib/prior-art.ts), [`agent/extensions/lib/research-evidence.ts`](../../agent/extensions/lib/research-evidence.ts)
+**Source:** [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts), [`agent/extensions/lib/project-profile.ts`](../agent/extensions/lib/project-profile.ts), [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts), [`agent/extensions/lib/research-evidence.ts`](../agent/extensions/lib/research-evidence.ts)
 
 **Documentation:** [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
 
@@ -1306,342 +1328,344 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `agentmail_message` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 1061; literal)
-- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 853; literal)
-- `agentmail_search` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 965; literal)
-- `agentmail_send` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 802; literal)
-- `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 725; literal)
-- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
-- `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 115; factory)
-- `asset_register` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 473; factory)
-- `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
-- `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 258; factory)
-- `audio_generate` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 137; factory)
-- `audio_mix` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 281; factory)
-- `audio_synth` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 149; factory)
-- `bash` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 574; sdk-factory)
-- `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 827; literal)
-- `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 781; literal)
-- `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 691; literal)
-- `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 750; literal)
-- `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
-- `blender_export` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 50; factory)
-- `blender_inspect` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 41; factory)
-- `blender_render` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 45; factory)
-- `blender_run` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 37; factory)
-- `blender_setup` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 33; factory)
-- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts) (line 155; literal)
-- `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts) (line 217; literal)
-- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 222; literal)
-- `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
-- `code_audit` — [`agent/extensions/code-audit.ts`](../../agent/extensions/code-audit.ts) (line 23; literal)
-- `code_quality` — [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts) (line 9; literal)
-- `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
-- `context_profile` — [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) (line 385; literal)
-- `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 14; literal)
-- `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
-- `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
-- `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
-- `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 22; factory)
-- `creative_compare` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 576; factory)
-- `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 300; factory)
-- `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 137; factory)
-- `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
-- `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 135; literal)
-- `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
-- `design_audit` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 251; literal)
-- `desktop_session` — [`agent/extensions/desktop-session.ts`](../../agent/extensions/desktop-session.ts) (line 15; literal)
-- `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
-- `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
-- `expert_director` — [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts) (line 63; literal)
-- `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 198; configured-default)
-- `fs_organize` — [`agent/extensions/fs-organize.ts`](../../agent/extensions/fs-organize.ts) (line 41; literal)
-- `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
-- `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 397; literal)
-- `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 165; literal)
-- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
-- `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
-- `image_analyze` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 38; factory)
-- `image_convert` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 33; factory)
-- `image_create` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 55; factory)
-- `image_crop` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 42; factory)
-- `image_generate` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 519; factory)
-- `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 257; factory)
-- `image_trace` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 49; factory)
-- `image_understand` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 35; factory)
-- `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
-- `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
-- `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 102; factory)
-- `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 259; factory)
-- `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 255; factory)
-- `media_pipeline` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 284; factory)
-- `media_sync` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 145; factory)
-- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2567; literal)
-- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2427; literal)
-- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2710; literal)
-- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2809; literal)
-- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2964; literal)
-- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2079; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 499; literal)
-- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
-- `ml_lab` — [`agent/extensions/ml-lab.ts`](../../agent/extensions/ml-lab.ts) (line 11; literal)
-- `motion_examples` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 161; factory)
-- `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 413; factory)
-- `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 264; factory)
-- `narration_align` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 135; factory)
-- `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 131; factory)
-- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 821; literal)
-- `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 170; literal)
-- `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
-- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
-- `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 602; literal)
-- `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 791; literal)
-- `project_memory_consolidate` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 778; literal)
-- `project_memory_forget` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 746; literal)
-- `project_memory_index_path` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 708; literal)
-- `project_memory_read` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 483; literal)
-- `project_memory_reembed` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 628; literal)
-- `project_memory_remember` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 658; literal)
-- `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 762; literal)
-- `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 408; literal)
-- `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 560; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 812; literal)
-- `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 250; literal)
-- `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 93; literal)
-- `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
-- `scene_create` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 274; factory)
-- `scene_render` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 275; factory)
-- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2240; literal)
-- `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1944; literal)
-- `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 816; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1881; literal)
-- `session_stop` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 746; literal)
-- `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
-- `splat_preview` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 64; factory)
-- `splat_setup` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 56; factory)
-- `splat_train` — [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) (line 60; factory)
-- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
-- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 940; literal)
-- `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
-- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 780; definition)
-- `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
-- `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 438; factory)
-- `svg_render` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 433; factory)
-- `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
-- `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 273; literal)
-- `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 448; literal)
-- `task_state` — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 125; literal)
-- `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 431; literal)
-- `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 388; factory)
-- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 133; factory)
-- `video_assets` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 125; factory)
-- `video_browser` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 147; factory)
-- `video_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 280; factory)
-- `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 256; factory)
-- `video_generate` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 69; factory)
-- `video_project` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 72; factory)
-- `video_qa` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 121; factory)
-- `video_render` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 117; factory)
-- `video_shot` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 94; factory)
-- `visual_diff` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 64; factory)
-- `visual_review` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 342; factory)
-- `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 88; literal)
-- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
-- `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
-- `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../../agent/extensions/pi-web-access/research-jobs.ts) (line 73; literal)
-- `web_search` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
-- `workdir_snapshot` — [`agent/extensions/scoped-snapshots.ts`](../../agent/extensions/scoped-snapshots.ts) (line 12; literal)
-- `workflow_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
-- `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
+- `agentmail_message` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 1061; literal)
+- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 853; literal)
+- `agentmail_search` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 965; literal)
+- `agentmail_send` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 802; literal)
+- `agentmail_status` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 725; literal)
+- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
+- `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
+- `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 490; factory)
+- `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
+- `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 258; factory)
+- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 137; factory)
+- `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 281; factory)
+- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 149; factory)
+- `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 574; sdk-factory)
+- `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 827; literal)
+- `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 781; literal)
+- `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 691; literal)
+- `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 750; literal)
+- `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
+- `blender_export` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 50; factory)
+- `blender_inspect` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 41; factory)
+- `blender_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 45; factory)
+- `blender_run` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 37; factory)
+- `blender_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 33; factory)
+- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 155; literal)
+- `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
+- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
+- `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
+- `code_audit` — [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts) (line 23; literal)
+- `code_quality` — [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts) (line 9; literal)
+- `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
+- `context_profile` — [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) (line 385; literal)
+- `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 14; literal)
+- `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
+- `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
+- `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
+- `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 22; factory)
+- `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 593; factory)
+- `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 300; factory)
+- `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 137; factory)
+- `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
+- `deliverable_check` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 135; literal)
+- `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
+- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 268; literal)
+- `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
+- `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
+- `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
+- `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
+- `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 198; configured-default)
+- `fs_organize` — [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts) (line 41; literal)
+- `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
+- `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 397; literal)
+- `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
+- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 165; literal)
+- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
+- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
+- `image_analyze` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 40; factory)
+- `image_convert` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 35; factory)
+- `image_create` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 57; factory)
+- `image_crop` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 44; factory)
+- `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 536; factory)
+- `image_ocr` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 257; factory)
+- `image_trace` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 51; factory)
+- `image_understand` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 37; factory)
+- `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
+- `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
+- `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 102; factory)
+- `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 259; factory)
+- `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 255; factory)
+- `media_pipeline` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 284; factory)
+- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 145; factory)
+- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2567; literal)
+- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2427; literal)
+- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2710; literal)
+- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2809; literal)
+- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2964; literal)
+- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 499; literal)
+- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
+- `ml_lab` — [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts) (line 11; literal)
+- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 161; factory)
+- `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 425; factory)
+- `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 264; factory)
+- `narration_align` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 135; factory)
+- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 131; factory)
+- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 821; literal)
+- `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
+- `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
+- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
+- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 602; literal)
+- `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 791; literal)
+- `project_memory_consolidate` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 778; literal)
+- `project_memory_forget` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 746; literal)
+- `project_memory_index_path` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 708; literal)
+- `project_memory_read` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 483; literal)
+- `project_memory_reembed` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 628; literal)
+- `project_memory_remember` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 658; literal)
+- `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 762; literal)
+- `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 408; literal)
+- `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 560; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 812; literal)
+- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 267; literal)
+- `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 93; literal)
+- `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
+- `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 274; factory)
+- `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 275; factory)
+- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2240; literal)
+- `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
+- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1944; literal)
+- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 816; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1881; literal)
+- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 746; literal)
+- `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
+- `splat_preview` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 64; factory)
+- `splat_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 56; factory)
+- `splat_train` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 60; factory)
+- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
+- `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
+- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 940; literal)
+- `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
+- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 780; definition)
+- `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
+- `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 455; factory)
+- `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 450; factory)
+- `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
+- `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 273; literal)
+- `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 258; literal)
+- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 568; literal)
+- `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 125; literal)
+- `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 443; literal)
+- `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 414; factory)
+- `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 388; factory)
+- `ui_recipe` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 33; factory)
+- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 133; factory)
+- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 125; factory)
+- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 147; factory)
+- `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 280; factory)
+- `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 256; factory)
+- `video_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 69; factory)
+- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 72; factory)
+- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 121; factory)
+- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 117; factory)
+- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 94; factory)
+- `visual_diff` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 66; factory)
+- `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 342; factory)
+- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 102; literal)
+- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
+- `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
+- `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 73; literal)
+- `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
+- `workdir_snapshot` — [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts) (line 12; literal)
+- `workflow_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
+- `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 
 ### Dynamic tool owners
 
-- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_explore`, `visual_review` (lines 267)
-- [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `splat_preview`, `splat_setup`, `splat_train` (lines 15)
-- [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred; known tools: `image_analyze`, `image_convert`, `image_create`, `image_crop`, `image_trace`, `image_understand`, `visual_diff` (lines 23)
-- [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)
-- [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 577)
-- [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `media_pipeline`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 245)
-- [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
-- [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
-- [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 831)
-- [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `coverage_select`, `decision_frontier`, `dependency_plan` (lines 9)
-- [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
-- [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
-- [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1668, 2256, 2410, 2809)
-- [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
-- [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
-- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_align`, `narration_tts`, `video_assets`, `video_browser`, `video_generate`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 33)
+- [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_consistency`, `ui_explore`, `visual_review` (lines 267)
+- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `splat_preview`, `splat_setup`, `splat_train` (lines 15)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred; known tools: `image_analyze`, `image_convert`, `image_create`, `image_crop`, `image_trace`, `image_understand`, `ui_recipe`, `visual_diff` (lines 22)
+- [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)
+- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 577)
+- [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `media_pipeline`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 245)
+- [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
+- [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
+- [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 831)
+- [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `coverage_select`, `decision_frontier`, `dependency_plan` (lines 9)
+- [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
+- [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
+- [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1668, 2256, 2410, 2809)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
+- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
+- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_align`, `narration_tts`, `video_assets`, `video_browser`, `video_generate`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 33)
 
 ### Literal slash commands
 
-- /bash-routes — [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts) (line 99)
-- /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
-- /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 570)
-- /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 562)
-- /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 578)
-- /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1662)
-- /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1852)
-- /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1405)
-- /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3404)
-- /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 452)
-- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 432)
-- /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 49)
-- /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1818)
-- /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 118)
-- /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3446)
-- /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 907)
-- /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)
-- /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 76)
-- /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 608)
-- /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 655)
-- /lens-allow-edit — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113833)
-- /lens-context-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113537)
-- /lens-drift — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113594)
-- /lens-health — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113629)
-- /lens-map — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113606)
-- /lens-perf — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113748)
-- /lens-tdi — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113562)
-- /lens-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113530)
-- /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113767)
-- /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113544)
-- /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 623)
-- /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts) (line 221)
-- /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 58)
-- /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 482)
-- /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 570)
-- /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 654)
-- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 798)
-- /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
-- /provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 653)
-- /provider-health — [`agent/extensions/provider-gate.ts`](../../agent/extensions/provider-gate.ts) (line 476)
-- /reminder — [`agent/extensions/reminders.ts`](../../agent/extensions/reminders.ts) (line 1201)
-- /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
-- /search — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3494)
-- /self — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1742)
-- /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 916)
-- /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
-- /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1280)
-- /subagents-detach — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 994)
-- /subagents-doctor — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 923)
-- /subagents-fleet — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 960)
-- /subagents-generate-profiles — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1242)
-- /subagents-inspect-rpc — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 930)
-- /subagents-load-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1155)
-- /subagents-models — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1125)
-- /subagents-profiles — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1143)
-- /subagents-refine — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 947)
-- /subagents-refresh-provider-models — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1208)
-- /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1054)
-- /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1006)
-- /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1767)
-- /task-state — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 170)
-- /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 554)
-- /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1786)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../../agent/extensions/session-watchmaker.ts) (line 345)
-- /websearch — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3143)
+- /bash-routes — [`agent/extensions/bash-router.ts`](../agent/extensions/bash-router.ts) (line 99)
+- /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
+- /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 570)
+- /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 562)
+- /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 578)
+- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1662)
+- /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1852)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1405)
+- /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3404)
+- /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 452)
+- /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 432)
+- /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
+- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1818)
+- /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
+- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 118)
+- /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3446)
+- /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 907)
+- /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
+- /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 76)
+- /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 608)
+- /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 655)
+- /lens-allow-edit — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113833)
+- /lens-context-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113537)
+- /lens-drift — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113594)
+- /lens-health — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113629)
+- /lens-map — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113606)
+- /lens-perf — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113748)
+- /lens-tdi — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113562)
+- /lens-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113530)
+- /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113767)
+- /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113544)
+- /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 623)
+- /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 221)
+- /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
+- /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 482)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 897)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 570)
+- /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
+- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 798)
+- /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
+- /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
+- /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 476)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1201)
+- /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
+- /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3494)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1742)
+- /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 916)
+- /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
+- /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1280)
+- /subagents-detach — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 994)
+- /subagents-doctor — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 923)
+- /subagents-fleet — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 960)
+- /subagents-generate-profiles — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1242)
+- /subagents-inspect-rpc — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 930)
+- /subagents-load-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1155)
+- /subagents-models — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1125)
+- /subagents-profiles — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1143)
+- /subagents-refine — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 947)
+- /subagents-refresh-provider-models — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1208)
+- /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1054)
+- /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1006)
+- /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1767)
+- /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 170)
+- /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 554)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1786)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 345)
+- /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3143)
 
 ### Dynamic command owners
 
-- [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
-- [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 177)
+- [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 177)
 
 ## MCP and wrapper service owners
 
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
-- [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) — `wrapper/adapter`
-- [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) — `wrapper/adapter`
-- [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
-- [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) — `wrapper/adapter`
-- [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/code-audit.ts`](../../agent/extensions/lib/code-audit.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts) — `MCP`
-- [`agent/extensions/lib/harness-capabilities.ts`](../../agent/extensions/lib/harness-capabilities.ts) — `MCP`
-- [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/jev-client.ts`](../../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../../agent/extensions/lib/micro-intelligence/span-sensor.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/project-intelligence/client.mjs`](../../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
-- [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/contract.mjs`](../../agent/extensions/lib/utility-mcp/contract.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../../agent/extensions/lib/utility-mcp/coverage.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/env.mjs`](../../agent/extensions/lib/utility-mcp/env.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/files.mjs`](../../agent/extensions/lib/utility-mcp/files.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../../agent/extensions/lib/utility-mcp/local-reference.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/net.mjs`](../../agent/extensions/lib/utility-mcp/net.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../../agent/extensions/lib/utility-mcp/openapi.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/package.mjs`](../../agent/extensions/lib/utility-mcp/package.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/server.mjs`](../../agent/extensions/lib/utility-mcp/server.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../../agent/extensions/lib/utility-mcp/shapes.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/system-probe.mjs`](../../agent/extensions/lib/utility-mcp/system-probe.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../../agent/extensions/lib/utility-mcp/web-assets.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/worker.mjs`](../../agent/extensions/lib/utility-mcp/worker.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../../agent/extensions/lib/utility-mcp/workflow.mjs) — `MCP`
-- [`agent/extensions/lib/video-assets.ts`](../../agent/extensions/lib/video-assets.ts) — `wrapper/adapter`
-- [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) — `wrapper/adapter`
-- [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) — `wrapper/adapter`
-- [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../../agent/extensions/pi-background-tasks/src/core/registry.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../../agent/extensions/pi-subagents/src/agents/agent-management.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/agents/agent-serializer.ts`](../../agent/extensions/pi-subagents/src/agents/agent-serializer.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/agents/agents.ts`](../../agent/extensions/pi-subagents/src/agents/agents.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/agents/runtime-agent-registry.ts`](../../agent/extensions/pi-subagents/src/agents/runtime-agent-registry.ts) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/api/preflight.ts`](../../agent/extensions/pi-subagents/src/api/preflight.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/inspectors/herdr/client.ts`](../../agent/extensions/pi-subagents/src/inspectors/herdr/client.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/background/async-execution.ts`](../../agent/extensions/pi-subagents/src/runs/background/async-execution.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/background/async-resume.ts`](../../agent/extensions/pi-subagents/src/runs/background/async-resume.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/background/run-status.ts`](../../agent/extensions/pi-subagents/src/runs/background/run-status.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts`](../../agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/foreground/execution.ts`](../../agent/extensions/pi-subagents/src/runs/foreground/execution.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/acceptance.ts`](../../agent/extensions/pi-subagents/src/runs/shared/acceptance.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/claude-code-adapter.ts`](../../agent/extensions/pi-subagents/src/runs/shared/claude-code-adapter.ts) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/codex-exec-adapter.ts`](../../agent/extensions/pi-subagents/src/runs/shared/codex-exec-adapter.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/completion-guard.ts`](../../agent/extensions/pi-subagents/src/runs/shared/completion-guard.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/cursor-agent-adapter.ts`](../../agent/extensions/pi-subagents/src/runs/shared/cursor-agent-adapter.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/dynamic-fanout.ts`](../../agent/extensions/pi-subagents/src/runs/shared/dynamic-fanout.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/external-cli-contract.ts`](../../agent/extensions/pi-subagents/src/runs/shared/external-cli-contract.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/external-cli-runner.ts`](../../agent/extensions/pi-subagents/src/runs/shared/external-cli-runner.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/model-research.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-research.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts`](../../agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/pi-args.ts`](../../agent/extensions/pi-subagents/src/runs/shared/pi-args.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/single-output.ts`](../../agent/extensions/pi-subagents/src/runs/shared/single-output.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts`](../../agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/tool-availability.ts`](../../agent/extensions/pi-subagents/src/runs/shared/tool-availability.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/shared/launch-contract.ts`](../../agent/extensions/pi-subagents/src/shared/launch-contract.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/shared/types.ts`](../../agent/extensions/pi-subagents/src/shared/types.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/slash/delegation-adapters.ts`](../../agent/extensions/pi-subagents/src/slash/delegation-adapters.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/slash/subagents-admin.ts`](../../agent/extensions/pi-subagents/src/slash/subagents-admin.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts`](../../agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts`](../../agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts) — `MCP`
-- [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) — `wrapper/adapter`
-- [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) — `wrapper/adapter`
-- [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) — `wrapper/adapter`
-- [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) — `wrapper/adapter`
-- [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) — `wrapper/adapter`
+- [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) — `wrapper/adapter`
+- [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
+- [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) — `wrapper/adapter`
+- [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts) — `MCP`
+- [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) — `MCP`
+- [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
+- [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/contract.mjs`](../agent/extensions/lib/utility-mcp/contract.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../agent/extensions/lib/utility-mcp/coverage.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/env.mjs`](../agent/extensions/lib/utility-mcp/env.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../agent/extensions/lib/utility-mcp/local-reference.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../agent/extensions/lib/utility-mcp/openapi.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/package.mjs`](../agent/extensions/lib/utility-mcp/package.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../agent/extensions/lib/utility-mcp/shapes.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/system-probe.mjs`](../agent/extensions/lib/utility-mcp/system-probe.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../agent/extensions/lib/utility-mcp/web-assets.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs) — `MCP`
+- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../agent/extensions/lib/utility-mcp/workflow.mjs) — `MCP`
+- [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts) — `wrapper/adapter`
+- [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) — `wrapper/adapter`
+- [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) — `wrapper/adapter`
+- [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../agent/extensions/pi-background-tasks/src/core/registry.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/agents/agent-serializer.ts`](../agent/extensions/pi-subagents/src/agents/agent-serializer.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/agents/agents.ts`](../agent/extensions/pi-subagents/src/agents/agents.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/agents/runtime-agent-registry.ts`](../agent/extensions/pi-subagents/src/agents/runtime-agent-registry.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/api/preflight.ts`](../agent/extensions/pi-subagents/src/api/preflight.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/inspectors/herdr/client.ts`](../agent/extensions/pi-subagents/src/inspectors/herdr/client.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/background/async-execution.ts`](../agent/extensions/pi-subagents/src/runs/background/async-execution.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/background/async-resume.ts`](../agent/extensions/pi-subagents/src/runs/background/async-resume.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/background/run-status.ts`](../agent/extensions/pi-subagents/src/runs/background/run-status.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts`](../agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/foreground/execution.ts`](../agent/extensions/pi-subagents/src/runs/foreground/execution.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/acceptance.ts`](../agent/extensions/pi-subagents/src/runs/shared/acceptance.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/claude-code-adapter.ts`](../agent/extensions/pi-subagents/src/runs/shared/claude-code-adapter.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/codex-exec-adapter.ts`](../agent/extensions/pi-subagents/src/runs/shared/codex-exec-adapter.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/completion-guard.ts`](../agent/extensions/pi-subagents/src/runs/shared/completion-guard.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/cursor-agent-adapter.ts`](../agent/extensions/pi-subagents/src/runs/shared/cursor-agent-adapter.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/dynamic-fanout.ts`](../agent/extensions/pi-subagents/src/runs/shared/dynamic-fanout.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/external-cli-contract.ts`](../agent/extensions/pi-subagents/src/runs/shared/external-cli-contract.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/external-cli-runner.ts`](../agent/extensions/pi-subagents/src/runs/shared/external-cli-runner.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts`](../agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts`](../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts`](../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts`](../agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/model-research.ts`](../agent/extensions/pi-subagents/src/runs/shared/model-research.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts`](../agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/pi-args.ts`](../agent/extensions/pi-subagents/src/runs/shared/pi-args.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/single-output.ts`](../agent/extensions/pi-subagents/src/runs/shared/single-output.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts`](../agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/runs/shared/tool-availability.ts`](../agent/extensions/pi-subagents/src/runs/shared/tool-availability.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/shared/launch-contract.ts`](../agent/extensions/pi-subagents/src/shared/launch-contract.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/shared/types.ts`](../agent/extensions/pi-subagents/src/shared/types.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/slash/delegation-adapters.ts`](../agent/extensions/pi-subagents/src/slash/delegation-adapters.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/slash/subagents-admin.ts`](../agent/extensions/pi-subagents/src/slash/subagents-admin.ts) — `MCP`
+- [`agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts`](../agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts`](../agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts) — `MCP`
+- [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — `wrapper/adapter`
+- [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) — `wrapper/adapter`
+- [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) — `wrapper/adapter`
+- [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) — `wrapper/adapter`
+- [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
 
 ## Extension source inventory
 
@@ -1649,402 +1673,404 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ### Extensions
 
-- [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts)
-- [`agent/extensions/agent-context-tools.ts`](../../agent/extensions/agent-context-tools.ts)
-- [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts)
-- [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts)
-- [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts)
-- [`agent/extensions/blender-studio.ts`](../../agent/extensions/blender-studio.ts)
-- [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts)
-- [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts)
-- [`agent/extensions/code-audit.ts`](../../agent/extensions/code-audit.ts)
-- [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts)
-- [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts)
-- [`agent/extensions/continuation-notice.ts`](../../agent/extensions/continuation-notice.ts)
-- [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts)
-- [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts)
-- [`agent/extensions/desktop-session.ts`](../../agent/extensions/desktop-session.ts)
-- [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts)
-- [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts)
-- [`agent/extensions/fs-organize.ts`](../../agent/extensions/fs-organize.ts)
-- [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
-- [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts)
-- [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts)
-- [`agent/extensions/health-log.ts`](../../agent/extensions/health-log.ts)
-- [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts)
-- [`agent/extensions/last-model.ts`](../../agent/extensions/last-model.ts)
-- [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts)
-- [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts)
-- [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts)
-- [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts)
-- [`agent/extensions/ml-lab.ts`](../../agent/extensions/ml-lab.ts)
-- [`agent/extensions/model-config.ts`](../../agent/extensions/model-config.ts)
-- [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts)
-- [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts)
-- [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts)
-- [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts)
-- [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts)
-- [`agent/extensions/provider-gate.ts`](../../agent/extensions/provider-gate.ts)
-- [`agent/extensions/reasoning-aids.ts`](../../agent/extensions/reasoning-aids.ts)
-- [`agent/extensions/reminders.ts`](../../agent/extensions/reminders.ts)
-- [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts)
-- [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts)
-- [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts)
-- [`agent/extensions/scoped-snapshots.ts`](../../agent/extensions/scoped-snapshots.ts)
-- [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts)
-- [`agent/extensions/session-hooks.ts`](../../agent/extensions/session-hooks.ts)
-- [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts)
-- [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts)
-- [`agent/extensions/session-watchmaker.ts`](../../agent/extensions/session-watchmaker.ts)
-- [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
-- [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts)
-- [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts)
-- [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts)
-- [`agent/extensions/timeout-guard.ts`](../../agent/extensions/timeout-guard.ts)
-- [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts)
-- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts)
+- [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts)
+- [`agent/extensions/agent-context-tools.ts`](../agent/extensions/agent-context-tools.ts)
+- [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts)
+- [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts)
+- [`agent/extensions/bash-router.ts`](../agent/extensions/bash-router.ts)
+- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts)
+- [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts)
+- [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts)
+- [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts)
+- [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts)
+- [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts)
+- [`agent/extensions/continuation-notice.ts`](../agent/extensions/continuation-notice.ts)
+- [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts)
+- [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts)
+- [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts)
+- [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
+- [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts)
+- [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
+- [`agent/extensions/goal.ts`](../agent/extensions/goal.ts)
+- [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
+- [`agent/extensions/health-log.ts`](../agent/extensions/health-log.ts)
+- [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts)
+- [`agent/extensions/last-model.ts`](../agent/extensions/last-model.ts)
+- [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts)
+- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts)
+- [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts)
+- [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts)
+- [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts)
+- [`agent/extensions/model-config.ts`](../agent/extensions/model-config.ts)
+- [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts)
+- [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts)
+- [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts)
+- [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts)
+- [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts)
+- [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts)
+- [`agent/extensions/reasoning-aids.ts`](../agent/extensions/reasoning-aids.ts)
+- [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts)
+- [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts)
+- [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts)
+- [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts)
+- [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts)
+- [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts)
+- [`agent/extensions/session-hooks.ts`](../agent/extensions/session-hooks.ts)
+- [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts)
+- [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts)
+- [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts)
+- [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts)
+- [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts)
+- [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts)
+- [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts)
+- [`agent/extensions/timeout-guard.ts`](../agent/extensions/timeout-guard.ts)
+- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts)
+- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts)
 
 ### Libraries
 
-- [`agent/extensions/lib/activity-indicators.ts`](../../agent/extensions/lib/activity-indicators.ts)
-- [`agent/extensions/lib/adaptive-execution.ts`](../../agent/extensions/lib/adaptive-execution.ts)
-- [`agent/extensions/lib/artifact-checks.ts`](../../agent/extensions/lib/artifact-checks.ts)
-- [`agent/extensions/lib/asset-registry.ts`](../../agent/extensions/lib/asset-registry.ts)
-- [`agent/extensions/lib/assurance-output.ts`](../../agent/extensions/lib/assurance-output.ts)
-- [`agent/extensions/lib/audio-studio.ts`](../../agent/extensions/lib/audio-studio.ts)
-- [`agent/extensions/lib/authored-review.ts`](../../agent/extensions/lib/authored-review.ts)
-- [`agent/extensions/lib/bash-routing.ts`](../../agent/extensions/lib/bash-routing.ts)
-- [`agent/extensions/lib/binary-read.ts`](../../agent/extensions/lib/binary-read.ts)
-- [`agent/extensions/lib/blender-studio.ts`](../../agent/extensions/lib/blender-studio.ts)
-- [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts)
-- [`agent/extensions/lib/bulk-edit.ts`](../../agent/extensions/lib/bulk-edit.ts)
-- [`agent/extensions/lib/capability-audit.ts`](../../agent/extensions/lib/capability-audit.ts)
-- [`agent/extensions/lib/capability-groups.ts`](../../agent/extensions/lib/capability-groups.ts)
-- [`agent/extensions/lib/capability-health.ts`](../../agent/extensions/lib/capability-health.ts)
-- [`agent/extensions/lib/catalog-cache-lock.ts`](../../agent/extensions/lib/catalog-cache-lock.ts)
-- [`agent/extensions/lib/checkpoint-files.ts`](../../agent/extensions/lib/checkpoint-files.ts)
-- [`agent/extensions/lib/ci-awareness.ts`](../../agent/extensions/lib/ci-awareness.ts)
-- [`agent/extensions/lib/code-audit.ts`](../../agent/extensions/lib/code-audit.ts)
-- [`agent/extensions/lib/code-guidance-signals.ts`](../../agent/extensions/lib/code-guidance-signals.ts)
-- [`agent/extensions/lib/code-lexical-mask.ts`](../../agent/extensions/lib/code-lexical-mask.ts)
-- [`agent/extensions/lib/code-quality.ts`](../../agent/extensions/lib/code-quality.ts)
-- [`agent/extensions/lib/code-structure.ts`](../../agent/extensions/lib/code-structure.ts)
-- [`agent/extensions/lib/compact-tool-json.ts`](../../agent/extensions/lib/compact-tool-json.ts)
-- [`agent/extensions/lib/compaction-policy.ts`](../../agent/extensions/lib/compaction-policy.ts)
-- [`agent/extensions/lib/competence-store.ts`](../../agent/extensions/lib/competence-store.ts)
-- [`agent/extensions/lib/completion-gate.ts`](../../agent/extensions/lib/completion-gate.ts)
-- [`agent/extensions/lib/context-anchor.ts`](../../agent/extensions/lib/context-anchor.ts)
-- [`agent/extensions/lib/context-limits.ts`](../../agent/extensions/lib/context-limits.ts)
-- [`agent/extensions/lib/context-profile.mjs`](../../agent/extensions/lib/context-profile.mjs)
-- [`agent/extensions/lib/context-provenance.ts`](../../agent/extensions/lib/context-provenance.ts)
-- [`agent/extensions/lib/continuation-notice.ts`](../../agent/extensions/lib/continuation-notice.ts)
-- [`agent/extensions/lib/cost-evidence.ts`](../../agent/extensions/lib/cost-evidence.ts)
-- [`agent/extensions/lib/cost-states.ts`](../../agent/extensions/lib/cost-states.ts)
-- [`agent/extensions/lib/creative-direction.ts`](../../agent/extensions/lib/creative-direction.ts)
-- [`agent/extensions/lib/creative-evidence.ts`](../../agent/extensions/lib/creative-evidence.ts)
-- [`agent/extensions/lib/creative-qa.ts`](../../agent/extensions/lib/creative-qa.ts)
-- [`agent/extensions/lib/data-query.ts`](../../agent/extensions/lib/data-query.ts)
-- [`agent/extensions/lib/deliverable-inspect.ts`](../../agent/extensions/lib/deliverable-inspect.ts)
-- [`agent/extensions/lib/deliverable-ledger.ts`](../../agent/extensions/lib/deliverable-ledger.ts)
-- [`agent/extensions/lib/design-direction.ts`](../../agent/extensions/lib/design-direction.ts)
-- [`agent/extensions/lib/design-studio.ts`](../../agent/extensions/lib/design-studio.ts)
-- [`agent/extensions/lib/desktop-session.ts`](../../agent/extensions/lib/desktop-session.ts)
-- [`agent/extensions/lib/diagnostic-provenance.ts`](../../agent/extensions/lib/diagnostic-provenance.ts)
-- [`agent/extensions/lib/disk-guard.ts`](../../agent/extensions/lib/disk-guard.ts)
-- [`agent/extensions/lib/double.ts`](../../agent/extensions/lib/double.ts)
-- [`agent/extensions/lib/effort-policy.mjs`](../../agent/extensions/lib/effort-policy.mjs)
-- [`agent/extensions/lib/elevenlabs.ts`](../../agent/extensions/lib/elevenlabs.ts)
-- [`agent/extensions/lib/execution-evidence.ts`](../../agent/extensions/lib/execution-evidence.ts)
-- [`agent/extensions/lib/expert-brief.ts`](../../agent/extensions/lib/expert-brief.ts)
-- [`agent/extensions/lib/expert-convergence.ts`](../../agent/extensions/lib/expert-convergence.ts)
-- [`agent/extensions/lib/expert-critics.ts`](../../agent/extensions/lib/expert-critics.ts)
-- [`agent/extensions/lib/expert-doctrine.ts`](../../agent/extensions/lib/expert-doctrine.ts)
-- [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts)
-- [`agent/extensions/lib/expert-taste.ts`](../../agent/extensions/lib/expert-taste.ts)
-- [`agent/extensions/lib/fail-policy.ts`](../../agent/extensions/lib/fail-policy.ts)
-- [`agent/extensions/lib/fs-organize.ts`](../../agent/extensions/lib/fs-organize.ts)
-- [`agent/extensions/lib/git-authority.ts`](../../agent/extensions/lib/git-authority.ts)
-- [`agent/extensions/lib/gltf-inspect.ts`](../../agent/extensions/lib/gltf-inspect.ts)
-- [`agent/extensions/lib/goal-state.ts`](../../agent/extensions/lib/goal-state.ts)
-- [`agent/extensions/lib/guarded-process.ts`](../../agent/extensions/lib/guarded-process.ts)
-- [`agent/extensions/lib/guidance-topics-domains.ts`](../../agent/extensions/lib/guidance-topics-domains.ts)
-- [`agent/extensions/lib/guidance-topics-systems.ts`](../../agent/extensions/lib/guidance-topics-systems.ts)
-- [`agent/extensions/lib/guidance-topics.ts`](../../agent/extensions/lib/guidance-topics.ts)
-- [`agent/extensions/lib/harness-activity.ts`](../../agent/extensions/lib/harness-activity.ts)
-- [`agent/extensions/lib/harness-capabilities.ts`](../../agent/extensions/lib/harness-capabilities.ts)
-- [`agent/extensions/lib/harness-invariants.ts`](../../agent/extensions/lib/harness-invariants.ts)
-- [`agent/extensions/lib/harness-notice.ts`](../../agent/extensions/lib/harness-notice.ts)
-- [`agent/extensions/lib/harness-orientation.ts`](../../agent/extensions/lib/harness-orientation.ts)
-- [`agent/extensions/lib/health-log.ts`](../../agent/extensions/lib/health-log.ts)
-- [`agent/extensions/lib/helper-usage.ts`](../../agent/extensions/lib/helper-usage.ts)
-- [`agent/extensions/lib/hook-events.ts`](../../agent/extensions/lib/hook-events.ts)
-- [`agent/extensions/lib/hook-ledger.ts`](../../agent/extensions/lib/hook-ledger.ts)
-- [`agent/extensions/lib/host-operation-safety.ts`](../../agent/extensions/lib/host-operation-safety.ts)
-- [`agent/extensions/lib/image-analysis.ts`](../../agent/extensions/lib/image-analysis.ts)
-- [`agent/extensions/lib/image-compaction.ts`](../../agent/extensions/lib/image-compaction.ts)
-- [`agent/extensions/lib/image-convert.ts`](../../agent/extensions/lib/image-convert.ts)
-- [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts)
-- [`agent/extensions/lib/image-synth.ts`](../../agent/extensions/lib/image-synth.ts)
-- [`agent/extensions/lib/image-understand.ts`](../../agent/extensions/lib/image-understand.ts)
-- [`agent/extensions/lib/intent-context.ts`](../../agent/extensions/lib/intent-context.ts)
-- [`agent/extensions/lib/intervention-control.ts`](../../agent/extensions/lib/intervention-control.ts)
-- [`agent/extensions/lib/intervention-intents.ts`](../../agent/extensions/lib/intervention-intents.ts)
-- [`agent/extensions/lib/intervention-registry.ts`](../../agent/extensions/lib/intervention-registry.ts)
-- [`agent/extensions/lib/intervention-session.ts`](../../agent/extensions/lib/intervention-session.ts)
-- [`agent/extensions/lib/intervention-shared.ts`](../../agent/extensions/lib/intervention-shared.ts)
-- [`agent/extensions/lib/jev-client.ts`](../../agent/extensions/lib/jev-client.ts)
-- [`agent/extensions/lib/jev-fusion.ts`](../../agent/extensions/lib/jev-fusion.ts)
-- [`agent/extensions/lib/local-intelligence.mjs`](../../agent/extensions/lib/local-intelligence.mjs)
-- [`agent/extensions/lib/local-lm-assets.mjs`](../../agent/extensions/lib/local-lm-assets.mjs)
-- [`agent/extensions/lib/local-lm.ts`](../../agent/extensions/lib/local-lm.ts)
-- [`agent/extensions/lib/local-models.ts`](../../agent/extensions/lib/local-models.ts)
-- [`agent/extensions/lib/media-model-routing.ts`](../../agent/extensions/lib/media-model-routing.ts)
-- [`agent/extensions/lib/media-pipeline.ts`](../../agent/extensions/lib/media-pipeline.ts)
-- [`agent/extensions/lib/media-process.ts`](../../agent/extensions/lib/media-process.ts)
-- [`agent/extensions/lib/media-sync.ts`](../../agent/extensions/lib/media-sync.ts)
-- [`agent/extensions/lib/media-timeline.ts`](../../agent/extensions/lib/media-timeline.ts)
-- [`agent/extensions/lib/memory-guard.ts`](../../agent/extensions/lib/memory-guard.ts)
-- [`agent/extensions/lib/memory-redaction.ts`](../../agent/extensions/lib/memory-redaction.ts)
-- [`agent/extensions/lib/metrics-panel.ts`](../../agent/extensions/lib/metrics-panel.ts)
-- [`agent/extensions/lib/mini-preprocessor.ts`](../../agent/extensions/lib/mini-preprocessor.ts)
-- [`agent/extensions/lib/ml-lab.ts`](../../agent/extensions/lib/ml-lab.ts)
-- [`agent/extensions/lib/model-competence.ts`](../../agent/extensions/lib/model-competence.ts)
-- [`agent/extensions/lib/model-facts.ts`](../../agent/extensions/lib/model-facts.ts)
-- [`agent/extensions/lib/model-routing-metrics.ts`](../../agent/extensions/lib/model-routing-metrics.ts)
-- [`agent/extensions/lib/model-routing-store.ts`](../../agent/extensions/lib/model-routing-store.ts)
-- [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts)
-- [`agent/extensions/lib/motion-library.ts`](../../agent/extensions/lib/motion-library.ts)
-- [`agent/extensions/lib/music-score.ts`](../../agent/extensions/lib/music-score.ts)
-- [`agent/extensions/lib/needle-assets.mjs`](../../agent/extensions/lib/needle-assets.mjs)
-- [`agent/extensions/lib/needle-embedding-cache.mjs`](../../agent/extensions/lib/needle-embedding-cache.mjs)
-- [`agent/extensions/lib/needle-policy.ts`](../../agent/extensions/lib/needle-policy.ts)
-- [`agent/extensions/lib/needle-runtime.ts`](../../agent/extensions/lib/needle-runtime.ts)
-- [`agent/extensions/lib/needle-types.ts`](../../agent/extensions/lib/needle-types.ts)
-- [`agent/extensions/lib/needle-worker.mjs`](../../agent/extensions/lib/needle-worker.mjs)
-- [`agent/extensions/lib/numeric-checks.ts`](../../agent/extensions/lib/numeric-checks.ts)
-- [`agent/extensions/lib/observation-retrieval.ts`](../../agent/extensions/lib/observation-retrieval.ts)
-- [`agent/extensions/lib/observer-book.ts`](../../agent/extensions/lib/observer-book.ts)
-- [`agent/extensions/lib/observer-journal.ts`](../../agent/extensions/lib/observer-journal.ts)
-- [`agent/extensions/lib/observer-model-evidence.ts`](../../agent/extensions/lib/observer-model-evidence.ts)
-- [`agent/extensions/lib/office-build.ts`](../../agent/extensions/lib/office-build.ts)
-- [`agent/extensions/lib/office-read.ts`](../../agent/extensions/lib/office-read.ts)
-- [`agent/extensions/lib/office-render.ts`](../../agent/extensions/lib/office-render.ts)
-- [`agent/extensions/lib/office-zip.ts`](../../agent/extensions/lib/office-zip.ts)
-- [`agent/extensions/lib/output-distiller.ts`](../../agent/extensions/lib/output-distiller.ts)
-- [`agent/extensions/lib/path-safety.ts`](../../agent/extensions/lib/path-safety.ts)
-- [`agent/extensions/lib/popup-theme.ts`](../../agent/extensions/lib/popup-theme.ts)
-- [`agent/extensions/lib/pptx-build.ts`](../../agent/extensions/lib/pptx-build.ts)
-- [`agent/extensions/lib/prior-art.ts`](../../agent/extensions/lib/prior-art.ts)
-- [`agent/extensions/lib/process-owner.ts`](../../agent/extensions/lib/process-owner.ts)
-- [`agent/extensions/lib/project-identity.ts`](../../agent/extensions/lib/project-identity.ts)
-- [`agent/extensions/lib/project-memory-consolidate.ts`](../../agent/extensions/lib/project-memory-consolidate.ts)
-- [`agent/extensions/lib/project-memory-context.ts`](../../agent/extensions/lib/project-memory-context.ts)
-- [`agent/extensions/lib/project-memory-embedder.ts`](../../agent/extensions/lib/project-memory-embedder.ts)
-- [`agent/extensions/lib/project-memory-index.ts`](../../agent/extensions/lib/project-memory-index.ts)
-- [`agent/extensions/lib/project-memory-retrieve.ts`](../../agent/extensions/lib/project-memory-retrieve.ts)
-- [`agent/extensions/lib/project-profile.ts`](../../agent/extensions/lib/project-profile.ts)
-- [`agent/extensions/lib/project-tests.ts`](../../agent/extensions/lib/project-tests.ts)
-- [`agent/extensions/lib/project-vector-store.ts`](../../agent/extensions/lib/project-vector-store.ts)
-- [`agent/extensions/lib/prompt-analysis-runtime.ts`](../../agent/extensions/lib/prompt-analysis-runtime.ts)
-- [`agent/extensions/lib/prompt-interpretation.ts`](../../agent/extensions/lib/prompt-interpretation.ts)
-- [`agent/extensions/lib/quality-refinement.ts`](../../agent/extensions/lib/quality-refinement.ts)
-- [`agent/extensions/lib/quality-review-owner.ts`](../../agent/extensions/lib/quality-review-owner.ts)
-- [`agent/extensions/lib/quality-review-signals.ts`](../../agent/extensions/lib/quality-review-signals.ts)
-- [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts)
-- [`agent/extensions/lib/reasoning-aids.ts`](../../agent/extensions/lib/reasoning-aids.ts)
-- [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts)
-- [`agent/extensions/lib/reminders-state.ts`](../../agent/extensions/lib/reminders-state.ts)
-- [`agent/extensions/lib/render-queue.ts`](../../agent/extensions/lib/render-queue.ts)
-- [`agent/extensions/lib/request-compat.ts`](../../agent/extensions/lib/request-compat.ts)
-- [`agent/extensions/lib/requirement-ledger.ts`](../../agent/extensions/lib/requirement-ledger.ts)
-- [`agent/extensions/lib/research-evidence.ts`](../../agent/extensions/lib/research-evidence.ts)
-- [`agent/extensions/lib/retry-policy.ts`](../../agent/extensions/lib/retry-policy.ts)
-- [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
-- [`agent/extensions/lib/reviewer-board.ts`](../../agent/extensions/lib/reviewer-board.ts)
-- [`agent/extensions/lib/scene-studio.ts`](../../agent/extensions/lib/scene-studio.ts)
-- [`agent/extensions/lib/scope-deliberation.ts`](../../agent/extensions/lib/scope-deliberation.ts)
-- [`agent/extensions/lib/scoped-snapshots.ts`](../../agent/extensions/lib/scoped-snapshots.ts)
-- [`agent/extensions/lib/self-mutation-guard.ts`](../../agent/extensions/lib/self-mutation-guard.ts)
-- [`agent/extensions/lib/seo-policy.ts`](../../agent/extensions/lib/seo-policy.ts)
-- [`agent/extensions/lib/service-probe.ts`](../../agent/extensions/lib/service-probe.ts)
-- [`agent/extensions/lib/session-audit.ts`](../../agent/extensions/lib/session-audit.ts)
-- [`agent/extensions/lib/session-cost.ts`](../../agent/extensions/lib/session-cost.ts)
-- [`agent/extensions/lib/session-diagnostics.ts`](../../agent/extensions/lib/session-diagnostics.ts)
-- [`agent/extensions/lib/session-errors.ts`](../../agent/extensions/lib/session-errors.ts)
-- [`agent/extensions/lib/session-export-json.ts`](../../agent/extensions/lib/session-export-json.ts)
-- [`agent/extensions/lib/session-hooks.ts`](../../agent/extensions/lib/session-hooks.ts)
-- [`agent/extensions/lib/session-metrics.ts`](../../agent/extensions/lib/session-metrics.ts)
-- [`agent/extensions/lib/session-observability.ts`](../../agent/extensions/lib/session-observability.ts)
-- [`agent/extensions/lib/session-observer.ts`](../../agent/extensions/lib/session-observer.ts)
-- [`agent/extensions/lib/session-report.ts`](../../agent/extensions/lib/session-report.ts)
-- [`agent/extensions/lib/session-signals.ts`](../../agent/extensions/lib/session-signals.ts)
-- [`agent/extensions/lib/session-stop.ts`](../../agent/extensions/lib/session-stop.ts)
-- [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts)
-- [`agent/extensions/lib/session-watchmaker.ts`](../../agent/extensions/lib/session-watchmaker.ts)
-- [`agent/extensions/lib/sheet-formula.ts`](../../agent/extensions/lib/sheet-formula.ts)
-- [`agent/extensions/lib/shot-scene.ts`](../../agent/extensions/lib/shot-scene.ts)
-- [`agent/extensions/lib/skill-discovery-controller.ts`](../../agent/extensions/lib/skill-discovery-controller.ts)
-- [`agent/extensions/lib/skill-discovery.ts`](../../agent/extensions/lib/skill-discovery.ts)
-- [`agent/extensions/lib/skill-relevance.ts`](../../agent/extensions/lib/skill-relevance.ts)
-- [`agent/extensions/lib/skill-routing.ts`](../../agent/extensions/lib/skill-routing.ts)
-- [`agent/extensions/lib/skill-telemetry.ts`](../../agent/extensions/lib/skill-telemetry.ts)
-- [`agent/extensions/lib/slop-guidance-signals.ts`](../../agent/extensions/lib/slop-guidance-signals.ts)
-- [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts)
-- [`agent/extensions/lib/smol-extraction.ts`](../../agent/extensions/lib/smol-extraction.ts)
-- [`agent/extensions/lib/smol-preprocessor.ts`](../../agent/extensions/lib/smol-preprocessor.ts)
-- [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts)
-- [`agent/extensions/lib/specifics.ts`](../../agent/extensions/lib/specifics.ts)
-- [`agent/extensions/lib/splat-studio.ts`](../../agent/extensions/lib/splat-studio.ts)
-- [`agent/extensions/lib/stable-tool-order.ts`](../../agent/extensions/lib/stable-tool-order.ts)
-- [`agent/extensions/lib/stall-core.ts`](../../agent/extensions/lib/stall-core.ts)
-- [`agent/extensions/lib/svg-analysis.ts`](../../agent/extensions/lib/svg-analysis.ts)
-- [`agent/extensions/lib/svg-check.ts`](../../agent/extensions/lib/svg-check.ts)
-- [`agent/extensions/lib/svg-inspect.ts`](../../agent/extensions/lib/svg-inspect.ts)
-- [`agent/extensions/lib/svg-render.ts`](../../agent/extensions/lib/svg-render.ts)
-- [`agent/extensions/lib/sys-probe.ts`](../../agent/extensions/lib/sys-probe.ts)
-- [`agent/extensions/lib/task-pipelines.ts`](../../agent/extensions/lib/task-pipelines.ts)
-- [`agent/extensions/lib/todo-linkage.ts`](../../agent/extensions/lib/todo-linkage.ts)
-- [`agent/extensions/lib/token-budget.ts`](../../agent/extensions/lib/token-budget.ts)
-- [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts)
-- [`agent/extensions/lib/tool-schema.ts`](../../agent/extensions/lib/tool-schema.ts)
-- [`agent/extensions/lib/ui-doctrine.ts`](../../agent/extensions/lib/ui-doctrine.ts)
-- [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts)
-- [`agent/extensions/lib/video-art.ts`](../../agent/extensions/lib/video-art.ts)
-- [`agent/extensions/lib/video-assets.ts`](../../agent/extensions/lib/video-assets.ts)
-- [`agent/extensions/lib/video-browser.ts`](../../agent/extensions/lib/video-browser.ts)
-- [`agent/extensions/lib/video-compose.ts`](../../agent/extensions/lib/video-compose.ts)
-- [`agent/extensions/lib/video-derive.ts`](../../agent/extensions/lib/video-derive.ts)
-- [`agent/extensions/lib/video-generate.ts`](../../agent/extensions/lib/video-generate.ts)
-- [`agent/extensions/lib/video-looks.ts`](../../agent/extensions/lib/video-looks.ts)
-- [`agent/extensions/lib/video-motion.ts`](../../agent/extensions/lib/video-motion.ts)
-- [`agent/extensions/lib/video-publish.ts`](../../agent/extensions/lib/video-publish.ts)
-- [`agent/extensions/lib/video-segments.ts`](../../agent/extensions/lib/video-segments.ts)
-- [`agent/extensions/lib/video-shot.ts`](../../agent/extensions/lib/video-shot.ts)
-- [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts)
-- [`agent/extensions/lib/workspace-write-lease.ts`](../../agent/extensions/lib/workspace-write-lease.ts)
-- [`agent/extensions/lib/worktree-checkpoint.ts`](../../agent/extensions/lib/worktree-checkpoint.ts)
-- [`agent/extensions/lib/xml-lite.ts`](../../agent/extensions/lib/xml-lite.ts)
+- [`agent/extensions/lib/activity-indicators.ts`](../agent/extensions/lib/activity-indicators.ts)
+- [`agent/extensions/lib/adaptive-execution.ts`](../agent/extensions/lib/adaptive-execution.ts)
+- [`agent/extensions/lib/artifact-checks.ts`](../agent/extensions/lib/artifact-checks.ts)
+- [`agent/extensions/lib/asset-registry.ts`](../agent/extensions/lib/asset-registry.ts)
+- [`agent/extensions/lib/assurance-output.ts`](../agent/extensions/lib/assurance-output.ts)
+- [`agent/extensions/lib/audio-studio.ts`](../agent/extensions/lib/audio-studio.ts)
+- [`agent/extensions/lib/authored-review.ts`](../agent/extensions/lib/authored-review.ts)
+- [`agent/extensions/lib/bash-routing.ts`](../agent/extensions/lib/bash-routing.ts)
+- [`agent/extensions/lib/binary-read.ts`](../agent/extensions/lib/binary-read.ts)
+- [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts)
+- [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts)
+- [`agent/extensions/lib/bulk-edit.ts`](../agent/extensions/lib/bulk-edit.ts)
+- [`agent/extensions/lib/capability-audit.ts`](../agent/extensions/lib/capability-audit.ts)
+- [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
+- [`agent/extensions/lib/capability-health.ts`](../agent/extensions/lib/capability-health.ts)
+- [`agent/extensions/lib/catalog-cache-lock.ts`](../agent/extensions/lib/catalog-cache-lock.ts)
+- [`agent/extensions/lib/checkpoint-files.ts`](../agent/extensions/lib/checkpoint-files.ts)
+- [`agent/extensions/lib/ci-awareness.ts`](../agent/extensions/lib/ci-awareness.ts)
+- [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts)
+- [`agent/extensions/lib/code-guidance-signals.ts`](../agent/extensions/lib/code-guidance-signals.ts)
+- [`agent/extensions/lib/code-lexical-mask.ts`](../agent/extensions/lib/code-lexical-mask.ts)
+- [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts)
+- [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts)
+- [`agent/extensions/lib/compact-tool-json.ts`](../agent/extensions/lib/compact-tool-json.ts)
+- [`agent/extensions/lib/compaction-policy.ts`](../agent/extensions/lib/compaction-policy.ts)
+- [`agent/extensions/lib/competence-store.ts`](../agent/extensions/lib/competence-store.ts)
+- [`agent/extensions/lib/completion-gate.ts`](../agent/extensions/lib/completion-gate.ts)
+- [`agent/extensions/lib/context-anchor.ts`](../agent/extensions/lib/context-anchor.ts)
+- [`agent/extensions/lib/context-limits.ts`](../agent/extensions/lib/context-limits.ts)
+- [`agent/extensions/lib/context-profile.mjs`](../agent/extensions/lib/context-profile.mjs)
+- [`agent/extensions/lib/context-provenance.ts`](../agent/extensions/lib/context-provenance.ts)
+- [`agent/extensions/lib/continuation-notice.ts`](../agent/extensions/lib/continuation-notice.ts)
+- [`agent/extensions/lib/cost-evidence.ts`](../agent/extensions/lib/cost-evidence.ts)
+- [`agent/extensions/lib/cost-states.ts`](../agent/extensions/lib/cost-states.ts)
+- [`agent/extensions/lib/creative-direction.ts`](../agent/extensions/lib/creative-direction.ts)
+- [`agent/extensions/lib/creative-evidence.ts`](../agent/extensions/lib/creative-evidence.ts)
+- [`agent/extensions/lib/creative-qa.ts`](../agent/extensions/lib/creative-qa.ts)
+- [`agent/extensions/lib/data-query.ts`](../agent/extensions/lib/data-query.ts)
+- [`agent/extensions/lib/deliverable-inspect.ts`](../agent/extensions/lib/deliverable-inspect.ts)
+- [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts)
+- [`agent/extensions/lib/design-direction.ts`](../agent/extensions/lib/design-direction.ts)
+- [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
+- [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts)
+- [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
+- [`agent/extensions/lib/disk-guard.ts`](../agent/extensions/lib/disk-guard.ts)
+- [`agent/extensions/lib/double.ts`](../agent/extensions/lib/double.ts)
+- [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
+- [`agent/extensions/lib/elevenlabs.ts`](../agent/extensions/lib/elevenlabs.ts)
+- [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
+- [`agent/extensions/lib/expert-brief.ts`](../agent/extensions/lib/expert-brief.ts)
+- [`agent/extensions/lib/expert-convergence.ts`](../agent/extensions/lib/expert-convergence.ts)
+- [`agent/extensions/lib/expert-critics.ts`](../agent/extensions/lib/expert-critics.ts)
+- [`agent/extensions/lib/expert-doctrine.ts`](../agent/extensions/lib/expert-doctrine.ts)
+- [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts)
+- [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
+- [`agent/extensions/lib/fail-policy.ts`](../agent/extensions/lib/fail-policy.ts)
+- [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts)
+- [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
+- [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
+- [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
+- [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts)
+- [`agent/extensions/lib/guidance-topics-domains.ts`](../agent/extensions/lib/guidance-topics-domains.ts)
+- [`agent/extensions/lib/guidance-topics-systems.ts`](../agent/extensions/lib/guidance-topics-systems.ts)
+- [`agent/extensions/lib/guidance-topics.ts`](../agent/extensions/lib/guidance-topics.ts)
+- [`agent/extensions/lib/harness-activity.ts`](../agent/extensions/lib/harness-activity.ts)
+- [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts)
+- [`agent/extensions/lib/harness-invariants.ts`](../agent/extensions/lib/harness-invariants.ts)
+- [`agent/extensions/lib/harness-notice.ts`](../agent/extensions/lib/harness-notice.ts)
+- [`agent/extensions/lib/harness-orientation.ts`](../agent/extensions/lib/harness-orientation.ts)
+- [`agent/extensions/lib/health-log.ts`](../agent/extensions/lib/health-log.ts)
+- [`agent/extensions/lib/helper-usage.ts`](../agent/extensions/lib/helper-usage.ts)
+- [`agent/extensions/lib/hook-events.ts`](../agent/extensions/lib/hook-events.ts)
+- [`agent/extensions/lib/hook-ledger.ts`](../agent/extensions/lib/hook-ledger.ts)
+- [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts)
+- [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts)
+- [`agent/extensions/lib/image-compaction.ts`](../agent/extensions/lib/image-compaction.ts)
+- [`agent/extensions/lib/image-convert.ts`](../agent/extensions/lib/image-convert.ts)
+- [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts)
+- [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts)
+- [`agent/extensions/lib/image-understand.ts`](../agent/extensions/lib/image-understand.ts)
+- [`agent/extensions/lib/intent-context.ts`](../agent/extensions/lib/intent-context.ts)
+- [`agent/extensions/lib/intervention-control.ts`](../agent/extensions/lib/intervention-control.ts)
+- [`agent/extensions/lib/intervention-intents.ts`](../agent/extensions/lib/intervention-intents.ts)
+- [`agent/extensions/lib/intervention-registry.ts`](../agent/extensions/lib/intervention-registry.ts)
+- [`agent/extensions/lib/intervention-session.ts`](../agent/extensions/lib/intervention-session.ts)
+- [`agent/extensions/lib/intervention-shared.ts`](../agent/extensions/lib/intervention-shared.ts)
+- [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts)
+- [`agent/extensions/lib/jev-fusion.ts`](../agent/extensions/lib/jev-fusion.ts)
+- [`agent/extensions/lib/local-intelligence.mjs`](../agent/extensions/lib/local-intelligence.mjs)
+- [`agent/extensions/lib/local-lm-assets.mjs`](../agent/extensions/lib/local-lm-assets.mjs)
+- [`agent/extensions/lib/local-lm.ts`](../agent/extensions/lib/local-lm.ts)
+- [`agent/extensions/lib/local-models.ts`](../agent/extensions/lib/local-models.ts)
+- [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts)
+- [`agent/extensions/lib/media-pipeline.ts`](../agent/extensions/lib/media-pipeline.ts)
+- [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
+- [`agent/extensions/lib/media-sync.ts`](../agent/extensions/lib/media-sync.ts)
+- [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts)
+- [`agent/extensions/lib/memory-guard.ts`](../agent/extensions/lib/memory-guard.ts)
+- [`agent/extensions/lib/memory-redaction.ts`](../agent/extensions/lib/memory-redaction.ts)
+- [`agent/extensions/lib/metrics-panel.ts`](../agent/extensions/lib/metrics-panel.ts)
+- [`agent/extensions/lib/mini-preprocessor.ts`](../agent/extensions/lib/mini-preprocessor.ts)
+- [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts)
+- [`agent/extensions/lib/model-competence.ts`](../agent/extensions/lib/model-competence.ts)
+- [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
+- [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
+- [`agent/extensions/lib/model-routing-store.ts`](../agent/extensions/lib/model-routing-store.ts)
+- [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts)
+- [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts)
+- [`agent/extensions/lib/music-score.ts`](../agent/extensions/lib/music-score.ts)
+- [`agent/extensions/lib/needle-assets.mjs`](../agent/extensions/lib/needle-assets.mjs)
+- [`agent/extensions/lib/needle-embedding-cache.mjs`](../agent/extensions/lib/needle-embedding-cache.mjs)
+- [`agent/extensions/lib/needle-policy.ts`](../agent/extensions/lib/needle-policy.ts)
+- [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts)
+- [`agent/extensions/lib/needle-types.ts`](../agent/extensions/lib/needle-types.ts)
+- [`agent/extensions/lib/needle-worker.mjs`](../agent/extensions/lib/needle-worker.mjs)
+- [`agent/extensions/lib/numeric-checks.ts`](../agent/extensions/lib/numeric-checks.ts)
+- [`agent/extensions/lib/observation-retrieval.ts`](../agent/extensions/lib/observation-retrieval.ts)
+- [`agent/extensions/lib/observer-book.ts`](../agent/extensions/lib/observer-book.ts)
+- [`agent/extensions/lib/observer-journal.ts`](../agent/extensions/lib/observer-journal.ts)
+- [`agent/extensions/lib/observer-model-evidence.ts`](../agent/extensions/lib/observer-model-evidence.ts)
+- [`agent/extensions/lib/office-build.ts`](../agent/extensions/lib/office-build.ts)
+- [`agent/extensions/lib/office-read.ts`](../agent/extensions/lib/office-read.ts)
+- [`agent/extensions/lib/office-render.ts`](../agent/extensions/lib/office-render.ts)
+- [`agent/extensions/lib/office-zip.ts`](../agent/extensions/lib/office-zip.ts)
+- [`agent/extensions/lib/output-distiller.ts`](../agent/extensions/lib/output-distiller.ts)
+- [`agent/extensions/lib/path-safety.ts`](../agent/extensions/lib/path-safety.ts)
+- [`agent/extensions/lib/popup-theme.ts`](../agent/extensions/lib/popup-theme.ts)
+- [`agent/extensions/lib/pptx-build.ts`](../agent/extensions/lib/pptx-build.ts)
+- [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts)
+- [`agent/extensions/lib/process-owner.ts`](../agent/extensions/lib/process-owner.ts)
+- [`agent/extensions/lib/project-identity.ts`](../agent/extensions/lib/project-identity.ts)
+- [`agent/extensions/lib/project-memory-consolidate.ts`](../agent/extensions/lib/project-memory-consolidate.ts)
+- [`agent/extensions/lib/project-memory-context.ts`](../agent/extensions/lib/project-memory-context.ts)
+- [`agent/extensions/lib/project-memory-embedder.ts`](../agent/extensions/lib/project-memory-embedder.ts)
+- [`agent/extensions/lib/project-memory-index.ts`](../agent/extensions/lib/project-memory-index.ts)
+- [`agent/extensions/lib/project-memory-retrieve.ts`](../agent/extensions/lib/project-memory-retrieve.ts)
+- [`agent/extensions/lib/project-profile.ts`](../agent/extensions/lib/project-profile.ts)
+- [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts)
+- [`agent/extensions/lib/project-vector-store.ts`](../agent/extensions/lib/project-vector-store.ts)
+- [`agent/extensions/lib/prompt-analysis-runtime.ts`](../agent/extensions/lib/prompt-analysis-runtime.ts)
+- [`agent/extensions/lib/prompt-interpretation.ts`](../agent/extensions/lib/prompt-interpretation.ts)
+- [`agent/extensions/lib/quality-refinement.ts`](../agent/extensions/lib/quality-refinement.ts)
+- [`agent/extensions/lib/quality-review-owner.ts`](../agent/extensions/lib/quality-review-owner.ts)
+- [`agent/extensions/lib/quality-review-signals.ts`](../agent/extensions/lib/quality-review-signals.ts)
+- [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts)
+- [`agent/extensions/lib/reasoning-aids.ts`](../agent/extensions/lib/reasoning-aids.ts)
+- [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts)
+- [`agent/extensions/lib/reminders-state.ts`](../agent/extensions/lib/reminders-state.ts)
+- [`agent/extensions/lib/render-queue.ts`](../agent/extensions/lib/render-queue.ts)
+- [`agent/extensions/lib/request-compat.ts`](../agent/extensions/lib/request-compat.ts)
+- [`agent/extensions/lib/requirement-ledger.ts`](../agent/extensions/lib/requirement-ledger.ts)
+- [`agent/extensions/lib/research-evidence.ts`](../agent/extensions/lib/research-evidence.ts)
+- [`agent/extensions/lib/retry-policy.ts`](../agent/extensions/lib/retry-policy.ts)
+- [`agent/extensions/lib/review-coordinator.ts`](../agent/extensions/lib/review-coordinator.ts)
+- [`agent/extensions/lib/reviewer-board.ts`](../agent/extensions/lib/reviewer-board.ts)
+- [`agent/extensions/lib/scene-studio.ts`](../agent/extensions/lib/scene-studio.ts)
+- [`agent/extensions/lib/scope-deliberation.ts`](../agent/extensions/lib/scope-deliberation.ts)
+- [`agent/extensions/lib/scoped-snapshots.ts`](../agent/extensions/lib/scoped-snapshots.ts)
+- [`agent/extensions/lib/self-mutation-guard.ts`](../agent/extensions/lib/self-mutation-guard.ts)
+- [`agent/extensions/lib/seo-policy.ts`](../agent/extensions/lib/seo-policy.ts)
+- [`agent/extensions/lib/service-probe.ts`](../agent/extensions/lib/service-probe.ts)
+- [`agent/extensions/lib/session-audit.ts`](../agent/extensions/lib/session-audit.ts)
+- [`agent/extensions/lib/session-cost.ts`](../agent/extensions/lib/session-cost.ts)
+- [`agent/extensions/lib/session-diagnostics.ts`](../agent/extensions/lib/session-diagnostics.ts)
+- [`agent/extensions/lib/session-errors.ts`](../agent/extensions/lib/session-errors.ts)
+- [`agent/extensions/lib/session-export-json.ts`](../agent/extensions/lib/session-export-json.ts)
+- [`agent/extensions/lib/session-hooks.ts`](../agent/extensions/lib/session-hooks.ts)
+- [`agent/extensions/lib/session-metrics.ts`](../agent/extensions/lib/session-metrics.ts)
+- [`agent/extensions/lib/session-observability.ts`](../agent/extensions/lib/session-observability.ts)
+- [`agent/extensions/lib/session-observer.ts`](../agent/extensions/lib/session-observer.ts)
+- [`agent/extensions/lib/session-report.ts`](../agent/extensions/lib/session-report.ts)
+- [`agent/extensions/lib/session-signals.ts`](../agent/extensions/lib/session-signals.ts)
+- [`agent/extensions/lib/session-stop.ts`](../agent/extensions/lib/session-stop.ts)
+- [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts)
+- [`agent/extensions/lib/session-watchmaker.ts`](../agent/extensions/lib/session-watchmaker.ts)
+- [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts)
+- [`agent/extensions/lib/shot-scene.ts`](../agent/extensions/lib/shot-scene.ts)
+- [`agent/extensions/lib/skill-discovery-controller.ts`](../agent/extensions/lib/skill-discovery-controller.ts)
+- [`agent/extensions/lib/skill-discovery.ts`](../agent/extensions/lib/skill-discovery.ts)
+- [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts)
+- [`agent/extensions/lib/skill-routing.ts`](../agent/extensions/lib/skill-routing.ts)
+- [`agent/extensions/lib/skill-telemetry.ts`](../agent/extensions/lib/skill-telemetry.ts)
+- [`agent/extensions/lib/slop-guidance-signals.ts`](../agent/extensions/lib/slop-guidance-signals.ts)
+- [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts)
+- [`agent/extensions/lib/smol-extraction.ts`](../agent/extensions/lib/smol-extraction.ts)
+- [`agent/extensions/lib/smol-preprocessor.ts`](../agent/extensions/lib/smol-preprocessor.ts)
+- [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts)
+- [`agent/extensions/lib/specifics.ts`](../agent/extensions/lib/specifics.ts)
+- [`agent/extensions/lib/splat-studio.ts`](../agent/extensions/lib/splat-studio.ts)
+- [`agent/extensions/lib/stable-tool-order.ts`](../agent/extensions/lib/stable-tool-order.ts)
+- [`agent/extensions/lib/stall-core.ts`](../agent/extensions/lib/stall-core.ts)
+- [`agent/extensions/lib/svg-analysis.ts`](../agent/extensions/lib/svg-analysis.ts)
+- [`agent/extensions/lib/svg-check.ts`](../agent/extensions/lib/svg-check.ts)
+- [`agent/extensions/lib/svg-inspect.ts`](../agent/extensions/lib/svg-inspect.ts)
+- [`agent/extensions/lib/svg-render.ts`](../agent/extensions/lib/svg-render.ts)
+- [`agent/extensions/lib/sys-probe.ts`](../agent/extensions/lib/sys-probe.ts)
+- [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts)
+- [`agent/extensions/lib/todo-linkage.ts`](../agent/extensions/lib/todo-linkage.ts)
+- [`agent/extensions/lib/token-budget.ts`](../agent/extensions/lib/token-budget.ts)
+- [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts)
+- [`agent/extensions/lib/tool-schema.ts`](../agent/extensions/lib/tool-schema.ts)
+- [`agent/extensions/lib/ui-doctrine.ts`](../agent/extensions/lib/ui-doctrine.ts)
+- [`agent/extensions/lib/ui-recipes.ts`](../agent/extensions/lib/ui-recipes.ts)
+- [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts)
+- [`agent/extensions/lib/video-art.ts`](../agent/extensions/lib/video-art.ts)
+- [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts)
+- [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts)
+- [`agent/extensions/lib/video-compose.ts`](../agent/extensions/lib/video-compose.ts)
+- [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts)
+- [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts)
+- [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts)
+- [`agent/extensions/lib/video-motion.ts`](../agent/extensions/lib/video-motion.ts)
+- [`agent/extensions/lib/video-publish.ts`](../agent/extensions/lib/video-publish.ts)
+- [`agent/extensions/lib/video-segments.ts`](../agent/extensions/lib/video-segments.ts)
+- [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts)
+- [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts)
+- [`agent/extensions/lib/workspace-write-lease.ts`](../agent/extensions/lib/workspace-write-lease.ts)
+- [`agent/extensions/lib/worktree-checkpoint.ts`](../agent/extensions/lib/worktree-checkpoint.ts)
+- [`agent/extensions/lib/xml-lite.ts`](../agent/extensions/lib/xml-lite.ts)
 
 ### Local forks
 
-- [`agent/extensions/pi-background-tasks`](../../agent/extensions/pi-background-tasks) — package `pi-background-tasks`
-- [`agent/extensions/pi-lens`](../../agent/extensions/pi-lens) — package `pi-lens`
-- [`agent/extensions/pi-memory`](../../agent/extensions/pi-memory) — package `pi-memory`
-- [`agent/extensions/pi-subagents`](../../agent/extensions/pi-subagents) — package `pi-subagents`
-- [`agent/extensions/pi-web-access`](../../agent/extensions/pi-web-access) — package `pi-web-access`
-- [`agent/extensions/rpiv-todo`](../../agent/extensions/rpiv-todo) — package `@juicesharp/rpiv-todo`
+- [`agent/extensions/pi-background-tasks`](../agent/extensions/pi-background-tasks) — package `pi-background-tasks`
+- [`agent/extensions/pi-lens`](../agent/extensions/pi-lens) — package `pi-lens`
+- [`agent/extensions/pi-memory`](../agent/extensions/pi-memory) — package `pi-memory`
+- [`agent/extensions/pi-subagents`](../agent/extensions/pi-subagents) — package `pi-subagents`
+- [`agent/extensions/pi-web-access`](../agent/extensions/pi-web-access) — package `pi-web-access`
+- [`agent/extensions/rpiv-todo`](../agent/extensions/rpiv-todo) — package `@juicesharp/rpiv-todo`
 
 ### Manifest support files
 
-- [`agent/extensions/lib/micro-intelligence/advisory.ts`](../../agent/extensions/lib/micro-intelligence/advisory.ts)
-- [`agent/extensions/lib/micro-intelligence/evidence.ts`](../../agent/extensions/lib/micro-intelligence/evidence.ts)
-- [`agent/extensions/lib/micro-intelligence/health.ts`](../../agent/extensions/lib/micro-intelligence/health.ts)
-- [`agent/extensions/lib/micro-intelligence/intent.ts`](../../agent/extensions/lib/micro-intelligence/intent.ts)
-- [`agent/extensions/lib/micro-intelligence/jev-decisions.ts`](../../agent/extensions/lib/micro-intelligence/jev-decisions.ts)
-- [`agent/extensions/lib/micro-intelligence/metrics.ts`](../../agent/extensions/lib/micro-intelligence/metrics.ts)
-- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts)
-- [`agent/extensions/lib/micro-intelligence/micro-worker.ts`](../../agent/extensions/lib/micro-intelligence/micro-worker.ts)
-- [`agent/extensions/lib/micro-intelligence/model-qual-lab.ts`](../../agent/extensions/lib/micro-intelligence/model-qual-lab.ts)
-- [`agent/extensions/lib/micro-intelligence/rerank.ts`](../../agent/extensions/lib/micro-intelligence/rerank.ts)
-- [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../../agent/extensions/lib/micro-intelligence/retrieval.ts)
-- [`agent/extensions/lib/micro-intelligence/review.ts`](../../agent/extensions/lib/micro-intelligence/review.ts)
-- [`agent/extensions/lib/micro-intelligence/route-privacy.ts`](../../agent/extensions/lib/micro-intelligence/route-privacy.ts)
-- [`agent/extensions/lib/micro-intelligence/router-shadow.ts`](../../agent/extensions/lib/micro-intelligence/router-shadow.ts)
-- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../../agent/extensions/lib/micro-intelligence/span-sensor.ts)
-- [`agent/extensions/lib/micro-intelligence/status.ts`](../../agent/extensions/lib/micro-intelligence/status.ts)
-- [`agent/extensions/lib/project-intelligence/client.mjs`](../../agent/extensions/lib/project-intelligence/client.mjs)
-- [`agent/extensions/lib/project-intelligence/continuity.mjs`](../../agent/extensions/lib/project-intelligence/continuity.mjs)
-- [`agent/extensions/lib/project-intelligence/discovery-parsers.mjs`](../../agent/extensions/lib/project-intelligence/discovery-parsers.mjs)
-- [`agent/extensions/lib/project-intelligence/discovery.mjs`](../../agent/extensions/lib/project-intelligence/discovery.mjs)
-- [`agent/extensions/lib/project-intelligence/heartbeat.mjs`](../../agent/extensions/lib/project-intelligence/heartbeat.mjs)
-- [`agent/extensions/lib/project-intelligence/identity.mjs`](../../agent/extensions/lib/project-intelligence/identity.mjs)
-- [`agent/extensions/lib/project-intelligence/privacy.mjs`](../../agent/extensions/lib/project-intelligence/privacy.mjs)
-- [`agent/extensions/lib/project-intelligence/query.mjs`](../../agent/extensions/lib/project-intelligence/query.mjs)
-- [`agent/extensions/lib/project-intelligence/store.mjs`](../../agent/extensions/lib/project-intelligence/store.mjs)
-- [`agent/extensions/lib/project-intelligence/viewer-assets/app.js`](../../agent/extensions/lib/project-intelligence/viewer-assets/app.js)
-- [`agent/extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js`](../../agent/extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js)
-- [`agent/extensions/lib/project-intelligence/viewer-server.mjs`](../../agent/extensions/lib/project-intelligence/viewer-server.mjs)
-- [`agent/extensions/lib/project-intelligence/viewer.mjs`](../../agent/extensions/lib/project-intelligence/viewer.mjs)
-- [`agent/extensions/lib/project-intelligence/worker.mjs`](../../agent/extensions/lib/project-intelligence/worker.mjs)
-- [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs)
-- [`agent/extensions/lib/utility-mcp/contract.mjs`](../../agent/extensions/lib/utility-mcp/contract.mjs)
-- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../../agent/extensions/lib/utility-mcp/coverage.mjs)
-- [`agent/extensions/lib/utility-mcp/env.mjs`](../../agent/extensions/lib/utility-mcp/env.mjs)
-- [`agent/extensions/lib/utility-mcp/files.mjs`](../../agent/extensions/lib/utility-mcp/files.mjs)
-- [`agent/extensions/lib/utility-mcp/local_operations.py`](../../agent/extensions/lib/utility-mcp/local_operations.py)
-- [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../../agent/extensions/lib/utility-mcp/local-reference.mjs)
-- [`agent/extensions/lib/utility-mcp/net.mjs`](../../agent/extensions/lib/utility-mcp/net.mjs)
-- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../../agent/extensions/lib/utility-mcp/openapi.mjs)
-- [`agent/extensions/lib/utility-mcp/package.mjs`](../../agent/extensions/lib/utility-mcp/package.mjs)
-- [`agent/extensions/lib/utility-mcp/probe.py`](../../agent/extensions/lib/utility-mcp/probe.py)
-- [`agent/extensions/lib/utility-mcp/server.mjs`](../../agent/extensions/lib/utility-mcp/server.mjs)
-- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../../agent/extensions/lib/utility-mcp/shapes.mjs)
-- [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../../agent/extensions/lib/utility-mcp/web-assets.mjs)
-- [`agent/extensions/lib/utility-mcp/worker.mjs`](../../agent/extensions/lib/utility-mcp/worker.mjs)
-- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../../agent/extensions/lib/utility-mcp/workflow.mjs)
-- [`agent/extensions/pi-background-tasks/src/core/completion-wake.ts`](../../agent/extensions/pi-background-tasks/src/core/completion-wake.ts)
-- [`agent/extensions/pi-lens/context-code.mjs`](../../agent/extensions/pi-lens/context-code.mjs)
-- [`agent/extensions/pi-lens/context-lsp.mjs`](../../agent/extensions/pi-lens/context-lsp.mjs)
-- [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts)
-- [`agent/extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs`](../../agent/extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs)
-- [`agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs`](../../agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs)
-- [`agent/extensions/pi-lens/semantic-radar/rank-features.mjs`](../../agent/extensions/pi-lens/semantic-radar/rank-features.mjs)
-- [`agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json`](../../agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json)
-- [`agent/extensions/pi-memory/context-evidence.ts`](../../agent/extensions/pi-memory/context-evidence.ts)
-- [`agent/extensions/pi-memory/context-salience.ts`](../../agent/extensions/pi-memory/context-salience.ts)
-- [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts)
-- [`agent/extensions/pi-memory/mutation.ts`](../../agent/extensions/pi-memory/mutation.ts)
-- [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts)
-- [`agent/extensions/pi-memory/project-identity.ts`](../../agent/extensions/pi-memory/project-identity.ts)
-- [`agent/extensions/pi-subagents/src/runs/shared/common-task.ts`](../../agent/extensions/pi-subagents/src/runs/shared/common-task.ts)
-- [`agent/extensions/pi-subagents/src/runs/shared/file-verification.ts`](../../agent/extensions/pi-subagents/src/runs/shared/file-verification.ts)
-- [`agent/extensions/pi-subagents/src/shared/progress-evidence.ts`](../../agent/extensions/pi-subagents/src/shared/progress-evidence.ts)
-- [`agent/extensions/rpiv-todo/state/plan.ts`](../../agent/extensions/rpiv-todo/state/plan.ts)
-- [`agent/scripts/auto-update.sh`](../../agent/scripts/auto-update.sh)
-- [`agent/scripts/blender-studio.py`](../../agent/scripts/blender-studio.py)
-- [`agent/scripts/browser-diagnostics.mjs`](../../agent/scripts/browser-diagnostics.mjs)
-- [`agent/scripts/browser-markers.mjs`](../../agent/scripts/browser-markers.mjs)
-- [`agent/scripts/browser-page-tools.mjs`](../../agent/scripts/browser-page-tools.mjs)
-- [`agent/scripts/browser-session-lease.mjs`](../../agent/scripts/browser-session-lease.mjs)
-- [`agent/scripts/browser-session-runner.mjs`](../../agent/scripts/browser-session-runner.mjs)
-- [`agent/scripts/compatibility/atomic-edit-preflight-test.mjs`](../../agent/scripts/compatibility/atomic-edit-preflight-test.mjs)
-- [`agent/scripts/compatibility/automatic-compaction-test.mjs`](../../agent/scripts/compatibility/automatic-compaction-test.mjs)
-- [`agent/scripts/compatibility/autonomous-recovery-test.mjs`](../../agent/scripts/compatibility/autonomous-recovery-test.mjs)
-- [`agent/scripts/compatibility/harness-load-test.mjs`](../../agent/scripts/compatibility/harness-load-test.mjs)
-- [`agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs`](../../agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs)
-- [`agent/scripts/compatibility/reasoning-aids-loader-test.mjs`](../../agent/scripts/compatibility/reasoning-aids-loader-test.mjs)
-- [`agent/scripts/compatibility/retry-lifecycle-test.mjs`](../../agent/scripts/compatibility/retry-lifecycle-test.mjs)
-- [`agent/scripts/compatibility/session-recovery-guidance-test.mjs`](../../agent/scripts/compatibility/session-recovery-guidance-test.mjs)
-- [`agent/scripts/compatibility/skill-pack-routing-test.mjs`](../../agent/scripts/compatibility/skill-pack-routing-test.mjs)
-- [`agent/scripts/compatibility/summary-recovery-test.mjs`](../../agent/scripts/compatibility/summary-recovery-test.mjs)
-- [`agent/scripts/compatibility/tool-integrity-test.mjs`](../../agent/scripts/compatibility/tool-integrity-test.mjs)
-- [`agent/scripts/compatibility/utility-mcp-loader-test.mjs`](../../agent/scripts/compatibility/utility-mcp-loader-test.mjs)
-- [`agent/scripts/core-update.mjs`](../../agent/scripts/core-update.mjs)
-- [`agent/scripts/effort-audit.mjs`](../../agent/scripts/effort-audit.mjs)
-- [`agent/scripts/harness-readonly-exec.py`](../../agent/scripts/harness-readonly-exec.py)
-- [`agent/scripts/lib/core-compatibility.mjs`](../../agent/scripts/lib/core-compatibility.mjs)
-- [`agent/scripts/lib/effort-audit.mjs`](../../agent/scripts/lib/effort-audit.mjs)
-- [`agent/scripts/lib/owned-core.mjs`](../../agent/scripts/lib/owned-core.mjs)
-- [`agent/scripts/lib/paragraph_selector.py`](../../agent/scripts/lib/paragraph_selector.py)
-- [`agent/scripts/mini-preprocessor.py`](../../agent/scripts/mini-preprocessor.py)
-- [`agent/scripts/music-soundfont.py`](../../agent/scripts/music-soundfont.py)
-- [`agent/scripts/pi-launch.sh`](../../agent/scripts/pi-launch.sh)
-- [`agent/scripts/process-owner.sh`](../../agent/scripts/process-owner.sh)
-- [`agent/scripts/render-capture.mjs`](../../agent/scripts/render-capture.mjs)
-- [`agent/scripts/render-design-state.mjs`](../../agent/scripts/render-design-state.mjs)
-- [`agent/scripts/render-noise-state.mjs`](../../agent/scripts/render-noise-state.mjs)
-- [`agent/scripts/render-page-state.mjs`](../../agent/scripts/render-page-state.mjs)
-- [`agent/scripts/repair-harness-hardlinks.py`](../../agent/scripts/repair-harness-hardlinks.py)
-- [`agent/scripts/sandbox-runner.py`](../../agent/scripts/sandbox-runner.py)
-- [`agent/scripts/scene-model.mjs`](../../agent/scripts/scene-model.mjs)
-- [`agent/scripts/scene-runtime.mjs`](../../agent/scripts/scene-runtime.mjs)
-- [`agent/scripts/skill-mirrors.mjs`](../../agent/scripts/skill-mirrors.mjs)
-- [`agent/scripts/systemd/pi-mini-preprocessor.service`](../../agent/scripts/systemd/pi-mini-preprocessor.service)
-- [`agent/scripts/transaction.mjs`](../../agent/scripts/transaction.mjs)
-- [`agent/scripts/video-browser.mjs`](../../agent/scripts/video-browser.mjs)
-- [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs)
-- [`agent/scripts/wait-condition.mjs`](../../agent/scripts/wait-condition.mjs)
-- [`agent/scripts/workspace-facts.mjs`](../../agent/scripts/workspace-facts.mjs)
+- [`agent/extensions/lib/micro-intelligence/advisory.ts`](../agent/extensions/lib/micro-intelligence/advisory.ts)
+- [`agent/extensions/lib/micro-intelligence/evidence.ts`](../agent/extensions/lib/micro-intelligence/evidence.ts)
+- [`agent/extensions/lib/micro-intelligence/health.ts`](../agent/extensions/lib/micro-intelligence/health.ts)
+- [`agent/extensions/lib/micro-intelligence/intent.ts`](../agent/extensions/lib/micro-intelligence/intent.ts)
+- [`agent/extensions/lib/micro-intelligence/jev-decisions.ts`](../agent/extensions/lib/micro-intelligence/jev-decisions.ts)
+- [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts)
+- [`agent/extensions/lib/micro-intelligence/micro-worker.ts`](../agent/extensions/lib/micro-intelligence/micro-worker.ts)
+- [`agent/extensions/lib/micro-intelligence/model-qual-lab.ts`](../agent/extensions/lib/micro-intelligence/model-qual-lab.ts)
+- [`agent/extensions/lib/micro-intelligence/rerank.ts`](../agent/extensions/lib/micro-intelligence/rerank.ts)
+- [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../agent/extensions/lib/micro-intelligence/retrieval.ts)
+- [`agent/extensions/lib/micro-intelligence/review.ts`](../agent/extensions/lib/micro-intelligence/review.ts)
+- [`agent/extensions/lib/micro-intelligence/route-privacy.ts`](../agent/extensions/lib/micro-intelligence/route-privacy.ts)
+- [`agent/extensions/lib/micro-intelligence/router-shadow.ts`](../agent/extensions/lib/micro-intelligence/router-shadow.ts)
+- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts)
+- [`agent/extensions/lib/micro-intelligence/status.ts`](../agent/extensions/lib/micro-intelligence/status.ts)
+- [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs)
+- [`agent/extensions/lib/project-intelligence/continuity.mjs`](../agent/extensions/lib/project-intelligence/continuity.mjs)
+- [`agent/extensions/lib/project-intelligence/discovery-parsers.mjs`](../agent/extensions/lib/project-intelligence/discovery-parsers.mjs)
+- [`agent/extensions/lib/project-intelligence/discovery.mjs`](../agent/extensions/lib/project-intelligence/discovery.mjs)
+- [`agent/extensions/lib/project-intelligence/heartbeat.mjs`](../agent/extensions/lib/project-intelligence/heartbeat.mjs)
+- [`agent/extensions/lib/project-intelligence/identity.mjs`](../agent/extensions/lib/project-intelligence/identity.mjs)
+- [`agent/extensions/lib/project-intelligence/privacy.mjs`](../agent/extensions/lib/project-intelligence/privacy.mjs)
+- [`agent/extensions/lib/project-intelligence/query.mjs`](../agent/extensions/lib/project-intelligence/query.mjs)
+- [`agent/extensions/lib/project-intelligence/store.mjs`](../agent/extensions/lib/project-intelligence/store.mjs)
+- [`agent/extensions/lib/project-intelligence/viewer-assets/app.js`](../agent/extensions/lib/project-intelligence/viewer-assets/app.js)
+- [`agent/extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js`](../agent/extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js)
+- [`agent/extensions/lib/project-intelligence/viewer-server.mjs`](../agent/extensions/lib/project-intelligence/viewer-server.mjs)
+- [`agent/extensions/lib/project-intelligence/viewer.mjs`](../agent/extensions/lib/project-intelligence/viewer.mjs)
+- [`agent/extensions/lib/project-intelligence/worker.mjs`](../agent/extensions/lib/project-intelligence/worker.mjs)
+- [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs)
+- [`agent/extensions/lib/utility-mcp/contract.mjs`](../agent/extensions/lib/utility-mcp/contract.mjs)
+- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../agent/extensions/lib/utility-mcp/coverage.mjs)
+- [`agent/extensions/lib/utility-mcp/env.mjs`](../agent/extensions/lib/utility-mcp/env.mjs)
+- [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs)
+- [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py)
+- [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../agent/extensions/lib/utility-mcp/local-reference.mjs)
+- [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
+- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../agent/extensions/lib/utility-mcp/openapi.mjs)
+- [`agent/extensions/lib/utility-mcp/package.mjs`](../agent/extensions/lib/utility-mcp/package.mjs)
+- [`agent/extensions/lib/utility-mcp/probe.py`](../agent/extensions/lib/utility-mcp/probe.py)
+- [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs)
+- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../agent/extensions/lib/utility-mcp/shapes.mjs)
+- [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../agent/extensions/lib/utility-mcp/web-assets.mjs)
+- [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs)
+- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../agent/extensions/lib/utility-mcp/workflow.mjs)
+- [`agent/extensions/pi-background-tasks/src/core/completion-wake.ts`](../agent/extensions/pi-background-tasks/src/core/completion-wake.ts)
+- [`agent/extensions/pi-lens/context-code.mjs`](../agent/extensions/pi-lens/context-code.mjs)
+- [`agent/extensions/pi-lens/context-lsp.mjs`](../agent/extensions/pi-lens/context-lsp.mjs)
+- [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts)
+- [`agent/extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs`](../agent/extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs)
+- [`agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs`](../agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs)
+- [`agent/extensions/pi-lens/semantic-radar/rank-features.mjs`](../agent/extensions/pi-lens/semantic-radar/rank-features.mjs)
+- [`agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json`](../agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json)
+- [`agent/extensions/pi-memory/context-evidence.ts`](../agent/extensions/pi-memory/context-evidence.ts)
+- [`agent/extensions/pi-memory/context-salience.ts`](../agent/extensions/pi-memory/context-salience.ts)
+- [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts)
+- [`agent/extensions/pi-memory/mutation.ts`](../agent/extensions/pi-memory/mutation.ts)
+- [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts)
+- [`agent/extensions/pi-memory/project-identity.ts`](../agent/extensions/pi-memory/project-identity.ts)
+- [`agent/extensions/pi-subagents/src/runs/shared/common-task.ts`](../agent/extensions/pi-subagents/src/runs/shared/common-task.ts)
+- [`agent/extensions/pi-subagents/src/runs/shared/file-verification.ts`](../agent/extensions/pi-subagents/src/runs/shared/file-verification.ts)
+- [`agent/extensions/pi-subagents/src/shared/progress-evidence.ts`](../agent/extensions/pi-subagents/src/shared/progress-evidence.ts)
+- [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
+- [`agent/scripts/auto-update.sh`](../agent/scripts/auto-update.sh)
+- [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py)
+- [`agent/scripts/browser-diagnostics.mjs`](../agent/scripts/browser-diagnostics.mjs)
+- [`agent/scripts/browser-markers.mjs`](../agent/scripts/browser-markers.mjs)
+- [`agent/scripts/browser-page-tools.mjs`](../agent/scripts/browser-page-tools.mjs)
+- [`agent/scripts/browser-session-lease.mjs`](../agent/scripts/browser-session-lease.mjs)
+- [`agent/scripts/browser-session-runner.mjs`](../agent/scripts/browser-session-runner.mjs)
+- [`agent/scripts/compatibility/atomic-edit-preflight-test.mjs`](../agent/scripts/compatibility/atomic-edit-preflight-test.mjs)
+- [`agent/scripts/compatibility/automatic-compaction-test.mjs`](../agent/scripts/compatibility/automatic-compaction-test.mjs)
+- [`agent/scripts/compatibility/autonomous-recovery-test.mjs`](../agent/scripts/compatibility/autonomous-recovery-test.mjs)
+- [`agent/scripts/compatibility/harness-load-test.mjs`](../agent/scripts/compatibility/harness-load-test.mjs)
+- [`agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs`](../agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs)
+- [`agent/scripts/compatibility/reasoning-aids-loader-test.mjs`](../agent/scripts/compatibility/reasoning-aids-loader-test.mjs)
+- [`agent/scripts/compatibility/retry-lifecycle-test.mjs`](../agent/scripts/compatibility/retry-lifecycle-test.mjs)
+- [`agent/scripts/compatibility/session-recovery-guidance-test.mjs`](../agent/scripts/compatibility/session-recovery-guidance-test.mjs)
+- [`agent/scripts/compatibility/skill-pack-routing-test.mjs`](../agent/scripts/compatibility/skill-pack-routing-test.mjs)
+- [`agent/scripts/compatibility/summary-recovery-test.mjs`](../agent/scripts/compatibility/summary-recovery-test.mjs)
+- [`agent/scripts/compatibility/tool-integrity-test.mjs`](../agent/scripts/compatibility/tool-integrity-test.mjs)
+- [`agent/scripts/compatibility/utility-mcp-loader-test.mjs`](../agent/scripts/compatibility/utility-mcp-loader-test.mjs)
+- [`agent/scripts/core-update.mjs`](../agent/scripts/core-update.mjs)
+- [`agent/scripts/effort-audit.mjs`](../agent/scripts/effort-audit.mjs)
+- [`agent/scripts/harness-readonly-exec.py`](../agent/scripts/harness-readonly-exec.py)
+- [`agent/scripts/lib/core-compatibility.mjs`](../agent/scripts/lib/core-compatibility.mjs)
+- [`agent/scripts/lib/effort-audit.mjs`](../agent/scripts/lib/effort-audit.mjs)
+- [`agent/scripts/lib/owned-core.mjs`](../agent/scripts/lib/owned-core.mjs)
+- [`agent/scripts/lib/paragraph_selector.py`](../agent/scripts/lib/paragraph_selector.py)
+- [`agent/scripts/mini-preprocessor.py`](../agent/scripts/mini-preprocessor.py)
+- [`agent/scripts/music-soundfont.py`](../agent/scripts/music-soundfont.py)
+- [`agent/scripts/pi-launch.sh`](../agent/scripts/pi-launch.sh)
+- [`agent/scripts/process-owner.sh`](../agent/scripts/process-owner.sh)
+- [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs)
+- [`agent/scripts/render-design-state.mjs`](../agent/scripts/render-design-state.mjs)
+- [`agent/scripts/render-noise-state.mjs`](../agent/scripts/render-noise-state.mjs)
+- [`agent/scripts/render-page-state.mjs`](../agent/scripts/render-page-state.mjs)
+- [`agent/scripts/repair-harness-hardlinks.py`](../agent/scripts/repair-harness-hardlinks.py)
+- [`agent/scripts/sandbox-runner.py`](../agent/scripts/sandbox-runner.py)
+- [`agent/scripts/scene-model.mjs`](../agent/scripts/scene-model.mjs)
+- [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
+- [`agent/scripts/skill-mirrors.mjs`](../agent/scripts/skill-mirrors.mjs)
+- [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
+- [`agent/scripts/transaction.mjs`](../agent/scripts/transaction.mjs)
+- [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs)
+- [`agent/scripts/video-browser.mjs`](../agent/scripts/video-browser.mjs)
+- [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs)
+- [`agent/scripts/wait-condition.mjs`](../agent/scripts/wait-condition.mjs)
+- [`agent/scripts/workspace-facts.mjs`](../agent/scripts/workspace-facts.mjs)
 
 ### Folded markers
 
@@ -2085,176 +2111,176 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 The exporter includes 170 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
-- `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
-- `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
-- `algorithm-design` — [`agent/skills/algorithm-design/SKILL.md`](../../agent/skills/algorithm-design/SKILL.md)
-- `animation-libraries` — [`agent/skills/animation-libraries/SKILL.md`](../../agent/skills/animation-libraries/SKILL.md)
-- `anti-ai-slop` — [`agent/skills/anti-ai-slop/SKILL.md`](../../agent/skills/anti-ai-slop/SKILL.md)
-- `api-design` — [`agent/skills/api-design/SKILL.md`](../../agent/skills/api-design/SKILL.md)
-- `audio-processing` — [`agent/skills/audio-processing/SKILL.md`](../../agent/skills/audio-processing/SKILL.md)
-- `behavioral-contracts` — [`agent/skills/behavioral-contracts/SKILL.md`](../../agent/skills/behavioral-contracts/SKILL.md)
-- `blender-production` — [`agent/skills/blender-production/SKILL.md`](../../agent/skills/blender-production/SKILL.md)
-- `browser-animation-engineering` — [`agent/skills/browser-animation-engineering/SKILL.md`](../../agent/skills/browser-animation-engineering/SKILL.md)
-- `browser-automation` — [`agent/skills/browser-automation/SKILL.md`](../../agent/skills/browser-automation/SKILL.md)
-- `browser-javascript-engineering` — [`agent/skills/browser-javascript-engineering/SKILL.md`](../../agent/skills/browser-javascript-engineering/SKILL.md)
-- `browser-ml` — [`agent/skills/browser-ml/SKILL.md`](../../agent/skills/browser-ml/SKILL.md)
-- `browser-task-recovery` — [`agent/skills/browser-task-recovery/SKILL.md`](../../agent/skills/browser-task-recovery/SKILL.md)
-- `c-cpp-multiplatform` — [`agent/skills/c-cpp-multiplatform/SKILL.md`](../../agent/skills/c-cpp-multiplatform/SKILL.md)
-- `c-systems-engineering` — [`agent/skills/c-systems-engineering/SKILL.md`](../../agent/skills/c-systems-engineering/SKILL.md)
-- `cad-engineering` — [`agent/skills/cad-engineering/SKILL.md`](../../agent/skills/cad-engineering/SKILL.md)
-- `cinematic-pixel-scene` — [`agent/skills/cinematic-pixel-scene/SKILL.md`](../../agent/skills/cinematic-pixel-scene/SKILL.md)
-- `classical-ml-modeling` — [`agent/skills/classical-ml-modeling/SKILL.md`](../../agent/skills/classical-ml-modeling/SKILL.md)
-- `cloudflare-platform-engineering` — [`agent/skills/cloudflare-platform-engineering/SKILL.md`](../../agent/skills/cloudflare-platform-engineering/SKILL.md)
-- `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../../agent/skills/code-first-video/SKILL.md)
-- `coding-practices` — [`agent/skills/coding-practices/SKILL.md`](../../agent/skills/coding-practices/SKILL.md)
-- `color-theory` — [`agent/skills/color-theory/SKILL.md`](../../agent/skills/color-theory/SKILL.md)
-- `colors` — [`agent/skills/colors/SKILL.md`](../../agent/skills/colors/SKILL.md)
-- `community-promotion` — [`agent/skills/community-promotion/SKILL.md`](../../agent/skills/community-promotion/SKILL.md)
-- `compiler-construction` — [`agent/skills/compiler-construction/SKILL.md`](../../agent/skills/compiler-construction/SKILL.md)
-- `component-libraries` — [`agent/skills/component-libraries/SKILL.md`](../../agent/skills/component-libraries/SKILL.md)
-- `concurrency-memory-models` — [`agent/skills/concurrency-memory-models/SKILL.md`](../../agent/skills/concurrency-memory-models/SKILL.md)
-- `copywriting` — [`agent/skills/copywriting/SKILL.md`](../../agent/skills/copywriting/SKILL.md)
-- `cpp-performance-engineering` — [`agent/skills/cpp-performance-engineering/SKILL.md`](../../agent/skills/cpp-performance-engineering/SKILL.md)
-- `css-battle` — [`agent/skills/css-battle/SKILL.md`](../../agent/skills/css-battle/SKILL.md)
-- `custom-svg` — [`agent/skills/custom-svg/SKILL.md`](../../agent/skills/custom-svg/SKILL.md)
-- `data-analysis` — [`agent/skills/data-analysis/SKILL.md`](../../agent/skills/data-analysis/SKILL.md)
-- `data-lineage-validation` — [`agent/skills/data-lineage-validation/SKILL.md`](../../agent/skills/data-lineage-validation/SKILL.md)
-- `data-viz` — [`agent/skills/data-viz/SKILL.md`](../../agent/skills/data-viz/SKILL.md)
-- `databases` — [`agent/skills/databases/SKILL.md`](../../agent/skills/databases/SKILL.md)
-- `debugging` — [`agent/skills/debugging/SKILL.md`](../../agent/skills/debugging/SKILL.md)
-- `design-slop-prevention` — [`agent/skills/design-slop-prevention/SKILL.md`](../../agent/skills/design-slop-prevention/SKILL.md)
-- `design-systems` — [`agent/skills/design-systems/SKILL.md`](../../agent/skills/design-systems/SKILL.md)
-- `desktop-app-dev` — [`agent/skills/desktop-app-dev/SKILL.md`](../../agent/skills/desktop-app-dev/SKILL.md)
-- `desktop-ui` — [`agent/skills/desktop-ui/SKILL.md`](../../agent/skills/desktop-ui/SKILL.md)
-- `distributed-systems` — [`agent/skills/distributed-systems/SKILL.md`](../../agent/skills/distributed-systems/SKILL.md)
-- `dotnet-linux-engineering` — [`agent/skills/dotnet-linux-engineering/SKILL.md`](../../agent/skills/dotnet-linux-engineering/SKILL.md)
-- `edge-model-deployment` — [`agent/skills/edge-model-deployment/SKILL.md`](../../agent/skills/edge-model-deployment/SKILL.md)
-- `email` — [`agent/skills/email/SKILL.md`](../../agent/skills/email/SKILL.md)
-- `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../../agent/skills/embedded-device-engineering/SKILL.md)
-- `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../../agent/skills/evidence-first-engineering/SKILL.md)
-- `file-organization` — [`agent/skills/file-organization/SKILL.md`](../../agent/skills/file-organization/SKILL.md)
-- `financial-modeling` — [`agent/skills/financial-modeling/SKILL.md`](../../agent/skills/financial-modeling/SKILL.md)
-- `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../../agent/skills/financial-statement-analysis/SKILL.md)
-- `fonts` — [`agent/skills/fonts/SKILL.md`](../../agent/skills/fonts/SKILL.md)
-- `formal-model-checking` — [`agent/skills/formal-model-checking/SKILL.md`](../../agent/skills/formal-model-checking/SKILL.md)
-- `fortran-scientific-computing` — [`agent/skills/fortran-scientific-computing/SKILL.md`](../../agent/skills/fortran-scientific-computing/SKILL.md)
-- `frontend-design` — [`agent/skills/frontend-design/SKILL.md`](../../agent/skills/frontend-design/SKILL.md)
-- `frontend-js` — [`agent/skills/frontend-js/SKILL.md`](../../agent/skills/frontend-js/SKILL.md)
-- `gaussian-splatting` — [`agent/skills/gaussian-splatting/SKILL.md`](../../agent/skills/gaussian-splatting/SKILL.md)
-- `gif-animation-editing` — [`agent/skills/gif-animation-editing/SKILL.md`](../../agent/skills/gif-animation-editing/SKILL.md)
-- `git-github` — [`agent/skills/git-github/SKILL.md`](../../agent/skills/git-github/SKILL.md)
-- `github-actions-workflows` — [`agent/skills/github-actions-workflows/SKILL.md`](../../agent/skills/github-actions-workflows/SKILL.md)
-- `github-identity-integration` — [`agent/skills/github-identity-integration/SKILL.md`](../../agent/skills/github-identity-integration/SKILL.md)
-- `github-readme-authoring` — [`agent/skills/github-readme-authoring/SKILL.md`](../../agent/skills/github-readme-authoring/SKILL.md)
-- `github-release-notes` — [`agent/skills/github-release-notes/SKILL.md`](../../agent/skills/github-release-notes/SKILL.md)
-- `github-repo-presentation` — [`agent/skills/github-repo-presentation/SKILL.md`](../../agent/skills/github-repo-presentation/SKILL.md)
-- `go-service-engineering` — [`agent/skills/go-service-engineering/SKILL.md`](../../agent/skills/go-service-engineering/SKILL.md)
-- `google-colab-training` — [`agent/skills/google-colab-training/SKILL.md`](../../agent/skills/google-colab-training/SKILL.md)
-- `google-identity-integration` — [`agent/skills/google-identity-integration/SKILL.md`](../../agent/skills/google-identity-integration/SKILL.md)
-- `harness-self-maintenance` — [`agent/skills/harness-self-maintenance/SKILL.md`](../../agent/skills/harness-self-maintenance/SKILL.md)
-- `hybrid-ml-systems` — [`agent/skills/hybrid-ml-systems/SKILL.md`](../../agent/skills/hybrid-ml-systems/SKILL.md)
-- `image-analysis` — [`agent/skills/image-analysis/SKILL.md`](../../agent/skills/image-analysis/SKILL.md)
-- `incremental-computation` — [`agent/skills/incremental-computation/SKILL.md`](../../agent/skills/incremental-computation/SKILL.md)
-- `industrial-automation-control` — [`agent/skills/industrial-automation-control/SKILL.md`](../../agent/skills/industrial-automation-control/SKILL.md)
-- `industrial-device-protocols` — [`agent/skills/industrial-device-protocols/SKILL.md`](../../agent/skills/industrial-device-protocols/SKILL.md)
-- `inference-serving` — [`agent/skills/inference-serving/SKILL.md`](../../agent/skills/inference-serving/SKILL.md)
-- `investment-risk-analysis` — [`agent/skills/investment-risk-analysis/SKILL.md`](../../agent/skills/investment-risk-analysis/SKILL.md)
-- `java-cross-platform` — [`agent/skills/java-cross-platform/SKILL.md`](../../agent/skills/java-cross-platform/SKILL.md)
-- `java-platform-engineering` — [`agent/skills/java-platform-engineering/SKILL.md`](../../agent/skills/java-platform-engineering/SKILL.md)
-- `key-visual-art-direction` — [`agent/skills/key-visual-art-direction/SKILL.md`](../../agent/skills/key-visual-art-direction/SKILL.md)
-- `libreoffice-automation` — [`agent/skills/libreoffice-automation/SKILL.md`](../../agent/skills/libreoffice-automation/SKILL.md)
-- `linux` — [`agent/skills/linux/SKILL.md`](../../agent/skills/linux/SKILL.md)
-- `linux-desktop-ui-ux` — [`agent/skills/linux-desktop-ui-ux/SKILL.md`](../../agent/skills/linux-desktop-ui-ux/SKILL.md)
-- `linux-host-defense` — [`agent/skills/linux-host-defense/SKILL.md`](../../agent/skills/linux-host-defense/SKILL.md)
-- `linux-network-engineering` — [`agent/skills/linux-network-engineering/SKILL.md`](../../agent/skills/linux-network-engineering/SKILL.md)
-- `llm-dataset-preparation` — [`agent/skills/llm-dataset-preparation/SKILL.md`](../../agent/skills/llm-dataset-preparation/SKILL.md)
-- `llm-fine-tuning` — [`agent/skills/llm-fine-tuning/SKILL.md`](../../agent/skills/llm-fine-tuning/SKILL.md)
-- `llm-systems-engineering` — [`agent/skills/llm-systems-engineering/SKILL.md`](../../agent/skills/llm-systems-engineering/SKILL.md)
-- `local-network-analysis` — [`agent/skills/local-network-analysis/SKILL.md`](../../agent/skills/local-network-analysis/SKILL.md)
-- `media-in-web` — [`agent/skills/media-in-web/SKILL.md`](../../agent/skills/media-in-web/SKILL.md)
-- `memory-resource-ownership` — [`agent/skills/memory-resource-ownership/SKILL.md`](../../agent/skills/memory-resource-ownership/SKILL.md)
-- `ml-engineering` — [`agent/skills/ml-engineering/SKILL.md`](../../agent/skills/ml-engineering/SKILL.md)
-- `mockup-to-code` — [`agent/skills/mockup-to-code/SKILL.md`](../../agent/skills/mockup-to-code/SKILL.md)
-- `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../../agent/skills/model-evaluation/SKILL.md)
-- `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../../agent/skills/modern-frontend-frameworks/SKILL.md)
-- `motion` — [`agent/skills/motion/SKILL.md`](../../agent/skills/motion/SKILL.md)
-- `motion-approaches` — [`agent/skills/motion-approaches/SKILL.md`](../../agent/skills/motion-approaches/SKILL.md)
-- `motion-graphics-production` — [`agent/skills/motion-graphics-production/SKILL.md`](../../agent/skills/motion-graphics-production/SKILL.md)
-- `multi-developer-pipelines` — [`agent/skills/multi-developer-pipelines/SKILL.md`](../../agent/skills/multi-developer-pipelines/SKILL.md)
-- `music-composition` — [`agent/skills/music-composition/SKILL.md`](../../agent/skills/music-composition/SKILL.md)
-- `natural-editorial-writing` — [`agent/skills/natural-editorial-writing/SKILL.md`](../../agent/skills/natural-editorial-writing/SKILL.md)
-- `network-iso-compliance` — [`agent/skills/network-iso-compliance/SKILL.md`](../../agent/skills/network-iso-compliance/SKILL.md)
-- `network-traffic-analysis` — [`agent/skills/network-traffic-analysis/SKILL.md`](../../agent/skills/network-traffic-analysis/SKILL.md)
-- `nlp-system-design` — [`agent/skills/nlp-system-design/SKILL.md`](../../agent/skills/nlp-system-design/SKILL.md)
-- `node-runtime-engineering` — [`agent/skills/node-runtime-engineering/SKILL.md`](../../agent/skills/node-runtime-engineering/SKILL.md)
-- `numerical-computing` — [`agent/skills/numerical-computing/SKILL.md`](../../agent/skills/numerical-computing/SKILL.md)
-- `optimization-modeling` — [`agent/skills/optimization-modeling/SKILL.md`](../../agent/skills/optimization-modeling/SKILL.md)
-- `organic-growth-engineering` — [`agent/skills/organic-growth-engineering/SKILL.md`](../../agent/skills/organic-growth-engineering/SKILL.md)
-- `packet-trace-analysis` — [`agent/skills/packet-trace-analysis/SKILL.md`](../../agent/skills/packet-trace-analysis/SKILL.md)
-- `performance-experiments` — [`agent/skills/performance-experiments/SKILL.md`](../../agent/skills/performance-experiments/SKILL.md)
-- `php-application-engineering` — [`agent/skills/php-application-engineering/SKILL.md`](../../agent/skills/php-application-engineering/SKILL.md)
-- `physical-animation-systems` — [`agent/skills/physical-animation-systems/SKILL.md`](../../agent/skills/physical-animation-systems/SKILL.md)
-- `physics-modeling` — [`agent/skills/physics-modeling/SKILL.md`](../../agent/skills/physics-modeling/SKILL.md)
-- `ponytail` — [`agent/skills/ponytail/SKILL.md`](../../agent/skills/ponytail/SKILL.md)
-- `presentation-authoring` — [`agent/skills/presentation-authoring/SKILL.md`](../../agent/skills/presentation-authoring/SKILL.md)
-- `prior-art-scouting` — [`agent/skills/prior-art-scouting/SKILL.md`](../../agent/skills/prior-art-scouting/SKILL.md)
-- `procedural-animation-math` — [`agent/skills/procedural-animation-math/SKILL.md`](../../agent/skills/procedural-animation-math/SKILL.md)
-- `procedural-audio` — [`agent/skills/procedural-audio/SKILL.md`](../../agent/skills/procedural-audio/SKILL.md)
-- `product-ui-verification` — [`agent/skills/product-ui-verification/SKILL.md`](../../agent/skills/product-ui-verification/SKILL.md)
-- `property-based-testing` — [`agent/skills/property-based-testing/SKILL.md`](../../agent/skills/property-based-testing/SKILL.md)
-- `proxy-analysis` — [`agent/skills/proxy-analysis/SKILL.md`](../../agent/skills/proxy-analysis/SKILL.md)
-- `proxy-operations` — [`agent/skills/proxy-operations/SKILL.md`](../../agent/skills/proxy-operations/SKILL.md)
-- `python-software-engineering` — [`agent/skills/python-software-engineering/SKILL.md`](../../agent/skills/python-software-engineering/SKILL.md)
-- `rag-engineering` — [`agent/skills/rag-engineering/SKILL.md`](../../agent/skills/rag-engineering/SKILL.md)
-- `reinforcement-learning` — [`agent/skills/reinforcement-learning/SKILL.md`](../../agent/skills/reinforcement-learning/SKILL.md)
-- `remotion-video` — [`agent/skills/remotion-video/SKILL.md`](../../agent/skills/remotion-video/SKILL.md)
-- `research` — [`agent/skills/research/SKILL.md`](../../agent/skills/research/SKILL.md)
-- `resourceful-market-strategy` — [`agent/skills/resourceful-market-strategy/SKILL.md`](../../agent/skills/resourceful-market-strategy/SKILL.md)
-- `rl-decision-systems` — [`agent/skills/rl-decision-systems/SKILL.md`](../../agent/skills/rl-decision-systems/SKILL.md)
-- `rust-systems-engineering` — [`agent/skills/rust-systems-engineering/SKILL.md`](../../agent/skills/rust-systems-engineering/SKILL.md)
-- `scientific-paper-research` — [`agent/skills/scientific-paper-research/SKILL.md`](../../agent/skills/scientific-paper-research/SKILL.md)
-- `scroll-animated-websites` — [`agent/skills/scroll-animated-websites/SKILL.md`](../../agent/skills/scroll-animated-websites/SKILL.md)
-- `search-discoverability` — [`agent/skills/search-discoverability/SKILL.md`](../../agent/skills/search-discoverability/SKILL.md)
-- `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../../agent/skills/signature-experience/SKILL.md)
-- `simulation-engineering` — [`agent/skills/simulation-engineering/SKILL.md`](../../agent/skills/simulation-engineering/SKILL.md)
-- `small-model-engineering` — [`agent/skills/small-model-engineering/SKILL.md`](../../agent/skills/small-model-engineering/SKILL.md)
-- `software-engineering-wisdom` — [`agent/skills/software-engineering-wisdom/SKILL.md`](../../agent/skills/software-engineering-wisdom/SKILL.md)
-- `sound-analysis` — [`agent/skills/sound-analysis/SKILL.md`](../../agent/skills/sound-analysis/SKILL.md)
-- `spreadsheet-authoring` — [`agent/skills/spreadsheet-authoring/SKILL.md`](../../agent/skills/spreadsheet-authoring/SKILL.md)
-- `sql-query-engineering` — [`agent/skills/sql-query-engineering/SKILL.md`](../../agent/skills/sql-query-engineering/SKILL.md)
-- `statistical-experiments` — [`agent/skills/statistical-experiments/SKILL.md`](../../agent/skills/statistical-experiments/SKILL.md)
-- `storytelling` — [`agent/skills/storytelling/SKILL.md`](../../agent/skills/storytelling/SKILL.md)
-- `svg-assessment` — [`agent/skills/svg-assessment/SKILL.md`](../../agent/skills/svg-assessment/SKILL.md)
-- `svg-motion-engineering` — [`agent/skills/svg-motion-engineering/SKILL.md`](../../agent/skills/svg-motion-engineering/SKILL.md)
-- `systems-security` — [`agent/skills/systems-security/SKILL.md`](../../agent/skills/systems-security/SKILL.md)
-- `terminal-video-editing` — [`agent/skills/terminal-video-editing/SKILL.md`](../../agent/skills/terminal-video-editing/SKILL.md)
-- `threejs` — [`agent/skills/threejs/SKILL.md`](../../agent/skills/threejs/SKILL.md)
-- `threejs-animation-engineering` — [`agent/skills/threejs-animation-engineering/SKILL.md`](../../agent/skills/threejs-animation-engineering/SKILL.md)
-- `type-driven-design` — [`agent/skills/type-driven-design/SKILL.md`](../../agent/skills/type-driven-design/SKILL.md)
-- `typescript-contract-engineering` — [`agent/skills/typescript-contract-engineering/SKILL.md`](../../agent/skills/typescript-contract-engineering/SKILL.md)
-- `ubuntu-operations` — [`agent/skills/ubuntu-operations/SKILL.md`](../../agent/skills/ubuntu-operations/SKILL.md)
-- `ui-antipattern-review` — [`agent/skills/ui-antipattern-review/SKILL.md`](../../agent/skills/ui-antipattern-review/SKILL.md)
-- `ui-ux-principles` — [`agent/skills/ui-ux-principles/SKILL.md`](../../agent/skills/ui-ux-principles/SKILL.md)
-- `vanilla-web-libs` — [`agent/skills/vanilla-web-libs/SKILL.md`](../../agent/skills/vanilla-web-libs/SKILL.md)
-- `video-analysis` — [`agent/skills/video-analysis/SKILL.md`](../../agent/skills/video-analysis/SKILL.md)
-- `visual-composition` — [`agent/skills/visual-composition/SKILL.md`](../../agent/skills/visual-composition/SKILL.md)
-- `wasm-animation-pipelines` — [`agent/skills/wasm-animation-pipelines/SKILL.md`](../../agent/skills/wasm-animation-pipelines/SKILL.md)
-- `wasm-browsers` — [`agent/skills/wasm-browsers/SKILL.md`](../../agent/skills/wasm-browsers/SKILL.md)
-- `wasm-c-cpp` — [`agent/skills/wasm-c-cpp/SKILL.md`](../../agent/skills/wasm-c-cpp/SKILL.md)
-- `wasm-python` — [`agent/skills/wasm-python/SKILL.md`](../../agent/skills/wasm-python/SKILL.md)
-- `wasm-runtime-engineering` — [`agent/skills/wasm-runtime-engineering/SKILL.md`](../../agent/skills/wasm-runtime-engineering/SKILL.md)
-- `wasm-rust` — [`agent/skills/wasm-rust/SKILL.md`](../../agent/skills/wasm-rust/SKILL.md)
-- `web-component-patterns` — [`agent/skills/web-component-patterns/SKILL.md`](../../agent/skills/web-component-patterns/SKILL.md)
-- `web-effects` — [`agent/skills/web-effects/SKILL.md`](../../agent/skills/web-effects/SKILL.md)
-- `web-patterns` — [`agent/skills/web-patterns/SKILL.md`](../../agent/skills/web-patterns/SKILL.md)
-- `web-performance` — [`agent/skills/web-performance/SKILL.md`](../../agent/skills/web-performance/SKILL.md)
-- `web-security` — [`agent/skills/web-security/SKILL.md`](../../agent/skills/web-security/SKILL.md)
-- `web-ui-stack-selection` — [`agent/skills/web-ui-stack-selection/SKILL.md`](../../agent/skills/web-ui-stack-selection/SKILL.md)
-- `windows-on-linux-engineering` — [`agent/skills/windows-on-linux-engineering/SKILL.md`](../../agent/skills/windows-on-linux-engineering/SKILL.md)
-- `winecharm` — [`agent/skills/winecharm/SKILL.md`](../../agent/skills/winecharm/SKILL.md)
-- `wireless-signal-analysis` — [`agent/skills/wireless-signal-analysis/SKILL.md`](../../agent/skills/wireless-signal-analysis/SKILL.md)
-- `word-document-authoring` — [`agent/skills/word-document-authoring/SKILL.md`](../../agent/skills/word-document-authoring/SKILL.md)
-- `x86-assembly-engineering` — [`agent/skills/x86-assembly-engineering/SKILL.md`](../../agent/skills/x86-assembly-engineering/SKILL.md)
+- `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
+- `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
+- `algorithm-design` — [`agent/skills/algorithm-design/SKILL.md`](../agent/skills/algorithm-design/SKILL.md)
+- `animation-libraries` — [`agent/skills/animation-libraries/SKILL.md`](../agent/skills/animation-libraries/SKILL.md)
+- `anti-ai-slop` — [`agent/skills/anti-ai-slop/SKILL.md`](../agent/skills/anti-ai-slop/SKILL.md)
+- `api-design` — [`agent/skills/api-design/SKILL.md`](../agent/skills/api-design/SKILL.md)
+- `audio-processing` — [`agent/skills/audio-processing/SKILL.md`](../agent/skills/audio-processing/SKILL.md)
+- `behavioral-contracts` — [`agent/skills/behavioral-contracts/SKILL.md`](../agent/skills/behavioral-contracts/SKILL.md)
+- `blender-production` — [`agent/skills/blender-production/SKILL.md`](../agent/skills/blender-production/SKILL.md)
+- `browser-animation-engineering` — [`agent/skills/browser-animation-engineering/SKILL.md`](../agent/skills/browser-animation-engineering/SKILL.md)
+- `browser-automation` — [`agent/skills/browser-automation/SKILL.md`](../agent/skills/browser-automation/SKILL.md)
+- `browser-javascript-engineering` — [`agent/skills/browser-javascript-engineering/SKILL.md`](../agent/skills/browser-javascript-engineering/SKILL.md)
+- `browser-ml` — [`agent/skills/browser-ml/SKILL.md`](../agent/skills/browser-ml/SKILL.md)
+- `browser-task-recovery` — [`agent/skills/browser-task-recovery/SKILL.md`](../agent/skills/browser-task-recovery/SKILL.md)
+- `c-cpp-multiplatform` — [`agent/skills/c-cpp-multiplatform/SKILL.md`](../agent/skills/c-cpp-multiplatform/SKILL.md)
+- `c-systems-engineering` — [`agent/skills/c-systems-engineering/SKILL.md`](../agent/skills/c-systems-engineering/SKILL.md)
+- `cad-engineering` — [`agent/skills/cad-engineering/SKILL.md`](../agent/skills/cad-engineering/SKILL.md)
+- `cinematic-pixel-scene` — [`agent/skills/cinematic-pixel-scene/SKILL.md`](../agent/skills/cinematic-pixel-scene/SKILL.md)
+- `classical-ml-modeling` — [`agent/skills/classical-ml-modeling/SKILL.md`](../agent/skills/classical-ml-modeling/SKILL.md)
+- `cloudflare-platform-engineering` — [`agent/skills/cloudflare-platform-engineering/SKILL.md`](../agent/skills/cloudflare-platform-engineering/SKILL.md)
+- `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../agent/skills/code-first-video/SKILL.md)
+- `coding-practices` — [`agent/skills/coding-practices/SKILL.md`](../agent/skills/coding-practices/SKILL.md)
+- `color-theory` — [`agent/skills/color-theory/SKILL.md`](../agent/skills/color-theory/SKILL.md)
+- `colors` — [`agent/skills/colors/SKILL.md`](../agent/skills/colors/SKILL.md)
+- `community-promotion` — [`agent/skills/community-promotion/SKILL.md`](../agent/skills/community-promotion/SKILL.md)
+- `compiler-construction` — [`agent/skills/compiler-construction/SKILL.md`](../agent/skills/compiler-construction/SKILL.md)
+- `component-libraries` — [`agent/skills/component-libraries/SKILL.md`](../agent/skills/component-libraries/SKILL.md)
+- `concurrency-memory-models` — [`agent/skills/concurrency-memory-models/SKILL.md`](../agent/skills/concurrency-memory-models/SKILL.md)
+- `copywriting` — [`agent/skills/copywriting/SKILL.md`](../agent/skills/copywriting/SKILL.md)
+- `cpp-performance-engineering` — [`agent/skills/cpp-performance-engineering/SKILL.md`](../agent/skills/cpp-performance-engineering/SKILL.md)
+- `css-battle` — [`agent/skills/css-battle/SKILL.md`](../agent/skills/css-battle/SKILL.md)
+- `custom-svg` — [`agent/skills/custom-svg/SKILL.md`](../agent/skills/custom-svg/SKILL.md)
+- `data-analysis` — [`agent/skills/data-analysis/SKILL.md`](../agent/skills/data-analysis/SKILL.md)
+- `data-lineage-validation` — [`agent/skills/data-lineage-validation/SKILL.md`](../agent/skills/data-lineage-validation/SKILL.md)
+- `data-viz` — [`agent/skills/data-viz/SKILL.md`](../agent/skills/data-viz/SKILL.md)
+- `databases` — [`agent/skills/databases/SKILL.md`](../agent/skills/databases/SKILL.md)
+- `debugging` — [`agent/skills/debugging/SKILL.md`](../agent/skills/debugging/SKILL.md)
+- `design-slop-prevention` — [`agent/skills/design-slop-prevention/SKILL.md`](../agent/skills/design-slop-prevention/SKILL.md)
+- `design-systems` — [`agent/skills/design-systems/SKILL.md`](../agent/skills/design-systems/SKILL.md)
+- `desktop-app-dev` — [`agent/skills/desktop-app-dev/SKILL.md`](../agent/skills/desktop-app-dev/SKILL.md)
+- `desktop-ui` — [`agent/skills/desktop-ui/SKILL.md`](../agent/skills/desktop-ui/SKILL.md)
+- `distributed-systems` — [`agent/skills/distributed-systems/SKILL.md`](../agent/skills/distributed-systems/SKILL.md)
+- `dotnet-linux-engineering` — [`agent/skills/dotnet-linux-engineering/SKILL.md`](../agent/skills/dotnet-linux-engineering/SKILL.md)
+- `edge-model-deployment` — [`agent/skills/edge-model-deployment/SKILL.md`](../agent/skills/edge-model-deployment/SKILL.md)
+- `email` — [`agent/skills/email/SKILL.md`](../agent/skills/email/SKILL.md)
+- `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../agent/skills/embedded-device-engineering/SKILL.md)
+- `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../agent/skills/evidence-first-engineering/SKILL.md)
+- `file-organization` — [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
+- `financial-modeling` — [`agent/skills/financial-modeling/SKILL.md`](../agent/skills/financial-modeling/SKILL.md)
+- `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../agent/skills/financial-statement-analysis/SKILL.md)
+- `fonts` — [`agent/skills/fonts/SKILL.md`](../agent/skills/fonts/SKILL.md)
+- `formal-model-checking` — [`agent/skills/formal-model-checking/SKILL.md`](../agent/skills/formal-model-checking/SKILL.md)
+- `fortran-scientific-computing` — [`agent/skills/fortran-scientific-computing/SKILL.md`](../agent/skills/fortran-scientific-computing/SKILL.md)
+- `frontend-design` — [`agent/skills/frontend-design/SKILL.md`](../agent/skills/frontend-design/SKILL.md)
+- `frontend-js` — [`agent/skills/frontend-js/SKILL.md`](../agent/skills/frontend-js/SKILL.md)
+- `gaussian-splatting` — [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
+- `gif-animation-editing` — [`agent/skills/gif-animation-editing/SKILL.md`](../agent/skills/gif-animation-editing/SKILL.md)
+- `git-github` — [`agent/skills/git-github/SKILL.md`](../agent/skills/git-github/SKILL.md)
+- `github-actions-workflows` — [`agent/skills/github-actions-workflows/SKILL.md`](../agent/skills/github-actions-workflows/SKILL.md)
+- `github-identity-integration` — [`agent/skills/github-identity-integration/SKILL.md`](../agent/skills/github-identity-integration/SKILL.md)
+- `github-readme-authoring` — [`agent/skills/github-readme-authoring/SKILL.md`](../agent/skills/github-readme-authoring/SKILL.md)
+- `github-release-notes` — [`agent/skills/github-release-notes/SKILL.md`](../agent/skills/github-release-notes/SKILL.md)
+- `github-repo-presentation` — [`agent/skills/github-repo-presentation/SKILL.md`](../agent/skills/github-repo-presentation/SKILL.md)
+- `go-service-engineering` — [`agent/skills/go-service-engineering/SKILL.md`](../agent/skills/go-service-engineering/SKILL.md)
+- `google-colab-training` — [`agent/skills/google-colab-training/SKILL.md`](../agent/skills/google-colab-training/SKILL.md)
+- `google-identity-integration` — [`agent/skills/google-identity-integration/SKILL.md`](../agent/skills/google-identity-integration/SKILL.md)
+- `harness-self-maintenance` — [`agent/skills/harness-self-maintenance/SKILL.md`](../agent/skills/harness-self-maintenance/SKILL.md)
+- `hybrid-ml-systems` — [`agent/skills/hybrid-ml-systems/SKILL.md`](../agent/skills/hybrid-ml-systems/SKILL.md)
+- `image-analysis` — [`agent/skills/image-analysis/SKILL.md`](../agent/skills/image-analysis/SKILL.md)
+- `incremental-computation` — [`agent/skills/incremental-computation/SKILL.md`](../agent/skills/incremental-computation/SKILL.md)
+- `industrial-automation-control` — [`agent/skills/industrial-automation-control/SKILL.md`](../agent/skills/industrial-automation-control/SKILL.md)
+- `industrial-device-protocols` — [`agent/skills/industrial-device-protocols/SKILL.md`](../agent/skills/industrial-device-protocols/SKILL.md)
+- `inference-serving` — [`agent/skills/inference-serving/SKILL.md`](../agent/skills/inference-serving/SKILL.md)
+- `investment-risk-analysis` — [`agent/skills/investment-risk-analysis/SKILL.md`](../agent/skills/investment-risk-analysis/SKILL.md)
+- `java-cross-platform` — [`agent/skills/java-cross-platform/SKILL.md`](../agent/skills/java-cross-platform/SKILL.md)
+- `java-platform-engineering` — [`agent/skills/java-platform-engineering/SKILL.md`](../agent/skills/java-platform-engineering/SKILL.md)
+- `key-visual-art-direction` — [`agent/skills/key-visual-art-direction/SKILL.md`](../agent/skills/key-visual-art-direction/SKILL.md)
+- `libreoffice-automation` — [`agent/skills/libreoffice-automation/SKILL.md`](../agent/skills/libreoffice-automation/SKILL.md)
+- `linux` — [`agent/skills/linux/SKILL.md`](../agent/skills/linux/SKILL.md)
+- `linux-desktop-ui-ux` — [`agent/skills/linux-desktop-ui-ux/SKILL.md`](../agent/skills/linux-desktop-ui-ux/SKILL.md)
+- `linux-host-defense` — [`agent/skills/linux-host-defense/SKILL.md`](../agent/skills/linux-host-defense/SKILL.md)
+- `linux-network-engineering` — [`agent/skills/linux-network-engineering/SKILL.md`](../agent/skills/linux-network-engineering/SKILL.md)
+- `llm-dataset-preparation` — [`agent/skills/llm-dataset-preparation/SKILL.md`](../agent/skills/llm-dataset-preparation/SKILL.md)
+- `llm-fine-tuning` — [`agent/skills/llm-fine-tuning/SKILL.md`](../agent/skills/llm-fine-tuning/SKILL.md)
+- `llm-systems-engineering` — [`agent/skills/llm-systems-engineering/SKILL.md`](../agent/skills/llm-systems-engineering/SKILL.md)
+- `local-network-analysis` — [`agent/skills/local-network-analysis/SKILL.md`](../agent/skills/local-network-analysis/SKILL.md)
+- `media-in-web` — [`agent/skills/media-in-web/SKILL.md`](../agent/skills/media-in-web/SKILL.md)
+- `memory-resource-ownership` — [`agent/skills/memory-resource-ownership/SKILL.md`](../agent/skills/memory-resource-ownership/SKILL.md)
+- `ml-engineering` — [`agent/skills/ml-engineering/SKILL.md`](../agent/skills/ml-engineering/SKILL.md)
+- `mockup-to-code` — [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
+- `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../agent/skills/model-evaluation/SKILL.md)
+- `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../agent/skills/modern-frontend-frameworks/SKILL.md)
+- `motion` — [`agent/skills/motion/SKILL.md`](../agent/skills/motion/SKILL.md)
+- `motion-approaches` — [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
+- `motion-graphics-production` — [`agent/skills/motion-graphics-production/SKILL.md`](../agent/skills/motion-graphics-production/SKILL.md)
+- `multi-developer-pipelines` — [`agent/skills/multi-developer-pipelines/SKILL.md`](../agent/skills/multi-developer-pipelines/SKILL.md)
+- `music-composition` — [`agent/skills/music-composition/SKILL.md`](../agent/skills/music-composition/SKILL.md)
+- `natural-editorial-writing` — [`agent/skills/natural-editorial-writing/SKILL.md`](../agent/skills/natural-editorial-writing/SKILL.md)
+- `network-iso-compliance` — [`agent/skills/network-iso-compliance/SKILL.md`](../agent/skills/network-iso-compliance/SKILL.md)
+- `network-traffic-analysis` — [`agent/skills/network-traffic-analysis/SKILL.md`](../agent/skills/network-traffic-analysis/SKILL.md)
+- `nlp-system-design` — [`agent/skills/nlp-system-design/SKILL.md`](../agent/skills/nlp-system-design/SKILL.md)
+- `node-runtime-engineering` — [`agent/skills/node-runtime-engineering/SKILL.md`](../agent/skills/node-runtime-engineering/SKILL.md)
+- `numerical-computing` — [`agent/skills/numerical-computing/SKILL.md`](../agent/skills/numerical-computing/SKILL.md)
+- `optimization-modeling` — [`agent/skills/optimization-modeling/SKILL.md`](../agent/skills/optimization-modeling/SKILL.md)
+- `organic-growth-engineering` — [`agent/skills/organic-growth-engineering/SKILL.md`](../agent/skills/organic-growth-engineering/SKILL.md)
+- `packet-trace-analysis` — [`agent/skills/packet-trace-analysis/SKILL.md`](../agent/skills/packet-trace-analysis/SKILL.md)
+- `performance-experiments` — [`agent/skills/performance-experiments/SKILL.md`](../agent/skills/performance-experiments/SKILL.md)
+- `php-application-engineering` — [`agent/skills/php-application-engineering/SKILL.md`](../agent/skills/php-application-engineering/SKILL.md)
+- `physical-animation-systems` — [`agent/skills/physical-animation-systems/SKILL.md`](../agent/skills/physical-animation-systems/SKILL.md)
+- `physics-modeling` — [`agent/skills/physics-modeling/SKILL.md`](../agent/skills/physics-modeling/SKILL.md)
+- `ponytail` — [`agent/skills/ponytail/SKILL.md`](../agent/skills/ponytail/SKILL.md)
+- `presentation-authoring` — [`agent/skills/presentation-authoring/SKILL.md`](../agent/skills/presentation-authoring/SKILL.md)
+- `prior-art-scouting` — [`agent/skills/prior-art-scouting/SKILL.md`](../agent/skills/prior-art-scouting/SKILL.md)
+- `procedural-animation-math` — [`agent/skills/procedural-animation-math/SKILL.md`](../agent/skills/procedural-animation-math/SKILL.md)
+- `procedural-audio` — [`agent/skills/procedural-audio/SKILL.md`](../agent/skills/procedural-audio/SKILL.md)
+- `product-ui-verification` — [`agent/skills/product-ui-verification/SKILL.md`](../agent/skills/product-ui-verification/SKILL.md)
+- `property-based-testing` — [`agent/skills/property-based-testing/SKILL.md`](../agent/skills/property-based-testing/SKILL.md)
+- `proxy-analysis` — [`agent/skills/proxy-analysis/SKILL.md`](../agent/skills/proxy-analysis/SKILL.md)
+- `proxy-operations` — [`agent/skills/proxy-operations/SKILL.md`](../agent/skills/proxy-operations/SKILL.md)
+- `python-software-engineering` — [`agent/skills/python-software-engineering/SKILL.md`](../agent/skills/python-software-engineering/SKILL.md)
+- `rag-engineering` — [`agent/skills/rag-engineering/SKILL.md`](../agent/skills/rag-engineering/SKILL.md)
+- `reinforcement-learning` — [`agent/skills/reinforcement-learning/SKILL.md`](../agent/skills/reinforcement-learning/SKILL.md)
+- `remotion-video` — [`agent/skills/remotion-video/SKILL.md`](../agent/skills/remotion-video/SKILL.md)
+- `research` — [`agent/skills/research/SKILL.md`](../agent/skills/research/SKILL.md)
+- `resourceful-market-strategy` — [`agent/skills/resourceful-market-strategy/SKILL.md`](../agent/skills/resourceful-market-strategy/SKILL.md)
+- `rl-decision-systems` — [`agent/skills/rl-decision-systems/SKILL.md`](../agent/skills/rl-decision-systems/SKILL.md)
+- `rust-systems-engineering` — [`agent/skills/rust-systems-engineering/SKILL.md`](../agent/skills/rust-systems-engineering/SKILL.md)
+- `scientific-paper-research` — [`agent/skills/scientific-paper-research/SKILL.md`](../agent/skills/scientific-paper-research/SKILL.md)
+- `scroll-animated-websites` — [`agent/skills/scroll-animated-websites/SKILL.md`](../agent/skills/scroll-animated-websites/SKILL.md)
+- `search-discoverability` — [`agent/skills/search-discoverability/SKILL.md`](../agent/skills/search-discoverability/SKILL.md)
+- `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../agent/skills/signature-experience/SKILL.md)
+- `simulation-engineering` — [`agent/skills/simulation-engineering/SKILL.md`](../agent/skills/simulation-engineering/SKILL.md)
+- `small-model-engineering` — [`agent/skills/small-model-engineering/SKILL.md`](../agent/skills/small-model-engineering/SKILL.md)
+- `software-engineering-wisdom` — [`agent/skills/software-engineering-wisdom/SKILL.md`](../agent/skills/software-engineering-wisdom/SKILL.md)
+- `sound-analysis` — [`agent/skills/sound-analysis/SKILL.md`](../agent/skills/sound-analysis/SKILL.md)
+- `spreadsheet-authoring` — [`agent/skills/spreadsheet-authoring/SKILL.md`](../agent/skills/spreadsheet-authoring/SKILL.md)
+- `sql-query-engineering` — [`agent/skills/sql-query-engineering/SKILL.md`](../agent/skills/sql-query-engineering/SKILL.md)
+- `statistical-experiments` — [`agent/skills/statistical-experiments/SKILL.md`](../agent/skills/statistical-experiments/SKILL.md)
+- `storytelling` — [`agent/skills/storytelling/SKILL.md`](../agent/skills/storytelling/SKILL.md)
+- `svg-assessment` — [`agent/skills/svg-assessment/SKILL.md`](../agent/skills/svg-assessment/SKILL.md)
+- `svg-motion-engineering` — [`agent/skills/svg-motion-engineering/SKILL.md`](../agent/skills/svg-motion-engineering/SKILL.md)
+- `systems-security` — [`agent/skills/systems-security/SKILL.md`](../agent/skills/systems-security/SKILL.md)
+- `terminal-video-editing` — [`agent/skills/terminal-video-editing/SKILL.md`](../agent/skills/terminal-video-editing/SKILL.md)
+- `threejs` — [`agent/skills/threejs/SKILL.md`](../agent/skills/threejs/SKILL.md)
+- `threejs-animation-engineering` — [`agent/skills/threejs-animation-engineering/SKILL.md`](../agent/skills/threejs-animation-engineering/SKILL.md)
+- `type-driven-design` — [`agent/skills/type-driven-design/SKILL.md`](../agent/skills/type-driven-design/SKILL.md)
+- `typescript-contract-engineering` — [`agent/skills/typescript-contract-engineering/SKILL.md`](../agent/skills/typescript-contract-engineering/SKILL.md)
+- `ubuntu-operations` — [`agent/skills/ubuntu-operations/SKILL.md`](../agent/skills/ubuntu-operations/SKILL.md)
+- `ui-antipattern-review` — [`agent/skills/ui-antipattern-review/SKILL.md`](../agent/skills/ui-antipattern-review/SKILL.md)
+- `ui-ux-principles` — [`agent/skills/ui-ux-principles/SKILL.md`](../agent/skills/ui-ux-principles/SKILL.md)
+- `vanilla-web-libs` — [`agent/skills/vanilla-web-libs/SKILL.md`](../agent/skills/vanilla-web-libs/SKILL.md)
+- `video-analysis` — [`agent/skills/video-analysis/SKILL.md`](../agent/skills/video-analysis/SKILL.md)
+- `visual-composition` — [`agent/skills/visual-composition/SKILL.md`](../agent/skills/visual-composition/SKILL.md)
+- `wasm-animation-pipelines` — [`agent/skills/wasm-animation-pipelines/SKILL.md`](../agent/skills/wasm-animation-pipelines/SKILL.md)
+- `wasm-browsers` — [`agent/skills/wasm-browsers/SKILL.md`](../agent/skills/wasm-browsers/SKILL.md)
+- `wasm-c-cpp` — [`agent/skills/wasm-c-cpp/SKILL.md`](../agent/skills/wasm-c-cpp/SKILL.md)
+- `wasm-python` — [`agent/skills/wasm-python/SKILL.md`](../agent/skills/wasm-python/SKILL.md)
+- `wasm-runtime-engineering` — [`agent/skills/wasm-runtime-engineering/SKILL.md`](../agent/skills/wasm-runtime-engineering/SKILL.md)
+- `wasm-rust` — [`agent/skills/wasm-rust/SKILL.md`](../agent/skills/wasm-rust/SKILL.md)
+- `web-component-patterns` — [`agent/skills/web-component-patterns/SKILL.md`](../agent/skills/web-component-patterns/SKILL.md)
+- `web-effects` — [`agent/skills/web-effects/SKILL.md`](../agent/skills/web-effects/SKILL.md)
+- `web-patterns` — [`agent/skills/web-patterns/SKILL.md`](../agent/skills/web-patterns/SKILL.md)
+- `web-performance` — [`agent/skills/web-performance/SKILL.md`](../agent/skills/web-performance/SKILL.md)
+- `web-security` — [`agent/skills/web-security/SKILL.md`](../agent/skills/web-security/SKILL.md)
+- `web-ui-stack-selection` — [`agent/skills/web-ui-stack-selection/SKILL.md`](../agent/skills/web-ui-stack-selection/SKILL.md)
+- `windows-on-linux-engineering` — [`agent/skills/windows-on-linux-engineering/SKILL.md`](../agent/skills/windows-on-linux-engineering/SKILL.md)
+- `winecharm` — [`agent/skills/winecharm/SKILL.md`](../agent/skills/winecharm/SKILL.md)
+- `wireless-signal-analysis` — [`agent/skills/wireless-signal-analysis/SKILL.md`](../agent/skills/wireless-signal-analysis/SKILL.md)
+- `word-document-authoring` — [`agent/skills/word-document-authoring/SKILL.md`](../agent/skills/word-document-authoring/SKILL.md)
+- `x86-assembly-engineering` — [`agent/skills/x86-assembly-engineering/SKILL.md`](../agent/skills/x86-assembly-engineering/SKILL.md)
 
 ## Migration test fixtures
 
@@ -2333,6 +2359,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/TASK-PIPELINES.md`](TASK-PIPELINES.md)
 - [`docs/TASK-STATE-GRAPH.md`](TASK-STATE-GRAPH.md)
 - [`docs/TERMINAL-INTERFACE.md`](TERMINAL-INTERFACE.md)
+- [`docs/UI-ENGINEERING.md`](UI-ENGINEERING.md)
 - [`docs/UNREAL-INTEGRATION-REVIEW.md`](UNREAL-INTEGRATION-REVIEW.md)
 - [`docs/VECTOR-MEMORY.md`](VECTOR-MEMORY.md)
 - [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)

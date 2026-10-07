@@ -80,7 +80,7 @@ async function picture(format = 'png') {
   return encodeImage({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4).fill(255) }, format);
 }
 
-test('generated artifacts require decoded pixels and failed publication removes the fresh output folder', async t => {
+test('generated artifacts require decoded pixels and a failed registry preserves generated pixels for recovery', async t => {
   const cwd = workspace(t), oldFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = oldFetch; });
   let bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -94,8 +94,16 @@ test('generated artifacts require decoded pixels and failed publication removes 
   assert.doesNotMatch(fs.readFileSync(path.join(cwd, result.dir, 'receipt.json'), 'utf8'), /TEST_image_fixture_only/);
   const broken = workspace(t);
   fs.mkdirSync(path.join(broken, '.pi/assets/registry.json'), { recursive: true });
-  await assert.rejects(images.imageGenerateRun({ prompt: 'Synthetic plate' }, broken, undefined, undefined, fixtureEnv));
-  assert.deepEqual(fs.readdirSync(path.join(broken, '.pi/assets')).filter(name => name.startsWith('gen-')), []);
+  let generatedCalls = 0;
+  globalThis.fetch = async () => { generatedCalls++; return Response.json({ data: [{ b64_json: bytes.toString('base64') }] }); };
+  await assert.rejects(images.imageGenerateRun({ prompt: 'Synthetic plate' }, broken, undefined, undefined, fixtureEnv), /Decoded image retained/);
+  const retained = fs.readdirSync(path.join(broken, '.pi/assets')).filter(name => name.startsWith('gen-'));
+  assert.equal(retained.length, 1); assert.equal(generatedCalls, 1);
+  const recovery = JSON.parse(fs.readFileSync(path.join(broken, '.pi/assets', retained[0], 'recovery.json')));
+  assert.equal(recovery.registration, 'unverified'); assert.equal(recovery.decodeVerified, true);
+  assertSameBytes(fs.readFileSync(path.join(broken, recovery.file)), bytes);
+  assert.match(recovery.next, /do not repeat generation/);
+  assert.doesNotMatch(JSON.stringify(recovery), /TEST_image_fixture_only/);
 });
 
 test('image response bounds and cancellation apply while reading the body before artifacts exist', async t => {

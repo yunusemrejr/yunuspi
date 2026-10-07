@@ -371,8 +371,10 @@ async function storeGenerated(
   signal?.throwIfAborted();
   const dir = await qaFolder(undefined, cwd, "assets", "gen");
   const file = path.join(dir, `image.${format === "jpeg" ? "jpg" : format}`);
+  let retained = false;
   try {
     await fs.writeFile(file, bytes, { flag: "wx" });
+    retained = true;
     const receipt = {
       backend: backend.name, apiUrl: backend.apiUrl, model: backend.model,
       size: backend.name === "openrouter" && params.transport === "images" && params.size === undefined ? null : brief.size, role: brief.role,
@@ -396,7 +398,17 @@ async function storeGenerated(
       brief: { role: brief.role, size: brief.size, negative: brief.negative, constraints: brief.constraints },
       next: `Review the actual pixels before use: visual_review run {source: ${JSON.stringify(relative(cwd, file))}}. An attractive standalone image can still fail inside the page — integrate, render the page, and review the whole.`,
     };
-  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+  } catch (error: any) {
+    if (!retained) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+    // Generation has already happened. A bookkeeping/cancellation failure
+    // cannot justify deleting usable pixels or issuing another paid request.
+    const recovery = { status: 'retained', file: relative(cwd, file), dir: relative(cwd, dir), bytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'), decodeVerified: true, role: brief.role,
+      registration: 'unverified', error: redactSecrets(String(error?.message ?? error)).slice(0, 600),
+      next: 'Reuse this local image. Repair the reported receipt/registry gap, use asset_register on the retained file, then review its pixels; do not repeat generation.' };
+    await fs.writeFile(path.join(dir, 'recovery.json'), JSON.stringify(recovery, null, 2) + '\n', { flag: 'wx', mode: 0o600 }).catch(() => {});
+    throw new Error(`${recovery.error}\nDecoded image retained at ${recovery.file}; recovery folder: ${recovery.dir}. ${recovery.next}`, { cause: error });
+  }
 }
 
 async function plannedImageParams(params: any, signal?: AbortSignal) {

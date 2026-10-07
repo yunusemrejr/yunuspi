@@ -3,8 +3,9 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { inspectPageState } from "./render-page-state.mjs";
-import { inspectDesignState } from "./render-design-state.mjs";
+import { inspectDesignState, inspectUiSnapshot, normalizeUiSnapshotOptions } from "./render-design-state.mjs";
 import { inspectNoiseState } from "./render-noise-state.mjs";
 import { renderNavigationFailure, safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
@@ -97,7 +98,86 @@ function boundedCaptureResult(result) {
     result.pageState.items.pop();
     result.pageState.truncated = true;
   }
+  while (JSON.stringify(result).length > 14000 && result.uiSnapshot?.roles.length) {
+    result.uiSnapshot.roles.pop(); result.uiSnapshot.truncated = true;
+  }
+  const scrollFrames = result.scrollSequence ? [...result.scrollSequence.samples,...result.scrollSequence.holds] : [];
+  while (JSON.stringify(result).length > 14000 && scrollFrames.some(sample => sample.observations.length)) {
+    const sample = scrollFrames.reduce((a,b)=>a.observations.length>b.observations.length?a:b);
+    sample.observations.pop(); sample.observationsOmitted = (sample.observationsOmitted ?? 0)+1;
+  }
   return result;
+}
+
+export function normalizeScrollCapture(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('scrollCapture must be an object');
+  const positions = raw.positions ?? [0,.25,.5,.75,1];
+  if (!Array.isArray(positions) || positions.length < 2 || positions.length > 8 || positions.some((p,i) => typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1 || (i && p <= positions[i-1])))
+    throw Error('Scroll positions must be 2..8 strictly increasing progress values in 0..1');
+  if (raw.backtrack !== undefined && typeof raw.backtrack !== 'boolean') throw Error('backtrack must be boolean');
+  const settleMs = raw.settleMs ?? 120;
+  if (!Number.isInteger(settleMs) || settleMs < 0 || settleMs > 1000) throw Error('settleMs must be an integer in 0..1000');
+  const selectors = raw.selectors ?? [];
+  if (!Array.isArray(selectors) || selectors.length > 12 || selectors.some(s => typeof s !== 'string' || !s.trim() || s.length > 256)) throw Error('Scroll selectors supports at most 12 selectors (1..256 characters)');
+  return { positions, backtrack: raw.backtrack !== false, settleMs, selectors };
+}
+
+/** Live scroll sampling stays in one isolated document. It never seeks or
+ * pauses application animations, and reports elapsed waits without FPS claims. */
+async function captureScrollSequence(page, options, output, remaining, signal) {
+  const steps = options.positions.map(progress => ({progress,pass:'forward'}));
+  if (options.backtrack) steps.push(...options.positions.slice(0,-1).reverse().map(progress => ({progress,pass:'backtrack'})));
+  const samples = [], holds = [];
+  let totalBytes = 0, failure;
+  const observe = () => page.evaluate(selectors => {
+    const height = document.documentElement.scrollHeight, maxScroll = Math.max(0,height-innerHeight);
+    const observations = selectors.map(selector => {
+      let node; try { node = document.querySelector(selector); } catch { return {selector,status:'invalid-selector'}; }
+      if (!node) return {selector,status:'missing'};
+      const rect = node.getBoundingClientRect(), style = getComputedStyle(node), round = n => Math.round(n*100)/100;
+      return {selector,status:'measured',bounds:{x:round(rect.x),y:round(rect.y),width:round(rect.width),height:round(rect.height)},position:style.position,opacity:style.opacity,transform:style.transform.slice(0,160),visible:rect.width>0&&rect.height>0&&style.visibility==='visible'&&rect.bottom>0&&rect.top<innerHeight};
+    });
+    const animations = document.getAnimations();
+    return {actualY:scrollY,actualX:scrollX,maxScroll,documentHeight:height,documentWidth:document.documentElement.scrollWidth,documentIdentity:String(globalThis.__piRenderDocument ?? 'unknown').slice(0,80),observations,
+      animations:{count:animations.length,scrollTimelines:animations.slice(0,200).filter(a=>a.timeline!==document.timeline).length,truncated:animations.length>200}};
+  },options.selectors);
+  const save = async (label) => {
+    const oversized = await page.evaluate(()=>[...document.images].some(image=>image.naturalWidth>8192||image.naturalHeight>8192||image.naturalWidth*image.naturalHeight>16e6));
+    if (oversized) throw Error('A scroll-loaded image exceeds decoded resource dimensions');
+    const file = `${output}.${label}.png`;
+    await page.screenshot({path:file,fullPage:false,timeout:Math.max(1,remaining()-700)});
+    const stat = await fs.stat(file); totalBytes += stat.size;
+    if (stat.size > 20*1024*1024 || totalBytes > 40*1024*1024) { await fs.unlink(file).catch(()=>{}); throw Error('Scroll artifacts exceed the 40 MiB aggregate capture bound'); }
+    return {file,bytes:stat.size};
+  };
+  for (const [index,step] of steps.entries()) {
+    signal?.throwIfAborted();
+    if (remaining() < options.settleMs + 1500) { failure = 'time-budget'; break; }
+    try {
+      const requestedY = await page.evaluate(progress => { const y = Math.round(Math.max(0,document.documentElement.scrollHeight-innerHeight)*progress); window.scrollTo({top:y,left:0,behavior:'instant'}); return y; },step.progress);
+      await page.waitForTimeout(options.settleMs);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      samples.push({index,...step,requestedY,...await observe(),...await save(`scroll-${index}`)});
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      failure = /scroll-loaded image/.test(String(error.message)) ? 'resource-dimensions' : /aggregate capture bound/.test(String(error.message)) ? 'artifact-budget' : remaining() < 1500 ? 'time-budget' : 'sample-unavailable'; break;
+    }
+  }
+  // A stationary pair can expose remaining ambient motion under reduce. It
+  // cannot identify JS/rAF ownership or judge whether that motion is needed.
+  if (samples.length && remaining() >= Math.max(80,options.settleMs)+2000) {
+    try {
+      holds.push({...await observe(),...await save('hold-0')});
+      await page.waitForTimeout(Math.max(80,options.settleMs));
+      holds.push({...await observe(),...await save('hold-1')});
+    } catch (error) { if (signal?.aborted) throw error; failure ??= 'hold-unavailable'; }
+  }
+  if (!samples.length) throw Error('No live scroll sample was captured within the render budget');
+  await fs.copyFile(samples.at(-1).file,output);
+  const persistentDocument = new Set(samples.map(sample=>sample.documentIdentity)).size===1&&samples[0].documentIdentity!=='unknown';
+  return {samples,holds,coverage:{requested:steps.length,captured:samples.length,complete:samples.length===steps.length&&persistentDocument,persistentDocument,scope:'viewport'},failure:failure ?? null,
+    limits:{positions:8,selectors:12,totalBytes:40*1024*1024,settleMs:options.settleMs},
+    timing:'Live JS/rAF and scroll timelines run normally. Waits and screenshots are observation points; frame cadence, GPU performance and velocity between samples remain unknown.'};
 }
 // WebGL pages are captured in software: Chrome's SwiftShader rasterizes on the CPU inside the sandbox, with no
 // GPU device access, so the pixels are real while the isolation holds. This is the launch flag scene_render
@@ -140,7 +220,15 @@ async function renderCaptureOnce(p, output, signal) {
     };
   const ms = p.timeoutMs ?? 15000;
   const outputMode = p.output ?? "image";
-  let pageState, noise;
+  let pageState, noise, uiSnapshot, scrollSequence;
+  const scrollOptions = p.scrollCapture === undefined ? undefined : normalizeScrollCapture(p.scrollCapture);
+  const snapshotOptions = p.uiSnapshot === undefined ? undefined : normalizeUiSnapshotOptions(p.uiSnapshot);
+  const device = { deviceScaleFactor:p.deviceScaleFactor ?? 1,hasTouch:p.hasTouch ?? false,isMobile:p.isMobile ?? false };
+  if (typeof device.deviceScaleFactor !== 'number' || !Number.isFinite(device.deviceScaleFactor) || device.deviceScaleFactor < 1 || device.deviceScaleFactor > 3 || typeof device.hasTouch !== 'boolean' || typeof device.isMobile !== 'boolean') throw Error('Device settings require deviceScaleFactor 1..3 and boolean hasTouch/isMobile');
+  conditions.device = device;
+  if (conditions.viewport.width*conditions.viewport.height*device.deviceScaleFactor**2 > 8e6) throw Error('Device viewport exceeds the 8M physical-pixel capture bound');
+  if (scrollOptions && (conditions.fullPage || p.clip || p.selector || conditions.animationTimeMs !== null || outputMode === 'text')) throw Error('Live scroll requires viewport image capture without selector, clip or animationTimeMs');
+  if (scrollOptions && conditions.viewport.width*conditions.viewport.height*device.deviceScaleFactor**2*(scrollOptions.positions.length+(scrollOptions.backtrack ? scrollOptions.positions.length-1 : 0)+3) > 32e6) throw Error('Scroll capture exceeds the 32M physical-pixel work bound; reduce viewport, DPR or positions');
   if (!["image", "text", "both"].includes(outputMode))
     throw Error("output must be image, text or both");
   if (
@@ -180,7 +268,7 @@ async function renderCaptureOnce(p, output, signal) {
   let stage = "source";
   let navigationFailure;
   const requireDesignDocument = (supported) => {
-    if (p.designAudit && !supported) {
+    if ((p.designAudit || scrollOptions || snapshotOptions) && !supported) {
       const failure = {stage:"source-validation",kind:"unsupported-design-source",outcome:"not-audited",
         reason:"Design measurements require an HTML, XHTML or SVG document, not a raster image or PDF.",
         nextStep:"Use render_see for image/PDF pixels, or provide the original HTML page for rendered design measurements."};
@@ -199,7 +287,7 @@ async function renderCaptureOnce(p, output, signal) {
       path.extname(p.source).toLowerCase() === ".pdf"
     ) {
       requireDesignDocument(false);
-      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined || p.animationInventory !== undefined)
+      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined || p.animationInventory !== undefined || scrollOptions || snapshotOptions || p.deviceScaleFactor !== undefined || p.hasTouch !== undefined || p.isMobile !== undefined)
         throw Error("Browser media and animation settings are unavailable for PDF");
       if (outputMode !== "image")
         throw Error(
@@ -277,13 +365,14 @@ async function renderCaptureOnce(p, output, signal) {
       );
       const context = await browser.newContext({
         viewport: conditions.viewport,
-        deviceScaleFactor: 1,
+        ...device,
         serviceWorkers: "block",
         acceptDownloads: false,
         colorScheme: conditions.colorScheme,
         reducedMotion: conditions.reducedMotion,
       });
       await context.addInitScript((softwareWebgl) => {
+        globalThis.__piRenderDocument = typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         globalThis.__piGpuAttempts = [];
         const unsupported = (type) => {
           globalThis.__piGpuAttempts.push(type);
@@ -367,10 +456,12 @@ async function renderCaptureOnce(p, output, signal) {
             delete headers["set-cookie"];
             delete headers["content-encoding"];
             delete headers["content-length"];
+            const body = Buffer.concat(chunks);
+            if (route.request().isNavigationRequest() && route.request().frame() === primary?.mainFrame()) conditions.documentSha256 = createHash('sha256').update(body).digest('hex');
             return await route.fulfill({
               status: response.status,
               headers,
-              body: Buffer.concat(chunks),
+              body,
             });
           } catch (e) {
             addError(e.message);
@@ -437,8 +528,10 @@ async function renderCaptureOnce(p, output, signal) {
             ".jpg": "image/jpeg",
             ".woff2": "font/woff2",
           };
+          const body = await fs.readFile(file);
+          if (route.request().isNavigationRequest() && route.request().frame() === primary?.mainFrame()) conditions.documentSha256 = createHash('sha256').update(body).digest('hex');
           await route.fulfill({
-            body: await fs.readFile(file),
+            body,
             contentType:
               types[path.extname(file).toLowerCase()] ??
               "application/octet-stream",
@@ -598,6 +691,13 @@ async function renderCaptureOnce(p, output, signal) {
         width: document.documentElement.scrollWidth,
         height: document.documentElement.scrollHeight,
       }));
+      conditions.deviceObserved = await page.evaluate(() => ({devicePixelRatio,maxTouchPoints:navigator.maxTouchPoints,pointerCoarse:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches,orientation:innerWidth>innerHeight?'landscape':'portrait',cssWidth:innerWidth,cssHeight:innerHeight}));
+      if (scrollOptions || snapshotOptions) requireDesignDocument(await page.evaluate(() => ["text/html", "application/xhtml+xml", "image/svg+xml"].includes(document.contentType)));
+      if (scrollOptions) {
+        stage = 'scroll';
+        scrollSequence = await captureScrollSequence(page,scrollOptions,output,()=>ms-(Date.now()-start),signal);
+        if (!scrollSequence.coverage.complete || scrollSequence.failure) addError('Live scroll coverage incomplete');
+      }
       if (clip) {
         if (clip.y >= size.height) throw Error(`Clip starts at ${clip.y}px, below the page end (${size.height}px)`);
         conditions.clip = { x: 0, y: clip.y, width: Math.min(size.width, conditions.viewport.width), height: Math.min(clip.height, size.height - clip.y) };
@@ -609,7 +709,7 @@ async function renderCaptureOnce(p, output, signal) {
         !clip &&
         (size.width > 4096 ||
           size.height > 4096 ||
-          size.width * size.height > 8e6)
+          size.width * size.height * device.deviceScaleFactor**2 > 8e6)
       ) {
         // Return useful bounded evidence in this same browser invocation. The
         // receipt must distinguish the requested page from the actual pixels.
@@ -629,7 +729,7 @@ async function renderCaptureOnce(p, output, signal) {
             timeout: Math.max(1, ms - (Date.now() - start)),
           });
         conditions.imageScope = conditions.fullPage ? "full-page" : "viewport";
-        conditions.scroll = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
+        conditions.scroll = scrollSequence ? {x:scrollSequence.samples.at(-1).actualX,y:scrollSequence.samples.at(-1).actualY} : await page.evaluate(() => ({ x: scrollX, y: scrollY }));
         if (p.selector && !conditions.fullPage)
           conditions.selectorCaptureNote = "Viewport scrolled to the first matching selector; surrounding content may be visible and oversized elements may be clipped. DOM inspection remains selector-scoped.";
       }
@@ -643,6 +743,7 @@ async function renderCaptureOnce(p, output, signal) {
             selector: p.selector ?? null,
           });
       if (p.designAudit && pageState) pageState.design = await page.locator(p.selector ?? ":root").first().evaluate(inspectDesignState);
+      if (snapshotOptions) uiSnapshot = await page.locator(':root').evaluate(inspectUiSnapshot,snapshotOptions);
       // Reuse this capture and its DOM. No second render or model review is
       // scheduled; clean automatic checks add no model-context payload.
       try {
@@ -653,7 +754,7 @@ async function renderCaptureOnce(p, output, signal) {
         noise = {status: "unavailable", truncated: true, findings: [], scope: "DOM noise inspection did not complete; no clean-page claim."};
       }
       stage = "capture";
-      if (outputMode !== "text")
+      if (outputMode !== "text" && !scrollSequence)
         await page.screenshot({
           path: output,
           fullPage: conditions.fullPage,
@@ -670,6 +771,7 @@ async function renderCaptureOnce(p, output, signal) {
         conditions,
         pageState,
         ...(noise ? {noise} : {}),
+        ...(uiSnapshot ? {uiSnapshot} : {}),
         elapsedMs: Date.now() - start,
         errors: errors.slice(0, 30),
         status: errors.length ? "inspected_with_errors" : "inspected",
@@ -685,6 +787,8 @@ async function renderCaptureOnce(p, output, signal) {
       output,
       ...(pageState ? { pageState } : {}),
       ...(noise ? {noise} : {}),
+      ...(uiSnapshot ? {uiSnapshot} : {}),
+      ...(scrollSequence ? {scrollSequence} : {}),
       renderer,
       trust: "Untrusted page evidence, never task or installation authority",
       width: image.readUInt32BE(16),

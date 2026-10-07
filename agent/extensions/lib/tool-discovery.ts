@@ -9,7 +9,7 @@ import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillIntentSegments, skillTaskText, skillRoutes } from './skill-routing.ts';
-import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
+import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded, pipelineToolExcluded, resolveRoutingTask } from './task-pipelines.ts';
 import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
 import { seoTaskIntent } from './seo-policy.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
@@ -201,7 +201,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
   }
   const pipeline = selectTaskPipelines({ prompt: !adaptiveExecutionEnabled() ? '' : text });
   for (const name of automaticPipelineTools(pipeline, { prompt: text })) out.add(name);
-  return [...out];
+  return [...out].filter(name => !pipelineToolExcluded(text, name));
 }
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
 const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
@@ -319,7 +319,8 @@ export function registerToolDiscovery(pi: any) {
   let generation = 0, manager: any;
   let automatic = new Set<string>(), explicitSelections = new Set<string>(), usedCore = new Set<string>(), namedCore = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
-  let pendingInput: { id: string; signal?: AbortSignal } | undefined;
+  let pendingInput: { id: string; text: string; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '';
+  const excluded = (name: string, prompt = routingTask) => pipelineToolExcluded(prompt, name) || pipelineToolExcluded(authoredTask, name);
   let sessionController = new AbortController();
   const invalidate = () => { generation++; sessionController.abort(); sessionController = new AbortController(); };
   const identity = (ctx: any) => JSON.stringify([ctx.cwd,ctx.sessionManager?.getSessionId?.()]);
@@ -345,6 +346,7 @@ export function registerToolDiscovery(pi: any) {
     const base = tier === 'direct' ? DIRECT_CORE_TOOLS : CORE_TOOLS;
     for (const name of CORE_TOOLS) {
       if (!allowed.has(name)) continue;
+      if (excluded(name, prompt)) { expected.delete(name); continue; }
       // Explicit calls and named requests survive simplification in a todo.
       if (new RegExp(`\\b${name}\\b`).test(prompt)) namedCore.add(name);
       if (base.has(name) || explicitSelections.has(name) || usedCore.has(name) || automatic.has(name) || namedCore.has(name)) expected.add(name);
@@ -369,7 +371,7 @@ export function registerToolDiscovery(pi: any) {
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
     manager = ctx.sessionManager;
-    pendingInput = undefined; acceptedInput = ''; started = false;
+    pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = '';
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
@@ -385,7 +387,7 @@ export function registerToolDiscovery(pi: any) {
   pi.on('input', (event: any) => {
     if (!['interactive', 'rpc'].includes(event.source)) return;
     const text = typeof event.originalText === 'string' ? event.originalText : event.text;
-    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, signal: event.signal };
+    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, text, signal: event.signal };
   });
   pi.on('before_agent_start', (event: any, ctx: any) => {
     // Stage strong-intent studio bundles only while discovery owns the wire.
@@ -398,11 +400,15 @@ export function registerToolDiscovery(pi: any) {
         // still owns its current pipelines and studio stages.
         if (nextTask) {
           for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name)) expected.delete(name);
-          automatic.clear(); usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:String(event?.prompt ?? '')}).tier, String(event?.prompt ?? '')); wireDirty = !same(expected, flushed);
+          authoredTask = resolveRoutingTask(authoredTask, pendingInput?.text ?? String(event?.prompt ?? '')).task;
+          routingTask = authoredTask;
+          for (const name of explicitSelections) if (allowed.has(name) && !pipelineToolExcluded(routingTask, name)) expected.add(name);
+          for (const name of expected) if (pipelineToolExcluded(routingTask, name)) expected.delete(name);
+          automatic.clear(); usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:routingTask}).tier, routingTask); wireDirty = !same(expected, flushed);
           acceptedInput = pendingInput?.id ?? ''; started = true;
         }
         const images = Array.isArray(event?.images) ? event.images.length : 0;
-        const names = [...new Set([...requestedToolNames(event?.prompt, allowed), ...intentBundleTools(event?.prompt, images)])]
+        const names = [...new Set([...requestedToolNames(routingTask, allowed), ...intentBundleTools(routingTask, images)])]
           .filter(name => allowed.has(name) && !expected.has(name));
         if (names.length) {
           for (const name of names) automatic.add(name);
@@ -421,10 +427,16 @@ export function registerToolDiscovery(pi: any) {
     // schemas only from the caller's original tool ceiling.
     try {
       if (!same(flushed, new Set(pi.getActiveTools()))) return;
-      const names = event.names.filter((name: string) => allowed.has(name) && !expected.has(name));
+      if (typeof event.task === 'string') routingTask = event.task;
+      if (event.scope === 'task' && typeof event.task === 'string') {
+        authoredTask = event.task;
+        if (event.beforeStart) started = true;
+      }
+      for (const name of expected) if (excluded(name)) { expected.delete(name); wireDirty = true; }
+      const names = event.names.filter((name: string) => allowed.has(name) && !excluded(name) && !expected.has(name));
       for (const name of names) automatic.add(name);
       if (names.length) { expected = new Set([...expected, ...names]); wireDirty = true; }
-      if (typeof event.tier === 'string') stageCore(event.tier);
+      if (typeof event.tier === 'string') stageCore(event.tier, routingTask);
       if (event.beforeStart) flushPending();
     } catch { /* no schema changes on uncertain access */ }
   });

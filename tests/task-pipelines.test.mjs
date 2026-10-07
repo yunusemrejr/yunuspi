@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.join(root, '..', 'agent'), path.resolve(root, '..')].find(dir => fs.existsSync(path.join(dir, 'extensions/lib/task-pipelines.ts')));
-const { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, nextPipelineStages, buildPipelineContext } = await import(pathToFileURL(path.join(agent, 'extensions/lib/task-pipelines.ts')));
+const { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, nextPipelineStages, buildPipelineContext, inspectPipelineSource, resolveRoutingTask, pipelineToolExcluded } = await import(pathToFileURL(path.join(agent, 'extensions/lib/task-pipelines.ts')));
 const { classifyExecution } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const selected = (prompt, extra = {}) => selectTaskPipelines({ prompt, ...extra });
 const automatic = (prompt, extra = {}) => automaticPipelineTools(selected(prompt, extra), { prompt, ...extra });
@@ -340,7 +340,93 @@ test('research, reinforcement learning and edge work stage executable evidence w
   const code = selected('Refactor Python source to remove redundant classes and improve code quality');
   assert.ok(code.stages.some(stage => stage.id === 'source-quality'));
   const ledger = createPipelineLedger();
-  record(code, ledger, 'discovery', 'inspection'); record(code, ledger, 'implementation', 'artifact'); record(code, ledger, 'validation', 'execution');
+  record(code, ledger, 'discovery', 'inspection'); record(code, ledger, 'source-impact', 'inspection'); record(code, ledger, 'implementation', 'artifact'); record(code, ledger, 'validation', 'execution');
   assert.throws(() => record(code, ledger, 'delivery', 'artifact'), /unresolved/);
   record(code, ledger, 'source-quality', 'inspection'); record(code, ledger, 'delivery', 'artifact');
+});
+
+test('UI choreography, responsive coverage, consistency and web assets select distinct stage-aware capabilities', () => {
+  const prompt = 'Build a responsive Three.js website with scroll-driven animations, consistent tokens and a Blender 3D hero; generate an image for its texture';
+  const selection = selected(prompt);
+  for (const id of ['ui-motion', 'ui-scroll', 'ui-responsive', 'ui-consistency', 'web-3d', 'blender-3d', 'image-media']) assert.ok(selection.ids.includes(id), id);
+  assert.ok(!selection.ids.includes('video'), 'UI motion graphics do not ask for a finished video');
+  const ledger = createPipelineLedger();
+  const names = () => automaticPipelineTools(selection, { prompt, ledger, coordinate });
+  for (const name of ['ui_recipe', 'creative_direct', 'blender_run', 'blender_export', 'image_generate']) assert.ok(names().includes(name), name);
+  for (const name of ['motion_inspect', 'ui_explore', 'ui_consistency']) assert.ok(!names().includes(name), `${name} waits for source artifacts`);
+  record(selection, ledger, 'discovery', 'inspection'); record(selection, ledger, 'implementation', 'artifact');
+  for (const name of ['motion_inspect', 'ui_explore', 'ui_consistency', 'ui_recipe']) assert.ok(names().includes(name), name);
+  assert.throws(() => record(selection, ledger, 'ui-interaction', 'inspection'), /requires interaction/);
+  assert.throws(() => record(selection, ledger, 'ui-pixels', 'inspection'), /requires pixels/);
+  const film = selected('Create motion graphics for a 30 second explainer video');
+  assert.ok(film.ids.includes('video'));
+});
+
+test('inspected imports, manifests and CSS facts activate UI work without trusting prose or comments', () => {
+  const metadata = inspectPipelineSource('src/Hero.tsx', 'import { WebGLRenderer } from "three";\nexport const Hero = () => <canvas/>;\nconst entrances = new IntersectionObserver(() => {});');
+  const manifest = inspectPipelineSource('package.json', JSON.stringify({dependencies:{three:'0.180',gsap:'3',react:'19'}}));
+  const selection = selected('Fix the affected owner', { files: ['src/Hero.tsx'], signals: metadata.signals, dependencies: manifest.dependencies });
+  for (const id of ['react-node', 'web-3d', 'ui-motion', 'ui-scroll']) assert.ok(selection.ids.includes(id), id);
+  const css = inspectPipelineSource('src/theme.css', ':root { --space: 1rem; } @media (width < 48rem) { .card { width: 100%; } }');
+  const styled = selected('Fix its spacing', { files:['src/theme.css'],signals:css.signals });
+  assert.ok(styled.ids.includes('ui-responsive') && styled.ids.includes('ui-consistency'));
+  assert.deepEqual(inspectPipelineSource('README.md', 'Use THREE.WebGLRenderer and ScrollTrigger.').signals, []);
+  assert.deepEqual(inspectPipelineSource('src/plain.js', '// new ScrollTrigger; THREE.WebGLRenderer\nconst n = 1; // new IntersectionObserver').signals, []);
+  assert.deepEqual(inspectPipelineSource('package.json', '{invalid manifest}').dependencies, []);
+});
+
+test('authored exclusions defeat file and dependency cues, and later explicit corrections replace them', () => {
+  const prompt = 'Build a responsive website without animation, Blender or 3D. Do not use ui_recipe or image generation.';
+  const selection = selected(prompt, { files:['src/Hero.tsx','assets/hero.glb'],dependencies:['three','gsap'],signals:['motion','scroll','web3d'] });
+  for (const id of ['ui-motion','ui-scroll','web-3d','blender-3d']) assert.ok(!selection.ids.includes(id), id);
+  for (const name of ['ui_recipe','image_generate','blender_run','asset_register','motion_inspect']) assert.ok(!automaticPipelineTools(selection, {prompt}).includes(name), name);
+  const first = 'Build an animated UI without Blender or Git.';
+  const followup = resolveRoutingTask(first, 'Make its scroll choreography smoother');
+  assert.ok(followup.continuing && followup.task.includes(first));
+  assert.ok(pipelineToolExcluded(followup.task,'blender_run') && pipelineToolExcluded(followup.task,'git_info'));
+  const corrected = resolveRoutingTask(followup.task, 'Use Blender now to model that same hero');
+  assert.ok(!pipelineToolExcluded(corrected.task,'blender_run'));
+  assert.ok(!resolveRoutingTask(first, 'New task: fix the Python parser').continuing);
+  assert.ok(!resolveRoutingTask(first, 'What is the capital of France?').continuing);
+  assert.ok(!selected('Explain scroll-driven Three.js UI animation').ids.length);
+});
+
+test('shared code owners require bounded impact discovery before artifact and delivery evidence', () => {
+  const prompt = 'Refactor shared UI components and migrate their API contracts across multiple files';
+  const selection = selected(prompt), ledger = createPipelineLedger();
+  assert.ok(selection.ids.includes('codebase-control'));
+  for (const name of ['project_report','module_report','symbol_search','context_slice','code_quality','code_audit','bulk_edit']) assert.ok(automaticPipelineTools(selection,{prompt}).includes(name), name);
+  record(selection,ledger,'discovery','inspection');
+  assert.throws(() => record(selection,ledger,'implementation','artifact'), /unresolved prerequisite/);
+  record(selection,ledger,'source-impact','inspection'); record(selection,ledger,'implementation','artifact');
+  assert.ok(nextPipelineStages(selection,ledger,coordinate).some(stage=>stage.id==='validation'));
+  assert.ok(!selected('Fix the CSS color', {files:['src/theme.css']}).ids.includes('codebase-control'));
+});
+
+test('ordinary interface and plural scroll goal wording preserve UI intent while negative generation stays quiet', () => {
+  const prompt = '/goal Build a responsive interface with layered scroll animations and a Three.js model. Keep shared tokens consistent across pages. No image generation.';
+  const selection = selected(prompt);
+  for (const id of ['ui-quality','ui-motion','ui-scroll','ui-responsive','ui-consistency','web-3d']) assert.ok(selection.ids.includes(id), id);
+  assert.ok(!selection.ids.includes('image-media') && !selection.ids.includes('video'));
+  assert.ok(!automaticPipelineTools(selection,{prompt}).includes('image_generate'));
+  const images = selected('Inspect the image assets for the interface. No image generation.',{files:['assets/hero.png']});
+  assert.ok(images.ids.includes('image-media') && images.tools.includes('image_analyze'));
+  assert.ok(!automaticPipelineTools(images,{prompt:'Inspect the image assets for the interface. No image generation.'}).includes('image_generate'));
+  for (const task of ['Fix the network interface','Build a command-line interface','Fix TypeScript interface contracts','Optimize memory layout']) assert.ok(!selected(task).ids.includes('ui-quality'),task);
+});
+
+test('upstream UI and hybrid media verification survive advanced routing without duplicate stages', () => {
+  for (const [prompt,files] of [['Fix the UI typography',[]],['Fix header line-height',['src/theme.css']],['Build a responsive animated Three.js interface',[]]]) {
+    const selection=selected(prompt,{files});
+    assert.equal(selection.stages.filter(stage=>stage.id==='ui-responsive').length,1,prompt);
+    assert.equal(new Set(selection.stages.map(stage=>stage.id)).size,selection.stages.length,prompt);
+    for(const name of ['ui_explore','visual_review','image_understand','browser_session']) assert.ok(selection.tools.includes(name),name);
+    assert.match(selection.stages.find(stage=>stage.id==='ui-responsive').check,/320px/);
+    assert.match(selection.stages.find(stage=>stage.id==='ui-pixels').check,/runId/);
+  }
+  const film=selected('Create a hybrid Blender video with generated image backplates and motion graphics');
+  for(const name of ['video_project','video_render','video_qa','video_generate','image_generate','image_understand','image_convert','blender_export','blender_setup']) assert.ok(film.tools.includes(name),name);
+  assert.ok(film.stages.some(stage=>stage.id==='video-art'&&stage.evidenceKinds.includes('pixels')));
+  assert.ok(film.stages.some(stage=>stage.id==='video-playback'&&stage.tools.includes('video_qa')));
+  assert.ok(!selected('Build scroll animations for a Three.js website').ids.includes('video'));
 });

@@ -128,7 +128,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		key: "creative-direction-loop",
 		tools: ["creative_direct"],
 		when: (args) => args.action === 'set',
-		line: "This direction now steers review: visual_review, ui_explore and motion_inspect check conformance against it and blocking verdicts hold completion. Keep one direction per task; revise it instead of stacking briefs.",
+		line: "This direction now steers review: visual_review, ui_explore, ui_consistency and motion_inspect check conformance against it and blocking verdicts hold completion. Keep one direction per task; revise it instead of stacking briefs. References supply composition/motion principles, not a palette/template to copy. Design mechanics must serve the real content and user task.",
 	},
 	{
 		key: "visual-review-receipt",
@@ -138,17 +138,25 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "art-qa-evidence",
-		tools: ["ui_explore", "motion_inspect", "svg_inspect", "creative_compare"],
+		tools: ["ui_explore", "ui_consistency", "motion_inspect", "svg_inspect", "creative_compare"],
 		when: (args) => !['status', 'get', 'brief'].includes(String(args.action)),
 		line: "Keep the returned files with the finding: matrix cells, timeline frames, geometry outliers and variant deltas are the evidence. Findings name locations and measurements; re-run after the fix on the same revision instead of asserting it.",
 	},
 	{
-		key: 'creative-recover', tools: ['svg_inspect', 'visual_review', 'ui_explore', 'creative_compare', 'motion_inspect'], onError: true,
+		key: 'creative-recover', tools: ['svg_inspect', 'visual_review', 'ui_explore', 'ui_consistency', 'ui_recipe', 'creative_compare', 'motion_inspect'], onError: true,
 		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
 	},
+  {
+    key: 'ui-recipe-integrate', tools: ['ui_recipe'], when: args => args.action === 'scaffold',
+    line: 'Adapt the prepared mechanics to the project content and tokens. Check imports/selectors and preserve the static/reduced-motion/mobile path; mount once and dispose on route unmount. Use the real served URL with motion_inspect mode:"scroll", device/breakpoint ui_explore and ui_consistency on shared route roles. A scaffold is not an executed or visually approved UI.',
+  },
+  {
+    key: 'blender-web-import', tools: ['blender_export'], when: args => ['glb', 'gltf'].includes(String(args.format)),
+    line: 'Carry webAsset bundle hashes, loader requirements and mobile budget warnings into the served Three.js path. A blocked preflight preserves the export: repair the gap and inspect the existing artifact before rerendering. Verify model loading, frame cost, fallback and pixels on actual devices/viewports; structure alone does not approve the asset.',
+  },
 	{
 		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "svg_render", "image_generate", "image_convert", "image_understand", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
-		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
+		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Keep completed artifacts and use any recovery receipt to repair local registration. A provider timeout can leave a paid outcome unknown: reconcile available receipts/status before another request and preserve the selected model. Narrow local renders or use existing background tools for long jobs.",
 	},
 	{
 		key: "video-sample-evidence", tools: ["video_frames"],
