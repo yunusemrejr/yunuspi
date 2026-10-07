@@ -71,21 +71,27 @@ async function main() {
   const { serveUrl, cached, bundleMs } = await bundled();
   const browserExecutable = request.browserExecutable ?? null;
   const chromiumOptions = { gl: "swangle", ...(request.chromiumOptions ?? {}) };
-  const composition = await renderer.selectComposition({ serveUrl, id: request.composition, browserExecutable, chromiumOptions, logLevel: "error" });
+  const inputProps=request.mode==='stills'?{reviewLayout:true}:{};
+  const composition = await renderer.selectComposition({ serveUrl, id: request.composition, inputProps, browserExecutable, chromiumOptions, logLevel: "error" });
   const out = path.resolve(request.outDir);
   fs.mkdirSync(out, { recursive: true });
-  const common = { serveUrl, composition, browserExecutable, chromiumOptions, logLevel: "error", scale: request.scale ?? 1 };
+  const common = { serveUrl, composition, inputProps, browserExecutable, chromiumOptions, logLevel: "error", scale: request.scale ?? 1 };
   const result = { composition: composition.id, fps: composition.fps, width: composition.width, height: composition.height, durationInFrames: composition.durationInFrames, bundleCached: cached, ...(bundleMs ? { bundleMs } : {}) };
   if (request.mode === "stills") {
     const stills = [];
+    const layout = [];
     for (const frame of request.frames) {
       if (frame < 0 || frame >= composition.durationInFrames) throw new Error(`Frame ${frame} is outside ${composition.id} (0..${composition.durationInFrames - 1})`);
       const output = path.join(out, `frame-${String(frame).padStart(6, "0")}.png`);
-      await renderer.renderStill({ ...common, frame, output, imageFormat: "png" });
+      await renderer.renderStill({ ...common, frame, output, imageFormat: "png", inputProps:{reviewLayout:true},
+        onBrowserLog: (log) => {
+          if (!log.text?.startsWith('YUNUSPI_LAYOUT ')) return;
+          try { layout.push({...JSON.parse(log.text.slice(15)),deliveredFrame:frame}); } catch { /* an unknown project log cannot approve layout */ }
+        } });
       stills.push({ frame, seconds: frame / composition.fps, path: output });
       emit("VIDEO_RENDER_PROGRESS", { stage: "stills", done: stills.length, total: request.frames.length });
     }
-    emit("VIDEO_RENDER_RESULT", { ...result, stills });
+    emit("VIDEO_RENDER_RESULT", { ...result, stills, layout });
     return;
   }
   const output = path.join(out, request.losslessAudio ? 'segment.mkv' : request.mode === "final" ? "final.mp4" : "preview.mp4");

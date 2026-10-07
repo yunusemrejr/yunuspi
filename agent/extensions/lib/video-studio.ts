@@ -16,9 +16,10 @@ import { memoryBudgetMb } from "./memory-guard.ts";
 import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lintSource, lookById, suggestLook, type FontChoice, type Look } from "./video-looks.ts";
 import { deriveLook } from "./video-derive.ts";
 import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions } from './elevenlabs.ts';
-import { renderSegments } from './video-segments.ts';
-import { compileStoryboard, followCamera, validateProductionScene } from './video-compose.ts';
+import { fileDigest, renderSegments, videoFingerprint } from './video-segments.ts';
+import { compileStoryboard, followCamera, productionTimes, validateProductionScene } from './video-compose.ts';
 import { matchAvoidSignals, readProjectDirection, renderDirectionBrief, type CreativeDirection } from "./creative-direction.ts";
+import { inspectVideoAssets, referenceEvidence } from './video-art.ts';
 import { chapterList, descriptionDraft, formatChapters, isPublishing, planCtas, publishFindings, validatePublishSpec } from "./video-publish.ts";
 // The template's caption timing is the single source for burned-in captions
 // and sidecar subtitles; it is plain TypeScript with no Remotion imports.
@@ -416,13 +417,14 @@ async function inspectProject(dir: string) {
   const source = await sceneSources(dir);
   const code = lintSource(source).map(({ severity, message }) => ({ severity, message: `Source: ${message}` }));
   const previews = await previewShots(dir, spec);
+  const art = await inspectVideoAssets(dir,spec);
   const composition = (spec.scenes ?? []).flatMap(validateProductionScene);
   const clocks: Issue[] = Object.entries(source).flatMap(([file, text]) => /\b(?:progress|enter|interpolate)\s*\(\s*scene\.index\b/.test(text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")) ? [{ severity: 'error' as const, message: `Source: ${file} animates scene.index (the scene ordinal). Use useCurrentFrame() for motion; the current expression freezes the animation.` }] : []);
   // The creative direction recorded at init is a contract: lint findings that name something it avoids are called out as such.
   const direction: Issue[] = Array.isArray(spec.direction?.avoid) && spec.direction.avoid.length
     ? matchAvoidSignals({ avoid: spec.direction.avoid }, [...design, ...code].map((issue) => issue.message)).slice(0, 4).map((hit) => ({ severity: "warn" as const, message: `Creative direction "${spec.direction.name}" avoids "${hit.avoid}": ${hit.signal.slice(0, 160)}` }))
     : [];
-  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...code, ...previews, ...composition, ...clocks, ...direction, ...audience] };
+  return { spec, components, ...result, assets:art.assets, issues: [...result.issues, ...structural, ...design, ...code, ...previews, ...art.issues, ...composition, ...clocks, ...direction, ...audience] };
 }
 
 function browserExecutable(): string | undefined {
@@ -514,6 +516,29 @@ async function applyLook(dir: string, spec: any, look: Look): Promise<boolean> {
 }
 const writeSpec = (dir: string, spec: any) => fs.writeFile(path.join(dir, "video.json"), JSON.stringify(spec, null, 2) + "\n");
 
+/** Update only recognized tool-owned compositor sources. A modified module
+ * is a conflict for the caller to reconcile, never an overwrite target. */
+export async function upgradeVideoTemplate(dir: string, apply=false) {
+  const catalog=JSON.parse(await fs.readFile(path.join(VIDEO_PATHS.template,'managed.json'),'utf8'));
+  const previous=await fs.readFile(path.join(dir,'.video-template.json'),'utf8').then(JSON.parse,()=>({files:{}}));
+  const changes: any[]=[],conflicts: string[]=[],files: Record<string,string>={};
+  for(const [file,known] of Object.entries(catalog.known) as Array<[string,string[]]>) {
+    const incoming=await fs.readFile(path.join(VIDEO_PATHS.template,file));
+    const target=projectWritePath(dir,file),old=await fs.readFile(target).catch(()=>null);
+    const next=createHash('sha256').update(incoming).digest('hex'),before=old?createHash('sha256').update(old).digest('hex'):null;
+    files[file]=next;
+    if(before===next)continue;
+    if(before && before!==previous.files?.[file] && !known.includes(before)){conflicts.push(file);continue;}
+    changes.push({file,before,after:next});
+  }
+  if(apply && conflicts.length)throw Error(`Modified compositor sources need reconciliation before upgrade: ${conflicts.join(', ')}. Your sources have been preserved; compare them with the harness template.`);
+  if(apply) {
+    for(const {file} of changes){const target=projectWritePath(dir,file);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(VIDEO_PATHS.template,file),target);}
+    await fs.writeFile(projectWritePath(dir,'.video-template.json'),JSON.stringify({format:catalog.format,files},null,2)+'\n');
+  }
+  return {project:dir,applied:apply,changes,conflicts,note:'Only known unmodified compositor modules are upgraded; custom scenes, registry, timeline, assets, fonts and brand remain owned by the project'};
+}
+
 export async function videoProject(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const action = params.action ?? "check";
   if (action === "init") {
@@ -527,7 +552,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     const brief = [params.topic, params.title, ...(direction?.intent ?? [])].filter((part) => typeof part === "string" && part.trim()).join(" ") || path.basename(dir);
     const { look, note: lookNote } = resolveLook(params, brief, direction);
     await applyLook(dir, spec, look);
-    if (direction) spec.direction = { name: direction.name, intent: direction.intent, avoid: direction.avoid, motion: direction.motion, audio: direction.audio, updatedAt: direction.updatedAt };
+    if (direction) spec.direction = direction;
     const [width, height] = FORMATS[params.format ?? "landscape"] ?? FORMATS.landscape;
     Object.assign(spec, { width, height });
     for (const key of ["fps", "width", "height"]) if (params[key] !== undefined) spec[key] = params[key];
@@ -538,6 +563,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     spec.publish = { intent, platforms, ...(intent === "publish" && spec.brand ? { cta: { enabled: true } } : {}) };
     if (intent === "personal") spec.captions = { ...spec.captions, enabled: params.captions === true };
     await writeSpec(dir, spec);
+    await upgradeVideoTemplate(dir,true);
     if (params.install !== false) { await npmInstall(dir, signal, progress); await syncFonts(dir, look.fonts); }
     return {
       project: dir, installed: params.install !== false, look: { id: look.id, derived: look.derived ? true : undefined, why: look.why, fits: look.fits, voice: look.audio.voice, music: look.audio.music, theme: { background: look.theme.background, accent: look.theme.accent, accent2: look.theme.accent2, display: look.theme.display, text: look.theme.text, backdrop: look.theme.backdrop }, note: lookNote },
@@ -550,9 +576,23 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     };
   }
   const dir = await projectDir(params.dir, cwd);
+  if(action==='upgrade')return upgradeVideoTemplate(dir,params.apply===true);
+  if(action==='direction') {
+    const direction=await readProjectDirection(cwd);
+    if(!direction)throw Error('Set a project-scope creative_direct brief first; video_project direction adopts that existing brief');
+    const spec=await readSpec(dir);spec.direction=direction;
+    await fs.writeFile(projectWritePath(dir,'video.json'),JSON.stringify(spec,null,2)+'\n');
+    return {project:dir,direction,brief:renderDirectionBrief(direction),note:'The existing creative direction remains the brief owner; video.json now preserves its full focal, visual, motion, audio and reference fields'};
+  }
   if (action === 'compose') {
     const spec = await readSpec(dir);
-    const input = structuredClone(params.scenes);
+    if(params.scenes && params.storyboard)throw Error('Provide scenes or storyboard, not both');
+    let input = structuredClone(params.scenes);
+    if(params.storyboard) {
+      const file=await inputFile(params.storyboard,dir);
+      if((await fs.stat(file)).size>2*1024*1024)throw Error('Storyboard exceeds 2 MiB');
+      const raw=JSON.parse(await fs.readFile(file,'utf8'));input=Array.isArray(raw)?raw:raw.scenes;
+    }
     if (Array.isArray(input)) for (const scene of input) {
       const layers = [...(scene.layers ?? []), ...(scene.hero ? [scene.hero] : [])];
       const events: any[] = [];
@@ -570,6 +610,8 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
       if (events.length) scene.soundEvents = events;
     }
     const result = compileStoryboard(input, spec, params.append === true);
+    const advanced=result.scenes.some((s: any)=>(s.props?.layers ?? []).some((l: any)=>['path','counter'].includes(l.kind) || ['words','typewriter'].includes(l.reveal) || l.colorRole || l.subjectFit!==undefined || l.wordCues || l.stroke || l.shadow || ['linear','hold'].includes(l.motion?.easing) || l.motion?.exit || l.motion?.route || l.motion?.keys?.some((k: any)=>['easing','rotateX','rotateY','scaleX','scaleY','blur'].some(f=>k[f]!==undefined))));
+    if(advanced)await upgradeVideoTemplate(dir,true);
     const probed = new Map<string, Promise<any>>();
     for (const scene of result.scenes) for (const layer of scene.props?.layers ?? []) {
       const picture = ['image', 'video'].includes(layer.kind) ? layer : layer.screen;
@@ -594,6 +636,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
       const text = await fs.readFile(registry, 'utf8');
       if (!/export const scenes[^=]*=\s*\{/.test(text)) throw Error('Scene registry format is custom; register StudioScene explicitly before composing');
       await fs.copyFile(path.join(VIDEO_PATHS.template, 'src/production.ts'), projectWritePath(dir, 'src/production.ts'));
+      await fs.copyFile(path.join(VIDEO_PATHS.template, 'src/review.tsx'), projectWritePath(dir, 'src/review.tsx'));
       await fs.copyFile(path.join(VIDEO_PATHS.template, 'src/scenes/StudioScene.tsx'), projectWritePath(dir, 'src/scenes/StudioScene.tsx'));
       await fs.writeFile(registry, `import { StudioScene } from './StudioScene';\n` + text.replace(/(export const scenes[^=]*=\s*\{)/, '$1\n  StudioScene,'));
     }
@@ -644,12 +687,14 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     if (params.install !== false) await npmInstall(dir, signal, progress);
     return { project: dir, feature: "3d", primitive: 'import { Model3D } from "../primitives/Model3D";', use: '<Model3D src="assets/models/<id>/<id>.gltf" width={900} height={700} turns={0.5} />', note: "Software GL renders each frame on the CPU; keep models at 1k textures and the canvas near the size it is shown." };
   }
-  if (action !== "check") throw new Error("action must be init, compose, check, install, look, cta or feature");
-  const { spec, issues, scenes, seconds, components } = await inspectProject(dir);
+  if (action !== "check") throw new Error("action must be init, compose, check, install, look, cta, feature or upgrade");
+  const { spec, issues, scenes, seconds, components, assets } = await inspectProject(dir);
   return {
     project: dir, title: spec.title, look: spec.look ?? null, intent: spec.publish?.intent ?? "publish", fps: spec.fps, size: `${spec.width}x${spec.height}`, seconds: Number(seconds.toFixed(2)),
     installed: existsSync(path.join(dir, "node_modules/@remotion/renderer")),
     components: [...components],
+    direction:spec.direction ?? null,assets,
+    motion: (spec.scenes ?? []).filter((s: any)=>s?.component==='StudioScene' && !validateProductionScene(s).some(i=>i.severity==='error')).map((s: any)=>({id:s.id,reviewTimes:productionTimes(s,spec.fps).slice(0,96),note:'Critical frame times for cues, keys and exits; sample the remaining times or playback when coverage is truncated'})),
     scenes: scenes.map((s) => ({ id: s.id, component: s.component, start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)), narration: s.narrationAudio ? `${s.narrationSeconds ?? "?"}s audio` : s.narration ? "text only" : "none" })),
     issues, ok: !issues.some((i) => i.severity === "error"),
   };
@@ -675,7 +720,7 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
   const { spec, issues, scenes } = await inspectProject(dir);
   const blocking = issues.filter((i) => i.severity === "error");
   const mode = params.mode ?? "stills";
-  if (['final', 'segments'].includes(mode) && issues.some(i => /is a preview render|runs at .* fps in a .* fps film/.test(i.message))) throw Error('Final delivery contains draft or undersampled Blender shots. Re-render referenced shots at film fps with mode:final, or explicitly author stepped motion.');
+  if (['final', 'segments'].includes(mode) && issues.some(i => /is a preview render|runs at .* fps in a .* fps film|is an explicit (?:blockout|draft) asset/.test(i.message))) throw Error('Final delivery contains blockout, draft or undersampled assets. Finish the declared assets and re-render referenced Blender shots at film fps with mode:final, or explicitly author stepped motion.');
   if (blocking.length && mode !== "stills" && mode !== "thumbnail") throw new Error(`Fix timeline errors first: ${blocking.map((i) => `${i.scene ? `[${i.scene}] ` : ""}${i.message}`).join("; ")}`);
   const release = await acquireRender(signal);
   const report = throttled(progress);
@@ -688,7 +733,13 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
       const result = await runRenderer(dir, request, signal, report, 600_000);
       const stills = result.stills.map((s: any, i: number) => ({ ...s, label: plan[i].label }));
       const sheet = await contactSheet(stills.map((s: any) => ({ path: s.path, label: s.label })), path.join(out, "contact-sheet.png"), signal);
-      return { mode, contactSheet: sheet, stills, bundleCached: result.bundleCached, timelineIssues: issues,
+      const layout = result.layout ?? [];
+      const layoutFindings: Issue[] = layout.flatMap((sample: any)=>(sample.text ?? []).flatMap((text: any)=>[
+        ...(text.overflow ? [{severity:'error' as const,scene:sample.scene,message:`Rendered text ${text.id} overflows its region at frame ${sample.deliveredFrame}; enlarge its region or shorten it`}] : []),
+        ...(text.size<24 ? [{severity:'warn' as const,scene:sample.scene,message:`Rendered text ${text.id} shrank to ${text.size}px in the design canvas; inspect its readability at delivery size`}] : []),
+      ]));
+      return { mode, contactSheet: sheet, stills, bundleCached: result.bundleCached, timelineIssues: issues, layout, layoutFindings,
+        layoutStatus:layout.length?'measured':'unavailable (custom or older template)',
         review: "Open contact-sheet.png (and full-size stills where detail matters) with the read tool and judge it: hierarchy, clipping, text size/density, spacing rhythm, contrast, empty or overcrowded composition, consistency with neighbouring scenes. A successful render is not visual approval." };
     }
     if (mode === "thumbnail") {
@@ -783,16 +834,59 @@ async function runRenderer(dir: string, request: any, signal: AbortSignal | unde
 /** A bounded strip covers entrance, settled composition, an authored gesture
  * and the final delivered frame. This is evidence for review, not approval. */
 export function criticalReviewTimes(scene: TimedScene, raw: any, fps: number): number[] {
-  const clamp = (t: number) => Math.max(0, Math.min(scene.seconds-1/fps, t));
-  const motions = (raw?.props?.layers ?? []).map((l: any) => l.motion ?? {});
+  const last=Math.max(0,Math.round(scene.seconds*fps)-1);
+  const clamp = (t: number) => Math.max(0, Math.min(last, Math.round(t*fps)))/fps;
+  const layers = Array.isArray(raw?.props?.layers) ? raw.props.layers.filter((l:any)=>l && typeof l==='object') : [];
+  const motions = layers.map((l: any) => l.motion ?? {});
   const onset = (m: any) => m.cue ? scene.cues?.[m.cue] ?? 0 : m.at ?? 0;
   const settled = motions.length ? Math.max(...motions.map((m: any) => onset(m)+(m.duration ?? .65))) : scene.seconds*.3;
-  const gesture = motions.flatMap((m: any) => (m.keys ?? []).map((k: any) => k.t)).find((t: number) => t > settled && t < scene.seconds-.1);
-  const times = [.08, settled, gesture ?? scene.seconds*.6, scene.seconds-1/fps];
-  return [...new Set(times.map(t => Math.round(clamp(t)*fps)/fps))].sort((a,b) => a-b);
+  const gesture = motions.flatMap((m: any) => (Array.isArray(m.keys)?m.keys:[]).map((k: any) => k?.t)).find((t: number) => t > settled && t < scene.seconds-.1);
+  const exits=motions.flatMap((m: any)=>m.exit?[onset(m.exit),onset(m.exit)+(m.exit.duration ?? .4)]:[]);
+  const words=layers.flatMap((l: any)=>Array.isArray(l.wordTimes)&&l.wordTimes.length?[l.wordTimes.at(-1)]:Array.isArray(l.wordCues)&&l.wordCues.length?[scene.cues?.[l.wordCues.at(-1)]]:[]).filter(Number.isFinite);
+  const times = [0,.08,settled,gesture ?? scene.seconds*.6,...exits.slice(0,2),...words.slice(0,1),last/fps];
+  return [...new Set(times.map(clamp))].sort((a,b) => a-b);
+}
+
+const QA_CRITERIA=['art-direction','composition','typography','motion','sync','audio'];
+async function qaIdentity(file: string, dir: string | undefined, signal?: AbortSignal, references: any[] = []) {
+  const current=await referenceEvidence(references.map(r=>r.source),dir ?? path.dirname(file),signal);
+  return {video:await fileDigest(file,signal),project:dir?await videoFingerprint(dir,{purpose:'video-qa-v2'},signal):null,references:createHash('sha256').update(JSON.stringify(current)).digest('hex')};
+}
+
+/** Existing QA artifacts own their reviews. Technical passes never populate
+ * perceptual verdicts, and edited bytes invalidate every prior attestation. */
+async function qaReview(params: any, cwd: string, signal?: AbortSignal) {
+  const reportPath=await inputFile(params.report,cwd), file=await inputFile(params.path,cwd);
+  if((await fs.stat(reportPath)).size>2*1024*1024)throw Error('QA report exceeds 2 MiB');
+  const report=JSON.parse(await fs.readFile(reportPath,'utf8'));
+  if(report.format!=='yunuspi-video-qa-v2' || report.path!==file || !report.identity)throw Error('Use the qa.json returned by video_qa analyze for this video');
+  const identity=await qaIdentity(file,report.project,signal,report.references ?? []);
+  let evidenceChanged=false;
+  for(const sample of report.evidence ?? []) if(await fileDigest(sample.path,signal).catch(()=>null)!==sample.sha256)evidenceChanged=true;
+  signal?.throwIfAborted();
+  const stale=identity.video!==report.identity.video || identity.project!==report.identity.project || identity.references!==report.identity.references || evidenceChanged;
+  if(params.action==='status') return {report:reportPath,stale,reviewStatus:stale?'stale':report.reviewStatus,reviews:report.reviews ?? [],sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Verdicts are explicit reviewer attestations on this evidence scope; technical checks do not establish design, playback or listening quality'};
+  if(stale)throw Error('QA evidence is stale: video or project bytes changed. Analyze the current render before recording verdicts.');
+  const denial=selfMutationDenial(reportPath,await fs.realpath(cwd));if(denial)throw Error(denial);
+  if(!Array.isArray(params.reviews) || !params.reviews.length || params.reviews.length>6)throw Error('record needs 1..6 explicit review verdicts');
+  const seen=new Set(), reviews=new Map<string,any>((report.reviews ?? []).map((r: any)=>[r.criterion,r]));
+  for(const review of params.reviews) {
+    if(!review || !QA_CRITERIA.includes(review.criterion) || seen.has(review.criterion) || !['pass','fail','unreviewed'].includes(review.verdict) || typeof review.note!=='string' || !review.note.trim() || review.note.length>1200)throw Error('Reviews need distinct known criteria, verdicts and concrete notes');
+    if(review.comparedReferences !== undefined && (!Array.isArray(review.comparedReferences) || review.comparedReferences.length>8 || review.comparedReferences.some((r:any)=>typeof r!=='string' || r.length>4096)))throw Error('comparedReferences needs at most 8 reference paths/URLs');
+    if(!['frames','playback','listening'].includes(review.evidence) || (['motion','sync'].includes(review.criterion) && review.evidence!=='playback') || (review.criterion==='audio' && review.evidence!=='listening') || (['art-direction','composition','typography'].includes(review.criterion) && review.evidence==='listening'))throw Error('Art direction/composition/typography need frames or playback, motion/sync need playback, audio needs listening');
+    if(review.criterion==='art-direction' && review.verdict==='pass' && (report.references ?? []).some((r:any)=>r.unavailable || !review.comparedReferences?.includes(r.source)))throw Error('An art-direction pass must name every inspected reference in comparedReferences; unavailable references need repair or a revised brief');
+    seen.add(review.criterion);reviews.set(review.criterion,{...review,note:review.note.trim(),reviewer:params.reviewer ?? 'model',at:new Date().toISOString()});
+  }
+  report.reviews=[...reviews.values()];
+  const required=QA_CRITERIA.filter(c=>report.hasAudio || !['audio','sync'].includes(c));
+  report.reviewStatus=report.reviews.some((r: any)=>r.verdict==='fail')?'needs-work':required.every(c=>reviews.get(c)?.verdict==='pass')?(report.nextScene!==null || report.startScene>0?'passed-scope':'passed'):'partial';
+  await fs.writeFile(reportPath,JSON.stringify(report,null,2)+'\n');
+  return {report:reportPath,reviewStatus:report.reviewStatus,deliveryReady:report.passedAutomatedChecks && report.reviewStatus==='passed',reviews:report.reviews,sampledScenes:report.sampledScenes,nextScene:report.nextScene,note:'Recorded review attestations; automated technical checks remain separate'};
 }
 
 export async function videoQa(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
+  if(['record','status'].includes(params.action))return qaReview(params,cwd,signal);
+  if(params.action!==undefined && params.action!=='analyze')throw Error('action must be analyze, record or status');
   const file = await inputFile(params.path, cwd);
   const info = await probe(file, signal);
   const video = info.streams?.find((s: any) => s.codec_type === "video");
@@ -801,24 +895,32 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   const duration = Number(info.format?.duration);
   if (!Number.isFinite(duration) || duration <= 0) throw new Error("Unknown video duration");
   let scenes: TimedScene[] = [];
-  let projectSpec: any;
+  let projectSpec: any, assets: any[]=[];
   let timelineIssues: Issue[] = [];
   let platformTarget = -16;
-  if (params.dir) { const project = await inspectProject(await projectDir(params.dir, cwd)); projectSpec = project.spec; scenes = project.scenes; timelineIssues = project.issues; platformTarget = targetLoudness(project.spec); }
+  const dir=params.dir?await projectDir(params.dir,cwd):undefined;
+  if (dir) { const project = await inspectProject(dir); projectSpec = project.spec; scenes = project.scenes; timelineIssues = project.issues; assets=project.assets; platformTarget = targetLoudness(project.spec); }
+  const references=await referenceEvidence(projectSpec?.direction?.references ?? [],dir ?? cwd,signal);
+  const identity=await qaIdentity(file,dir,signal,references);
   const targetLufs = typeof params.targetLufs === "number" ? params.targetLufs : platformTarget;
   progress?.("Analyzing picture and sound (black/freeze detection, silence, EBU R128 loudness)…");
   const analysis = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, 0), "-map", "0:v:0", "-vf", "blackdetect=d=0.25:pix_th=0.08,freezedetect=n=0.002:d=1.5",
     ...(audio ? ["-map", "0:a:0", "-af", "silencedetect=noise=-50dB:d=1.2,ebur128=peak=true:framelog=info"] : []),
     "-f", "null", "-"], signal, Math.round(Math.min(3_600_000, 60_000 + duration * 4000)));
   const metrics = parseQaLog(`${analysis.stdout}\n${analysis.stderr}`, duration);
-  const findings = [...timelineIssues.filter((i) => i.severity !== "info"), ...qaFindings(metrics, {
+  const findings = [...timelineIssues.filter((i) => i.severity !== "info").map(i=>/is a preview render|is an explicit (?:blockout|draft) asset/.test(i.message)?{...i,severity:'error' as const}:i), ...qaFindings(metrics, {
     duration, hasAudio: Boolean(audio), targetLufs,
     videoDuration: Number(video.duration ?? duration), ...(audio ? { audioDuration: Number(audio.duration ?? duration) } : {}),
   }, scenes)];
+  const [num,den]=String(video.avg_frame_rate).split('/').map(Number), deliveredFps=den?num/den:num;
+  const projectMatches=!projectSpec || (video.width===projectSpec.width && video.height===projectSpec.height && Math.abs(deliveredFps-projectSpec.fps)<.001 && Math.abs(Number(video.duration ?? duration)-(scenes.at(-1)?.end ?? 0))<=1/projectSpec.fps+.01);
+  if(!projectMatches)findings.push({severity:'error',message:'Delivered dimensions, frame rate or duration differ from video.json. Use the matching full-film render/project; scene labels and cue samples cannot describe this file.'});
+  if(!projectMatches)scenes=[];
   const first = Number(params.startScene ?? 0), selected = scenes.slice(first, first + 8);
+  if(!Number.isInteger(first) || first<0)throw Error('startScene must be a non-negative integer');
   if (scenes.length && !selected.length) throw Error(`startScene must be below ${scenes.length}`);
   const times = scenes.length
-    ? selected.flatMap(s => criticalReviewTimes(s, projectSpec?.scenes?.find((raw: any) => raw.id === s.id), projectSpec?.fps ?? 30).map(t => ({ t: s.start + t, label: `${s.id} ${(s.start+t).toFixed(2)}s` })))
+    ? selected.flatMap(s => [ ...(s.start>0?[{t:s.start-1/projectSpec.fps,label:`before ${s.id}`}]:[]),...criticalReviewTimes(s, projectSpec?.scenes?.find((raw: any) => raw.id === s.id), projectSpec?.fps ?? 30).map(t => ({ t: s.start + t, label: `${s.id} ${(s.start+t).toFixed(2)}s` }))])
     : Array.from({ length: 12 }, (_, i) => { const t = duration * (i + 0.5) / 12; return { t, label: `${t.toFixed(1)}s` }; });
   const out = path.join(path.dirname(file), `qa-${path.basename(file, path.extname(file))}-${randomBytes(3).toString("hex")}`);
   const denial = selfMutationDenial(out, await fs.realpath(cwd));
@@ -827,20 +929,26 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   const frames: Array<{ path: string; label: string }> = [];
   for (const [i, { t, label }] of times.entries()) {
     const framePath = path.join(out, `frame-${String(i + 1).padStart(2, "0")}.png`);
-    await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputArgs(file, Math.min(t, duration - 0.05)), "-frames:v", "1", "-update", "1", framePath], signal, 30_000);
+    await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputArgs(file, Math.max(0,Math.min(t,Number(video.duration ?? duration)-1/(deliveredFps || 30)))), "-frames:v", "1", "-update", "1", framePath], signal, 30_000);
+    await produced(framePath);
     frames.push({ path: framePath, label });
   }
   const sheet = await contactSheet(frames, path.join(out, "contact-sheet.png"), signal);
   const report = {
+    format:'yunuspi-video-qa-v2',identity,project:dir ?? null,startScene:first,
+    direction:projectSpec?.direction ?? null,references,assets:assets.filter(a=>!selected.length || selected.some(s=>s.id===a.scene)),
     path: file, seconds: Number(duration.toFixed(3)), size: `${video.width}x${video.height}`, fps: video.avg_frame_rate, hasAudio: Boolean(audio),
     loudness: { integratedLufs: metrics.integratedLufs, loudnessRangeLu: metrics.loudnessRange, peakDbfs: metrics.truePeak, targetLufs },
     black: metrics.black, freeze: metrics.freeze, silence: metrics.silence,
     findings, passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
-    contactSheet: sheet,
+    contactSheet: sheet,detailFrame:frames[Math.min(3,frames.length-1)]?.path,frames:frames.map((f,i)=>({...f,seconds:times[i].t})),report:path.join(out,'qa.json'),
     sampledScenes: selected.map(s => s.id), nextScene: first + selected.length < scenes.length ? first + selected.length : null,
-    reviewStatus: 'unreviewed',
-    review: "Automated checks find technical defects only. Now open the contact sheet with the read tool and review every frame against the storyboard (hierarchy, legibility, clipping, density, consistency, meaning), then spot-check transitions with video_frames and confirm narration lines land on their visual cues.",
+    reviewStatus: 'unreviewed',reviews:[],projectMatches,
+    reviewPrompts:{'art-direction':'Compare full-size hero/detail frames against the brief and references: specific silhouette, accurate subject, intentional materials/texture, coherent light/shadow, grounded depth, palette and style. A primitive stand-in, decorative blob or noisy unfinished material needs work even if the file decodes. Intentional abstract and flat artwork can pass when they serve the brief.',composition:'Check hierarchy, spacing, focal balance and intentional overlap in the final canvas.',typography:'Check actual glyphs, wrapping, readable holds and unclipped labels.',motion:'Inspect continuous playback for acceleration, transitions, continuity and artifacts; stills cannot establish timing.',sync:'Inspect playback against spoken words and observed actions.',audio:'Listen to the delivery encoding for voice clarity, balance, accents and endings.'},
+    review: "Automated checks find technical defects only. Open the contact sheet and full-size detail frames against the stored creative brief and reference pixels, inspect actual playback, and listen where audio exists. Record separate art-direction, composition, typography, motion, sync and audio verdicts with video_qa record; honest unreviewed criteria remain open.",
   };
+  (report as any).evidence=await Promise.all([...frames.map(f=>f.path),sheet].map(async sample=>({path:sample,sha256:await fileDigest(sample,signal)})));
+  if(await fileDigest(file,signal)!==identity.video)throw Error('Video changed during QA; analyze the stable final render again');
   await fs.writeFile(path.join(out, "qa.json"), JSON.stringify(report, null, 2) + "\n");
   return report;
 }

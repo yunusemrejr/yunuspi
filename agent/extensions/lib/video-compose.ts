@@ -1,11 +1,13 @@
 /** Native storyboard authoring for video_project. Extends the existing master
  * timeline and renderer; the shared production kernel also drives validation. */
-import { cameraAt, layerPose, smooth, type Layer, type CameraKey } from '../../skills/remotion-video/assets/template/src/production.ts';
+import { cameraAt, cueTime, layerPose, smooth, type Layer, type CameraKey } from '../../skills/remotion-video/assets/template/src/production.ts';
 export type ProductionIssue = { severity: 'error' | 'warn'; scene?: string; message: string };
 const finite = (n: unknown) => typeof n === 'number' && Number.isFinite(n);
 const pathOK = (p: unknown) => typeof p === 'string' && !!p && !p.startsWith('/') && !p.split(/[\\/]/).includes('..') && !/[\x00-\x1f]|^[a-z]+:/i.test(p);
 const colorOK = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 const layouts = ['hero-left', 'hero-right', 'screen', 'full', 'type'];
+const easings = ['linear', 'smooth', 'snappy', 'spring', 'hold'];
+const pointsOK = (p: any, count: number | null, lo: number, hi: number) => Array.isArray(p) && (count === null ? p.length >= 2 && p.length <= 64 : p.length === count) && p.every((v: any) => Array.isArray(v) && v.length === 2 && v.every((n: any) => finite(n) && n >= lo && n <= hi));
 
 /** Comfortable, responsive regions with reserved caption space. Deliberate
  * custom layering remains possible through explicit normalized boxes. */
@@ -21,7 +23,7 @@ export function storyboardLayers(scene: any, spec: any): Layer[] {
   if (scene.hero) {
     const hero = scene.hero;
     const box: any = hero.box ?? (layout === 'screen' ? [.06, .21, .88, .61] : layout === 'full' ? (scene.headline ? [.03, .23, .94, .59] : [.03, .03, .94, .79]) : vertical ? [.07, .38, .86, .43] : [right ? .51 : .04, .08, .45, .75]);
-    layers.push({ id: 'hero', ...hero, box, motion: hero.motion ?? { enter: 'pop', at: Math.min(.2, scene.seconds*.1), duration: Math.min(.8, scene.seconds*.5) } });
+    layers.push({ id: 'hero', role: 'hero', ...hero, box, motion: hero.motion ?? { enter: 'pop', at: Math.min(.2, scene.seconds*.1), duration: Math.min(.8, scene.seconds*.5) } });
   }
   if (scene.footer) layers.push({ id: 'footer', kind: 'text', text: scene.footer, box: [.07, .84, .86, .07], font: 'text', size: 32, motion: { enter: 'rise', at: Math.min(.7, scene.seconds*.35), duration: Math.min(.5, scene.seconds*.35) } });
   return layers;
@@ -64,29 +66,68 @@ export function validateProductionScene(scene: any): ProductionIssue[] {
     if (!layer || typeof layer.id !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/.test(layer.id) || ids.has(layer.id)) { add('error', 'Layers need distinct kebab-case ids'); continue; }
     ids.add(layer.id);
     const name = `Layer ${layer.id}`;
-    if (!['text', 'image', 'video', 'shot', 'shape'].includes(layer.kind)) add('error', `${name}: unknown kind`);
+    if (layer.role !== undefined && !['hero','support','label','background'].includes(layer.role)) add('error', `${name}: unknown visual role`);
+    if (layer.asset !== undefined && (!layer.asset || !['blockout','draft','final'].includes(layer.asset.stage) || (layer.asset.description !== undefined && (typeof layer.asset.description !== 'string' || layer.asset.description.length > 400)))) add('error', `${name}: asset needs stage blockout/draft/final and an optional description up to 400 characters`);
+    if (!['text', 'image', 'video', 'shot', 'shape', 'path', 'counter'].includes(layer.kind)) add('error', `${name}: unknown kind`);
     if (!Array.isArray(layer.box) || layer.box.length !== 4 || layer.box.some((v: any) => !finite(v)) || layer.box[2] <= 0 || layer.box[3] <= 0 || layer.box[0] < 0 || layer.box[1] < 0 || layer.box[0] + layer.box[2] > 1.001 || layer.box[1] + layer.box[3] > 1.001) { add('error', `${name}: box [x,y,w,h] must fit the canvas in fractions`); continue; }
     if (layer.kind === 'text' && (typeof layer.text !== 'string' || !layer.text.trim() || layer.text.length > 1000)) add('error', `${name}: text required (1..1000 characters)`);
     if (['image', 'video'].includes(layer.kind) && !pathOK(layer.src)) add('error', `${name}: src must be a relative public/ asset path`);
     if (layer.kind === 'shot' && (typeof layer.shot !== 'string' || !/^[a-z0-9][a-z0-9-]{0,47}$/.test(layer.shot))) add('error', `${name}: valid shot id required`);
+    if (layer.subjectFit !== undefined && (layer.kind !== 'shot' || typeof layer.subjectFit !== 'boolean')) add('error', `${name}: subjectFit is a boolean for shot layers; false preserves the authored full-frame camera composition`);
     if (layer.color !== undefined && !colorOK(layer.color)) add('error', `${name}: color must be #rrggbb`);
+    if (layer.colorRole !== undefined && !['ink','muted','accent','accent2','surface','background'].includes(layer.colorRole)) add('error', `${name}: unknown theme colorRole`);
+    if (layer.stroke !== undefined && !colorOK(layer.stroke)) add('error', `${name}: stroke must be #rrggbb`);
+    if (layer.strokeWidth !== undefined && (!finite(layer.strokeWidth) || layer.strokeWidth < .1 || layer.strokeWidth > 40)) add('error', `${name}: strokeWidth must be .1..40`);
+    if (layer.shadow !== undefined && !['soft','none'].includes(layer.shadow)) add('error', `${name}: unknown shadow`);
+    if (layer.kind === 'path' && (!layer.path || !pointsOK(layer.path.points,null,0,1))) add('error', `${name}: path needs 2..64 normalized 2D points`);
+    if (layer.path) for (const key of ['smooth','closed','draw','arrow']) if (layer.path[key] !== undefined && typeof layer.path[key] !== 'boolean') add('error', `${name}: path.${key} must be boolean`);
+    if (layer.kind === 'counter' && (!layer.value || !finite(layer.value.from) || !finite(layer.value.to) || Math.abs(layer.value.from)>1e12 || Math.abs(layer.value.to)>1e12)) add('error', `${name}: counter needs finite from/to within 1e12`);
+    if (layer.value) {
+      if (layer.value.decimals !== undefined && (!Number.isInteger(layer.value.decimals) || layer.value.decimals<0 || layer.value.decimals>6)) add('error', `${name}: counter decimals must be 0..6`);
+      for (const k of ['prefix','suffix']) if (layer.value[k] !== undefined && (typeof layer.value[k] !== 'string' || layer.value[k].length>40)) add('error', `${name}: counter ${k} must be at most 40 characters`);
+    }
     for (const [field, lo, hi] of [['size', 14, 300], ['radius', 0, 200], ['startFrom', 0, 86400], ['speed', .1, 4]] as const) if (layer[field] !== undefined && (!finite(layer[field]) || layer[field] < lo || layer[field] > hi)) add('error', `${name}: invalid ${field}`);
     const motion = layer.motion ?? {};
-    if (motion.easing && !['smooth', 'snappy', 'spring'].includes(motion.easing)) add('error', `${name}: unknown easing`);
+    if (motion.easing && !easings.includes(motion.easing)) add('error', `${name}: unknown easing`);
     if (motion.stagger !== undefined && (!finite(motion.stagger) || motion.stagger < 0 || motion.stagger > 2)) add('error', `${name}: stagger must be 0..2 seconds`);
     if (motion.travel !== undefined && (!finite(motion.travel) || Math.abs(motion.travel) > 1)) add('error', `${name}: travel must be -1..1 canvas units`);
-    if (layer.reveal && !['block', 'lines'].includes(layer.reveal)) add('error', `${name}: unknown text reveal`);
+    if (layer.reveal && !['block', 'lines', 'words', 'typewriter'].includes(layer.reveal)) add('error', `${name}: unknown text reveal`);
+    if (layer.wordTimes !== undefined && layer.wordCues !== undefined) add('error', `${name}: provide wordTimes or wordCues, not both`);
+    if (layer.wordCues !== undefined) {
+      const text=typeof layer.text==='string'?layer.text:'';
+      const count=layer.reveal==='typewriter'?Array.from(text).length:text.trim().split(/\s+/).length;
+      if(layer.kind!=='text' || !['words','typewriter'].includes(layer.reveal) || !Array.isArray(layer.wordCues) || layer.wordCues.length!==count || layer.wordCues.some((cue: any,i: number)=>typeof cue!=='string' || !finite(scene.cues?.[cue]) || (i>0 && scene.cues[cue]<scene.cues[layer.wordCues[i-1]])))add('error',`${name}: wordCues needs one ordered existing cue per word/character`);
+    }
+    if (layer.wordTimes !== undefined) {
+      const text=typeof layer.text==='string'?layer.text:'';
+      const count = layer.reveal === 'typewriter' ? Array.from(text).length : text.trim().split(/\s+/).length;
+      if (layer.kind !== 'text' || !['words','typewriter'].includes(layer.reveal) || !Array.isArray(layer.wordTimes) || layer.wordTimes.length !== count || layer.wordTimes.some((v: any,i: number) => !finite(v) || v<0 || v>=scene.seconds || (i>0 && v<layer.wordTimes[i-1]))) add('error', `${name}: wordTimes needs one ordered scene time per revealed word/character`);
+    }
     if (motion.cue && !finite(scene.cues?.[motion.cue])) add('error', `${name}: missing cue ${motion.cue}`);
     if (motion.at !== undefined && (!finite(motion.at) || motion.at < 0 || motion.at >= scene.seconds)) add('error', `${name}: motion.at outside scene`);
     if (motion.duration !== undefined && (!finite(motion.duration) || motion.duration < .01 || motion.duration > scene.seconds)) add('error', `${name}: invalid motion.duration`);
     if (motion.enter && !['none', 'rise', 'slide', 'pop', 'wipe'].includes(motion.enter)) add('error', `${name}: unknown entrance`);
+    if (motion.route !== undefined && !pointsOK(motion.route,4,-2,2)) add('error', `${name}: route needs four cubic control points in canvas offsets within -2..2`);
+    if (motion.orient !== undefined && typeof motion.orient !== 'boolean') add('error', `${name}: orient must be boolean`);
+    if (motion.exit !== undefined) {
+      const end=motion.exit;
+      if (!end || typeof end !== 'object' || Array.isArray(end)) add('error', `${name}: exit must be a timing object`);
+      else {
+        if (end.cue && !finite(scene.cues?.[end.cue])) add('error', `${name}: missing exit cue ${end.cue}`);
+        if (end.at !== undefined && (!finite(end.at) || end.at<0 || end.at>=scene.seconds)) add('error', `${name}: exit.at outside scene`);
+        if (end.duration !== undefined && (!finite(end.duration) || end.duration<.01 || end.duration>scene.seconds)) add('error', `${name}: invalid exit.duration`);
+        if (end.to !== undefined && !['fade','rise','slide','shrink','wipe'].includes(end.to)) add('error', `${name}: unknown exit`);
+        if (end.travel !== undefined && (!finite(end.travel) || Math.abs(end.travel)>1)) add('error', `${name}: invalid exit.travel`);
+      }
+    }
     for (const [keys, label] of [[motion.keys, 'motion'], [layer.camera, 'camera']] as const) if (keys !== undefined) {
       if (!Array.isArray(keys) || keys.length > (label === 'camera' ? 1202 : 64)) { add('error', `${name}: invalid ${label} keys`); continue; }
       let last = -1;
       for (const k of keys) {
-        if (!k || !finite(k.t) || k.t <= last || k.t < 0 || k.t > (label === 'camera' ? 86400 : scene.seconds) || Object.values(k).some(v => !finite(v))) add('error', `${name}: ordered finite ${label} keys required`);
+        if (!k || !finite(k.t) || k.t <= last || k.t < 0 || k.t > (label === 'camera' ? 86400 : scene.seconds) || Object.entries(k).some(([field,v]) => field === 'easing' ? !easings.includes(String(v)) : !finite(v))) { add('error', `${name}: ordered finite ${label} keys required`); continue; }
         last = k?.t ?? last;
         if (label === 'motion' && ((k.scale !== undefined && (k.scale <= 0 || k.scale > 5)) || (k.opacity !== undefined && (k.opacity < 0 || k.opacity > 1)))) add('error', `${name}: invalid scale/opacity`);
+        if (label === 'motion' && (['scaleX','scaleY'].some(f=>k[f] !== undefined && (k[f]<=0 || k[f]>5)) || (k.blur !== undefined && (k.blur<0 || k.blur>100)))) add('error', `${name}: invalid axis scale/blur`);
         if (label === 'camera' && (!finite(k.zoom) || k.zoom < 1 || k.zoom > 4 || !finite(k.x) || !finite(k.y))) add('error', `${name}: camera needs x, y, zoom 1..4`);
       }
     }
@@ -94,12 +135,27 @@ export function validateProductionScene(scene: any): ProductionIssue[] {
     if (layer.screen) for (const [field, lo, hi] of [['startFrom', 0, 86400], ['speed', .1, 4], ['width', 64, 3840], ['height', 64, 3840]] as const) if (layer.screen[field] !== undefined && (!finite(layer.screen[field]) || layer.screen[field] < lo || layer.screen[field] > hi)) add('error', `${name}: invalid screen.${field}`);
   }
   if (issues.some(i => i.severity === 'error')) return issues;
+  for (const l of layers) if (['text','counter'].includes(l.kind)) {
+    const m=l.motion ?? {}, at=cueTime(m,scene.cues);
+    let settled=(m.enter === 'none' ? 0 : at+(m.duration ?? .65));
+    if (l.kind === 'counter') settled=at+(m.duration ?? .65);
+    if (l.reveal === 'words' || l.reveal === 'typewriter') {
+      const count=l.reveal==='words'?l.text.trim().split(/\s+/).length:Array.from(l.text).length;
+      settled=Math.max(settled,l.wordCues?.length?scene.cues[l.wordCues.at(-1)]:l.wordTimes?.at(-1) ?? at+(count-1)*(m.stagger ?? (l.reveal==='words'?.12:.04)));
+    }
+    const end=m.exit ? cueTime(m.exit,scene.cues) : scene.seconds;
+    const hold=end-settled;
+    if (hold<.25) add('warn', `${l.id} has ${Math.max(0,hold).toFixed(2)}s of settled reading time; its reveal may finish after exit or cut`);
+  }
   const reported = new Set<string>();
   for (let k = 0; k < 24; k++) {
     const t = scene.seconds * (k + .5) / 24;
     const regions = layers.map((l: Layer) => {
-      const p = layerPose(t, l.motion, scene.cues), [x, y, w, h] = l.box;
-      const cw = w * p.scale, ch = h * p.scale;
+      const aspect=scene.props.canvasAspect ?? 1;
+      const p = layerPose(t, l.motion, scene.cues,aspect), [x, y, w, h] = l.box;
+      const radians=p.rotate*Math.PI/180;
+      const cw = Math.abs(Math.cos(radians))*w*p.scale*p.scaleX+Math.abs(Math.sin(radians))*h*p.scale*p.scaleY/aspect;
+      const ch = Math.abs(Math.sin(radians))*w*p.scale*p.scaleX*aspect+Math.abs(Math.cos(radians))*h*p.scale*p.scaleY;
       return { l, p, x: x + p.x + (w - cw) / 2, y: y + p.y + (h - ch) / 2, w: cw, h: ch };
     });
     for (const a of regions) if (a.p.opacity > .95 && t > (a.l.motion?.at ?? 0) + (a.l.motion?.duration ?? .65)) {
@@ -115,6 +171,22 @@ export function validateProductionScene(scene: any): ProductionIssue[] {
   return issues;
 }
 
+/** Bounded cue/gesture evidence for the renderer and model, never an aesthetic
+ * score. Endpoints are quantized to actual delivered frames. */
+export function productionTimes(scene: any, fps: number): number[] {
+  const frames=Math.max(1,Math.round(scene.seconds*fps)), times=new Set([0,frames-1]);
+  const add=(t: number) => { if(finite(t)) { const f=Math.max(0,Math.min(frames-1,Math.round(t*fps))); for(const d of [-1,0,1])if(f+d>=0&&f+d<frames)times.add(f+d); } };
+  for (const l of scene.props?.layers ?? []) {
+    const m=l.motion ?? {}, at=cueTime(m,scene.cues);
+    add(at); add(at+(m.duration ?? .65));
+    for(const key of m.keys ?? []) add(key.t);
+    for(const time of l.wordTimes ?? []) add(time);
+    if(m.exit) {const at=cueTime(m.exit,scene.cues);add(at);add(at+(m.exit.duration ?? .4));}
+  }
+  for(const t of Object.values(scene.cues ?? {}))add(Number(t));
+  return [...times].sort((a,b)=>a-b).map(f=>f/fps);
+}
+
 export function compileStoryboard(input: any[], spec: any, append = false) {
   if (!Array.isArray(input) || !input.length || input.length > 2000) throw Error('compose needs 1..2000 scenes');
   const scenes = input.map(raw => {
@@ -122,7 +194,7 @@ export function compileStoryboard(input: any[], spec: any, append = false) {
     const previous = (spec.scenes ?? []).find((s: any) => s.id === raw.id && s.narration === raw.narration);
     const timing = previous ? Object.fromEntries(['narrationAudio', 'narrationWords', 'narrationSeconds', 'narrationOffset'].filter(k => previous[k] !== undefined).map(k => [k, previous[k]])) : {};
     const { layers, hero, headline, kicker, footer, layout, background, ink, size, headlineCue, ...scene } = raw;
-    return { ...timing, ...scene, component: 'StudioScene', props: { layers: storyboardLayers(raw, spec), background, ink }, transition: raw.transition ?? { type: 'none', seconds: .2 } };
+    return { ...timing, ...scene, component: 'StudioScene', props: { layers: storyboardLayers(raw, spec), background, ink,canvasAspect:(spec.width ?? 1920)/(spec.height ?? 1080) }, transition: raw.transition ?? { type: 'none', seconds: .2 } };
   });
   const combined = append ? [...spec.scenes, ...scenes] : scenes;
   const ids = combined.map(s => s.id);

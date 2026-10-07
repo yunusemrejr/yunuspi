@@ -1,0 +1,25 @@
+{
+  "catalog": {
+    "title": "A signal follows the explanation",
+    "summary": "Editable native process diagram: drawn connections, a packet on cubic routes, coordinated type and a readable outcome. Uses the film theme without extra code or assets.",
+    "concepts": ["Causal staging with vector stroke reveals", "Absolute-time cubic travel with endpoint continuity", "Reserved headline, diagram and label regions", "Settled reading time and coordinated exits"],
+    "use": ["Copy, then video_project compose storyboard:storyboard/process-flow.json", "Replace the labels and durations with the real process; render stills and preview before delivery"],
+    "tags": "diagram process tutorial explain path stroke bezier signal flow vector causal"
+  },
+  "scenes": [{
+    "id": "follow-the-signal", "seconds": 6,
+    "layers": [
+      {"id":"title","kind":"text","text":"Follow the signal","box":[0.07,0.07,0.86,0.18],"size":128,"motion":{"enter":"rise","duration":0.5}},
+      {"id":"first-link","kind":"path","box":[0.25,0.43,0.18,0.12],"path":{"points":[[0,0.5],[0.4,0],[0.6,1],[1,0.5]],"smooth":true,"draw":true,"arrow":true},"motion":{"enter":"none","at":0.8,"duration":0.7}},
+      {"id":"second-link","kind":"path","box":[0.58,0.43,0.18,0.12],"path":{"points":[[0,0.5],[0.4,1],[0.6,0],[1,0.5]],"smooth":true,"draw":true,"arrow":true},"motion":{"enter":"none","at":2.4,"duration":0.7}},
+      {"id":"input","kind":"shape","box":[0.1,0.35,0.15,0.28],"shape":"ellipse","motion":{"enter":"pop","at":0.3,"duration":0.5}},
+      {"id":"transform","kind":"shape","box":[0.425,0.35,0.15,0.28],"radius":32,"motion":{"enter":"pop","at":0.5,"duration":0.5}},
+      {"id":"output","kind":"shape","box":[0.75,0.35,0.15,0.28],"shape":"ellipse","motion":{"enter":"pop","at":0.7,"duration":0.5}},
+      {"id":"input-label","kind":"text","text":"INPUT","box":[0.08,0.67,0.19,0.07],"font":"mono","size":28,"align":"center","motion":{"enter":"none"}},
+      {"id":"transform-label","kind":"text","text":"TRANSFORM","box":[0.39,0.67,0.22,0.07],"font":"mono","size":28,"align":"center","motion":{"enter":"none"}},
+      {"id":"output-label","kind":"text","text":"OUTPUT","box":[0.73,0.67,0.19,0.07],"font":"mono","size":28,"align":"center","motion":{"enter":"none"}},
+      {"id":"packet","kind":"shape","box":[0.16,0.465,0.03,0.054],"shape":"ellipse","colorRole":"ink","motion":{"enter":"none","at":1.1,"duration":2.8,"easing":"linear","route":[[0,0],[0.18,-0.14],[0.48,0.14],[0.65,0]],"exit":{"at":4.2,"duration":0.3,"to":"shrink"}}},
+      {"id":"outcome","kind":"text","text":"Make each step visible.","box":[0.07,0.81,0.86,0.09],"font":"text","size":42,"motion":{"enter":"rise","at":3.8,"duration":0.5}}
+    ]
+  }]
+}

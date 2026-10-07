@@ -1,6 +1,6 @@
 # QA loop
 
-Review is a loop: render, look, write down defects, fix, re-render the changed scenes, and look again. Stop only when a round finds no defect of severity *fix*. Budget three to five rounds for a short video; that is normal, not failure.
+Review is a loop: render, look, write down defects, fix, re-render the changed scenes, and look again. Stop only when a round finds no defect of severity *fix*. Re-render only changed scenes and stop repeating unchanged checks once current evidence is sufficient.
 
 ## Frame review (every round)
 
@@ -8,18 +8,19 @@ Review is a loop: render, look, write down defects, fix, re-render the changed s
 
 | Defect | Look for | Typical fix |
 | --- | --- | --- |
+| Unfinished hero / wrong subject | Crude substitute, vague silhouette, missing defining details, incoherent material or light | Author the actual form or generate/import an appropriate asset; inspect full-size details against references |
 | Clipping / overflow | Text or shapes cut at edges or inside boxes | Reduce size, wrap earlier, enlarge the container, respect the safe area |
 | Weak hierarchy | Eye doesn't know where to land; two things equally loud | Enlarge the subject, mute the secondary layer, remove an element |
 | Bad typography | Tiny labels (< 26 px), long lines, orphans, mixed fonts, tight leading | Use the type scale; shorten copy; one line per idea |
-| Empty composition | Subject small in a big void; everything hugging one edge | Scale up the subject, recenter, use the thirds |
-| Overcrowding | More than ~7 distinct elements competing | Split the beat or build progressively |
+| Empty composition | Unintentional void or weak focal balance; deliberate negative space can be excellent | Scale up the subject, recenter, use the thirds |
+| Overcrowding | Multiple equally loud elements competing; a dense editorial composition can still have clear hierarchy | Split the beat or build progressively |
 | Excess text | Sentences on screen; narration duplicated as captions | Cut to ≤ 8 words; let the visual carry it |
 | Inconsistent spacing | Gutters and margins change between scenes | Use `space()` and shared layout components |
 | Poor contrast | Grey on grey, thin strokes on busy backdrop | Raise ink contrast, thicken strokes, quiet the backdrop |
 | Unreadable diagram | Crossing edges, labels overlapping nodes, no legend for encodings | Re-layout, fewer nodes, label directly, state the encoding once |
 | Mid-transition frame looks broken | Half-faded clutter, overlapping scenes | Adjust exit timing so outgoing content clears first |
 
-Frames sampled at 60% of each scene show settled states. Also sample early frames (`times`) to check entrances, and the last 10 frames of scenes to check exits.
+Native critical times include cues, key boundaries and the actual final frame. A default 60% sample can miss a late reveal. Also sample early frames (`times`) to check entrances, and the last 10 frames of scenes to check exits.
 
 ## Motion review
 
@@ -29,7 +30,7 @@ Render `video_render mode:"preview" scene:"<id>"` and inspect it. Extract 8–12
 - Is order readable (stagger), and does the eye have one focal change at a time?
 - Is there time to read each reveal before the next begins?
 - Do transitions preserve continuity (same objects, same positions) where the idea continues?
-- Are easings consistent (ease-out entrances, quicker exits), with no linear robotic slides?
+- Are easings consistent (ease-out entrances, quicker exits), with appropriate curves or intentional linear/held timing?
 - Any jitter, popping or flicker? Check determinism: seeded randomness, no time-based state.
 
 ## Audio review
@@ -52,3 +53,6 @@ Render `video_render mode:"preview" scene:"<id>"` and inspect it. Extract 8–12
 ## Independent review
 
 For videos longer than about 45 seconds, ask a reviewer subagent with vision to read the final contact sheets and preview frames against this checklist and the storyboard. Give it the paths and the checklist, not your opinion. Treat its findings as defects to triage, not as approval.
+
+
+`video_qa action:"record"` stores explicit art-direction, composition, typography, motion, sync and audio reviews on the returned report. Name inspected `comparedReferences` for an art-direction pass. Frames support appearance; motion/sync need playback and audio needs listening. Local reference and sampled pixel edits, project/source/asset edits or a different encoding make the report stale. A page of eight scenes approves at most its scope; continue `nextScene`. Unreviewed criteria remain visible.

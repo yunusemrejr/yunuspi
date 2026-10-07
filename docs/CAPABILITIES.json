@@ -3949,7 +3949,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 112,
+        "line": 118,
         "kind": "factory"
       },
       {
@@ -3961,7 +3961,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 118,
+        "line": 124,
         "kind": "factory"
       },
       {
@@ -4312,7 +4312,7 @@
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 114,
+        "line": 120,
         "kind": "factory"
       },
       {
@@ -4372,7 +4372,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 130,
+        "line": 136,
         "kind": "factory"
       },
       {
@@ -4390,13 +4390,13 @@
       {
         "name": "narration_align",
         "source": "agent/extensions/video-studio.ts",
-        "line": 110,
+        "line": 116,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 106,
+        "line": 112,
         "kind": "factory"
       },
       {
@@ -4697,13 +4697,13 @@
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 100,
+        "line": 106,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 116,
+        "line": 122,
         "kind": "factory"
       },
       {
@@ -4721,25 +4721,25 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 49,
+        "line": 55,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 96,
+        "line": 102,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 92,
+        "line": 98,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 71,
+        "line": 77,
         "kind": "factory"
       },
       {
@@ -5473,7 +5473,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          29
+          30
         ],
         "knownNames": [
           "audio_generate",
@@ -5492,7 +5492,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 739,
+      "sourceFiles": 740,
       "registrationSites": 90,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 152,
@@ -6523,6 +6523,10 @@
       },
       {
         "path": "agent/extensions/lib/utility-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-art.ts",
         "exists": true
       },
       {

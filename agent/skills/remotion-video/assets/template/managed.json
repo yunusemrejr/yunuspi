@@ -1,0 +1,15 @@
+{
+  "format": "yunuspi-native-template-v2",
+  "known": {
+    "src/Main.tsx": [
+      "732539ef69420c6fc35fe72afff6f702f72b1483468eb74c95e78f35efd8a418"
+    ],
+    "src/production.ts": [
+      "2958845e1052d8cb2628583c5df8d07daf4b88bead8fc9a13ba0075acb07e8ec"
+    ],
+    "src/scenes/StudioScene.tsx": [
+      "e73de0fa46fb05dc22f2472f1213f4e7b1dfe71df4a2cd4bb38c0f4be39c6e84"
+    ],
+    "src/review.tsx": []
+  }
+}

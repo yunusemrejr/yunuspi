@@ -1,6 +1,6 @@
 /** Bounded scene graph contract for video_shot's built-in Blender builder. */
 import { number } from './media-process.ts';
-export const SCENE_SHAPES = ['box', 'sphere', 'cylinder', 'torus', 'lathe', 'tube', 'text', 'phone', 'laptop', 'model', 'group'] as const;
+export const SCENE_SHAPES = ['box', 'sphere', 'cylinder', 'torus', 'lathe', 'tube', 'text', 'phone', 'laptop', 'model', 'group', 'image-plane'] as const;
 const vector = (v: unknown, label: string, positive = false) => {
   if (!Array.isArray(v) || v.length !== 3 || v.some(n => typeof n !== 'number' || !Number.isFinite(n) || Math.abs(n) > 1000 || (positive && n <= 0))) throw Error(`${label} needs three finite ${positive ? 'positive ' : ''}numbers within 1000`);
 };
@@ -18,6 +18,10 @@ export function validateShotScene(spec: any, seconds: number) {
     }
     if (obj.maps && ['model','group','phone','laptop'].includes(obj.shape)) throw Error('PBR maps apply to native surface forms; imported models retain authored textures and devices retain their finished material palette');
     if (!(SCENE_SHAPES as readonly string[]).includes(obj.shape)) throw Error(`Unsupported scene shape ${obj.shape}`);
+    if (obj.role !== undefined && !['hero','support','background'].includes(obj.role)) throw Error(`${obj.id}.role must be hero, support or background`);
+    if (obj.shape === 'image-plane' && (typeof obj.image !== 'string' || !obj.image.trim())) throw Error('image-plane needs image: a local artwork, texture or cutout path');
+    if (obj.lit !== undefined && (obj.shape !== 'image-plane' || typeof obj.lit !== 'boolean')) throw Error('lit is a boolean for image-plane surfaces only');
+    if (obj.shape === 'image-plane' && obj.maps) throw Error('image-plane uses image RGBA; apply PBR maps to native surface forms instead');
     for (const key of ['position', 'rotation', 'size', 'scale']) if (obj[key] !== undefined) vector(obj[key], `${obj.id}.${key}`, key === 'size' || key === 'scale');
     if (obj.size && ['phone','laptop'].includes(obj.shape)) {
       const [w,d,h] = obj.size;

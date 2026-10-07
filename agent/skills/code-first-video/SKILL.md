@@ -7,6 +7,8 @@ description: Direct and produce explainer, documentary or motion-design videos i
 
 Treat the video as software whose output is judged by eye and ear. The failure mode to avoid is a slideshow: text cards with fades. Every beat must show an idea working, a visual system the viewer watches change, not a sentence to read.
 
+Asset craft matters as much as timing. Preserve the complete `creative_direct` brief with `video_project action:"direction"`. Name the focal subject, hierarchy, material/illustration treatment and references before choosing a hero. Build detailed assets with Blender code or licensed models; use `image_generate` with the chosen image model for artwork, backplates, cutouts and textures, then `video_assets import` to retain provenance. Native image/shot/video layers and Blender `image-plane` cards combine these sources. See [hybrid art production](references/hybrid-art-production.md). A ball with eyes is not a complex world asset; more samples cannot repair a weak silhouette. Intentional abstract forms and flat typography can be excellent when the brief calls for them.
+
 Move through the phases in order and do not skip a gate. Read [production pipeline](references/production-pipeline.md) for the artifacts, gates and when to use subagents. Scale ceremony to the job: a 20-second loop needs a short storyboard and one review pass; a three-minute documentary needs research notes, a script, a full storyboard, per-scene reviews and an independent review.
 
 1. **Research → narrative.** Gather facts with sources before writing. Write for the ear: one idea per sentence, concrete nouns, about 3.3–4.3 spoken syllables per second.
@@ -32,6 +34,6 @@ For a long film, keep scene IDs, assets and style consistent in one project. Syn
 
 See the [worked example](assets/example-attention/README.md) for a complete small project and the defects its review rounds caught.
 
-A successful render, a passing `video_qa` or a clean type check is never evidence that the video looks or sounds good. Only viewed frames, watched motion and measured, listened-to audio are.
+A successful render or a technical `video_qa` pass establishes file mechanics. `video_qa action:"record"` separately stores explicit art-direction, composition, typography, motion, sync and audio verdicts with observations. Local reference pixels, sampled evidence, project assets and video bytes are bound to the report; changes make old reviews stale. Missing vision/playback/listening stays unreviewed. Only viewed frames, watched motion and measured, listened-to audio establish those qualities.
 
 For a compact SVG or Three.js delivery without a Remotion project, `media_pipeline` accepts an animation source, standalone narration and an editable music score; voice/music roles activate ducking and final AAC measurements. `narration_tts action:"speak"` returns WAV and SRT/VTT timing independently. Resolve narration overruns rather than trimming words. SVG data tracks and CSS/SMIL share an absolute export clock.

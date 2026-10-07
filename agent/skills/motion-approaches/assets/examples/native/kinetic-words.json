@@ -1,0 +1,19 @@
+{
+  "catalog": {
+    "title": "Kinetic words without layout jitter",
+    "summary": "Frame-timed word additions keep the final line breaks fixed. A numeric payoff, hold keyframes and coordinated exits demonstrate precise typography without requiring 3D.",
+    "concepts": ["Fixed wrapping while words enter on authored times", "Linear and held keyframes versus eased gestures", "Animated counters with tabular numerals", "Deliberate reading hold before the cut"],
+    "use": ["Copy, then video_project compose storyboard:storyboard/kinetic-words.json", "Tie wordTimes to measured speech or music; keep claims and numbers factual"],
+    "tags": "kinetic typography words text beat cut sync timing counter minimalist"
+  },
+  "scenes": [
+    {"id":"one-idea","seconds":3,"layers":[
+      {"id":"phrase","kind":"text","text":"One idea. Every frame.","box":[0.08,0.15,0.84,0.55],"size":180,"reveal":"words","wordTimes":[0.2,0.6,1.0,1.4],"motion":{"enter":"none","exit":{"at":2.6,"duration":0.3,"to":"rise"}}},
+      {"id":"label","kind":"text","text":"A FIXED BASELINE, A CLEAR RHYTHM","box":[0.08,0.79,0.84,0.08],"font":"mono","size":24,"motion":{"enter":"none"}}
+    ]},
+    {"id":"frame-clock","seconds":3,"layers":[
+      {"id":"count","kind":"counter","value":{"from":0,"to":90,"suffix":" frames"},"box":[0.08,0.19,0.84,0.43],"size":176,"motion":{"enter":"none","at":0.2,"duration":1.3,"easing":"snappy","keys":[{"t":0,"scale":1,"easing":"hold"},{"t":1.5,"scale":1},{"t":1.7,"scale":1.04},{"t":2.1,"scale":1}]}},
+      {"id":"payoff","kind":"text","text":"One reliable clock.","box":[0.08,0.7,0.84,0.13],"font":"text","size":50,"motion":{"enter":"rise","at":1.4,"duration":0.4}}
+    ]}
+  ]
+}

@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { inspectGltf, stageGltfBundle } from "./gltf-inspect.ts";
-import { registerAsset } from "./asset-registry.ts";
+import { readRegistry, recordAssetUsage, registerAsset } from "./asset-registry.ts";
 import { inputFile } from "./media-process.ts";
 import { decodeImage, encodeImage, probeImage } from "./design-studio.ts";
 import { projectDir, projectWritePath, readSpec } from "./video-studio.ts";
@@ -98,13 +98,13 @@ async function sha256(file: string) { return createHash("sha256").update(await f
 
 /** Shrink oversized images (a 6000 px photograph costs decode time in every
  * frame) through the sandboxed decode/encode path. Animated GIFs are left alone. */
-async function fitImage(file: string, signal?: AbortSignal): Promise<{ width?: number; height?: number }> {
+async function fitImage(file: string, signal?: AbortSignal, maxSide = MAX_IMAGE_SIDE): Promise<{ width?: number; height?: number }> {
   const ext = path.extname(file).toLowerCase();
   if (ext === ".svg") return {};
   const bytes = await fs.readFile(file);
   const info = await probeImage(bytes, signal);
-  if (Math.max(info.width, info.height) <= MAX_IMAGE_SIDE || ext === ".gif") return { width: info.width, height: info.height };
-  const decoded = await decodeImage(bytes, { maxWidth: info.width >= info.height ? MAX_IMAGE_SIDE : Math.round(MAX_IMAGE_SIDE * info.width / info.height) }, signal);
+  if (Math.max(info.width, info.height) <= maxSide || ext === ".gif") return { width: info.width, height: info.height };
+  const decoded = await decodeImage(bytes, { maxWidth: info.width >= info.height ? maxSide : Math.round(maxSide * info.width / info.height) }, signal);
   const format = ext === ".png" ? "png" : ext === ".webp" ? "webp" : "jpg";
   await fs.writeFile(file, await encodeImage(decoded, format, { quality: 90 }, signal));
   return { width: decoded.width, height: decoded.height };
@@ -195,11 +195,13 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
   if (action === "fetch" && params.source === "polyhaven") return fetchPolyHaven(dir, params, cwd, signal, progress);
   if (action !== "fetch" && action !== "import") throw new Error("action must be search, fetch, import or list");
   const isImport = action === "import";
+  if(params.assetKind !== undefined && !['generated','cropped','traced','authored','plate','captured'].includes(params.assetKind))throw Error('assetKind must be a known asset-registry kind');
   let title = String(params.title ?? "").trim(), url = String(params.url ?? ""), staged: string;
   const name = slug(params.name ?? title ?? "asset");
-  let model: any;
+  let model: any, origin: any;
   if (isImport) {
     const source = await inputFile(params.path, cwd);
+    origin=(await readRegistry(cwd)).assets.find(a=>path.resolve(cwd,a.file)===source);
     const ext = path.extname(source).toLowerCase();
     if (![...IMAGE_EXT, ...VIDEO_EXT, ...MODEL_EXT, ".mp3", ".wav"].includes(ext)) throw new Error(`Unsupported file type ${ext}`);
     if (MODEL_EXT.has(ext)) {
@@ -228,9 +230,13 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
   const ext = path.extname(staged).toLowerCase();
   const kind = IMAGE_EXT.has(ext) ? "image" : VIDEO_EXT.has(ext) ? "video" : MODEL_EXT.has(ext) ? "model" : "audio";
   if (kind === "model" && !model) model = await inspectGltf(staged, signal);
-  const dims = kind === "image" ? await fitImage(staged, signal) : {};
-  const license = String(params.license ?? (isImport ? "user-supplied" : "unknown"));
-  const attributionRequired = params.attributionRequired ?? (!isImport && license !== "unknown" && needsCredit(license));
+  const delivery=kind==='image'?await readSpec(dir):undefined;
+  const dims = kind === "image" ? await fitImage(staged, signal,Math.min(3840,Math.max(MAX_IMAGE_SIDE,delivery?.width ?? 0,delivery?.height ?? 0))) : {};
+  const license = String(params.license ?? origin?.license ?? (isImport ? "user-supplied" : "unknown"));
+  const creator=params.creator ?? origin?.creator ?? (isImport ? '' : 'unknown');
+  const licenseUrl=params.licenseUrl ?? origin?.licenseUrl;
+  const page=params.page ?? origin?.sourceUrl;
+  const attributionRequired = params.attributionRequired ?? ((!isImport || Boolean(origin && /^(cc\b|creative commons)|attribution/i.test(license))) && license !== "unknown" && needsCredit(license));
   const file = path.relative(path.join(dir, "public"), staged);
   let take: string | undefined;
   if (isImport && kind === 'video' && params.path) {
@@ -246,8 +252,11 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
       }
     }
   }
-  await record(dir, { file, kind, title, creator: params.creator ?? (isImport ? "" : "unknown"), license, licenseUrl: params.licenseUrl, attributionRequired, source: isImport ? "local" : (params.source ?? new URL(url).host), page: params.page, ...dims, ...(model ? { model: modelSummary(model) } : {}), bytes: model?.bytes ?? (await fs.stat(staged)).size, sha256: await sha256(staged), fetchedAt: new Date().toISOString() });
-  const registered = (await fs.stat(staged)).size <= 40 * 1024 * 1024 ? (await registerAsset({ path: staged, kind: "authored", role: kind === "model" ? "product-shot" : "editorial-support", description: title, license, sourceUrl: params.page ?? (!isImport ? url : undefined), creator: params.creator, licenseUrl: params.licenseUrl, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record : undefined;
+  const assetKind=origin?.kind ?? params.assetKind ?? (take?'captured':'authored');
+  if(!['generated','cropped','traced','authored','plate','captured'].includes(assetKind))throw Error('assetKind must be a known asset-registry kind');
+  await record(dir, { file, kind, title, creator, license, licenseUrl, attributionRequired, source: isImport ? "local" : (params.source ?? new URL(url).host), originAssetId:origin?.id ?? null,assetKind,page, ...dims, ...(model ? { model: modelSummary(model) } : {}), bytes: model?.bytes ?? (await fs.stat(staged)).size, sha256: await sha256(staged), fetchedAt: new Date().toISOString() });
+  const registered = (await fs.stat(staged)).size <= 40 * 1024 * 1024 ? (await registerAsset({ path: staged, kind: assetKind, parent:origin?.id, prompt:origin?.prompt,sourceImage:origin?.sourceImage,role: kind === "model" ? "product-shot" : "editorial-support", description: title, license, sourceUrl: page ?? (!isImport ? url : undefined), creator, licenseUrl, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record : undefined;
+  if(registered)await recordAssetUsage(cwd,registered.id,path.relative(cwd,path.join(dir,'video.json')));
   return { file, kind, ...dims, license, attributionRequired, take, compose: take ? { kind: 'video', src: file, take: `public/${take}`, zoom: 1.8 } : undefined, assetId: registered?.id ?? null, ...(model ? { model: modelSummary(model) } : {}), ...(license === "unknown" ? { warning: "License unknown: pass license, creator and page from the search hit. Do not publish media whose license you cannot state." } : {}),
     use: kind === "video" ? `Clip src="${file}"` : kind === "image" ? `MediaFrame src="${file}" motion="push"` : kind === "model" ? `Model3D src="${file}" (video_project feature 3d uses the existing Three.js renderer; inspect actual stills/playback)` : `video.json audio track path="${file}"` };
 }

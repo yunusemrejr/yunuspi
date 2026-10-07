@@ -11,7 +11,7 @@ import { projectDir, projectWritePath } from "./video-studio.ts";
 
 const SKILL = fileURLToPath(new URL("../../skills/motion-approaches/", import.meta.url));
 const ROOT = path.join(SKILL, "assets", "examples");
-export const MOTION_APPROACHES = ["html", "blender", "merge", "ffmpeg", "python"] as const;
+export const MOTION_APPROACHES = ["native", "html", "blender", "merge", "ffmpeg", "python"] as const;
 export type MotionApproach = (typeof MOTION_APPROACHES)[number];
 const STOP = new Set(["the", "and", "for", "with", "that", "this", "from", "into", "make", "video", "motion", "graphics", "scene", "using", "use", "want", "need", "like"]);
 
@@ -32,6 +32,11 @@ function headerBlock(source: string, file: string): string {
 
 export function parseExample(file: string, source: string): Omit<MotionExample, "bytes"> {
   const rel = path.relative(ROOT, file).split(path.sep).join("/");
+  if(file.endsWith('.json')) {
+    const {catalog}=JSON.parse(source);
+    if(!catalog || typeof catalog.title!=='string' || typeof catalog.summary!=='string' || !Array.isArray(catalog.concepts) || !Array.isArray(catalog.use))throw Error(`Native example ${rel} needs catalogue metadata`);
+    return {id:rel.replace(/\.json$/,''),approach:'native',file:rel,title:catalog.title,summary:catalog.summary,concepts:catalog.concepts,use:catalog.use,tags:catalog.tags ?? ''};
+  }
   const block = headerBlock(source, file), lines = block.split("\n");
   const keyword = /^(APPROACH|CONCEPTS|USE|TAGS)\b\s*(.*)$/;
   const concepts: string[] = [];
@@ -59,7 +64,7 @@ export function motionCatalog(): Promise<MotionExample[]> {
     const found: MotionExample[] = [];
     for (const approach of MOTION_APPROACHES) {
       for (const name of (await fs.readdir(path.join(ROOT, approach)).catch(() => [])).sort()) {
-        if (!/\.(html|py|mjs)$/.test(name)) continue;
+        if (!/\.(html|py|mjs|json)$/.test(name)) continue;
         const file = path.join(ROOT, approach, name), source = await fs.readFile(file, "utf8");
         found.push({ ...parseExample(file, source), bytes: Buffer.byteLength(source) });
       }
@@ -89,6 +94,8 @@ const brief = (example: Omit<MotionExample, "bytes">) => ({ id: example.id, appr
 /** Worked examples for the moves a new film most often needs, by role rather than by topic (an example describes a technique, so a topic search
  * would rank on incidental words). Each id is checked against the catalogue by a test. */
 export const STARTER_KIT: ReadonlyArray<readonly [role: string, id: string]> = [
+  ['native process explainer with curved gestures','native/process-flow'],
+  ['native word cuts and counter reveal','native/kinetic-words'],
   ["titles and kinetic type", "html/kinetic-type-lines"],
   ["a shader or flow-field backdrop", "html/webgl-domain-warp"],
   ["a data or chart reveal", "html/data-reveal"],
@@ -117,6 +124,7 @@ export async function motionExample(id: string, withSource: boolean) {
 
 /** Where a project looks for each kind of example, and what to do with it next. */
 function destination(example: MotionExample, name: string): { rel: string[]; then: string } {
+  if(example.approach==='native')return {rel:['storyboard',`${name}.json`],then:`video_project action:"compose" storyboard:"storyboard/${name}.json"; edit its scenes and keep the project's own palette/type, then render stills and a preview`};
   if (example.file.endsWith(".html")) return { rel: ["public", "html", `${name}.html`], then: `{"component":"HtmlScene","props":{"src":"html/${name}.html","props":{}}} in video.json; the page reads window.__PROPS__ (theme and fonts arrive automatically)` };
   if (example.approach === "blender") return { rel: ["blender", "scripts", `${name}.py`], then: `blender_run script:"blender/scripts/${name}.py" with the args its header lists, then video_shot on the saved .blend` };
   return { rel: ["scripts", `${name}${path.extname(example.file)}`], then: `run it from the project: ${example.file.endsWith(".py") ? "python3" : "node"} scripts/${name}${path.extname(example.file)} (see its header for arguments)` };

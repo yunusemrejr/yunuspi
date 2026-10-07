@@ -239,6 +239,7 @@
     "ui-doctrine.ts",
     "utility-client.ts",
     "motion-library.ts",
+    "video-art.ts",
     "video-assets.ts",
     "video-derive.ts",
     "video-looks.ts",

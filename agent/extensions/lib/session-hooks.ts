@@ -160,12 +160,12 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "video-timeline-check", tools: ["video_project"],
-		when: (args) => args.action === undefined || ['init', 'check', 'look', 'cta', 'feature'].includes(String(args.action)),
-		line: "Keep timing in video.json: resolve every check error, then render stills and inspect the contact sheet before any preview or final. A valid timeline is not visual approval.",
+		when: (args) => args.action === undefined || ['init', 'compose', 'check', 'look', 'cta', 'feature', 'direction', 'upgrade'].includes(String(args.action)),
+		line: "Keep timing in video.json and adopt the full creative_direct brief with video_project direction. Choose specific hero assets: authored code/Blender, licensed models, or image_generate artwork and textures. Combine via native layers or Blender image-plane cards; mark unfinished assets blockout/draft. Review silhouette, light/materials, hierarchy and reference fit in actual pixels before extending the animation.",
 	},
 	{
 		key: "video-render-review", tools: ["video_render"],
-		line: "Stills need contact-sheet inspection (hierarchy, clipping, density, consistency); previews judge pacing, easing and transitions; finals need video_qa plus a listen-check. A successful render never approves itself.",
+		line: "Stills return measured text-fit evidence; open full-size hero/detail frames and compare silhouette, material/light, spacing and typography to the brief and references. Previews judge continuous pacing, easing and transitions. Finals need video_qa analyze then explicit art-direction/composition/typography/playback/listening verdicts. A successful render never approves itself.",
 	},
 	{
 		key: "motion-example-first", tools: ["write"],
@@ -174,7 +174,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "video-shot-review", tools: ["video_shot"],
-		line: "A preview shot is half size and cheap: open its contact sheet and judge framing, lighting against the film's ground, the move and where the headline fits; adjust rig, lights, offset or palette with replace:true. Use only the listed anchors in notes, and render the delivery version once, in the background, after the look is locked.",
+		line: "Inspect the shot's contact sheet and full-size details for specific silhouette, coherent light/shadow, finished material and intentional framing. Samples cannot turn a crude stand-in into a detailed subject. Build complex assets with authored Blender code/models and generated textures/cutouts; image-plane combines artwork at real depth. Keep images/model settings explicit. Render delivery fps/pixels once the look is locked; verified native cache hits retain their own review requirement.",
 	},
 	{
 		key: "motion-example-adapt", tools: ["motion_examples"],
@@ -201,7 +201,8 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "video-qa-review", tools: ["video_qa"],
-		line: "Fix every error finding, then review the QA contact sheet frame by frame and spot-check narration sync around transitions. Automated passes find technical defects only.",
+		when: (args) => args.action === undefined || args.action === 'analyze',
+		line: "Fix technical errors, then inspect full-size hero/detail pixels against the stored brief and references, inspect continuous playback and listen to the final encoding. Record separate art-direction, composition, typography, motion, sync and audio verdicts with concrete observations and comparedReferences. Missing vision/playback/listening remains unreviewed; technical passes do not approve design.",
 	},
 	{
 		key: "narration-fit", tools: ["narration_tts"],

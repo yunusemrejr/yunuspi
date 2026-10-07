@@ -104,16 +104,16 @@ export const fontDependencies = (fonts: FontChoice[]): Record<string, string> =>
 
 /** Source of src/fonts.ts: latin subsets only (small bundles), loaded before rendering. */
 export function fontsSource(fonts: FontChoice[]): string {
-  const imports = fonts.flatMap((font) => font.weights.map((weight) => `import "@fontsource/${font.package}/latin-${weight}.css";`));
+  const imports = fonts.flatMap((font) => font.weights.map((weight) => `import "@fontsource/${font.package}/${weight}.css";`));
   const faces = fonts.flatMap((font) => font.weights.map((weight) => `"${weight} 40px '${font.family}'"`));
-  return `// Local, pinned font files (OFL, @fontsource, latin subset). Rendering never
+  return `// Local, pinned font files (OFL, @fontsource, bundled Unicode subsets). Rendering never
 // depends on network fonts or on whatever happens to be installed on the host.
 ${imports.join("\n")}
-import { continueRender, delayRender } from "remotion";
+import { cancelRender, continueRender, delayRender } from "remotion";
 
 const handle = delayRender("Loading fonts");
 const faces = [${faces.join(", ")}];
-Promise.all(faces.map((face) => document.fonts.load(face))).then(() => continueRender(handle), () => continueRender(handle));
+Promise.all(faces.map(async (face) => { const loaded = await document.fonts.load(face); if (!loaded.length) throw new Error("Missing font face: " + face); })).then(() => continueRender(handle), (error) => cancelRender(error));
 `;
 }
 

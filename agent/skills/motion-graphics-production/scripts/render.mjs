@@ -49,7 +49,14 @@ try{
   await page.evaluate(async()=>{await document.fonts.ready;if(typeof window.renderFrame!=='function')throw Error('Page must expose window.renderFrame(seconds)');document.body.classList.add('exporting');});
   for(let i=first;i<last;i++){
     if(Date.now()-started>600000)throw Error('Export exceeded ten-minute bound');
-    await page.evaluate(async t=>{await window.renderFrame(t);},i/fps);
+    await page.evaluate(async t=>{
+      await window.renderFrame(t);
+      // A resolved author callback only establishes DOM state. CSS 3D/filter
+      // layers commit asynchronously; let their paint reach the compositor
+      // before taking pixels, without advancing the author's absolute clock.
+      void document.body.offsetHeight;
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    },i/fps);
     await page.screenshot({path:path.join(output,`frame-${String(i).padStart(6,'0')}.png`),timeout:20000,omitBackground:alpha});
   }
   await browser.close();browser=undefined;

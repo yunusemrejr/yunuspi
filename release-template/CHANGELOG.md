@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.27.0 — 2026-10-07
+
+**Motion and art share a complete production brief.** Video projects retain the focal subject, visual treatment, hierarchy and references from creative_direct. Generated backplates, cutouts and textures can be imported with source lineage, combined with native layers or RGBA Blender image-plane cards, and packed into editable scenes. A new original atmospheric architecture example demonstrates authored geometry/materials/lights and generated atmosphere. Tools and hooks stage the mixed workflow while retaining exact model choices.
+
+**The native compositor covers more expressive motion.** Per-key easing, held cuts, cubic routes, axis stretch, perspective tilts, blur and coordinated exits join stroke-drawn paths, counters and stable word/typewriter reveals. Speech cue references survive retiming. Native JSON examples compose directly. Actual loaded-font fit/overflow reaches still receipts; missing pinned fonts fail explicitly. Recognized compositor upgrades preserve custom source conflicts.
+
+**Review keeps art separate from file mechanics.** QA stores the full brief, focal asset inventory, comparison-reference identities and critical frames including exact endpoints. Explicit art-direction, composition, typography, motion, sync and audio attestations remain unreviewed until recorded with suitable evidence. Local reference, sample, project or video changes invalidate reviews; paged scope is explicit. Declared blockouts/drafts block final delivery, missing assets fail preflight and enlargement warnings expose weak source resolution. Full-size detail evidence accompanies contact sheets for vision-capable models.
+
+**Blender work preserves pixels and prior results.** Final plans retain 4K resolution. Self-contained native shots reuse only content-verified frames, anchors and editable sources; imported dependency graphs are rendered afresh. Locks and staged two-file publication preserve previous shots when replacement fails or is cancelled. A cache hit still needs visual review. These changes improve capability and verification, without promising flawless design from every model. See [video studio](docs/VIDEO-STUDIO.md).
+
+**Terminal refinements from the current main branch.**
 
 - Compact terminal footer with consistent KPI labels, a dedicated model/effort row, prioritized status previews and expandable accounting/helper details through the existing tool-expansion shortcut.
 - Shared scrollable `/metrics`, `/cost` and `/self` reports with section headings, readable diagnostic fields, keyboard navigation and stable resize anchors.

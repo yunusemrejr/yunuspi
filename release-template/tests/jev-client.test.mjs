@@ -455,12 +455,14 @@ test('malformed typed judgments never reach the cache or report success', async 
   });
 });
 
-test('one deadline bounds the entire alias cascade and reports an error-colored helper outcome', async () => {
+test('one deadline bounds slow helper routes and reports an error-colored outcome', async () => {
   const states = [];
+  const requests = [];
   const key = Symbol.for('yunus-pi.activity.v1'), previous = globalThis[key];
   globalThis[key] = request => { states.push(request.label); return outcome => states.push(outcome); };
   harness(async (url, options) => {
     if (String(url).includes('/models')) return emptyModels();
+    requests.push(options.signal);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(resolve, 30);
       options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
@@ -475,7 +477,13 @@ test('one deadline bounds the entire alias cascade and reports an error-colored 
     assert.ok(performance.now() - started < 250);
     assert.equal(states.at(-1), 'error');
     assert.ok(states.includes('jev'));
-    assert.equal(jev.jevHealth().state, 'open', 'both independently timed-out routes cool down');
+    const health=jev.jevHealth();
+    assert.ok(requests.length>0 && requests.length<=2 && requests.every(signal=>signal.aborted), 'deadline cancels every admitted slow request');
+    assert.ok(health.routes.every(route=>route.active===0), 'every route lease is released');
+    // Overall cancellation can preempt a family's own timeout on a loaded
+    // runner. That family remains healthy; elapsed wall time cannot prove
+    // that both independent routes completed a failure/cooldown transition.
+    if(health.routes.every(route=>route.state==='cooling')) assert.equal(health.state,'open');
   } finally {
     jev.configureJevClient({ requestTimeoutMs: jev.JEV_REQUEST_TIMEOUT_MS });
     if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;

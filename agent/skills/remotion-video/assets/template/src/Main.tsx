@@ -6,6 +6,7 @@ import { Captions } from "./primitives/Captions";
 import { BrandBug, CtaLayer } from "./primitives/Cta";
 import { scenes as registry } from "./scenes";
 import { Canvas, ThemeProvider } from "./theme";
+import { ReviewLayout } from './review';
 import { narrationWindows, spec, timeline, toFrames, type SceneSpec, type TimedScene } from "./timeline";
 
 type Transition = SceneSpec["transition"];
@@ -56,13 +57,13 @@ function musicVolume(frame: number): number {
   return interpolate(distance, [0, ramp], [spec.audio.musicDuckedVolume, spec.audio.musicVolume], { extrapolateRight: "clamp" }) * fade;
 }
 
-export const Main: React.FC = () => {
+export const Main: React.FC<{ reviewLayout?: boolean }> = ({reviewLayout=false}) => {
   const { scenes, durationInFrames } = timeline();
   // The end screen carries the full brand; the corner mark steps aside for it.
   const outro = scenes.find((scene) => scene.component === "OutroScene");
   const outroStart = outro ? outro.startSeconds : undefined;
   return (
-    <ThemeProvider>
+    <ReviewLayout.Provider value={reviewLayout}><ThemeProvider>
       <AbsoluteFill style={{ background: spec.theme.background }}>
         <Canvas>
           {scenes.map((scene, i) => (
@@ -92,7 +93,7 @@ export const Main: React.FC = () => {
           </Sequence>
         ))}
       </AbsoluteFill>
-    </ThemeProvider>
+    </ThemeProvider></ReviewLayout.Provider>
   );
 };
 

@@ -628,7 +628,15 @@ def mix_color(a, b, t):
 
 
 def subject_objects(scene):
-    return [o for o in scene.objects if o.type in SUBJECT_TYPES and not o.hide_render and not o.name.startswith("YP_")]
+    visible = [o for o in scene.objects if o.type in SUBJECT_TYPES and not o.hide_render and not o.name.startswith("YP_")]
+    def background(obj):
+        while obj:
+            if obj.get("yp_role") == "background":
+                return True
+            obj = obj.parent
+        return False
+    subjects = [o for o in visible if not background(o)]
+    return subjects or visible
 
 
 def subject_bounds(scene):
@@ -871,6 +879,7 @@ def build_shot_scene(spec, seconds, fps, palette):
         name, shape = item["id"], item["shape"]
         root = link(f"{name}-rig")
         roots[name] = root
+        root["yp_role"] = item.get("role", "support")
         root.location = item.get("position", (0, 0, 0))
         root.rotation_euler = tuple(math.radians(v) for v in item.get("rotation", (0, 0, 0)))
         root.scale = item.get("scale", (1, 1, 1))
@@ -897,6 +906,37 @@ def build_shot_scene(spec, seconds, fps, palette):
         obj = None
         if shape == "box":
             obj = box(name, size, (0, 0, 0), mat, bevel, root)
+        elif shape == "image-plane":
+            # An RGBA card in the XZ plane, facing the native camera from -Y.
+            # Geometry stays editable; artwork can be layered in real depth
+            # with modeled subjects and packed into the saved .blend.
+            w, _, h = size
+            mesh = bpy.data.meshes.new(f"{name}-card")
+            mesh.from_pydata([(-w/2, 0, -h/2), (w/2, 0, -h/2), (w/2, 0, h/2), (-w/2, 0, h/2)], [], [(0, 1, 2, 3)])
+            uv = mesh.uv_layers.new(name="Artwork UV")
+            for loop, coordinate in zip(uv.data, [(0, 0), (1, 0), (1, 1), (0, 1)]):
+                loop.uv = coordinate
+            nodes, links = mat.node_tree.nodes, mat.node_tree.links
+            nodes.clear()
+            output = nodes.new("ShaderNodeOutputMaterial")
+            texture = nodes.new("ShaderNodeTexImage")
+            texture.image = bpy.data.images.load(item["image"], check_existing=True)
+            texture.image.pack()
+            surface = nodes.new("ShaderNodeBsdfPrincipled" if item.get("lit", False) else "ShaderNodeEmission")
+            links.new(texture.outputs["Color"], surface.inputs["Base Color" if item.get("lit", False) else "Color"])
+            if item.get("lit", False):
+                surface.inputs["Roughness"].default_value = float(item.get("roughness", .6))
+            transparent = nodes.new("ShaderNodeBsdfTransparent")
+            blend = nodes.new("ShaderNodeMixShader")
+            links.new(texture.outputs["Alpha"], blend.inputs[0])
+            links.new(transparent.outputs[0], blend.inputs[1])
+            links.new(surface.outputs[0], blend.inputs[2])
+            links.new(blend.outputs[0], output.inputs["Surface"])
+            if hasattr(mat, "surface_render_method"):
+                mat.surface_render_method = 'DITHERED'
+            obj = link(name, mesh)
+            obj.parent = root
+            finish(obj, name, mat)
         elif shape in ("sphere", "cylinder", "torus"):
             if shape == "sphere":
                 bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=.5)
@@ -1344,6 +1384,14 @@ def op_shot(req):
     # Blender shifts the camera frame, so the subject moves the opposite way; negate so a positive offset moves the subject right and up.
     if rig != "scene":
         cam_data.shift_x, cam_data.shift_y = -float(offset[0]), -float(offset[1])
+    if req.get("projection") == "orthographic":
+        cam_data.type = "ORTHO"
+        # Horizontal sensor fit: orthographic scale is the view width. Fit
+        # the swept sphere to both axes, keeping authored planar forms flat.
+        aspect = render.resolution_x / max(1, render.resolution_y)
+        cam_data.ortho_scale = 2 * radius * float(req.get("margin") or 1.15) * max(1, aspect)
+    elif req.get("projection") == "perspective":
+        cam_data.type = "PERSP"
     if req.get("fStop"):
         cam_data.dof.use_dof = True
         cam_data.dof.aperture_fstop = float(req["fStop"])
