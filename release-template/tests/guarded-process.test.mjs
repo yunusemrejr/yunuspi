@@ -9,6 +9,20 @@ import { runGuarded } from '../agent/extensions/lib/guarded-process.ts';
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'guarded-process-'));
 test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 const run = (code, options = {}) => runGuarded(process.execPath, ['-e', code], { cwd: scratch, guard: false, timeoutMs: 10_000, memoryMb: 12_000, ...options });
+async function assertOrphanStopped(pid) {
+  const deadline = Date.now() + 500;
+  let state;
+  do {
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      // Exit can expose X (dead) before Z (zombie), or disappear once reaped.
+      if (state === 'X' || state === 'Z') return;
+    } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  assert.fail(`Owned orphan ${pid} remained live in state ${state} after output closed`);
+}
 
 test('guarded children decode UTF-8 independently across stdout and stderr chunks', async () => {
   const lines = [];
@@ -85,10 +99,7 @@ test('cancellation stops detached descendants holding job pipes and spares unrel
     try { await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('escaped worker held stdio beyond cancellation bound')),1_500);})]),/node cancelled/); }
     finally {clearTimeout(timer);}
     assert.ok(Number.isSafeInteger(escaped));
-    // An adopted grandchild can briefly remain a zombie under PID1; it must
-    // be gone or dead, with no running writer holding this operation's pipes.
-    try {const stat=fs.readFileSync(`/proc/${escaped}/stat`,'utf8');assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z');}
-    catch(error){if(error.code!=='ENOENT')throw error;}
+    await assertOrphanStopped(escaped);
     assert.doesNotThrow(()=>process.kill(unrelated.pid,0));
   } finally {
     if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}
@@ -105,7 +116,7 @@ test('the deadline stops an inherited-output worker even after its direct parent
     const pending=run(code,{timeoutMs:150,onLine(line){escaped=Number(line);}});
     await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('orphan output writer exceeded the deadline bound')),1_500);})]),/exceeded/);
     assert.ok(Number.isSafeInteger(escaped));
-    try{const stat=fs.readFileSync(`/proc/${escaped}/stat`,'utf8');assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z');}catch(error){if(error.code!=='ENOENT')throw error;}
+    await assertOrphanStopped(escaped);
   }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
 });
 
@@ -117,6 +128,6 @@ test('the deadline finds inherited output retained at a non-standard descriptor'
     const pending=run(code,{timeoutMs:150,onLine(line){escaped=Number(line);}});
     await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('inherited fd3 writer exceeded the deadline bound')),1_500);})]),/exceeded/);
     assert.ok(Number.isSafeInteger(escaped));
-    try{const stat=fs.readFileSync(`/proc/${escaped}/stat`,'utf8');assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z');}catch(error){if(error.code!=='ENOENT')throw error;}
+    await assertOrphanStopped(escaped);
   }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
 });
