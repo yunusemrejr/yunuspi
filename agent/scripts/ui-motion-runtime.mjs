@@ -42,14 +42,18 @@ export function mountScrollStory(root, config) {
   const preference = matchMedia('(prefers-reduced-motion: reduce)'), narrow = matchMedia(`(max-width: ${config.mobileBelow - 1}px)`);
   const section = root.querySelector(config.section);
   if (!section) throw Error(`Scroll section missing: ${config.section}`);
-  let disposed = false, raf = 0, visible = true, effects = [], observer;
+  let disposed = false, raf = 0, visible = true, effects = [], observer, manualProgress = null;
   const clear = () => { for (const effect of effects) effect.animation.cancel(); effects = []; };
+  const apply = progress => {
+    for (const effect of effects) effect.animation.currentTime = Math.max(0, Math.min(1, (progress - effect.start) / (effect.end - effect.start))) * 1000;
+  };
   const draw = () => {
     raf = 0;
     if (disposed || !visible || document.hidden || preference.matches || narrow.matches) return;
+    if (manualProgress !== null) { apply(manualProgress); return; }
     const bounds = section.getBoundingClientRect(), span = bounds.height - innerHeight;
     const progress = span > 0 ? Math.max(0, Math.min(1, -bounds.top / span)) : 0;
-    for (const effect of effects) effect.animation.currentTime = Math.max(0, Math.min(1, (progress - effect.start) / (effect.end - effect.start))) * 1000;
+    apply(progress);
   };
   const schedule = () => { if (!disposed && !raf) raf = requestAnimationFrame(draw); };
   const refresh = () => {
@@ -68,7 +72,8 @@ export function mountScrollStory(root, config) {
         animation.pause(); effects.push({ animation, start: track.start, end: track.end });
       }
     } catch (error) { clear(); throw error; }
-    schedule();
+    if (manualProgress !== null) apply(manualProgress);
+    else schedule();
   };
   if (globalThis.IntersectionObserver) {
     observer = new IntersectionObserver(entries => { visible = entries.some(entry => entry.isIntersecting); if (visible) schedule(); });
@@ -77,7 +82,18 @@ export function mountScrollStory(root, config) {
   addEventListener('scroll', schedule, { passive: true }); addEventListener('resize', schedule, { passive: true });
   document.addEventListener('visibilitychange', schedule);
   preference.addEventListener('change', refresh); narrow.addEventListener('change', refresh);
-  const handle = { kind: 'scroll-story', refresh, dispose() {
+  const handle = { kind: 'scroll-story', refresh,
+    // The same authored tracks can use a video frame clock. Explicit seeking
+    // owns progress until resume(), including after scroll/resize callbacks.
+    seek(progress) {
+      if (typeof progress !== 'number' || !Number.isFinite(progress) || progress < 0 || progress > 1) throw Error('Story progress must be finite in 0..1');
+      if (disposed) throw Error('Scroll story has been disposed');
+      manualProgress = progress; cancelAnimationFrame(raf); raf = 0;
+      if (preference.matches || narrow.matches) return false;
+      apply(progress); return effects.length > 0;
+    },
+    resume() { if (!disposed) { manualProgress = null; schedule(); } },
+    dispose() {
     if (disposed) return;
     disposed = true; cancelAnimationFrame(raf); clear(); observer?.disconnect();
     removeEventListener('scroll', schedule); removeEventListener('resize', schedule); document.removeEventListener('visibilitychange', schedule);

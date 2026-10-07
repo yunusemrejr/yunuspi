@@ -414,7 +414,7 @@ export default function adaptiveWorkflows(pi: any) {
           && (data.coverage.comparedRoles > 0 || data.coverage.comparedTokens > 0);
       } else {
         stage = event.input?.mode === 'scroll' ? 'ui-scroll' : 'ui-motion';
-        observed = currentSource(data) && data.samples?.length >= 2 && data.reducedPass === 'checked' && !data.findings?.length
+        observed = currentSource(data) && data.coverage?.complete === true && data.samples?.length >= 2 && data.reducedPass === 'checked' && !data.findings?.length
           && (stage !== 'ui-scroll' || data.mode === 'scroll' && data.coverage?.complete === true && data.coverage.persistentDocument === true && data.coverage.hasScrollRange === true);
       }
       record(stage, 'inspection', source, problem ? 'failed' : observed ? 'passed' : 'blocked');

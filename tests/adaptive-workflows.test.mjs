@@ -993,6 +993,11 @@ test('native UI captures index only current technical evidence, with appearance 
   for(const id of ['ui-pixels','ui-interaction']) assert.ok(state.pending.some(row=>row.id===id),`${id} needs its own evidence`);
   await f.call('motion_inspect',{source:a,mode:'scroll'},{details:{...scroll,coverage:{...scroll.coverage,complete:false}}});
   assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-scroll'&&row.status==='blocked'));
+  const temporal={...source,mode:'render',samples:[{timeMs:0},{timeMs:1000}],reducedPass:'checked',coverage:{complete:true},findings:[]};
+  await f.call('motion_inspect',{source:a,mode:'render'},{details:temporal});
+  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-motion'&&row.status==='passed'));
+  await f.call('motion_inspect',{source:a,mode:'render'},{details:{...temporal,coverage:{complete:false}}});
+  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-motion'&&row.status==='blocked'),'even a clean-looking partial temporal receipt leaves verification open');
   const delayed=await f.beginCall('ui_explore',{source:a}); await f.write(a,'<main>New revision</main>');
   await f.finish(delayed,{details:matrix});
   assert.ok(!(await f.status()).evidence.some(row=>row.stageId==='ui-responsive'&&row.status==='passed'),'late captures cannot approve changed source');

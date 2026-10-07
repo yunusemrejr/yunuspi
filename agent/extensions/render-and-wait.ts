@@ -76,16 +76,19 @@ export async function captureToFile(params: CaptureParams, destination: string, 
     const stat = await fs.lstat(staged);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) throw new Error("Render returned an invalid capture artifact");
     await fs.copyFile(staged, destination, fs.constants.COPYFILE_EXCL);
-    if (details.scrollSequence) {
+    if (details.scrollSequence || details.temporalSequence) {
       let totalBytes = 0;
-      for (const [kind,list] of [['scroll',details.scrollSequence.samples],['hold',details.scrollSequence.holds]] as const) {
-        if (!Array.isArray(list) || list.length > 17) throw Error('Render returned an invalid scroll sequence');
+      const groups = details.scrollSequence
+        ? [['scroll',details.scrollSequence.samples],['hold',details.scrollSequence.holds]] as const
+        : [['time',details.temporalSequence.samples]] as const;
+      for (const [kind,list] of groups) {
+        if (!Array.isArray(list) || list.length > (kind === 'time' ? 12 : 17)) throw Error('Render returned an invalid capture sequence');
         for (const [index,sample] of list.entries()) {
           signal?.throwIfAborted();
           const file=path.resolve(String(sample.file));
-          if (path.dirname(file)!==tempRoot || !path.basename(file).startsWith('capture.png.')) throw Error('Render returned an invalid scroll artifact path');
+          if (path.dirname(file)!==tempRoot || !path.basename(file).startsWith('capture.png.')) throw Error('Render returned an invalid sequence artifact path');
           const sampleStat=await fs.lstat(file);totalBytes+=sampleStat.size;
-          if (!sampleStat.isFile() || sampleStat.isSymbolicLink() || sampleStat.size>20*1024*1024 || totalBytes>40*1024*1024) throw Error('Render scroll artifacts exceed their file/aggregate bounds');
+          if (!sampleStat.isFile() || sampleStat.isSymbolicLink() || sampleStat.size>20*1024*1024 || totalBytes>40*1024*1024) throw Error('Render sequence artifacts exceed their file/aggregate bounds');
           const target=`${destination}.${kind}-${index}.png`;await fs.copyFile(file,target,fs.constants.COPYFILE_EXCL);sample.file=target;
         }
       }

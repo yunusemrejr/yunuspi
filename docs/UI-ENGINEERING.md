@@ -9,7 +9,7 @@ UI work starts from its real audience, content, existing component owners and de
 | Tool | Behavior |
 | --- | --- |
 | `ui_recipe` | `plan` describes mechanisms, inputs and checks without writes. `scaffold` writes an editable module and receipt in a fresh `.pi/design` folder; it never replaces target sources. Patterns are `scroll-reveal`, `scroll-story` and `three-model`. |
-| `motion_inspect` | `mode:"scroll"` captures forward and backward normalized scroll positions in one persistent page. It reports actual positions, target observations, reduced-motion samples, failures and saved frames. Time-mode CSS/WAAPI inspection remains available. |
+| `motion_inspect` | `mode:"scroll"` observes forward/backward scroll; `mode:"time"` seeks CSS/WAAPI/SMIL; `mode:"render"` explicitly awaits the existing HTML video `window.renderFrame(seconds)` clock. Each temporal pass reuses one loaded page and its assets. Saved frames, coverage, errors and source/document changes remain visible. |
 | `ui_explore` | Defaults to 320px/mobile/tablet/desktop coverage and adds touch, DPR, phone orientation and CSS breakpoint neighbors to the viewport/theme/reduced-motion matrix. The bounded plan reports omitted cells so a partial matrix cannot masquerade as device coverage. |
 | `ui_consistency` | Compares named shared roles and selected CSS custom properties across 2–4 routes. Declared variants compare within their own group. Missing roles, failed captures and source changes remain explicit. Style drift is measured evidence for review, not a taste score. |
 | `blender_export` | GLB/glTF exports automatically run current-file preflight and carry bundle/resource hashes, mesh counts, mobile budget warnings and decoder requirements. An export survives failed preflight. |
@@ -44,6 +44,26 @@ For a restrained entrance, scaffold `scroll-reveal` with the actual target selec
 Adapt the selectors and values to existing content. One owner drives each target; transforms and opacity avoid layout-property animation. Updates coalesce into one animation frame, and invisible/hidden pages skip drawing. The optional sticky CSS applies only at wider widths with normal motion; the mobile and reduced-motion path retains normal flow. Keep essential copy and controls outside fading layers. Mount once, refresh after target changes and dispose before route replacement.
 
 Inspect the real scroll sequence after integration, including reverse scrolling, focus, resize and reduced motion. Static frames demonstrate sampled output; they do not establish continuous smoothness, FPS or physical GPU cost.
+
+## Reuse web choreography in video
+
+The generated `scroll-story` handle exposes `seek(progress)` for finite progress in `0..1`. It takes control of the same authored tracks until `resume()` restores live scroll; scroll callbacks, refresh and resize cannot overwrite a sought frame. Disposal releases those animations. Mobile and reduced-motion states stay static under either clock.
+
+An authored HTML layer can connect that handle to the existing standalone and Remotion HTML renderers:
+
+```js
+const handle = mount(document);
+window.renderFrame = async seconds => {
+  await document.fonts.ready;
+  handle.seek(Math.max(0, Math.min(1, seconds / durationSeconds)));
+};
+```
+
+Keep the real content, SVG, typography, colors and track/easing configuration in their established owners. Author an export layout when the film aspect ratio differs from the page; do not turn the website into a screenshot slideshow or force essential copy into fading tracks. The video renderer and `motion_inspect {mode:"render"}` set the existing `exporting` body class, await the supplied frame function and paint boundary, and preserve the host's clock. Optional `window.__renderReady=false` defers inspection while authored setup completes; an absent frame function fails explicitly.
+
+Temporal inspection retains every captured PNG before renderer staging is removed. Partial clock application, unsupported timelines, runtime errors, source changes, changing served documents and incomplete reduced-state coverage cannot satisfy the native motion verification stage. A six-frame clock pass uses four captures when reduction needs a frame pair, rather than launching a browser for every sample and loop endpoint. This is reduced capture overhead, not a measured universal speed or token saving. Review actual encoded playback and audio synchronization separately.
+
+Typography QA counts text-bearing elements rather than inherited fonts on empty layout wrappers. The visual rubric reports computed text sizes when available, discloses incomplete coverage and leaves typography judgment open for rendered review against the actual product. Pixel-ink clusters and font counts do not establish a good reading hierarchy or justify a uniform aesthetic.
 
 ## Blender to Three.js
 

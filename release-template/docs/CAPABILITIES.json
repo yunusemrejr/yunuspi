@@ -4109,7 +4109,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 490,
+        "line": 491,
         "kind": "factory"
       },
       {
@@ -4290,7 +4290,7 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 593,
+        "line": 594,
         "kind": "factory"
       },
       {
@@ -4326,7 +4326,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 268,
+        "line": 271,
         "kind": "literal"
       },
       {
@@ -4430,7 +4430,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 536,
+        "line": 537,
         "kind": "factory"
       },
       {
@@ -4682,7 +4682,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 267,
+        "line": 270,
         "kind": "literal"
       },
       {
@@ -4815,13 +4815,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 455,
+        "line": 456,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 450,
+        "line": 451,
         "kind": "factory"
       },
       {
@@ -4965,7 +4965,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 102,
+        "line": 105,
         "kind": "literal"
       },
       {
@@ -5124,7 +5124,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 268,
+        "line": 271,
         "kind": "literal"
       },
       {
@@ -5322,7 +5322,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 267,
+        "line": 270,
         "kind": "literal"
       },
       {
@@ -5418,7 +5418,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 102,
+        "line": 105,
         "kind": "literal"
       },
       {

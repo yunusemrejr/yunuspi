@@ -122,6 +122,70 @@ export function normalizeScrollCapture(raw) {
   return { positions, backtrack: raw.backtrack !== false, settleMs, selectors };
 }
 
+export function normalizeTemporalCapture(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('temporalCapture must be an object');
+  const timesMs = raw.timesMs, clock = raw.clock ?? 'document';
+  if (!Array.isArray(timesMs) || timesMs.length < 2 || timesMs.length > 12 || timesMs.some(t => !Number.isInteger(t) || t < 0 || t > 600000))
+    throw Error('Temporal times must be 2..12 integer milliseconds in 0..600000');
+  if (!['document','render'].includes(clock)) throw Error('Temporal clock must be document or render');
+  return { timesMs: [...timesMs], clock };
+}
+
+/** Seek one loaded document rather than reloading its assets for each frame.
+ * The explicit render clock shares the native video window.renderFrame(seconds)
+ * contract. It never infers a clock from the presence of a page function. */
+async function captureTemporalSequence(page, options, output, remaining, signal) {
+  const samples = [];
+  let totalBytes = 0, failure;
+  if (options.clock === 'render' && await page.evaluate(() => window.__renderReady === false))
+    await page.waitForFunction(() => window.__renderReady !== false, null, {timeout:Math.max(1,remaining()-1500)});
+  if (options.clock === 'render') await page.evaluate(() => document.body?.classList.add('exporting'));
+  for (const [index,timeMs] of options.timesMs.entries()) {
+    signal?.throwIfAborted();
+    if (remaining() < 1500) { failure = 'time-budget'; break; }
+    try {
+      let sampling;
+      if (options.clock === 'render') {
+        sampling = await page.evaluate(async timeMs => {
+          if (typeof window.renderFrame !== 'function') return {applied:false,reason:'missing-render-clock'};
+          if (window.__renderReady === false) return {applied:false,reason:'render-not-ready'};
+          await window.renderFrame(timeMs / 1000);
+          await Promise.all(document.getAnimations().filter(animation=>animation.pending).map(animation=>animation.ready));
+          return {applied:true};
+        },timeMs);
+        if (!sampling.applied) { failure = sampling.reason; break; }
+      } else sampling = await page.evaluate(inspectAnimationClock,timeMs);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const state = await page.evaluate(() => ({
+        documentIdentity:String(globalThis.__piRenderDocument ?? 'unknown').slice(0,80),
+        oversized:[...document.images].some(image => image.naturalWidth > 8192 || image.naturalHeight > 8192 || image.naturalWidth * image.naturalHeight > 16e6),
+        gpu:(globalThis.__piGpuAttempts ?? []).length > 0,
+      }));
+      if (state.oversized) { failure = 'resource-dimensions'; break; }
+      if (state.gpu) throw Error('Unsupported GPU/WebGL path requested during temporal capture');
+      const file = `${output}.time-${index}.png`;
+      await page.screenshot({path:file,fullPage:false,timeout:Math.max(1,remaining()-700)});
+      const stat = await fs.stat(file); totalBytes += stat.size;
+      if (stat.size > 20*1024*1024 || totalBytes > 40*1024*1024) { await fs.unlink(file).catch(() => {}); failure = 'artifact-budget'; break; }
+      // Per-frame inventories would duplicate the initial inventory and crowd
+      // out coverage diagnostics. Keep only clock application counts here.
+      const {descriptors,note,...clockFacts} = sampling;
+      samples.push({index,timeMs,file,bytes:stat.size,documentIdentity:state.documentIdentity,sampling:clockFacts});
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const gpu = await page.evaluate(() => globalThis.__piGpuAttempts ?? []).catch(() => []);
+      if (gpu.length) throw Error(`Unsupported GPU/WebGL path requested (${gpu.join(',')}); temporal clock needs the existing renderer policy`);
+      failure = remaining() < 1500 ? 'time-budget' : 'sample-unavailable'; break;
+    }
+  }
+  if (!samples.length) throw Error(`No temporal frame captured (${failure ?? 'unavailable'}); check the requested clock and readiness`);
+  await fs.copyFile(samples.at(-1).file,output);
+  const persistentDocument = new Set(samples.map(sample => sample.documentIdentity)).size === 1 && samples[0].documentIdentity !== 'unknown';
+  const clockComplete = samples.every(sample => !sample.sampling.unsupported && !sample.sampling.failed && !sample.sampling.omitted && !sample.sampling.smil?.omitted);
+  return {clock:options.clock,samples,coverage:{requested:options.timesMs.length,captured:samples.length,persistentDocument,clockComplete,complete:samples.length===options.timesMs.length&&persistentDocument&&clockComplete&&!failure,scope:'viewport'},failure:failure ?? null,
+    limits:{frames:12,totalBytes:40*1024*1024},...(options.clock==='render'?{driver:'window.renderFrame(seconds)',exporting:true}:{}),timing:'Requested clock samples in one document, not continuous playback, FPS, deterministic application state or GPU performance proof.'};
+}
+
 /** Live scroll sampling stays in one isolated document. It never seeks or
  * pauses application animations, and reports elapsed waits without FPS claims. */
 async function captureScrollSequence(page, options, output, remaining, signal) {
@@ -179,6 +243,74 @@ async function captureScrollSequence(page, options, output, remaining, signal) {
     limits:{positions:8,selectors:12,totalBytes:40*1024*1024,settleMs:options.settleMs},
     timing:'Live JS/rAF and scroll timelines run normally. Waits and screenshots are observation points; frame cadence, GPU performance and velocity between samples remain unknown.'};
 }
+/** Browser-local CSS/WAAPI and SMIL sampling, shared by single and temporal captures. */
+export function inspectAnimationClock(timeMs) {
+  const animations = document.getAnimations();
+  let sampled = 0, unsupported = 0, failed = 0;
+  const describe = (animation, index) => {
+    try {
+      const timing = typeof animation.effect?.getTiming === "function" ? animation.effect.getTiming() : {};
+      const target = animation.effect?.target;
+      let label = "?";
+      if (target && target.tagName) {
+        label = String(target.tagName).toLowerCase().slice(0, 24);
+        if (target.id) label += `#${String(target.id).slice(0, 40)}`;
+        else if (target.classList?.length)
+          label += `.${[...target.classList].slice(0, 2).join('.').slice(0, 40)}`;
+      }
+      let properties = [];
+      try {
+        const frames = typeof animation.effect?.getKeyframes === "function" ? animation.effect.getKeyframes() : [];
+        const keys = new Set();
+        for (const frame of frames.slice(0, 4)) {
+          if (!frame || typeof frame !== "object") continue;
+          for (const key of Object.keys(frame)) {
+            if (!["composite", "offset", "easing", "computedOffset"].includes(key)) keys.add(String(key).slice(0, 48));
+            if (keys.size >= 12) break;
+          }
+        }
+        properties = [...keys];
+      } catch { /* keyframes unavailable */ }
+      const rawDuration = timing.duration === "auto" ? NaN : Number(timing.duration);
+      return {
+        index, kind: String(animation.constructor?.name ?? "Animation").slice(0, 32),
+        playState: ["running", "paused", "finished", "idle"].includes(animation.playState) ? animation.playState : "unknown",
+        target: label.slice(0, 120),
+        durationMs: Number.isFinite(rawDuration) ? rawDuration : null,
+        delayMs: Number.isFinite(Number(timing.delay)) ? Number(timing.delay) : 0,
+        iterations: timing.iterations === Infinity ? "infinite" : (Number.isFinite(Number(timing.iterations)) ? Number(timing.iterations) : 1),
+        playbackRate: Number.isFinite(Number(animation.playbackRate)) ? Number(animation.playbackRate) : 1,
+        properties,
+      };
+    } catch { return { index, kind: "unknown", target: "?", durationMs: null, delayMs: 0, iterations: 1, playbackRate: 1, properties: [] }; }
+  };
+  const descriptors = animations.slice(0, 40).map(describe);
+  const smilRoots = [...document.querySelectorAll('svg')].filter(root => root.querySelector('animate,animateMotion,animateTransform,set'));
+  let smilSampled = 0;
+  if (timeMs !== null) {
+    for (const root of smilRoots.slice(0, 64)) {
+      try { root.pauseAnimations(); root.setCurrentTime(timeMs / 1000); smilSampled++; }
+      catch { failed++; }
+    }
+    for (const animation of animations.slice(0, 200)) {
+      if (animation.timeline !== document.timeline) { unsupported++; continue; }
+      try {
+        animation.pause();
+        animation.currentTime = timeMs;
+        sampled++;
+      } catch { failed++; }
+    }
+  }
+  return {
+    sampled, unsupported, failed, omitted: Math.max(0, animations.length - 200),
+    total: animations.length, descriptors, smil: { roots: smilRoots.length, sampled: smilSampled, omitted: Math.max(0, smilRoots.length - 64) },
+    note: timeMs === null
+      ? "Inventory only: no animation was paused or moved. Main-frame CSS/WAAPI animations and SVG SMIL roots; excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed."
+      : "Each main-frame CSS/WAAPI animation and SVG SMIL root paused at the requested local seconds. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
+  };
+
+}
+
 // WebGL pages are captured in software: Chrome's SwiftShader rasterizes on the CPU inside the sandbox, with no
 // GPU device access, so the pixels are real while the isolation holds. This is the launch flag scene_render
 // already uses (lib/scene-studio.ts). The first pass keeps WebGL off so ordinary pages stay fast and strict.
@@ -220,8 +352,9 @@ async function renderCaptureOnce(p, output, signal) {
     };
   const ms = p.timeoutMs ?? 15000;
   const outputMode = p.output ?? "image";
-  let pageState, noise, uiSnapshot, scrollSequence;
+  let pageState, noise, uiSnapshot, scrollSequence, temporalSequence;
   const scrollOptions = p.scrollCapture === undefined ? undefined : normalizeScrollCapture(p.scrollCapture);
+  const temporalOptions = p.temporalCapture === undefined ? undefined : normalizeTemporalCapture(p.temporalCapture);
   const snapshotOptions = p.uiSnapshot === undefined ? undefined : normalizeUiSnapshotOptions(p.uiSnapshot);
   const device = { deviceScaleFactor:p.deviceScaleFactor ?? 1,hasTouch:p.hasTouch ?? false,isMobile:p.isMobile ?? false };
   if (typeof device.deviceScaleFactor !== 'number' || !Number.isFinite(device.deviceScaleFactor) || device.deviceScaleFactor < 1 || device.deviceScaleFactor > 3 || typeof device.hasTouch !== 'boolean' || typeof device.isMobile !== 'boolean') throw Error('Device settings require deviceScaleFactor 1..3 and boolean hasTouch/isMobile');
@@ -229,6 +362,8 @@ async function renderCaptureOnce(p, output, signal) {
   if (conditions.viewport.width*conditions.viewport.height*device.deviceScaleFactor**2 > 8e6) throw Error('Device viewport exceeds the 8M physical-pixel capture bound');
   if (scrollOptions && (conditions.fullPage || p.clip || p.selector || conditions.animationTimeMs !== null || outputMode === 'text')) throw Error('Live scroll requires viewport image capture without selector, clip or animationTimeMs');
   if (scrollOptions && conditions.viewport.width*conditions.viewport.height*device.deviceScaleFactor**2*(scrollOptions.positions.length+(scrollOptions.backtrack ? scrollOptions.positions.length-1 : 0)+3) > 32e6) throw Error('Scroll capture exceeds the 32M physical-pixel work bound; reduce viewport, DPR or positions');
+  if (temporalOptions && (scrollOptions || conditions.fullPage || p.clip || p.selector || conditions.animationTimeMs !== null || outputMode === 'text')) throw Error('Temporal capture requires viewport images without scrollCapture, selector, clip or animationTimeMs');
+  if (temporalOptions && conditions.viewport.width*conditions.viewport.height*device.deviceScaleFactor**2*(temporalOptions.timesMs.length+1) > 32e6) throw Error('Temporal capture exceeds the 32M physical-pixel work bound; reduce viewport, DPR or frames');
   if (!["image", "text", "both"].includes(outputMode))
     throw Error("output must be image, text or both");
   if (
@@ -268,7 +403,7 @@ async function renderCaptureOnce(p, output, signal) {
   let stage = "source";
   let navigationFailure;
   const requireDesignDocument = (supported) => {
-    if ((p.designAudit || scrollOptions || snapshotOptions) && !supported) {
+    if ((p.designAudit || scrollOptions || temporalOptions || snapshotOptions) && !supported) {
       const failure = {stage:"source-validation",kind:"unsupported-design-source",outcome:"not-audited",
         reason:"Design measurements require an HTML, XHTML or SVG document, not a raster image or PDF.",
         nextStep:"Use render_see for image/PDF pixels, or provide the original HTML page for rendered design measurements."};
@@ -287,7 +422,7 @@ async function renderCaptureOnce(p, output, signal) {
       path.extname(p.source).toLowerCase() === ".pdf"
     ) {
       requireDesignDocument(false);
-      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined || p.animationInventory !== undefined || scrollOptions || snapshotOptions || p.deviceScaleFactor !== undefined || p.hasTouch !== undefined || p.isMobile !== undefined)
+      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined || p.animationInventory !== undefined || scrollOptions || temporalOptions || snapshotOptions || p.deviceScaleFactor !== undefined || p.hasTouch !== undefined || p.isMobile !== undefined)
         throw Error("Browser media and animation settings are unavailable for PDF");
       if (outputMode !== "image")
         throw Error(
@@ -591,71 +726,7 @@ async function renderCaptureOnce(p, output, signal) {
           });
       stage = "animation";
       if (conditions.animationTimeMs !== null || p.animationInventory === true)
-        conditions.animationSample = await page.evaluate((timeMs) => {
-          const animations = document.getAnimations();
-          let sampled = 0, unsupported = 0, failed = 0;
-          const describe = (animation, index) => {
-            try {
-              const timing = typeof animation.effect?.getTiming === "function" ? animation.effect.getTiming() : {};
-              const target = animation.effect?.target;
-              let label = "?";
-              if (target && target.tagName) {
-                label = String(target.tagName).toLowerCase().slice(0, 24);
-                if (target.id) label += `#${String(target.id).slice(0, 40)}`;
-                else if (typeof target.className === "string" && target.className.trim())
-                  label += `.${target.className.trim().split(/\s+/).slice(0, 2).join(".").slice(0, 40)}`;
-              }
-              let properties = [];
-              try {
-                const frames = typeof animation.effect?.getKeyframes === "function" ? animation.effect.getKeyframes() : [];
-                const keys = new Set();
-                for (const frame of frames.slice(0, 4)) {
-                  if (!frame || typeof frame !== "object") continue;
-                  for (const key of Object.keys(frame)) {
-                    if (!["composite", "offset", "easing", "computedOffset"].includes(key)) keys.add(String(key).slice(0, 48));
-                    if (keys.size >= 12) break;
-                  }
-                }
-                properties = [...keys];
-              } catch { /* keyframes unavailable */ }
-              const rawDuration = timing.duration === "auto" ? NaN : Number(timing.duration);
-              return {
-                index, kind: String(animation.constructor?.name ?? "Animation").slice(0, 32),
-                playState: ["running", "paused", "finished", "idle"].includes(animation.playState) ? animation.playState : "unknown",
-                target: label.slice(0, 120),
-                durationMs: Number.isFinite(rawDuration) ? rawDuration : null,
-                delayMs: Number.isFinite(Number(timing.delay)) ? Number(timing.delay) : 0,
-                iterations: timing.iterations === Infinity ? "infinite" : (Number.isFinite(Number(timing.iterations)) ? Number(timing.iterations) : 1),
-                playbackRate: Number.isFinite(Number(animation.playbackRate)) ? Number(animation.playbackRate) : 1,
-                properties,
-              };
-            } catch { return { index, kind: "unknown", target: "?", durationMs: null, delayMs: 0, iterations: 1, playbackRate: 1, properties: [] }; }
-          };
-          const descriptors = animations.slice(0, 40).map(describe);
-          const smilRoots = [...document.querySelectorAll('svg')].filter(root => root.querySelector('animate,animateMotion,animateTransform,set'));
-          let smilSampled = 0;
-          if (timeMs !== null) {
-            for (const root of smilRoots.slice(0, 64)) {
-              try { root.pauseAnimations(); root.setCurrentTime(timeMs / 1000); smilSampled++; }
-              catch { failed++; }
-            }
-            for (const animation of animations.slice(0, 200)) {
-              if (animation.timeline !== document.timeline) { unsupported++; continue; }
-              try {
-                animation.pause();
-                animation.currentTime = timeMs;
-                sampled++;
-              } catch { failed++; }
-            }
-          }
-          return {
-            sampled, unsupported, failed, omitted: Math.max(0, animations.length - 200),
-            total: animations.length, descriptors, smil: { roots: smilRoots.length, sampled: smilSampled, omitted: Math.max(0, smilRoots.length - 64) },
-            note: timeMs === null
-              ? "Inventory only: no animation was paused or moved. Main-frame CSS/WAAPI animations and SVG SMIL roots; excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed."
-              : "Each main-frame CSS/WAAPI animation and SVG SMIL root paused at the requested local seconds. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
-          };
-        }, conditions.animationTimeMs);
+        conditions.animationSample = await page.evaluate(inspectAnimationClock, conditions.animationTimeMs);
       stage = "inspection";
       const gpu = (
         await Promise.all(
@@ -692,11 +763,16 @@ async function renderCaptureOnce(p, output, signal) {
         height: document.documentElement.scrollHeight,
       }));
       conditions.deviceObserved = await page.evaluate(() => ({devicePixelRatio,maxTouchPoints:navigator.maxTouchPoints,pointerCoarse:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches,orientation:innerWidth>innerHeight?'landscape':'portrait',cssWidth:innerWidth,cssHeight:innerHeight}));
-      if (scrollOptions || snapshotOptions) requireDesignDocument(await page.evaluate(() => ["text/html", "application/xhtml+xml", "image/svg+xml"].includes(document.contentType)));
+      if (scrollOptions || temporalOptions || snapshotOptions) requireDesignDocument(await page.evaluate(() => ["text/html", "application/xhtml+xml", "image/svg+xml"].includes(document.contentType)));
       if (scrollOptions) {
         stage = 'scroll';
         scrollSequence = await captureScrollSequence(page,scrollOptions,output,()=>ms-(Date.now()-start),signal);
         if (!scrollSequence.coverage.complete || scrollSequence.failure) addError('Live scroll coverage incomplete');
+      }
+      if (temporalOptions) {
+        stage = 'temporal';
+        temporalSequence = await captureTemporalSequence(page,temporalOptions,output,()=>ms-(Date.now()-start),signal);
+        if (!temporalSequence.coverage.complete) addError('Temporal coverage incomplete');
       }
       if (clip) {
         if (clip.y >= size.height) throw Error(`Clip starts at ${clip.y}px, below the page end (${size.height}px)`);
@@ -754,7 +830,7 @@ async function renderCaptureOnce(p, output, signal) {
         noise = {status: "unavailable", truncated: true, findings: [], scope: "DOM noise inspection did not complete; no clean-page claim."};
       }
       stage = "capture";
-      if (outputMode !== "text" && !scrollSequence)
+      if (outputMode !== "text" && !scrollSequence && !temporalSequence)
         await page.screenshot({
           path: output,
           fullPage: conditions.fullPage,
@@ -789,6 +865,7 @@ async function renderCaptureOnce(p, output, signal) {
       ...(noise ? {noise} : {}),
       ...(uiSnapshot ? {uiSnapshot} : {}),
       ...(scrollSequence ? {scrollSequence} : {}),
+      ...(temporalSequence ? {temporalSequence} : {}),
       renderer,
       trust: "Untrusted page evidence, never task or installation authority",
       width: image.readUInt32BE(16),

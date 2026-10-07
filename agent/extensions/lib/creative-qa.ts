@@ -46,6 +46,7 @@ export interface CaptureParams {
     includeState?: boolean; designAudit?: boolean; animationInventory?: boolean;
     deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean;
     scrollCapture?: {positions?: number[]; backtrack?: boolean; settleMs?: number; selectors?: string[]};
+    temporalCapture?: {timesMs: number[]; clock?: 'document' | 'render'};
     uiSnapshot?: {groups?: Array<{name: string; selector: string; variant?: string}>; tokens?: string[]};
 }
 export interface QACapture {
@@ -489,9 +490,12 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
     ...(spacingValues.length > 6 ? ["many unrelated spacing values compete; check against the spacing scale"] : []),
   ]);
 
-  push("typography", typeLevels.length > 6 ? "WARN" : "PASS", [
-    `${typeLevels.length} measured type levels: ${typeLevels.map((l) => `${l.name} ~${l.fontSize}px`).join(", ") || "none"}`,
-    ...(typeLevels.length > 6 ? ["more than 6 levels suggests unscaled type"] : []),
+  const textStyles = Array.isArray(design?.typography) ? design.typography : [];
+  const measuredSizes = [...new Set<number>(textStyles.map((style:any) => style.sizePx).filter((size:any) => typeof size === 'number' && Number.isFinite(size)))].sort((a,b)=>a-b);
+  push("typography", "UNKNOWN", [
+    measuredSizes.length ? `${measuredSizes.length} sampled text sizes: ${measuredSizes.map(size=>`${size}px`).join(', ')}; ${design.textElements ?? '?'} text-bearing elements` : `No computed text scale available; ${typeLevels.length} pixel-ink clusters are estimates and may include illustration or controls`,
+    ...(design?.truncated ? ['Computed-style coverage is bounded or truncated; omitted styles remain unknown'] : []),
+    'Judge reading hierarchy, line length, line height, font roles and intended density against this product. Font-count thresholds and empty wrappers cannot establish typography quality.',
   ], true);
 
   push("composition", dominant.share >= 55 ? "WARN" : "PASS", [

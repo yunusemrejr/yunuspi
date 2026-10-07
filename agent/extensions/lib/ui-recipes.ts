@@ -71,7 +71,7 @@ export async function uiRecipe(params: any, cwd: string, signal?: AbortSignal) {
       const sticky = selector(params.stickySelector, 'stickySelector');
       css = `@media (min-width: ${config.mobileBelow}px) and (prefers-reduced-motion: no-preference) {\n  ${config.section} { min-block-size: 240svh; }\n  ${sticky} { position: sticky; inset-block-start: 0; }\n}\n`;
     }
-    runtime = mountScrollStory; integration = 'Keep the section and every chapter semantic and readable in normal flow. Import the optional sticky CSS only when pinning serves the narrative. Mount once, refresh on target changes, dispose on route unmount.';
+    runtime = mountScrollStory; integration = 'Keep the section and every chapter semantic and readable in normal flow. Import the optional sticky CSS only when pinning serves the narrative. Mount once, refresh on target changes, dispose on route unmount. For a video reuse the same tracks: window.renderFrame = seconds => handle.seek(Math.max(0, Math.min(1, seconds / durationSeconds))); set window.__renderReady after mounting and loading assets/fonts. seek owns progress until handle.resume(); reduced motion and mobile static flow remain honored. Inspect this explicit clock with motion_inspect mode render, then inspect actual video playback.';
   } else {
     if (!asset) throw Error('three-model scaffold needs assetPath for current local glTF preflight');
     const extensions = asset.extensionsRequired ?? [];

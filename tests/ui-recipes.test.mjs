@@ -108,10 +108,29 @@ test('generated browser mechanics handle scroll, reduced motion, repeated mount 
       return getComputedStyle(document.querySelector('.layer')).transform;
     });
     assert.match(normal, /matrix/); assert.notEqual(normal, 'matrix(1, 0, 0, 1, 0, 0)');
+    const sought = await page.evaluate(async () => {
+      const node = document.querySelector('.layer'), style = () => getComputedStyle(node).transform;
+      window.motionHandle.seek(0); const start = style();
+      window.motionHandle.seek(.5); const middle = style();
+      scrollTo(0,1200); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const afterScroll = style(); window.motionHandle.refresh(); const afterRefresh = style();
+      window.motionHandle.seek(1); const end = style();
+      window.motionHandle.seek(.5); window.motionHandle.resume();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      let invalid; try { window.motionHandle.seek(NaN); } catch { invalid = true; }
+      return { start,middle,end,afterScroll,afterRefresh,resumed:style(),invalid };
+    });
+    assert.equal(sought.start,'matrix(1, 0, 0, 1, 0, 0)');
+    assert.equal(sought.middle,'matrix(1, 0, 0, 1, 50, 0)');
+    assert.equal(sought.end,'matrix(1, 0, 0, 1, 100, 0)');
+    assert.equal(sought.afterScroll,sought.middle); assert.equal(sought.afterRefresh,sought.middle);
+    assert.notEqual(sought.resumed,sought.middle); assert.equal(sought.invalid,true);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.layer')).transform === 'none', null, { timeout: 5000 });
     assert.equal(await page.locator('.layer').evaluate(node => getComputedStyle(node).transform), 'none');
+    assert.equal(await page.evaluate(() => window.motionHandle.seek(.7)),false,'video clock cannot bypass the static reduced-motion state');
     await page.evaluate(() => window.motionHandle.dispose());
+    assert.equal(await page.evaluate(() => { try { window.motionHandle.seek(.5); } catch { return true; } }),true);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(async () => { const recipe = await import('/recipe1.mjs'); const handle = recipe.mount(); const count = document.getAnimations().length; handle.dispose(); return count; }), 0);

@@ -8,9 +8,9 @@
  * main-frame document-timeline animations (CSS + WAAPI) with timing and
  * animated properties; this module turns that inventory into a timeline,
  * concurrency/owner/property findings, and sampled-frame analysis (dead
- * time, jumps, loop seams, reduced-motion behavior). JS/rAF systems,
- * scroll timelines and cross-frame choreography stay out of scope and are
- * reported as unknown, never inferred.
+ * time, jumps, loop seams, reduced-motion behavior). Live scroll and an
+ * explicit renderFrame clock cover authored web/video choreography; uncontrolled
+ * rAF, cross-frame motion and playback cadence remain explicit limits.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -171,21 +171,28 @@ export interface MotionSample {
 }
 
 const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
+// Image-analysis reports changed pixels as a percentage; motion thresholds
+// and receipts use a 0..1 share. Keep the unit conversion at this boundary.
+const pixelChangeShare = (comparison: { changed: number }): number => Math.round(comparison.changed * 100) / 10_000;
 
 export async function motionInspectRun(
   params: { source: string; mode?:unknown; width?: unknown; height?: unknown; durationMs?: unknown; samples?: unknown; reducedMotion?: unknown;positions?:unknown;backtrack?:unknown;settleMs?:unknown;selectors?:unknown },
   cwd: string, signal: AbortSignal | undefined, capture: QACapture, direction?: CreativeDirection,
 ) {
-  if (params.mode !== undefined && !['time','scroll'].includes(String(params.mode))) throw Error('motion_inspect mode must be time or scroll');
+  if (params.mode !== undefined && !['time','scroll','render'].includes(String(params.mode))) throw Error('motion_inspect mode must be time, scroll or render');
   if (params.mode === 'scroll') return scrollMotionInspectRun(params,cwd,signal,capture,direction);
   if (typeof params.source !== "string" || !params.source) throw new Error("motion_inspect needs a source (local HTML/SVG path or http(s) URL)");
   const width = Math.max(200, Math.min(2048, Math.round(Number(params.width) || 1280)));
   const height = Math.max(200, Math.min(2048, Math.round(Number(params.height) || 800)));
   const dir = await qaFolder(undefined, cwd, "motion", "timeline");
+  const initialRevision = await sourceRevision(params.source,cwd);
+  const clock = params.mode === 'render' ? 'render' as const : 'document' as const;
+  const captureReceipts: any[] = [];
 
   // Inventory first: full pass plus a reduced-motion pass for parity.
   const probeFile = path.join(dir, "inventory.png");
   const full = await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, includeState: true, animationInventory: true }, probeFile, cwd, signal);
+  captureReceipts.push(full);
   const smil = full?.conditions?.animationSample?.smil ?? { roots: 0, sampled: 0, omitted: 0 };
   const fullInventory: unknown = full?.animationInventory ?? full?.conditions?.animationSample?.descriptors ?? [];
   let reducedInventory: unknown = [];
@@ -195,6 +202,7 @@ export async function motionInspectRun(
     try {
       const reducedFile = path.join(dir, "inventory-reduced.png");
       const receipt = await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, includeState: true, animationInventory: true, reducedMotion: "reduce" }, reducedFile, cwd, signal);
+      captureReceipts.push(receipt);
       reducedPass = "checked";
       reducedInventory = receipt?.animationInventory ?? receipt?.conditions?.animationSample?.descriptors ?? [];
     } catch (error: any) {
@@ -209,15 +217,22 @@ export async function motionInspectRun(
     : Math.max(800, Math.min(12_000, Math.round(Math.max(...finiteEnds, 2000))));
   const sampleCount = Math.max(2, Math.min(9, Math.round(Number(params.samples) || 6)));
 
-  // Temporal QA: sample the deterministic CSS/WAAPI clock across the run.
+  // One loaded document owns every normal-motion frame and loop endpoint.
   const times = Array.from({ length: sampleCount }, (_, i) => Math.round((durationMs * i) / (sampleCount - 1)));
+  const loops = sanitizeDescriptors(fullInventory).filter(d => d.iterations === "infinite");
+  const period = loops[0]?.durationMs;
+  const checkLoop = clock === 'document' && loops.length > 0 && !!period && loops.every(d => d.durationMs === period && d.delayMs === 0) && period <= 60_000;
+  const requestedTimes = [...new Set([...times,...(checkLoop ? [period as number] : [])])];
+  const temporalCapture = await capture({source:params.source,width,height,fullPage:false,timeoutMs:30_000,animationInventory:true,temporalCapture:{timesMs:requestedTimes,clock}},path.join(dir,'frames.png'),cwd,signal);
+  captureReceipts.push(temporalCapture);
+  const sequence = temporalCapture?.temporalSequence;
+  if (!Array.isArray(sequence?.samples) || !sequence.samples.length) throw Error('Renderer returned no temporal sequence; update the capture owner before motion inspection');
   const frames: Array<{ timeMs: number; file: string; img: Rgba }> = [];
-  for (const timeMs of times) {
+  for (const frame of sequence.samples.filter((frame:any) => times.includes(frame.timeMs))) {
     signal?.throwIfAborted();
-    const dest = path.join(dir, `t-${String(timeMs).padStart(5, "0")}.png`);
-    await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, animationTimeMs: timeMs }, dest, cwd, signal);
-    frames.push({ timeMs, file: relative(cwd, dest), img: await decodeImage(await fs.readFile(dest), { maxWidth: 960, maxPixels: 4_000_000 }, signal) });
+    frames.push({ timeMs:frame.timeMs, file:relative(cwd,frame.file), img:await decodeImage(await fs.readFile(frame.file), { maxWidth:960,maxPixels:4_000_000 },signal) });
   }
+  if (!frames.length) throw Error('No requested motion sample was captured');
   const samples: MotionSample[] = frames.map((frame, i) => {
     if (!i) return { timeMs: frame.timeMs, file: frame.file, changedShare: null, meanDelta: null, ssim: null, flag: "ok" as const };
     const prev = frames[i - 1].img, cur = frame.img;
@@ -226,7 +241,7 @@ export async function motionInspectRun(
       { width: prev.width, height: h, data: prev.data.subarray(0, prev.width * h * 4) },
       { width: cur.width, height: h, data: cur.data.subarray(0, cur.width * h * 4) },
     );
-    const changedShare = Math.round(comparison.changed * 10_000) / 10_000;
+    const changedShare = pixelChangeShare(comparison);
     const meanDelta = Math.round(comparison.meanDelta * 100) / 100;
     const ssim = Math.round(comparison.ssim * 1000) / 1000;
     const flag = changedShare < 0.002 && meanDelta < 0.4 ? "dead" : changedShare > 0.5 && meanDelta > 20 ? "jump" : "ok";
@@ -236,20 +251,24 @@ export async function motionInspectRun(
   const temporal: MotionFinding[] = [];
   if (reducedPass === "failed") temporal.push({ severity: "WARN", id: "reduced-motion-unverified", detail: "Reduced-motion capture failed; preference handling remains unknown.", evidence: [reducedError ?? "capture unavailable"] });
   let reducedPixels: { changedShare: number; meanDelta: number; files: string[] } | undefined;
-  if (reducedPass === "checked" && (analysis.count > 0 || smil.roots > 0)) {
+  let reducedCoverage: any;
+  if (reducedPass === "checked" && (analysis.count > 0 || smil.roots > 0 || clock === 'render')) {
     const reducedFrames: Array<{ file: string; img: Rgba }> = [];
-    for (const timeMs of [0, Math.min(durationMs, 333)]) {
-      const dest = path.join(dir, `reduce-${timeMs}.png`);
-      await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, animationTimeMs: timeMs, reducedMotion: "reduce" }, dest, cwd, signal);
-      reducedFrames.push({ file: relative(cwd, dest), img: await decodeImage(await fs.readFile(dest), { maxWidth: 960, maxPixels: 4_000_000 }, signal) });
-    }
+    try {
+      const reducedCapture = await capture({source:params.source,width,height,fullPage:false,timeoutMs:30_000,reducedMotion:'reduce',temporalCapture:{timesMs:[0,Math.min(durationMs,333)],clock}},path.join(dir,'reduce.png'),cwd,signal);
+      captureReceipts.push(reducedCapture); reducedCoverage = reducedCapture.temporalSequence?.coverage;
+      for (const frame of reducedCapture.temporalSequence?.samples ?? []) reducedFrames.push({file:relative(cwd,frame.file),img:await decodeImage(await fs.readFile(frame.file),{maxWidth:960,maxPixels:4_000_000},signal)});
+    } catch (error:any) { if (signal?.aborted) throw error; reducedPass='failed'; reducedError=String(error?.message ?? error).slice(0,200); }
+    if (reducedFrames.length === 2) {
     const { comparison } = compareImages(reducedFrames[0].img, reducedFrames[1].img);
-    reducedPixels = { changedShare: Math.round(comparison.changed * 10_000) / 10_000, meanDelta: Math.round(comparison.meanDelta * 100) / 100, files: reducedFrames.map(f => f.file) };
+    reducedPixels = { changedShare: pixelChangeShare(comparison), meanDelta: Math.round(comparison.meanDelta * 100) / 100, files: reducedFrames.map(f => f.file) };
     const retainedInfiniteTransform = sanitizeDescriptors(reducedInventory).some(d => d.iterations === "infinite" && d.playState === "running" && d.playbackRate !== 0 && d.properties.some(p => ["transform", "translate", "rotate", "scale"].includes(p)));
-    if (analysis.reducedMotion.unchangedInventory && retainedInfiniteTransform && comparison.changed > .002 && comparison.meanDelta > .4) {
+    if (analysis.reducedMotion.unchangedInventory && retainedInfiniteTransform && reducedPixels.changedShare > .002 && comparison.meanDelta > .4) {
       analysis.reducedMotion.ignored = true;
       temporal.push({ severity: "FAIL", id: "reduced-motion-moving-loop", detail: "Equivalent infinite transform animations retain visible pixel changes under reduce. Provide a static state or explicit playback control and recheck.", evidence: reducedPixels.files });
     }
+    if (clock === 'render' && reducedPixels.changedShare > .002 && comparison.meanDelta > .4) temporal.push({severity:'WARN',id:'render-reduced-motion-moving',detail:'The explicit frame clock still changes reduced-motion pixels. Inspect whether the web equivalent retains a readable static state; a video clock alone does not establish accessible interaction.',evidence:reducedPixels.files});
+    } else temporal.push({severity:'WARN',id:'reduced-motion-incomplete',detail:'Reduced-motion temporal samples are incomplete; preference handling remains unverified.',evidence:[reducedError ?? 'missing frame pair']});
   }
   const dead = samples.filter((s) => s.flag === "dead");
   const jumps = samples.filter((s) => s.flag === "jump");
@@ -257,31 +276,35 @@ export async function motionInspectRun(
   for (const jump of jumps.slice(0, 3)) temporal.push({ severity: "WARN", id: "jump", detail: `t=${jump.timeMs}ms: large ${(jump.changedShare! * 100).toFixed(1)}% difference between sparse frames; motion and intentional cuts can both explain it, so inspect playback`, evidence: [jump.file] });
   // A random run endpoint is not a loop boundary. Seek the explicit local
   // period only when every infinite animation shares a known duration/offset.
-  const loops = sanitizeDescriptors(fullInventory).filter(d => d.iterations === "infinite");
-  const period = loops[0]?.durationMs;
   let loopBoundary: { periodMs: number; files: string[]; changedShare: number } | undefined;
-  if (loops.length && period && loops.every(d => d.durationMs === period && d.delayMs === 0) && period <= 60_000) {
+  if (checkLoop && sequence.samples.some((frame:any) => frame.timeMs === period)) {
     const loopFrames: Array<{ file: string; img: Rgba }> = [];
     for (const timeMs of [0, period]) {
-      const dest = path.join(dir, `loop-${timeMs}.png`);
-      await capture({ source: params.source, width, height, fullPage: false, timeoutMs: 30_000, animationTimeMs: timeMs }, dest, cwd, signal);
-      loopFrames.push({ file: relative(cwd, dest), img: await decodeImage(await fs.readFile(dest), { maxWidth: 960, maxPixels: 4_000_000 }, signal) });
+      const frame = sequence.samples.find((frame:any) => frame.timeMs === timeMs);
+      loopFrames.push({ file:relative(cwd,frame.file),img:await decodeImage(await fs.readFile(frame.file),{maxWidth:960,maxPixels:4_000_000},signal) });
     }
     const { comparison } = compareImages(loopFrames[0].img, loopFrames[1].img);
-    loopBoundary = { periodMs: period, files: loopFrames.map(f => f.file), changedShare: Math.round(comparison.changed * 10_000) / 10_000 };
+    loopBoundary = { periodMs: period as number, files: loopFrames.map(f => f.file), changedShare: pixelChangeShare(comparison) };
     // Sampling exactly at the restart establishes endpoint parity, not velocity
     // continuity or a near-boundary jump. Report this narrow fact accurately.
-    if (comparison.changed > .02) temporal.push({ severity: "WARN", id: "loop-endpoint-parity", detail: "Frames at 0 and one known local loop period differ; finite content or unstable page state may explain it. Inspect the boundary in playback.", evidence: loopBoundary.files });
+    if (loopBoundary.changedShare > .02) temporal.push({ severity: "WARN", id: "loop-endpoint-parity", detail: "Frames at 0 and one known local loop period differ; finite content or unstable page state may explain it. Inspect the boundary in playback.", evidence: loopBoundary.files });
   }
 
   const strip = composeRow(frames.map((f) => f.img), 8);
   const stripPath = path.join(dir, "sequence.png");
   await fs.writeFile(stripPath, await encodeImage(strip, "png", { maxWidth: 2400 }, signal), { flag: "wx" });
 
+  const revision = await sourceRevision(params.source,cwd),sourceChanged = initialRevision !== revision;
+  const errors = [...new Set(captureReceipts.flatMap(receipt => receipt.errors ?? []))].slice(0,6);
+  const documentChanged = captureReceipts.some(receipt => receipt.conditions?.documentSha256 && full.conditions?.documentSha256 && receipt.conditions.documentSha256 !== full.conditions.documentSha256);
+  const complete = sequence.coverage?.complete === true && frames.length === times.length && !sourceChanged && !documentChanged && !errors.length && !captureReceipts.some(receipt => receipt.diagnosticsTruncated) && (reducedPass === 'disabled' || reducedPass === 'checked' && (!reducedCoverage || reducedCoverage.complete === true));
+  if (!complete) temporal.push({severity:'WARN',id:'temporal-coverage-incomplete',detail:'Temporal verification is incomplete: inspect capture coverage, runtime errors, document changes and reduced-motion results before recording a pass.',evidence:[...(sourceChanged ? ['source changed during capture'] : []),...(documentChanged ? ['served document changed between passes'] : []),...errors,sequence.failure ?? 'coverage incomplete'].slice(0,6)});
   const findings = [...analysis.findings, ...temporal];
   const report = {
-    source: params.source, revision: await sourceRevision(params.source, cwd), at: new Date().toISOString(),
-    dir: relative(cwd, dir), durationMs, sampledClock: "CSS/WAAPI document timeline and SVG SMIL roots; JS/rAF, scroll timelines, frames and not-yet-created animations are invisible to sampling; each animation is sought to its own local time",
+    source: params.source, revision, initialRevision, sourceChanged, mode:params.mode ?? 'time', at: new Date().toISOString(),
+    dir: relative(cwd, dir), durationMs, sampledClock: clock === 'render' ? 'Explicit window.renderFrame(seconds), awaited in one document. The authored clock owns canvas/SVG/web choreography; it must produce the same state for the same time. Uncontrolled rAF, media, random and wall-clock state remain unknown.' : 'CSS/WAAPI document timeline and SVG SMIL roots, each sought to local time in one document. JS/rAF, scroll timelines, frames and not-yet-created animations remain outside this clock.',
+    coverage:{...sequence.coverage,complete,sourceChanged,documentChanged,reducedComplete:reducedPass==='checked'&&(!reducedCoverage||reducedCoverage.complete===true)},
+    errors,documentSha256:temporalCapture.conditions?.documentSha256 ?? null,
     inventory: { smil, count: analysis.count, infinite: analysis.infinite, maxConcurrent: analysis.maxConcurrent, distinctDurationsMs: analysis.distinctDurations, transformOwners: analysis.transformOwners, layoutAnimations: analysis.layoutAnimations, reducedMotion: analysis.reducedMotion },
     timeline: renderMotionTimeline(sanitizeDescriptors(fullInventory), durationMs),
     descriptors: sanitizeDescriptors(fullInventory).slice(0, 40),
@@ -328,7 +351,7 @@ async function scrollMotionInspectRun(params:any,cwd:string,signal:AbortSignal|u
   }
   const findings:MotionFinding[]=[],images=new Map<string,Rgba>();
   const pixels=async(file:string)=>{let image=images.get(file);if(!image){image=await decodeImage(await fs.readFile(file),{maxWidth:480,maxPixels:2e6},signal);images.set(file,image);}return image;};
-  const compare=async(a:string,b:string)=>{const left=await pixels(a),right=await pixels(b);if(left.width!==right.width||left.height!==right.height)return null;const {comparison}=compareImages(left,right);return {changedShare:Math.round(comparison.changed*10000)/10000,meanDelta:Math.round(comparison.meanDelta*100)/100};};
+  const compare=async(a:string,b:string)=>{const left=await pixels(a),right=await pixels(b);if(left.width!==right.width||left.height!==right.height)return null;const {comparison}=compareImages(left,right);return {changedShare:pixelChangeShare(comparison),meanDelta:Math.round(comparison.meanDelta*100)/100};};
   const samples=full.scrollSequence.samples.map((sample:any)=>({...sample,file:relative(cwd,sample.file)}));
   const backtrack:any[]=[];
   for(const sample of full.scrollSequence.samples.filter((s:any)=>s.pass==='backtrack')) {

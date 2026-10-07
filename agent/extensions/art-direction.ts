@@ -423,10 +423,10 @@ export default function artDirection(pi: any) {
 
   // ── motion_inspect ──
   register("motion_inspect",
-    "Inspect running motion with mode:time (default) or scroll. time inventories and seeks CSS/WAAPI/SMIL clocks, detects ownership/layout risks and verifies reduced-state infinite transform loops. scroll observes actual bounded progress positions in one live document, optionally backtracks, keeps JS/rAF and scroll timelines running and captures a reduced-motion pass plus stationary pixels. Selector geometry, actual scroll positions, hashes, missing coverage and screenshots accompany findings. Scroll samples cannot prove frame cadence, easing, GPU performance or appearance. time excludes JS/rAF and scroll timelines; encoded-video cadence uses media_info action motion.",
+    "Inspect running motion with mode:time (default), scroll or render. time inventories and seeks CSS/WAAPI/SMIL clocks in one loaded document. render explicitly awaits the native video window.renderFrame(seconds) clock to inspect reusable canvas/SVG/web choreography; it never guesses or installs a clock. scroll observes actual progress and backtracking in one live document with JS/rAF and scroll timelines running. Reduced-motion passes, retained screenshots, coverage, source/document changes and runtime errors accompany findings. Incomplete coverage cannot approve motion. Samples are not playback, FPS, GPU cost or appearance proof; encoded-video cadence uses media_info action motion.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
-      mode:Type.Optional(choices(['time','scroll'])),
+      mode:Type.Optional(choices(['time','scroll','render'])),
       width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       height: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
       durationMs: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
@@ -442,7 +442,8 @@ export default function artDirection(pi: any) {
       const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
       const report = await motionInspectRun(params, ctx.cwd as string, signal, capture, direction);
       const key = `motion:${report.source}:${params.mode ?? 'time'}`;
-      if (report.blocking > 0) state.blockingRuns.set(key, `motion: ${report.blocking} blocking finding(s) on ${report.source} (rev ${report.revision}): ${report.findings.filter((f: any) => f.severity === "FAIL").map((f: any) => f.id).join(", ")}`.slice(0, 280));
+      if (report.coverage?.complete === false) state.blockingRuns.set(key, `motion: incomplete ${params.mode ?? 'time'} capture on ${report.source} (rev ${report.revision}); inspect coverage, errors and reduced-motion results`.slice(0,280));
+      else if (report.blocking > 0) state.blockingRuns.set(key, `motion: ${report.blocking} blocking finding(s) on ${report.source} (rev ${report.revision}): ${report.findings.filter((f: any) => f.severity === "FAIL").map((f: any) => f.id).join(", ")}`.slice(0, 280));
       else state.blockingRuns.delete(key);
       return { result: report };
     }, 600_000);

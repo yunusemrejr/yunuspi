@@ -5,7 +5,7 @@ export function inspectDesignState(root) {
   const started=performance.now(),limit=600,timeLimit=120;
   const result={version:2,visited:0,visible:0,truncated:false,viewport:{width:innerWidth,height:innerHeight},
     horizontalOverflowPx:Math.max(0,document.documentElement.scrollWidth-document.documentElement.clientWidth),
-    typography:[],spacing:[],surfacePatterns:{gradients:0,shadows:0,rounded:0},
+    typography:[],textElements:0,spacing:[],surfacePatterns:{gradients:0,shadows:0,rounded:0},
     slopSignals:{pills:0,glowShadows:0,gradientText:0,glass:0,textGlow:0,oversizedType:0,heavyRadius:0},
     contrast:{checked:0,belowThreshold:0,indeterminate:0},findings:[],
     svg:{sampled:0,missingViewBox:0,unresolvedRefs:0,duplicateIds:0,clippingCandidates:0,findings:[],limitations:'Inline main-document SVG sample. Fill bounds exclude stroke/filter paint; clipping candidates need pixel judgment. Hidden defs may legitimately have no viewBox. Not an optical-quality verdict.'},
@@ -43,7 +43,7 @@ export function inspectDesignState(root) {
           if(++scanned>128||performance.now()-started>=timeLimit){result.truncated=true;break;}
           if(child.id){if(svgIds.has(child.id)){svg.duplicateIds++;note('duplicate-id');}svgIds.add(child.id);}
           for(const attr of ['href','xlink:href','clip-path','mask','fill','stroke','filter']){
-            const raw=child.getAttribute(attr)||'',ref=raw.startsWith('#')?raw.slice(1):/url\(\s*["']?#([^\s)'";]+)["']?\s*\)/.exec(raw)?.[1];
+            const raw=child.getAttribute(attr)||'',ref=(attr==='href'||attr==='xlink:href')&&raw.startsWith('#')?raw.slice(1):/url\(\s*["']?#([^\s)'";]+)["']?\s*\)/.exec(raw)?.[1];
             if(ref&&!document.getElementById(ref)){svg.unresolvedRefs++;note('unresolved-reference');}
           }
           child=parts.nextNode();
@@ -52,8 +52,11 @@ export function inspectDesignState(root) {
           try{const b=node.getBBox();if(b.width>0&&b.height>0&&(b.x<view.x-.5||b.y<view.y-.5||b.x+b.width>view.x+view.width+.5||b.y+b.height>view.y+view.height+.5)){svg.clippingCandidates++;note('fill-outside-viewbox',{bounds:{x:round(b.x),y:round(b.y),width:round(b.width),height:round(b.height)}});}}catch{/* unsupported geometry remains a pixel question */}
         }
       }
+      let hasDirectText=false,directChildren=0;for(let child=node.firstChild;child&&directChildren++<64;child=child.nextSibling)if(child.nodeType===Node.TEXT_NODE&&child.textContent.trim()){hasDirectText=true;break;}
       const font={family:style.fontFamily.slice(0,120),sizePx:parseFloat(style.fontSize),weight:style.fontWeight,lineHeight:style.lineHeight};
-      count(fonts,JSON.stringify(font));
+      // Decorative geometry and inherited styles on empty layout wrappers
+      // cannot establish a type level or outweigh the actual reading text.
+      if(hasDirectText&&!node.matches('script,style,template')){count(fonts,JSON.stringify(font));result.textElements++;}
       for(const value of [style.gap,style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft,style.marginTop,style.marginBottom]){const n=parseFloat(value);if(Number.isFinite(n)&&n>0&&n<=512)count(spaces,String(round(n)));}
       if(/gradient\(/.test(style.backgroundImage))result.surfacePatterns.gradients++;
       if(style.boxShadow!=='none')result.surfacePatterns.shadows++;
@@ -64,7 +67,6 @@ export function inspectDesignState(root) {
       const shortSide=Math.min(rect.width,rect.height);
       const isPill=shortSide>=8&&shortSide<=96&&rect.width>rect.height&&parseFloat(style.borderTopLeftRadius)>=shortSide/2-1;
       if(isPill)slop('pills',node);
-      let hasDirectText=false,directChildren=0;for(let child=node.firstChild;child&&directChildren++<64;child=child.nextSibling)if(child.nodeType===Node.TEXT_NODE&&child.textContent.trim()){hasDirectText=true;break;}
       // A glow halo is a soft wide shadow with a near-zero offset (not a drop
       // shadow and not an inset fill). Computed serialization puts color first.
       if(style.boxShadow!=='none'&&!/inset/.test(style.boxShadow)){
