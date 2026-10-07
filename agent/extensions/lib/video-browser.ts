@@ -25,7 +25,7 @@ export function planBrowserTake(params: any) {
   if (width % 2 || height % 2) throw Error('Browser take dimensions must be even');
   const steps = structuredClone(params.steps ?? []);
   if (!Array.isArray(steps) || steps.length > 100) throw Error('steps accepts at most 100 entries');
-  let at = -1;
+  let at = -1, earliestEnd = 0;
   for (const step of steps) {
     if (step?.action === 'press' && step.text === undefined) step.text = step.key;
     if (!step || !ACTIONS.includes(step.action)) throw Error('Unsupported browser take action');
@@ -40,6 +40,12 @@ export function planBrowserTake(params: any) {
     if (step.y !== undefined) number(step.y, 0, 0, height, 'step.y');
     if (step.action === 'scroll') { number(step.dx, 0, -10000, 10000, 'step.dx'); number(step.dy, 0, -10000, 10000, 'step.dy'); }
     if (['type', 'press', 'wait_text', 'mark'].includes(step.action) && (typeof step.text !== 'string' || !step.text || step.text.length > 2000)) throw Error('Action needs text of 1..2000 characters');
+    // Steps are sequential even when their planned starts overlap. Reject a
+    // guaranteed overrun before opening Chromium or allocating output files.
+    const work = ['move', 'click', 'tap', 'scroll'].includes(step.action) ? step.duration ?? 0.5 :
+      step.action === 'type' ? Array.from(step.text).length * 0.04 : 0;
+    earliestEnd = Math.max(earliestEnd, at) + work;
+    if (earliestEnd >= seconds) throw Error('Browser actions cannot finish within seconds; lengthen the take or shorten movement/typing');
   }
   return { seconds, fps, width, height, steps, cursor: params.cursor !== false, mobile, accent: params.accent ?? '#e76339' };
 }

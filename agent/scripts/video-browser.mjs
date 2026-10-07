@@ -4,15 +4,37 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { safeBrowserUrl } from './browser-diagnostics.mjs';
 const require = createRequire(new URL('../npm/package.json', import.meta.url));
 const { chromium } = require('playwright');
-const plan = JSON.parse(await fs.readFile(process.argv[2], 'utf8'));
 const emit = (kind, data) => process.stdout.write(`${kind} ${JSON.stringify(data)}\n`);
 const urlOf = raw => { const u = new URL(raw); if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw Error('Unsupported browser protocol'); return u.href; };
 const ease = t => t * t * t * (t * (6 * t - 15) + 10);
 
+/** Raw and delivered frames share a filesystem. Hardlinks retain observed
+ * bytes after raw cleanup without rewriting a JPEG for every held frame. */
+export async function resampleBrowserFrames(raw, seconds, fps, epoch, framesDir) {
+  if (!raw.length || raw.some(frame => !Number.isFinite(frame.timestamp)) || !Number.isFinite(epoch)) throw Error('Browser source frame clock is invalid');
+  raw.sort((a, b) => a.timestamp - b.timestamp);
+  const count = Math.round(seconds * fps), sources = [], used = new Set();
+  let source = 0, repeatedFrameBytes = 0, storedFrameBytes = 0;
+  for (let i = 0; i < count; i++) {
+    const requested = i / fps;
+    while (source + 1 < raw.length && raw[source + 1].timestamp <= epoch + requested) source++;
+    const frame = raw[source];
+    await fs.link(frame.file, path.join(framesDir, 'frame-' + String(i).padStart(6, '0') + '.jpg'));
+    const size = frame.bytes ?? (await fs.stat(frame.file)).size;
+    repeatedFrameBytes += size;
+    if (!used.has(frame.file)) { storedFrameBytes += size; used.add(frame.file); }
+    sources.push({ frame: i, t: requested, sourceT: frame.timestamp - epoch });
+  }
+  return { sources, frames: count, resampling: { method: 'hardlinks', uniqueSourceFrames: used.size, storedFrameBytes, copyBytesAvoided: repeatedFrameBytes - storedFrameBytes } };
+}
+const inViewport = (box, plan) => box && box.width > 0 && box.height > 0 && box.x >= 0 && box.y >= 0 && box.x + box.width <= plan.width && box.y + box.height <= plan.height;
+
 async function main() {
+  const plan = JSON.parse(await fs.readFile(process.argv[2], 'utf8'));
   const rawDir = path.join(plan.out, 'raw'), framesDir = path.join(plan.out, 'frames');
   await fs.mkdir(rawDir); await fs.mkdir(framesDir);
   const browser = await chromium.launch({ channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? 'chrome', headless: true, chromiumSandbox: true, timeout: 15_000 });
@@ -51,7 +73,7 @@ async function main() {
       const timestamp = frame.metadata.timestamp;
       if (!Number.isFinite(timestamp)) { captureError = Error('Screencast frame has no timestamp'); return; }
       const file = path.join(rawDir, `raw-${String(raw.length).padStart(6, '0')}.jpg`), data = Buffer.from(frame.data, 'base64');
-      bytes += data.length; raw.push({ timestamp, file });
+      bytes += data.length; raw.push({ timestamp, file, bytes: data.length });
       const write = fs.writeFile(file, data, { flag: 'wx' }).catch(error => { captureError = error; }).finally(() => writes.delete(write)); writes.add(write);
     });
     await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 94, maxWidth: plan.width, maxHeight: plan.height, everyNthFrame: 1 });
@@ -79,11 +101,11 @@ async function main() {
       const due = (step.at ?? 0) - time(); if (due > 0) await delay(due * 1000);
       if (time() >= plan.seconds) throw Error('Browser actions overran the take; lengthen seconds or move them earlier');
       let target;
-      if (step.selector) {
+      if (step.selector && step.action !== 'wait_text') {
         const locator = page.locator(step.selector);
         if (await locator.count() !== 1) throw Error('Take selector must identify exactly one observed element');
         await locator.waitFor({ state: 'visible' }); target = await locator.boundingBox();
-        if (!target || target.x < 0 || target.y < 0 || target.x + target.width > plan.width || target.y + target.height > plan.height) throw Error('Take target is outside the viewport; add an explicit scroll step');
+        if (!inViewport(target, plan)) throw Error('Take target is outside the viewport; add an explicit scroll step');
         log('target', { selector: step.selector, ...target });
       }
       if (step.action === 'highlight') {
@@ -97,6 +119,14 @@ async function main() {
       } else if (['move', 'click', 'tap'].includes(step.action)) {
         await point(target ? target.x + target.width / 2 : step.x, target ? target.y + target.height / 2 : step.y, step.duration ?? 0.5);
         if (step.action === 'click' || step.action === 'tap') {
+          if (step.selector) {
+            const locator = page.locator(step.selector);
+            const hit = await locator.evaluate((element, point) => {
+              const observed = document.elementFromPoint(point.x, point.y);
+              return observed === element || element.contains(observed);
+            }, { x, y });
+            if (!hit || !await locator.isEnabled()) throw Error('Take target moved, is covered or disabled at the observed pointer; inspect the page and update the take steps');
+          }
           log(step.action === 'tap' || plan.mobile ? 'tap' : 'click', { x, y });
           if (plan.cursor) await page.evaluate(([px, py, accent]) => {
             const ring = document.createElement('div'); ring.style.cssText = `position:fixed;left:${px - 12}px;top:${py - 12}px;width:24px;height:24px;border:2px solid ${accent};border-radius:50%;pointer-events:none;z-index:2147483646`;
@@ -114,7 +144,14 @@ async function main() {
         for (const character of step.text) { log('key'); await page.keyboard.type(character); await delay(40); }
       }
       else if (step.action === 'press') { if (step.selector) await page.locator(step.selector).focus(); log('press', { key: step.text }); await page.keyboard.press(step.text); }
-      else if (step.action === 'wait_text') { await page.getByText(step.text, { exact: false }).first().waitFor({ state: 'visible', timeout: Math.max(1, Math.min(15000, (plan.seconds - time()) * 1000)) }); log('text-visible'); }
+      else if (step.action === 'wait_text') {
+        const locator = step.selector ? page.locator(step.selector).filter({ hasText: step.text }) : page.getByText(step.text, { exact: false }).first();
+        await locator.waitFor({ state: 'visible', timeout: Math.max(1, Math.min(15000, (plan.seconds - time()) * 1000)) });
+        if (step.selector && await page.locator(step.selector).count() !== 1) throw Error('Take selector must identify exactly one observed element');
+        const box = await locator.boundingBox();
+        if (!inViewport(box, plan)) throw Error('Take response is outside the viewport; add an explicit scroll step');
+        log('target', { selector: step.selector, ...box }); log('text-visible', { selector: step.selector });
+      }
       else if (step.action === 'mark') log('mark', { name: step.text });
       emit('BROWSER_TAKE_PROGRESS', `${step.action} at ${time().toFixed(2)}s`);
     }
@@ -123,22 +160,15 @@ async function main() {
     await cdp.send('Page.stopScreencast'); await Promise.all([...writes]);
     if (captureError) throw captureError;
     if (bytes > 512 * 1024 * 1024) throw Error('Browser take exceeds the 512 MiB raw frame budget');
-    raw.sort((a, b) => a.timestamp - b.timestamp);
-    const count = Math.round(plan.seconds * plan.fps), sources = []; let source = 0;
-    for (let i = 0; i < count; i++) {
-      const requested = i / plan.fps;
-      while (source + 1 < raw.length && raw[source + 1].timestamp <= epoch + requested) source++;
-      await fs.copyFile(raw[source].file, path.join(framesDir, `frame-${String(i).padStart(6, '0')}.jpg`));
-      sources.push({ frame: i, t: requested, sourceT: raw[source].timestamp - epoch });
-    }
+    const { frames: count, sources, resampling } = await resampleBrowserFrames(raw, plan.seconds, plan.fps, epoch, framesDir);
     await fs.rm(rawDir, { recursive: true });
-    const result = { frames: count, capturedFrames: raw.length, droppedFrames: dropped, sourceUrl: safeBrowserUrl(page.url()), sourceFrames: sources, eventLog: events, problems,
+    const result = { frames: count, capturedFrames: raw.length, droppedFrames: dropped, resampling, sourceUrl: safeBrowserUrl(page.url()), sourceFrames: sources, eventLog: events, problems,
       maxSourceAgeSeconds: Math.max(...sources.map(s => s.t - s.sourceT)), clock: 'CDP timestamps relative to capture epoch; actions use monotonic elapsed wall time. Output selects the most recent observed frame.' };
     await fs.writeFile(path.join(plan.out, 'take-data.json'), JSON.stringify(result));
     emit('BROWSER_TAKE_RESULT', { frames: count });
   } finally { await browser.close(); }
 }
-main().catch(error => {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => {
   const message = String(error.message).split('\n').filter(line => !/<launching>|--disable-field-trial-config/.test(line)).join('\n');
   emit('BROWSER_TAKE_RESULT', { error: message.length > 1800 ? message.slice(0, 400) + '\n…\n' + message.slice(-1300) : message });
   process.exitCode = 1;
