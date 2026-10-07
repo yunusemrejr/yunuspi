@@ -4011,7 +4011,7 @@
       {
         "name": "task-state",
         "source": "agent/extensions/task-state.ts",
-        "line": 170
+        "line": 215
       },
       {
         "name": "tasks",
@@ -4290,7 +4290,7 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 594,
+        "line": 595,
         "kind": "factory"
       },
       {
@@ -4851,7 +4851,7 @@
       {
         "name": "task_state",
         "source": "agent/extensions/task-state.ts",
-        "line": 125,
+        "line": 156,
         "kind": "literal"
       },
       {
@@ -5406,7 +5406,7 @@
       {
         "name": "task_state",
         "source": "agent/extensions/task-state.ts",
-        "line": 125,
+        "line": 156,
         "kind": "literal"
       },
       {
@@ -5710,7 +5710,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 753,
+      "sourceFiles": 754,
       "registrationSites": 91,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 157,
