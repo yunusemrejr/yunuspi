@@ -108,3 +108,15 @@ test('the deadline stops an inherited-output worker even after its direct parent
     try{const stat=fs.readFileSync(`/proc/${escaped}/stat`,'utf8');assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z');}catch(error){if(error.code!=='ENOENT')throw error;}
   }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
 });
+
+test('the deadline finds inherited output retained at a non-standard descriptor', {timeout:5_000}, async t => {
+  if(process.platform!=='linux'){t.skip('Linux inherited output identities');return;}
+  let escaped, timer;
+  const code="const {spawn}=require('child_process');const grand=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore','ignore','ignore',process.stdout]});grand.unref();process.stdout.write(grand.pid+'\\n')";
+  try {
+    const pending=run(code,{timeoutMs:150,onLine(line){escaped=Number(line);}});
+    await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('inherited fd3 writer exceeded the deadline bound')),1_500);})]),/exceeded/);
+    assert.ok(Number.isSafeInteger(escaped));
+    try{const stat=fs.readFileSync(`/proc/${escaped}/stat`,'utf8');assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z');}catch(error){if(error.code!=='ENOENT')throw error;}
+  }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
+});

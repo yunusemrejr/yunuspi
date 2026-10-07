@@ -37,9 +37,16 @@ export function treeUsage(rootPid: number, includeIdentities = false, outputLink
         const stat = readFileSync(`/proc/${name}/stat`, "utf8");
         // comm may contain spaces and parentheses; the fields after the last ")" are stable.
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-        const ownsOutput = Number(name) !== process.pid && outputLinks.length > 0 && [1, 2].some(fd => {
-          try { return outputLinks.includes(readlinkSync(`/proc/${name}/fd/${fd}`)); } catch { return false; }
-        });
+        // A child can retain an inherited output handle at another fd after
+        // redirecting stdout/stderr. Inspect descriptors only during cleanup;
+        // the ordinary memory-watch path does not need this ownership scan.
+        let ownsOutput = false;
+        if (Number(name) !== process.pid && outputLinks.length > 0) {
+          try { ownsOutput = readdirSync(`/proc/${name}/fd`).some(fd => {
+            if (!/^\d+$/.test(fd)) return false;
+            try { return outputLinks.includes(readlinkSync(`/proc/${name}/fd/${fd}`)); } catch { return false; }
+          }); } catch { /* exited or inaccessible */ }
+        }
         rows.set(Number(name), { ppid: Number(fields[1]), rssKb: Number(fields[21]) * PAGE_KB, identity: fields[19], ownsOutput });
       } catch { /* exited while scanning */ }
     }
