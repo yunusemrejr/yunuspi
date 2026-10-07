@@ -17,7 +17,7 @@ function httpUrl(value: string, base?: string): string | undefined {
   } catch { return; }
 }
 
-async function readCapped(response: Response, max: number): Promise<{ text: string; bytes: number; truncated: boolean }> {
+export async function readCapped(response: Response, max: number): Promise<{ text: string; bytes: number; truncated: boolean }> {
   const reader = response.body?.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;

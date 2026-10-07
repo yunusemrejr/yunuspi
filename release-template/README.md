@@ -10,7 +10,7 @@ YunusPi is a full agent harness built on its own owned core, an independent line
 
 The aim is practical: spend context on the task instead of on instructions, reuse what the harness already proved, and keep one agent clearly responsible for the outcome.
 
-[Research, code and ML](docs/RESEARCH-CODE-ML.md) · [Media creation](docs/MEDIA-CREATION.md) · [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
+[Research, code and ML](docs/RESEARCH-CODE-ML.md) · [Media creation](docs/MEDIA-CREATION.md) · [Public-site SEO](docs/SITE-SEO.md) · [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 

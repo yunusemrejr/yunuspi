@@ -11,6 +11,7 @@ import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillIntentSegments, skillTaskText, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded } from './task-pipelines.ts';
 import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
+import { seoTaskIntent } from './seo-policy.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
 
 import { choices } from "./tool-schema.ts";
@@ -134,7 +135,7 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
   // Producing a finished file (document, PDF, video, audio) stages the check that opens it: a script printing "Saved x" proves nothing about x.
   { pattern: /\b(?:create|make|generate|produce|export|render|build|prepare|save|convert)\b[^.\n]{0,70}\b(?:pdf|docx|xlsx|pptx|mp4|webm|mov|wav|mp3|video|audio (?:file|track)|podcast|spreadsheet|slide deck|invoice|resume|r[eé]sum[eé])\b/i, tools: ['deliverable_check'] },
   // SEO is technical (crawl, canonical, structured data) and research (queries, competitors, SERPs): stage both.
-  { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['web_probe', 'web_search', 'fetch_content'] },
+  { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['seo_toolkit', 'web_probe', 'web_search', 'fetch_content'] },
   // Work whose answer lives on the web stages search and page reading with the first turn instead of
   // relying on a discovery round trip the agent may not make (an SEO session ran 190 calls without one search).
   { pattern: /\b(?:search (?:the )?(?:web|internet)|(?:web|online|market|competitor|competitive|keyword|literature|user) research|research (?:the )?(?:competitors?|market|competition|alternatives|options|vendors|prices|pricing|trends|topic|history|news)|competitors?|competitive (?:analysis|landscape)|serp|look ?up (?:online|on the web)|google (?:it|this|for)|latest\b[^.\n]{0,30}\b(?:version|release|news|changes|lts)\b|find out (?:what|which|who|when|how many|whether)|what(?:'s| is) new in|state of the art|literature review)\b/i, tools: ['web_search', 'fetch_content', 'get_search_content'] },
@@ -188,7 +189,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
     const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
-  for (const bundle of DIRECT_BUNDLES) if ((bundle.acting ? clauses : segments).some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
+  for (const bundle of DIRECT_BUNDLES) if ((!bundle.tools.includes('seo_toolkit') || seoTaskIntent(text).relevant) && (bundle.acting ? clauses : segments).some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
   // Open-ended work stages the scouting tools up front: the agent will not search for tools it does not know it needs.
   if (priorArtIntent(text)) for (const name of PRIOR_ART_TOOLS) out.add(name);
   for (const part of clauses) {

@@ -72,6 +72,8 @@ test('shared-host deployment plans cannot turn into claims of a live deployment'
   const live = selected('Deploy the PHP website through Git and SSH to GoDaddy');
   assert.deepEqual(live.stages.filter(stage => stage.id.startsWith('deploy-')).map(stage => stage.id), ['deploy-preflight', 'deploy-remote', 'deploy-live']);
   assert.deepEqual(live.stages.find(stage => stage.id === 'deploy-live').evidenceKinds, ['live']);
+  assert.deepEqual(live.stages.find(stage => stage.id === 'seo-live').evidenceKinds, ['live']);
+  assert.ok(live.stages.find(stage => stage.id === 'seo-live').dependsOn.includes('deploy-remote'));
 });
 
 test('stage ordering and native evidence requirements block premature delivery and source-only UI approval', () => {
@@ -87,6 +89,8 @@ test('stage ordering and native evidence requirements block premature delivery a
   assert.throws(() => record(selection, ledger, 'delivery', 'artifact'), /unresolved prerequisite/);
   record(selection, ledger, 'ui-pixels', 'pixels');
   record(selection, ledger, 'ui-interaction', 'interaction');
+  record(selection, ledger, 'seo-raw', 'inspection');
+  record(selection, ledger, 'seo-content', 'assessment');
   record(selection, ledger, 'delivery', 'artifact');
   assert.deepEqual(pendingPipelineStages(selection, ledger, coordinate), []);
   assert.equal(buildPipelineContext(selection, ledger, coordinate), undefined);
@@ -236,7 +240,8 @@ test('3D, SEO, LLM-application and API-automation work get their own evidence-st
   const seo = selected('Fix our technical SEO: canonical tags, sitemap.xml and robots.txt are inconsistent');
   assert.ok(seo.ids.includes('seo'));
   assert.ok(seo.tools.includes('web_probe'));
-  assert.ok(seo.stages.some(stage => stage.id === 'validation' && /web_probe/.test(stage.check) && /never claims/.test(stage.check)));
+  assert.ok(seo.stages.some(stage => stage.id === 'seo-raw' && /seo_toolkit/.test(stage.check)));
+  assert.ok(seo.stages.some(stage => stage.id === 'validation' && /submitted\/crawled\/indexed differ/.test(stage.check)));
   assert.ok(automatic('Fix our technical SEO: canonical tags, sitemap.xml and robots.txt are inconsistent').includes('web_probe'));
 
   const llm = selected('Build an LLM agent with retrieval-augmented generation and prompt injection guardrails');

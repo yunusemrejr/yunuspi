@@ -84,6 +84,60 @@ async function prepared(t, prompt = 'Fix the Node.js parser', options) {
   await f.write('parser.mjs', 'export const value = 1;\n');
   return f;
 }
+
+test('native SEO receipts keep errors, private scope, incomplete and stale evidence unresolved', async t => {
+  const f = fixture(t);
+  await f.emit('session_start'); await f.start('Improve SEO for the public website');
+  await f.call('read', { path: 'index.html' });
+  await f.write('index.html', '<main><h1>Public guide</h1></main>');
+  const report = (findings = [], coverage = { rawHtml: true, complete: true }) => ({ sha256: 'a'.repeat(64), coverage, findings });
+  await f.call('seo_toolkit', { action: 'inspect' }, { details: report([{ severity: 'error', code: 'public-noindex' }]) });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'failed'));
+  await f.call('seo_toolkit', { action: 'inspect' }, { details: report() });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'passed'));
+  assert.ok((await f.status()).pending.some(row => row.id === 'seo-content'));
+  const old = await f.beginCall('seo_toolkit', { action: 'audit' });
+  await f.write('index.html', '<main><h1>Changed guide</h1></main>');
+  await f.finish(old, { details: report() });
+  assert.ok(!(await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'passed'));
+  await f.call('seo_toolkit', { action: 'inspect' }, { details: report([], { rawHtml: true, complete: false }) });
+  assert.ok((await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'blocked'));
+  await f.call('seo_toolkit', { action: 'audit', scope: 'private' }, { details: { scope: 'private', checks: [] } });
+  assert.ok(!(await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'passed'));
+  await f.call('seo_toolkit', { action: 'report' }, { details: report() });
+  assert.ok(!(await f.status()).evidence.some(row => row.stageId === 'seo-raw' && row.status === 'passed'));
+});
+
+test('production SEO credit requires deployment and a fresh declared non-loopback origin audit', async t => {
+  const f = fixture(t);
+  await f.emit('session_start'); await f.start('Deploy the public PHP website through Git SSH');
+  await f.call('read', { path: 'index.html' });
+  await f.write('index.html', '<main><h1>Public guide</h1></main>');
+  const audit = origin => ({ origin, pages: [{ url: `${origin}/`, sha256: 'a'.repeat(64) }], coverage: { rawHtml: true, complete: false, boundedSample: true, robotsKnown: true }, findings: [], failures: [] });
+  const live = async () => (await f.status()).evidence.some(row => row.stageId === 'seo-live' && row.status === 'passed');
+  await f.call('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com' }, { details: audit('https://example.com') });
+  assert.equal(await live(), false, 'a pre-deployment audit cannot certify the deployed revision');
+  const pendingAudit = await f.beginCall('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com' });
+  for (const stageId of ['validation', 'seo-content', 'ui-pixels', 'ui-interaction', 'deploy-preflight', 'deploy-remote']) {
+    const stage = (await f.status()).pending.find(row => row.id === stageId);
+    await f.runTool({ action: 'record', stageId, status: 'passed', evidenceKind: stage.evidenceKinds[0], source: `fixture:${stageId}` });
+  }
+  await f.finish(pendingAudit, { details: audit('https://example.com') });
+  assert.equal(await live(), false, 'an audit begun before deployment remains pre-deployment evidence');
+  for (const origin of ['http://127.0.0.1:8080', 'http://localhost:8080', 'http://[::1]:8080']) {
+    await f.call('seo_toolkit', { action: 'audit', canonicalOrigin: origin }, { details: audit(origin) });
+    assert.equal(await live(), false, origin);
+  }
+  await f.call('seo_toolkit', { action: 'audit' }, { details: audit('https://example.com') });
+  assert.equal(await live(), false, 'the target production origin must be explicitly declared');
+  await f.call('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com' }, { details: audit('https://other.example') });
+  assert.equal(await live(), false, 'redirecting to another origin does not verify the declared production site');
+  await f.call('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com/' }, { details: audit('https://example.com') });
+  assert.equal(await live(), true);
+  await f.write('index.html', '<main><h1>Next public guide</h1></main>');
+  assert.equal(await live(), false, 'a source edit retires production evidence for the old revision');
+});
+
 async function nativeProject(f, input) {
   const call = await f.beginCall('project_tests', input);
   const result = await f.tools.get('project_tests').execute(call.toolCallId, input, undefined, undefined, f.ctx);

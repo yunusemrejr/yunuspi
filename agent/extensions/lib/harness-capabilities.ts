@@ -918,6 +918,16 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/SKILLS-AND-CHECKS.md",
 	}),
 	capability({
+		id: "site-seo",
+		group: "web_media",
+		summary: "Proactive public-site SEO: route purpose and content planning, built HTML inspection, bounded same-origin robots/sitemap/link-graph/canonical/status/hreflang/schema/media/cache audits, and synchronized public sitemap/index, llms.txt, feed and entity-graph generation. Public website/content work stages the tools automatically; private apps remain excluded. Raw, rendered, editorial, factual, freshness and performance evidence remain distinct.",
+		entrypoints: ["seo_toolkit"], tools: ["seo_toolkit", "web_probe", "web_search", "fetch_content", "render_see", "browser_session"],
+		options: [option("action", "Plan, inspect raw built HTML, audit served pages, generate discovery artifacts, or page an existing snapshot.", ["plan", "inspect", "audit", "discovery", "report"]), option("scope", "Public/private/unknown intent; private scope performs no network/generation."), option("pages", "Reviewed canonical route purpose, query intent and real dates."), option("maxPages|offset|view|resultId", "Bounded crawl and paginated evidence; report reuses session snapshots without refetching."), option("path|html|url|canonicalOrigin", "Built HTML source or served public URL and canonical origin.")],
+		related: ["web-and-media", "workflow-orchestration", "source-intelligence"],
+		sourceFiles: ["agent/extensions/pi-web-access/seo-toolkit.ts", "agent/extensions/pi-web-access/seo-document.ts", "agent/extensions/pi-web-access/seo-audit.ts", "agent/extensions/pi-web-access/seo-discovery.ts", "agent/extensions/lib/seo-policy.ts", "agent/extensions/lib/task-pipelines.ts", "agent/extensions/lib/session-hooks.ts"],
+		doc: "agent/public-template/docs/SITE-SEO.md",
+	}),
+	capability({
 		id: "web-and-media",
 		group: "web_media",
 		summary: "Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.",

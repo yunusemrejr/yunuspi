@@ -2313,6 +2313,67 @@
       "commands": []
     },
     {
+      "id": "site-seo",
+      "group": "web_media",
+      "summary": "Proactive public-site SEO: route purpose and content planning, built HTML inspection, bounded same-origin robots/sitemap/link-graph/canonical/status/hreflang/schema/media/cache audits, and synchronized public sitemap/index, llms.txt, feed and entity-graph generation. Public website/content work stages the tools automatically; private apps remain excluded. Raw, rendered, editorial, factual, freshness and performance evidence remain distinct.",
+      "entrypoints": [
+        "seo_toolkit"
+      ],
+      "tools": [
+        "seo_toolkit",
+        "web_probe",
+        "web_search",
+        "fetch_content",
+        "render_see",
+        "browser_session"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "plan",
+            "inspect",
+            "audit",
+            "discovery",
+            "report"
+          ],
+          "summary": "Plan, inspect raw built HTML, audit served pages, generate discovery artifacts, or page an existing snapshot."
+        },
+        {
+          "name": "scope",
+          "summary": "Public/private/unknown intent; private scope performs no network/generation."
+        },
+        {
+          "name": "pages",
+          "summary": "Reviewed canonical route purpose, query intent and real dates."
+        },
+        {
+          "name": "maxPages|offset|view|resultId",
+          "summary": "Bounded crawl and paginated evidence; report reuses session snapshots without refetching."
+        },
+        {
+          "name": "path|html|url|canonicalOrigin",
+          "summary": "Built HTML source or served public URL and canonical origin."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "workflow-orchestration",
+        "source-intelligence"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-web-access/seo-toolkit.ts",
+        "agent/extensions/pi-web-access/seo-document.ts",
+        "agent/extensions/pi-web-access/seo-audit.ts",
+        "agent/extensions/pi-web-access/seo-discovery.ts",
+        "agent/extensions/lib/seo-policy.ts",
+        "agent/extensions/lib/task-pipelines.ts",
+        "agent/extensions/lib/session-hooks.ts"
+      ],
+      "doc": "docs/SITE-SEO.md",
+      "commands": []
+    },
+    {
       "id": "web-and-media",
       "group": "web_media",
       "summary": "Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.",
@@ -3580,7 +3641,7 @@
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3402
+        "line": 3404
       },
       {
         "name": "custom-double",
@@ -3615,7 +3676,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3444
+        "line": 3446
       },
       {
         "name": "graph",
@@ -3760,7 +3821,7 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3492
+        "line": 3494
       },
       {
         "name": "self",
@@ -3875,7 +3936,7 @@
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3141
+        "line": 3143
       }
     ],
     "commandDynamicOwners": [
@@ -4200,7 +4261,7 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 197,
+        "line": 198,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4213,7 +4274,7 @@
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 198,
+        "line": 199,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4560,6 +4621,12 @@
         "kind": "literal"
       },
       {
+        "name": "seo_toolkit",
+        "source": "agent/extensions/pi-web-access/seo-toolkit.ts",
+        "line": 45,
+        "kind": "literal"
+      },
+      {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
         "line": 1944,
@@ -4592,7 +4659,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 196,
+        "line": 197,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4683,7 +4750,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 422,
+        "line": 436,
         "kind": "literal"
       },
       {
@@ -4701,7 +4768,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 430,
+        "line": 431,
         "kind": "literal"
       },
       {
@@ -4809,7 +4876,7 @@
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 195,
+        "line": 196,
         "kind": "configured-default",
         "configurable": true
       },
@@ -5164,6 +5231,12 @@
         "kind": "literal"
       },
       {
+        "name": "seo_toolkit",
+        "source": "agent/extensions/pi-web-access/seo-toolkit.ts",
+        "line": 45,
+        "kind": "literal"
+      },
+      {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
         "line": 1944,
@@ -5214,7 +5287,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 422,
+        "line": 436,
         "kind": "literal"
       },
       {
@@ -5226,7 +5299,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 430,
+        "line": 431,
         "kind": "literal"
       },
       {
@@ -5446,10 +5519,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1666,
-          2254,
-          2408,
-          2807
+          1668,
+          2256,
+          2410,
+          2809
         ],
         "knownNames": [
           "fetch_content",
@@ -5521,11 +5594,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 741,
-      "registrationSites": 90,
+      "sourceFiles": 746,
+      "registrationSites": 91,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 153,
-      "uniqueStableTools": 152,
+      "stableRegistrationRows": 154,
+      "uniqueStableTools": 153,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -6384,6 +6457,10 @@
       },
       {
         "path": "agent/extensions/lib/self-mutation-guard.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/seo-policy.ts",
         "exists": true
       },
       {
@@ -8785,6 +8862,10 @@
       {
         "name": "SESSION-RECOVERY-AUDIT.md",
         "path": "docs/SESSION-RECOVERY-AUDIT.md"
+      },
+      {
+        "name": "SITE-SEO.md",
+        "path": "docs/SITE-SEO.md"
       },
       {
         "name": "SKILLS-AND-CHECKS.md",
