@@ -76,9 +76,9 @@ export function registerSeoToolkit(pi: any) {
             if (read.errors.length || !read.files.length) throw new Error(read.errors[0]?.error ?? 'HTML source unavailable.');
             html = read.files[0].source;
           }
-          result = inspectSeoDocument(html, url, { status: params.status, headers: new Headers(params.headers), policy: params.pages?.find((page: any) => seoUrl(page.url, url) === url) });
+          result = inspectSeoDocument(html, url, { status: params.status, headers: params.headers ? new Headers(params.headers) : undefined, policy: params.pages?.find((page: any) => seoUrl(page.url, url) === url) });
         } else if (params.action === 'discovery') result = buildSeoDiscovery({ ...params, pages: params.pages ?? [] });
-        else if (params.action === 'audit') result = await runWithProxy(params.proxy, () => auditSeoSite({ ...params, signal }));
+        else if (params.action === 'audit') result = await runWithProxy(params.proxy, () => auditSeoSite({ url: params.url, canonicalOrigin: params.canonicalOrigin, pages: params.pages, maxPages: params.maxPages, signal }));
         else throw new Error('Unknown SEO action.');
         if (!resultId) { resultId = randomUUID(); snapshots.set(resultId, { scope: snapshotScope, result }); if (snapshots.size > 4) snapshots.delete(snapshots.keys().next().value!); }
         let visible = params.view === 'detailed' ? result : compactSeoResult(result, params.offset ?? 0);

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.29.2 — 2026-10-07
+
+Built-page SEO reports now keep HTTP status and headers unknown until actual serving evidence is supplied. Private-page source inspection also keeps authentication and access status unresolved. Served-site audits retain their observed responses; local markup never certifies live indexing or access. Registered audit calls also discard transport fixture overrides, keeping private/loopback boundaries under the public tool policy.
+
 ## 0.29.1 — 2026-10-07
 
 **The `/models` browser page selects media models directly.** Images, Video and Audio sections provide searchable public catalogs, capability details and separate speech, music and SFX choices. Session use and verified persistent saves share the runtime SettingsManager without changing LLM roles, the current model or thinking. Saved routes survive offline catalog failures; capability-scoped writes reject foreign origins, stale session revisions and invalid choices. The terminal `/scoped-models` picker retains its keyboard tabs.

@@ -25,7 +25,9 @@ export function inspectSeoDocument(html: string, url: string, options: { status?
     if (!intendedIndex && /missing|no canonical|no og:image|0 h1|robots directive blocks/.test(String(message))) continue;
     add('page-signal', /conflicting|does not parse|outside head|HTTP [45]\d\d/.test(String(message)) ? 'error' : 'warning', String(message));
   }
-  if (!intendedIndex && !signals.noindex && (options.status ?? 200) === 200) add('excluded-indexable', 'error', 'Excluded page has no observed noindex; private data requires access control, not robots.txt.');
+  if (options.status === undefined) add('http-status-unknown', 'review', 'HTML source alone does not establish an HTTP status; inspect the actual serving path.');
+  if (!intendedIndex && !signals.noindex && options.status === 200) add('excluded-indexable', 'error', 'Excluded page has no observed noindex; private data requires access control, not robots.txt.');
+  if (!intendedIndex && !signals.noindex && options.status === undefined) add('excluded-access-unknown', 'review', 'Excluded HTML lacks noindex, but server access and status remain unknown; inspect actual authentication/index policy.');
   if (intendedIndex && signals.noindex) add('public-noindex', 'error', 'Intended public indexable page has an observed noindex directive.');
   const canonical = signals.canonical;
   if (intendedIndex && !canonical) add('canonical-missing', 'error', 'Intended public page has no observed canonical identity.');
@@ -102,13 +104,13 @@ export function inspectSeoDocument(html: string, url: string, options: { status?
   for (const el of document.querySelectorAll('script,style,noscript,template,[hidden],input,textarea,select,[contenteditable]')) el.remove();
   const content = text(document.querySelector('main,article')?.textContent ?? document.body?.textContent, 100000);
   if (intendedIndex && scriptCount && content.length < 160) add('javascript-shell', 'warning', 'Little meaningful initial HTML with scripts present; inspect rendered DOM and SSR/prerender suitability.');
-  if (intendedIndex && /^(?:404|not found|page not found|access denied)\b/i.test(text(document.title))) add('soft-error-cue', 'review', 'Successful status with an error-like title; verify soft-404 behavior and real removed-URL status.');
-  return { url, status: options.status ?? 200, sha256: createHash('sha256').update(html).digest('hex'), canonical, noindex: signals.noindex,
+  if (intendedIndex && /^(?:404|not found|page not found|access denied)\b/i.test(text(document.title))) add('soft-error-cue', 'review', 'Error-like title in HTML; verify soft-404 behavior and the actual removed-URL status.');
+  return { url, status: options.status ?? null, sha256: createHash('sha256').update(html).digest('hex'), canonical, noindex: signals.noindex,
     title: signals.title, description: signals.description, language: language ?? null, h1: signals.h1,
     headings: Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).slice(0, 60).map((heading: any) => ({ level: Number(heading.localName[1]), text: text(heading.textContent, 90) })),
     openGraph: { ...signals.openGraph, url: ogUrl ?? null }, hreflang: signals.hreflang, jsonLd: signals.jsonLd,
     contentLength: content.length, contentHash: createHash('sha256').update(content).digest('hex'), answerPreview: content.slice(0, 400),
     links, linkCount: anchors.length, schemaTypes: [...new Set(schemaNodes.flatMap(types))].slice(0, 30), findings,
-    coverage: { rawHtml: true, complete: !options.truncated, linksComplete: anchors.length <= 400, renderedDom: false, coreWebVitals: false, schemaFacts: false, indexed: 'unverified' },
+    coverage: { rawHtml: true, complete: !options.truncated, httpStatus: options.status !== undefined, headers: options.headers !== undefined, linksComplete: anchors.length <= 400, renderedDom: false, coreWebVitals: false, schemaFacts: false, indexed: 'unverified' },
     cache: { control: headers.get('cache-control'), etag: headers.get('etag'), encoding: headers.get('content-encoding'), vary: headers.get('vary') } };
 }

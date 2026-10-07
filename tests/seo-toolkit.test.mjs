@@ -98,8 +98,9 @@ test('raw document audit detects conflicting identities, schema dates and semant
   for (const code of ['social-identity', 'schema-page-identity', 'date-order', 'schema-stable-id', 'form-label', 'table-semantics', 'critical-image-lazy']) assert.ok(codes.has(code), code);
   assert.ok(!result.findings.some(f => /no alt attribute/.test(f.message)), 'decorative empty alt is valid');
   assert.equal(result.coverage.renderedDom, false); assert.equal(result.coverage.schemaFacts, false); assert.equal(result.coverage.indexed, 'unverified');
+  assert.equal(result.status, null); assert.equal(result.coverage.httpStatus, false); assert.equal(result.coverage.headers, false);
   assert.equal(result.headings[1].level, 2);
-  const privatePage = inspectSeoDocument(page('https://example.com', '/member-only'), 'https://example.com/member-only', { policy: { url: '/member-only', index: false } });
+  const privatePage = inspectSeoDocument(page('https://example.com', '/member-only'), 'https://example.com/member-only', { status: 200, policy: { url: '/member-only', index: false } });
   assert.ok(privatePage.findings.some(f => f.code === 'excluded-indexable'));
 });
 
@@ -169,6 +170,7 @@ test('registered tool checks built workspace HTML, rejects escaped paths, and pr
     const run = params => tool.execute('fixture', params, undefined, undefined, { cwd, sessionManager });
     const inspected = await run({ action: 'inspect', url: 'https://example.com/guide', path: 'page.html' });
     assert.ok(!inspected.isError); assert.equal(inspected.details.sha256.length, 64);
+    assert.equal(inspected.details.status, null); assert.equal(inspected.details.coverage.httpStatus, false); assert.equal(inspected.details.coverage.headers, false);
     fs.writeFileSync(path.join(cwd, 'page.html'), '<html><body>new source</body></html>');
     const cached = await run({ action: 'report', resultId: inspected.details.resultId });
     assert.equal(cached.details.sha256, inspected.details.sha256, 'report preserves old evidence instead of claiming a new read');
@@ -178,6 +180,11 @@ test('registered tool checks built workspace HTML, rejects escaped paths, and pr
     assert.equal((await tool.execute('other', { action: 'report', resultId: inspected.details.resultId }, undefined, undefined, { cwd, sessionManager: { getSessionId: () => 'other-session' } })).isError, true);
     assert.equal((await run({ action: 'inspect', url: 'https://example.com/', path: 'escape.html' })).isError, true);
     assert.equal((await run({ action: 'inspect', url: 'https://example.com/', html: '<html/>', path: 'page.html' })).isError, true);
+    let injectedFetches = 0;
+    const blocked = await run({ action: 'audit', url: 'http://127.0.0.1:8088/', allowLoopback: true, lookup, fetcher: async () => { injectedFetches++; return new Response('fixture override'); } });
+    assert.equal(injectedFetches, 0, 'registered tools cannot activate transport fixture overrides through extra arguments');
+    assert.equal(blocked.details.pages.length, 0);
+    assert.ok(blocked.details.failures.some(row => /loopback|private|blocked/i.test(row.error)));
     const privateRun = await run({ action: 'audit', scope: 'private', url: 'http://127.0.0.1/private' });
     assert.equal(privateRun.details.scope, 'private'); assert.ok(!privateRun.details.pages);
     const privateGeneration = await run({ action: 'discovery', scope: 'private', canonicalOrigin: 'https://example.com', pages: [{ url: '/' }] });

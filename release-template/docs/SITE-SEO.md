@@ -9,7 +9,7 @@ The workflow operates through tools and revision-bound evidence. Skills remain o
 | Action | Input and result |
 | --- | --- |
 | `plan` | Task, scope, canonical origin and optional page inventory. Returns page-policy exclusions, overlapping intents, content planning and fourteen evidence areas. Private scope returns access/index-exclusion guidance and performs no network work or generation. |
-| `inspect` | Intended URL plus exactly one workspace built `.html` path or HTML string; optional actual status/headers/page policy. Checks raw HTML and returns its SHA-256, findings and explicit coverage. Templates are not rendered evidence. Paths use the existing guarded source reader. |
+| `inspect` | Intended URL plus exactly one workspace built `.html` path or HTML string; optional actual status/headers/page policy. Checks raw HTML and returns its SHA-256, findings and explicit coverage. HTTP status and headers stay unknown unless supplied from actual serving evidence. Templates are not rendered evidence. Paths use the existing guarded source reader. |
 | `audit` | Served public entry URL, optional canonical origin and reviewed page inventory. Fetches raw HTML, robots, XML sitemap/index and llms pointers; checks a bounded same-origin link graph and representative pages. |
 | `discovery` | Canonical origin and reviewed canonical public pages. Generates exact sitemap/index, llms.txt, optional RSS and an entity-graph source representation from the same inventory. The native write/project owner publishes these files. Custom robots/access rules are preserved. |
 | `report` | `resultId`, offset and view. Pages one of the last four snapshots in the same session without refetching or claiming new revision evidence. New inspect/audit calls collect fresh evidence. |
