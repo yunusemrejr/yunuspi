@@ -452,14 +452,13 @@ export async function imageRecoverRun(params: { path?: unknown }, cwd: string, s
   if (!stat.isFile() || stat.size > 64 * 1024) throw Error('Image download checkpoint must be a regular file up to 64 KiB');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
   if (saved.version !== 1 || saved.status !== 'awaiting_download' || typeof saved.url !== 'string' || !saved.url || saved.url.length > 8192 || !saved.brief || !ASSET_ROLES.includes(saved.brief.role) || typeof saved.brief.prompt !== 'string' || !saved.params || !['openrouter', 'openai-compatible'].includes(saved.backend?.name)) throw Error('Invalid image download checkpoint');
-  const checkpoint = { dir: path.dirname(file), receipt: file };
-  // Only remove harness-created checkpoint directories after saving pixels.
-  const owned = path.basename(file) === 'download.json' && /^gen-url-[a-zA-Z0-9-]+$/.test(path.basename(checkpoint.dir));
   let bytes: Buffer;
   try { bytes = await imageBytesFromPayload({ data: [{ url: saved.url }] }, signal); }
   catch (error) { throw new Error(`${redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 600)}; image download checkpoint retained at ${relative(root, file)}. Retry recover while the URL remains valid; do not repeat generation.`, { cause: error }); }
   const extra = Object.fromEntries(['editOf', 'references', 'referenceHashes', 'mask', 'maskHash', 'inputFidelity', 'quote'].filter(key => saved.extra?.[key] !== undefined).map(key => [key, saved.extra[key]]));
-  return storeGenerated(bytes, saved.brief, saved.params, saved.backend, 'generated', root, signal, { ...extra, usage: saved.usage ?? null, recovered: true }, owned ? checkpoint : undefined);
+  // Recovery treats the supplied checkpoint as source material. Its path or
+  // folder name cannot authorize deleting caller-owned files/directories.
+  return storeGenerated(bytes, saved.brief, saved.params, saved.backend, 'generated', root, signal, { ...extra, usage: saved.usage ?? null, recovered: true });
 }
 
 async function plannedImageParams(params: any, signal?: AbortSignal) {

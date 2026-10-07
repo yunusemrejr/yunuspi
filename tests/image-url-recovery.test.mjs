@@ -41,7 +41,7 @@ test('paid URL-only image results survive cancellation and failed downloads and 
     const receiptAfter=JSON.parse(await fs.readFile(path.join(path.dirname(path.resolve(cwd,recovered.file)),'receipt.json'),'utf8'));
     assert.equal(receiptAfter.recovered,true);
     if(mode==='edit'){assert.equal(receiptAfter.editOf,'reference.png');assert.deepEqual(receiptAfter.references,['reference.png']);assert.equal(receiptAfter.referenceHashes.length,1);}
-    assert.equal(await fs.readFile(marker,'utf8'),'keep');assert.equal(existsSync(receipt),false);
+    assert.equal(await fs.readFile(marker,'utf8'),'keep');assert.equal(existsSync(receipt),true,'recovery preserves its input checkpoint');
   }
   assert.equal(downloads,2,'cancelled calls did not start a download');
   status=503;const statuses=[];let receipt;
