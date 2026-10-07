@@ -117,3 +117,15 @@ test('desktop pixels cannot substitute for a current responsive visual judgment'
   evidence.matrix('index.html', matrix(), evidence.stamp(), 'new-matrix', true);
   assert.throws(() => evidence.record(record), /current inspected ui_explore/);
 });
+
+test('interaction identity retains query and fragment state without exposing URL parameters', () => {
+  const evidence = createCreativeEvidence(); evidence.observe('index.html', 'h1', 'ui');
+  const source = 'http://localhost/app?screen=customer#contact';
+  evidence.matrix('index.html', matrix(), evidence.stamp(), 'matrix', true);
+  evidence.run(capture({ source, surface: 'index.html', dom: { controls: 2 } }), 'png', true);
+  evidence.record({ runId: 'run-1', source, revision: 'rev-1', verdict: verdict('PASS') });
+  evidence.interaction('http://localhost/app?screen=other', 'keyboard'); evidence.interaction('http://localhost/app?screen=other', 'verify');
+  assert.ok(evidence.gaps().some(line => line.includes('user task')));
+  evidence.interaction(source, 'keyboard'); evidence.interaction(source, 'verify');
+  assert.deepEqual(evidence.gaps(), []);
+});

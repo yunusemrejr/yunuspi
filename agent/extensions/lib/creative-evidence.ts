@@ -17,6 +17,7 @@ export function createCreativeEvidence() {
   let workspace = '', direction = 'null', overflow = false;
   const stamp = () => createHash('sha256').update(JSON.stringify([workspace, direction, [...changes].sort()])).digest('hex').slice(0, 20);
   const current = (entry: { stamp: string } | undefined) => entry?.stamp === stamp();
+  const interactionKey = (source: string) => /^https?:\/\//i.test(source) ? createHash('sha256').update(new URL(source).href).digest('hex') : source;
   const surfaces = (kind: 'ui' | 'svg') => {
     const entries = [...changes].filter(([, row]) => row.kind === kind).map(([file]) => file);
     const sources = entries.filter(file => kind === 'svg' || /\.html?(?:[?#].*)?$/i.test(file));
@@ -42,7 +43,7 @@ export function createCreativeEvidence() {
       const run = [...runs.values()].findLast(row => current(row) && uiSource(row.capture.source, row.capture.dom) && (source === 'application' || (row.capture.surface ?? row.capture.source) === source));
       const target = current(judgment) ? judgment : run ? { source: run.capture.source, controls: run.capture.dom?.controls } : undefined;
       if (target?.controls > 0) {
-        const interaction = interactions.get(target.source);
+        const interaction = interactions.get(interactionKey(target.source));
         if (!current(interaction) || !interaction!.actions.has('keyboard') || !interaction!.actions.has('verify'))
           add(`interaction:${source}`, 'unresolved', `${target.source}: exercise the user task with browser_session, including keyboard/focus and verify the resulting state; screenshots alone are not interaction proof.`);
       }
@@ -86,10 +87,11 @@ export function createCreativeEvidence() {
       const matrix = matching(matrices, source);
       return current(matrix) ? { widths: matrix!.widths, status: matrix!.status, findings: matrix!.findings, imageHash: matrix!.imageHash, file: matrix!.file } : undefined;
     },
-    interaction(source: string, action: string) {
-      const previous = interactions.get(source);
+    interaction(source: string, action: string, identity?: string) {
+      const key = typeof identity === 'string' && /^[a-f0-9]{64}$/.test(identity) ? identity : interactionKey(source);
+      const previous = interactions.get(key);
       const row = current(previous) ? previous! : { stamp: stamp(), actions: new Set<string>() };
-      row.actions.add(action); interactions.set(source, row);
+      row.actions.add(action); interactions.set(key, row);
       while (interactions.size > 24) interactions.delete(interactions.keys().next().value!);
     },
     record(input: { runId?: string; source: string; revision: string; verdict: unknown; dismissals?: Array<{ id: string; reason: string }> }) {

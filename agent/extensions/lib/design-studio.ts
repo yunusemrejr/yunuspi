@@ -117,9 +117,17 @@ export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; m
     outW = Math.min(maxWidth, inW * (options.upscale ?? 1), Math.floor(Math.sqrt(maxPixels * inW / inH)));
   }
   outW = Math.max(1, Math.round(outW));
-  const outH = options.exactHeight ?? Math.max(1, Math.round(inH * outW / inW));
+  let outH = options.exactHeight ?? Math.max(1, Math.round(inH * outW / inW));
+  const pixelLimit = Math.min(DECODE_MAX_PIXELS, options.maxPixels ?? 40000000);
+  // Rounding the aspect-ratio height can put a legitimate bounded resize a
+  // few pixels above its budget (390×844 into 240k, for example). Tighten an
+  // automatic width; explicit caller dimensions still fail rather than drift.
+  if (options.exactWidth === undefined && options.exactHeight === undefined && outW * outH > pixelLimit && Math.floor(pixelLimit / outH) >= 1) {
+    outW = Math.min(outW, Math.floor(pixelLimit / outH));
+    outH = Math.max(1, Math.round(inH * outW / inW));
+  }
   if (options.exactHeight !== undefined && options.exactWidth === undefined) throw Error("exactHeight requires exactWidth");
-  if (!Number.isSafeInteger(outW) || !Number.isSafeInteger(outH) || outW < 1 || outH < 1 || outW * outH > Math.min(DECODE_MAX_PIXELS, options.maxPixels ?? 40000000)) throw Error("Requested decoded dimensions exceed the pixel bound");
+  if (!Number.isSafeInteger(outW) || !Number.isSafeInteger(outH) || outW < 1 || outH < 1 || outW * outH > pixelLimit) throw Error("Requested decoded dimensions exceed the pixel bound");
   const filters = [...(crop ? [`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`] : []), ...(outW !== inW || outH !== inH ? [`scale=${outW}:${outH}:flags=${outW < inW || outH < inH ? "area" : "lanczos"}`] : [])];
   // Crops and source coordinates use stored pixel axes. Auto-rotating from
   // EXIF would invalidate the probed dimensions and region coordinates.

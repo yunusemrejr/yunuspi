@@ -88,6 +88,7 @@
     "cost-evidence.ts",
     "cost-states.ts",
     "creative-direction.ts",
+    "creative-evidence.ts",
     "creative-qa.ts",
     "data-query.ts",
     "deliverable-inspect.ts",

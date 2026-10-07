@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import { inspectPageState } from "./render-page-state.mjs";
 import { inspectNoiseState } from './render-noise-state.mjs';
@@ -658,6 +659,7 @@ export async function runBrowserSession(input, output) {
           ok: true,
           tab: activeTab()?.id,
           url: page ? safeBrowserUrl(page.url()) : undefined,
+          pageIdentity: page ? createHash('sha256').update(new URL(page.url()).href).digest('hex') : undefined,
           diagnostics: { logs: logs?.summary(), network: network?.summary() },
           untrusted: true,
           lease: lease.receipt(),

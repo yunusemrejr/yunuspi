@@ -254,20 +254,33 @@ export async function uiExploreRun(
   const consistent = before === revision && revision !== "missing" && !revision.startsWith("unhashed-");
   const incomplete = !consistent || plan.capped || cells.some(c => c.ok && (!c.dom.available || !c.design || c.dom.truncated || c.design.truncated || c.inspectionIncomplete));
   const defects = cells.filter(c => c.ok && (c.dom.brokenImages || c.dom.missingAlt || c.design?.contrast?.belowThreshold || c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds));
-  const previewCells = cells.filter(c => c.ok && c.state === 'default').slice(0, 4);
+  const previewCells = cells.filter(c => c.ok);
   let preview: string | undefined;
   if (previewCells.length) {
-    const images: Rgba[] = [];
-    for (const cell of previewCells) images.push(await decodeImage(await fs.readFile(path.resolve(cwd, cell.file)), { maxWidth: 480, maxPixels: 6_000_000 }, signal));
+    const rows: Rgba[] = [];
+    for (let start = 0; start < previewCells.length; start += 4) {
+      const images: Rgba[] = [];
+      for (const cell of previewCells.slice(start, start + 4)) images.push(await decodeImage(await fs.readFile(path.resolve(cwd, cell.file)), { maxWidth: 480, maxPixels: 240_000 }, signal));
+      rows.push(composeRow(images, 12));
+    }
+    const width = Math.max(...rows.map(row => row.width)), height = rows.reduce((sum, row) => sum + row.height, 0) + (rows.length - 1) * 12;
+    if (width * height > 8_000_000) throw Error('Responsive contact sheet exceeds its pixel bound; use fewer states and inspect saved captures individually.');
+    const data = new Uint8Array(width * height * 4).fill(245);
+    for (let i = 3; i < data.length; i += 4) data[i] = 255;
+    let y = 0;
+    for (const row of rows) {
+      for (let line = 0; line < row.height; line++) data.set(row.data.subarray(line * row.width * 4, (line + 1) * row.width * 4), ((y + line) * width) * 4);
+      y += row.height + 12;
+    }
     const dest = path.join(dir, 'viewports.png');
-    await fs.writeFile(dest, await encodeImage(composeRow(images, 12), 'png', { maxWidth: 1920 }, signal), { flag: 'wx' });
+    await fs.writeFile(dest, await encodeImage({ width, height, data }, 'png', { maxWidth: 1920 }, signal), { flag: 'wx' });
     preview = relative(cwd, dest);
   }
   const report = {
     source: params.source, revision, consistent, at: new Date().toISOString(),
     status: failed.length || defects.length ? "fail" : incomplete ? "incomplete" : cells.some(c => c.dom.scopeOverflowPx || c.dom.overflowElements || c.dom.unnamedControls || c.dom.smallTargets || c.noise.length || c.errors.length) ? "warn" : "measured",
     coverage: { widths: cells.filter(c => c.ok).map(c => c.width).filter((w, i, all) => all.indexOf(w) === i), visualJudgment: "pending", interaction: "pending" },
-    preview, previewOrder: previewCells.map(c => ({ viewport: c.viewport, width: c.width, file: c.file })),
+    preview, previewOrder: previewCells.map((c, i) => ({ viewport: c.viewport, state: c.state, width: c.width, file: c.file, row: Math.floor(i / 4), column: i % 4 })),
     plan: { cells: plan.cells.length, capped: plan.capped, note: plan.capped ? `Matrix capped at ${MATRIX_MAX_CELLS} captures; run again with narrower viewports/states.` : undefined },
     cells,
     findings: [
@@ -281,7 +294,7 @@ export async function uiExploreRun(
       ...(!consistent ? ["Source changed during capture or its revision is unavailable; re-capture the final revision"] : []),
       ...failed.map((c) => `${c.viewport}/${c.state}: capture failed — ${c.error}`),
     ].slice(0, 24),
-    note: "Viewport/state pixels plus DOM facts, not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or design_audit follow-ups. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
+    note: "The contact sheet includes every successful capture in row/column order; open the saved full-size PNGs for small text or long-page details. Viewport/state pixels plus DOM facts are not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or design_audit follow-ups. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
   };
   await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report, null, 1) + "\n", { flag: "wx" });
   return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report };
@@ -422,7 +435,7 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
     ...(options.responsive ? { responsiveHash: options.responsive.imageHash } : {}),
     sections: sectionsOut,
     blocking: sectionsOut.filter((s) => s.verdict === "FAIL").length,
-    next: "Judge the needsVision sections from the attached pixels (or open the capture), then record the verdict with visual_review action record. Deterministic PASS/FAIL stands unless the pixels prove otherwise; UNKNOWN must never be recorded as PASS without rendered judgment.",
+    next: "Judge the needsVision sections from the attached pixels (or open the capture), then record the verdict with visual_review action record. Deterministic PASS/FAIL stands unless the pixels prove otherwise; UNKNOWN must never be recorded as PASS without rendered judgment. For interactive local HTML, serve it on HTTP and review that URL with entrypoint before browser_session checks.",
   };
   Object.assign(run, { consistent: before === run.revision && run.revision !== "missing" && !run.revision.startsWith("unhashed-") });
   await fs.writeFile(path.join(dir, "review.json"), JSON.stringify(run, null, 1) + "\n", { flag: "wx" });

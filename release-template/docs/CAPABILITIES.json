@@ -4024,7 +4024,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 427,
+        "line": 473,
         "kind": "factory"
       },
       {
@@ -4205,13 +4205,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 530,
+        "line": 576,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 254,
+        "line": 300,
         "kind": "factory"
       },
       {
@@ -4345,7 +4345,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 473,
+        "line": 519,
         "kind": "factory"
       },
       {
@@ -4471,7 +4471,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 367,
+        "line": 413,
         "kind": "factory"
       },
       {
@@ -4730,13 +4730,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 392,
+        "line": 438,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 387,
+        "line": 433,
         "kind": "factory"
       },
       {
@@ -4784,7 +4784,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 342,
+        "line": 388,
         "kind": "factory"
       },
       {
@@ -4856,7 +4856,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 296,
+        "line": 342,
         "kind": "factory"
       },
       {
@@ -5344,7 +5344,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          223
+          267
         ],
         "knownNames": [
           "asset_register",
@@ -5975,6 +5975,10 @@
       },
       {
         "path": "agent/extensions/lib/creative-direction.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/creative-evidence.ts",
         "exists": true
       },
       {

@@ -53,6 +53,8 @@ interface SessionCreative {
   evidence: ReturnType<typeof createCreativeEvidence>;
   followups: number;
   autoSvgStamp?: string;
+  browserOrigins: Map<string, { source: string; stamp: string }>;
+  verifiedHashes: Map<string, string>;
 }
 
 const isChild = () => process.env.PI_SUBAGENT_CHILD === "1";
@@ -91,18 +93,20 @@ export default function artDirection(pi: any) {
   let active: any, activeKey = '', epoch = 0, disposeNotice: (() => void) | undefined;
   const owner = Symbol('creative-session-owner');
   const assertOwner = (ctx: any) => { if (ctx[owner] !== undefined && ctx[owner] !== epoch) throw Error('Creative tool session changed; the late result cannot approve another session.'); };
+  let observationTail = Promise.resolve();
   const anchor = createContextAnchor();
   const calls = new Map<string, { tool: string; input: any; session: any; epoch: number }>();
   const automatic = () => !['off', '0'].includes(process.env.PI_UI_VERIFICATION ?? 'on');
-  const sourceKey = (source: string, cwd: string) => /^https?:\/\//i.test(source) ? source : path.relative(cwd, localRenderPath(cwd, source)).replaceAll('\\', '/');
+  const sourceKey = (source: string, cwd: string) => /^https?:\/\//i.test(source) ? new URL(source).href : path.relative(cwd, localRenderPath(cwd, source).replace(/[?#].*$/, '')).replaceAll('\\', '/');
   const sessionOf = (ctx: any): { sid: string; state: SessionCreative } => {
     assertOwner(ctx);
     const sid = JSON.stringify([path.resolve(ctx.cwd), ctx?.sessionManager?.getSessionId?.() ?? '']);
     let state = sessions.get(sid);
-    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0 }; sessions.set(sid, state); }
+    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0, browserOrigins: new Map(), verifiedHashes: new Map() }; sessions.set(sid, state); }
     while (sessions.size > 8) sessions.delete(sessions.keys().next().value!);
     if (activeKey !== sid || active?.sessionManager !== ctx.sessionManager) {
       disposeNotice?.(); active = ctx; activeKey = sid; epoch++;
+      observationTail = Promise.resolve();
       const own = state;
       disposeNotice = registerContinuationSource({ name: 'creative', session: ctx.sessionManager,
         pending: () => automatic() && own.followups < 2 && own.evidence.gaps().length && !isSessionStopped(ctx) ? ['finish current UI and SVG verification'] : [],
@@ -112,12 +116,12 @@ export default function artDirection(pi: any) {
     }
     return { sid, state };
   };
-  const hashFile = async (file: string, cwd: string) => {
+  const hashFile = async (file: string, cwd: string, maxBytes = 4 * 1024 * 1024) => {
     const root = await fs.realpath(cwd), resolved = await fs.realpath(path.resolve(cwd, file));
     const relative = path.relative(root, resolved);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Error('UI evidence requires an existing file inside the workspace.');
     const stat = await fs.stat(resolved);
-    if (!stat.isFile() || stat.size > 4 * 1024 * 1024) throw Error('UI evidence file exceeds its bounded read.');
+    if (!stat.isFile() || stat.size > maxBytes) throw Error('UI evidence file exceeds its bounded read.');
     const bytes = await fs.readFile(resolved);
     return { file: relative.replaceAll('\\', '/'), hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.subarray(0, 24000).toString('utf8') };
   };
@@ -142,6 +146,7 @@ export default function artDirection(pi: any) {
       try {
         const row = await hashFile(raw, ctx.cwd);
         if (ticket !== epoch) return;
+        if (state.verifiedHashes.get(row.file) === row.hash) continue;
         if (/\.svg$/i.test(row.file) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|skills|references)\//i.test(row.file)) state.evidence.observe(row.file, row.hash, 'svg');
         else if (uiFileCue(row.file, row.content) && (/\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|php|phtml)$/i.test(row.file) || /document\.createElement|\.innerHTML\s*=|React\.createElement/.test(row.content))) state.evidence.observe(row.file, row.hash, 'ui');
       } catch { /* the native mutation owner records unavailable paths */ }
@@ -161,9 +166,19 @@ export default function artDirection(pi: any) {
       } catch { /* gaps stay open; automatic checks never prevent the edit */ }
     }
   };
-  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); if (ctx?.cwd) sessionOf(ctx); });
-  pi.on?.('session_shutdown', () => { epoch++; calls.clear(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
-  pi.on?.('input', (event: any, ctx: any) => { if (event.source !== 'extension' && ctx?.cwd) sessionOf(ctx).state.followups = 0; });
+  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); observationTail = Promise.resolve(); if (ctx?.cwd) sessionOf(ctx); });
+  pi.on?.('session_shutdown', () => { epoch++; calls.clear(); observationTail = Promise.resolve(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
+  pi.on?.('input', (event: any, ctx: any) => {
+    if (event.source === 'extension' || !ctx?.cwd) return;
+    const { state } = sessionOf(ctx);
+    state.followups = 0;
+    if (!state.evidence.gaps().length && !state.blockingRuns.size && !creativeVerificationLines(state.receipts, state.direction).length) {
+      for (const row of state.evidence.changed()) state.verifiedHashes.set(row.file, row.hash);
+      while (state.verifiedHashes.size > 64) state.verifiedHashes.delete(state.verifiedHashes.keys().next().value!);
+      state.evidence = createCreativeEvidence();
+      state.browserOrigins.clear();
+    }
+  });
   pi.on?.('before_agent_start', (event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd) return;
     sessionOf(ctx);
@@ -172,14 +187,20 @@ export default function artDirection(pi: any) {
   });
   pi.on?.('context', async (event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd) return;
-    const ticket = epoch, state = await refresh(ctx), gaps = state.evidence.gaps();
+    const ticket = epoch;
+    await observationTail;
+    if (ticket !== epoch) return;
+    const state = await refresh(ctx), gaps = state.evidence.gaps();
     if (ticket !== epoch) return;
     const messages = event.messages.filter((m: any) => m.customType !== 'creative-verification-context');
     if (!gaps.length) return messages.length !== event.messages.length ? { messages } : undefined;
     return { messages: anchor(messages, { role: 'custom', customType: 'creative-verification-context', content: `[UI verification on the current revision]\n${gaps.join('\n')}\nUse current captures; fix actual defects. Do not repeat unchanged checks or substitute source analysis for pixels. If a required route is unavailable, disclose the specific limit.`, display: false }, state.evidence.stamp()) };
   });
-  pi.on?.('tool_call', (event: any, ctx: any) => {
+  pi.on?.('tool_call', async (event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd || typeof event.toolCallId !== 'string') return;
+    const ticket = epoch;
+    await observationTail;
+    if (ticket !== epoch) return;
     calls.set(event.toolCallId, { tool: event.toolName, input: event.input ?? {}, session: ctx.sessionManager, epoch });
     while (calls.size > 128) calls.delete(calls.keys().next().value!);
   });
@@ -196,23 +217,46 @@ export default function artDirection(pi: any) {
       for (const image of event.details.images ?? []) if (typeof image.hash === 'string' && !image.region) state.evidence.vision(image.hash);
     }
     if (event.toolName === 'read' && ctx.model?.input?.includes('image') && event.content?.some((part: any) => part.type === 'image')) {
-      try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd)).hash); } catch { /* unmatched pixels cannot certify a run */ }
+      try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd, 20 * 1024 * 1024)).hash); } catch { /* unmatched pixels cannot certify a run */ }
     }
     if (event.toolName === 'browser_session' && event.details?.ok === true && typeof event.details.url === 'string') {
       const action = call.input.action === 'press' && ['Tab', 'Shift+Tab', 'Enter', 'Space', 'Escape'].includes(call.input.key) ? 'keyboard' : call.input.action;
-      if (action !== 'verify' || event.details.verification?.matches === true) state.evidence.interaction(event.details.url, action);
+      const handle = JSON.stringify([event.details.session, event.details.tab]);
+      if (typeof event.details.session === 'string' && ['open', 'new_tab', 'navigate', 'reload'].includes(action)) {
+        const source = typeof call.input.url === 'string' ? sourceKey(call.input.url, ctx.cwd) : state.browserOrigins.get(handle)?.source;
+        if (source) state.browserOrigins.set(handle, { source, stamp: state.evidence.stamp() });
+        while (state.browserOrigins.size > 8) state.browserOrigins.delete(state.browserOrigins.keys().next().value!);
+      }
+      if (action !== 'verify' || event.details.verification?.matches === true) {
+        state.evidence.interaction(event.details.url, action, event.details.pageIdentity);
+        const origin = state.browserOrigins.get(handle);
+        if (origin?.stamp === state.evidence.stamp() && typeof event.details.pageIdentity === 'string') state.evidence.interaction(origin.source, action);
+      }
+      if (action === 'close') state.browserOrigins.delete(handle);
     }
   });
-  pi.events?.on?.('harness:mutation-committed', async (event: any) => { if (event.ctx?.sessionManager === active?.sessionManager) await observePaths(event.paths ?? [], event.ctx); });
-  pi.events?.on?.('project-source-observed', async (event: any) => {
-    if (!automatic() || event.ctx?.sessionManager !== active?.sessionManager) return;
-    const state = sessionOf(event.ctx).state;
-    state.evidence.workspace(`${event.revision}:${event.tree ?? 'unknown'}:${event.complete === true}`);
-    await observePaths(event.paths ?? [], event.ctx);
-  });
+  // The shared bus deliberately emits without awaiting listeners. Retain this
+  // owner's bounded observation work so shell/bulk writes cannot race a model
+  // context or the completion gate. Do not change the bus or run another scan.
+  const observeEvent = (event: any, workspace: boolean) => {
+    if (!automatic() || !event.ctx?.cwd || event.ctx.sessionManager !== active?.sessionManager) return;
+    const ticket = epoch, ctx = { ...event.ctx, [owner]: epoch };
+    const job = observationTail.then(async () => {
+      if (ticket !== epoch) return;
+      if (workspace) sessionOf(ctx).state.evidence.workspace(`${event.revision}:${event.tree ?? 'unknown'}:${event.complete === true}`);
+      await observePaths(event.paths ?? [], ctx);
+    });
+    observationTail = job.catch(() => {});
+    return job;
+  };
+  pi.events?.on?.('harness:mutation-committed', (event: any) => observeEvent(event, false));
+  pi.events?.on?.('project-source-observed', (event: any) => observeEvent(event, true));
   pi.on?.('agent_settled', async (_event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd || isSessionStopped(ctx) || resumesElsewhere(ctx.sessionManager) || ctx.hasPendingMessages?.()) return;
-    const ticket = epoch, state = await refresh(ctx), gaps = state.evidence.gaps();
+    const ticket = epoch;
+    await observationTail;
+    if (ticket !== epoch) return;
+    const state = await refresh(ctx), gaps = state.evidence.gaps();
     if (ticket !== epoch || isSessionStopped(ctx)) return;
     if (!gaps.length || state.followups >= 2) return;
     state.followups++;
@@ -228,6 +272,8 @@ export default function artDirection(pi: any) {
         const cwd = ctx?.cwd || process.cwd();
         sessionOf({ ...ctx, cwd });
         const ticket = epoch;
+        await observationTail;
+        assertOwner({ [owner]: ticket });
         const { result, pixels } = await handler(params, { ...ctx, cwd, [owner]: ticket }, bounded);
         bounded.throwIfAborted();
         if (ticket !== epoch) throw Error('Creative tool session changed; the late result cannot approve another session.');
@@ -238,7 +284,7 @@ export default function artDirection(pi: any) {
           if (image) {
             content.push(image);
             const state = sessionOf(ctx).state;
-            const hash = (await hashFile(pixels, cwd)).hash;
+            const hash = (await hashFile(pixels, cwd, 20 * 1024 * 1024)).hash;
             assertOwner({ [owner]: ticket });
             state.evidence.vision(hash);
           }
@@ -320,7 +366,7 @@ export default function artDirection(pi: any) {
         const responsive = state.evidence.responsive(surface ?? (state.evidence.changed().some(row => row.file === sourceKey(params.source, cwd)) ? sourceKey(params.source, cwd) : 'application'));
         const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction, responsive }, cwd, signal, capture);
         await refresh(ctx);
-        state.evidence.run({ ...run, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd)).hash, false, stamp);
+        state.evidence.run({ ...run, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, 20 * 1024 * 1024)).hash, false, stamp);
         return { result: run, pixels: run.file };
       }
       if (params.action === "record") {
@@ -358,7 +404,7 @@ export default function artDirection(pi: any) {
       const stamp = state.evidence.stamp();
       const result = await uiExploreRun(params, ctx.cwd as string, signal, capture);
       await refresh(ctx);
-      const hash = result.preview ? (await hashFile(result.preview, ctx.cwd)).hash : '';
+      const hash = result.preview ? (await hashFile(result.preview, ctx.cwd, 20 * 1024 * 1024)).hash : '';
       state.evidence.matrix(surface, result, stamp, hash);
       return { result, pixels: result.preview };
     }, 600_000);

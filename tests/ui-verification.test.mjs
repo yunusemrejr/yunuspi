@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import registerArt from '../agent/extensions/art-direction.ts';
 import registerRender from '../agent/extensions/render-and-wait.ts';
+import registerDesign from '../agent/extensions/design-studio.ts';
 import { collectVerificationReceipts } from '../agent/extensions/lib/continuation-notice.ts';
 
 const good = `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Customer contact</title><style>
@@ -19,6 +20,7 @@ async function fixture(t, input = ['text']) {
   await fs.writeFile(path.join(cwd, 'index.html'), good);
   const server = createServer(async (request, response) => {
     if (request.url === '/missing.png') { response.writeHead(404); response.end(); return; }
+    if (request.url === '/saved') { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><title>Saved contact</title><p id="result" role="status">Contact saved</p>'); return; }
     response.writeHead(200, { 'content-type': 'text/html' }); response.end(request.url === '/broken' ? bad : await fs.readFile(path.join(cwd, 'index.html')));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -27,14 +29,14 @@ async function fixture(t, input = ['text']) {
     appendEntry: (type, data) => entries.push({ type, data }), sendMessage: async message => messages.push(message),
     events: { on: (name, fn) => { if (!events.has(name)) events.set(name, []); events.get(name).push(fn); }, emit: (name, data) => { for (const fn of events.get(name) ?? []) void fn(data); entries.push({ type: name, data }); } } };
   const ctx = { cwd, model: { input }, sessionManager: { getSessionId: () => 'ui-fixture' }, hasPendingMessages: () => false };
-  registerArt(pi); registerRender(pi);
+  registerArt(pi); registerRender(pi); registerDesign(pi);
   const fire = async (name, event, context = ctx) => { let result; for (const fn of handlers.get(name) ?? []) result = await fn(event, context) ?? result; return result; };
   await fire('session_start', {});
   let id = 0;
   const run = async (name, args) => { const toolCallId = `call-${++id}`; await fire('tool_call', { toolCallId, toolName: name, input: args }); const result = await tools.get(name).execute(toolCallId, args, undefined, undefined, ctx); await fire('tool_result', { toolCallId, toolName: name, input: args, ...result, isError: false }); return result; };
   const change = async (file, content) => { await fs.writeFile(path.join(cwd, file), content); const toolCallId = `write-${++id}`; await fire('tool_call', { toolCallId, toolName: 'write', input: { path: file, content } }); await fire('tool_result', { toolCallId, toolName: 'write', input: { path: file, content }, isError: false, content: [] }); };
   t.after(async () => { await fire('session_shutdown', {}); await new Promise(resolve => server.close(resolve)); if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous; await fs.rm(cwd, { recursive: true, force: true }); });
-  return { cwd, ctx, fire, run, change, messages, entries, tools, url: `http://127.0.0.1:${server.address().port}/` };
+  return { cwd, ctx, fire, run, change, messages, entries, tools, emit: pi.events.emit, url: `http://127.0.0.1:${server.address().port}/` };
 }
 
 test('real responsive captures expose broken native controls, assets, contrast and runtime evidence', { timeout: 150000 }, async t => {
@@ -67,12 +69,23 @@ test('native tools enforce current visual provenance and actual keyboard/state c
   assert.equal(rendered.content.some(c => c.type === 'image'), false);
   const verdict = review.sections.map(section => ({ id: section.id, verdict: 'PASS', evidence: [`${section.id}: inspected the current contact form, responsive captures and keyboard task.`] }));
   await assert.rejects(f.run('visual_review', { action: 'record', source: f.url, runId: review.runId, verdict }), /delivered pixels/);
-  f.ctx.model.input = ['text', 'image'];
-  for (const image of [review.file, matrix.details.preview]) {
-    const bytes = await fs.readFile(path.resolve(f.cwd, image));
-    await f.fire('tool_call', { toolCallId: image, toolName: 'read', input: { path: image } });
-    await f.fire('tool_result', { toolCallId: image, toolName: 'read', isError: false, content: [{ type: 'image', mimeType: 'image/png', data: bytes.toString('base64') }] });
-  }
+  const parentModel = f.ctx.model;
+  const vision = { id: 'fixture-vision', provider: 'fixture', input: ['text', 'image'], maxTokens: 2048 };
+  let visionCalls = 0;
+  f.ctx.modelRegistry = {
+    find: (provider, model) => provider === vision.provider && model === vision.id ? vision : undefined,
+    getApiKeyAndHeaders: async () => ({ apiKey: ['synthetic', 'fixture'].join('-') }),
+    completeSimple: async (model, context) => {
+      visionCalls++; assert.equal(model.id, vision.id);
+      assert.equal(context.messages[0].content.filter(part => part.type === 'image').length, 2);
+      return { content: [{ type: 'text', text: 'The supplied capture and responsive sheet contain the customer form. Main content remains legible in the narrow column; desktop places the form beside the heading. This fixture transport tests provenance, not aesthetic capability.' }], stopReason: 'stop' };
+    },
+  };
+  const observed = await f.run('image_understand', { paths: [review.file, matrix.details.preview], provider: vision.provider, model: vision.id, prompt: 'Inspect the current page and every responsive cell.' });
+  assert.equal(observed.details.images.length, 2); assert.equal(visionCalls, 1);
+  assert.equal(f.ctx.model, parentModel); assert.deepEqual(f.ctx.model.input, ['text']);
+  assert.equal(matrix.details.previewOrder.length, 8, 'all captured states reach the responsive contact sheet');
+  assert.ok(matrix.details.previewOrder.some(cell => cell.state === 'reduced-motion' && cell.row === 1));
   const browser = await f.run('browser_session', { action: 'open', url: f.url });
   const session = browser.details.session;
   try {
@@ -113,4 +126,45 @@ test('an in-flight capture cannot reinstall an old session continuation after a 
   assert.deepEqual(collectVerificationReceipts(10, other.sessionManager), []);
   const status = await f.tools.get('visual_review').execute('new-status', { action: 'status' }, undefined, undefined, other);
   assert.deepEqual(status.details.gaps, []);
+});
+
+test('native shell observations settle before completion even when the event bus does not await listeners', async t => {
+  const f = await fixture(t);
+  await fs.writeFile(path.join(f.cwd, 'shell-page.html'), good);
+  f.emit('project-source-observed', { ctx: f.ctx, revision: 1, tree: 'shell-tree', complete: true, paths: ['shell-page.html'] });
+  await f.fire('agent_settled', {});
+  assert.equal(f.messages.length, 1);
+  assert.ok(f.messages[0].content.includes('shell-page.html'));
+  const gaps = (await f.run('visual_review', { action: 'status' })).details.gaps;
+  assert.ok(gaps.some(line => line.startsWith('shell-page.html')));
+});
+
+test('browser task evidence follows a redirect in its own tab and retains private query-state identity', { timeout: 120000 }, async t => {
+  const f = await fixture(t, ['text', 'image']);
+  await f.change('index.html', good.replace("document.querySelector('#result').textContent='Contact saved'", "location.href='/saved'"));
+  const source = f.url + '?screen=contact#form';
+  await f.run('ui_explore', { source, entrypoint: 'index.html', viewports: ['narrow', 'desktop'] });
+  const review = (await f.run('visual_review', { action: 'run', source, entrypoint: 'index.html' })).details;
+  const verdict = review.sections.map(section => ({ id: section.id, verdict: 'PASS', evidence: [`${section.id}: current capture, responsive sheet and contact-task result inspected in the fixture.`] }));
+  await f.run('visual_review', { action: 'record', source, runId: review.runId, verdict });
+  const browser = (await f.run('browser_session', { action: 'open', url: source })).details;
+  const session = browser.session, tab = browser.tab;
+  try {
+    assert.match(browser.pageIdentity, /^[a-f0-9]{64}$/); assert.equal(browser.url.includes('screen='), false);
+    await f.run('browser_session', { action: 'press', session, key: 'Tab' });
+    await f.run('browser_session', { action: 'new_tab', session, url: f.url + 'saved' });
+    await f.run('browser_session', { action: 'verify', session, selector: '#result', text: 'Contact saved' });
+    assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.some(line => line.includes('user task')), 'another tab cannot approve the contact task');
+    await f.run('browser_session', { action: 'switch_tab', session, tab });
+    await f.run('browser_session', { action: 'fill', session, selector: '#email', text: 'contact@example.com' });
+    await f.run('browser_session', { action: 'press', session, key: 'Enter' });
+    const checked = (await f.run('browser_session', { action: 'verify', session, selector: '#result', text: 'Contact saved' })).details;
+    assert.equal(checked.verification.matches, true); assert.notEqual(checked.pageIdentity, browser.pageIdentity);
+    assert.deepEqual((await f.run('visual_review', { action: 'status' })).details.gaps, []);
+    await f.fire('input', { source: 'user', text: 'Update the README wording.' });
+    f.emit('project-source-observed', { ctx: f.ctx, revision: 2, tree: 'documentation-tree', complete: true, paths: ['index.html'] });
+    assert.deepEqual((await f.run('visual_review', { action: 'status' })).details.gaps, [], 'completed UI work does not reopen for an unrelated request');
+    await f.change('index.html', good);
+    assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.length > 0, 'a real subsequent UI change receives fresh checks');
+  } finally { await f.run('browser_session', { action: 'close', session }); }
 });
