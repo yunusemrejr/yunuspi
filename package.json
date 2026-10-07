@@ -7,6 +7,7 @@
     "node": ">=22.19.0"
   },
   "devDependencies": {
+    "@xmldom/xmldom": "0.9.12",
     "acorn": "8.18.0",
     "htmlparser2": "9.1.0",
     "linkedom": "0.16.11",

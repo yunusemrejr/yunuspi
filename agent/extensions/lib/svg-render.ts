@@ -5,7 +5,9 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { inspectSvg } from "./svg-check.ts";
-import { readSvg } from "./svg-inspect.ts";
+import { readSvg, parseTransform } from "./svg-inspect.ts";
+import { parsePath } from "./svg-analysis.ts";
+import { DOMParser } from "@xmldom/xmldom";
 import { studioFolder } from "./design-studio.ts";
 import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, probe, produced, requireStream, run } from "./media-process.ts";
 import { createRenderQueue } from "./render-queue.ts";
@@ -53,12 +55,22 @@ export function planSvgRender(params: any) {
   return { mode, width, height, fps, duration, times, background, reducedMotion: params.reducedMotion === true, loop: params.loop === true };
 }
 
-async function validateSvgTracks(svg: string, value: unknown, duration: number) {
-  const { parseDocument } = await import("htmlparser2");
-  const document = parseDocument(svg, { xmlMode: true });
+/** Reject XML recovery before a pipeline spends work on narration or music.
+ * The browser repeats this check before painting; parsing never fetches assets. */
+function parseSvgSource(svg: string) {
+  let document: any;
+  try {
+    document = new DOMParser({ onError: (_level, message) => { throw Error(message); } }).parseFromString(svg, "application/xml");
+  } catch (error: any) { throw Error(`SVG source is not well-formed XML: ${String(error.message).slice(0, 500)}`); }
+  if (document.documentElement?.localName !== "svg") throw Error("SVG source needs an SVG root");
+  const elements: any[] = Array.from(document.getElementsByTagName("*"));
+  if (elements.some(element => element.namespaceURI !== "http://www.w3.org/2000/svg" || ["script", "foreignObject"].includes(element.localName) || Array.from(element.attributes).some((attr: any) => /^on/i.test(attr.localName)))) throw Error("SVG export accepts inert SVG namespace elements only");
+  return elements;
+}
+
+async function validateSvgTracks(elements: any[], value: unknown, duration: number) {
   const ids = new Set<string>();
-  const walk = (node: any) => { if (node.attribs?.id) ids.add(node.attribs.id); for (const child of node.children ?? []) walk(child); };
-  walk(document);
+  for (const element of elements) if (element.getAttribute("id")) ids.add(element.getAttribute("id"));
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 64) throw Error("tracks accepts at most 64 entries");
   let total = 0;
@@ -66,6 +78,12 @@ async function validateSvgTracks(svg: string, value: unknown, duration: number) 
   for (const track of value) {
     if (!track || typeof track.target !== "string" || !ids.has(track.target)) throw Error("Each SVG track target must name an existing element id");
     if (!ATTRIBUTES.includes(track.property)) throw Error(`Unsupported SVG track property: ${track.property}`);
+    const target = elements.find(element => element.getAttribute("id") === track.target);
+    if (elements.some(child => {
+      const reference = child.getAttribute("href") || child.getAttribute("xlink:href");
+      const ownsTarget = reference ? reference === `#${track.target}` : child.parentNode === target;
+      return ownsTarget && (["animate", "animateTransform", "set"].includes(child.localName) && child.getAttribute("attributeName") === track.property || child.localName === "animateMotion" && track.property === "transform");
+    })) throw Error(`SVG track owner collision ${track.target}:${track.property}; use one animation owner per property`);
     const owner = `${track.target}:${track.property}`;
     if (owners.has(owner)) throw Error(`Duplicate SVG track owner ${owner}`);
     owners.add(owner);
@@ -90,6 +108,8 @@ async function validateSvgTracks(svg: string, value: unknown, duration: number) 
       if (track.property === "viewBox" && (nums.length !== 4 || nums[2] <= 0 || nums[3] <= 0 || /[^\d\s.,eE+\-]/.test(text))) throw Error("viewBox keys need x y positive-width positive-height");
       if (topology !== undefined && topology !== shape) throw Error("SVG path/transform key values must keep identical topology; use separate tracks for other changes");
       if (track.property === "d" && /[aA]/.test(text)) throw Error("Arc path morphing needs flag-aware geometry; convert arcs to cubics before animating d");
+      if (track.property === "d" && (!/^[mM]/.test(text.trim()) || !parsePath(text)?.length)) throw Error("SVG path keys must contain valid path commands starting with moveto");
+      if (track.property === "transform" && !parseTransform(text).valid) throw Error("SVG transform keys must contain valid affine transform functions and argument counts");
       if (track.property === "opacity" && (nums.length !== 1 || nums[0] < 0 || nums[0] > 1)) throw Error("Opacity keys must be 0..1");
       topology = shape;
     }
@@ -101,8 +121,10 @@ function svgRuntime(tracks: any[], sample: typeof sampleSvgValue) {
   const root = document.querySelector("svg")!;
   const collisions = tracks.filter(track => {
     const target = document.getElementById(track.target)!;
-    return target.getAnimations().some(animation => animation.effect?.getKeyframes().some(frame => track.property in frame)) || [...target.children].some(child => ["animate", "animateTransform", "set"].includes(child.localName) && child.getAttribute("attributeName") === track.property);
+    const cssProperty = track.property.replace(/-([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+    return target.getAnimations().some(animation => animation.effect?.getKeyframes().some(frame => track.property in frame || cssProperty in frame));
   }).map(track => `${track.target}:${track.property}`);
+  if (collisions.length) throw Error(`SVG track owner collision ${collisions.join(", ")}; use one animation owner per property`);
   return (time: number) => {
     for (const svg of document.querySelectorAll("svg")) { svg.pauseAnimations(); svg.setCurrentTime(time); }
     const animations = document.getAnimations();
@@ -120,6 +142,23 @@ function svgRuntime(tracks: any[], sample: typeof sampleSvgValue) {
   };
 }
 
+/** Retain distinct findings and their first/last observation, rather than
+ * repeating the same clipped shape hundreds of times in the tool response. */
+export function svgDiagnosticCollector(limit = 24) {
+  const groups = new Map<string, any>();
+  let omittedObservations = 0;
+  return {
+    add(frame: number, diagnostic: any) {
+      const key = JSON.stringify([diagnostic.cssAnimations, diagnostic.smilAnimations, diagnostic.programmaticTracks, diagnostic.ownerCollisions, diagnostic.clipped]);
+      const group = groups.get(key);
+      if (group) { group.observations++; group.lastFrame = frame; group.lastTime = diagnostic.time; return; }
+      if (groups.size >= limit) { omittedObservations++; return; }
+      groups.set(key, { frame, ...diagnostic, observations: 1, lastFrame: frame, lastTime: diagnostic.time });
+    },
+    result() { return { diagnostics: [...groups.values()], diagnosticsTruncated: omittedObservations > 0, omittedDiagnosticObservations: omittedObservations }; },
+  };
+}
+
 export async function prepareSvgSource(params: any, cwd: string) {
   const plan = planSvgRender(params);
   if ((params.path === undefined) === (params.svg === undefined)) throw Error("Provide path or raw svg, exactly one");
@@ -128,7 +167,7 @@ export async function prepareSvgSource(params: any, cwd: string) {
   const source = await inspectSvg(xml);
   const forbidden = source.findings.filter(f => f.severity === "error" || ["active-content", "event-handler", "external-reference"].includes(f.key));
   if (forbidden.length) throw Error(`SVG render preflight: ${forbidden.map(f => `${f.key}: ${f.message}`).join("; ").slice(0, 1500)}`);
-  const tracks = await validateSvgTracks(xml, params.tracks, plan.duration);
+  const tracks = await validateSvgTracks(parseSvgSource(xml), params.tracks, plan.duration);
   return { xml, tracks, plan };
 }
 
@@ -166,12 +205,12 @@ export async function svgRender(params: any, cwd: string, signal?: AbortSignal) 
     await fs.writeFile(path.join(dir, "source.svg"), xml, { flag: "wx" });
     await fs.writeFile(path.join(dir, "tracks.json"), JSON.stringify(tracks, null, 2) + "\n", { flag: "wx" });
     const frameDir = path.join(dir, "frames"); await fs.mkdir(frameDir);
-    const diagnostics: any[] = [], frames: any[] = [];
+    const diagnostics = svgDiagnosticCollector(), frames: any[] = [];
     let totalBytes = 0;
     for (let i = 0; i < plan.times.length; i++) {
       bounded.throwIfAborted();
       const diagnostic = await page.evaluate((time: number) => (window as any).__svgRender(time), plan.times[i]);
-      if (i === 0 || diagnostic.clipped.length || diagnostic.ownerCollisions.length) diagnostics.push({ frame: i, ...diagnostic });
+      diagnostics.add(i, diagnostic);
       const output = path.join(frameDir, `${String(i).padStart(6, "0")}.png`);
       const bytes = await page.screenshot({ type: "png", omitBackground: plan.background === "transparent", timeout: 20000 });
       totalBytes += bytes.length;
@@ -199,7 +238,7 @@ export async function svgRender(params: any, cwd: string, signal?: AbortSignal) 
     const sheet = path.join(dir, "contact-sheet.png");
     await contactSheet(samples.map(f => ({ path: f.path, label: `${f.time.toFixed(3)}s` })), sheet, bounded);
     await fs.rm(frameDir, { recursive: true, force: true });
-    const result = { mode: plan.mode, sourceHash: createHash("sha256").update(xml).digest("hex"), source: path.join(dir, "source.svg"), tracks: path.join(dir, "tracks.json"), width: plan.width, height: plan.height, fps: plan.fps, frames: frames.length, duration: plan.mode === "video" ? frames.length / plan.fps : 0, samples, contactSheet: await produced(sheet), ...(video ? { video, output, decodeVerified: true, motion } : {}), diagnostics: diagnostics.slice(0, 24), diagnosticsTruncated: diagnostics.length > 24, reducedMotion: plan.reducedMotion, timing: "CSS/WAAPI local time, SVG SMIL root time and data-keyframe attributes are sampled at the same absolute seconds. Video samples i/fps and excludes the duration endpoint.", note: "Clipping uses approximate screen bounds without stroke/filter expansion; intentional off-canvas motion may be valid. Programmatic tracks are explicit export data and do not automatically implement reduced-motion alternatives. Inspect pixels and playback before artistic approval." };
+    const result = { mode: plan.mode, sourceHash: createHash("sha256").update(xml).digest("hex"), source: path.join(dir, "source.svg"), tracks: path.join(dir, "tracks.json"), width: plan.width, height: plan.height, fps: plan.fps, frames: frames.length, duration: plan.mode === "video" ? frames.length / plan.fps : 0, samples, contactSheet: await produced(sheet), ...(video ? { video, output, decodeVerified: true, motion } : {}), ...diagnostics.result(), reducedMotion: plan.reducedMotion, timing: "CSS/WAAPI local time, SVG SMIL root time and data-keyframe attributes are sampled at the same absolute seconds. Video samples i/fps and excludes the duration endpoint.", note: "Clipping uses approximate screen bounds without stroke/filter expansion; intentional off-canvas motion may be valid. Diagnostics group equal observations with first/last frame and occurrence counts. Programmatic tracks are explicit export data and do not automatically implement reduced-motion alternatives. Inspect pixels and playback before artistic approval." };
     await fs.writeFile(path.join(dir, "render.json"), JSON.stringify(result, null, 2) + "\n", { flag: "wx" });
     bounded.throwIfAborted();
     return result;

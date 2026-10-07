@@ -20,6 +20,8 @@ Edits accept one `path` or up to five `references`. The compatible backend also 
 
 GPT Image requests omit the unsupported `response_format` field and reject `seed`. `inputFidelity` is exposed only where accepted by the selected GPT Image family; unsupported fidelity is rejected. PNG and WebP can preserve transparency; JPEG cannot. Compression requires JPEG or WebP. Receipts preserve hashes, reference/mask provenance, requested encoding, actual decoded dimensions and sampled alpha. Generation, decoding and visual approval are separate facts.
 
+Once a provider returns complete image bytes, the tool saves them before local decoding or registration. Cancellation after the response, corrupt image data, and registry failures keep the bytes and a `recovery.json` receipt with the observed decode/registration state and reported usage. Reuse a decoded retained image and repair its bookkeeping; inspect decode-unverified bytes before requesting another paid take. Invalid mask types never silently become an unmasked edit.
+
 The request formats follow the official [OpenAI generation](https://developers.openai.com/api/reference/resources/images/methods/generate), [OpenAI editing](https://developers.openai.com/api/reference/resources/images/methods/edit) and [OpenRouter image generation](https://openrouter.ai/docs/guides/overview/multimodal/image-generation) documentation.
 
 ## Understanding and converting images
@@ -54,11 +56,13 @@ The renderer seeks CSS/WAAPI animations and SVG SMIL roots to absolute time befo
 {"path":"art.svg","mode":"video","duration":3,"fps":24,"width":640,"height":640,"tracks":[{"target":"orbit","property":"transform","keys":[{"time":0,"value":"rotate(0 320 320)","ease":"smooth"},{"time":3,"value":"rotate(360 320 320)"}]}]}
 ```
 
-Track targets must exist. Duplicate owners, unordered times, changed numeric topology, invalid scalar dimensions and unsupported attributes are rejected. Colors interpolate RGB; numeric path/transform tokens interpolate with linear, smooth or hold easing. Convert arc paths to cubics before morphing `d`; arc flags require another interpolation contract. CSS or SMIL ownership collisions and approximate screen clipping appear in diagnostics.
+Track targets must exist. Duplicate owners, unordered times, changed numeric topology, invalid scalar dimensions and unsupported attributes are rejected. Path keys need valid commands beginning with moveto; transform keys need valid affine functions and argument counts. Colors interpolate RGB; numeric path/transform tokens interpolate with linear, smooth or hold easing. Convert arc paths to cubics before morphing `d`; arc flags require another interpolation contract. SMIL/data ownership collisions reject during preflight; CSS/data collisions reject before capture. Use one animation owner per property.
 
-The export document rejects scripts, event handlers, external references and foreign namespaces. Network and downloads are blocked, CSP forbids page scripts, and the only browser code executed is harness-owned clock logic. Arbitrary JavaScript/RAF and scroll timelines require an independently seekable page workflow. `motion_inspect` now also seeks discoverable SVG SMIL roots in page captures, and reports their sampling scope separately from CSS descriptors.
+The export preflight parses XML without accepting recovery and rejects scripts, event handlers, external references and foreign namespaces before a pipeline starts narration or music synthesis. Escape text such as `R&amp;D` correctly and declare the SVG namespace. The browser repeats XML/namespace checks before painting. Network and downloads are blocked, CSP forbids page scripts, and the only browser code executed is harness-owned clock logic. Arbitrary JavaScript/RAF and scroll timelines require an independently seekable page workflow. `motion_inspect` now also seeks discoverable SVG SMIL roots in page captures, and reports their sampling scope separately from CSS descriptors.
 
 Video uses frame times `i/fps` and excludes the duration endpoint. Frames mode allows up to 12 timestamps and transparent PNG output. H.264 requires an opaque background and even dimensions. Exports are bounded to 30 seconds, 900 frames, 600 million pixel-frames and 512 MiB of frame data, with cancellation and queue limits. Receipts include source/tracks, contact sheets, timestamps, decoded video, cadence and optional loop diagnostics. `reducedMotion:true` selects the CSS preference; authored SMIL/data tracks still need a deliberate stable alternative.
+
+SVG diagnostics group identical observations with their first/last frame and occurrence count. This keeps repeated clipping compact while retaining late distinct findings; an omitted-observation count makes overflow explicit. Bounds are approximate and exclude stroke/filter expansion, so inspect the actual pixels at intended sizes.
 
 ## Narration, music and 2D/3D delivery
 
@@ -69,6 +73,8 @@ Video uses frame times `i/fps` and excludes the duration endpoint. Frames mode a
 ```
 
 `media_pipeline` can render a Three.js scene JSON or an SVG, synthesize narration, compose an editable music score, duck music under voice, encode video and measure the delivered AAC audio in one call. Narration overruns reject before video rendering, rather than silently truncating speech.
+
+Three.js pipelines use a bounded, validated scene snapshot for both the audio clock and video rendering. Source edits during synthesis do not change that take. The `visual` receipt identifies the original source, editable snapshot and content hash, and retains available contact-sheet, diagnostic and motion evidence instead of discarding the renderer's review context. Media subprocesses finish closing before worker slots or failed output folders are released.
 
 For longer projects, use the [video studio](VIDEO-STUDIO.md): per-scene narration checkpoints, resumable frame-contiguous render parts, timed browser recordings, surface detail for Blender shots and `media_sync` for text/voice/cut comparisons. `narration_align` locates a supplied transcript in existing speech; `audio_generate` adds directed instrumental music and sound effects through ElevenLabs. Generated timing and duration are evidence to inspect, and alignment is not independent transcription.
 

@@ -275,7 +275,7 @@ const multiplyMatrix = (m: Matrix, n: Matrix): Matrix => ({
   e: m.a * n.e + m.c * n.f + m.e, f: m.b * n.e + m.d * n.f + m.f,
 });
 
-const parseTransform = (value: string): { matrix: Matrix; trivial: boolean; valid: boolean } => {
+export const parseTransform = (value: string): { matrix: Matrix; trivial: boolean; valid: boolean } => {
   let matrix = { ...IDENTITY };
   let trivial = true, valid = true, end = 0;
   const re = /([A-Za-z]+)\s*\(([^)]*)\)/g;

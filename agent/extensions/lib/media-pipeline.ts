@@ -3,10 +3,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import { validateScore, composeMusic } from './music-score.ts';
 import { audioMix, videoCompose, prepareAudioMix, prepareVideoCompose, cachedProbe, duckingOptions, loopBudget } from './media-timeline.ts';
 import { measureAudio } from './audio-studio.ts';
-import { sceneRender } from './scene-studio.ts';
+import { sceneRender, readSceneJson } from './scene-studio.ts';
 import { prepareSvgSource, svgRender } from './svg-render.ts';
 import { planNarration, narrationSpeak } from './video-studio.ts';
 import { inputFile, number, outputFolder } from './media-process.ts';
@@ -58,13 +59,15 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     if (!/\.sf[23]$/i.test(bank) || (await fs.stat(bank)).size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
   }
   signal?.throwIfAborted();
-  let animation: any, svgSource: any;
+  let animation: any, svgSource: any, animationFile: string | undefined, animationSnapshot: string | undefined;
   if (params.animation !== undefined) {
     const file = await inputFile(params.animation, cwd);
+    animationFile = file;
     if (plan.svg) { svgSource = await prepareSvgSource({ path: file, mode: 'video', tracks: params.animationTracks, width: params.width, height: params.height, fps: params.fps, duration: params.duration }, cwd); animation = svgSource.plan; }
     else {
-      if ((await fs.stat(file)).size > SCENE_LIMITS.jsonBytes) throw Error('Scene JSON exceeds 256 KiB');
-      animation = validateScene({ ...JSON.parse(await fs.readFile(file, 'utf8')), ...(params.width === undefined ? {} : { width: params.width }), ...(params.height === undefined ? {} : { height: params.height }), ...(params.fps === undefined ? {} : { fps: params.fps }) });
+      animation = validateScene({ ...await readSceneJson(file), ...(params.width === undefined ? {} : { width: params.width }), ...(params.height === undefined ? {} : { height: params.height }), ...(params.fps === undefined ? {} : { fps: params.fps }) });
+      animationSnapshot = JSON.stringify(animation);
+      if (Buffer.byteLength(animationSnapshot) > SCENE_LIMITS.jsonBytes) throw Error('Validated scene snapshot exceeds 256 KiB');
     }
   }
   // Resolve every source and edit option before synthesizing or allocating
@@ -93,6 +96,10 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     return result;
   };
   try {
+    // Render exactly the scene that established the audio clock. A concurrent
+    // edit while narration/music runs must not change geometry or duration.
+    const sceneSnapshot = animationSnapshot === undefined ? undefined : path.join(dir, 'animation.scene.json');
+    if (sceneSnapshot) await fs.writeFile(sceneSnapshot, animationSnapshot!, { flag: 'wx', mode: 0o600 });
     const tracks = [...(params.tracks ?? [])];
     let score: any, narration: any;
     if (params.narration) {
@@ -114,7 +121,7 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
       let mixed: any;
       if (tracks.length) mixed = await stage('mix_audio', () => audioMix({ ...mixOptions, duration }, cwd, signal, inspect));
       if (plan.mode === 'animation') {
-        rendered = await stage('render_animation', () => plan.svg ? svgRender({ svg: svgSource.xml, tracks: svgSource.tracks, mode: 'video', duration: animation.duration, audio: mixed?.artifact.path, width: animation.width, height: animation.height, fps: animation.fps, outputDir: dir }, cwd, signal) : sceneRender({ path: params.animation, mode: 'video', audio: mixed?.artifact.path, width: params.width, height: params.height, fps: params.fps, outputDir: dir }, cwd, signal));
+        rendered = await stage('render_animation', () => plan.svg ? svgRender({ svg: svgSource.xml, tracks: svgSource.tracks, mode: 'video', duration: animation.duration, audio: mixed?.artifact.path, width: animation.width, height: animation.height, fps: animation.fps, outputDir: dir }, cwd, signal) : sceneRender({ path: sceneSnapshot, mode: 'video', audio: mixed?.artifact.path, outputDir: dir }, cwd, signal));
         artifact = rendered.video;
         rendered.ducking = mixed?.ducking ?? false;
         mastering = mixed?.loudness;
@@ -126,7 +133,15 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
     const measurements = hasAudio ? await stage('measure_delivery_audio', async () => plan.mode !== 'animation' && rendered.loudness ? rendered.loudness.after : (await measureAudio(artifact.path, params.targetLufs ?? -16, signal)).measurement) : undefined;
     if (mastering) mastering = { ...mastering, after: measurements, note: 'WAV normalized before animation rendering; after values measure the final AAC encoding' };
     else mastering = rendered.loudness;
-    const result = { pipeline: plan.mode, artifact, duration: rendered.duration, decodeVerified: rendered.decodeVerified === true, ducking: rendered.ducking ?? false, ...(narration ? { narration } : {}), ...(score ? { score: { files: score.files, seconds: score.seconds, bpm: score.bpm } } : {}), ...(measurements ? { audio: measurements } : {}), ...(mastering ? { mastering } : {}), ...(rendered.samples ? { samples: rendered.samples, poster: rendered.poster } : {}), automatedChecks: { decode: rendered.decodeVerified === true, loudnessWithinTarget: params.targetLufs === undefined || !measurements ? null : measurements.integratedLufs !== null && Math.abs(measurements.integratedLufs - params.targetLufs) <= 1, truePeakWithinCeiling: !measurements || measurements.truePeakDbtp === null ? null : measurements.truePeakDbtp <= -1 }, stages, elapsedMs: Math.round(performance.now() - started), review: 'Inspect representative frames and motion for video; listen to the final mix. Decode and loudness measurements establish technical output, not artistic quality.' };
+    const visual = plan.mode === 'animation' ? {
+      source: animationFile, snapshot: sceneSnapshot ?? rendered.source,
+      sourceHash: createHash('sha256').update(animationSnapshot ?? svgSource.xml).digest('hex'),
+      ...(rendered.contactSheet ? { contactSheet: rendered.contactSheet } : {}),
+      ...(rendered.tracks ? { tracks: rendered.tracks } : {}),
+      ...(rendered.diagnostics ? { diagnostics: rendered.diagnostics, diagnosticsTruncated: rendered.diagnosticsTruncated, omittedDiagnosticObservations: rendered.omittedDiagnosticObservations } : {}),
+      ...(rendered.motion ? { motion: rendered.motion } : {}),
+    } : undefined;
+    const result = { pipeline: plan.mode, artifact, duration: rendered.duration, decodeVerified: rendered.decodeVerified === true, ducking: rendered.ducking ?? false, ...(narration ? { narration } : {}), ...(score ? { score: { files: score.files, seconds: score.seconds, bpm: score.bpm } } : {}), ...(measurements ? { audio: measurements } : {}), ...(mastering ? { mastering } : {}), ...(visual ? { visual } : {}), ...(rendered.samples ? { samples: rendered.samples, poster: rendered.poster } : {}), automatedChecks: { decode: rendered.decodeVerified === true, loudnessWithinTarget: params.targetLufs === undefined || !measurements ? null : measurements.integratedLufs !== null && Math.abs(measurements.integratedLufs - params.targetLufs) <= 1, truePeakWithinCeiling: !measurements || measurements.truePeakDbtp === null ? null : measurements.truePeakDbtp <= -1 }, stages, elapsedMs: Math.round(performance.now() - started), review: 'Inspect representative frames and motion for video; listen to the final mix. Decode and loudness measurements establish technical output, not artistic quality.' };
     await fs.writeFile(path.join(dir, 'pipeline.json'), JSON.stringify(result, null, 2) + '\n', { flag: 'wx' });
     signal?.throwIfAborted();
     return result;

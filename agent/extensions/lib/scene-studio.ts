@@ -61,7 +61,7 @@ export async function sceneCreate(params: any, cwd: string, signal?: AbortSignal
 }
 
 const acquireRender = createRenderQueue(4);
-async function readSceneJson(file: string) {
+export async function readSceneJson(file: string) {
   const handle = await fs.open(file, 'r');
   try {
     if (!(await handle.stat()).isFile()) throw Error('Scene input must be a regular file');

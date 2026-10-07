@@ -3,6 +3,7 @@
   "private": true,
   "description": "Vendored runtime dependency root for the locally forked extensions (extensions/*-local-fork). No pi extension packages are installed here anymore — forking complete 2026-08-31. Versions are EXACT pins of the audited working tree: nothing in this file can pull updates; npm install only reconciles to these pins if a human runs it.",
   "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
     "@ast-grep/cli": "0.45.2",
     "@ast-grep/napi": "0.45.2",
     "@mozilla/readability": "0.6.0",

@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 
-const exec = promisify(execFile);
 // Container-only demuxers: no playlists, concat scripts or remote protocols.
 export const INPUT_FLAGS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg,aac,aiff,flv,mpeg,mpegts"];
 export const FFMPEG_FLAGS = ["-hide_banner", "-nostdin", "-n", "-threads", "2", "-filter_threads", "1", "-filter_complex_threads", "1"];
@@ -46,7 +44,15 @@ export async function outputFolder(value: unknown, cwd: string, createParent = f
 export async function run(binary: string, args: string[], signal?: AbortSignal, timeout = 120000) {
   signal?.throwIfAborted();
   try {
-    const result = await exec(binary, args, { encoding: "utf8", signal, timeout, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024, env: { ...process.env, AV_LOG_FORCE_NOCOLOR: "1" } });
+    // execFile's abort callback can run before close. Wait for the child and
+    // its stdio to close before callers remove output or release worker slots.
+    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      let failure: any, stdout = '', stderr = '';
+      const child = execFile(binary, args, { encoding: "utf8", signal, timeout, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024, env: { ...process.env, AV_LOG_FORCE_NOCOLOR: "1" } }, (error, out, err) => {
+        failure = error; stdout = out; stderr = err;
+      });
+      child.once('close', () => failure ? reject(failure) : resolve({ stdout, stderr }));
+    });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error: any) {
     if (signal?.aborted) throw new Error("Media operation cancelled");

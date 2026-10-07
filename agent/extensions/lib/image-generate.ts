@@ -288,7 +288,8 @@ async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefine
   try {
     payload = await request(active);
     const bytes = await imageBytesFromPayload(payload, active);
-    active.throwIfAborted();
+    // Complete bytes are a paid result. Storage owns recovery if cancellation
+    // arrives now; discarding this response would encourage another charge.
     const usage = imageUsage(payload.usage);
     runtime.onUsage?.(usage, "completed");
     return { bytes, usage: usage ?? null, rawUsage: payload.usage ?? null };
@@ -351,8 +352,8 @@ async function openRouterImage(brief: GenerationBrief, params: any, backend: Bac
     runtime.onUsage?.(undefined, bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
     throw error;
   }
-  runtime.onUsage?.(result.usage, bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : result.stopReason === "aborted" ? "cancelled" : result.stopReason === "stop" ? "completed" : "failed");
-  bounded.throwIfAborted();
+  runtime.onUsage?.(result.usage, result.stopReason === "stop" ? "completed" : bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : result.stopReason === "aborted" ? "cancelled" : "failed");
+  if (result.stopReason !== "stop") bounded.throwIfAborted();
   if (result.stopReason !== "stop") throw new Error(`Image backend failed: ${redactSecrets(result.errorMessage ?? result.stopReason).slice(0, 400)}`);
   const image = result.output.find(part => part.type === "image");
   if (!image || image.type !== "image") throw new Error("Image backend returned no image");
@@ -366,21 +367,22 @@ async function storeGenerated(
 ) {
   const format = sniffImage(bytes);
   if (!format) throw new Error("Backend bytes are not a recognized image (PNG, JPEG, WebP, GIF, BMP, TIFF, QOI, PNM)");
-  // Headers and dimensions alone are not proof of a usable picture.
-  const decoded = await decodeImage(bytes, { maxWidth: 512, maxPixels: 512 * 512 }, signal);
-  signal?.throwIfAborted();
   const dir = await qaFolder(undefined, cwd, "assets", "gen");
   const file = path.join(dir, `image.${format === "jpeg" ? "jpg" : format}`);
-  let retained = false;
+  let retained = false, decoded: Awaited<ReturnType<typeof decodeImage>> | undefined, registration = 'unverified';
   try {
-    await fs.writeFile(file, bytes, { flag: "wx" });
+    await fs.writeFile(file, bytes, { flag: "wx", mode: 0o600 });
     retained = true;
+    // Save first, then finish bounded local decoding even when the request was
+    // cancelled after its response. No new provider call is allowed here.
+    decoded = await decodeImage(bytes, { maxWidth: 512, maxPixels: 512 * 512 }, AbortSignal.timeout(80_000));
+    const alphaObserved = decoded.data.some((v, i) => i % 4 === 3 && v < 255);
     const receipt = {
       backend: backend.name, apiUrl: backend.apiUrl, model: backend.model,
       size: backend.name === "openrouter" && params.transport === "images" && params.size === undefined ? null : brief.size, role: brief.role,
       aspectRatio: params.aspectRatio ?? params.aspect ?? null, resolution: params.resolution ?? null,
       seed: params.seed ?? null, transparent: params.transparent === true,
-      transparencyRequested: params.transparent ?? null, alphaObservedInPreview: decoded.data.some((v, i) => i % 4 === 3 && v < 255),
+      transparencyRequested: params.transparent ?? null, alphaObservedInPreview: alphaObserved,
       requestedFormat: params.format ?? null, compression: params.compression ?? null,
       transport: backend.name === "openrouter" ? params.transport ?? "chat" : "images",
       ...(typeof params.quality === "string" ? { quality: params.quality.slice(0, 32) } : {}),
@@ -390,9 +392,11 @@ async function storeGenerated(
     await fs.writeFile(path.join(dir, "receipt.json"), JSON.stringify({ ...receipt, prompt: brief.prompt, negative: brief.negative }, null, 1) + "\n", { flag: "wx" });
     signal?.throwIfAborted();
     const { record } = await registerAsset({ path: relative(cwd, file), role: brief.role, kind, prompt: brief.prompt, description: `Generated ${brief.role}: ${brief.prompt.slice(0, 200)}` }, cwd);
+    registration = 'verified';
+    signal?.throwIfAborted();
     return {
       backend: backend.name, model: backend.model, usage: extra.usage ?? null, quote: extra.quote ?? null,
-      alphaObserved: decoded.data.some((v, i) => i % 4 === 3 && v < 255),
+      alphaObserved,
       file: relative(cwd, file), dir: relative(cwd, dir), bytes: bytes.length, format, decodeVerified: true,
       asset: { id: record.id, role: record.role, width: decoded.sourceWidth, height: decoded.sourceHeight },
       brief: { role: brief.role, size: brief.size, negative: brief.negative, constraints: brief.constraints },
@@ -403,11 +407,12 @@ async function storeGenerated(
     // Generation has already happened. A bookkeeping/cancellation failure
     // cannot justify deleting usable pixels or issuing another paid request.
     const recovery = { status: 'retained', file: relative(cwd, file), dir: relative(cwd, dir), bytes: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex'), decodeVerified: true, role: brief.role,
-      registration: 'unverified', error: redactSecrets(String(error?.message ?? error)).slice(0, 600),
-      next: 'Reuse this local image. Repair the reported receipt/registry gap, use asset_register on the retained file, then review its pixels; do not repeat generation.' };
+      sha256: createHash('sha256').update(bytes).digest('hex'), decodeVerified: !!decoded, role: brief.role,
+      registration, usage: extra.usage ?? null, model: backend.model,
+      error: redactSecrets(String(error?.message ?? error)).slice(0, 600),
+      next: decoded ? 'Reuse this local image. Repair the reported receipt/registry gap, use asset_register on the retained file if registration is unverified, then review its pixels; do not repeat generation.' : 'Provider bytes are retained but decoding is unverified. Inspect the bytes and decoder error before explicitly requesting another generation.' };
     await fs.writeFile(path.join(dir, 'recovery.json'), JSON.stringify(recovery, null, 2) + '\n', { flag: 'wx', mode: 0o600 }).catch(() => {});
-    throw new Error(`${recovery.error}\nDecoded image retained at ${recovery.file}; recovery folder: ${recovery.dir}. ${recovery.next}`, { cause: error });
+    throw new Error(`${recovery.error}\n${decoded ? 'Decoded image' : 'Generated bytes'} retained at ${recovery.file}; recovery folder: ${recovery.dir}. ${recovery.next}`, { cause: error });
   }
 }
 
@@ -442,7 +447,6 @@ export async function imageGenerateRun(
   if (backend.name === "openrouter") routerImageOptions(body, params, true);
   if (planned.quote) body.provider = { only: [planned.quote.provider], allow_fallbacks: false };
   const { bytes, usage } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, backend.name === "openrouter" ? "/images" : "/images/generations", body, active, 240_000));
-  signal?.throwIfAborted();
   return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { usage, quote: planned.quote });
 }
 
@@ -485,7 +489,8 @@ export async function imageEditRun(
     imageFiles.push(file); references.push(bytes);
   }
   const imageFile = imageFiles[0];
-  const maskFile = typeof params.mask === "string" && params.mask ? await resolveIn(params.mask) : undefined;
+  if (params.mask !== undefined && (typeof params.mask !== "string" || !params.mask.trim())) throw Error("mask must be a nonempty local PNG path");
+  const maskFile = params.mask === undefined ? undefined : await resolveIn(params.mask as string);
   let maskBytes: Buffer | undefined;
   if (maskFile) {
     maskBytes = await fs.readFile(maskFile);
@@ -527,6 +532,5 @@ export async function imageEditRun(
     if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
     try { return JSON.parse(text); } catch { throw new Error("Image backend returned a non-JSON payload"); }
   });
-  signal?.throwIfAborted();
   return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { ...extra, usage });
 }
