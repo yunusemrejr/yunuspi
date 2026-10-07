@@ -71,3 +71,20 @@ test('reviewer packets read the session ledger, or a labeled packet-local extrac
   const tight = packetRequirements('1. Fix the login redirect loop on staging\n2. Add a print stylesheet for invoices\n3. Rename the export button\nMake it premium.', [], 200);
   assert.match(tight, /omitted for the packet bound/);
 });
+
+test('the latest empty ledger retires earlier requirements without falling back to prompt mining', () => {
+  const entries = [
+    { type: 'custom', customType: 'requirement-ledger-v1', data: { items: [{ id: 'R1', text: 'Already completed' }], next: 1 } },
+    { type: 'custom', customType: 'requirement-ledger-v1', data: { items: [], subjective: [], unbounded: false, next: 1 } },
+  ];
+  assert.deepEqual(readSessionLedger(entries), { items: [], subjective: [], unbounded: false, next: 1 });
+  assert.equal(packetRequirements('1. Already completed\n2. Previously verified', entries), '');
+});
+
+test('a malformed nonempty ledger cannot masquerade as a retirement', () => {
+  const entries = [
+    { type: 'custom', customType: 'requirement-ledger-v1', data: { items: [{ id: 'R1', text: 'Keep the scope' }], next: 1 } },
+    { type: 'custom', customType: 'requirement-ledger-v1', data: { items: [null, { id: 'bogus', text: 'broken' }], next: 2 } },
+  ];
+  assert.equal(readSessionLedger(entries).items[0].id, 'R1');
+});

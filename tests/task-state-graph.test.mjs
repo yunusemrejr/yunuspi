@@ -354,7 +354,7 @@ test('a passing check is recognised across package managers, but only in command
     'mvn test', './gradlew test', 'make test', 'just test', 'composer test', 'phpunit',
     'python -m pytest', 'python3 -m pytest', 'python3.11 -m unittest',
     'cd /tmp && tsc --noEmit', 'cd /tmp && npm test', 'NODE_ENV=test pnpm test', 'CI=1 yarn lint',
-    './node_modules/.bin/vitest run', 'npm test | tee out.log', 'make test; echo done',
+    './node_modules/.bin/vitest run', 'cd "dir && name" && node --test "test && name.mjs"',
   ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
 
   // A runner merely named in a path or a message is not a check: the unanchored
@@ -363,6 +363,9 @@ test('a passing check is recognised across package managers, but only in command
     'ls -la', 'git status', 'git commit -m "fix tsc types"', 'cat tsc-config.json',
     'grep tsc README.md', 'echo "run npm test"', 'cat package.json', 'git log --grep test',
     'node script.js', 'deno run main.ts', 'npm install', 'npm ci', 'rm -rf node_modules',
+    'echo "hello; npm test"', "echo 'hello && npm test'", 'echo hello\\; npm test',
+    'npm test || true', 'npm test; echo done', 'npm test | tail -n 5', 'npm test | tee out.log',
+    'npm test --help', 'node --test --listTests', 'cargo test --no-run', 'npm "test ; echo done"',
   ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
 });
 

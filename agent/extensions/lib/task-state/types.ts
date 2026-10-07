@@ -84,6 +84,9 @@ export interface TaskRefs {
 	file?: string;
 	fileHash?: string;
 	fileVersion?: number;
+	/** Source versions captured by an observed check or an explicit assessment. */
+	fileVersions?: Record<string, number>;
+	fileHashes?: Record<string, string>;
 	gitCommit?: string;
 	toolCallId?: string;
 	testCommand?: string;
@@ -132,6 +135,7 @@ export interface TaskFileVersion {
 
 /** Append-only event envelope. The materialized graph derives from these. */
 export type TaskEventKind =
+	| "assessment"
 	| "task-opened"
 	| "task-followup"
 	| "entity-upsert"
@@ -205,9 +209,11 @@ export interface TaskRotatedEvent extends TaskEventBase {
 	priorTaskId: string;
 	priorLabel: string;
 	reason: string;
+	/** Session ledger IDs belonging to earlier tasks, never adopted anew. */
+	priorRequirementIds?: string[];
 }
 
-export type TaskEvent =
+export type TaskMutationEvent =
 	| TaskOpenedEvent
 	| TaskFollowupEvent
 	| EntityUpsertEvent
@@ -216,6 +222,15 @@ export type TaskEvent =
 	| FileVersionEvent
 	| EvidenceStaleEvent
 	| TaskRotatedEvent;
+
+/** An accountable assessment is one JSONL record, so interruption cannot
+ * persist half of its links and status transitions. No nested batches. */
+export interface TaskAssessmentEvent extends TaskEventBase {
+	kind: "assessment";
+	events: TaskMutationEvent[];
+}
+
+export type TaskEvent = TaskMutationEvent | TaskAssessmentEvent;
 
 export interface TaskGraphHealth {
 	degraded: boolean;
@@ -244,7 +259,7 @@ export interface TaskGraph {
 	/** Bounded set of applied event ids (idempotency + replay safety). */
 	eventIds: string[];
 	health: TaskGraphHealth;
-	rotations: Array<{ priorTaskId: string; priorLabel: string; reason: string; ts: number }>;
+	rotations: Array<{ priorTaskId: string; priorLabel: string; reason: string; ts: number; priorRequirementIds?: string[] }>;
 }
 
 export const TASK_ENTITY_KINDS: readonly TaskEntityKind[] = [

@@ -13,12 +13,33 @@ import type {
 	TaskGraph,
 	TaskLink,
 } from "./types.ts";
+import { TASK_ENTITY_KINDS, TASK_PROVENANCE, TASK_STATUSES } from "./types.ts";
 
 /** Bounds keep one session's graph small and projections cheap. */
 export const TASK_GRAPH_MAX_ENTITIES = 2000;
 export const TASK_GRAPH_MAX_LINKS = 5000;
 export const TASK_GRAPH_MAX_EVENT_IDS = 20000;
 export const TASK_GRAPH_MAX_ERRORS = 32;
+
+// Membership is a hot path for every producer and replay. The serialized
+// array remains the bounded receipt; the index never survives its graph.
+const eventIndexes = new WeakMap<TaskGraph, { ids: string[]; size: number; seen: Set<string> }>();
+
+function eventIndex(graph: TaskGraph): Set<string> {
+	let index = eventIndexes.get(graph);
+	if (!index || index.ids !== graph.eventIds || index.size !== graph.eventIds.length) {
+		index = { ids: graph.eventIds, size: graph.eventIds.length, seen: new Set(graph.eventIds) };
+		eventIndexes.set(graph, index);
+	}
+	return index.seen;
+}
+
+/** Only live evidence can support a verified claim. Child reports stay advice. */
+export function currentEvidence(entity: TaskEntity | undefined): boolean {
+	return !!entity && entity.kind === "evidence" && !entity.stale
+		&& ["test-result", "source-inspection", "render-inspection", "tool-output"].includes(entity.provenance)
+		&& ["active", "implemented", "partially-verified", "verified"].includes(entity.status);
+}
 
 const TERMINAL: Record<TaskEntityStatus, boolean> = {
 	superseded: true,
@@ -145,8 +166,7 @@ function cascadeFileVersion(graph: TaskGraph, file: string, version: number, ts:
 	const staleEvidence = new Set<string>();
 	for (const entity of Object.values(graph.entities)) {
 		if (entity.kind !== "evidence" || entity.stale) continue;
-		if (entity.refs?.file !== file) continue;
-		const bound = entity.refs?.fileVersion;
+		const bound = entity.refs?.file === file ? entity.refs.fileVersion : entity.refs?.fileVersions?.[file];
 		if (typeof bound === "number" && bound < version) {
 			entity.stale = true;
 			entity.status = "invalidated";
@@ -166,7 +186,7 @@ function cascadeFileVersion(graph: TaskGraph, file: string, version: number, ts:
 		if (!evidence.length) continue;
 		const current = evidence.filter((id) => {
 			const ev = graph.entities[id];
-			return ev && ev.status !== "invalidated" && !ev.stale;
+			return currentEvidence(ev);
 		});
 		if (current.length < evidence.length && !current.length) {
 			entity.status = "partially-verified";
@@ -234,17 +254,46 @@ export function applyEvent(graph: TaskGraph, event: TaskEvent): boolean {
 		noteError(graph, "event without eventId rejected");
 		return false;
 	}
-	if (graph.eventIds.includes(event.eventId)) {
+	// A foreign event must never enter a session's graph, even via a reused
+	// service or a copied event log.
+	if (event.taskId !== graph.taskId || event.sessionId !== graph.sessionId) {
+		noteWarning(graph, "event identity mismatch");
+		return false;
+	}
+	if (event.kind === "assessment" && (!Array.isArray(event.events) || !event.events.length || event.events.length > 32
+		|| event.events.some(item => !item || item.taskId !== event.taskId || item.sessionId !== event.sessionId
+			|| typeof item.eventId !== "string" || !item.eventId || !Number.isFinite(item.ts)
+			|| (item.kind === "entity-status" ? typeof item.entityId !== "string" || !TASK_STATUSES.includes(item.status)
+				: item.kind === "entity-upsert" ? !item.entity || typeof item.entity.id !== "string" || typeof item.entity.title !== "string"
+					|| !TASK_ENTITY_KINDS.includes(item.entity.kind) || !TASK_STATUSES.includes(item.entity.status) || !TASK_PROVENANCE.includes(item.entity.provenance)
+				: item.kind === "link" ? typeof item.from !== "string" || typeof item.to !== "string" || typeof item.link !== "string"
+				: true)))) {
+		noteError(graph, "invalid assessment batch rejected");
+		return false;
+	}
+	const seen = eventIndex(graph);
+	if (seen.has(event.eventId)) {
 		graph.health.duplicateEvents += 1;
 		return false;
 	}
 	graph.health.eventCount += 1;
 	graph.seq += 1;
 	graph.updatedAt = Math.max(graph.updatedAt, event.ts);
-	if (graph.eventIds.length < TASK_GRAPH_MAX_EVENT_IDS) graph.eventIds.push(event.eventId);
+	if (graph.eventIds.length >= TASK_GRAPH_MAX_EVENT_IDS) {
+		// Retain recent ids instead of permanently freezing the first 20k.
+		// Half-window eviction keeps array maintenance amortized and bounded.
+		for (const id of graph.eventIds.splice(0, Math.ceil(TASK_GRAPH_MAX_EVENT_IDS / 2))) seen.delete(id);
+	}
+	graph.eventIds.push(event.eventId);
+	seen.add(event.eventId);
+	eventIndexes.get(graph)!.size = graph.eventIds.length;
 	graph.health.appliedCount += 1;
 	try {
 		switch (event.kind) {
+			case "assessment": {
+				for (const item of event.events) applyEvent(graph, item);
+				break;
+			}
 			case "task-opened": {
 				graph.label = event.label.slice(0, 200);
 				graph.objective = event.objective.slice(0, 2000);
@@ -329,6 +378,7 @@ export function applyEvent(graph: TaskGraph, event: TaskEvent): boolean {
 					priorLabel: event.priorLabel.slice(0, 200),
 					reason: event.reason.slice(0, 280),
 					ts: event.ts,
+					...(event.priorRequirementIds ? { priorRequirementIds: event.priorRequirementIds.filter(id => /^R\d{1,3}$/.test(id)).slice(0, 1000) } : {}),
 				});
 				break;
 			}
@@ -378,7 +428,7 @@ export function requirementState(graph: TaskGraph, requirementId: string): {
 		.map((id) => graph.entities[id])
 		.filter((entry): entry is TaskEntity => !!entry)
 		.map((entry) => ({ id: entry.id, status: entry.status, stale: entry.stale === true, title: entry.title }));
-	const current = evidence.filter((entry) => entry.status !== "invalidated" && !entry.stale);
+	const current = evidence.filter((entry) => currentEvidence(graph.entities[entry.id]));
 	const implementedBy = graph.links.some((link) => link.to === requirementId && (link.kind === "implemented-by" || link.kind === "satisfies"));
 	return {
 		found: true,

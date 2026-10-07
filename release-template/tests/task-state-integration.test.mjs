@@ -184,7 +184,7 @@ test('main agent tool consumes the live graph: input, edits, tests, todos flow i
   assert.ok(h.commands.has('task-state'), '/task-state command is registered');
   await h.emit('session_start');
   // Ledger render already on the branch so the graph adopts ledger R-ids.
-  h.branch.push({ type: 'message', message: { role: 'custom', customType: 'requirement-ledger', content: 'Requirement ledger:\nR1: Add a search box\nR2: Keep existing text unchanged' } });
+  h.branch.push({ type: 'custom', customType: 'requirement-ledger-v1', data: { items: [{ id: 'R1', text: 'Add a search box' }, { id: 'R2', text: 'Keep existing text unchanged' }], next: 2 } });
   await h.emit('input', { source: 'interactive', text: 'Add a search box. Keep existing text unchanged.' });
   await h.emit('tool_result', { toolName: 'edit', toolCallId: 'call-1', input: { path: 'src/search.ts' }, content: [{ type: 'text', text: 'edited' }], isError: false });
   await h.emit('tool_result', { toolName: 'bash', toolCallId: 'call-2', input: { command: 'npm test' }, content: [{ type: 'text', text: 'all 12 tests passed' }], isError: false });
@@ -195,7 +195,8 @@ test('main agent tool consumes the live graph: input, edits, tests, todos flow i
   assert.match(status, /search box/i);
   assert.match(status, /R1/);
   const blockers = await run({ action: 'blockers' });
-  assert.match(blockers, /R1|R2/, 'unverified requirements surface as blockers');
+  assert.match(blockers, /Completion blockers: none/, 'unmapped requirements stay advisory');
+  assert.match(await run({ action: 'unresolved' }), /R1|R2/, 'unresolved requirements stay visible');
   const failures = await run({ action: 'failures' });
   assert.match(failures, /none recorded/, 'no failures were observed');
 });
@@ -225,9 +226,14 @@ test('completion gate refuses on graph blockers and allows verified completion',
   const service = getTaskStateService('sid-gate');
   service.userInput('Add a search box.');
   service.syncRequirements([{ id: 'R1', text: 'Add a search box' }]);
+  const mapped = { sessionId: service.graph().sessionId, taskId: service.taskId, ts: Date.now() };
+  service.apply([
+    ingest.upsertEvent(mapped, { id: 'mapped-work', kind: 'work', status: 'implemented', title: 'Search box implementation', provenance: 'main-agent' }),
+    ingest.linkEvent(mapped, 'mapped-work', `req-${service.taskId}-R1`, 'implemented-by'),
+  ]);
   const refused = new Set();
   const lines = [...service.completionBlockers().map((b) => `task state: ${b}`)];
-  assert.ok(lines.length > 0, 'unverified requirement produces a blocker line');
+  assert.ok(lines.length > 0, 'mapped implementation without verification produces a blocker line');
   const first = completionGate('plan-complete', lines, refused);
   assert.equal(first.block, true);
   refused.add(first.key);
@@ -398,7 +404,7 @@ test('a background suite records its outcome only when the terminal receipt arri
   // The launch says nothing about the result, so nothing may be claimed from it.
   await h.emit('tool_result', { toolName: 'bg_run', toolCallId: 'bg-call', input: { command: 'pnpm test' }, content: [{ type: 'text', text: 'task id bg_1' }], isError: false });
   const run = async (params) => (await h.tools.get('task_state').execute('x', params, undefined, undefined, h.ctx)).details.text;
-  assert.match(await run({ action: 'evidence' }), /none recorded|nothing recorded/i, 'a launch alone is not a passing check');
+  assert.match(await run({ action: 'evidence' }), /No retained records/i, 'a launch alone is not a passing check');
 
   // A red receipt records a failure, still not a pass.
   await h.emit('message_end', { message: { role: 'custom', customType: 'background-task-notification', details: { id: 'bg_1', command: 'pnpm test', status: 'failed', exitCode: 1 } } });

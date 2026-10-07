@@ -75,11 +75,15 @@ export interface CompletionView {
 	complete: boolean;
 }
 
-export function projectCompletion(graph: TaskGraph): CompletionView {
+export function projectCompletion(graph: TaskGraph, assessedOnly = false): CompletionView {
 	const rows = requirementRows(graph);
 	const blockers: string[] = [];
 	for (const row of rows) {
 		if (row.status === "superseded" || row.status === "invalidated") continue;
+		// Unmapped requirements remain visible to the main stream and reviewers.
+		// They cannot impose a hard verification contract that has no producer
+		// (for example a creative or research result with its own quality gate).
+		if (assessedOnly && !row.implemented && !row.evidence && !["failed", "blocked", "verified", "partially-verified"].includes(row.status)) continue;
 		if (!row.implemented) blockers.push(`${row.id} not implemented (${row.status})`);
 		else if (!row.verified) {
 			blockers.push(row.staleEvidence > 0
@@ -127,7 +131,7 @@ function section(title: string, lines: string[], empty: string): string[] {
 
 /** Main-agent projection: current objective, work, gaps, blockers. */
 export function projectMain(graph: TaskGraph, budgets: ProjectionBudgets = DEFAULT_BUDGETS): string {
-	const completion = projectCompletion(graph);
+	const completion = projectCompletion(graph, true);
 	const work = ofKind(graph, "work").sort(byUpdatedDesc);
 	const active = work.filter((entry) => entry.status === "active" || entry.status === "proposed");
 	const decisions = ofKind(graph, "decision").sort(byUpdatedDesc).slice(0, budgets.maxItems);

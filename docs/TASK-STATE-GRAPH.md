@@ -87,7 +87,7 @@ bounded projections (per-consumer budgets)
 
 | Consumer | What it reads | How |
 |---|---|---|
-| Main Agent | `task_state` tool: status, requirements, unresolved, evidence, entity, blockers, failures, decisions, diagnostics | read-only tool |
+| Main Agent | `task_state`: status, requirements, unresolved, evidence, work, entity, blockers, failures, decisions, diagnostics, assess | bounded reads; explicit evidence assessment |
 | Operator | `/task-state` summary + entity drill-down | TUI command |
 | Observer | reviewer projection: requirements × verification, decisions, assumptions, failures, child findings, claims, contradictions, stale evidence | `task-state` packet row (1500 chars) |
 | Watchmaker | progress projection: active work, attempts, repeat families, blocked deps, completed investigations | `task-progress` packet row (time-kind budget) |
@@ -102,6 +102,54 @@ file edits/writes (file versions), test-like/failed commands, subagent
 dispatch + results, quality-review findings, project-test assessments, and
 completion-gate evaluations. Routine passing non-check commands and read-only
 traffic are deliberately not indexed (telemetry noise).
+
+### Accountable requirement assessment
+
+The graph reads the checkpoint owner's persisted `requirement-ledger-v1`
+receipt after input hooks finish. It never parses the model-only ledger
+rendering into another requirement list. A valid empty receipt retires the
+reviewer packet's old requirements. Prompt analysis must match the current
+request ID; a delayed result from an earlier request cannot rotate the task.
+Rotation archives earlier ledger IDs so cumulative session receipts cannot
+reintroduce another task's scope, including after recovery.
+
+Successful tool execution records an observation, not requirement coverage.
+The main stream can inspect `work` and `evidence` for retained entity IDs,
+then use `assess` with one current R#, 1–8 completed implementation IDs,
+1–8 native evidence IDs and a concrete coverage reason. Unknown IDs, child
+advice, failed or stale checks, retired requirements and incomplete bindings
+are rejected. The main agent retains responsibility for whether the check
+actually covers the required behavior. A passing build does not establish
+visual quality, playback correctness or artistic approval.
+
+For tracked file changes, checks bind source versions and hashes observed
+before execution and still matching at the result boundary. Assessment
+rechecks the current source; changed files cannot inherit old checks. Source
+reads are bounded to 32 regular files of at most 1 MiB each inside the
+checkout, with symlink containment and replacement checks. Unknown or
+oversized sources cannot support this assessment path. Source bindings do
+not prove check coverage or exclude a transient external change and revert
+between observations; there is no continuous external-edit watcher.
+
+Unmapped requirements remain visible as unresolved guidance. The additional
+completion receipt applies only to mapped implementation, linked evidence
+or explicit failed/blocked requirement state. Creative and research tasks
+without a task-graph evidence producer retain their existing quality gates
+and can close a todo without being forced into irrelevant code checks.
+
+An assessment's links, status transitions and main judgment share one JSONL
+record. Failed append rolls back the in-memory assessment. Repeating an
+unchanged ledger or accepted assessment adds no duplicate log records.
+Background checks remain active until a completed receipt supplies exit
+zero; their launch bindings survive recovery. Child async launches stay
+active until retained native results arrive. Partial failure, cancellation
+and timeout stay distinguishable in their retained summaries; status queries
+and other management actions create no child work.
+
+Check detection uses the existing literal shell tokenizer. A runner mentioned
+inside a quoted argument, a help/list/dry-run command, or a pipeline/`;`/`||`
+whose final exit could mask the check cannot mint passing evidence. These
+commands may still execute normally; only the evidence claim is conservative.
 
 ## Task lifecycle
 
@@ -123,6 +171,11 @@ traffic are deliberately not indexed (telemetry noise).
 - Snapshots are an optimization. A corrupt snapshot is quarantined aside and
   the view rebuilds deterministically from the event log; skipped log lines
   are counted, never fatal.
+- Snapshots carry a byte cursor and digest of the accepted log prefix. Resume
+  replays only its tail; a replaced or truncated prefix rebuilds the graph.
+  Legacy snapshots with an available log rebuild once. Session identity and
+  materialized shape are validated before loading. An interrupted final log
+  line is preserved for diagnostics and separated from the next append.
 - Total storage failure degrades to memory-only operation with visible
   `degraded` health. Every API is fail-open: graph trouble never breaks user
   input, tool calls, reviews, dispatch, compaction, or shutdown.
@@ -133,6 +186,9 @@ traffic are deliberately not indexed (telemetry noise).
 
 - 2000 entities / 5000 links / 20000 tracked event ids per task (soft caps
   with health warnings, not crashes).
+- Event membership uses an in-memory index and retains a recent bounded
+  window after the ID cap. Snapshot cursors preserve replay correctness
+  beyond that window; full rebuilds also deduplicate the complete log.
 - Projections carry hard char budgets (default 2000; observer 1500;
   watchmaker 420; child slice 1500) with item caps. The whole graph is never
   injected into context.
@@ -161,6 +217,8 @@ requirement coverage.
   per-consumer renderers + diagnostics.
 - `agent/extensions/lib/task-state/store.ts` — JSONL + snapshot persistence,
   quarantine/rebuild, resume listing.
+- `agent/extensions/lib/task-state/file-evidence.ts` — bounded, contained,
+  stable source hashing without retaining source text.
 - `agent/extensions/lib/task-state/service.ts` — session-scoped service,
   typed API (`record`, `link`, `updateStatus`, `invalidate`, `supersede`,
   `query`, `project`, …), lifecycle, fail-open wrappers.
@@ -171,6 +229,12 @@ requirement coverage.
 - `tests/task-state-integration.test.mjs` — live consumption by main agent,
   Observer, Watchmaker, subagents, reviews, completion gate, metrics (15
   tests).
+- `tests/task-state-recovery.test.mjs` — long-log replay, interrupted writes,
+  foreign/malformed snapshots, replaced logs, native session scopes and
+  invalid verification evidence.
+- `tests/task-state-assessment.test.mjs` — actual owned runtime/ledger hook
+  ordering and write/bash tools, accountable assessment and recovery, stale
+  source, partial append, task isolation, async children and background checks.
 
 ## Known limitations
 
@@ -183,3 +247,26 @@ requirement coverage.
   provenance) but no automatic cross-session linking is performed.
 - Durable promotion of task outcomes into project intelligence/memory is a
   future step; the graph holds live task truth only.
+
+## Verification of the recovery and evidence pass
+
+Targeted command (after building the owned core):
+
+```sh
+PI_LOCAL_LM=off node --test tests/task-state-{graph,integration,recovery,assessment}.test.mjs tests/requirement-ledger.test.mjs
+```
+
+The native test loads the actual checkpoint ledger and task-state factories
+into the owned ExtensionRunner/SessionManager in reversed input-hook order.
+It also executes owned write/bash tools against a temporary module and a
+real Node assertion, then checks assessment, duplicate delivery and recovery.
+Other fixtures deterministically inject interruption, source replacement,
+delayed analysis, asynchronous terminal failures and corrupt persistence.
+No provider call or private installed state is needed.
+
+A controlled local reducer comparison with baseline `960c9586`, Node
+v24.21.0, 20,005 unique follow-up events and three alternating trials observed
+median folding time of 1,342.39 ms before versus 6.66 ms after the membership
+index. Every trial retained sequence 20,005. This synthetic hot-path result
+measures event membership, not overall harness latency, model quality,
+token use or billing. Real workloads have other costs.

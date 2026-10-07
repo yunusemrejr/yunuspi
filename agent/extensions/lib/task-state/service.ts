@@ -17,7 +17,8 @@ import {
 	TASK_STATE_SNAPSHOT_EVERY,
 	type TaskStatePaths,
 } from "./store.ts";
-import { applyEvent, emptyGraph } from "./reducer.ts";
+import { applyEvent, currentEvidence, emptyGraph, requirementState } from "./reducer.ts";
+import { MAX_EVIDENCE_FILES } from "./file-evidence.ts";
 import {
 	classifyUserInput,
 	linkEvent,
@@ -25,6 +26,7 @@ import {
 	statusEvent,
 	taskIdFor,
 	upsertEvent,
+	stableId,
 	type EntityInput,
 	type FollowupMode,
 	type IngestContext,
@@ -40,7 +42,7 @@ import {
 	renderSummary,
 	type GraphDiagnostics,
 } from "./projections.ts";
-import type { TaskEntity, TaskEntityStatus, TaskEvent, TaskGraph, TaskLinkKind } from "./types.ts";
+import type { TaskEntity, TaskEntityStatus, TaskEvent, TaskMutationEvent, TaskGraph, TaskLinkKind } from "./types.ts";
 
 export const TASK_STATE_SERVICE = Symbol.for("yunus-pi.task-state.v1");
 
@@ -111,18 +113,27 @@ export class TaskStateService {
 		return { sessionId: this.sessionId, taskId: this.state.taskId, ts };
 	}
 
-	private persist(events: readonly TaskEvent[]): void {
-		if (this.disabled || !events.length) return;
+	private persist(events: readonly TaskEvent[]): boolean {
+		if (this.disabled) return false;
+		if (!events.length) return true;
 		try {
 			appendTaskEvents(this.paths, events);
-			this.pendingSnapshot += events.length;
-			if (this.pendingSnapshot >= TASK_STATE_SNAPSHOT_EVERY) {
-				this.pendingSnapshot = 0;
-				writeTaskSnapshot(this.paths, this.state);
-			}
 		} catch (error) {
 			this.noteFailure(`persist failed: ${error instanceof Error ? error.message : String(error)}`);
+			return false;
 		}
+		this.pendingSnapshot += events.length;
+		if (this.pendingSnapshot >= TASK_STATE_SNAPSHOT_EVERY) {
+			try {
+				this.pendingSnapshot = 0;
+				writeTaskSnapshot(this.paths, this.state);
+			} catch (error) {
+				// The event log is durable truth; a failed snapshot does not undo
+				// an accepted append or force the main stream to repeat it.
+				this.noteFailure(`snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return true;
 	}
 
 	private load(): void {
@@ -158,12 +169,12 @@ export class TaskStateService {
 	/** Apply raw events (ingest mappers, replay, tests). Returns applied count. */
 	apply(events: readonly TaskEvent[]): number {
 		return safe(this, "apply", 0, () => {
-			let applied = 0;
+			const accepted: TaskEvent[] = [];
 			for (const event of events) {
-				if (applyEvent(this.state, event)) applied += 1;
+				if (applyEvent(this.state, event)) accepted.push(event);
 			}
-			this.persist(events);
-			return applied;
+			this.persist(accepted);
+			return accepted.length;
 		});
 	}
 
@@ -254,13 +265,81 @@ export class TaskStateService {
 	/** Fold requirement-ledger items into the graph (ledger stays authoritative). */
 	syncRequirements(items: readonly LedgerRequirement[], mode: FollowupMode = "followup"): number {
 		return safe(this, "syncRequirements", 0, () => {
+			const earlier = new Set(this.state.rotations.flatMap(rotation => rotation.priorRequirementIds ?? []));
+			const current = items.filter(item => !earlier.has(item.id)
+				&& !["superseded", "invalidated"].includes(this.state.entities[`req-${this.taskId}-${item.id}`]?.status));
 			const prior = new Map<string, string>();
 			for (const entity of Object.values(this.state.entities)) {
 				if (entity.kind === "requirement" && entity.status !== "superseded" && entity.status !== "invalidated") {
 					prior.set(entity.id, `${entity.title} ${entity.detail ?? ""}`);
 				}
 			}
-			return this.apply(requirementEvents(this.ctx(), items, mode, prior));
+			return this.apply(requirementEvents(this.ctx(), current, mode, prior));
+		});
+	}
+
+	/** Source scope of retained implementations, bounded by the caller before hashing. */
+	assessmentFiles(implementationIds: readonly string[]): string[] {
+		const files = [...new Set(implementationIds.flatMap(id => {
+			const refs = this.state.entities[id]?.refs;
+			return refs?.file ? [refs.file] : [];
+		}))];
+		return files.length ? files : Object.keys(this.state.files);
+	}
+
+	/** The main stream owns coverage judgment. Binding requires retained native
+	 * observations and current source hashes; no model claim becomes evidence. */
+	assessRequirement(input: { requirementId: string; implementationIds: string[]; evidenceIds: string[]; reason: string },
+		currentHashes: Record<string, string> = {}): { ok: boolean; reason: string; requirementId?: string } {
+		return safe(this, "assess", { ok: false, reason: "Task-state assessment is unavailable." }, () => {
+			const reject = (reason: string) => ({ ok: false, reason });
+			const reqId = /^R\d{1,3}$/.test(input.requirementId) ? `req-${this.taskId}-${input.requirementId}` : input.requirementId;
+			const requirement = this.state.entities[reqId];
+			if (!requirement || requirement.kind !== "requirement" || ["superseded", "invalidated"].includes(requirement.status)) return reject("Unknown or retired requirement in this task.");
+			if (typeof input.reason !== "string" || input.reason.trim().length < 20) return reject("Explain how the retained implementation and checks cover this requirement (at least 20 characters).");
+			if (![input.implementationIds, input.evidenceIds].every(ids => Array.isArray(ids) && ids.length > 0 && ids.length <= 8 && ids.every(id => typeof id === "string"))) return reject("Cite 1–8 retained implementation IDs and 1–8 evidence IDs.");
+			const implementations = [...new Set(input.implementationIds)].map(id => this.state.entities[id]);
+			if (implementations.some(entity => !entity || !["tool-exec", "work", "attempt"].includes(entity.kind)
+				|| !["implemented", "verified"].includes(entity.status) || (!entity.refs?.toolCallId && !Number.isSafeInteger(entity.refs?.todoId)))) return reject("Implementation must cite completed native edits, commands or todo work; child claims and unknown IDs do not qualify.");
+			const evidence = [...new Set(input.evidenceIds)].map(id => this.state.entities[id]);
+			if (evidence.some(entity => !currentEvidence(entity) || !entity.refs?.toolCallId)) return reject("Evidence must cite current native observations; failed, stale, superseded or advisory records do not qualify.");
+			const files = this.assessmentFiles(input.implementationIds);
+			if (files.length > MAX_EVIDENCE_FILES) return reject(`Assessment source scope exceeds ${MAX_EVIDENCE_FILES} files; cite narrower implementation records.`);
+			for (const file of files) {
+				const version = this.state.files[file];
+				if (!version?.hash || currentHashes[file] !== version.hash) return reject(`Source changed or cannot be verified: ${file}. Record the current implementation before assessing.`);
+				if (implementations.some(entity => entity.refs?.file === file && entity.refs.fileVersion !== version.version)) return reject(`Implementation is stale: ${file}.`);
+				if (evidence.some(entity => entity.refs?.fileVersions?.[file] !== version.version || entity.refs?.fileHashes?.[file] !== version.hash)) return reject(`Check evidence is stale or has no source binding for ${file}; run the relevant check on the current source.`);
+			}
+			const ctx = this.ctx();
+			const events: TaskMutationEvent[] = [];
+			const assessmentId = `assessment-${stableId([reqId, ...input.implementationIds, ...input.evidenceIds, input.reason])}`;
+			const why = `${input.reason} [${assessmentId}]`;
+			for (const entity of implementations) events.push(linkEvent(ctx, entity.id, reqId, "implemented-by"));
+			for (const entity of evidence) events.push(linkEvent(ctx, entity.id, reqId, "verified-by"));
+			if (requirement.status !== "verified") {
+				if (["proposed", "blocked"].includes(requirement.status)) events.push(statusEvent(ctx, reqId, "active", why));
+				if (!["implemented", "partially-verified"].includes(requirement.status)) events.push(statusEvent(ctx, reqId, "implemented", why));
+				events.push(statusEvent(ctx, reqId, "verified", why));
+			}
+			events.push(upsertEvent(ctx, { id: assessmentId, kind: "decision", status: "active", title: `Main assessment of ${input.requirementId}`,
+				detail: input.reason, provenance: "main-agent", refs: { requirementId: requirement.refs?.requirementId } }));
+			events.push(linkEvent(ctx, assessmentId, reqId, "based-on"));
+			const previous = this.state;
+			const next = structuredClone(previous);
+			const batch: TaskEvent = { ...ctx, kind: "assessment", eventId: `ev-${assessmentId}`, events };
+			if (!applyEvent(next, batch)) return { ok: true, reason: "This assessment is already recorded.", requirementId: reqId };
+			if (!requirementState(next, reqId).verified || !next.entities[assessmentId]
+				|| [...implementations, ...evidence].some(entity => !next.links.some(link => link.from === entity.id && link.to === reqId
+					&& link.kind === (entity.kind === "evidence" ? "verified-by" : "implemented-by")))) return reject("Assessment could not preserve all required links and status transitions; the requirement remains unresolved.");
+			this.state = next;
+			if (!this.persist([batch])) {
+				const error = next.health.lastError ?? "assessment log append failed";
+				this.state = previous;
+				this.noteFailure(error);
+				return reject("Assessment was not durably recorded; the requirement remains unresolved.");
+			}
+			return { ok: true, reason: "Main assessment recorded with retained native evidence. Coverage remains the main stream's judgment.", requirementId: reqId };
 		});
 	}
 
@@ -272,6 +351,8 @@ export class TaskStateService {
 		}
 		const priorTaskId = this.state.taskId;
 		const priorLabel = this.state.label;
+		const priorRequirementIds = [...new Set([...this.state.rotations.flatMap(rotation => rotation.priorRequirementIds ?? []),
+			...Object.values(this.state.entities).flatMap(entity => entity.kind === "requirement" && entity.refs?.requirementId ? [entity.refs.requirementId] : [])])];
 		this.epoch += 1;
 		const next = taskIdFor(this.sessionId, this.epoch);
 		this.paths = taskStatePaths(this.baseDir, this.sessionId, next);
@@ -286,6 +367,7 @@ export class TaskStateService {
 			priorTaskId,
 			priorLabel,
 			reason: reason.slice(0, 280),
+			priorRequirementIds,
 		}]);
 	}
 
@@ -327,7 +409,7 @@ export class TaskStateService {
 	}
 
 	completionBlockers(): string[] {
-		return safe(this, "completionBlockers", [], () => projectCompletion(this.state).blockers);
+		return safe(this, "completionBlockers", [], () => projectCompletion(this.state, true).blockers);
 	}
 
 	diagnostics(): GraphDiagnostics {
@@ -375,11 +457,13 @@ export function getTaskStateService(sessionId: string, baseDir?: string): TaskSt
 	if (!service) {
 		service = new TaskStateService(sessionId, baseDir);
 		services.set(key, service);
-		try {
-			sessionObservability()[TASK_STATE_SERVICE] = service;
-		} catch {
-			/* observability publish is best-effort */
-		}
+	}
+	try {
+		// The native owner creates a new observability scope on each switch.
+		// A cached service must publish into that scope just like a fresh one.
+		sessionObservability()[TASK_STATE_SERVICE] = service;
+	} catch {
+		/* observability publish is best-effort */
 	}
 	return service;
 }

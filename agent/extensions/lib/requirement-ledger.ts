@@ -134,12 +134,14 @@ export function readSessionLedger(entries: readonly unknown[]): RequirementLedge
 				typeof (item as RequirementItem).text === "string" && (item as RequirementItem).text.trim().length > 0)
 			.map((item) => ({ id: item.id, text: clip(item.text) }))
 			.slice(-MAX_ITEMS);
+		if (data.items.length > 0 && items.length === 0) continue; // malformed content is not a retirement
 		const subjective = Array.isArray(data.subjective)
 			? [...new Set((data.subjective as unknown[]).filter((criterion): criterion is string => typeof criterion === "string" && criterion.trim().length > 0)
 				.map((criterion) => criterion.replace(/\s+/g, " ").trim().slice(0, 80)))].slice(0, 8)
 			: [];
 		const unbounded = data.unbounded === true;
-		if (!items.length && !subjective.length && !unbounded) continue;
+		// An empty latest receipt is an authoritative retirement, not a reason
+		// to resurrect requirements from an earlier receipt.
 		return { items, subjective, unbounded, next: Number.isSafeInteger(data.next) ? (data.next as number) : 0 };
 	}
 	return undefined;
@@ -173,7 +175,7 @@ const renderLedgerBrief = (ledger: RequirementLedger, maxChars: number, packetLo
 export function packetRequirements(rawText: string, entries: readonly unknown[], maxChars = 1500): string {
 	const cap = Number.isSafeInteger(maxChars) ? Math.max(200, Math.min(maxChars, 8000)) : 1500;
 	const ledger = readSessionLedger(entries);
-	if (ledger) return renderLedgerBrief(ledger, cap, false);
+	if (ledger) return ledger.items.length || ledger.subjective.length || ledger.unbounded ? renderLedgerBrief(ledger, cap, false) : "";
 	const extracted = extractRequirements(typeof rawText === "string" ? rawText : "");
 	if (!extracted.items.length && !extracted.subjective.length && !extracted.unbounded) return "";
 	return renderLedgerBrief({

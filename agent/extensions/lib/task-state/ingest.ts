@@ -6,6 +6,7 @@
  * stable idempotent id so replays and double delivery are no-ops.
  */
 import { createHash } from "node:crypto";
+import { tokenizeSimple } from "../bash-routing.ts";
 import type {
 	TaskEntityKind,
 	TaskEntityStatus,
@@ -13,6 +14,9 @@ import type {
 	TaskLinkKind,
 	TaskProvenance,
 	TaskRefs,
+	EntityUpsertEvent,
+	EntityStatusEvent,
+	LinkEvent,
 } from "./types.ts";
 
 export function stableId(parts: Array<string | number | undefined | null>): string {
@@ -60,7 +64,7 @@ export interface IngestContext {
 	ts: number;
 }
 
-export function upsertEvent(ctx: IngestContext, entity: EntityInput, dedup = ""): TaskEvent {
+export function upsertEvent(ctx: IngestContext, entity: EntityInput, dedup = ""): EntityUpsertEvent {
 	return {
 		eventId: `ev-${stableId(["upsert", entity.id, dedup || entity.title])}`,
 		ts: ctx.ts,
@@ -85,7 +89,7 @@ export function statusEvent(
 	entityId: string,
 	status: TaskEntityStatus,
 	why = "",
-): TaskEvent {
+): EntityStatusEvent {
 	return {
 		eventId: `ev-${stableId(["status", entityId, status, why])}`,
 		ts: ctx.ts,
@@ -103,7 +107,7 @@ export function linkEvent(
 	from: string,
 	to: string,
 	link: TaskLinkKind,
-): TaskEvent {
+): LinkEvent {
 	return {
 		eventId: `ev-${stableId(["link", from, link, to])}`,
 		ts: ctx.ts,
@@ -186,7 +190,7 @@ export function requirementEvents(
 			refs: { requirementId: item.id },
 		}, `${ctx.taskId}:${item.id}:${stableId([item.text])}`));
 		events.push(linkEvent(ctx, id, ctx.taskId, "child-of"));
-		if (mode === "correction") {
+		if (mode === "correction" && !priorRequirements.has(id)) {
 			// A correction supersedes the prior requirement it overlaps most,
 			// preserving history instead of silently deleting it.
 			let best = "";
@@ -305,36 +309,55 @@ export function fileWriteEvents(
 /**
  * A test-like command is one whose whole point is to check the build, so a
  * passing run of it is evidence and clears the goal's unverified-write debt.
- * Two rules make that safe:
+ * A check receipt requires a literal invocation with an observable exit:
  *
  * - Package managers are one family. A pnpm/yarn/bun project must earn a
  *   receipt on the same terms as an npm one; when only `npm` matched, those
  *   projects could never clear the completion gate and the session wedged.
- * - Every alternative is anchored to *command position* — start of line or
- *   after a shell separator, behind an optional env prefix. The old unanchored
- *   `tsc\b` matched `cat tsc-config.json` and `git commit -m "fix tsc types"`,
- *   which cleared the debt without running anything.
+ * - The shared shell tokenizer distinguishes command argv from quoted text.
+ *   Only a single command or the existing `cd <dir> &&` wrapper qualifies.
+ *   Pipelines, status masking and non-verifying flags produce no passing
+ *   receipt, while execution itself remains under the native tool's control.
  */
-const COMMAND = String.raw`(?:^|\|\||&&|[;&|])\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*(?:\S*\/)?`;
-const PM = String.raw`(?:npm|pnpm|yarn|bun)`;
-const TASK = String.raw`(?:test|tests|check|lint|typecheck|build)\b`;
-const RUNNER = String.raw`(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|phpunit)\b`;
-const TASK_TOOL = String.raw`(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)\s+${TASK}`;
-const TEST_COMMAND = new RegExp(
-	`${COMMAND}(?:` +
-		`${PM} (?:run )?${TASK}` +
-		`|${PM} t\\b` +
-		`|(?:npx|pnpm dlx|bunx|yarn dlx) ${RUNNER}` +
-		`|${RUNNER}` +
-		`|${TASK_TOOL}` +
-		`|deno (?:test|check|lint|fmt)\\b` +
-		`|python3?(?:\\.\\d+)? -m (?:pytest|unittest|tox|ruff|mypy)\\b` +
-		`|node --test\\b` +
-		`)`,
-);
+const RUNNER = /^(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|phpunit)$/;
+const CHECK_TASK = /^(?:test|tests|check|lint|typecheck|build)(?::[\w.-]+)?$/;
+const NON_VERIFY_FLAG = /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|--if-present|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/;
 
 export function isTestLikeCommand(command: string): boolean {
-	return TEST_COMMAND.test(String(command ?? ""));
+	const raw = String(command ?? "").trim();
+	if (!raw || raw.length > 2000) return false;
+	// Align with project check receipts: one literal command, optionally after
+	// `cd <dir> &&`. Quoted/escaped operators are arguments, never separators.
+	const parts: string[] = [];
+	let start = 0;
+	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
+		if (match[0] !== "&&") continue;
+		parts.push(raw.slice(start, match.index)); start = match.index! + 2;
+	}
+	parts.push(raw.slice(start));
+	if (parts.length > 2) return false;
+	if (parts.length === 2) {
+		const prefix = tokenizeSimple(parts[0].trim());
+		if (prefix?.length !== 2 || prefix[0] !== "cd") return false;
+	}
+	const argv = tokenizeSimple(parts.at(-1)!.trim());
+	if (!argv?.length) return false;
+	const index = argv.findIndex(token => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
+	if (index < 0) return false;
+	const tokens = argv.slice(index);
+	if (tokens.some(token => NON_VERIFY_FLAG.test(token))) return false;
+	const executable = tokens[0].split("/").at(-1)!;
+	const args = tokens.slice(1);
+	if (RUNNER.test(executable)) return true;
+	if (/^(?:npm|pnpm|yarn|bun)$/.test(executable)) {
+		const task = args[0] === "run" ? args[1] : args[0];
+		return CHECK_TASK.test(task ?? "") || task === "t" || (args[0] === "dlx" && RUNNER.test(args[1] ?? ""));
+	}
+	if (executable === "npx" || executable === "bunx") return RUNNER.test(args[args[0] === "--no-install" ? 1 : 0] ?? "");
+	if (/^(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)$/.test(executable)) return CHECK_TASK.test(args[0] ?? "");
+	if (executable === "deno") return /^(?:test|check|lint|fmt)$/.test(args[0] ?? "");
+	if (/^python3?(?:\.\d+)?$/.test(executable)) return args[0] === "-m" && /^(?:pytest|unittest|tox|ruff|mypy)$/.test(args[1] ?? "");
+	return executable === "node" && args[0] === "--test";
 }
 
 /** Bash results become attempt/evidence/failure entities with family keys.
@@ -352,12 +375,12 @@ export function bashResultEvents(
 		upsertEvent(ctx, {
 			id: attemptId,
 			kind: "attempt",
-			status: input.failed ? "failed" : "implemented",
+			status: input.failed ? "failed" : input.pending ? "active" : "implemented",
 			title: clip(command || "bash", 240),
 			detail: clip(input.excerpt ?? "", 800),
 			provenance: "tool-output",
 			refs: { toolCallId: callId, testCommand: command.slice(0, 300) || undefined },
-		}, `attempt:${ctx.taskId}:${callId}`),
+		}, `attempt:${ctx.taskId}:${callId}:${input.failed ? "failed" : input.pending ? "pending" : "completed"}`),
 		linkEvent(ctx, attemptId, ctx.taskId, "child-of"),
 	];
 	if (input.failed) {
@@ -392,19 +415,20 @@ export function bashResultEvents(
 /** Child results are written back with subagent provenance, never auto-verified. */
 export function subagentResultEvents(
 	ctx: IngestContext,
-	input: { runId: string; agent?: string; ok: boolean; summary?: string; files?: string[] },
+	input: { runId: string; agent?: string; ok: boolean; status?: TaskEntityStatus; entityId?: string; nativeRunId?: string; toolCallId?: string; summary?: string; files?: string[] },
 ): TaskEvent[] {
-	const id = `child-${stableId([ctx.taskId, input.runId])}`;
+	const id = input.entityId ?? `child-${stableId([ctx.taskId, input.runId])}`;
+	const status = input.status ?? (input.ok ? "implemented" : "failed");
 	const events: TaskEvent[] = [
 		upsertEvent(ctx, {
 			id,
 			kind: "child",
-			status: input.ok ? "implemented" : "failed",
+			status,
 			title: `${clip(input.agent ?? "subagent", 80)} run ${clip(input.runId, 40)}`,
 			detail: clip(input.summary ?? "", 1200),
 			provenance: "subagent",
-			refs: { childRunId: input.runId.slice(0, 120) },
-		}, `child:${ctx.taskId}:${input.runId}`),
+			refs: { childRunId: (input.nativeRunId ?? input.runId).slice(0, 120), toolCallId: input.toolCallId },
+		}, `child:${ctx.taskId}:${input.runId}:${status}`),
 		linkEvent(ctx, id, ctx.taskId, "child-of"),
 	];
 	for (const file of (input.files ?? []).slice(0, 16)) {
