@@ -118,7 +118,7 @@ test('production SEO credit requires deployment and a fresh declared non-loopbac
   await f.call('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com' }, { details: audit('https://example.com') });
   assert.equal(await live(), false, 'a pre-deployment audit cannot certify the deployed revision');
   const pendingAudit = await f.beginCall('seo_toolkit', { action: 'audit', canonicalOrigin: 'https://example.com' });
-  for (const stageId of ['validation', 'seo-content', 'ui-pixels', 'ui-interaction', 'deploy-preflight', 'deploy-remote']) {
+  for (const stageId of ['validation', 'seo-content', 'ui-responsive', 'ui-pixels', 'ui-interaction', 'deploy-preflight', 'deploy-remote']) {
     const stage = (await f.status()).pending.find(row => row.id === stageId);
     await f.runTool({ action: 'record', stageId, status: 'passed', evidenceKind: stage.evidenceKinds[0], source: `fixture:${stageId}` });
   }
