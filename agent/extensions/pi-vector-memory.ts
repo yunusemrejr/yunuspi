@@ -738,7 +738,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       }, { embedder: embedder ?? undefined, now: isoNow, signal });
       recallCache.clear();
       signal?.throwIfAborted();
-      const text = `[indexed ${params.path}: ${result.inserted} new, ${result.skippedDup} unchanged, ${result.embedded} embedded]`;
+      const text = `[indexed ${params.path}: ${result.inserted} new, ${result.skippedDup} unchanged, ${result.embedded} embedded${result.truncated ? `; partial: ${result.indexedChunks}/${result.totalChunks} chunks within the insertion budget; unchanged existing evidence retained` : ''}]`;
       return { content: [{ type: "text" as const, text }], details: { path: params.path, result } };
     },
   });

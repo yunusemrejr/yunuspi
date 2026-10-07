@@ -100,6 +100,8 @@ export type AgentSessionEvent = Exclude<AgentEvent, {
     delta: string;
 };
 /** Listener function for agent session events */
+/** Observers do not participate in run settlement. Errors are reported through
+ * extension diagnostics without interrupting persistence or other observers. */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
 export interface AgentSessionConfig {
     agent: Agent;

@@ -158,8 +158,11 @@ export function chunkMarkdown(text: string, maxChars = MAX_CHUNK_CHARS): TextChu
 /** Code split: overlapping line windows that never break a line. */
 export function chunkCode(text: string, opts: { windowLines?: number; overlapLines?: number; maxChars?: number } = {}): TextChunk[] {
   const window = opts.windowLines ?? 80;
-  const overlap = Math.min(opts.overlapLines ?? 12, Math.floor(window / 2));
+  const requestedOverlap = opts.overlapLines ?? 12;
   const maxChars = opts.maxChars ?? 4000;
+  if (!Number.isSafeInteger(window) || window < 1 || !Number.isSafeInteger(requestedOverlap) || requestedOverlap < 0 || !Number.isSafeInteger(maxChars) || maxChars < 1)
+    throw new RangeError('Code chunk windows and character bounds must be positive integers; overlap must be a non-negative integer.');
+  const overlap = Math.min(requestedOverlap, Math.floor(window / 2));
   const lines = text.split("\n");
   const chunks: TextChunk[] = [];
   for (let start = 0; start < lines.length;) {
@@ -171,7 +174,9 @@ export function chunkCode(text: string, opts: { windowLines?: number; overlapLin
     }
     if (body.trim().length >= 12) chunks.push({ title: "", text: body, start: start + 1, end });
     if (end >= lines.length) break;
-    start = end - overlap;
+    // Dense lines can shrink a window below its configured overlap. Keep
+    // overlap where possible, but every iteration must consume a new line.
+    start = Math.max(start + 1, end - overlap);
   }
   return chunks;
 }
@@ -527,6 +532,10 @@ export interface IndexResult {
   skippedDup: number;
   embedded: number;
   ids: string[];
+  /** File insertion is bounded; unchanged previously indexed tails survive. */
+  truncated?: boolean;
+  indexedChunks?: number;
+  totalChunks?: number;
 }
 
 const EVENT_MAX_CHARS: Record<IndexEventKind, number> = {
@@ -637,7 +646,13 @@ export async function indexFile(
   const content = redactSecrets(input.content);
   if (content.trim().length < 24 || content.length > 500_000) return result;
   const kind = chunkerForPath(input.path);
-  const chunks = (kind === "markdown" ? chunkMarkdown(content) : kind === "code" ? chunkCode(content) : chunkText(content)).slice(0, 64);
+  const allChunks = kind === "markdown" ? chunkMarkdown(content) : kind === "code" ? chunkCode(content) : chunkText(content);
+  const chunks = allChunks.slice(0, 64);
+  if (allChunks.length > chunks.length) {
+    result.truncated = true;
+    result.indexedChunks = chunks.length;
+    result.totalChunks = allChunks.length;
+  }
   const type = input.sourceType ?? (kind === "markdown" ? "architecture" : "code");
   const atomKind = kind === "code" ? "code" : "prose";
   const now = (opts.now ?? (() => new Date().toISOString()))();
@@ -646,15 +661,16 @@ export async function indexFile(
   const keepIds: string[] = [];
   const keepStarts = new Map<string, number>();
   const commit = input.commit;
+  const existingSource = (chunk: TextChunk, hash = sourceHash(`${type}:${input.path}`, chunk.text)) => {
+    const exact = store.hasHash(hash);
+    if (exact) return exact;
+    // Legacy normalized hashes count only when the source bytes still match.
+    const legacy = store.hasHash(contentHash(`${type}:${input.path}`, chunk.text));
+    return legacy && store.getChunk(legacy)?.text === chunk.text ? legacy : undefined;
+  };
   for (const chunk of chunks) {
     const hash = sourceHash(`${type}:${input.path}`, chunk.text);
-    // Rows stored before exact source identity used a normalized hash; they
-    // still count as this chunk only when their text is byte-identical.
-    let duplicate = store.hasHash(hash);
-    if (!duplicate) {
-      const legacy = store.hasHash(contentHash(`${type}:${input.path}`, chunk.text));
-      if (legacy && store.getChunk(legacy)?.text === chunk.text) duplicate = legacy;
-    }
+    const duplicate = existingSource(chunk, hash);
     if (duplicate) {
       result.skippedDup++;
       keepIds.push(duplicate);
@@ -701,6 +717,17 @@ export async function indexFile(
     for (const atom of inputs) {
       jobs.push({ chunkId: id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.title, atom.text) });
     }
+  }
+  // The insertion/embedding budget does not establish absence from the
+  // source. Retain exact known fragments beyond it, refresh their provenance,
+  // and include them when deciding which earlier fragments really vanished.
+  for (const chunk of allChunks.slice(chunks.length)) {
+    const duplicate = existingSource(chunk);
+    if (!duplicate) continue;
+    result.skippedDup++;
+    keepIds.push(duplicate);
+    keepStarts.set(duplicate, chunk.start);
+    store.refreshSource(duplicate, {start:chunk.start,end:chunk.end,...(commit ? {commit} : {})}, now);
   }
   retireReplacedSource(store, input.path, type, keepIds, keepStarts, now);
   if (jobs.length && opts.embedder) {

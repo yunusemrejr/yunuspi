@@ -363,8 +363,28 @@ export class AgentSession {
     // =========================================================================
     /** Emit an event to all listeners */
     _emit(event) {
-        for (const l of this._eventListeners) {
-            l(event);
+        if (this._eventListeners.length === 0) return;
+        const report = (error) => {
+            try {
+                this._extensionRunner?.emitError({
+                    extensionPath: "<agent-session:listener>",
+                    event: "session_listener",
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                });
+            }
+            catch { /* diagnostics must not interrupt durable event handling */ }
+        };
+        // These observers do not own settlement or persistence. Dispatch from
+        // a snapshot so subscribing/unsubscribing cannot skip another observer.
+        for (const listener of [...this._eventListeners]) {
+            try {
+                const pending = listener(event);
+                if (pending && typeof pending.then === "function") Promise.resolve(pending).catch(report);
+            }
+            catch (error) {
+                report(error);
+            }
         }
     }
     _emitQueueUpdate() {

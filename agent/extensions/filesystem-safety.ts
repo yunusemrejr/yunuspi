@@ -360,11 +360,17 @@ function isPathProtected(
 	}
 	// A launch at / or home never grants those whole trees as destructive scope.
 	if ([...PROTECTED_DIRS, "/tmp", "/var/tmp"].includes(resolved)) return true;
+	// Memory ownership precedes workspace and temporary-directory allowances.
+	// A configured root can live in either; those locations never grant tree
+	// deletion. Preserve safe unlinking of a leaf symlink via followLeaf above.
+	const memoryRoots = agentMemoryRoots();
+	if (memoryRoots.some(root => root === resolved || recursive &&
+		(containsPath(root, resolved) || containsPath(resolved, root)))) return true;
+	if (!recursive && memoryRoots.some(root => containsPath(root, resolved))) return false;
 	if (!scopeTooBroad(normalizedCwd) && containsPath(normalizedCwd, resolved))
 		return false;
 	if (resolved.startsWith("/tmp/") || resolved.startsWith("/var/tmp/"))
 		return false;
-	if (!recursive && withinAgentMemory(resolved)) return false;
 	return PROTECTED_DIRS.some(
 		(root) => root !== "/" && containsPath(root, resolved),
 	);
@@ -375,15 +381,14 @@ function isPathProtected(
  * for shell and edit/write: entries strictly inside the memory root are
  * writable without a scope prompt; the root itself and recursive or broad
  * shell mutations stay protected, so memory trees cannot be wiped. */
-function withinAgentMemory(resolved: string): boolean {
+function agentMemoryRoots(): string[] {
 	const roots = [path.join(getAgentDir(), "memory"), process.env.PI_MEMORY_DIR?.trim()];
-	return roots.some((root) => {
-		if (!root) return false;
+	return roots.flatMap((root) => {
+		if (!root) return [];
 		try {
-			const physical = canonicalMutationPath(root);
-			return physical !== resolved && containsPath(physical, resolved);
+			return [canonicalMutationPath(root)];
 		} catch {
-			return false;
+			return [];
 		}
 	});
 }
