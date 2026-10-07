@@ -10,13 +10,14 @@ The shared tools own frame clocks, scene contracts and review evidence. Skills a
 | `video_render` | `stills` renders critical frames, a labelled contact sheet and actual loaded-font fit/overflow evidence; `preview` renders a low-resolution scene or range; `final` renders H.264/AAC with decode verification and captions. Long films automatically use resumable parts; `segments` exposes the same bounded workflow explicitly. Bundles and completed parts are content-hash cached |
 | `video_qa` | `analyze` creates technical and reference/frame evidence; `record` stores separate art-direction/composition/type/playback/listening attestations; `status` checks stale video/project/reference/pixel identities. Black and frozen stretches (single holds of 4 s or more, and a runtime that is 35% or more static in holds of 1.5 s or more), audio/video drift, silence gaps, EBU R128 loudness, peak and range, per-scene narration audibility and paginated strips at entrances, settled states, authored gestures and final scene frames; review status remains unreviewed |
 | `video_assets` | Finds and fetches license-tracked photographs, footage, CC0 3D models, PBR map sets and HDRIs (Openverse, Wikimedia Commons, Poly Haven) into `public/assets`, records each licence in `assets.json` and adds required credits to `video.json` |
-| `video_shot` | Renders a Blender camera move (a `.blend`, an imported model, extruded 3D title text or native editable object graph) into `public/shots/<name>` as a transparent RGBA sequence with named screen anchors. Finished device rigs, object parenting/keyframes, PBR maps, HDRI lighting, preserved authored cameras and optional surface detail; previews are half size |
+| `video_generate` | Plans, submits, resumes and downloads short hosted clips from live OpenRouter model capabilities and duration prices. Content-keyed receipts prevent automatic paid resubmission; decoded clips become reusable assets |
+| `video_shot` | Renders a Blender camera move (a `.blend`, an imported model, extruded 3D title text or native editable object graph) into `public/shots/<name>` as a transparent RGBA sequence with named screen anchors. Finished device rigs, alpha image cards, shared line/grid/radial instances, staggered motion, editable camera/target/lens paths, object parenting/keyframes, PBR maps, HDRI lighting, preserved authored cameras and optional surface detail; previews are half size |
 | `video_browser` | Records a fresh browser take with eased cursor movement, mobile touch emulation, click/tap rings, selector highlights, focused typing and scrolling. Imported take metadata supplies action-follow framing and sound accents. Returns a constant-frame-rate MP4 and observed event/frame timestamps for placing callouts and sound effects |
 | `motion_examples` | Searches, reads and copies worked examples of advanced motion: vanilla HTML/CSS/JS pages, Blender scripts, HTML+Blender merges, FFmpeg/libass and numpy. The catalogue is read from each example's own header |
 | `narration_tts` | Prefers ElevenLabs timestamped speech when an API key is configured; exact voice/model selection, resumable paid text chunks and per-scene checkpoints. Explicit local Piper remains available with a checksum-verified install. Writes decoded durations and word timing to the timeline |
 | `narration_align` | Sends an existing audio file and supplied transcript to ElevenLabs forced alignment; returns word spans, coverage, loss and matching captions. Alignment is not independent transcription |
 | `media_sync` | Audits narration endings against cuts, text/word coverage, cue drift in frames and encoded audio/video boundaries. `music_grid` snaps cue times to a supplied tempo and downbeat |
-| `audio_generate` | ElevenLabs instrumental music and sound effects with measured delivery duration and decode evidence; generated assets can be imported and mixed with voice |
+| `audio_generate` | Selected local procedural or ElevenLabs instrumental music and sound effects with measured delivery duration and decode evidence; generated assets can be imported and mixed with voice |
 | `audio_synth` | Seeded numpy music beds (chord progression, intensity automation) and sound effects (whoosh, riser, impact, tick, chime) |
 | `media_pipeline` | Selects audio editing/mixing, clip video composition or scene animation from its inputs; optional editable MIDI score → music bed → voice ducking/effects → render/master → decode and delivery loudness evidence in one call. Writes `pipeline.json` with stage timings and measurements |
 | `audio_mix` / `video_compose` | Local bounded timelines with looping, pitch-preserving speed, noise reduction, filters, fades and voice/music roles. Music ducks from the actual voice signal; optional two-pass mastering measures the final WAV or AAC encoding |
@@ -56,6 +57,29 @@ Final shot planning preserves full 4K dimensions. Native self-contained shots ca
 QA strips include cue/key/exit boundaries and the true final frame. Technical success starts with reviewStatus unreviewed. Art-direction passes name inspected reference sources, appearance needs frames/playback, motion/sync needs playback and audio needs listening. Changing local reference images, sampled pixels, project/assets or delivered bytes invalidates old verdicts. Paged reports approve their scope only. There is no automatic taste score or universal quality guarantee.
 
 Reference studies included varied kinetic typography, product staging and editorial animation, plus the diverse collection in [Column Five's motion examples](https://www.columnfivemedia.com/best-100-motion-graphic-examples/). Those examples inform composition, continuity and craft; they are not copied assets.
+
+
+## Media choices and bounded generation
+
+Open `/models` and use **Tab / Shift+Tab** to move between LLM, Images, Video and Audio. Enter chooses a media route for the session; Ctrl+S saves the current tab's choices through SettingsManager. Audio has independent speech, music and SFX selections. Media choices never change the LLM, thinking, LLM cycling list or its request cache. An explicit tool `model` takes precedence over the saved choice, followed by existing environment configuration. Provider-qualified IDs use `openrouter/<vendor>/<model>`, `elevenlabs/<model>` or `local/<route>`.
+
+Image and video choices refresh from public catalogs only when the selector opens. Reads are cached for five minutes, bounded to 2 MiB and cancellable; opening the page never generates media. Catalog presence does not prove that an account can run a model. A saved route absent from the catalog stays visible. ElevenLabs speech/music/SFX routes and local routes remain available offline.
+
+Native motion graphics is the bundled Video choice: real typography, browser events, licensed 3D assets and authored choreography use local rendering without hosted video charges. Image/video **automatic** is an explicit media choice. It filters advertised reference/alpha/aspect/resolution/frame capabilities, then selects a compatible endpoint with a known conservative price estimate. Image planning examines at most eight candidate endpoint catalogs; token/megapixel prices remain unknown and fail a capped automatic request. An exact image model without a cap retains its existing route. Automatic image selection defaults to $0.25 per image and clip planning to $1 per job; set `maxCostUsd` to a smaller limit when suitable. These are preflight estimates, not provider-enforced spending limits or quality rankings. Explicit selections are never silently replaced by a cheaper model.
+
+```js
+image_generate({action:"plan", model:"openrouter/auto", prompt:"A tactile red paper ornament on white", aspectRatio:"1:1", maxCostUsd:0.03})
+image_generate({action:"generate", model:"openrouter/auto", prompt:"A tactile red paper ornament on white", aspectRatio:"1:1", maxCostUsd:0.03})
+video_generate({action:"plan", model:"openrouter/auto", prompt:"A red ribbon settling onto a gift", seconds:4, resolution:"720p", aspectRatio:"16:9", maxCostUsd:0.5})
+// Submit once, retain the returned job path; status/download do not generate another take.
+video_generate({action:"submit", model:"openrouter/auto", prompt:"A red ribbon settling onto a gift", seconds:4, maxCostUsd:0.5})
+video_generate({action:"status", job:".pi/media-generation/video-<hash>/job.json"})
+video_generate({action:"download", job:".pi/media-generation/video-<hash>/job.json"})
+```
+
+Hosted clips use [OpenRouter's video API](https://openrouter.ai/docs/guides/overview/multimodal/video-generation) with existing private OpenRouter credentials. First/last frame paths are accepted only when the selected model supports them; inputs are decoded before submission. A durable receipt is written before the sole paid POST. Identical submissions reuse the existing job; `newTake:true` deliberately creates another take. Poll no sooner than ten seconds; returned usage and the actual decoded duration are retained. Uncertain submission outcomes keep their receipt and are never retried automatically. Cancellation stops local work; it does not cancel or refund an already submitted provider job. Download uses the authenticated fixed-host content endpoint rather than a supplied redirect URL. Import the returned artifact through `video_assets` and review it on the native master timeline.
+
+Selected `local/procedural` music/SFX can also run outside a project with `audio_generate`; supply `style`, `seed` and `bpm` for music or `sfxType` for effects. Freeform prompts are retained as briefs; local synthesis uses authored parameters rather than semantic prompt interpretation. Piper speech is a separate local selection. Hosted ElevenLabs audio uses the existing provider contracts and account pricing; it does not use the image/video cost estimator.
 
 ## Voice, music and timing
 
@@ -130,6 +154,28 @@ Mastering is optional for focused tools and `media_pipeline` (`targetLufs`). The
 **Motion examples.** `motion_examples action:"search"` finds worked, verified examples by the effect wanted; `copy` places one where the project looks for it. HTML: seekable CSS/WAAPI, `@property`, `linear()` springs, SVG morph and draw-on, SVG filter liquid type, curl-noise flow fields, WebGL2 domain warping and SDF raymarching, audio-reactive fields, scroll-driven animation, CSS 3D, halftone transitions, kinetic type. Blender: product hero with anchors, procedural materials, camera rigs, 3D kinetic type, geometry-node terrain, an HTML sequence as a device screen. Merges: HTML annotations tracked to Blender anchors; an FFmpeg composite of a shot over a rendered background. Also FFmpeg/libass kinetic type and numpy procedural frames. The `motion-approaches` skill explains how to choose and combine them; the harness stages these tools and delivers the relevant skill sections when a request is about advanced motion.
 
 See [native production contracts](../agent/skills/code-first-video/references/native-production.md) for complete compose, browser, device, screen and instrument workflows, plus the source patterns reviewed from Blender Agent Studio, blender-skills, MCP for Blender and Motion AI Kit.
+
+
+## Image cards, arrays and camera flythroughs
+
+Combine designed/generated raster assets with real 3D rather than flattening the whole film into a hosted clip. `shape:"image"` is a UV-mapped plane facing -Y in the Z-up native scene; it respects PNG/WebP alpha, derives aspect from the decoded image, and defaults to unlit color for UI/graphic fidelity. Set `unlit:false` for a card that responds to scene lighting, `opacity` for a fade, or `size` for explicit metres. Native instancing shares geometry/material/texture data and supports line, grid and radial layouts, up to 192 objects per shot. Complex devices/imported models use their authored hierarchy or a bpy/Geometry Nodes workflow instead of this array helper.
+
+```js
+video_shot({action:"plan", dir:"film", name:"cards", seconds:4, shadow:"none",
+  scene:{objects:[{id:"card",shape:"image",path:"public/assets/card.png",
+    position:[-2,0,0],size:[1.2,0.01,1.5],
+    instances:{count:5,layout:"line",spacing:[1,0.6,0],stagger:0.12},
+    motion:[{t:0,position:[-2,0,-1],rotation:[0,0,-8],ease:"backOut"},
+            {t:1.5,position:[-2,0,0],rotation:[0,0,0]}]}]},
+  cameraPath:[{t:0,position:[0,-7,2],target:[0,0,0],lensMm:35},
+              {t:2,position:[1,-5,1],target:[0,0,0],lensMm:42,ease:"inOut"},
+              {t:4,position:[3,-3,1.5],target:[1,1,0],lensMm:50}]})
+// Same request with action:"render" and mode:"preview", then mode:"final" after review.
+```
+
+Object key `ease` describes the incoming segment (`linear`, `inOut`, `in`, `out`, `backOut`). Instance `stagger` delays each copy; the last copy must begin within the shot. Camera path keys start at t=0, with ordered scene-relative times, position, target and optional lens. The worker samples position/target/lens and depth-of-field focus distance into editable Blender keys. Path cameras use the supplied framing rather than automatically fitting the subject: inspect clipping at every critical camera/object gesture. Use detailed licensed models, PBR/HDRI lighting, appropriate bevels and reflections for product heroes; a generic device blockout does not establish commercial finish.
+
+`video_shot action:"plan"` resolves inputs and validates arrays, paths and pixel/sample/pass work without creating scene or render output. Default `maxRenderWork` is 80 billion pixel-samples; resolution, frame count, samples and soft-shadow passes all contribute. This proxy bounds a request, not elapsed render time. Shared geometry reduces scene storage, while render time still depends on lighting, geometry and the machine. Begin with a short low-resolution preview, reuse accepted assets and render independent shots into one film at delivery fps. For more advanced deformation, simulation or procedural geometry, use the guarded `blender_run` data API and preserve the authored camera with `video_shot blend`.
 
 ## Requirements and boundaries
 

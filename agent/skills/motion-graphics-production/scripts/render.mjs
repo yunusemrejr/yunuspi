@@ -51,10 +51,13 @@ try{
     if(Date.now()-started>600000)throw Error('Export exceeded ten-minute bound');
     await page.evaluate(async t=>{
       await window.renderFrame(t);
-      // A resolved author callback only establishes DOM state. CSS 3D/filter
-      // layers commit asynchronously; let their paint reach the compositor
-      // before taking pixels, without advancing the author's absolute clock.
-      void document.body.offsetHeight;
+      // A seek can resolve before Chromium commits composited text/transform
+      // layers. Flush the authored styles and wait for that paint boundary;
+      // never replace the page's individual animation clocks with a new one.
+      const animations=document.getAnimations();
+      await Promise.all(animations.filter(a=>a.pending).map(a=>a.ready));
+      for(const a of animations)if(a.effect?.target instanceof Element)void getComputedStyle(a.effect.target,a.effect.pseudoElement??null).transform;
+      void document.documentElement.getBoundingClientRect();
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     },i/fps);
     await page.screenshot({path:path.join(output,`frame-${String(i).padStart(6,'0')}.png`),timeout:20000,omitBackground:alpha});

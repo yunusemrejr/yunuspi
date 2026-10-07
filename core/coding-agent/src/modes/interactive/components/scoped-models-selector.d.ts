@@ -1,11 +1,16 @@
 import type { Model } from "@yunuspi/ai";
 import { Container, type Focusable, Input } from "@yunuspi/tui";
+import type { MediaModelOption, MediaModelSelections } from "../../../core/media-models.js";
 export interface ModelsConfig {
+    mediaModels?: MediaModelOption[];
+    mediaSelections?: MediaModelSelections;
     allModels: Model<any>[];
     enabledModelIds: string[] | null;
     refreshStatus?: string;
 }
 export interface ModelsCallbacks {
+    onMediaChange?: (selections: MediaModelSelections) => void;
+    onMediaPersist?: (selections: MediaModelSelections) => void;
     /** Called whenever the enabled model set or order changes (session-only, no persist) */
     onChange: (enabledModelIds: string[] | null) => void | Promise<void>;
     /** Called when user wants to persist current selection to settings */
@@ -33,6 +38,8 @@ export declare class ScopedModelsSelectorComponent extends Container implements 
     private isDirty;
     private refreshStatusText?;
     constructor(config: ModelsConfig, callbacks: ModelsCallbacks);
+    setMediaRefreshStatus(message: string): void;
+    updateMediaModels(models: MediaModelOption[]): void;
     updateModels(models: readonly Model<any>[], enabledModelIds?: string[] | null): void;
     setRefreshStatus(message: string, kind: "muted" | "success" | "warning"): void;
     private buildItems;

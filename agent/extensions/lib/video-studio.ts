@@ -1330,6 +1330,25 @@ async function synthRun(dir: string, spec: any, name: string, signal?: AbortSign
   } finally { await fs.rm(specPath, { force: true }); }
 }
 
+/** Standalone local generation reuses the same synthesis script as film audio. */
+export async function audioSynthStandalone(params: any, cwd: string, signal?: AbortSignal) {
+  const seconds = number(params.seconds, params.kind === 'music' ? 15 : .5, .02, 600, 'seconds');
+  if (!['music', 'sfx'].includes(params.kind)) throw Error('kind must be music or sfx');
+  if (params.kind === 'sfx' && !SFX_TYPES.includes(params.sfxType)) throw Error('Local SFX needs sfxType: ' + SFX_TYPES.join(', '));
+  const dir = await studioFolder(params.outputDir, cwd, 'audio');
+  const spec = { kind: params.kind, seconds, brief: typeof params.prompt === "string" ? params.prompt.slice(0, 3000) : undefined, seed: params.seed ?? 7, ...(params.kind === 'music' ? { style: params.style ?? 'focused', bpm: params.bpm } : { type: params.sfxType }) };
+  const specPath = path.join(dir, 'synthesis.json'), output = path.join(dir, 'generated.wav');
+  try {
+    await fs.writeFile(specPath, JSON.stringify(spec));
+    const made = await runGuarded('python3', ['-I', VIDEO_PATHS.synth, specPath, output], { cwd, signal, timeoutMs: 300_000, nice: 10, env: { OMP_NUM_THREADS: '2', OPENBLAS_NUM_THREADS: '2' } });
+    const stats = JSON.parse(made.stdout.trim().split('\n').at(-1) ?? '{}');
+    const info = await probe(output, signal);
+    if (!info.streams?.some((stream: any) => stream.codec_type === "audio")) throw Error("Local synthesis produced no audio stream");
+    await run('ffmpeg', [...FFMPEG_FLAGS, '-v', 'error', '-xerror', ...inputArgs(output, 0), '-f', 'null', '-'], signal);
+    return { artifact: await produced(output), provider: 'local', model: 'procedural', seconds: Number(info.format?.duration), stats, generationCostUsd: 0, decodeVerified: true, note: 'Style, seed and instrument parameters direct local synthesis; the freeform prompt is retained as a brief, not a semantic music model.' };
+  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+}
+
 export async function audioSynth(params: any, cwd: string, signal?: AbortSignal) {
   const dir = await projectDir(params.dir, cwd);
   // A sound named after its type ("whoosh", "impact-2") is the common way to

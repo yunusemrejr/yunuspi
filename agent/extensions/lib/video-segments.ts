@@ -38,7 +38,7 @@ export async function videoFingerprint(dir: string, settings: any, signal?: Abor
       // Shot locks and incomplete replacement sequences are coordination state,
       // not published inputs. They may disappear while a cached shot is read.
       if (path.relative(dir, file) === path.join('public', 'shots') &&
-          (/^[a-z][a-z0-9-]{0,47}\.lock$/.test(name) || /^\.[a-z][a-z0-9-]{0,47}-render-[a-f0-9]{10}$/.test(name))) continue;
+          (/^[a-z0-9][a-z0-9-]{0,47}\.lock$/.test(name) || /^\.[a-z0-9][a-z0-9-]{0,47}-render-[a-f0-9]{10}$/.test(name))) continue;
       await visit(path.join(file, name));
     }
     else if (stat.isFile()) hash.update(path.relative(dir, file)).update('\0').update(await fileDigest(file, signal)).update('\0');

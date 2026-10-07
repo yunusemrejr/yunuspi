@@ -40,3 +40,6 @@ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
 export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
 
 export { waitForChildProcess } from "./utils/child-process.js";
+
+export { MEDIA_KINDS, MEDIA_CATALOG_API, normalizeMediaModels, builtinMediaModels, mediaCatalogJson, fetchMediaModels } from "./core/media-models.js";
+export type { MediaKind, MediaModelSelections, MediaModelOption } from "./core/media-models.js";

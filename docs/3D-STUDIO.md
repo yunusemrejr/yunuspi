@@ -50,3 +50,5 @@ splat_preview({ path: ".pi/splats/run/splat_10000.ply", up: [0, 0, 1] })   // re
 - Blender and Brush processes run through the shared guarded runner (`agent/extensions/lib/guarded-process.ts`): harness directories are read-only, `/dev/dri` is bound for these GPU engines only (other guarded commands keep the minimal `/dev`), the process group is killed on abort or when it exceeds the memory budget, and output tails are bounded.
 - Renders, datasets, splats and exports write under the workspace (`.pi/blender`, `.pi/splats` by default) and never modify the source `.blend`.
 - A successful render or training run is not approval: open the frames, the fidelity sheet or the turntable and judge them, as the skills require.
+
+Native video shots now support alpha image cards, shared arrays, per-key easing, staggered animation and editable camera/target/lens paths. `video_shot action:"plan"` validates render work and source inputs before creating output. See [advanced motion contracts](VIDEO-STUDIO.md#image-cards-arrays-and-camera-flythroughs) for examples and bounds.

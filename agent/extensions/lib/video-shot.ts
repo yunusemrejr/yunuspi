@@ -1,3 +1,4 @@
+import { decodeImage, sniffImage } from "./design-studio.ts";
 /** Blender shots for video projects. A shot is a camera move around one
  * subject (a .blend, an imported model or extruded 3D text), rendered headless
  * as an RGBA image sequence into public/shots/<name>/ with a manifest and the
@@ -16,9 +17,9 @@ import { fileDigest } from './video-segments.ts';
 import { acquireCatalogCacheLock } from './catalog-cache-lock.ts';
 import { contactSheet, freshOut, projectDir, projectWritePath, readSpec } from "./video-studio.ts";
 import type { Progress } from "./guarded-process.ts";
-import { validateShotScene } from './shot-scene.ts';
+import { validateShotScene, validateCameraPath } from './shot-scene.ts';
 
-export const SHOT_RIGS = ["turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene"] as const;
+export const SHOT_RIGS = ["turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene", "path"] as const;
 export const SHOT_LIGHTS = ["softbox", "rim", "top", "overcast", "scene"] as const;
 export const SHOT_MATERIALS = ["keep", "clay", "satin", "metal", "glass", "glow"] as const;
 export const SHOT_SHADOWS = ["none", "soft", "catcher"] as const;
@@ -45,14 +46,22 @@ export function planShot(params: any, spec: any) {
   const mode = params.mode === "final" ? "final" : "preview";
   const projectWidth = Number(spec?.width) || 1920, projectHeight = Number(spec?.height) || 1080;
   const base = mode==='preview'?Math.min(1,1920/projectWidth):1;
-  const scale = number(params.scale,mode==='preview'?.5:1,.1,1,'scale');
-  const width = even(number(params.width,projectWidth*base*scale,64,3840,'width')), height = even(number(params.height,projectHeight*base*scale,64,3840,'height'));
-  const fps = integer(params.fps,mode==='preview'?12:Number(spec?.fps)||30,1,60,'fps');
-  const seconds = number(params.seconds,4,.5,20,'seconds');
+  const scale = number(params.scale,mode==='preview'?.5:1,.05,2,'scale');
+  const width = even(number(params.width,projectWidth*base*scale,16,8192,'width')), height = even(number(params.height,projectHeight*base*scale,16,8192,'height'));
+  const fps = number(params.fps,mode==='preview'?12:Number(spec?.fps)||30,1,120,'fps');
+  const seconds = number(params.seconds,4,.1,20,'seconds');
+  if (params.cameraPath) validateCameraPath(params.cameraPath, seconds);
+  if (params.rig === 'path' && !params.cameraPath) throw Error('rig:path needs cameraPath');
+  if (params.cameraPath && params.rig && params.rig !== 'path') throw Error('cameraPath uses rig:path');
   if (mode === 'final' && fps < (Number(spec?.fps) || 30) && params.stepped !== true) throw Error('Final shots need the film frame rate. Low fps is a draft, not smooth motion; use stepped:true only for intentional stop-motion.');
   const frames = Math.max(2, Math.round(seconds * fps));
   if (frames > MAX_FRAMES) throw new Error(`${frames} frames exceeds the ${MAX_FRAMES}-frame limit of one shot; split longer choreography into shots on the master timeline`);
-  return { mode, width, height, fps, seconds, frames, samples: integer(params.samples,mode==='preview'?16:64,1,1024,'samples') };
+  const samples = integer(params.samples,mode==='preview'?16:64,1,1024,'samples');
+  const passes = (params.shadow ?? (params.scene || params.model ? 'soft' : 'none')) === 'soft' ? 4 : 1;
+  const pixelSamples = width * height * frames * samples * passes;
+  const maxRenderWork = number(params.maxRenderWork, 80_000_000_000, 1_000_000, 1_000_000_000_000, 'maxRenderWork');
+  if (pixelSamples > maxRenderWork) throw Error('Shot exceeds maxRenderWork; preview at reduced resolution/samples or split choreography into shots');
+  return { mode, width, height, fps, seconds, frames, samples, pixelSamples, passes, maxRenderWork, estimate: 'Pixel/sample/pass work proxy, not elapsed time; Cycles, reflections and geometry have additional costs.' };
 }
 
 /** Only native, self-contained inputs can be reused automatically. Imported
@@ -60,7 +69,7 @@ export function planShot(params: any, spec: any) {
 async function shotFingerprint(request: any, source: string, signal?: AbortSignal) {
   if(!['scene','title'].includes(source) || request.scene?.objects?.some((o: any)=>o.shape==='model'))return undefined;
   const {outputDir,save,...settings}=request;
-  const files=[request.environment,request.title?.font,...(request.scene?.objects ?? []).flatMap((o: any)=>[o.font,o.image,...Object.values(o.maps ?? {})])].filter(Boolean).sort();
+  const files=[request.environment,request.title?.font,...(request.scene?.objects ?? []).flatMap((o: any)=>[o.font,o.image,o.path,...Object.values(o.maps ?? {})])].filter(Boolean).sort();
   const hash=createHash('sha256').update('yunuspi-shot-v2').update(JSON.stringify(settings)).update(await fileDigest(BLENDER_WORKER,signal));
   const binary=blenderBinary();if(binary){const stat=await fs.stat(binary);hash.update(JSON.stringify([binary,stat.size,stat.mtimeMs]));}
   for(const file of files)hash.update(file).update(await fileDigest(file,signal));
@@ -149,14 +158,25 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   const model = source === "model" ? await sourcePath(params.model, dir, cwd) : undefined;
   const title = source === "title" ? { text: params.title?.text, font: params.title?.font ? await sourcePath(params.title.font, dir, cwd) : undefined, depth: params.title?.depth, bevel: params.title?.bevel } : undefined;
   const scene = source === 'scene' ? structuredClone(validateShotScene(params.scene, plan.seconds)) : undefined;
+  let imageBytes = 0;
   if (scene) for (const object of scene.objects) {
     if (object.path) object.path = await sourcePath(object.path, dir, cwd);
-    if (object.font) object.font = await sourcePath(object.font, dir, cwd);
     if (object.image) object.image = await sourcePath(object.image, dir, cwd);
+    if (['image','image-plane'].includes(object.shape)) {
+      const imagePath=object.shape==='image'?object.path:object.image;
+      const stat = await fs.stat(imagePath); imageBytes += stat.size;
+      if (stat.size > 20 * 1024 * 1024 || imageBytes > 80 * 1024 * 1024) throw Error('Image cards exceed the 20 MiB per-image or 80 MiB scene texture budget');
+      const bytes = await fs.readFile(imagePath);
+      if (!['png', 'jpeg', 'webp'].includes(sniffImage(bytes) ?? '')) throw Error('Image cards require PNG, JPEG or WebP');
+      await decodeImage(bytes, { maxWidth: 512, maxPixels: 512 * 512 }, signal);
+    }
+    if (object.font) object.font = await sourcePath(object.font, dir, cwd);
     if (object.maps) for (const key of ['diffuse', 'roughness', 'metallic', 'normal']) if (object.maps[key]) object.maps[key] = await sourcePath(object.maps[key], dir, cwd);
   }
   const environment = params.environment ? await sourcePath(params.environment, dir, cwd) : undefined;
   if (title && (typeof title.text !== "string" || !title.text.trim())) throw new Error("title.text is required for a 3D title shot");
+  if (params.action === 'plan') return { source, plan, generationCostUsd: 0, next: 'Review the work estimate; render a small preview before final. plan creates no scene or render output.' };
+  if (params.action !== undefined && params.action !== 'render') throw Error('action must be plan or render');
   const shotDir = projectWritePath(dir, "public", "shots", name);
   // The rigged scene is saved beside the source; never over the source itself.
   const saved = projectWritePath(dir, "blender", blend && path.resolve(blend) === path.resolve(dir, "blender", `${name}.blend`) ? `${name}-shot.blend` : `${name}.blend`);
@@ -165,7 +185,7 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   const staging=path.join(path.dirname(shotDir),`.${name}-render-${randomBytes(5).toString('hex')}`),savedStaging=path.join(path.dirname(saved),`.${name}-${randomBytes(5).toString('hex')}.blend`);
   const request = {
     op: "shot", name, source: source === "blend" ? "blend" : source, model, title, outputDir: staging, save: savedStaging, projection:params.projection,
-    rig: params.rig, fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : source === 'blend' ? undefined : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,
+    rig: params.cameraPath ? 'path' : params.rig, cameraPath: params.cameraPath, fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : source === 'blend' ? undefined : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,
     transparent: params.transparent !== false, palette, material: params.material ?? (source === "title" ? "satin" : "keep"), color: hexOr(params.color), lights: params.lights, lightStrength: params.lightStrength, surface: params.surface,
     scene, environment, environmentStrength: params.environmentStrength,
     shadow: params.shadow, lensMm: params.lensMm, azimuth: params.azimuth, elevation: params.elevation, elevationEnd: params.elevationEnd, degrees: params.degrees, travel: params.travel, ease: params.ease, margin: params.margin, offset: params.offset, fStop: params.fStop, motionBlur: params.motionBlur, anchors: params.anchors,

@@ -1,3 +1,4 @@
+import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.ts";
 /** Closed-loop creative production: one shared direction, rendered QA, and
  * revision-sensitive receipts. Discovered on demand through tool_search;
  * the design-direction protocol and Expert Director critics own the
@@ -315,10 +316,11 @@ export default function artDirection(pi: any) {
 
   // ── image_generate ──
   register("image_generate",
-    "Generative imagery inside the creative loop. status lists the bundled OpenRouter image catalog; refresh:true discovers its current Images API models for transport:images. generate/edit accept an exact model overriding the environment for this call. edit supports path or 1..5 references, inputFidelity on supported models, and validated transparent PNG masks with openai-compatible. GPT Image requests omit unsupported legacy response_format/seed. Format/compression/transparency/quality are explicit. Outputs are decode-verified, registered and returned for review; no cheaper fallback or paid retry is selected automatically.",
+    "Generative imagery inside the creative loop. /models Images sets an independent default. plan checks live capabilities and conservative pricing without generation. model:auto chooses a compatible fixed-price endpoint within maxCostUsd; no paid retry or model fallback. status lists the bundled OpenRouter image catalog; refresh:true discovers its current Images API models for transport:images. generate/edit accept an exact model overriding the environment for this call. edit supports path or 1..5 references, inputFidelity on supported models, and validated transparent PNG masks with openai-compatible. GPT Image requests omit unsupported legacy response_format/seed. Format/compression/transparency/quality are explicit. Outputs are decode-verified, registered and returned for review; no cheaper fallback or paid retry is selected automatically.",
     Type.Object({
-      action: choices(["status", "brief", "generate", "edit"]),
-      model: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Exact model id; overrides PI_IMAGE_MODEL only for this call" })),
+      action: choices(["status", "brief", "plan", "generate", "edit"]),
+      model: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact model id or openrouter/auto; /models Images supplies the default" })),
+      maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 500, description: "Native OpenRouter preflight cap; automatic choice defaults to $0.25 for one image. Unknown token/megapixel costs cannot pass this cap." })),
       refresh: Type.Optional(Type.Boolean({ description: "status: fetch current OpenRouter Images API catalog" })),
       transport: Type.Optional(choices(["chat", "images"], "OpenRouter: existing chat-image route (default), or native Images API")),
       prompt: Type.Optional(Type.String({ maxLength: 4000 })),
@@ -337,20 +339,29 @@ export default function artDirection(pi: any) {
       inputFidelity: Type.Optional(choices(["low", "high"])),
     }),
     async (params, ctx, signal) => {
+      params = selectedMediaParams(params, 'image', ctx.mediaModels);
+      const selectedBackend = params.mediaProvider;
+      const imageBaseEnv = { ...process.env, ...(selectedBackend ? { PI_IMAGE_BACKEND: selectedBackend } : {}), ...(params.model ? { PI_IMAGE_MODEL: params.model } : {}) };
+      if (selectedBackend && selectedBackend !== process.env.PI_IMAGE_BACKEND) {
+        delete imageBaseEnv.PI_IMAGE_API_URL; delete imageBaseEnv.PI_IMAGE_API_KEY;
+      }
+      if (selectedBackend === 'openrouter' && params.model === 'auto' && params.maxCostUsd === undefined) params.maxCostUsd = .25;
       const ownerSession = ctx.sessionManager?.getSessionId?.();
-      const backendName = process.env.PI_IMAGE_BACKEND?.trim().toLowerCase();
-      const providerKey = params.action !== "brief" && (!backendName || backendName === "openrouter") && !process.env.PI_IMAGE_API_KEY && !process.env.OPENROUTER_API_KEY
+      const backendName = imageBaseEnv.PI_IMAGE_BACKEND?.trim().toLowerCase();
+      const providerKey = params.action !== "brief" && (!backendName || backendName === "openrouter") && !imageBaseEnv.PI_IMAGE_API_KEY && !process.env.OPENROUTER_API_KEY
         ? await ctx.modelRegistry?.getApiKeyForProvider?.("openrouter") : undefined;
       signal.throwIfAborted();
-      if (params.action === "status") return { result: await imageBackendStatus(process.env, !!providerKey, { refresh: params.refresh, key: process.env.PI_IMAGE_API_KEY ?? process.env.OPENROUTER_API_KEY ?? providerKey, signal }) };
+      if (params.action === "status") return { result: await imageBackendStatus(imageBaseEnv, !!providerKey, { refresh: params.refresh, key: imageBaseEnv.PI_IMAGE_API_KEY ?? process.env.OPENROUTER_API_KEY ?? providerKey, signal }) };
       const { state } = sessionOf(ctx);
       const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
       if (params.action === "brief") return { result: buildGenerationBrief(direction, params) };
-      const imageEnv = imageBackendEnvironment(process.env, !!providerKey, params.model);
+      if (params.action === 'plan') return { result: await planImageModel({ ...params, model: params.model ?? imageBaseEnv.PI_IMAGE_MODEL ?? 'auto' }, signal) };
+      const imageEnv = imageBackendEnvironment(imageBaseEnv, !!providerKey, params.model);
+      let usageModel = imageEnv.PI_IMAGE_MODEL;
       const usageId = randomUUID();
-      const runtime = { providerKey, onUsage: (usage: unknown, status: string) => {
+      const runtime = { providerKey, onModel: (model: string) => { usageModel = model; }, onUsage: (usage: unknown, status: string) => {
         if (ctx.sessionManager?.getSessionId?.() !== ownerSession) return;
-        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: imageEnv.PI_IMAGE_BACKEND === "openrouter" ? "openrouter" : "openai-compatible", model: imageEnv.PI_IMAGE_MODEL?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
+        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: imageEnv.PI_IMAGE_BACKEND === "openrouter" ? "openrouter" : "openai-compatible", model: usageModel?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
       } };
       if (params.action === "generate") {
         const run = await imageGenerateRun(params, ctx.cwd as string, signal, direction, imageEnv, runtime);

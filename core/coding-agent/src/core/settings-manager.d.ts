@@ -66,7 +66,9 @@ export type PackageSource = string | {
     prompts?: string[];
     themes?: string[];
 };
+import type { MediaModelSelections } from "./media-models.js";
 export interface Settings {
+    mediaModels?: MediaModelSelections;
     lastChangelogVersion?: string;
     defaultProvider?: string;
     defaultModel?: string;
@@ -307,6 +309,9 @@ export declare class SettingsManager {
     setImageAutoResize(enabled: boolean): void;
     getBlockImages(): boolean;
     setBlockImages(blocked: boolean): void;
+    private sessionMediaModels?;
+    getMediaModels(): MediaModelSelections;
+    setMediaModels(selections: MediaModelSelections, persist?: boolean): void;
     getEnabledModels(): string[] | undefined;
     getDefaultTools(): string[] | undefined;
     setEnabledModels(patterns: string[] | undefined): void;

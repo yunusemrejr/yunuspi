@@ -149,6 +149,7 @@ export class ExtensionRunner {
     errorListeners = new Set();
     getModel = () => undefined;
     getScopedModels = () => [];
+    getMediaModels = () => ({});
     isIdleFn = () => true;
     isProjectTrustedFn = () => true;
     getSignalFn = () => undefined;
@@ -197,6 +198,7 @@ export class ExtensionRunner {
         // Context actions (required)
         this.getModel = contextActions.getModel;
         this.getScopedModels = contextActions.getScopedModels;
+        this.getMediaModels = contextActions.getMediaModels ?? (() => ({}));
         this.isIdleFn = contextActions.isIdle;
         this.isProjectTrustedFn = contextActions.isProjectTrusted;
         this.getSignalFn = contextActions.getSignal;
@@ -568,6 +570,10 @@ export class ExtensionRunner {
             get scopedModels() {
                 runner.assertActive();
                 return getScopedModels();
+            },
+            get mediaModels() {
+                runner.assertActive();
+                return { ...runner.getMediaModels() };
             },
             get thinkingLevel() {
                 runner.assertActive();

@@ -798,6 +798,9 @@ def ease_curve(t, kind):
     t = max(0.0, min(1.0, t))
     if kind == "linear":
         return t
+    if kind == "backOut":
+        u = t - 1
+        return 1 + 2.70158 * u ** 3 + 1.70158 * u ** 2
     if kind == "out":
         return 1 - (1 - t) ** 3
     if kind == "in":
@@ -826,7 +829,7 @@ def camera_pose(rig, t, p):
 
 
 LOOPING_RIGS = {"turntable", "drift"}
-RIGS = ("turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene")
+RIGS = ("turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene", "path")
 
 
 def build_shot_scene(spec, seconds, fps, palette):
@@ -836,6 +839,7 @@ def build_shot_scene(spec, seconds, fps, palette):
     from mathutils import Matrix, Vector
     scene = bpy.context.scene
     scene.render.fps = int(round(fps))
+    scene.render.fps_base = scene.render.fps / fps
     scene.frame_start = 1
     scene.frame_end = max(2, int(round(seconds * fps)))
     roots, screens = {}, []
@@ -948,6 +952,42 @@ def build_shot_scene(spec, seconds, fps, palette):
             obj.data.transform(Matrix.Diagonal(Vector((*size, 1))))
             obj.parent = root
             finish(obj, name, mat, bevel if shape == "cylinder" else 0)
+        elif shape == "image":
+            # Generated RGBA plates and browser UI become exact textured cards.
+            # Shared Blender image datablocks keep repeated cards cheap.
+            image = bpy.data.images.load(item["path"], check_existing=True)
+            image.pack()
+            image.colorspace_settings.name = "sRGB"
+            w = size[0]
+            h = size[2] if "size" in item else w * image.size[1] / max(1, image.size[0])
+            mesh = bpy.data.meshes.new(name)
+            mesh.from_pydata([(-w/2, 0, -h/2), (w/2, 0, -h/2), (w/2, 0, h/2), (-w/2, 0, h/2)], [], [(0, 1, 2, 3)])
+            mesh.update()
+            uv = mesh.uv_layers.new(name="UVMap")
+            for loop, coords in zip(uv.data, [(0,0), (1,0), (1,1), (0,1)]):
+                loop.uv = coords
+            nodes, links = mat.node_tree.nodes, mat.node_tree.links
+            nodes.clear()
+            texture = nodes.new("ShaderNodeTexImage")
+            texture.image = image
+            shader = nodes.new("ShaderNodeEmission" if item.get("unlit", True) else "ShaderNodeBsdfPrincipled")
+            links.new(texture.outputs["Color"], shader.inputs["Color" if item.get("unlit", True) else "Base Color"])
+            alpha = nodes.new("ShaderNodeMath")
+            alpha.operation = "MULTIPLY"
+            alpha.inputs[1].default_value = item.get("opacity", 1)
+            links.new(texture.outputs["Alpha"], alpha.inputs[0])
+            transparent = nodes.new("ShaderNodeBsdfTransparent")
+            mix = nodes.new("ShaderNodeMixShader")
+            links.new(alpha.outputs[0], mix.inputs[0])
+            links.new(transparent.outputs[0], mix.inputs[1])
+            links.new(shader.outputs[0], mix.inputs[2])
+            output = nodes.new("ShaderNodeOutputMaterial")
+            links.new(mix.outputs[0], output.inputs["Surface"])
+            if hasattr(mat, "surface_render_method"):
+                mat.surface_render_method = "DITHERED"
+            obj = link(name, mesh)
+            obj.parent = root
+            mesh.materials.append(mat)
         elif shape == "lathe":
             # Radial profile makes bowls, bottles, food props and turned parts;
             # it is a real silhouette, not a pile of unrefined primitives.
@@ -1044,7 +1084,7 @@ def build_shot_scene(spec, seconds, fps, palette):
                 while index+1 < len(keys) and keys[index+1]["t"] <= t:
                     index += 1
                 a, b = keys[index], keys[min(index+1, len(keys)-1)]
-                p = ease_curve((t-a["t"])/max(1e-6, b["t"]-a["t"]), "inOut") if b != a else 0
+                p = ease_curve((t-a["t"])/max(1e-6, b["t"]-a["t"]), a.get("ease", "inOut")) if b != a else 0
                 for field, target in [("position", "location"), ("rotation", "rotation_euler"), ("scale", "scale")]:
                     def value(end):
                         for n in range(end, -1, -1):
@@ -1055,11 +1095,70 @@ def build_shot_scene(spec, seconds, fps, palette):
                     result = [v+(w-v)*p for v, w in zip(va, vb)]
                     if field == "rotation":
                         result = [math.radians(v) for v in result]
+                    if field == "scale":
+                        result = [max(0.0001, v) for v in result]
                     setattr(root, target, result)
                     root.keyframe_insert(target, frame=k+1)
     for item in spec["objects"]:
         if item.get("parent"):
             roots[item["id"]].parent = roots[item["parent"]]
+    def offset_for(instance, i):
+        spacing = instance.get("spacing", [1.5, 0, 0])
+        if instance.get("layout") == "radial":
+            angle = math.radians(instance.get("startAngle", 0) + instance.get("sweep", 360) * i / max(1, instance["count"] if instance.get("sweep", 360) == 360 else instance["count"]-1))
+            radius = instance.get("radius", 2)
+            return (radius * math.cos(angle), radius * math.sin(angle), i * spacing[2])
+        if instance.get("layout") == "grid":
+            columns = instance.get("columns", int(math.ceil(math.sqrt(instance["count"]))))
+            return ((i % columns) * spacing[0], (i // columns) * spacing[1], (i // columns) * spacing[2])
+        return tuple(i * v for v in spacing)
+
+    def copy_tree(original, parent, label):
+        clone = original.copy()  # shares mesh/curve/material/image datablocks
+        scene.collection.objects.link(clone)
+        clone.name = label
+        clone.parent = parent
+        for child in original.children:
+            copy_tree(child, clone, f"{label}-{child.name}")
+        return clone
+
+    def shift_action(obj, delay):
+        data = obj.animation_data
+        if not data or not data.action or delay == 0:
+            return
+        data.action = data.action.copy()
+        slots = list(getattr(data.action, "slots", []))
+        if slots:
+            data.action_slot = slots[0]
+        curves = list(getattr(data.action, "fcurves", []))
+        for layer in getattr(data.action, "layers", []):
+            for strip in layer.strips:
+                for bag in getattr(strip, "channelbags", []):
+                    curves.extend(bag.fcurves)
+        for curve in curves:
+            for point in curve.keyframe_points:
+                point.co.x += delay
+                point.handle_left.x += delay
+                point.handle_right.x += delay
+        for child in obj.children:
+            shift_action(child, delay)
+
+    for item in spec["objects"]:
+        instance = item.get("instances")
+        if not instance:
+            continue
+        original = roots[item["id"]]
+        parent = original.parent
+        for i in range(1, instance["count"]):
+            placement = link(f"{item['id']}-instance-{i}-offset")
+            placement.parent = parent
+            placement.location = offset_for(instance, i)
+            clone = copy_tree(original, placement, f"{item['id']}-instance-{i}-rig")
+            shift_action(clone, i * instance.get("stagger", 0) * fps)
+        placement = link(f"{item['id']}-instance-0-offset")
+        placement.parent = parent
+        placement.location = offset_for(instance, 0)
+        original.parent = placement
     scene.frame_set(1)
     bpy.context.view_layer.update()
     return screens
@@ -1407,7 +1506,7 @@ def op_shot(req):
     base_distance = shot_lens_distance(scene, cam_data, radius, float(req.get("margin", 1.18)))
     # Fit the actual bounding corners in the chosen projection instead of a
     # sphere around them. Thin devices and long text no longer become tiny.
-    if rig != "scene":
+    if rig not in ("scene", "path"):
         hfov = 2*math.atan(cam_data.sensor_width/(2*cam_data.lens))
         vfov = 2*math.atan(math.tan(hfov/2)*render.resolution_y/render.resolution_x)
         corners = [Vector((x,y,z))-center for x in (lo.x,hi.x) for y in (lo.y,hi.y) for z in (lo.z,hi.z)]
@@ -1435,8 +1534,32 @@ def op_shot(req):
     def aim(k):
         if rig == "scene":
             return
-        cam.location, distance = poses[k]
-        look_at(cam, center)
+        target = center
+        if rig == "path":
+            keys = req.get("cameraPath")
+            if not keys or len(keys) < 2:
+                raise RuntimeError("rig:path requires two or more cameraPath keys")
+            t = k / fps
+            index = 0
+            while index+1 < len(keys) and keys[index+1]["t"] <= t:
+                index += 1
+            a, b = keys[index], keys[min(index+1, len(keys)-1)]
+            p = ease_curve((t-a["t"])/max(1e-6, b["t"]-a["t"]), a.get("ease", "inOut")) if b != a else 0
+            cam.location = Vector([v+(w-v)*p for v,w in zip(a["position"], b["position"])])
+            target = Vector([v+(w-v)*p for v,w in zip(a["target"], b["target"])])
+            def lens_at(end):
+                for n in range(end, -1, -1):
+                    if "lensMm" in keys[n]:
+                        return keys[n]["lensMm"]
+                return float(req.get("lensMm") or 60)
+            left, right = lens_at(index), lens_at(min(index+1, len(keys)-1))
+            cam_data.lens = left+(right-left)*p
+            distance = (target-cam.location).length
+            if distance < .001:
+                raise RuntimeError("cameraPath intersects its look target")
+        else:
+            cam.location, distance = poses[k]
+        look_at(cam, target)
         if cam_data.dof.use_dof:
             cam_data.dof.focus_distance = distance
 
@@ -1496,6 +1619,10 @@ def op_shot(req):
                     aim(k)
                     cam.keyframe_insert("location", frame=blend_frame(k))
                     cam.keyframe_insert("rotation_euler", frame=blend_frame(k))
+                    if rig == "path":
+                        cam_data.keyframe_insert("lens", frame=blend_frame(k))
+                    if cam_data.dof.use_dof:
+                        cam_data.keyframe_insert("dof.focus_distance", frame=blend_frame(k))
         finally:
             edit.keyframe_new_interpolation_type = previous_interpolation
         os.makedirs(os.path.dirname(req["save"]) or ".", exist_ok=True)
@@ -1508,6 +1635,8 @@ def op_shot(req):
         "engine": summary["engine"], "samples": summary.get("samples"), "blender": bpy.app.version_string, "subject": {"center": [round(c, 4) for c in center], "radius": round(radius, 4)},
         "secondsPerFrame": round((time.time() - started) / max(1, len(files)), 2),
         "framing": framing, "screenAnchors": native_screens,
+        "nativeInstances": sum(item.get("instances", {}).get("count", 1) for item in (req.get("scene") or {}).get("objects", [])),
+        "cameraPath": req.get("cameraPath"),
     }
     with open(os.path.join(out_dir, "shot.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=1)

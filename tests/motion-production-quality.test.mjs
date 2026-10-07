@@ -25,6 +25,7 @@ test('delivery identity ignores transient shot locks and staging but binds publi
   await fs.writeFile(frame,'published pixels');
   const before=await videoFingerprint(dir,{fps:30});
   await fs.writeFile(path.join(folder,'hero.lock'),'process coordination');
+  await fs.writeFile(path.join(folder,'01-title.lock'),'numeric shot coordination');
   const staging=path.join(folder,'.hero-render-0123456789');await fs.mkdir(staging);
   await fs.writeFile(path.join(staging,'frame-0001.png'),'unfinished replacement');
   assert.equal(await videoFingerprint(dir,{fps:30}),before);
@@ -127,7 +128,7 @@ test('shot cache verifies all frame, anchor and editable bytes even with retaine
 
 test('final 3D plans retain 4K pixels, validate budgets and distinguish planar cameras',()=>{
   assert.equal(shots.planShot({mode:'final',seconds:1},{width:3840,height:2160,fps:30}).width,3840);
-  for(const p of [{fps:NaN},{width:-1},{seconds:-1},{samples:0},{fps:29.97},{projection:'orthographic',rig:'push-in'}])assert.throws(()=>shots.planShot(p,{}));
+  for(const p of [{fps:NaN},{width:-1},{seconds:-1},{samples:0},{fps:.5},{projection:'orthographic',rig:'push-in'}])assert.throws(()=>shots.planShot(p,{}));
   assert.equal(shots.planShot({projection:'orthographic',rig:'static'},{}).mode,'preview');
 });
 

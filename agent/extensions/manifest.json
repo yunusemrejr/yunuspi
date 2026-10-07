@@ -245,6 +245,8 @@
     "video-looks.ts",
     "video-publish.ts",
     "video-shot.ts",
+    "video-generate.ts",
+    "media-model-routing.ts",
     "video-compose.ts",
     "shot-scene.ts",
     "video-studio.ts",

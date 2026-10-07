@@ -1,4 +1,5 @@
 import { Container, fuzzyFilter, getKeybindings, Input, Key, matchesKey, Spacer, Text, } from "@yunuspi/tui";
+import { builtinMediaModels, normalizeMediaModels } from "../../../core/media-models.js";
 import { getModelSearchText } from "../model-search.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
@@ -82,9 +83,20 @@ export class ScopedModelsSelectorComponent extends Container {
     maxVisible = 8;
     isDirty = false;
     refreshStatusText;
+    activeTab = 0;
+    tabs = ["LLM", "Images", "Video", "Audio"];
+    tabText;
+    mediaModels = builtinMediaModels();
+    mediaSelections = {};
+    filteredMedia = [];
+    mediaIndex = 0;
+    mediaDirty = false;
+    mediaStatus;
     constructor(config, callbacks) {
         super();
         this.callbacks = callbacks;
+        this.mediaSelections = normalizeMediaModels(config.mediaSelections);
+        this.mediaModels = config.mediaModels ?? builtinMediaModels();
         for (const model of config.allModels) {
             const fullId = `${model.provider}/${model.id}`;
             this.modelsById.set(fullId, model);
@@ -97,6 +109,8 @@ export class ScopedModelsSelectorComponent extends Container {
         this.addChild(new Spacer(1));
         this.addChild(new Text(theme.fg("accent", theme.bold("Model Configuration")), 0, 0));
         this.addChild(new Text(theme.fg("muted", `Session-only. ${keyDisplayText("app.models.save")} to save to settings.`), 0, 0));
+        this.tabText = new Text(this.getTabText(), 0, 0);
+        this.addChild(this.tabText);
         this.addChild(new Spacer(1));
         // Search input
         this.searchInput = new Input();
@@ -115,6 +129,27 @@ export class ScopedModelsSelectorComponent extends Container {
         this.addChild(this.footerText);
         this.addChild(new DynamicBorder());
         this.updateList();
+    }
+    getTabText() {
+        return this.tabs.map((name, i) => i === this.activeTab ? theme.fg("accent", theme.bold(`[${name}]`)) : theme.fg("muted", name)).join("  ") + theme.fg("dim", "  Tab / Shift+Tab");
+    }
+    setMediaRefreshStatus(message) {
+        this.mediaStatus = message;
+        if (this.activeTab > 0) this.updateList();
+    }
+    updateMediaModels(models) {
+        this.mediaModels = models;
+        this.refresh();
+    }
+    mediaItems() {
+        const kinds = this.activeTab === 1 ? ["image"] : this.activeTab === 2 ? ["video"] : ["speech", "music", "sfx"];
+        const rows = this.mediaModels.filter(row => kinds.includes(row.kind));
+        for (const kind of kinds) {
+            const id = this.mediaSelections[kind];
+            if (id && !rows.some(row => row.kind === kind && row.id === id)) rows.push({ kind, id, name: id, description: "Selected route is outside this catalog; generation still requires backend configuration and supported capabilities.", source: "configured" });
+        }
+        const query = this.searchInput.getValue();
+        return query ? fuzzyFilter(rows, query, row => `${row.kind} ${row.id} ${row.name} ${row.description}`) : rows;
     }
     updateModels(models, enabledModelIds) {
         const selectedId = this.filteredItems[this.selectedIndex]?.fullId;
@@ -145,6 +180,7 @@ export class ScopedModelsSelectorComponent extends Container {
         }));
     }
     getFooterText() {
+        if (this.activeTab > 0) return theme.fg("dim", `  ${keyDisplayText("tui.select.confirm")} select · ${keyDisplayText("app.models.save")} save · Esc close · media tools`) + (this.mediaDirty ? theme.fg("warning", " (unsaved)") : "");
         const enabledCount = this.enabledIds?.filter((id) => this.modelsById.has(id)).length ?? this.allIds.length;
         const unavailableCount = this.enabledIds?.filter((id) => !this.modelsById.has(id)).length ?? 0;
         const allEnabled = this.enabledIds === null;
@@ -165,6 +201,13 @@ export class ScopedModelsSelectorComponent extends Container {
             : theme.fg("dim", `  ${parts.join(" · ")}`);
     }
     refresh() {
+        if (this.activeTab > 0) {
+            this.filteredMedia = this.mediaItems();
+            this.mediaIndex = Math.min(this.mediaIndex, Math.max(0, this.filteredMedia.length - 1));
+            this.updateList();
+            this.footerText.setText(this.getFooterText());
+            return;
+        }
         const query = this.searchInput.getValue();
         const items = this.buildItems();
         this.filteredItems = query
@@ -181,6 +224,33 @@ export class ScopedModelsSelectorComponent extends Container {
     }
     updateList() {
         this.listContainer.clear();
+        if (this.activeTab > 0) {
+            this.filteredMedia = this.mediaItems();
+            const start = Math.max(0, Math.min(this.mediaIndex - 4, this.filteredMedia.length - this.maxVisible));
+            for (let i = start; i < Math.min(start + this.maxVisible, this.filteredMedia.length); i++) {
+                const row = this.filteredMedia[i];
+                const prefix = i === this.mediaIndex ? theme.fg("accent", "→ ") : "  ";
+                const chosen = this.mediaSelections[row.kind] === row.id ? theme.fg("accent", "✓ ") : "  ";
+                const name = i === this.mediaIndex ? theme.fg("accent", row.name) : row.name;
+                this.listContainer.addChild(new Text(`${prefix}${chosen}${name}` + theme.fg("muted", ` [${row.kind}] ${row.id}`), 0, 0));
+            }
+            const row = this.filteredMedia[this.mediaIndex];
+            this.listContainer.addChild(new Spacer(1));
+            if (row) {
+                this.listContainer.addChild(new Text(theme.fg("muted", `  ${row.description.slice(0, 300)}`), 0, 0));
+                const caps = row.capabilities;
+                if (caps) {
+                    const parameters = caps.supported_parameters ?? {};
+                    const details = row.kind === 'image'
+                        ? [parameters.input_references?.max ? `up to ${parameters.input_references.max} references` : 'text prompt', parameters.background?.values?.includes('transparent') ? 'transparent output' : '', parameters.resolution?.values?.join('/'), parameters.aspect_ratio?.values?.slice(0, 8).join(' ')]
+                        : [caps.supported_durations?.length ? `${Math.min(...caps.supported_durations)}–${Math.max(...caps.supported_durations)} seconds` : '', caps.supported_resolutions?.join('/'), caps.supported_aspect_ratios?.join(' '), caps.supported_frame_images?.includes('last_frame') ? 'first + last frames' : caps.supported_frame_images?.includes('first_frame') ? 'first frame' : 'text prompt'];
+                    this.listContainer.addChild(new Text(theme.fg("dim", `  ${details.filter(Boolean).join(' · ')} · price checked in generation plan`), 0, 0));
+                }
+                this.listContainer.addChild(new Text(theme.fg("dim", `  ${this.mediaIndex + 1}/${this.filteredMedia.length} · ${row.source} · ${row.id.startsWith("local/") ? "local dependencies required" : "provider credentials required"}`), 0, 0));
+            } else this.listContainer.addChild(new Text(theme.fg("muted", "  No matching media models; catalogs refresh when this page opens."), 0, 0));
+            if (this.mediaStatus) this.listContainer.addChild(new Text(theme.fg("muted", `  ${this.mediaStatus}`), 0, 0));
+            return;
+        }
         if (this.filteredItems.length === 0) {
             this.listContainer.addChild(new Text(theme.fg("muted", "  No matching models"), 0, 0));
             return;
@@ -210,6 +280,32 @@ export class ScopedModelsSelectorComponent extends Container {
     }
     handleInput(data) {
         const kb = getKeybindings();
+        if (matchesKey(data, Key.tab) || matchesKey(data, Key.shift("tab"))) {
+            const delta = matchesKey(data, Key.shift("tab")) ? -1 : 1;
+            this.activeTab = (this.activeTab + delta + this.tabs.length) % this.tabs.length;
+            this.searchInput.setValue(""); this.mediaIndex = 0;
+            this.tabText.setText(this.getTabText()); this.refresh(); return;
+        }
+        if (this.activeTab > 0) {
+            if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+                if (this.filteredMedia.length) this.mediaIndex = (this.mediaIndex + (kb.matches(data, "tui.select.up") ? -1 : 1) + this.filteredMedia.length) % this.filteredMedia.length;
+                this.updateList(); return;
+            }
+            if (kb.matches(data, "tui.select.confirm")) {
+                const row = this.filteredMedia[this.mediaIndex];
+                if (row) { this.mediaSelections[row.kind] = row.id; this.mediaDirty = true; this.callbacks.onMediaChange?.({ ...this.mediaSelections }); this.refresh(); }
+                return;
+            }
+            if (kb.matches(data, "app.models.save")) {
+                this.callbacks.onMediaPersist?.({ ...this.mediaSelections }); this.mediaDirty = false; this.footerText.setText(this.getFooterText()); return;
+            }
+            if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+                if (matchesKey(data, Key.ctrl("c")) && this.searchInput.getValue()) { this.searchInput.setValue(""); this.refresh(); }
+                else this.callbacks.onCancel();
+                return;
+            }
+            this.searchInput.handleInput(data); this.mediaIndex = 0; this.refresh(); return;
+        }
         // Navigation
         if (kb.matches(data, "tui.select.up")) {
             if (this.filteredItems.length === 0)

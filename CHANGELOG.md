@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.27.0 — 2026-10-07
+## 0.28.0 — 2026-10-07
 
 **Motion and art share a complete production brief.** Video projects retain the focal subject, visual treatment, hierarchy and references from creative_direct. Generated backplates, cutouts and textures can be imported with source lineage, combined with native layers or RGBA Blender image-plane cards, and packed into editable scenes. A new original atmospheric architecture example demonstrates authored geometry/materials/lights and generated atmosphere. Tools and hooks stage the mixed workflow while retaining exact model choices.
 
@@ -10,7 +10,15 @@
 
 **Blender work preserves pixels and prior results.** Final plans retain 4K resolution. Self-contained native shots reuse only content-verified frames, anchors and editable sources; imported dependency graphs are rendered afresh. Locks and staged two-file publication preserve previous shots when replacement fails or is cancelled. A cache hit still needs visual review. These changes improve capability and verification, without promising flawless design from every model. See [video studio](docs/VIDEO-STUDIO.md).
 
-**Terminal refinements from the current main branch.**
+## 0.27.0 — 2026-10-07
+
+**Media models are independent choices in `/models`.** Images, Video and Audio tabs select image, clip, speech, music and SFX routes without changing the language model, thinking or cycling scope. Public image/video catalogs refresh lazily with bounded reads. Session choices persist only on Ctrl+S; local Blender/Piper/procedural routes and selected ElevenLabs routes remain available.
+
+**Hosted generation has concrete preflight and recovery.** Image plans filter live reference/alpha/aspect capabilities and conservative fixed prices; native OpenRouter image requests use the dedicated `/images` endpoint and pin the quoted provider. Video plans use duration/resolution/frame capabilities and recognized prices; one paid submission writes a durable content-keyed receipt, status/download resume without paid retry, and downloaded clips retain usage, hashes and decode evidence. Estimates are not provider spending limits. Unknown pricing remains unknown.
+
+**Advanced native motion uses editable contracts.** Alpha image cards combine raster design with 3D. Shared line/grid/radial instances, staggered transform keys, per-key easing and camera/target/lens paths support coordinated reveals and flythroughs. Plan-only shots validate source inputs and pixel/sample/pass work without creating output. Existing device screens, real browser takes, PBR/HDRI and authored scenes stay on one master timeline. Local music/SFX also works outside a film project. HTML exports flush sought styles at a paint boundary so repeated composited text frames are deterministic.
+
+## Unreleased
 
 - Compact terminal footer with consistent KPI labels, a dedicated model/effort row, prioritized status previews and expandable accounting/helper details through the existing tool-expansion shortcut.
 - Shared scrollable `/metrics`, `/cost` and `/self` reports with section headings, readable diagnostic fields, keyboard navigation and stable resize anchors.

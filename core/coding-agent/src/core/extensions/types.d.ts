@@ -226,6 +226,8 @@ export interface ExtensionContext {
      *  the `/scoped-models` command shows. Empty when no scoping is
      *  configured (all available models are usable). Read-only snapshot. */
     scopedModels: readonly ScopedModel[];
+    /** Independent image, video, speech, music and SFX choices from /models. */
+    readonly mediaModels: import("../media-models.js").MediaModelSelections;
     /** Current thinking level, when provided by the session runtime. */
     thinkingLevel?: ThinkingLevel;
     /** Whether the agent is idle (not streaming) */
@@ -1305,6 +1307,7 @@ export interface ExtensionActions {
 export interface ExtensionContextActions {
     getModel: () => Model<any> | undefined;
     getScopedModels: () => readonly ScopedModel[];
+    getMediaModels?: () => import("../media-models.js").MediaModelSelections;
     isIdle: () => boolean;
     isProjectTrusted: () => boolean;
     getSignal: () => AbortSignal | undefined;

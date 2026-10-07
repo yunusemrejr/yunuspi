@@ -43,7 +43,7 @@ jobs:
       - name: Install execution isolation prerequisites
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bubblewrap python3 apparmor ffmpeg xvfb xdotool x11-apps x11-utils libfluidsynth3 timgm6mb-soundfont
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bubblewrap python3 python3-numpy apparmor ffmpeg xvfb xdotool x11-apps x11-utils libfluidsynth3 timgm6mb-soundfont
           sudo apparmor_parser -r config/bwrap.apparmor
       - name: Start disposable sandbox resource manager
         run: |
