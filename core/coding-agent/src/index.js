@@ -52,3 +52,5 @@ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
 export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
 
 export { waitForChildProcess } from "./utils/child-process.js";
+
+export { MEDIA_KINDS, MEDIA_CATALOG_API, normalizeMediaModels, builtinMediaModels, mediaCatalogJson, fetchMediaModels } from "./core/media-models.js";

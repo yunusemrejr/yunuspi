@@ -2512,7 +2512,7 @@
     {
       "id": "video-studio",
       "group": "web_media",
-      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, local Piper narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.",
+      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.",
       "entrypoints": [
         "video_project",
         "video_render",
@@ -2520,7 +2520,11 @@
         "motion_examples",
         "video_qa",
         "narration_tts",
-        "audio_synth"
+        "audio_synth",
+        "video_generate",
+        "video_browser",
+        "image_generate",
+        "audio_generate"
       ],
       "tools": [
         "video_project",
@@ -2534,7 +2538,13 @@
         "media_pipeline",
         "video_frames",
         "media_info",
-        "audio_analyze"
+        "audio_analyze",
+        "video_generate",
+        "video_browser",
+        "image_generate",
+        "audio_generate",
+        "narration_align",
+        "media_sync"
       ],
       "options": [
         {
@@ -2567,6 +2577,14 @@
           "summary": "derive (default) builds the look from the subject, suggest lists curated looks; variation and accent re-roll or anchor it."
         },
         {
+          "name": "model|maxCostUsd",
+          "summary": "Media tool override; /models preferences stay independent of the LLM. Plans reject unknown pricing units and incompatible capabilities. Quotes are estimates, not provider spending limits."
+        },
+        {
+          "name": "cameraPath|scene.objects.instances",
+          "summary": "Editable camera target/lens keys and shared line/grid/radial instances with bounded staggering; video_shot action:plan creates no output."
+        },
+        {
           "name": "rig|lights|material|shadow|anchors",
           "summary": "video_shot: Blender camera move, lighting, material, ground shadow and named 3D anchors for pinned annotations."
         },
@@ -2594,6 +2612,10 @@
         "agent/extensions/lib/video-looks.ts",
         "agent/extensions/lib/video-derive.ts",
         "agent/extensions/lib/video-shot.ts",
+        "agent/extensions/lib/video-generate.ts",
+        "agent/extensions/lib/media-model-routing.ts",
+        "core/coding-agent/src/core/media-models.js",
+        "core/coding-agent/src/modes/interactive/components/scoped-models-selector.js",
         "agent/extensions/lib/motion-library.ts",
         "agent/scripts/video-render.mjs",
         "agent/skills/procedural-audio/scripts/synth.py",
@@ -3931,7 +3953,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 271,
+        "line": 272,
         "kind": "factory"
       },
       {
@@ -3949,7 +3971,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 112,
+        "line": 131,
         "kind": "factory"
       },
       {
@@ -3961,7 +3983,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 118,
+        "line": 143,
         "kind": "factory"
       },
       {
@@ -4112,13 +4134,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 364,
+        "line": 375,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 127,
+        "line": 128,
         "kind": "factory"
       },
       {
@@ -4252,7 +4274,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 317,
+        "line": 318,
         "kind": "factory"
       },
       {
@@ -4312,7 +4334,7 @@
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 114,
+        "line": 139,
         "kind": "factory"
       },
       {
@@ -4372,13 +4394,13 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 130,
+        "line": 155,
         "kind": "factory"
       },
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 216,
+        "line": 217,
         "kind": "factory"
       },
       {
@@ -4390,13 +4412,13 @@
       {
         "name": "narration_align",
         "source": "agent/extensions/video-studio.ts",
-        "line": 110,
+        "line": 129,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 106,
+        "line": 125,
         "kind": "factory"
       },
       {
@@ -4631,13 +4653,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 241,
+        "line": 242,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 236,
+        "line": 237,
         "kind": "factory"
       },
       {
@@ -4685,7 +4707,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 204,
+        "line": 205,
         "kind": "factory"
       },
       {
@@ -4697,13 +4719,13 @@
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 100,
+        "line": 119,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 116,
+        "line": 141,
         "kind": "factory"
       },
       {
@@ -4719,27 +4741,33 @@
         "kind": "factory"
       },
       {
+        "name": "video_generate",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 63,
+        "kind": "factory"
+      },
+      {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 49,
+        "line": 66,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 96,
+        "line": 115,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 92,
+        "line": 111,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 71,
+        "line": 88,
         "kind": "factory"
       },
       {
@@ -4751,7 +4779,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 168,
+        "line": 169,
         "kind": "factory"
       },
       {
@@ -5233,7 +5261,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          95
+          96
         ],
         "knownNames": [
           "asset_register",
@@ -5473,7 +5501,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          29
+          32
         ],
         "knownNames": [
           "audio_generate",
@@ -5484,6 +5512,7 @@
           "narration_tts",
           "video_assets",
           "video_browser",
+          "video_generate",
           "video_project",
           "video_qa",
           "video_render",
@@ -5492,11 +5521,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 739,
+      "sourceFiles": 741,
       "registrationSites": 90,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 152,
-      "uniqueStableTools": 151,
+      "stableRegistrationRows": 153,
+      "uniqueStableTools": 152,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -6090,6 +6119,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/media-model-routing.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/media-pipeline.ts",
         "exists": true
       },
@@ -6539,6 +6572,10 @@
       },
       {
         "path": "agent/extensions/lib/video-derive.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-generate.ts",
         "exists": true
       },
       {

@@ -36,7 +36,7 @@ Native layer and screen `startFrom` are **seconds**. Legacy Remotion `Clip start
 
 ## Editable 3D that belongs to the film
 
-A native shot builds authored forms without improvising a bpy script:
+A native shot builds authored forms without improvising a bpy script. For mixed graphic/3D shots, image planes retain raster alpha, instances share geometry and stagger motion, and cameraPath keys author flythroughs with target/lens changes. Run action:"plan" to validate references and render work before a short preview. See [image-card and camera contracts](../../../public-template/docs/VIDEO-STUDIO.md#image-cards-arrays-and-camera-flythroughs).
 
 ```json
 {"dir":"film","name":"device","scene":{"objects":[{"id":"laptop","shape":"laptop","color":"#b6bdc7","motion":[{"t":0,"rotation":[0,0,-12]},{"t":4,"rotation":[0,0,4]}]}]},"rig":"static","azimuth":6,"elevation":9,"shadow":"none","seconds":4,"mode":"preview"}

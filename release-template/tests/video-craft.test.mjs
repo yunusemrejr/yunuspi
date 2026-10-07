@@ -74,7 +74,7 @@ test("a shot plan is cheap as a preview, project-sized as a final, and bounded",
   assert.deepEqual([final.width, final.height, final.fps, final.samples], [1920, 1080, 30, 64]);
   assert.equal(preview.frames, 48);
   assert.equal(shotLib.planShot({ seconds: 3 }, { width: 1080, height: 1920, fps: 30 }).height % 2, 0);
-  assert.throws(() => shotLib.planShot({ seconds: 30, mode: "final" }, spec), /600-frame limit/);
+  assert.throws(() => shotLib.planShot({ seconds: 20, fps: 60, mode: "final" }, spec), /600-frame limit/);
   assert.deepEqual(shotLib.SHOT_RIGS.slice(0, 3), ["turntable", "orbit", "push-in"]);
 });
 

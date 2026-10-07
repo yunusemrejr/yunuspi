@@ -114,10 +114,10 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_understand', 'image_convert', 'image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'video_browser', 'video_generate', 'image_generate', 'audio_generate'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render', 'image_generate', 'video_browser'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
-  { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export'] },
+  { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'video_shot'] },
   { skill: 'gaussian-splatting', tools: ['splat_setup', 'splat_train', 'splat_preview', 'blender_export', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'spreadsheet-authoring', tools: ['office_doc', 'deliverable_check'] },

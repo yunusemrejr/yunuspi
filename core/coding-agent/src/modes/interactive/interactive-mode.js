@@ -1,3 +1,4 @@
+import { builtinMediaModels, fetchMediaModels } from "../../core/media-models.js";
 /**
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
@@ -4333,9 +4334,16 @@ export class InteractiveMode {
             }, 15_000);
             const selector = new ScopedModelsSelectorComponent({
                 allModels: availableModels,
+                mediaSelections: this.settingsManager.getMediaModels(),
+                mediaModels: builtinMediaModels(),
                 enabledModelIds: currentEnabledIds,
                 refreshStatus: "Refreshing model catalogs…",
             }, {
+                onMediaChange: (selections) => this.settingsManager.setMediaModels(selections),
+                onMediaPersist: (selections) => {
+                    this.settingsManager.setMediaModels(selections, true);
+                    this.showStatus("Media model choices saved to settings");
+                },
                 onChange: (enabledIds) => {
                     selectionChanged = true;
                     updateSessionModels(enabledIds);
@@ -4353,7 +4361,13 @@ export class InteractiveMode {
                     this.ui.requestRender();
                 },
             });
-            void refreshModelCatalogs(this.session.modelRuntime, controller.signal)
+            const mediaRefresh = process.env.PI_OFFLINE ? Promise.resolve() : Promise.allSettled([fetchMediaModels("image", { signal: controller.signal }), fetchMediaModels("video", { signal: controller.signal })]).then(results => {
+                if (disposed) return;
+                selector.updateMediaModels([...builtinMediaModels(), ...results.flatMap(result => result.status === "fulfilled" ? result.value : [])]);
+                selector.setMediaRefreshStatus(results.some(result => result.status === "rejected") ? "Some media catalogs could not refresh; showing local and configured choices." : "Media catalogs refreshed. Catalog presence does not verify generation.");
+                this.ui.requestRender();
+            });
+            const llmRefresh = refreshModelCatalogs(this.session.modelRuntime, controller.signal)
                 .then((result) => {
                 if (disposed)
                     return;
@@ -4386,8 +4400,8 @@ export class InteractiveMode {
                     ? "Model refresh timed out; showing cached models."
                     : `Could not refresh model catalogs: ${error instanceof Error ? error.message : String(error)}`, "warning");
                 this.ui.requestRender();
-            })
-                .finally(() => clearTimeout(timeout));
+            });
+            void Promise.allSettled([llmRefresh, mediaRefresh]).finally(() => clearTimeout(timeout));
             return {
                 component: selector,
                 focus: selector,

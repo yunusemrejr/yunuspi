@@ -2286,6 +2286,7 @@ export class AgentSession {
         }, {
             getModel: () => this.model,
             getScopedModels: () => this._scopedModels,
+            getMediaModels: () => this.settingsManager.getMediaModels(),
             isIdle: () => this.isIdle,
             isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
             getSignal: () => this.agent.signal,

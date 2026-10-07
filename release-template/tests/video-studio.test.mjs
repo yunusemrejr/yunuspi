@@ -292,7 +292,7 @@ test("video production tools stay lazily discovered with complete runtime suppor
   const tools = [];
   const extension = await import(pathToFileURL(path.join(agent, "extensions/video-studio.ts")).href);
   extension.default({ registerTool: (tool) => tools.push(tool) });
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['audio_generate', "audio_synth", 'media_sync', "motion_examples", 'narration_align', "narration_tts", "video_assets", 'video_browser', "video_project", "video_qa", "video_render", "video_shot"]);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['audio_generate', "audio_synth", 'media_sync', "motion_examples", 'narration_align', "narration_tts", "video_assets", 'video_browser', "video_project", "video_qa", "video_render", "video_shot", "video_generate"].sort());
   const { CORE_TOOLS } = await import(pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts")).href);
   for (const tool of tools) {
     assert.equal(CORE_TOOLS.has(tool.name), false, `${tool.name} stays off-wire until tool_search enables it`);

@@ -1,3 +1,4 @@
+import { normalizeMediaModels } from "./media-models.js";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -911,6 +912,18 @@ export class SettingsManager {
         this.globalSettings.images.blockImages = blocked;
         this.markModified("images", "blockImages");
         this.save();
+    }
+    sessionMediaModels;
+    getMediaModels() {
+        return normalizeMediaModels(this.sessionMediaModels ?? this.settings.mediaModels);
+    }
+    setMediaModels(selections, persist = false) {
+        this.sessionMediaModels = normalizeMediaModels(selections);
+        if (persist) {
+            this.globalSettings.mediaModels = { ...this.sessionMediaModels };
+            this.markModified("mediaModels");
+            this.save();
+        }
     }
     getEnabledModels() {
         return this.settings.enabledModels;
