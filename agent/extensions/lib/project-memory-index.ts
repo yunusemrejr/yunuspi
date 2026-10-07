@@ -174,9 +174,10 @@ export function chunkCode(text: string, opts: { windowLines?: number; overlapLin
     }
     if (body.trim().length >= 12) chunks.push({ title: "", text: body, start: start + 1, end });
     if (end >= lines.length) break;
-    // Dense lines can shrink a window below its configured overlap. Keep
-    // overlap where possible, but every iteration must consume a new line.
-    start = Math.max(start + 1, end - overlap);
+    // Dense lines can shrink a window below its configured overlap. Apply
+    // the same half-window bound to the fitted span so scans advance without
+    // spending the insertion budget on mostly repeated source fragments.
+    start = end - Math.min(overlap, Math.floor((end - start) / 2));
   }
   return chunks;
 }

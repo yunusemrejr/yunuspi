@@ -22,7 +22,9 @@ test('dense source lines finish chunking and preserve every line after shrinking
   });
   assert.equal(run.error, undefined, `chunking failed to settle: ${run.error?.code}`);
   assert.equal(run.status, 0, run.stderr);
-  assert.equal(JSON.parse(run.stdout).covered, 100);
+  const result = JSON.parse(run.stdout);
+  assert.equal(result.covered, 100);
+  assert.ok(result.chunks <= 64, 'dense source must fit the existing file insertion budget without mostly repeated fragments');
 });
 
 test('code windows advance, retain exact line spans, and cover varied dense sources', () => {
@@ -33,12 +35,14 @@ test('code windows advance, retain exact line spans, and cover varied dense sour
     const windowLines = 1 + next() % 90, overlapLines = next() % 60, maxChars = 1 + next() % 8000;
     const chunks = chunkCode(lines.join('\n'), {windowLines, overlapLines, maxChars});
     const covered = new Set();
-    let previous = 0;
+    let previous = 0, prior;
     for (const chunk of chunks) {
       assert.ok(chunk.start > previous && chunk.end >= chunk.start && chunk.end <= lines.length);
+      if (prior) assert.ok(prior.end - chunk.start + 1 <= Math.floor((prior.end - prior.start + 1) / 2), 'overlap must fit the actual preceding window');
       assert.equal(chunk.text, lines.slice(chunk.start - 1, chunk.end).join('\n'));
       for (let line = chunk.start; line <= chunk.end; line++) covered.add(line);
       previous = chunk.start;
+      prior = chunk;
     }
     assert.equal(covered.size, lines.length, `source ${i} lost lines`);
   }
