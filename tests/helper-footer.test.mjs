@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FooterComponent } from '../core/coding-agent/dist/modes/interactive/components/footer.js';
 import { initTheme } from '../core/coding-agent/dist/modes/interactive/theme/theme.js';
-import { visibleWidth } from '@yunuspi/tui';
+import { stripTerminalSequences, visibleWidth } from '@yunuspi/tui';
 import { AgentSession } from '@yunuspi/coding-agent';
 import { registerToolDiscovery } from '../agent/extensions/lib/tool-discovery.ts';
 import { collectSessionCost } from '../agent/extensions/lib/session-cost.ts';
@@ -53,7 +53,9 @@ test('source and built terminal footer agree with receipt collectors for retries
   const session={state:{model:{id:'fixture',provider:'fixture',contextWindow:10000}},getContextUsage:()=>({percent:0,contextWindow:10000}),modelRuntime:{isUsingSubscription:()=>false},sessionManager:{getEntries:()=>entries,getBranch:()=>entries,getCwd:()=>'/workspace/fixture',getSessionName:()=>undefined,getSessionId:()=> 'fixture'}};
   const data={getGitBranch:()=>undefined,getAvailableProviderCount:()=>1,getExtensionStatuses:()=>new Map()};
   for(const Component of [source.FooterComponent,FooterComponent]){
-   const rendered=new Component(session,data).render(240).join('\n');
+   const footer=new Component(session,data);
+   footer.setExpanded(true);
+   const rendered=footer.render(240).join('\n');
    assert.ok(rendered.includes(`${collectSessionCost(entries).formatted} total`));
    for(const metric of collectSessionMetrics(entries).footer)assert.ok(rendered.includes(metric),metric);
    if(entries===auxiliaryCase){for(const text of ['↑100','↓20','R80','Agents 0 (0 active)'])assert.ok(rendered.includes(text),text);assert.ok(!rendered.includes('↓27'));}
@@ -61,18 +63,70 @@ test('source and built terminal footer agree with receipt collectors for retries
  }
 });
 
-test('actual terminal footer retains named powers and helper/catalog status at narrow and wide widths',()=>{
+test('footer keeps primary KPIs compact and expands the complete activity and status ledger',()=>{
  const entries=['subagent','quality_review','project_tests','skill_review','session_self','browser_session','bg_run','tool_search'].map((toolName,index)=>({type:'message',message:{role:'toolResult',toolName,toolCallId:String(index),content:[]}}));
  const session={state:{model:{id:'example-model',provider:'example',contextWindow:128000},thinkingLevel:'high'},getContextUsage:()=>({percent:12.5,contextWindow:128000}),modelRuntime:{isUsingSubscription:()=>false},sessionManager:{getEntries:()=>entries,getBranch:()=>entries,getCwd:()=>'/workspace/example',getSessionName:()=>undefined,getSessionId:()=> 'example-session'}};
  const statuses=new Map([['00-harness-activity','✓ JEV returned · 25ms'],['model-catalog','Model list: example · updated 1d 14h ago · stale · /catalog-status']]);
  const footer=new FooterComponent(session,{getGitBranch:()=> 'main',getAvailableProviderCount:()=>1,getExtensionStatuses:()=>statuses});
  for(const width of [40,80,120]){
+  footer.setExpanded(false);
   const lines=footer.render(width);
   assert.ok(lines.every(line=>visibleWidth(line)<=width),`width ${width}`);
-  const text=lines.join('\n');
-  for(const word of ['Agents','Review','Tests','Skills','Self','Browser','Jobs','Tools','JEV','/catalog-status'])assert.ok(text.includes(word),`${word} at ${width}`);
+  const text=lines.map(stripTerminalSequences).join('\n');
+  assert.ok(lines.length<=6,`compact footer grows at ${width}`);
+  for(const word of ['example-model','Context','Cache','Tools','JEV','/catalog-status'])assert.ok(text.includes(word),`${word} at ${width}`);
+  assert.doesNotMatch(text,/Powers|Failures 0|Agents 0/);
+  footer.setExpanded(true);
+  const expanded=footer.render(width);
+  assert.ok(expanded.every(line=>visibleWidth(line)<=width),`expanded width ${width}`);
+  for(const word of ['Agents','Review','Tests','Skills','Self','Browser','Jobs','Tools','JEV','/catalog-status'])assert.ok(expanded.join('\n').includes(word),`${word} in details at ${width}`);
  }
 });
+
+test('footer prioritizes active work and warnings, preserves effort, and sanitizes external labels',()=>{
+ const entries=[{type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'fixture',mode:'single',results:[{index:0,status:'running'}]}},
+  {type:'message',message:{role:'toolResult',toolCallId:'error',toolName:'read',isError:true,content:[]}}];
+ const statuses=new Map([['02-harness-pulse','harness · Guardian 100 checks'],['other','\x1b[2Jprovider\x07\nnotice'],['model-output-limit','Output limit unverified: 16000 tokens'],['model-catalog','Model list: fixture · stale · /catalog-status'],['worktree-checkpoint','checkpoint 40 files']]);
+ const session={state:{model:{id:'a-long-selected-model-name',provider:'fixture',reasoning:true,contextWindow:128000},thinkingLevel:'ultra'},getContextUsage:()=>({percent:95,contextWindow:128000}),modelRuntime:{isUsingSubscription:()=>false},sessionManager:{getEntries:()=>entries,getBranch:()=>entries,getCwd:()=>'/workspace/\x1b[2Jdemo',getSessionName:()=> 'name\nnext',getSessionId:()=> 'fixture-session'}};
+ const footer=new FooterComponent(session,{getGitBranch:()=> 'main\x07',getAvailableProviderCount:()=>2,getExtensionStatuses:()=>statuses});
+ for(const width of [1,12,40,80,120])for(const expanded of [false,true]){
+  footer.setExpanded(expanded);
+  const lines=footer.render(width);
+  assert.ok(lines.every(line=>visibleWidth(line)<=width));
+  for(const line of lines)assert.doesNotMatch(stripTerminalSequences(line),/[\x00-\x1f\x7f-\x9f]/);
+  if(width>=40){
+   const text=lines.map(stripTerminalSequences).join('\n');
+   assert.match(text,/ultra/);
+   if(!expanded){assert.match(text,/Agents 1 active/);assert.match(text,/Failures 1/);assert.match(text,/Output limit unverified/);assert.match(text,/\+2/);assert.doesNotMatch(text,/Guardian 100/);}
+   else assert.match(text,/Guardian 100/);
+  }
+ }
+});
+
+test('compact cache KPI keeps unknown distinct from a measured miss and scopes reuse to the selected model',()=>{
+ const response=(model,input,cacheRead,cacheReadReported=true)=>({type:'message',message:{role:'assistant',provider:'fixture',model,content:[],usage:{input,output:1,cacheRead,cacheWrite:0,cacheReadReported}}});
+ const first=response('primary',200,800);
+ const auxiliary={type:'custom',customType:'auxiliary-model-usage-v1',data:{id:'aux',owner:'session-observer',provider:'fixture',model:'review',status:'completed',usage:{input:1,output:1,cacheRead:99999,cacheWrite:0}}};
+ for(const [entries,model,expected] of [
+  [[], 'primary','?'], [[response('primary',100,0,false)],'primary','?'],
+  [[{type:'message',message:{role:'assistant',provider:'fixture',model:'primary',content:[],stopReason:'error'}}],'primary','?'],
+  [[response('primary',100,0)],'primary','0.0%'],
+  [[first,response('primary',100,0),auxiliary],'primary','72.7%'],
+  [[first,{type:'model_change',provider:'fixture',modelId:'next'},response('next',50,50)],'next','50.0%'],
+ ]){
+  const session={state:{model:{id:model,provider:'fixture',contextWindow:128000}},getContextUsage:()=>({contextWindow:128000}),modelRuntime:{isUsingSubscription:()=>false},sessionManager:{getEntries:()=>entries,getBranch:()=>entries,getCwd:()=>'/workspace',getSessionName:()=>undefined,getSessionId:()=> 'fixture'}};
+  const footer=new FooterComponent(session,{getGitBranch:()=>undefined,getAvailableProviderCount:()=>1,getExtensionStatuses:()=>new Map()});
+  const text=plainFooter(footer.render(120));
+  assert.ok(text.includes(`Cache ${expected}`),text);
+  assert.match(text,/Context \?/);
+  footer.setExpanded(true);
+  const detail=plainFooter(footer.render(120));
+  assert.ok(detail.includes(`Cache ${expected}`),detail);
+  assert.doesNotMatch(detail,/NaN|undefined/);
+ }
+});
+
+function plainFooter(lines){return lines.map(stripTerminalSequences).join('\n');}
 
 test('owned next-turn snapshot includes a discovered tool without another user prompt',async()=>{
  const session=Object.create(AgentSession.prototype), hooks=new Map(), definitions=new Map();

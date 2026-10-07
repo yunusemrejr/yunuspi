@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Compact terminal footer with consistent KPI labels, a dedicated model/effort row, prioritized status previews and expandable accounting/helper details through the existing tool-expansion shortcut.
+- Shared scrollable `/metrics`, `/cost` and `/self` reports with section headings, readable diagnostic fields, keyboard navigation and stable resize anchors.
+- Wrapped tool result previews now have a row bound, with longer error previews and complete evidence available on expansion.
+
 ## 0.26.0 — 2026-10-07
 
 **Video composition has a native owner.** `video_project compose` stages typography and media in reserved regions, fits the actual loaded font, reveals lines, and samples smooth/snappy/spring motion on the frame clock. Explicit layer boxes and transform keys retain detailed control. Source probing checks footage length and dimensions. Camera crops establish the view and follow observed action targets/clicks or freeform pointer movement; trimmed footage, camera samples and sound accents use the same source clock. Custom scenes remain available.

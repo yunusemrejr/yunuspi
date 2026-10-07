@@ -31,7 +31,7 @@ Enabled tools become available at the next model turn within the same request; d
 
 Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every five minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
 
-The footer keeps the harness counters to agents and failures, alongside current activity. Open `/metrics` for detailed tool, skill, hook and workflow counts.
+The footer shows your model and thinking level, context, cache reuse, recorded cost and active work. `Ctrl+O` expands tool output and the full footer ledger; `/metrics`, `/cost` and `/self` open scrollable reports. [Terminal interface](docs/TERMINAL-INTERFACE.md)
 
 ### Discovery in practice
 
@@ -90,7 +90,7 @@ Less context does not guarantee a particular bill. Providers differ in tokenizat
 
 ## See what is happening
 
-Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context. JEV, Needle, the local language model and Kompress show calls and timed returns, and routine background work (Guardian checks, rankings, hooks, hints) is summarized in one live footer line; green marks success or cache reuse, red marks failure, and yellow marks cancellation or a skipped selection. Powers include a short name beside each emoji. Model-list warnings use readable ages such as `1d 14h ago`; `/catalog-status` explains them and `/catalog-status refresh` refreshes the selected provider.
+Short terminal activity labels show tool and automatic-helper actions without adding their display details to model context. The compact footer prioritizes active work and warnings; expanded details include named tool counts and the cumulative Guardian, ranking, hook and hint counters. Model-list warnings link to `/catalog-status`, which explains the full status and can refresh the selected provider.
 
 `/metrics` shows grouped failures, recovery clues, repeated output, large context contributors and review evidence gaps. Agents can inspect efficiency through `session_self({view:"efficiency"})`.
 

@@ -72,8 +72,10 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   const traffic = collectContextTraffic(branch);
   const lines = [
     'Overview · current branch',
-    `${traffic.totalResults} tool results · ${number(traffic.totalChars)} raw returned chars · ${diagnostics.activity.parentToolErrors} tool errors · ${diagnostics.activity.parentModelErrors} provider errors · ${diagnostics.activity.childFailures} child failures · ${diagnostics.uniqueIncidents ?? diagnostics.total} unique incidents`,
-    'Jump: 1 failures · 2 traffic · 3 skills/review · 4 hook health · 5 totals · 6 cache/models/costs', '',
+    `Tool results    ${number(traffic.totalResults)}`,
+    `Returned text   ${number(traffic.totalChars)} raw chars`,
+    `Failures        ${diagnostics.activity.parentToolErrors} tools · ${diagnostics.activity.parentModelErrors} providers · ${diagnostics.activity.childFailures} children`,
+    `Incidents       ${number(diagnostics.uniqueIncidents ?? diagnostics.total)} unique`, '',
     'Failure evidence · current branch',
     `${diagnostics.total} diagnostic records (${diagnostics.uniqueIncidents ?? diagnostics.total} unique incidents by stable incident id) in ${diagnostics.inspected} inspected entries${diagnostics.truncated ? ' (older entries outside this window)' : ''}; ${diagnostics.count} recent examples, ${diagnostics.omitted} additional records grouped below. Records sharing one incident id are one incident, not unique failures.`,
     ...diagnostics.groups.slice(0, 16).map(group => `${group.count} × ${group.kind} / ${group.tool} / ${group.category}. Next: ${group.recovery}`),

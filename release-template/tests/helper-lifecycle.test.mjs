@@ -419,7 +419,7 @@ test('discovery recovers a long typo without confusing short domain words or exa
 
 test('session metrics include readable tool names and counts', () => {
 	const metrics = collectSessionMetrics([{ type: 'message', message: { role: 'toolResult', toolCallId: 'one', toolName: 'tool_search', content: [] } }]);
-	assert.ok(metrics.footer.some((line) => line.includes('🧰 Tools 1')));
+	assert.ok(metrics.footer.some((line) => line.includes('Tools 1')));
 });
 
 test('a resumed session classifies the first prompt as a follow-up with restored prior context', async (t) => {

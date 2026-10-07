@@ -1,9 +1,24 @@
-import { Box, Container, getCapabilities, Image, MouseRegion, Spacer, Text, } from "@yunuspi/tui";
+import { Box, Container, getCapabilities, Image, MouseRegion, sanitizeDisplayText, Spacer, Text, truncateToWidth, } from "@yunuspi/tui";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
 import { keyHint } from "./keybinding-hints.js";
-const FALLBACK_PREVIEW_LINES = 10;
+const FALLBACK_PREVIEW_LINES = 3;
+const ERROR_PREVIEW_LINES = 6;
+/** Bound physical terminal rows, including a single very long JSON line. */
+class ResultPreview extends Text {
+    limit;
+    constructor(text, limit, paddingX = 0, paddingY = 0, bgFn) {
+        super(text, paddingX, paddingY, bgFn);
+        this.limit = limit;
+    }
+    render(width) {
+        const lines = super.render(width);
+        if (lines.length <= this.limit) return lines;
+        const hint = truncateToWidth(theme.fg("muted", `${lines.length - this.limit} more rows · `) + keyHint("app.tools.expand", "expand"), width, "…");
+        return [...lines.slice(0, this.limit), this.customBgFn ? this.customBgFn(hint) : hint];
+    }
+}
 export class ToolExecutionComponent extends Container {
     contentBox;
     contentText;
@@ -45,7 +60,7 @@ export class ToolExecutionComponent extends Container {
         // selfRenderContainer is used when the tool renders its own framing.
         // contentText is reserved for generic fallback rendering when no tool definition exists.
         this.contentBox = new Box(1, 1, (text) => theme.bg("toolPendingBg", text));
-        this.contentText = new Text("", 1, 1, (text) => theme.bg("toolPendingBg", text));
+        this.contentText = new ResultPreview("", Infinity, 1, 1, (text) => theme.bg("toolPendingBg", text));
         this.contentTextRegion = this.createResultRegion(this.contentText);
         this.selfRenderContainer = new Container();
         if (this.hasRendererDefinition()) {
@@ -95,14 +110,8 @@ export class ToolExecutionComponent extends Container {
         if (!output) {
             return undefined;
         }
-        const lines = output.split("\n");
-        const displayLines = this.expanded ? lines : lines.slice(0, FALLBACK_PREVIEW_LINES);
-        const remaining = lines.length - displayLines.length;
-        let text = displayLines.map((line) => theme.fg("toolOutput", line)).join("\n");
-        if (remaining > 0) {
-            text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-        }
-        return new Text(text, 0, 0);
+        const text = output.split("\n").map(line => theme.fg("toolOutput", line)).join("\n");
+        return new ResultPreview(text, this.expanded ? Infinity : this.result?.isError ? ERROR_PREVIEW_LINES : FALLBACK_PREVIEW_LINES);
     }
     createResultRegion(component) {
         return new MouseRegion(component, (event) => {
@@ -273,6 +282,9 @@ export class ToolExecutionComponent extends Container {
             }
         }
         else {
+            // Only text is collapsed. Native image components retain their
+            // transport sequences and height below the preview.
+            this.contentText.limit = this.expanded || !this.result ? Infinity : (this.result.isError ? ERROR_PREVIEW_LINES : FALLBACK_PREVIEW_LINES) + 3;
             this.contentText.setCustomBgFn(bgFn);
             this.contentText.setText(this.formatToolExecution());
             hasContent = true;
@@ -314,9 +326,9 @@ export class ToolExecutionComponent extends Container {
     }
     formatToolExecution() {
         let text = theme.fg("toolTitle", theme.bold(this.toolName));
-        const content = JSON.stringify(this.args, null, 2);
+        const content = sanitizeDisplayText(JSON.stringify(this.args, null, this.expanded ? 2 : undefined));
         if (content) {
-            text += `\n\n${content}`;
+            text += this.expanded ? `\n\n${content}` : `\n${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`;
         }
         const output = this.getTextOutput();
         if (output) {

@@ -3548,12 +3548,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1823
+        "line": 1852
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1404
+        "line": 1405
       },
       {
         "name": "curator",
@@ -3578,7 +3578,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1789
+        "line": 1818
       },
       {
         "name": "export-json",
@@ -3743,7 +3743,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1733
+        "line": 1742
       },
       {
         "name": "subagent-cost",
@@ -3828,7 +3828,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1738
+        "line": 1767
       },
       {
         "name": "task-state",
@@ -3843,7 +3843,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1757
+        "line": 1786
       },
       {
         "name": "watchmaker",
@@ -4540,7 +4540,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1915,
+        "line": 1944,
         "kind": "literal"
       },
       {
@@ -4552,7 +4552,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1852,
+        "line": 1881,
         "kind": "literal"
       },
       {
@@ -5138,7 +5138,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1915,
+        "line": 1944,
         "kind": "literal"
       },
       {
@@ -5150,7 +5150,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1852,
+        "line": 1881,
         "kind": "literal"
       },
       {
@@ -8772,6 +8772,10 @@
       {
         "name": "TASK-STATE-GRAPH.md",
         "path": "docs/TASK-STATE-GRAPH.md"
+      },
+      {
+        "name": "TERMINAL-INTERFACE.md",
+        "path": "docs/TERMINAL-INTERFACE.md"
       },
       {
         "name": "UNREAL-INTEGRATION-REVIEW.md",

@@ -12,11 +12,13 @@ export declare function formatCwdForFooter(cwd: string, home: string | undefined
  */
 export declare class FooterComponent implements Component {
     private autoCompactEnabled;
+    private expanded;
     private session;
     private footerData;
     constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider);
     setSession(session: AgentSession): void;
     setAutoCompactEnabled(enabled: boolean): void;
+    setExpanded(expanded: boolean): void;
     /**
      * No-op: git branch caching now handled by provider.
      * Kept for compatibility with existing call sites in interactive-mode.

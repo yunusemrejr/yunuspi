@@ -9,6 +9,7 @@ import {
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
 import { readCostEvidence, hasRecordedTokenUsage, collectAuxiliaryModelUsage } from "./lib/cost-evidence.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
+import { createMetricsPanel } from "./lib/metrics-panel.ts";
 import { collectHarnessUsage, harnessUsageHtml, helperUsageView, collectSkillEvidence } from "./lib/helper-usage.ts";
 import {
   deriveAttemptOutcome,
@@ -1409,24 +1410,22 @@ export default function (pi: any) {
       const money = (n: number) =>
         n > 0 && n < 0.000001 ? `$${n.toExponential(3)}` : `$${n.toFixed(6)}`;
       const lines = [
+        "Session cost · all retained entries",
         `${cost.formatted} total (USD)`,
-        `Provider-reported: ${money(cost.reported)}; estimated: ${money(cost.estimated)}.`,
+        `Reported    ${money(cost.reported)}`,
+        `Estimated   ${money(cost.estimated)}`,
+        ...(cost.unknown ? ["Partial total: some recorded activity has missing prices or usage."] : []),
+        ...(cost.pending ? [`${cost.pending} operation(s) awaiting final cost evidence.`] : []),
+        "", "By scope and model",
         ...cost.rows.map(
           (r: any) =>
             `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? " estimated" : ""}${r.unknown ? " + unpriced usage" : ""}${r.subscription ? " · subscription" : ""}`,
         ),
-        ...(cost.pending
-          ? [`${cost.pending} child operation(s) awaiting final cost evidence.`]
-          : []),
-        ...(cost.unknown
-          ? [
-              "Partial total: some recorded activity has missing prices or usage.",
-            ]
-          : []),
+        "", "Coverage",
         "Main responses, child runs, retries, compactions and usage-bearing tools are included when recorded. Repeated child snapshots count once.",
         "Estimates use the rates attached to each response. Provider-reported amounts take precedence. Unreported external tools, storage, taxes, credit purchases and subscription fees are outside this total.",
       ];
-      ctx.ui.notify(lines.join("\n"), "info");
+      await showReport(ctx, "Session cost", lines);
     },
   });
   const toolJson = createToolJsonCompactor();
@@ -1723,6 +1722,16 @@ export default function (pi: any) {
       await pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
+  async function showReport(ctx: any, title: string, lines: string[]) {
+    lines = lines.map(reportText);
+    if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
+      ctx.ui?.notify?.(lines.join("\n"), "info");
+      return;
+    }
+    await ctx.ui.custom((tui: any, theme: any, _keys: any, done: any) =>
+      createMetricsPanel(lines, tui, theme, done, { title, sections: {} }),
+      { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left" } });
+  }
   // Bounded, newest-first failure read: diagnose without re-running any work.
   const recentFailures = (ctx: any) =>
     collectSessionDiagnostics(
@@ -1732,8 +1741,28 @@ export default function (pi: any) {
     );
   pi.registerCommand("self", {
     description: "Current-session token and failure diagnostics",
-    handler: async (_a: any, ctx: any) =>
-      ctx.ui.notify(JSON.stringify(self(ctx)), "info"),
+    handler: async (_a: any, ctx: any) => {
+      const facts = self(ctx);
+      const count = (n: number) => n.toLocaleString("en-US");
+      const rate = (n: number | null) => n === null ? "unknown" : `${(100 * n).toFixed(1)}%`;
+      await showReport(ctx, "Session diagnostics", [
+        "Session diagnostics · all retained entries",
+        `Responses       ${count(facts.assistantAttempts)} attempts · ${count(facts.assistantFailures)} failed · ${count(facts.cancellations)} cancelled`,
+        `Tools           ${count(facts.toolCalls)} calls · ${count(facts.toolResults)} results · ${count(facts.toolFailures)} failed`,
+        `Failure rates   ${rate(facts.assistantErrorRate)} responses · ${rate(facts.toolErrorRate)} tools`,
+        `Summary calls   ${count(facts.summaryCalls)}`,
+        facts.totalsComplete ? "Token coverage  complete" : "Token coverage  partial totals · some token fields unavailable",
+        "", "Recorded token traffic",
+        `Input           ${count(facts.input)}`,
+        `Output          ${count(facts.output)}`,
+        `Cache read      ${count(facts.cacheRead)}`,
+        `Cache write     ${count(facts.cacheWrite)}`,
+        "", "Coverage",
+        facts.totalsComplete ? "All token fields recorded." : `Partial totals · ${count(facts.missingUsage)} response or summary record(s) without usage; unavailable fields are listed below.`,
+        ...Object.entries(facts.missingUsageFields).filter(([, n]) => n > 0).map(([field, n]) => `${field}: unavailable in ${count(n)} record(s)`),
+        facts.scope, facts.notes,
+      ]);
+    },
   });
   pi.registerCommand("sys-prompt", {
     description:

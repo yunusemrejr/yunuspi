@@ -3558,6 +3558,7 @@ export class InteractiveMode {
         if (expanded === this.toolOutputExpanded)
             return;
         this.toolOutputExpanded = expanded;
+        this.footer.setExpanded(expanded);
         const activeHeader = this.customHeader ?? this.builtInHeader;
         if (isExpandable(activeHeader)) {
             activeHeader.setExpanded(expanded);
@@ -3569,7 +3570,7 @@ export class InteractiveMode {
                 }
             }
         }
-        this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
+        this.showStatus(`Details: ${expanded ? "expanded" : "collapsed"}`);
     }
     /** Update rendered assistant messages without rebuilding live tool components. */
     updateThinkingBlockVisibility() {

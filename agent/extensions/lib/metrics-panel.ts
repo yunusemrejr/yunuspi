@@ -1,7 +1,14 @@
-import { isKeyRelease, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@yunuspi/tui';
+import { isKeyRelease, matchesKey, sanitizeDisplayText, truncateToWidth, wrapTextWithAnsi } from '@yunuspi/tui';
+
+const METRIC_SECTIONS: Record<string, string> = {'1':'Failure evidence','2':'Context traffic','3':'Capabilities and evidence gaps','4':'Hook health','5':'Session activity','6':'Cache, models and costs'};
+interface PanelOptions { title?: string; sections?: Record<string, string> }
 
 /** A snapshot remains stable while reading. Resize retains the logical line. */
-export function createMetricsPanel(lines: string[], tui: any, theme: any, done: () => void) {
+export function createMetricsPanel(lines: string[], tui: any, theme: any, done: () => void, options: PanelOptions = {}) {
+  lines = lines.flatMap(line => sanitizeDisplayText(line).replace(/\t/g, '  ').split('\n'));
+  const sections = options.sections ?? METRIC_SECTIONS;
+  const headings = new Set(lines.filter((line, index) => line.trim() && (index === 0 || !lines[index - 1].trim())));
+  for (const prefix of Object.values(sections)) for (const line of lines) if (line.startsWith(prefix)) headings.add(line);
   let offset = 0, height = 1, lastWidth = 0;
   let rows: { text: string; line: number; part: number }[] = [];
   const maxOffset = () => Math.max(0, rows.length - height);
@@ -16,7 +23,7 @@ export function createMetricsPanel(lines: string[], tui: any, theme: any, done: 
     handleInput(key: string) {
       if (isKeyRelease(key)) return;
       if (key === 'q' || matchesKey(key, 'escape') || matchesKey(key, 'enter')) return done();
-      const section = ({'1':'Failure evidence','2':'Context traffic','3':'Capabilities and evidence gaps','4':'Hook health','5':'Session activity','6':'Cache, models and costs'} as Record<string,string>)[key];
+      const section = sections[key];
       if (section) {
         const line = lines.findIndex(text => text.startsWith(section));
         const row = rows.findIndex(item => item.line === line);
@@ -40,7 +47,10 @@ export function createMetricsPanel(lines: string[], tui: any, theme: any, done: 
       height = Math.max(1, terminalRows - 2);
       if (width !== lastWidth) {
         const anchor = rows[offset];
-        rows = lines.flatMap((line, index) => wrapTextWithAnsi(line || ' ', width).map((text, part) => ({ text, line: index, part })));
+        rows = lines.flatMap((line, index) => {
+          const styled = headings.has(line) ? theme.bold(theme.fg('accent', line)) : line;
+          return wrapTextWithAnsi(styled || ' ', width).map((text, part) => ({ text, line: index, part }));
+        });
         if (anchor) {
           const first = rows.findIndex(row => row.line === anchor.line);
           if (first >= 0) offset = first + Math.min(anchor.part, rows.filter(row => row.line === anchor.line).length - 1);
@@ -48,7 +58,8 @@ export function createMetricsPanel(lines: string[], tui: any, theme: any, done: 
         lastWidth = width;
       }
       offset = Math.min(offset, maxOffset());
-      const header = theme.fg('accent', truncateToWidth('Session metrics · 1–6 sections · ↑/↓ PgUp/PgDn · Esc close', width));
+      const jumps = Object.keys(sections).length ? ' · 1–6 sections' : '';
+      const header = theme.fg('accent', truncateToWidth(`${options.title ?? 'Session metrics'}${jumps} · ↑/↓ PgUp/PgDn · Esc close`, width));
       const body = rows.slice(offset, offset + height).map(row => truncateToWidth(row.text, width));
       const footer = theme.fg('dim', truncateToWidth(`${rows.length ? offset + 1 : 0}–${Math.min(rows.length, offset + height)} / ${rows.length} · snapshot`, width));
       return terminalRows === 1 ? [header] : terminalRows === 2 ? [header, footer] : [header, ...body, footer];
