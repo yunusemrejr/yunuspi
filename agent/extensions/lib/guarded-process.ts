@@ -3,11 +3,12 @@
  * process-group kill on abort. One owner so every heavy local job yields to
  * the keyboard and dies alone when it runs away. */
 import path from "node:path";
+import { readlinkSync } from 'node:fs';
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { guardedCommand } from "./self-mutation-guard.ts";
-import { memoryBudgetMb, watchMemory } from "./memory-guard.ts";
-import { ownProcessGroup } from "./process-owner.ts";
+import { memoryBudgetMb, watchMemory, treeUsage } from "./memory-guard.ts";
+import { ownProcessGroup, processIdentity } from "./process-owner.ts";
 
 export type Progress = (text: string) => void;
 /** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
@@ -23,6 +24,10 @@ export async function runGuarded(command: string, args: string[], options: { cwd
   options.signal?.throwIfAborted();
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: options.replaceEnv ? { ...options.env } : { ...process.env, ...options.env } });
+    const childIdentity = child.pid ? processIdentity(child.pid) : '';
+    const outputLinks = childIdentity ? [1, 2].flatMap(fd => {
+      try { const link = readlinkSync(`/proc/${child.pid}/fd/${fd}`); return /^(?:pipe|socket):\[\d+\]$/.test(link) ? [link] : []; } catch { return []; }
+    }) : [];
     ownProcessGroup(child.pid);
     const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
     let stdout = "", stderr = "", pending = "", lineTruncated = false, settled = false, failure: Error | undefined;
@@ -33,11 +38,27 @@ export async function runGuarded(command: string, args: string[], options: { cwd
       if (start && first >= 0xdc00 && first <= 0xdfff) start++;
       return joined.slice(start);
     };
-    const kill = () => { if (child.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ } };
+    const kill = () => {
+      if (!child.pid) return;
+      // Snapshot descendants before killing their parent: detached workers can
+      // own another process group while still inheriting this job's pipes.
+      if (childIdentity) {
+        const tree = treeUsage(child.pid, true, outputLinks);
+        const descendants = tree.identities?.[child.pid] === childIdentity ? tree.pids.slice(1) : [];
+        // Exact inherited output handles still identify job writers after a
+        // parent exits and the kernel reparents detached descendants.
+        for (const pid of [...new Set([...descendants, ...(tree.outputOwners ?? [])])].reverse()) {
+          if (pid === child.pid && tree.identities?.[pid] !== childIdentity) continue;
+          const identity = tree.identities?.[pid];
+          if (identity && processIdentity(pid) === identity) try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+        }
+      }
+      // A reaped leader's numeric PID must never authorize an unrelated group.
+      if (!childIdentity || processIdentity(child.pid) === childIdentity) try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+    };
     const timer = options.timeoutMs > 0 ? setTimeout(() => { stop(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs) : undefined;
     timer?.unref();
-    const stopWatching = child.pid ? watchMemory(child.pid, options.memoryMb ?? memoryBudgetMb(), (message, pids) => {
-      for (const pid of pids) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    const stopWatching = child.pid ? watchMemory(child.pid, options.memoryMb ?? memoryBudgetMb(), (message) => {
       stop(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
     }) : () => {};
     const abort = () => { stop(new Error(`${path.basename(command)} cancelled`)); };

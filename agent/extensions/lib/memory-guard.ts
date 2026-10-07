@@ -5,7 +5,7 @@
  * kills the tree when it passes its budget or when the host itself runs low, so
  * the tool returns an actionable error instead of the kernel OOM killer freezing
  * the machine. */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 
 const PAGE_KB = 4;
 const MB = 1024;
@@ -28,8 +28,8 @@ export function memoryBudgetMb(): number {
 }
 
 /** Resident MB and pids of a process and all of its descendants (Chrome workers included). */
-export function treeUsage(rootPid: number): { mb: number; pids: number[] } {
-  const rows = new Map<number, { ppid: number; rssKb: number }>();
+export function treeUsage(rootPid: number, includeIdentities = false, outputLinks: readonly string[] = []): { mb: number; pids: number[]; identities?: Record<number, string>; outputOwners?: number[] } {
+  const rows = new Map<number, { ppid: number; rssKb: number; identity: string; ownsOutput: boolean }>();
   try {
     for (const name of readdirSync("/proc")) {
       if (!/^\d+$/.test(name)) continue;
@@ -37,10 +37,13 @@ export function treeUsage(rootPid: number): { mb: number; pids: number[] } {
         const stat = readFileSync(`/proc/${name}/stat`, "utf8");
         // comm may contain spaces and parentheses; the fields after the last ")" are stable.
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-        rows.set(Number(name), { ppid: Number(fields[1]), rssKb: Number(fields[21]) * PAGE_KB });
+        const ownsOutput = Number(name) !== process.pid && outputLinks.length > 0 && [1, 2].some(fd => {
+          try { return outputLinks.includes(readlinkSync(`/proc/${name}/fd/${fd}`)); } catch { return false; }
+        });
+        rows.set(Number(name), { ppid: Number(fields[1]), rssKb: Number(fields[21]) * PAGE_KB, identity: fields[19], ownsOutput });
       } catch { /* exited while scanning */ }
     }
-  } catch { return { mb: 0, pids: [rootPid] }; }
+  } catch { return { mb: 0, pids: [rootPid], ...(includeIdentities ? { identities: {} } : {}) }; }
   const children = new Map<number, number[]>();
   for (const [pid, row] of rows) {
     const siblings = children.get(row.ppid);
@@ -56,7 +59,10 @@ export function treeUsage(rootPid: number): { mb: number; pids: number[] } {
       pids.push(pid);
     }
   }
-  return { mb: Math.round(pids.reduce((sum, pid) => sum + (rows.get(pid)?.rssKb ?? 0), 0) / MB), pids };
+  const outputOwners = outputLinks.length ? [...rows].filter(([, row]) => row.ownsOutput).map(([pid]) => pid) : [];
+  return { mb: Math.round(pids.reduce((sum, pid) => sum + (rows.get(pid)?.rssKb ?? 0), 0) / MB), pids,
+    ...(includeIdentities ? { identities: Object.fromEntries([...new Set([...pids, ...outputOwners])].filter(pid => rows.has(pid)).map(pid => [pid, rows.get(pid)!.identity])) } : {}),
+    ...(outputLinks.length ? { outputOwners } : {}) };
 }
 
 /** Kill the tree at `budgetMb`, or when the host drops under `floorMb` free. Returns a stop function. */
