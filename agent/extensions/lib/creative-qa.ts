@@ -660,7 +660,7 @@ export async function creativeCompareRun(
     pairs.push({
       variants: [plan.sources[a], plan.sources[b]],
       ssim: Math.round(comparison.ssim * 1000) / 1000,
-      changedShare: Math.round(comparison.changed * 1000) / 1000,
+      changedShare: Math.round(comparison.changed * 100) / 10_000,
       meanDelta: Math.round(comparison.meanDelta * 100) / 100,
       paletteA, paletteB,
     });

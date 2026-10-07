@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {renderCapture,normalizeTemporalCapture} from '../agent/scripts/render-capture.mjs';
 import {captureToFile} from '../agent/extensions/render-and-wait.ts';
 import {motionInspectRun} from '../agent/extensions/lib/motion-inspect.ts';
-import {visualReviewRun} from '../agent/extensions/lib/creative-qa.ts';
+import {visualReviewRun,creativeCompareRun} from '../agent/extensions/lib/creative-qa.ts';
 import {encodeImage} from '../agent/extensions/lib/design-studio.ts';
 
 const html = `<!doctype html><title>Shared motion fixture</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css">
@@ -125,4 +125,14 @@ test('motion receipts convert pixel percentages into shares before applying thre
   assert.equal(small.backtrack[0].changedShare,.01);assert.ok(!small.findings.some(f=>f.id==='scroll-backtrack-state'));
   const visible=await motionInspectRun({source,mode:'scroll',width:200,height:200,positions:[0,1],reducedMotion:false},dir,undefined,scrollCapture(8));
   assert.equal(visible.backtrack[0].changedShare,.04);assert.ok(visible.findings.some(f=>f.id==='scroll-backtrack-state'));
+});
+
+test('creative variant pixel differences use the same fractional share contract', async t => {
+  const dir=await workspace(t);
+  const report=await creativeCompareRun({sources:['first.html','second.html'],width:200,height:200},dir,undefined,async(params,dest)=>{
+    const data=Buffer.alloc(1280*200*4,255);
+    if(params.source==='second.html')for(let y=0;y<200;y++)for(let x=0;x<640;x++)data.fill(0,(y*1280+x)*4,(y*1280+x)*4+3);
+    await fs.writeFile(dest,await encodeImage({width:1280,height:200,data},'png'));return {};
+  });
+  assert.equal(report.pairs[0].changedShare,.5,'half of the image changes, reported as a share in 0..1');
 });
