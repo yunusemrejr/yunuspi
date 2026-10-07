@@ -1,6 +1,7 @@
 // Fixed browser-take worker; no project JavaScript executes in Node. All
 // page actions use Playwright in a sandboxed, disposable Chromium context.
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,24 +13,39 @@ const emit = (kind, data) => process.stdout.write(`${kind} ${JSON.stringify(data
 const urlOf = raw => { const u = new URL(raw); if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw Error('Unsupported browser protocol'); return u.href; };
 const ease = t => t * t * t * (t * (6 * t - 15) + 10);
 
-/** Raw and delivered frames share a filesystem. Hardlinks retain observed
- * bytes after raw cleanup without rewriting a JPEG for every held frame. */
+/** Hardlinks retain observed bytes after raw cleanup without rewriting a
+ * held JPEG. Unsupported filesystems fall back to exclusive copies. */
 export async function resampleBrowserFrames(raw, seconds, fps, epoch, framesDir) {
   if (!raw.length || raw.some(frame => !Number.isFinite(frame.timestamp)) || !Number.isFinite(epoch)) throw Error('Browser source frame clock is invalid');
   raw.sort((a, b) => a.timestamp - b.timestamp);
-  const count = Math.round(seconds * fps), sources = [], used = new Set();
-  let source = 0, repeatedFrameBytes = 0, storedFrameBytes = 0;
+  const count = Math.round(seconds * fps), sources = [], used = new Set(), linked = new Set();
+  let source = 0, repeatedFrameBytes = 0, storedFrameBytes = 0, linkedFrames = 0, copiedFrames = 0, linksSupported = true;
   for (let i = 0; i < count; i++) {
     const requested = i / fps;
     while (source + 1 < raw.length && raw[source + 1].timestamp <= epoch + requested) source++;
     const frame = raw[source];
-    await fs.link(frame.file, path.join(framesDir, 'frame-' + String(i).padStart(6, '0') + '.jpg'));
+    const output = path.join(framesDir, 'frame-' + String(i).padStart(6, '0') + '.jpg');
     const size = frame.bytes ?? (await fs.stat(frame.file)).size;
+    let wasLinked = false;
+    if (linksSupported) {
+      try { await fs.link(frame.file, output); wasLinked = true; }
+      catch (error) {
+        if (!['EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV', 'EMLINK'].includes(error.code)) throw error;
+        linksSupported = false;
+      }
+    }
+    if (wasLinked) {
+      linkedFrames++;
+      if (!linked.has(frame.file)) { storedFrameBytes += size; linked.add(frame.file); }
+    } else {
+      await fs.copyFile(frame.file, output, constants.COPYFILE_EXCL);
+      copiedFrames++; storedFrameBytes += size;
+    }
     repeatedFrameBytes += size;
-    if (!used.has(frame.file)) { storedFrameBytes += size; used.add(frame.file); }
+    used.add(frame.file);
     sources.push({ frame: i, t: requested, sourceT: frame.timestamp - epoch });
   }
-  return { sources, frames: count, resampling: { method: 'hardlinks', uniqueSourceFrames: used.size, storedFrameBytes, copyBytesAvoided: repeatedFrameBytes - storedFrameBytes } };
+  return { sources, frames: count, resampling: { method: copiedFrames ? linkedFrames ? 'mixed' : 'copies' : 'hardlinks', linkedFrames, copiedFrames, uniqueSourceFrames: used.size, storedFrameBytes, copyBytesAvoided: repeatedFrameBytes - storedFrameBytes } };
 }
 const inViewport = (box, plan) => box && box.width > 0 && box.height > 0 && box.x >= 0 && box.y >= 0 && box.x + box.width <= plan.width && box.y + box.height <= plan.height;
 

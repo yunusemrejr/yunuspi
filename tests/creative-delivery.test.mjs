@@ -67,6 +67,35 @@ test('constant-frame resampling retains observed bytes and timestamps with one i
   await assert.rejects(resampleBrowserFrames([{ timestamp: NaN, file: a }], 1, 10, 100, out), /clock/);
 });
 
+test('browser resampling falls back exclusively on unsupported links and reports actual stored bytes', async t => {
+  const nativeLink = fs.link;
+  for (const [allowed, code] of [[0, 'EOPNOTSUPP'], [2, 'EMLINK']]) {
+    const dir = await workspace(t), raw = path.join(dir, 'raw.jpg'), out = path.join(dir, 'frames');
+    await fs.mkdir(out); await fs.writeFile(raw, 'observed source frame');
+    const size = (await fs.stat(raw)).size; let attempts = 0, result;
+    fs.link = async (...args) => {
+      if (attempts++ < allowed) return nativeLink(...args);
+      throw Object.assign(Error('Injected filesystem link limitation'), { code });
+    };
+    try { result = await resampleBrowserFrames([{ timestamp: 0, file: raw }], 1, 4, 0, out); }
+    finally { fs.link = nativeLink; }
+    assert.equal(attempts, allowed + 1, 'unsupported links are attempted once, then the take continues');
+    assert.equal(result.resampling.method, allowed ? 'mixed' : 'copies');
+    assert.equal(result.resampling.linkedFrames, allowed); assert.equal(result.resampling.copiedFrames, 4 - allowed);
+    assert.equal(result.resampling.uniqueSourceFrames, 1);
+    assert.equal(result.resampling.storedFrameBytes, size * (4 - allowed + (allowed ? 1 : 0)));
+    assert.equal(result.resampling.copyBytesAvoided, allowed ? size : 0);
+    await assert.rejects(resampleBrowserFrames([{ timestamp: 0, file: raw }], 1, 4, 0, out), /EEXIST/);
+    await fs.rm(raw);
+    const inodes = new Set();
+    for (let i = 0; i < 4; i++) {
+      const file = path.join(out, 'frame-' + String(i).padStart(6, '0') + '.jpg');
+      assert.equal(await fs.readFile(file, 'utf8'), 'observed source frame'); inodes.add((await fs.stat(file)).ino);
+    }
+    assert.equal(inodes.size, 4 - allowed + (allowed ? 1 : 0));
+  }
+});
+
 test('browser response waits scope text to the requested element, including delayed insertion', { timeout: 90_000 }, async t => {
   for (const existing of [true, false]) {
     const dir = await workspace(t), file = path.join(dir, 'demo.html');
