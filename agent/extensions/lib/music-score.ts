@@ -2,10 +2,20 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { inputFile, integer, number, outputFolder, produced } from "./media-process.ts";
+import { createReadStream } from "node:fs";
+import { inputFile, integer, number, outputFolder, produced, textPath } from "./media-process.ts";
 import { runGuarded } from "./guarded-process.ts";
 
-const PPQ = 480, RATE = 44100;
+const PPQ = 480, RATE = 44100, TABLE_SIZE = 8192, BLOCK = 8192;
+const yieldAudio = async (signal?: AbortSignal) => {
+  await new Promise<void>(resolve => setImmediate(resolve));
+  signal?.throwIfAborted();
+};
+async function bankDigest(file: string, signal?: AbortSignal) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file, { highWaterMark: 1024 * 1024, signal })) hash.update(chunk);
+  return hash.digest('hex');
+}
 /** Band-limited oscillator: harmonics stop below Nyquist, so square and saw
  * stay clean at high pitches. Sine and triangle match the original audition
  * exactly. Pure. */
@@ -55,12 +65,15 @@ export function validateScore(input: any) {
   if (!Array.isArray(input.tracks) || input.tracks.length < 1 || input.tracks.length > 8) throw new Error("Provide 1..8 tracks");
   const stereo = input.stereo ?? false;
   if (typeof stereo !== "boolean") throw new Error("stereo must be true or false");
-  let count = 0, noteSeconds = 0;
+  let count = 0, noteSeconds = 0, percussionTracks = 0;
   const tracks = input.tracks.map((t: any, channel: number) => {
     if (!t || typeof t !== "object" || !Array.isArray(t.notes) || !t.notes.length) throw new Error("Each track needs notes");
     count += t.notes.length; if (count > 1024) throw new Error("Score is limited to 1024 notes");
     const name = typeof t.name === "string" ? t.name.slice(0, 64) : `Track ${channel + 1}`;
     const program = integer(t.program, 0, 0, 127, "program");
+    const percussion = t.percussion ?? false;
+    if (typeof percussion !== 'boolean') throw Error('percussion must be true or false');
+    if (percussion && ++percussionTracks > 1) throw Error('Use one percussion track per score; General MIDI drums share channel 10');
     const waveform = t.waveform ?? "sine";
     if (!["sine", "triangle", "square", "saw"].includes(waveform)) throw new Error("waveform must be sine, triangle, square or saw");
     const pan = number(t.pan, 0, -1, 1, "pan");
@@ -81,20 +94,41 @@ export function validateScore(input: any) {
       const lane = notes.filter((n: any) => n.pitch === pitch).sort((a: any, b: any) => a.start - b.start);
       for (let i = 1; i < lane.length; i++) if (lane[i].start < lane[i - 1].start + lane[i - 1].duration - 1e-8) throw new Error("Overlapping same-pitch notes need separate tracks");
     }
-    return { name, program, waveform, pan, notes };
+    return { name, program, waveform, pan, percussion, notes };
   });
   if (noteSeconds > 1200) throw new Error("Score exceeds the preview work limit");
-  return { bpm, beats, numerator, denominator, seconds, stereo, tracks };
+  // MIDI stores an integer microsecond tempo and an integer ending tick.
+  // The audition and instrument worker use that same clock, including at
+  // fractional tempos and durations, instead of silently drifting from MIDI.
+  const midiTempoMicroseconds = Math.round(60000000 / bpm);
+  const clockSeconds = Math.round(beats * PPQ) / PPQ * midiTempoMicroseconds / 1e6;
+  if (clockSeconds > 120) throw Error('Quantized MIDI duration exceeds the 120-second score limit');
+  return { bpm, beats, numerator, denominator, seconds: clockSeconds, midiTempoMicroseconds, stereo, tracks };
 }
-export async function composeMusic(params: any, cwd: string, signal?: AbortSignal) {
+/** Pure renderer selection shared with media_pipeline's preflight. No bank
+ * reads, output allocation or paid work occurs while checking this contract. */
+export function planScoreRender(params: any, env: Record<string, string | undefined> = process.env) {
   const score = validateScore(params.score);
+  const requested = params.backend ?? 'auto';
+  if (!['auto', 'soundfont', 'oscillator'].includes(requested)) throw Error('backend must be auto, soundfont or oscillator');
+  const font = params.soundfont ?? env.YUNUSPI_SOUNDFONT;
+  const backend = requested === 'auto' ? font ? 'soundfont' : 'oscillator' : requested;
+  if (backend === 'soundfont' && !font) throw Error('SoundFont rendering needs soundfont: a local SF2/SF3 bank, or YUNUSPI_SOUNDFONT');
+  if (score.tracks.some(t => t.percussion) && backend !== 'soundfont') throw Error('Percussion requires a local SoundFont drum bank; configure soundfont or YUNUSPI_SOUNDFONT and use auto/soundfont');
+  if (backend === 'soundfont' && !/\.sf[23]$/i.test(textPath(font))) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
+  return { score, backend, soundfont: backend === 'soundfont' ? font : undefined, releaseTail: backend === 'soundfont' ? number(params.releaseTail, 1.5, 0, 5, 'releaseTail') : 0 };
+}
+
+export async function composeMusic(params: any, cwd: string, signal?: AbortSignal) {
+  const { score, backend, soundfont, releaseTail } = planScoreRender(params);
   signal?.throwIfAborted();
-  const tempo = Math.round(60000000 / score.bpm), end = Math.round(score.beats * PPQ);
+  const tempo = score.midiTempoMicroseconds, end = Math.round(score.beats * PPQ), beatSeconds = tempo / 1e6;
   const conductor = track([
     { tick: 0, order: 0, bytes: [255, 81, 3, tempo >> 16 & 255, tempo >> 8 & 255, tempo & 255] },
     { tick: 0, order: 1, bytes: [255, 88, 4, score.numerator, Math.log2(score.denominator), 24, 8] },
   ], end);
-  const tracks = score.tracks.map((t: any, ch: number) => {
+  const tracks = score.tracks.map((t: any, index: number) => {
+    const ch = t.percussion ? 9 : index;
     const name = [...Buffer.from(t.name, "utf8")];
     const events = [{ tick: 0, order: -2, bytes: [255, 3, ...vlq(name.length), ...name] }, { tick: 0, order: -1, bytes: [192 | ch, t.program] }, { tick: 0, order: -1, bytes: [176 | ch, 10, Math.round((t.pan + 1) * 63.5)] }];
     for (const n of t.notes) {
@@ -105,14 +139,11 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
   });
   const header = Buffer.alloc(6); header.writeUInt16BE(1); header.writeUInt16BE(tracks.length + 1, 2); header.writeUInt16BE(PPQ, 4);
   const midi = Buffer.concat([chunk("MThd", header), conductor, ...tracks]);
-  const backend = params.backend ?? 'auto';
-  if (!['auto', 'soundfont', 'oscillator'].includes(backend)) throw Error('backend must be auto, soundfont or oscillator');
-  const font = params.soundfont ?? process.env.YUNUSPI_SOUNDFONT;
-  if (backend === 'soundfont' || (backend === 'auto' && font)) {
-    if (!font) throw Error('SoundFont rendering needs soundfont: a local SF2/SF3 bank, or YUNUSPI_SOUNDFONT');
-    const bank = await inputFile(font, cwd);
-    if (!/\.sf[23]$/i.test(bank) || (await fs.stat(bank)).size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
-    const releaseTail = number(params.releaseTail, 1.5, 0, 5, 'releaseTail');
+  if (backend === 'soundfont') {
+    const bank = await inputFile(soundfont, cwd);
+    const bankStat = await fs.stat(bank);
+    if (!/\.sf[23]$/i.test(bank) || bankStat.size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
+    const sha256 = await bankDigest(bank, signal);
     const dir = await outputFolder(params.outputDir, cwd);
     try {
       const request = path.join(dir, 'request.json');
@@ -125,7 +156,9 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
       if (!rendered?.seconds) throw Error('Instrument renderer returned no receipt');
       await fs.writeFile(path.join(dir, 'score.mid'), midi, { flag: 'wx' });
       await fs.writeFile(path.join(dir, 'score.json'), JSON.stringify(score, null, 2)+'\n', { flag: 'wx' });
-      const receipt = { ...rendered, soundfont: { path: bank, sha256: createHash('sha256').update(await fs.readFile(bank)).digest('hex') } };
+      const after = await fs.stat(bank);
+      if (after.ino !== bankStat.ino || after.dev !== bankStat.dev || after.size !== bankStat.size || after.mtimeMs !== bankStat.mtimeMs || after.ctimeMs !== bankStat.ctimeMs) throw Error('SoundFont changed during rendering; bank provenance cannot be verified');
+      const receipt = { ...rendered, soundfont: { path: bank, sha256 } };
       await fs.writeFile(path.join(dir, 'render.json'), JSON.stringify(receipt, null, 2)+'\n', { flag: 'wx' });
       await fs.rm(request);
       return { ...receipt, files: await Promise.all(['score.mid', 'preview.wav', 'score.json', 'render.json'].map(f => produced(path.join(dir, f)))), bpm: score.bpm,
@@ -134,33 +167,59 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
   }
   // An intentionally simple audition synth. MIDI program changes remain in the MIDI.
   const frames = Math.ceil(score.seconds * RATE);
-  const left = new Float32Array(frames), right = new Float32Array(frames);
+  const left = new Float32Array(frames), right = score.stereo ? new Float32Array(frames) : undefined;
+  // Tables are local to this bounded render and retain the exact harmonic
+  // cutoff of oscillator(). Linear interpolation avoids trigonometry per
+  // sample; short notes bypass the table setup. Maximum table storage: 32 MiB.
+  const tables = new Map<string, Float64Array>();
   for (const t of score.tracks) for (const n of t.notes) {
     signal?.throwIfAborted();
-    const from = Math.round(n.start * 60 / score.bpm * RATE);
-    const length = Math.round(n.duration * 60 / score.bpm * RATE);
+    const from = Math.round(n.start * beatSeconds * RATE);
+    const length = Math.round((n.start + n.duration) * beatSeconds * RATE) - from;
     const freq = 440 * 2 ** ((n.pitch - 69) / 12);
     // Constant-power pan; mono mixes keep the original center sum exactly.
     const angle = (t.pan + 1) * Math.PI / 4;
     const gl = Math.cos(angle), gr = Math.sin(angle);
-    if (freq < RATE / 2) for (let i = 0; i < length && from + i < frames; i++) {
-      const wave = oscillator(t.waveform, 2 * Math.PI * freq * i / RATE, freq);
-      const envelope = Math.min(1, i / (RATE * 0.008), (length - 1 - i) / (RATE * 0.025));
-      const sample = wave * Math.max(0, envelope) * n.velocity / 127 * 0.18;
-      left[from + i] += sample * (score.stereo ? gl : 1);
-      if (score.stereo) right[from + i] += sample * gr;
+    if (freq < RATE / 2) {
+      let table: Float64Array | undefined;
+      if (length >= TABLE_SIZE) {
+        const key = `${t.waveform}:${n.pitch}`;
+        table = tables.get(key);
+        if (!table) {
+          table = Float64Array.from({ length: TABLE_SIZE }, (_, i) => oscillator(t.waveform, 2 * Math.PI * i / TABLE_SIZE, freq));
+          tables.set(key, table);
+        }
+      }
+      const step = freq * TABLE_SIZE / RATE;
+      for (let block = 0; block < length && from + block < frames; block += BLOCK) {
+        await yieldAudio(signal);
+        for (let i = block; i < Math.min(block + BLOCK, length, frames - from); i++) {
+          const phase = (i * step) % TABLE_SIZE, index = Math.floor(phase), fraction = phase - index;
+          const wave = table ? table[index] + (table[(index + 1) % TABLE_SIZE] - table[index]) * fraction : oscillator(t.waveform, 2 * Math.PI * freq * i / RATE, freq);
+          const envelope = Math.min(1, i / (RATE * 0.008), (length - 1 - i) / (RATE * 0.025));
+          const sample = wave * Math.max(0, envelope) * n.velocity / 127 * 0.18;
+          left[from + i] += sample * (score.stereo ? gl : 1);
+          if (right) right[from + i] += sample * gr;
+        }
+      }
     }
-    await new Promise<void>(resolve => setImmediate(resolve));
   }
-  const mix = score.stereo ? [left, right] : [left];
-  let peak = 0; for (const channel of mix) for (const v of channel) peak = Math.max(peak, Math.abs(v));
+  const mix = right ? [left, right] : [left];
+  let peak = 0;
+  for (let block = 0; block < frames; block += BLOCK * 4) {
+    await yieldAudio(signal);
+    for (const channel of mix) for (let i = block; i < Math.min(frames, block + BLOCK * 4); i++) peak = Math.max(peak, Math.abs(channel[i]));
+  }
   const gain = peak > 0.89 ? 0.89 / peak : 1;
   const channels = mix.length, block = channels * 2;
   const wav = Buffer.alloc(44 + frames * block);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16);
   wav.writeUInt16LE(1, 20); wav.writeUInt16LE(channels, 22); wav.writeUInt32LE(RATE, 24); wav.writeUInt32LE(RATE * block, 28); wav.writeUInt16LE(block, 32); wav.writeUInt16LE(16, 34);
   wav.write("data", 36); wav.writeUInt32LE(frames * block, 40);
-  for (let i = 0; i < frames; i++) for (let c = 0; c < channels; c++) wav.writeInt16LE(Math.round(mix[c][i] * gain * 32767), 44 + (i * channels + c) * 2);
+  for (let block = 0; block < frames; block += BLOCK * 4) {
+    await yieldAudio(signal);
+    for (let i = block; i < Math.min(frames, block + BLOCK * 4); i++) for (let c = 0; c < channels; c++) wav.writeInt16LE(Math.round(mix[c][i] * gain * 32767), 44 + (i * channels + c) * 2);
+  }
   signal?.throwIfAborted();
   const dir = await outputFolder(params.outputDir, cwd);
   try {

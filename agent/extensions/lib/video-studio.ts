@@ -15,7 +15,7 @@ import { runGuarded, throttled, type Progress } from "./guarded-process.ts";
 import { memoryBudgetMb } from "./memory-guard.ts";
 import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lintSource, lookById, suggestLook, type FontChoice, type Look } from "./video-looks.ts";
 import { deriveLook } from "./video-derive.ts";
-import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions } from './elevenlabs.ts';
+import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions, retainedSpeechError, elevenRecover } from './elevenlabs.ts';
 import { fileDigest, renderSegments, videoFingerprint } from './video-segments.ts';
 import { sampledColorEvidence } from './video-color-evidence.ts';
 import { videoMotion, videoLoopBoundary } from './video-motion.ts';
@@ -1087,7 +1087,11 @@ export async function narrationSpeak(params: any, cwd: string, signal?: AbortSig
         note: 'ElevenLabs speech, with provider character alignment. Listen to pronunciation and delivery. Captions and cueWords share these spans; provider alignment is not independent transcription.' };
       await fs.rm(made.raw, { force: true });
       await fs.writeFile(path.join(dir, 'narration.json'), JSON.stringify(delivery, null, 2) + '\n'); return delivery;
-    } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+    } catch (error) {
+      const retained = await retainedSpeechError(dir, error);
+      if (retained) throw retained;
+      await fs.rm(dir, { recursive: true, force: true }); throw error;
+    }
   }
   const plan = planNarration(params), style = VOICE_STYLES[plan.style];
   signal?.throwIfAborted();
@@ -1116,6 +1120,17 @@ export async function narrationSpeak(params: any, cwd: string, signal?: AbortSig
 
 export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const action = params.action ?? "status";
+  if (action === 'recover') {
+    if (typeof params.dir !== 'string' || !params.dir) throw Error('recover requires dir of the retained narration cache');
+    const manifest = await inputFile(path.join(params.dir ?? '', 'speech-request.json'), cwd), dir = path.dirname(manifest);
+    const root = await fs.realpath(cwd);
+    if (!containsPath(root, dir)) throw Error('Narration recovery cache must be inside the current workspace');
+    const denial = selfMutationDenial(manifest, root);
+    if (denial) throw Error(denial);
+    const made = await elevenRecover(dir, signal, progress);
+    return { ...made, artifact: await produced(made.raw), captions: await writeSpeechCaptions(dir, made.words.map(w => w.w).join(' '), made.seconds, made.words), decodeVerified: true,
+      note: 'Recovered decoded speech from saved responses only. Use the artifact as a voice track; words/captions describe cached spoken text before display-lexicon mapping. No new generation or mastering occurs.' };
+  }
   if (action === "speak") return narrationSpeak(params, cwd, signal, progress);
   let voice = params.voice ?? "en_US-ryan-high";
   if (action === "status") return { ...await piperStatus(), preferredBackend: narrationBackend(params), elevenlabs: elevenStatus() };

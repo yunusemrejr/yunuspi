@@ -2,7 +2,7 @@
  * reports evidence and never fixes overruns by cutting spoken words. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { inputFile, number, probe } from './media-process.ts';
+import { inputFile, number, probe, requireStream } from './media-process.ts';
 
 const norm = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
 export function wordTarget(words: any[], value: string) {
@@ -17,13 +17,17 @@ export function auditMediaSync(spec: any, measurements: Record<string, number> =
   if (!Number.isInteger(fps)) throw Error('fps must be an integer');
   if (!Array.isArray(spec?.scenes) || !spec.scenes.length) throw Error('scenes must be nonempty');
   number(toleranceFrames, 2, 0, 30, 'toleranceFrames');
-  const issues: any[] = [], scenes: any[] = [];
+  const issues: any[] = [], scenes: any[] = [], ids = new Set<string>();
   let frame = 0;
   for (const scene of spec.scenes) {
+    if (!scene || typeof scene !== 'object' || Array.isArray(scene) || typeof scene.id !== 'string' || !scene.id.trim() || ids.has(scene.id)) throw Error('Scenes need nonempty unique string ids');
+    ids.add(scene.id);
     const seconds = number(scene.seconds, 0, 0.01, 86400, 'scene.seconds'), frames = Math.max(1, Math.round(seconds * fps));
     const start = frame / fps, end = (frame + frames) / fps;
     const words = scene.narrationWords ?? [], offset = number(scene.narrationOffset, 0, 0, 86400, 'narrationOffset');
-    const measured = measurements[scene.id], declared = scene.narrationSeconds;
+    const measured = Object.hasOwn(measurements, scene.id) ? number(measurements[scene.id], 0, 0.001, 86400, 'measured narration duration') : undefined;
+    const declared = scene.narrationSeconds === undefined ? undefined : number(scene.narrationSeconds, 0, 0, 86400, 'narrationSeconds');
+    const lead = number(scene.cueLead, 0.08, 0, 10, 'cueLead');
     const audioSeconds = measured ?? declared;
     const problem = (severity: string, code: string, detail: any = {}) => issues.push({ severity, code, scene: scene.id, ...detail });
     if (!Array.isArray(words)) throw Error('narrationWords must be an array');
@@ -46,7 +50,6 @@ export function auditMediaSync(spec: any, measurements: Record<string, number> =
       if (cueFrame >= frame + frames) problem('error', 'cue-outside-frames', { cue: name });
       if (target && !word) problem('error', 'cue-word-unresolved', { cue: name, target });
       const spokenSeconds = word ? start + offset + word.s : null;
-      const lead = scene.cueLead ?? 0.08;
       const deltaFrames = spokenSeconds === null ? null : cueFrame - Math.round((spokenSeconds - lead) * fps);
       if (deltaFrames !== null && Math.abs(deltaFrames) > toleranceFrames) problem('error', 'cue-speech-drift', { cue: name, deltaFrames, intendedLeadSeconds: lead });
       return { name, seconds: start + cue, frame: cueFrame, quantizedSeconds: cueFrame / fps, target: target ?? null, spokenSeconds, deltaFrames };
@@ -65,7 +68,9 @@ export function musicGrid(params: any) {
   const beatsPerBar = number(params.beatsPerBar, 4, 1, 12, 'beatsPerBar');
   if (!Number.isInteger(beatsPerBar)) throw Error('beatsPerBar must be an integer');
   if (!Array.isArray(params.times) || params.times.length > 2000) throw Error('times must be an array of at most 2000 cue times');
-  const interval = 60 / bpm * (params.unit === 'bar' ? beatsPerBar : params.unit === 'half' ? 0.5 : 1);
+  const unit = params.unit ?? 'beat';
+  if (!['beat', 'bar', 'half'].includes(unit)) throw Error('unit must be beat, bar or half');
+  const interval = 60 / bpm * (unit === 'bar' ? beatsPerBar : unit === 'half' ? 0.5 : 1);
   return { bpm, offset, beatsPerBar, interval, cues: params.times.map((t: unknown) => {
     const time = number(t, 0, 0, 86400, 'cue time'), index = Math.max(0, Math.round((time - offset) / interval)), snapped = offset + index * interval;
     return { time, snapped, deltaSeconds: snapped - time, index };
@@ -83,13 +88,14 @@ export async function mediaSync(params: any, cwd: string, signal?: AbortSignal) 
     spec = JSON.parse(await fs.readFile(file, 'utf8'));
   }
   if (!spec) throw Error('Provide dir or timeline');
-  const measurements: Record<string, number> = {};
+  const measurements: Record<string, number> = Object.create(null);
   if (dir) for (const scene of spec.scenes ?? []) {
     signal?.throwIfAborted();
     if (scene.narrationAudio) {
       if (typeof scene.narrationAudio !== 'string' || /(^|[\\/])\.\.([\\/]|$)|^[\\/]|^[a-z]+:/i.test(scene.narrationAudio)) throw Error('Narration audio must be relative to public/');
       const info = await probe(await inputFile(path.join(dir, 'public', scene.narrationAudio), cwd), signal);
-      const seconds = Number(info.format?.duration);
+      const stream = requireStream(info, 'audio');
+      const seconds = Number(stream.duration ?? info.format?.duration);
       if (!Number.isFinite(seconds) || seconds <= 0) throw Error('Narration duration could not be measured');
       measurements[scene.id] = seconds;
     }
@@ -99,8 +105,12 @@ export async function mediaSync(params: any, cwd: string, signal?: AbortSignal) 
     const info = await probe(await inputFile(params.path, cwd), signal);
     const streamEnd = (s: any) => Number(s.start_time ?? 0) + Number(s.duration);
     const video = info.streams?.find((s: any) => s.codec_type === 'video'), audio = info.streams?.find((s: any) => s.codec_type === 'audio');
-    const videoEnd = video && streamEnd(video), audioEnd = audio && streamEnd(audio);
+    const videoStart = Number(video?.start_time ?? 0);
+    // Compare delivery duration to a timeline whose first video frame is
+    // zero, including remuxed sources with nonzero presentation timestamps.
+    const videoEnd = video && streamEnd(video) - videoStart, audioEnd = audio && streamEnd(audio) - videoStart;
     result.delivery = { videoEndSeconds: Number.isFinite(videoEnd) ? videoEnd : null, audioEndSeconds: Number.isFinite(audioEnd) ? audioEnd : null,
+      presentationStartSeconds: video ? videoStart : null,
       avDeltaFrames: Number.isFinite(videoEnd) && Number.isFinite(audioEnd) ? (audioEnd - videoEnd) * result.fps : null,
       timelineDeltaFrames: Number.isFinite(videoEnd) ? (videoEnd - result.seconds) * result.fps : null };
     if (result.delivery.timelineDeltaFrames !== null && Math.abs(result.delivery.timelineDeltaFrames) > 1 || result.delivery.avDeltaFrames !== null && Math.abs(result.delivery.avDeltaFrames) > 2) {

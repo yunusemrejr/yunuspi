@@ -40,6 +40,8 @@ def render(request):
     off = api('fluid_synth_noteoff', integer, ptr, integer, integer)
     write = api('fluid_synth_write_float', integer, ptr, integer, ptr, integer, integer, ptr, integer, integer)
     settings, synth = settings_new(), None
+    if not settings:
+        raise RuntimeError('FluidSynth could not allocate settings')
     raw = request['output'] + '.float'
     try:
         settings_num(settings, b'synth.sample-rate', rate)
@@ -51,13 +53,18 @@ def render(request):
         if bank < 0:
             raise RuntimeError('SoundFont could not be loaded')
         events = []
-        for channel, track in enumerate(score['tracks']):
-            if program(synth, channel, bank, 0, int(track['program'])) < 0:
-                raise RuntimeError(f"SoundFont has no bank 0 program {track['program']}")
-            control(synth, channel, 10, round((track['pan'] + 1) * 63.5))
+        for index, track in enumerate(score['tracks']):
+            channel = 9 if track.get('percussion', False) else index
+            bank_number = 128 if track.get('percussion', False) else 0
+            if program(synth, channel, bank, bank_number, int(track['program'])) < 0:
+                raise RuntimeError(f"SoundFont has no bank {bank_number} program {track['program']}")
+            if control(synth, channel, 10, round((track['pan'] + 1) * 63.5)) < 0:
+                raise RuntimeError('FluidSynth could not apply track pan')
+            beat_seconds = score.get('midiTempoMicroseconds', round(60000000 / score['bpm'])) / 1e6
             for note in track['notes']:
-                start = round(note['start'] * 60 / score['bpm'] * rate)
-                end = round((note['start'] + note['duration']) * 60 / score['bpm'] * rate)
+                # Match JavaScript/MIDI rounding at exact half-sample ties.
+                start = math.floor(note['start'] * beat_seconds * rate + .5)
+                end = math.floor((note['start'] + note['duration']) * beat_seconds * rate + .5)
                 events.extend([(start, 1, channel, note['pitch'], note['velocity']), (end, 0, channel, note['pitch'], 0)])
         if len(events) > 2048:
             raise ValueError('Too many note events')
@@ -84,7 +91,8 @@ def render(request):
                     output.write(samples.tobytes())
                     cursor += count
                 if kind == 1:
-                    on(synth, channel, pitch, velocity)
+                    if on(synth, channel, pitch, velocity) < 0:
+                        raise RuntimeError('FluidSynth could not start a note')
                 elif kind == 0:
                     off(synth, channel, pitch)
         gain = min(1., .89 / peak) if peak else 1.
