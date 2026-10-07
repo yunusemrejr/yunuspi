@@ -45,9 +45,11 @@ For a directed arrangement, use `audio_generate({kind:"music",prompt:"Instrument
 
 The template ducks music under narration windows automatically (`musicVolume` to `musicDuckedVolume`). Measure the result with `video_qa`; adjust the two volumes in `video.json`.
 
+For an authored instrumental arrangement, `music_compose` can render a supplied SF2/SF3 bank through libfluidsynth while retaining MIDI and score JSON. `auto` selects it when `YUNUSPI_SOUNDFONT` or `soundfont` is set; otherwise the WAV is labeled as an oscillator audition. Direct harmony, register and rhythm in the score; keep the release tail, audition it, import the WAV and use its measured length.
+
 ## Sound accents
 
-`audio_generate kind:"sfx"` produces a prompted accent when procedural sound cannot express it. For a browser demonstration, use `video_browser`'s observed click/key/scroll event times; planned times can differ when the page responds slowly. `media_sync action:"music_grid"` can suggest beat/bar/half-beat cue times from a supplied BPM and downbeat, but speech cues should stay anchored to words.
+`audio_generate kind:"sfx"` produces a prompted accent when procedural sound cannot express it. For a browser demonstration, use `video_browser`'s observed click/key/scroll event times; planned times can differ when the page responds slowly. Native compose imports observed click/tap/key accents from take metadata and uses named layer gestures for sound_design. `media_sync action:"music_grid"` can suggest beat/bar/half-beat cue times from a supplied BPM and downbeat, but speech cues should stay anchored to words.
 
 `audio_synth kind:"sfx"` with `type` whoosh (object crossing frame, transition), riser (tension into a reveal), downlifter (energy draining out, section end), impact (reveal lands), tick (items counting or stepping), pop (UI confirmations, small appearances), chime (conclusion, success). Use one accent per idea, place it at the visual event (`video.json` `audio.sfx: [{src, at, volume}]`), and keep it 6–12 dB under narration. If you can't say which visual event a sound belongs to, delete it.
 

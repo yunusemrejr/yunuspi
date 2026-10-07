@@ -42,6 +42,6 @@ An anchor is an object (usually an Empty) at a 3D feature, or a bounding-box poi
 ## Cost and honesty
 
 - A preview frame is ~0.3-1 s at 640x360; a final 1080p EEVEE frame ~2-6 s; Cycles with denoise 10-60 s. The shot result reports `secondsPerFrame` and an estimate for the final.
-- 12-15 fps is enough for slow moves because `BlenderShot` blends neighbours; fast moves need the film's fps.
+- 12-15 fps previews are drafts. Final shots use the film fps with no blending by default; only intentional stepped motion can opt out.
 - Blender 5 API changes you will hit: no `Action.fcurves` (set `bpy.context.preferences.edit.keyframe_new_interpolation_type` before keying); `transform_apply` bakes location by default (`location=False` to keep it); text objects cannot apply rotation before conversion to mesh.
 - The preview is not the delivery: say so when you show it.

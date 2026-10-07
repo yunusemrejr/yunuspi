@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.26.0 — 2026-10-07
+
+**Video composition has a native owner.** `video_project compose` stages typography and media in reserved regions, fits the actual loaded font, reveals lines, and samples smooth/snappy/spring motion on the frame clock. Explicit layer boxes and transform keys retain detailed control. Source probing checks footage length and dimensions. Camera crops establish the view and follow observed action targets/clicks or freeform pointer movement; trimmed footage, camera samples and sound accents use the same source clock. Custom scenes remain available.
+
+**Blender shots can be authored as editable scene graphs.** Finished phone/laptop rigs, smooth forms, revolved profiles, tubes, text and licensed imported models support parents, transform keys and PBR maps. Four tracked device corners project real footage with per-frame homographies and occlusion checks. Swept subject bounds improve framing. Imported blends preserve authored cameras, world, lights, engine and color management by default. Device proportions, parent cycles and source paths are validated before rendering; editable blends are retained.
+
+**Browser and audio tools coordinate real actions.** Mobile takes use touch emulation and tap markers; selector highlights, focused typing and key aliases join eased pointer paths and scrolling. Asset import retains portable observed take metadata. Native layer gestures and actual browser events drive sound design. `music_compose` and `media_pipeline scoreRender` support local SoundFont instruments through libfluidsynth, with MIDI programs/pan, release tails, bank hashes, source peaks and note-clock tolerance; unavailable instrument rendering fails explicitly. Existing ElevenLabs preference and voice/model selection remain intact.
+
+**Review reaches critical frames.** Shot/render/QA contact sheets are included in vision-capable tool responses. QA strips cover entrances, settled composition, authored gestures and the final frame, with pagination for longer films. Frozen motion from using `scene.index` is flagged. Referenced draft shots and accidental low-rate final shots block final export; frame blending is opt-in because it ghosts outlines. Existing global-clock segmented rendering and PCM assembly remain available. These checks provide technical evidence, not a guarantee of artistic quality from every model.
+
 ## 0.25.0 — 2026-10-06
 
 **Research keeps attributable evidence through synthesis.** Background research accepts up to 24 page reads and returns query-ranked passages with exact locations, complete-text hashes and explicit analysis limits. The new dossier action checks quotations and expected hashes, merges duplicate URL/text components, retains contradictions and missing authority/date coverage, and produces paginated source/claim receipts or an attributed report. Caller interpretations remain reviewable; matching text never certifies a claim.

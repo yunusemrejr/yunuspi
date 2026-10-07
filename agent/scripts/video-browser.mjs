@@ -17,7 +17,7 @@ async function main() {
   await fs.mkdir(rawDir); await fs.mkdir(framesDir);
   const browser = await chromium.launch({ channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? 'chrome', headless: true, chromiumSandbox: true, timeout: 15_000 });
   try {
-    const context = await browser.newContext({ viewport: { width: plan.width, height: plan.height }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false, permissions: [], colorScheme: 'light' });
+    const context = await browser.newContext({ viewport: { width: plan.width, height: plan.height }, deviceScaleFactor: 1, isMobile: plan.mobile, hasTouch: plan.mobile || plan.steps.some(s => s.action === 'tap'), serviceWorkers: 'block', acceptDownloads: false, permissions: [], colorScheme: 'light' });
     await context.route('**/*', async route => {
       const url = route.request().url();
       if (plan.local) {
@@ -34,12 +34,15 @@ async function main() {
     const problems = []; page.on('pageerror', error => { if (problems.length < 10) problems.push(String(error).slice(0, 200)); });
     await page.goto(plan.local ? 'http://yunuspi-take.invalid/' : urlOf(plan.url), { waitUntil: 'load', timeout: 30_000 });
     await page.evaluate(() => document.fonts.ready);
-    if (plan.cursor) await page.evaluate(() => {
+    const installPointer = async () => { if (plan.cursor) await page.evaluate(mobile => {
+      if (document.getElementById('__yunuspi_take_cursor')) return;
       const cursor = document.createElement('div'); cursor.id = '__yunuspi_take_cursor';
       cursor.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:28px;pointer-events:none;z-index:2147483647;filter:drop-shadow(1px 2px 2px #0008)';
-      cursor.innerHTML = '<svg viewBox="0 0 22 28"><path d="M2 1L2 23L8 17L13 27L17 25L12 15L21 15Z" fill="white" stroke="#17212a" stroke-width="1.3"/></svg>';
+      cursor.innerHTML = mobile ? '<svg viewBox="0 0 22 28"><circle cx="11" cy="14" r="9" fill="#fff6" stroke="white" stroke-width="2"/></svg>' : '<svg viewBox="0 0 22 28"><path d="M2 1L2 23L8 17L13 27L17 25L12 15L21 15Z" fill="white" stroke="#17212a" stroke-width="1.3"/></svg>';
       document.documentElement.append(cursor);
-    });
+    }, plan.mobile); };
+    await installPointer();
+    page.on('domcontentloaded', () => { void installPointer().catch(() => {}); });
     const cdp = await context.newCDPSession(page), raw = [], writes = new Set(), events = [];
     let bytes = 0, dropped = 0, captureError;
     cdp.on('Page.screencastFrame', frame => {
@@ -60,12 +63,14 @@ async function main() {
     const log = (kind, extra = {}) => events.push({ t: time(), kind, ...extra });
     let x = plan.width * 0.75, y = plan.height * 0.75;
     async function point(nx, ny, seconds) {
+      await installPointer();
       const ox = x, oy = y, began = performance.now();
       for (;;) {
         const u = seconds ? Math.min(1, (performance.now() - began) / (seconds * 1000)) : 1, e = ease(u);
-        x = ox + (nx - ox) * e; y = oy + (ny - oy) * e;
+        const bend = Math.sin(Math.PI*e)*.045;
+        x = ox + (nx - ox) * e - (ny-oy)*bend; y = oy + (ny - oy) * e + (nx-ox)*bend;
         await page.mouse.move(x, y);
-        if (plan.cursor) await page.evaluate(([px, py]) => { const cursor = document.getElementById('__yunuspi_take_cursor'); if (cursor) cursor.style.transform = `translate(${px}px,${py}px)`; }, [x, y]);
+        if (plan.cursor) await page.evaluate(([px, py, mobile]) => { const cursor = document.getElementById('__yunuspi_take_cursor'); if (cursor) cursor.style.transform = `translate(${px-(mobile?11:0)}px,${py-(mobile?14:0)}px)`; }, [x, y, plan.mobile]);
         log('pointer', { x, y }); if (u >= 1) break; await delay(16);
       }
     }
@@ -81,22 +86,34 @@ async function main() {
         if (!target || target.x < 0 || target.y < 0 || target.x + target.width > plan.width || target.y + target.height > plan.height) throw Error('Take target is outside the viewport; add an explicit scroll step');
         log('target', { selector: step.selector, ...target });
       }
-      if (['move', 'click'].includes(step.action)) {
+      if (step.action === 'highlight') {
+        log('highlight', { selector: step.selector, ...target });
+        await page.evaluate(([box, accent, seconds]) => {
+          const el = document.createElement('div');
+          el.style.cssText = `position:fixed;left:${box.x-5}px;top:${box.y-5}px;width:${box.width+10}px;height:${box.height+10}px;border:3px solid ${accent};border-radius:10px;box-shadow:0 0 0 9999px #08131b66;pointer-events:none;z-index:2147483645`;
+          document.documentElement.append(el);
+          el.animate([{ opacity: 0 }, { opacity: 1, offset: .15 }, { opacity: 1, offset: .82 }, { opacity: 0 }], { duration: seconds*1000 }).finished.then(() => el.remove());
+        }, [target, plan.accent, step.duration ?? 1.2]);
+      } else if (['move', 'click', 'tap'].includes(step.action)) {
         await point(target ? target.x + target.width / 2 : step.x, target ? target.y + target.height / 2 : step.y, step.duration ?? 0.5);
-        if (step.action === 'click') {
-          log('click', { x, y });
-          if (plan.cursor) await page.evaluate(([px, py]) => {
-            const ring = document.createElement('div'); ring.style.cssText = `position:fixed;left:${px - 12}px;top:${py - 12}px;width:24px;height:24px;border:2px solid #e76339;border-radius:50%;pointer-events:none;z-index:2147483646`;
+        if (step.action === 'click' || step.action === 'tap') {
+          log(step.action === 'tap' || plan.mobile ? 'tap' : 'click', { x, y });
+          if (plan.cursor) await page.evaluate(([px, py, accent]) => {
+            const ring = document.createElement('div'); ring.style.cssText = `position:fixed;left:${px - 12}px;top:${py - 12}px;width:24px;height:24px;border:2px solid ${accent};border-radius:50%;pointer-events:none;z-index:2147483646`;
             document.documentElement.append(ring); ring.animate([{ transform: 'scale(.6)', opacity: 1 }, { transform: 'scale(2)', opacity: 0 }], { duration: 500, easing: 'ease-out' }).finished.then(() => ring.remove());
-          }, [x, y]);
-          await page.mouse.click(x, y);
+          }, [x, y, plan.accent]);
+          if (plan.mobile || step.action === 'tap') await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
         }
       } else if (step.action === 'scroll') {
         const began = performance.now(), duration = (step.duration ?? 0.5) * 1000; let last = 0;
         for (;;) { const u = duration ? Math.min(1, (performance.now() - began) / duration) : 1, e = ease(u); await page.mouse.wheel((step.dx ?? 0) * (e - last), (step.dy ?? 0) * (e - last)); last = e; if (u >= 1) break; await delay(16); }
         log('scroll', { dx: step.dx ?? 0, dy: step.dy ?? 0 });
-      } else if (step.action === 'type') { await page.keyboard.type(step.text, { delay: 40 }); log('type', { characters: step.text.length }); }
-      else if (step.action === 'press') { await page.keyboard.press(step.text); log('press', { key: step.text }); }
+      } else if (step.action === 'type') {
+        if (step.selector) await page.locator(step.selector).focus();
+        log('type', { characters: step.text.length });
+        for (const character of step.text) { log('key'); await page.keyboard.type(character); await delay(40); }
+      }
+      else if (step.action === 'press') { if (step.selector) await page.locator(step.selector).focus(); log('press', { key: step.text }); await page.keyboard.press(step.text); }
       else if (step.action === 'wait_text') { await page.getByText(step.text, { exact: false }).first().waitFor({ state: 'visible', timeout: Math.max(1, Math.min(15000, (plan.seconds - time()) * 1000)) }); log('text-visible'); }
       else if (step.action === 'mark') log('mark', { name: step.text });
       emit('BROWSER_TAKE_PROGRESS', `${step.action} at ${time().toFixed(2)}s`);

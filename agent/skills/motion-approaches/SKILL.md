@@ -5,7 +5,7 @@ description: Choose and combine the ways to make advanced motion graphics for vi
 
 # Motion approaches
 
-A film's motion is chosen per idea, not per habit. Most scenes belong in Remotion primitives; the ones that carry the film (a hero move, a transition, a product moment, a data reveal) usually need something stronger, and the strongest results combine two approaches. Do not write advanced motion from memory: `motion_examples action:"search" query:"<the effect>"` returns worked, verified examples with the concepts they use; `action:"copy"` places one in the project; adapt it to the film's look.
+A film's motion is chosen per idea, not per habit. Start native staging with `video_project compose` and `video_shot scene` for clean typography, device rigs and shared cue timing. Most scenes belong in Remotion primitives; the ones that carry the film (a hero move, a transition, a product moment, a data reveal) usually need something stronger, and the strongest results combine two approaches. Do not write advanced motion from memory: `motion_examples action:"search" query:"<the effect>"` returns worked, verified examples with the concepts they use; `action:"copy"` places one in the project; adapt it to the film's look.
 
 ## Pick the approach by what the idea needs
 
@@ -14,7 +14,7 @@ A film's motion is chosen per idea, not per habit. Most scenes belong in Remotio
 | Typography, shapes, data marks, morphs, draw-on, liquid or halftone effects, shader fields, 2D/2.5D worlds | Vanilla HTML page exposing `window.renderFrame(t)` | `HtmlScene` (or `render.mjs` for a standalone clip) |
 | Real 3D form: product, object, lit materials, depth of field, camera moves, extruded type, terrain | Blender scene + `video_shot` | `ShotScene` / `BlenderShot` (RGBA frames + anchors) |
 | 3D with crisp typography and annotations that follow it | HTML or Remotion layer over the shot, pinned to anchors | `ShotScene` notes, or `merge/shot-overlay.html` |
-| UI or motion graphics living on a 3D device or surface | Render the HTML, then play it as an emission texture in Blender | `blender/html-as-texture.py` then `video_shot` |
+| UI or footage living on a tracked device | Native laptop/phone plus a `screen` video layer; use baked emission textures when reflections need screen content | `video_shot scene` + compose `hero.screen`, or `blender/html-as-texture.py` |
 | Stacks of effects, a shared grade, or output without a browser | FFmpeg filter graphs and libass; numpy for math-heavy frames | `merge/composite.mjs`, `ffmpeg/`, `python/` |
 
 Read [choosing](references/choosing.md) for the full matrix, costs and failure modes before committing, and [motion originality](references/motion-originality.md) before designing: it is the guard against generic motion (the same fade-up stagger, glow, particle field and slow zoom on every scene).

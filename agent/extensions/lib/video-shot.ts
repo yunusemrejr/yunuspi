@@ -13,8 +13,9 @@ import { number } from './media-process.ts';
 import { blenderWorker, readablePath } from "./blender-studio.ts";
 import { contactSheet, freshOut, projectDir, projectWritePath, readSpec } from "./video-studio.ts";
 import type { Progress } from "./guarded-process.ts";
+import { validateShotScene } from './shot-scene.ts';
 
-export const SHOT_RIGS = ["turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static"] as const;
+export const SHOT_RIGS = ["turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene"] as const;
 export const SHOT_LIGHTS = ["softbox", "rim", "top", "overcast", "scene"] as const;
 export const SHOT_MATERIALS = ["keep", "clay", "satin", "metal", "glass", "glow"] as const;
 export const SHOT_SHADOWS = ["none", "soft", "catcher"] as const;
@@ -40,17 +41,18 @@ export function planShot(params: any, spec: any) {
   const base = Math.min(1, 1920 / projectWidth);
   const scale = params.scale ?? (mode === "preview" ? 0.5 : 1);
   const width = even(params.width ?? projectWidth * base * scale), height = even(params.height ?? projectHeight * base * scale);
-  const fps = params.fps ?? (mode === "preview" ? 12 : Math.min(30, Number(spec?.fps) || 30));
+  const fps = params.fps ?? (mode === "preview" ? 12 : Number(spec?.fps) || 30);
   const seconds = params.seconds ?? 4;
+  if (mode === 'final' && fps < (Number(spec?.fps) || 30) && params.stepped !== true) throw Error('Final shots need the film frame rate. Low fps is a draft, not smooth motion; use stepped:true only for intentional stop-motion.');
   const frames = Math.max(2, Math.round(seconds * fps));
-  if (frames > MAX_FRAMES) throw new Error(`${frames} frames exceeds the ${MAX_FRAMES}-frame limit of one shot; shorten seconds or lower fps (BlenderShot blends between frames, so a 12-15 fps render plays smoothly in a 30 fps film)`);
+  if (frames > MAX_FRAMES) throw new Error(`${frames} frames exceeds the ${MAX_FRAMES}-frame limit of one shot; split longer choreography into shots on the master timeline`);
   return { mode, width, height, fps, seconds, frames, samples: params.samples ?? (mode === "preview" ? 16 : 64) };
 }
 
 function sourceOf(params: any) {
-  const given = ["blend", "model", "title"].filter((key) => params[key] !== undefined && params[key] !== null);
-  if (given.length !== 1) throw new Error("Give exactly one source: blend (a .blend with the subject), model (glb, gltf, obj, ply, stl or fbx) or title ({text, font?, depth?, bevel?} for extruded 3D text)");
-  return given[0] as "blend" | "model" | "title";
+  const given = ["blend", "model", "title", 'scene'].filter((key) => params[key] !== undefined && params[key] !== null);
+  if (given.length !== 1) throw new Error("Give exactly one source: blend, model, title or scene (native object graph with device rigs and animation)");
+  return given[0] as "blend" | "model" | "title" | 'scene';
 }
 
 /** Flatten the transparent frames over the film's background so a human (or vision model) judges what the viewer will see. */
@@ -89,6 +91,13 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   const blend = source === "blend" ? await sourcePath(params.blend, dir, cwd) : undefined;
   const model = source === "model" ? await sourcePath(params.model, dir, cwd) : undefined;
   const title = source === "title" ? { text: params.title?.text, font: params.title?.font ? await sourcePath(params.title.font, dir, cwd) : undefined, depth: params.title?.depth, bevel: params.title?.bevel } : undefined;
+  const scene = source === 'scene' ? structuredClone(validateShotScene(params.scene, plan.seconds)) : undefined;
+  if (scene) for (const object of scene.objects) {
+    if (object.path) object.path = await sourcePath(object.path, dir, cwd);
+    if (object.font) object.font = await sourcePath(object.font, dir, cwd);
+    if (object.maps) for (const key of ['diffuse', 'roughness', 'metallic', 'normal']) if (object.maps[key]) object.maps[key] = await sourcePath(object.maps[key], dir, cwd);
+  }
+  const environment = params.environment ? await sourcePath(params.environment, dir, cwd) : undefined;
   if (title && (typeof title.text !== "string" || !title.text.trim())) throw new Error("title.text is required for a 3D title shot");
   const shotDir = projectWritePath(dir, "public", "shots", name);
   // The rigged scene is saved beside the source; never over the source itself.
@@ -102,8 +111,9 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
   await fs.mkdir(path.dirname(saved), { recursive: true });
   const request = {
     op: "shot", name, source: source === "blend" ? "blend" : source, model, title, outputDir: shotDir, save: saved,
-    rig: params.rig ?? (source === "title" ? "orbit" : "turntable"), fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,
-    transparent: params.transparent !== false, palette, material: params.material ?? (source === "title" ? "satin" : "keep"), color: hexOr(params.color), lights: params.lights ?? "softbox", lightStrength: params.lightStrength, surface: params.surface,
+    rig: params.rig, fps: plan.fps, seconds: plan.seconds, width: plan.width, height: plan.height, samples: plan.samples, engine: params.engine ?? (params.shadow === "catcher" ? "CYCLES" : source === 'blend' ? undefined : "EEVEE"), denoise: params.engine === "CYCLES" || params.shadow === "catcher" ? true : undefined,
+    transparent: params.transparent !== false, palette, material: params.material ?? (source === "title" ? "satin" : "keep"), color: hexOr(params.color), lights: params.lights, lightStrength: params.lightStrength, surface: params.surface,
+    scene, environment, environmentStrength: params.environmentStrength,
     shadow: params.shadow, lensMm: params.lensMm, azimuth: params.azimuth, elevation: params.elevation, elevationEnd: params.elevationEnd, degrees: params.degrees, travel: params.travel, ease: params.ease, margin: params.margin, offset: params.offset, fStop: params.fStop, motionBlur: params.motionBlur, anchors: params.anchors,
   };
   let result: any;
@@ -114,7 +124,7 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
     await fs.rm(shotDir, { recursive: true, force: true });
     throw error;
   }
-  const manifest = { ...result.manifest, quality: plan.mode, source: { kind: source, path: blend ?? model ?? title?.font ?? null, title: title?.text ?? null }, palette, editable: path.relative(dir, saved) };
+  const manifest = { ...result.manifest, quality: plan.mode, stepped: params.stepped === true, source: { kind: source, path: blend ?? model ?? title?.font ?? null, title: title?.text ?? null }, palette, editable: path.relative(dir, saved) };
   await fs.writeFile(path.join(shotDir, "shot.json"), JSON.stringify(manifest, null, 1));
   const out = await freshOut(dir, `shot-${name}`);
   const review = await reviewArtifacts(dir, out, shotDir, name, manifest, hexOr(theme.background) ?? "#181A1B", signal).catch((error) => ({ error: `review artifacts failed: ${error.message}` }));
@@ -127,6 +137,7 @@ export async function videoShot(params: any, cwd: string, signal?: AbortSignal, 
     next: plan.mode === "preview"
       ? ["Open the contact sheet and judge framing, lighting, materials and the move; change the rig, lights, offset or palette with replace:true until it reads.", `Then render the delivery version (mode:"final", replace:true): about ${finalMinutes} min at ${full.width}x${full.height}, ${full.frames} frames; run it in the background if that is long.`]
       : ["Open the contact sheet, then review the shot in the film with video_render mode:\"stills\"."],
-    note: `Straight-alpha PNG frames at ${manifest.fps} fps; BlenderShot blends between frames when the film runs faster, so 12-15 fps is enough for slow moves. The editable scene with the rig is ${manifest.editable}.`,
+    framing: manifest.framing?.filter((_: any, i: number) => i % Math.max(1, Math.floor(manifest.frames/8)) === 0), screenAnchors: manifest.screenAnchors,
+    note: `Straight-alpha PNG frames at ${manifest.fps} fps. Previews are drafts; delivery motion needs the film fps. Use StudioScene's shot layer to reserve a hero region and screen.src to track real footage onto a device. The editable scene is ${manifest.editable}.`,
   };
 }

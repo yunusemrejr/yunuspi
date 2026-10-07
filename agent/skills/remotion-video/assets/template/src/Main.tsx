@@ -49,9 +49,11 @@ export const SceneView: React.FC<{ scene: TimedScene }> = ({ scene }) => {
 function musicVolume(frame: number): number {
   const ramp = 10;
   const ducked = narrationWindows().some(([start, end]) => frame >= start - ramp && frame <= end + ramp);
-  if (!ducked) return spec.audio.musicVolume;
+  const duration = timeline().durationInFrames;
+  const fade = Math.min(1, Math.max(0, frame / Math.max(1, spec.fps*.25)), Math.max(0, (duration - 1 - frame) / Math.max(1, spec.fps*.9)));
+  if (!ducked) return spec.audio.musicVolume * fade;
   const distance = Math.min(...narrationWindows().map(([start, end]) => (frame < start ? start - frame : frame > end ? frame - end : 0)));
-  return interpolate(distance, [0, ramp], [spec.audio.musicDuckedVolume, spec.audio.musicVolume], { extrapolateRight: "clamp" });
+  return interpolate(distance, [0, ramp], [spec.audio.musicDuckedVolume, spec.audio.musicVolume], { extrapolateRight: "clamp" }) * fade;
 }
 
 export const Main: React.FC = () => {

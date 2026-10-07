@@ -15,9 +15,13 @@ Rules: derive the HTML page's theme from the film (HtmlScene supplies it); light
 
 ## 2. HTML drawn over a Blender shot, no framework (`merge/shot-overlay.html`)
 
-A single page draws the shot's frames on a canvas (decoded on demand, neighbours blended so a 12 fps render plays smoothly) and SVG annotations positioned from `anchors.json`. Use when the annotated clip should be a standalone HTML/`render.mjs` artifact or when the overlay design is complex DOM/CSS. From `public/html/` reference the shot as `../shots/<name>`. Labels flip sides to stay on canvas, hide when the feature is occluded, and use the film's fonts.
+A single page draws the shot's frames on a canvas (decoded on demand, frame-rate-matched source for delivery; optional blending can ghost edges) and SVG annotations positioned from `anchors.json`. Use when the annotated clip should be a standalone HTML/`render.mjs` artifact or when the overlay design is complex DOM/CSS. From `public/html/` reference the shot as `../shots/<name>`. Labels flip sides to stay on canvas, hide when the feature is occluded, and use the film's fonts.
 
-## 3. HTML as a texture in Blender (`blender/html-as-texture.py`)
+## 3. Tracked device screens and baked textures
+
+For a native phone/laptop, `video_shot scene` emits `screen:tl/tr/br/bl` anchors. Compose `hero:{kind:"shot",shot:"device",screen:{src:"assets/take.mp4",startFrom:0}}`; `ShotScreen` uses a per-frame projective transform and hides an occluded/edge-on screen. Footage changes without another Blender render. The shot and fitted region share transforms, so the screen follows the actual camera and device motion. Screen `startFrom` is seconds and optional `speed` is independent of device playback. This is a composited screen without screen-content reflections. Use the baked method below when lighting/reflections need the content.
+
+### HTML as a texture in Blender (`blender/html-as-texture.py`)
 
 Render the page to frames (`render.mjs`), then use the sequence as the emission texture of a screen: UI, dashboards, titles and charts on glass in a perspective shot with reflections. `video_shot` the saved `.blend`. Type stays crisp because it was rasterised at the page's resolution; to change the screen, edit the page and re-render. Typical uses: a laptop or phone hero, a billboard in a scene, a monitor in an environment, wall projections.
 
@@ -25,7 +29,7 @@ The reverse also works: HTML-generated patterns (noise, halftone, gradients) as 
 
 ## 4. FFmpeg composite of a Blender shot over any background (`merge/composite.mjs`)
 
-When the background is a video (an HTML-rendered `motion.mp4`, a numpy clip, footage) and no Remotion pass is wanted: overlay the shot's RGBA sequence with straight alpha, blend frames up to the film's fps, hold the last frame of a non-looping shot, apply one grade (warm/cool/none) over the finished picture, map audio. Grading the finished composite is what makes the 2D and 3D layers feel like one photograph.
+When the background is a video (an HTML-rendered `motion.mp4`, a numpy clip, footage) and no Remotion pass is wanted: overlay the shot's RGBA sequence with straight alpha, match source frames to the film's fps, hold the last frame of a non-looping shot, apply one grade (warm/cool/none) over the finished picture, map audio. Grading the finished composite is what makes the 2D and 3D layers feel like one photograph.
 
 ## 5. Data handoffs in either direction
 

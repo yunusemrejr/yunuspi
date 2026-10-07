@@ -17,6 +17,7 @@ import { DEFAULT_LOOK, LOOKS, fontDependencies, fontsSource, lintDesign, lintSou
 import { deriveLook } from "./video-derive.ts";
 import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions } from './elevenlabs.ts';
 import { renderSegments } from './video-segments.ts';
+import { compileStoryboard, followCamera, validateProductionScene } from './video-compose.ts';
 import { matchAvoidSignals, readProjectDirection, renderDirectionBrief, type CreativeDirection } from "./creative-direction.ts";
 import { chapterList, descriptionDraft, formatChapters, isPublishing, planCtas, publishFindings, validatePublishSpec } from "./video-publish.ts";
 // The template's caption timing is the single source for burned-in captions
@@ -380,12 +381,28 @@ async function sceneSources(dir: string): Promise<Record<string, string>> {
   return Object.fromEntries(await Promise.all(names.map(async (name) => [`src/scenes/${name}`, (await fs.readFile(path.join(folder, name), "utf8").catch(() => "")).slice(0, 200_000)])));
 }
 /** Preview-quality shots are drafts: warn so a final film never ships half-size 12 fps renders unnoticed. */
-async function previewShots(dir: string): Promise<Issue[]> {
+async function previewShots(dir: string, spec: any): Promise<Issue[]> {
   const root = path.join(dir, "public", "shots");
   const issues: Issue[] = [];
-  for (const name of (await fs.readdir(root).catch(() => [] as string[])).slice(0, 40)) {
+  const referenced = new Set<string>();
+  const visit = (value: any) => { if (!value || typeof value !== 'object') return; if (typeof value.shot === 'string') referenced.add(value.shot); for (const child of Object.values(value)) visit(child); };
+  visit(spec.scenes);
+  // Custom scene components may refer to shot ids in code rather than props.
+  const sources = await sceneSources(dir);
+  let dynamic = false;
+  for (const scene of spec.scenes ?? []) if (scene && scene.component !== 'StudioScene') {
+    const source = sources[`src/scenes/${scene.component}.tsx`] ?? '';
+    for (const match of source.matchAll(/\bshot\s*[:=]\s*["']([a-z0-9-]+)["']/g)) referenced.add(match[1]);
+    if (/\bshot\s*=\s*\{/.test(source)) dynamic = true;
+  }
+  const names = dynamic ? await fs.readdir(root).catch(() => [] as string[]) : [...referenced];
+  for (const name of names) {
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(name)) continue;
     const manifest = await fs.readFile(path.join(root, name, "shot.json"), "utf8").then(JSON.parse, () => null);
+    if (!manifest && referenced.has(name)) issues.push({ severity: 'error', message: `Shot "${name}" has no readable shot.json; render the referenced shot before exporting` });
     if (manifest?.quality === "preview") issues.push({ severity: "warn", message: `Shot "${name}" is a preview render (${manifest.width}x${manifest.height}, ${manifest.fps} fps); re-run video_shot with mode:"final" and replace:true before the final render` });
+    if (manifest && manifest.fps < spec.fps && !manifest.stepped) issues.push({ severity: 'warn', message: `Shot "${name}" runs at ${manifest.fps} fps in a ${spec.fps} fps film; frame blending ghosts edges. Render at delivery fps or explicitly author stepped motion.` });
+    if (manifest?.framing?.some((f: any) => f.behindCamera || f.box?.[0] < -.02 || f.box?.[1] < -.02 || f.box?.[0] + f.box?.[2] > 1.02 || f.box?.[1] + f.box?.[3] > 1.02)) issues.push({ severity: 'warn', message: `Shot "${name}" has geometry outside its camera. Review the critical-frame strip for clipping.` });
   }
   return issues;
 }
@@ -398,12 +415,14 @@ async function inspectProject(dir: string) {
   const audience = structural.some((i) => i.severity === "error") ? [] : publishFindings(spec, result.scenes, result.seconds);
   const source = await sceneSources(dir);
   const code = lintSource(source).map(({ severity, message }) => ({ severity, message: `Source: ${message}` }));
-  const previews = await previewShots(dir);
+  const previews = await previewShots(dir, spec);
+  const composition = (spec.scenes ?? []).flatMap(validateProductionScene);
+  const clocks: Issue[] = Object.entries(source).flatMap(([file, text]) => /\b(?:progress|enter|interpolate)\s*\(\s*scene\.index\b/.test(text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")) ? [{ severity: 'error' as const, message: `Source: ${file} animates scene.index (the scene ordinal). Use useCurrentFrame() for motion; the current expression freezes the animation.` }] : []);
   // The creative direction recorded at init is a contract: lint findings that name something it avoids are called out as such.
   const direction: Issue[] = Array.isArray(spec.direction?.avoid) && spec.direction.avoid.length
     ? matchAvoidSignals({ avoid: spec.direction.avoid }, [...design, ...code].map((issue) => issue.message)).slice(0, 4).map((hit) => ({ severity: "warn" as const, message: `Creative direction "${spec.direction.name}" avoids "${hit.avoid}": ${hit.signal.slice(0, 160)}` }))
     : [];
-  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...code, ...previews, ...direction, ...audience] };
+  return { spec, components, ...result, issues: [...result.issues, ...structural, ...design, ...code, ...previews, ...composition, ...clocks, ...direction, ...audience] };
 }
 
 function browserExecutable(): string | undefined {
@@ -525,11 +544,65 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
       direction: direction ? `Following creative direction "${direction.name}": avoid ${direction.avoid.join("; ") || "(nothing listed)"}` : undefined,
       intent, platforms, size: `${spec.width}x${spec.height}`,
       files: ["video.json (master timeline: look, brand, publish, scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry: TitleCard, DiagramScene, OutroScene)", "src/primitives/* (Stage, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, MediaFrame, Clip, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch, BrandBug, CtaLayer)", "src/motion.ts, src/timing.ts (beat/loop helpers), src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx), public/assets/ (fetched media)"],
-      next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding; open on the payoff, not a title card", "Replace video.json scenes; build scene components from primitives (scenes do not fade themselves: transitions in video.json own entry and exit)", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", `narration_tts synthesize backend:auto (prefers configured ElevenLabs; local ${look.audio.voice.voice} otherwise) → audio_generate music or audio_synth music (${look.audio.music.style}, ${look.audio.music.bpm} bpm) → media_sync → video_render preview → final (long films resume in segments) → video_qa`],
-      note: "The template scenes are mechanical examples with placeholder text; replace them with components designed for this video. The look is a starting identity derived from the subject: change it with action look, or adjust theme colors and fonts if the subject calls for something else.",
+      next: ["Choose a visual argument for each beat; open on the payoff. Reuse the subject's brand colors and reference composition.", "video_project action:compose scenes:[{id,seconds,headline,layout,hero,narration,cues,cueWords}] gives native fitted typography, safe asset regions and choreography; use explicit layers and motion.keys for detailed staging. Custom scene code is optional.", "video_browser → take.json; compose hero:{kind:video,src,take,zoom:1.8} follows observed cursor movement. video_shot scene.objects builds native device rigs; compose hero:{kind:shot,shot,screen:{src}} projects footage onto their tracked corners.", "video_project check → video_render stills → inspect the attached evidence → video_render preview → inspect motion and fix", `narration_tts synthesize backend:auto (configured ElevenLabs preferred) → audio_generate music or audio_synth music (${look.audio.music.style}, ${look.audio.music.bpm} bpm) → audio_synth sound_design → media_sync → final (long films resume in segments) → video_qa`],
+      example: { action: 'compose', scenes: [{ id: 'payoff', seconds: 4, headline: 'A concrete benefit', layout: 'hero-right', hero: { kind: 'shot', shot: 'product', motion: { enter: 'pop', cue: 'reveal' } }, cues: { reveal: .3 } }] },
+      note: "The starting scenes are placeholders. Compose the film around its subject with native layers or custom scenes. The look is a starting identity, not a substitute for brand/reference evidence. Final quality needs actual motion review.",
     };
   }
   const dir = await projectDir(params.dir, cwd);
+  if (action === 'compose') {
+    const spec = await readSpec(dir);
+    const input = structuredClone(params.scenes);
+    if (Array.isArray(input)) for (const scene of input) {
+      const layers = [...(scene.layers ?? []), ...(scene.hero ? [scene.hero] : [])];
+      const events: any[] = [];
+      for (const layer of layers) if (layer.take) {
+        const file = await inputFile(layer.take, dir);
+        if ((await fs.stat(file)).size > 8*1024*1024) throw Error('Take metadata exceeds 8 MiB');
+        const take = JSON.parse(await fs.readFile(file, 'utf8'));
+        if (layer.follow !== false) layer.camera = followCamera(take, layer.zoom ?? 1.8, layer.lag ?? .35);
+        for (const e of take.eventLog ?? []) if (['click', 'tap', 'press'].includes(e.kind)) {
+          const at = (e.t-(layer.startFrom ?? 0))/(layer.speed ?? 1);
+          if (Number.isFinite(at) && at >= 0 && at < scene.seconds) events.push({ type: 'tick', at, volume: .18, note: `${scene.id}.${layer.id ?? 'hero'} ${e.kind}` });
+        }
+        delete layer.take; delete layer.follow; delete layer.zoom; delete layer.lag;
+      }
+      if (events.length) scene.soundEvents = events;
+    }
+    const result = compileStoryboard(input, spec, params.append === true);
+    const probed = new Map<string, Promise<any>>();
+    for (const scene of result.scenes) for (const layer of scene.props?.layers ?? []) {
+      const picture = ['image', 'video'].includes(layer.kind) ? layer : layer.screen;
+      if (!picture) continue;
+      const file = await inputFile(path.join(dir, 'public', picture.src), dir);
+      if (!probed.has(file)) probed.set(file, probe(file, signal));
+      const info = await probed.get(file), stream = info.streams?.find((s: any) => s.codec_type === 'video');
+      if (!stream?.width || !stream?.height) throw Error(`Layer ${layer.id} has no decodable picture`);
+      if (picture === layer) { layer.sourceWidth = stream.width; layer.sourceHeight = stream.height; }
+      else { picture.width ??= stream.width; picture.height ??= stream.height; }
+      if (layer.kind === 'video' || layer.screen) {
+        const duration = Number(stream.duration ?? info.format?.duration);
+        if (!Number.isFinite(duration) || (picture.startFrom ?? 0) + scene.seconds*(picture.speed ?? 1) > duration + .05) throw Error(`Layer ${layer.id} footage ends before scene ${scene.id}; trim the beat or provide enough source frames`);
+      }
+    }
+    if (!existsSync(path.join(dir, 'src/scenes/StudioScene.tsx'))) {
+      // Upgrade only the known compositor modules, never overwrite a user's
+      // custom scene implementations or registry entries.
+      const shotSource = await fs.readFile(path.join(dir, 'src/primitives/BlenderShot.tsx'), 'utf8').catch(() => '');
+      if (!shotSource.includes('export const ShotScreen')) throw Error('This older project needs the updated BlenderShot.tsx primitive with ShotScreen and bounds. Copy it from the harness template, inspect the diff, then compose again.');
+      const registry = path.join(dir, 'src/scenes/index.ts');
+      const text = await fs.readFile(registry, 'utf8');
+      if (!/export const scenes[^=]*=\s*\{/.test(text)) throw Error('Scene registry format is custom; register StudioScene explicitly before composing');
+      await fs.copyFile(path.join(VIDEO_PATHS.template, 'src/production.ts'), projectWritePath(dir, 'src/production.ts'));
+      await fs.copyFile(path.join(VIDEO_PATHS.template, 'src/scenes/StudioScene.tsx'), projectWritePath(dir, 'src/scenes/StudioScene.tsx'));
+      await fs.writeFile(registry, `import { StudioScene } from './StudioScene';\n` + text.replace(/(export const scenes[^=]*=\s*\{)/, '$1\n  StudioScene,'));
+    }
+    spec.scenes = result.scenes;
+    await writeSpec(dir, spec);
+    return { project: dir, scenes: result.scenes.map((s: any) => ({ id: s.id, seconds: s.seconds, layers: s.props.layers.map((l: any) => ({ id: l.id, kind: l.kind, box: l.box })) })), issues: result.issues,
+      next: ['video_project check', 'video_render stills: inspect every scene, then video_render preview for choreography', 'narration_tts backend:auto with fitScenes:true; measured cueWords re-time layer.motion.cue', 'audio_synth sound_design uses layer gestures and observed take events; media_sync before final'],
+      note: 'One frame-driven compositor owns asset placement, fitted typography, camera crops and screen projection. Custom scene code remains available. A render and a lint pass are not aesthetic approval.' };
+  }
   if (action === "install") {
     await npmInstall(dir, signal, progress);
     const spec = await readSpec(dir);
@@ -571,7 +644,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     if (params.install !== false) await npmInstall(dir, signal, progress);
     return { project: dir, feature: "3d", primitive: 'import { Model3D } from "../primitives/Model3D";', use: '<Model3D src="assets/models/<id>/<id>.gltf" width={900} height={700} turns={0.5} />', note: "Software GL renders each frame on the CPU; keep models at 1k textures and the canvas near the size it is shown." };
   }
-  if (action !== "check") throw new Error("action must be init, check, install, look, cta or feature");
+  if (action !== "check") throw new Error("action must be init, compose, check, install, look, cta or feature");
   const { spec, issues, scenes, seconds, components } = await inspectProject(dir);
   return {
     project: dir, title: spec.title, look: spec.look ?? null, intent: spec.publish?.intent ?? "publish", fps: spec.fps, size: `${spec.width}x${spec.height}`, seconds: Number(seconds.toFixed(2)),
@@ -602,6 +675,7 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
   const { spec, issues, scenes } = await inspectProject(dir);
   const blocking = issues.filter((i) => i.severity === "error");
   const mode = params.mode ?? "stills";
+  if (['final', 'segments'].includes(mode) && issues.some(i => /is a preview render|runs at .* fps in a .* fps film/.test(i.message))) throw Error('Final delivery contains draft or undersampled Blender shots. Re-render referenced shots at film fps with mode:final, or explicitly author stepped motion.');
   if (blocking.length && mode !== "stills" && mode !== "thumbnail") throw new Error(`Fix timeline errors first: ${blocking.map((i) => `${i.scene ? `[${i.scene}] ` : ""}${i.message}`).join("; ")}`);
   const release = await acquireRender(signal);
   const report = throttled(progress);
@@ -706,6 +780,18 @@ async function runRenderer(dir: string, request: any, signal: AbortSignal | unde
   return result;
 }
 
+/** A bounded strip covers entrance, settled composition, an authored gesture
+ * and the final delivered frame. This is evidence for review, not approval. */
+export function criticalReviewTimes(scene: TimedScene, raw: any, fps: number): number[] {
+  const clamp = (t: number) => Math.max(0, Math.min(scene.seconds-1/fps, t));
+  const motions = (raw?.props?.layers ?? []).map((l: any) => l.motion ?? {});
+  const onset = (m: any) => m.cue ? scene.cues?.[m.cue] ?? 0 : m.at ?? 0;
+  const settled = motions.length ? Math.max(...motions.map((m: any) => onset(m)+(m.duration ?? .65))) : scene.seconds*.3;
+  const gesture = motions.flatMap((m: any) => (m.keys ?? []).map((k: any) => k.t)).find((t: number) => t > settled && t < scene.seconds-.1);
+  const times = [.08, settled, gesture ?? scene.seconds*.6, scene.seconds-1/fps];
+  return [...new Set(times.map(t => Math.round(clamp(t)*fps)/fps))].sort((a,b) => a-b);
+}
+
 export async function videoQa(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const file = await inputFile(params.path, cwd);
   const info = await probe(file, signal);
@@ -715,9 +801,10 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
   const duration = Number(info.format?.duration);
   if (!Number.isFinite(duration) || duration <= 0) throw new Error("Unknown video duration");
   let scenes: TimedScene[] = [];
+  let projectSpec: any;
   let timelineIssues: Issue[] = [];
   let platformTarget = -16;
-  if (params.dir) { const project = await inspectProject(await projectDir(params.dir, cwd)); scenes = project.scenes; timelineIssues = project.issues; platformTarget = targetLoudness(project.spec); }
+  if (params.dir) { const project = await inspectProject(await projectDir(params.dir, cwd)); projectSpec = project.spec; scenes = project.scenes; timelineIssues = project.issues; platformTarget = targetLoudness(project.spec); }
   const targetLufs = typeof params.targetLufs === "number" ? params.targetLufs : platformTarget;
   progress?.("Analyzing picture and sound (black/freeze detection, silence, EBU R128 loudness)…");
   const analysis = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, 0), "-map", "0:v:0", "-vf", "blackdetect=d=0.25:pix_th=0.08,freezedetect=n=0.002:d=1.5",
@@ -728,8 +815,10 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
     duration, hasAudio: Boolean(audio), targetLufs,
     videoDuration: Number(video.duration ?? duration), ...(audio ? { audioDuration: Number(audio.duration ?? duration) } : {}),
   }, scenes)];
+  const first = Number(params.startScene ?? 0), selected = scenes.slice(first, first + 8);
+  if (scenes.length && !selected.length) throw Error(`startScene must be below ${scenes.length}`);
   const times = scenes.length
-    ? scenes.slice(0, 24).map((s) => ({ t: s.start + settledSeconds(s), label: `${s.id} ${(s.start + settledSeconds(s)).toFixed(1)}s` }))
+    ? selected.flatMap(s => criticalReviewTimes(s, projectSpec?.scenes?.find((raw: any) => raw.id === s.id), projectSpec?.fps ?? 30).map(t => ({ t: s.start + t, label: `${s.id} ${(s.start+t).toFixed(2)}s` })))
     : Array.from({ length: 12 }, (_, i) => { const t = duration * (i + 0.5) / 12; return { t, label: `${t.toFixed(1)}s` }; });
   const out = path.join(path.dirname(file), `qa-${path.basename(file, path.extname(file))}-${randomBytes(3).toString("hex")}`);
   const denial = selfMutationDenial(out, await fs.realpath(cwd));
@@ -748,6 +837,8 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
     black: metrics.black, freeze: metrics.freeze, silence: metrics.silence,
     findings, passedAutomatedChecks: !findings.some((f) => f.severity === "error"),
     contactSheet: sheet,
+    sampledScenes: selected.map(s => s.id), nextScene: first + selected.length < scenes.length ? first + selected.length : null,
+    reviewStatus: 'unreviewed',
     review: "Automated checks find technical defects only. Now open the contact sheet with the read tool and review every frame against the storyboard (hierarchy, legibility, clipping, density, consistency, meaning), then spot-check transitions with video_frames and confirm narration lines land on their visual cues.",
   };
   await fs.writeFile(path.join(out, "qa.json"), JSON.stringify(report, null, 2) + "\n");
@@ -1090,6 +1181,13 @@ export function planSoundDesign(spec: any, scenes: TimedScene[], seconds: number
   const events: SoundEvent[] = [];
   const push = (event: SoundEvent) => { if (event.at >= 0 && event.at < seconds - 0.05) events.push({ ...event, at: Number(event.at.toFixed(2)) }); };
   scenes.forEach((scene, i) => {
+    const source = spec.scenes?.find((s: any) => s.id === scene.id);
+    for (const e of source?.soundEvents ?? []) if (['tick', 'pop', 'chime', 'whoosh', 'impact'].includes(e.type) && Number.isFinite(e.at) && e.at >= 0 && e.at < scene.seconds) push({ ...e, at: scene.start + e.at });
+    for (const layer of source?.props?.layers ?? []) if (layer.sound && layer.sound !== 'none') {
+      const at = layer.motion?.cue ? scene.cues?.[layer.motion.cue] : layer.motion?.at ?? 0;
+      const seconds = Math.min(.7, layer.motion?.duration ?? .5);
+      if (Number.isFinite(at)) push({ type: layer.sound, at: scene.start + at, seconds, volume: SFX_VOLUME[layer.sound] ?? .2, note: `${scene.id}.${layer.id} gesture` });
+    }
     const t = Number(scene.transition?.seconds ?? 0.5), kind = scene.transition?.type;
     if (i > 0 && kind && ["slide", "slideup", "slidedown", "wipe", "zoom"].includes(kind)) push({ type: "whoosh", at: scene.start - 0.12, seconds: Math.min(1.1, Math.max(0.5, t * 1.5)), pitch: i % 2 ? 0.85 : 1.05, volume: SFX_VOLUME.whoosh, note: `${kind} into ${scene.id}` });
     else if (i > 0 && kind === "blur") push({ type: "swell", at: scene.start - 0.3, seconds: 1.4, volume: SFX_VOLUME.swell, note: `blur into ${scene.id}` });

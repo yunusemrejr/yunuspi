@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { integer, number, outputFolder, produced } from "./media-process.ts";
+import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { inputFile, integer, number, outputFolder, produced } from "./media-process.ts";
+import { runGuarded } from "./guarded-process.ts";
 
 const PPQ = 480, RATE = 44100;
 /** Band-limited oscillator: harmonics stop below Nyquist, so square and saw
@@ -93,7 +96,7 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
   ], end);
   const tracks = score.tracks.map((t: any, ch: number) => {
     const name = [...Buffer.from(t.name, "utf8")];
-    const events = [{ tick: 0, order: -2, bytes: [255, 3, ...vlq(name.length), ...name] }, { tick: 0, order: -1, bytes: [192 | ch, t.program] }];
+    const events = [{ tick: 0, order: -2, bytes: [255, 3, ...vlq(name.length), ...name] }, { tick: 0, order: -1, bytes: [192 | ch, t.program] }, { tick: 0, order: -1, bytes: [176 | ch, 10, Math.round((t.pan + 1) * 63.5)] }];
     for (const n of t.notes) {
       events.push({ tick: Math.round(n.start * PPQ), order: 1, bytes: [144 | ch, n.pitch, n.velocity] });
       events.push({ tick: Math.round((n.start + n.duration) * PPQ), order: 0, bytes: [128 | ch, n.pitch, 0] });
@@ -102,6 +105,33 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
   });
   const header = Buffer.alloc(6); header.writeUInt16BE(1); header.writeUInt16BE(tracks.length + 1, 2); header.writeUInt16BE(PPQ, 4);
   const midi = Buffer.concat([chunk("MThd", header), conductor, ...tracks]);
+  const backend = params.backend ?? 'auto';
+  if (!['auto', 'soundfont', 'oscillator'].includes(backend)) throw Error('backend must be auto, soundfont or oscillator');
+  const font = params.soundfont ?? process.env.YUNUSPI_SOUNDFONT;
+  if (backend === 'soundfont' || (backend === 'auto' && font)) {
+    if (!font) throw Error('SoundFont rendering needs soundfont: a local SF2/SF3 bank, or YUNUSPI_SOUNDFONT');
+    const bank = await inputFile(font, cwd);
+    if (!/\.sf[23]$/i.test(bank) || (await fs.stat(bank)).size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
+    const releaseTail = number(params.releaseTail, 1.5, 0, 5, 'releaseTail');
+    const dir = await outputFolder(params.outputDir, cwd);
+    try {
+      const request = path.join(dir, 'request.json');
+      await fs.writeFile(request, JSON.stringify({ score, soundfont: bank, releaseTail, output: path.join(dir, 'preview.wav') }));
+      let rendered: any;
+      await runGuarded('python3', ['-I', fileURLToPath(new URL('../../scripts/music-soundfont.py', import.meta.url)), request], {
+        cwd: dir, signal, timeoutMs: 180000, nice: 10,
+        onLine: line => { if (line.startsWith('MUSIC_RESULT ')) rendered = JSON.parse(line.slice(13)); },
+      });
+      if (!rendered?.seconds) throw Error('Instrument renderer returned no receipt');
+      await fs.writeFile(path.join(dir, 'score.mid'), midi, { flag: 'wx' });
+      await fs.writeFile(path.join(dir, 'score.json'), JSON.stringify(score, null, 2)+'\n', { flag: 'wx' });
+      const receipt = { ...rendered, soundfont: { path: bank, sha256: createHash('sha256').update(await fs.readFile(bank)).digest('hex') } };
+      await fs.writeFile(path.join(dir, 'render.json'), JSON.stringify(receipt, null, 2)+'\n', { flag: 'wx' });
+      await fs.rm(request);
+      return { ...receipt, files: await Promise.all(['score.mid', 'preview.wav', 'score.json', 'render.json'].map(f => produced(path.join(dir, f)))), bpm: score.bpm,
+        note: 'Real SoundFont instruments follow the editable MIDI clock, with stereo pan and a release tail. Instrument quality and permitted use depend on your bank. Missing libraries/programs fail explicitly; no oscillator fallback. Beat units are quarter notes.' };
+    } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+  }
   // An intentionally simple audition synth. MIDI program changes remain in the MIDI.
   const frames = Math.ceil(score.seconds * RATE);
   const left = new Float32Array(frames), right = new Float32Array(frames);
@@ -137,6 +167,6 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
     await fs.writeFile(path.join(dir, "score.mid"), midi, { flag: "wx" });
     await fs.writeFile(path.join(dir, "preview.wav"), wav, { flag: "wx" });
     await fs.writeFile(path.join(dir, "score.json"), JSON.stringify(score, null, 2) + "\n", { flag: "wx" });
-    return { files: await Promise.all(["score.mid", "preview.wav", "score.json"].map(f => produced(path.join(dir, f)))), seconds: score.seconds, bpm: score.bpm, channels, previewGain: gain, note: "Editable MIDI and score; WAV is a sine/triangle/square/saw audition (mono unless stereo:true), not a General MIDI instrument rendering. Beat units are quarter notes." };
+    return { files: await Promise.all(["score.mid", "preview.wav", "score.json"].map(f => produced(path.join(dir, f)))), backend: 'oscillator', seconds: score.seconds, bpm: score.bpm, channels, previewGain: gain, note: "Editable MIDI and score; WAV is a sine/triangle/square/saw audition (mono unless stereo:true), not a General MIDI instrument rendering. For actual instruments, pass soundfont or configure YUNUSPI_SOUNDFONT. Beat units are quarter notes." };
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }

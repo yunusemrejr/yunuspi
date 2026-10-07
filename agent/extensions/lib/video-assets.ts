@@ -15,7 +15,7 @@ import { decodeImage, encodeImage, probeImage } from "./design-studio.ts";
 import { projectDir, projectWritePath, readSpec } from "./video-studio.ts";
 
 type Progress = (text: string) => void;
-export type AssetHit = { source: string; id: string; kind: "image" | "video" | "model" | "texture"; title: string; creator: string; license: string; licenseUrl?: string; attributionRequired: boolean; url?: string; thumbnail?: string; page?: string; width?: number; height?: number; polycount?: number };
+export type AssetHit = { source: string; id: string; kind: "image" | "video" | "model" | "texture" | "hdri"; title: string; creator: string; license: string; licenseUrl?: string; attributionRequired: boolean; url?: string; thumbnail?: string; page?: string; width?: number; height?: number; polycount?: number };
 
 const UA = { "user-agent": "YunusPi-video-assets/1", accept: "application/json" };
 const SOURCES = ["openverse", "commons", "polyhaven"] as const;
@@ -60,7 +60,8 @@ async function searchCommons(query: string, kind: string, limit: number, signal?
 
 let polyIndex: Record<string, any> | undefined;
 async function searchPolyHaven(query: string, kind: string, limit: number, signal?: AbortSignal): Promise<AssetHit[]> {
-  const type = kind === "texture" ? "textures" : "models";
+  if (!['texture', 'model', 'hdri'].includes(kind)) throw Error('Poly Haven supports model, texture or hdri');
+  const type = kind === 'hdri' ? 'hdris' : kind === "texture" ? "textures" : "models";
   polyIndex ??= {};
   polyIndex[type] ??= await getJson(`https://api.polyhaven.com/assets?t=${type}`, signal);
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -68,14 +69,14 @@ async function searchPolyHaven(query: string, kind: string, limit: number, signa
     const hay = `${id} ${a.name} ${(a.tags ?? []).join(" ")} ${(a.categories ?? []).join(" ")}`.toLowerCase();
     return { id, a, score: terms.filter((t) => hay.includes(t)).length };
   }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score || (y.a.download_count ?? 0) - (x.a.download_count ?? 0)).slice(0, limit).map(({ id, a }): AssetHit => ({
-    source: "polyhaven", id, kind: kind === "texture" ? "texture" : "model", title: a.name, creator: Object.keys(a.authors ?? {}).join(", ") || "Poly Haven", license: "CC0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/", attributionRequired: false,
+    source: "polyhaven", id, kind: kind as AssetHit["kind"], title: a.name, creator: Object.keys(a.authors ?? {}).join(", ") || "Poly Haven", license: "CC0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/", attributionRequired: false,
     thumbnail: a.thumbnail_url, page: `https://polyhaven.com/a/${id}`, polycount: a.polycount }));
 }
 
 export async function searchAssets(params: any, signal?: AbortSignal): Promise<AssetHit[]> {
   const query = String(params.query ?? "").trim();
   if (!query) throw new Error("query is required");
-  const source = params.source ?? (params.kind === "model" || params.kind === "texture" ? "polyhaven" : "openverse");
+  const source = params.source ?? (params.kind === "model" || params.kind === "texture" || params.kind === "hdri" ? "polyhaven" : "openverse");
   if (!SOURCES.includes(source)) throw new Error(`source must be one of ${SOURCES.join(", ")}`);
   const limit = Math.min(12, Math.max(1, params.limit ?? 6));
   const kind = params.kind ?? (source === "polyhaven" ? "model" : "image");
@@ -139,7 +140,16 @@ async function fetchPolyHaven(dir: string, params: any, cwd: string, signal?: Ab
   const resolution = params.resolution ?? "1k";
   const meta = (polyIndex?.models?.[id] ?? polyIndex?.textures?.[id]) ?? (await getJson(`https://api.polyhaven.com/info/${id}`, signal));
   const base = { source: "polyhaven", title: meta.name ?? id, creator: Object.keys(meta.authors ?? {}).join(", ") || "Poly Haven", license: "CC0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/", attributionRequired: false, page: `https://polyhaven.com/a/${id}`, fetchedAt: new Date().toISOString() };
-  if (files.gltf) {
+  if (params.kind === 'hdri' || files.hdri) {
+    const selected = files.hdri?.[resolution]?.hdr ?? files.hdri?.[resolution]?.exr;
+    if (!selected?.url) throw Error(`${id} has no HDRI at ${resolution}`);
+    const extension = files.hdri[resolution].hdr ? 'hdr' : 'exr';
+    const file = `assets/environments/${id}.${extension}`;
+    const got = await download(selected.url, projectWritePath(dir, 'public', file), signal, 32*1024*1024);
+    await record(dir, { file, kind: 'hdri', bytes: got.bytes.length, sha256: await sha256(projectWritePath(dir, 'public', file)), resolution, ...base });
+    return { file, kind: 'hdri', license: 'CC0', bytes: got.bytes.length, use: `video_shot environment:"public/${file}" environmentStrength:0.6` };
+  }
+  if (files.gltf && params.kind !== 'texture') {
     const model = files.gltf[resolution]?.gltf;
     if (!model) throw new Error(`${id} has no gltf at ${resolution}; available: ${Object.keys(files.gltf).join(", ")}`);
     const root = `assets/models/${id}`;
@@ -158,13 +168,19 @@ async function fetchPolyHaven(dir: string, params: any, cwd: string, signal?: Ab
     const registered = (await registerAsset({ path: projectWritePath(dir, "public", file), role: "product-shot", kind: "authored", description: base.title, license: base.license, creator: base.creator, licenseUrl: base.licenseUrl, sourceUrl: base.page, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record;
     return { file, kind: "model", license: "CC0", bytes: total, assetId: registered.id, model: modelSummary(inspected), use: `Model3D src="${file}" (run video_project action:"feature" feature:"3d" once if the project has no 3D support)` };
   }
-  const tex = files.Diffuse?.[resolution === "1k" ? "2k" : resolution]?.jpg ?? files.Diffuse?.["1k"]?.jpg;
-  if (!tex) throw new Error(`${id} has neither a glTF model nor a diffuse texture`);
-  const file = `assets/${slug(params.name ?? id)}.jpg`;
-  await download(tex.url, projectWritePath(dir, "public", file), signal, 40 * 1024 * 1024, /^image\//);
-  const dims = await fitImage(projectWritePath(dir, "public", file), signal);
-  await record(dir, { file, kind: "texture", ...dims, ...base });
-  return { file, kind: "texture", license: "CC0", ...dims, use: `MediaFrame src="${file}"` };
+  const maps: Record<string, string> = {};
+  for (const [kind, fields] of Object.entries({ diffuse: ['Diffuse', 'diff', 'Color'], roughness: ['Rough', 'Roughness'], normal: ['nor_gl', 'Normal_GL'], metallic: ['Metal', 'Metalness'] })) {
+    const group = fields.map(field => files[field]).find(Boolean);
+    const variant = group?.[resolution] ?? (resolution === '1k' ? group?.['2k'] : undefined);
+    const tex = variant?.png ?? variant?.jpg;
+    if (!tex?.url) continue;
+    const ext = variant.png ? 'png' : 'jpg', file = `assets/materials/${slug(params.name ?? id)}/${kind}.${ext}`;
+    const got = await download(tex.url, projectWritePath(dir, 'public', file), signal, 24*1024*1024, /^image\//);
+    maps[kind] = `public/${file}`;
+    await record(dir, { file, kind: 'texture', map: kind, bytes: got.bytes.length, sha256: await sha256(projectWritePath(dir, 'public', file)), resolution, ...base });
+  }
+  if (!maps.diffuse) throw Error(`${id} has neither a glTF model nor supported PBR diffuse map`);
+  return { file: maps.diffuse.slice(7), kind: 'texture', license: 'CC0', maps, use: 'video_shot scene.objects[].maps accepts these resolved project-relative PBR maps; normal maps use OpenGL convention.' };
 }
 
 export async function videoAssets(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
@@ -216,8 +232,22 @@ export async function videoAssets(params: any, cwd: string, signal?: AbortSignal
   const license = String(params.license ?? (isImport ? "user-supplied" : "unknown"));
   const attributionRequired = params.attributionRequired ?? (!isImport && license !== "unknown" && needsCredit(license));
   const file = path.relative(path.join(dir, "public"), staged);
+  let take: string | undefined;
+  if (isImport && kind === 'video' && params.path) {
+    const original = await inputFile(params.path, cwd);
+    const adjacent = path.join(path.dirname(original), 'take.json');
+    if (path.basename(original) === 'take.mp4' && existsSync(adjacent) && (await fs.stat(adjacent)).size <= 8*1024*1024) {
+      const metadata = JSON.parse(await fs.readFile(adjacent, 'utf8'));
+      if (Array.isArray(metadata.eventLog) && Number.isFinite(metadata.width) && Number.isFinite(metadata.height)) {
+        take = file.replace(/\.[^.]+$/, '.take.json');
+        // The timeline needs event clocks and viewport, not runtime paths or
+        // source-frame inventories from the original capture environment.
+        await fs.writeFile(projectWritePath(dir, 'public', take), JSON.stringify({ width: metadata.width, height: metadata.height, seconds: metadata.seconds, fps: metadata.fps, cursor: metadata.cursor, eventLog: metadata.eventLog }, null, 2)+'\n', { flag: 'wx' });
+      }
+    }
+  }
   await record(dir, { file, kind, title, creator: params.creator ?? (isImport ? "" : "unknown"), license, licenseUrl: params.licenseUrl, attributionRequired, source: isImport ? "local" : (params.source ?? new URL(url).host), page: params.page, ...dims, ...(model ? { model: modelSummary(model) } : {}), bytes: model?.bytes ?? (await fs.stat(staged)).size, sha256: await sha256(staged), fetchedAt: new Date().toISOString() });
   const registered = (await fs.stat(staged)).size <= 40 * 1024 * 1024 ? (await registerAsset({ path: staged, kind: "authored", role: kind === "model" ? "product-shot" : "editorial-support", description: title, license, sourceUrl: params.page ?? (!isImport ? url : undefined), creator: params.creator, licenseUrl: params.licenseUrl, usage: [path.relative(cwd, path.join(dir, "video.json"))] }, cwd)).record : undefined;
-  return { file, kind, ...dims, license, attributionRequired, assetId: registered?.id ?? null, ...(model ? { model: modelSummary(model) } : {}), ...(license === "unknown" ? { warning: "License unknown: pass license, creator and page from the search hit. Do not publish media whose license you cannot state." } : {}),
+  return { file, kind, ...dims, license, attributionRequired, take, compose: take ? { kind: 'video', src: file, take: `public/${take}`, zoom: 1.8 } : undefined, assetId: registered?.id ?? null, ...(model ? { model: modelSummary(model) } : {}), ...(license === "unknown" ? { warning: "License unknown: pass license, creator and page from the search hit. Do not publish media whose license you cannot state." } : {}),
     use: kind === "video" ? `Clip src="${file}"` : kind === "image" ? `MediaFrame src="${file}" motion="push"` : kind === "model" ? `Model3D src="${file}" (video_project feature 3d uses the existing Three.js renderer; inspect actual stills/playback)` : `video.json audio track path="${file}"` };
 }

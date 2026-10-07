@@ -818,7 +818,211 @@ def camera_pose(rig, t, p):
 
 
 LOOPING_RIGS = {"turntable", "drift"}
-RIGS = ("turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static")
+RIGS = ("turntable", "orbit", "push-in", "pull-out", "crane", "drift", "static", "scene")
+
+
+def build_shot_scene(spec, seconds, fps, palette):
+    """Native, editable scene graph: finished device rigs, smooth forms,
+    imported hero assets and deterministic object choreography. Metres, Z up,
+    camera faces from -Y. Rotations in the tool contract are degrees."""
+    from mathutils import Matrix, Vector
+    scene = bpy.context.scene
+    scene.render.fps = int(round(fps))
+    scene.frame_start = 1
+    scene.frame_end = max(2, int(round(seconds * fps)))
+    roots, screens = {}, []
+
+    def link(name, data=None):
+        obj = bpy.data.objects.new(name, data)
+        scene.collection.objects.link(obj)
+        return obj
+
+    def finish(obj, name, material, bevel=0):
+        obj.name = name
+        if hasattr(obj.data, "materials"):
+            obj.data.materials.append(material)
+        if obj.type == "MESH":
+            for polygon in obj.data.polygons:
+                polygon.use_smooth = True
+            if bevel:
+                modifier = obj.modifiers.new("Edge highlights", "BEVEL")
+                modifier.width = bevel
+                modifier.segments = 5
+                modifier = obj.modifiers.new("Face normals", "WEIGHTED_NORMAL")
+                modifier.keep_sharp = True
+        return obj
+
+    def box(name, size, position, mat, bevel=.035, parent=None):
+        bpy.ops.mesh.primitive_cube_add(size=1)
+        obj = bpy.context.object
+        obj.data.transform(Matrix.Diagonal(Vector((*size, 1))))
+        obj.location = position
+        obj.parent = parent
+        return finish(obj, name, mat, min(bevel, min(size) * .45))
+
+    def screen_corners(root, prefix, width, height, y, z):
+        for corner, x, dz in [("tl", -width/2, height/2), ("tr", width/2, height/2), ("br", width/2, -height/2), ("bl", -width/2, -height/2)]:
+            anchor = link(f"{prefix}:{corner}")
+            anchor.parent = root
+            anchor.location = (x, y, z + dz)
+            screens.append(anchor.name)
+
+    for item in spec["objects"]:
+        name, shape = item["id"], item["shape"]
+        root = link(f"{name}-rig")
+        roots[name] = root
+        root.location = item.get("position", (0, 0, 0))
+        root.rotation_euler = tuple(math.radians(v) for v in item.get("rotation", (0, 0, 0)))
+        root.scale = item.get("scale", (1, 1, 1))
+        mat = principled(f"{name}-material", hex_color(item.get("color"), palette.get("accent") or "#D9A441"), item.get("material") or "satin")
+        if "roughness" in item:
+            mat.node_tree.nodes.get("Principled BSDF").inputs["Roughness"].default_value = item["roughness"]
+        maps = item.get("maps") or {}
+        bsdf = mat.node_tree.nodes.get("Principled BSDF")
+        for kind in ("diffuse", "roughness", "metallic", "normal"):
+            if not maps.get(kind):
+                continue
+            texture = mat.node_tree.nodes.new("ShaderNodeTexImage")
+            texture.image = bpy.data.images.load(maps[kind], check_existing=True)
+            texture.image.colorspace_settings.name = "sRGB" if kind == "diffuse" else "Non-Color"
+            target = {"diffuse": "Base Color", "roughness": "Roughness", "metallic": "Metallic"}.get(kind)
+            if target:
+                mat.node_tree.links.new(texture.outputs["Color"], bsdf.inputs[target])
+            else:
+                normal = mat.node_tree.nodes.new("ShaderNodeNormalMap")
+                mat.node_tree.links.new(texture.outputs["Color"], normal.inputs["Color"])
+                mat.node_tree.links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
+        size = item.get("size", (1, 1, 1))
+        bevel = item.get("bevel", .025)
+        obj = None
+        if shape == "box":
+            obj = box(name, size, (0, 0, 0), mat, bevel, root)
+        elif shape in ("sphere", "cylinder", "torus"):
+            if shape == "sphere":
+                bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=.5)
+            elif shape == "cylinder":
+                bpy.ops.mesh.primitive_cylinder_add(vertices=64, radius=.5, depth=1)
+            else:
+                bpy.ops.mesh.primitive_torus_add(major_segments=80, minor_segments=24, major_radius=.4, minor_radius=.1)
+            obj = bpy.context.object
+            obj.data.transform(Matrix.Diagonal(Vector((*size, 1))))
+            obj.parent = root
+            finish(obj, name, mat, bevel if shape == "cylinder" else 0)
+        elif shape == "lathe":
+            # Radial profile makes bowls, bottles, food props and turned parts;
+            # it is a real silhouette, not a pile of unrefined primitives.
+            points, segments = item["points"], 80
+            verts = [(r * math.cos(2 * math.pi * j / segments), r * math.sin(2 * math.pi * j / segments), z) for r, z in points for j in range(segments)]
+            faces = [(i*segments+j, i*segments+(j+1)%segments, (i+1)*segments+(j+1)%segments, (i+1)*segments+j) for i in range(len(points)-1) for j in range(segments)]
+            mesh = bpy.data.meshes.new(name)
+            mesh.from_pydata(verts, [], faces)
+            mesh.update()
+            obj = link(name, mesh)
+            obj.parent = root
+            finish(obj, name, mat)
+        elif shape == "tube":
+            curve = bpy.data.curves.new(name, "CURVE")
+            curve.dimensions = "3D"
+            curve.bevel_depth = item.get("radius", .035)
+            curve.bevel_resolution = 5
+            spline = curve.splines.new("BEZIER")
+            spline.bezier_points.add(len(item["points"])-1)
+            for point, coords in zip(spline.bezier_points, item["points"]):
+                point.co = coords
+                point.handle_left_type = point.handle_right_type = "AUTO"
+            obj = link(name, curve)
+            obj.parent = root
+            finish(obj, name, mat)
+        elif shape == "text":
+            obj = make_title({"text": item["text"], "font": item.get("font"), "depth": item.get("depth", .04), "bevel": min(bevel, .01)})
+            obj.parent = root
+            obj.scale = size
+            finish(obj, name, mat)
+        elif shape == "model":
+            before = set(scene.objects)
+            import_model(item["path"])
+            imported = list(set(scene.objects) - before)
+            bpy.context.view_layer.update()
+            geometry = [o for o in imported if o.type in SUBJECT_TYPES]
+            if not geometry:
+                raise RuntimeError(f"{name}: imported asset has no geometry")
+            corners = [o.matrix_world @ Vector(c) for o in geometry for c in o.bound_box]
+            lo = Vector(min(p[i] for p in corners) for i in range(3))
+            hi = Vector(max(p[i] for p in corners) for i in range(3))
+            extent = max(hi - lo)
+            # Scale uniformly to size.x (longest extent), place its bottom at
+            # the parent origin. Preserve authored materials and hierarchy.
+            factor = size[0] / max(extent, 1e-6)
+            normalization = link(f"{name}-asset-normalization")
+            normalization.parent = root
+            normalization.scale = (factor,) * 3
+            normalization.location = (-((lo.x+hi.x)/2)*factor, -((lo.y+hi.y)/2)*factor, -lo.z*factor)
+            for imported_obj in imported:
+                if imported_obj.parent not in imported:
+                    matrix = imported_obj.matrix_world.copy()
+                    imported_obj.parent = normalization
+                    imported_obj.matrix_basis = matrix
+        elif shape in ("phone", "laptop"):
+            metal = principled(f"{name}-aluminium", hex_color(item.get("color"), "#343B44"), "metal")
+            black = principled(f"{name}-bezel", hex_color("#0B0E13", "#0B0E13"), "clay")
+            screen_mat = principled(f"{name}-screen", hex_color("#171B24", "#171B24"), "clay")
+            screen_mat.node_tree.nodes.get("Principled BSDF").inputs["Roughness"].default_value = .19
+            if shape == "phone":
+                w, h, d = 1.45, 2.9, .14
+                box(f"{name}-body", (w, d, h), (0, 0, h/2), metal, .065, root)
+                box(f"{name}-bezel", (w-.045, .018, h-.04), (0, -d/2-.007, h/2), black, .045, root)
+                sw, sh = w-.14, h-.18
+                box(f"{name}-display", (sw, .008, sh), (0, -d/2-.02, h/2), screen_mat, .028, root)
+                box(f"{name}-speaker", (.23, .012, .022), (0, -d/2-.03, h-.095), black, .008, root)
+                box(f"{name}-button", (.025, .06, .27), (w/2+.005, 0, h*.67), metal, .008, root)
+                screen_corners(root, item.get("screenPrefix", "screen"), sw, sh, -d/2-.026, h/2)
+            else:
+                w, h = 3.5, 2.12
+                lid = link(f"{name}-lid")
+                lid.parent = root
+                lid.location = (0, .48, .15)
+                lid.rotation_euler = (math.radians(-8), 0, 0)
+                box(f"{name}-back", (w, .1, h), (0, 0, h/2), metal, .04, lid)
+                box(f"{name}-bezel", (w-.07, .014, h-.06), (0, -.058, h/2), black, .02, lid)
+                sw, sh = w-.22, h-.18
+                box(f"{name}-display", (sw, .008, sh), (0, -.073, h/2), screen_mat, .006, lid)
+                box(f"{name}-base", (w, 2.05, .13), (0, -.47, .065), metal, .04, root)
+                for row in range(5):
+                    for col in range(12):
+                        box(f"{name}-key-{row}-{col}", (.2, .14, .015), (-1.32+col*.24, -.1-row*.19, .14), black, .012, root)
+                box(f"{name}-trackpad", (1.05, .57, .009), (0, -1.16, .137), metal, .025, root)
+                screen_corners(lid, item.get("screenPrefix", "screen"), sw, sh, -.078, h/2)
+            if "size" in item:
+                dimensions = (w, d, h) if shape == "phone" else (w, 2.35, 2.25)
+                root.scale = tuple(a*b/c for a, b, c in zip(root.scale, size, dimensions))
+        if item.get("motion"):
+            keys = item["motion"]
+            defaults = {"position": list(root.location), "rotation": [math.degrees(v) for v in root.rotation_euler], "scale": list(root.scale)}
+            for k in range(scene.frame_end):
+                t = k/fps
+                index = 0
+                while index+1 < len(keys) and keys[index+1]["t"] <= t:
+                    index += 1
+                a, b = keys[index], keys[min(index+1, len(keys)-1)]
+                p = ease_curve((t-a["t"])/max(1e-6, b["t"]-a["t"]), "inOut") if b != a else 0
+                for field, target in [("position", "location"), ("rotation", "rotation_euler"), ("scale", "scale")]:
+                    def value(end):
+                        for n in range(end, -1, -1):
+                            if field in keys[n]:
+                                return keys[n][field]
+                        return defaults[field]
+                    va, vb = value(index), value(min(index+1, len(keys)-1))
+                    result = [v+(w-v)*p for v, w in zip(va, vb)]
+                    if field == "rotation":
+                        result = [math.radians(v) for v in result]
+                    setattr(root, target, result)
+                    root.keyframe_insert(target, frame=k+1)
+    for item in spec["objects"]:
+        if item.get("parent"):
+            roots[item["id"]].parent = roots[item["parent"]]
+    scene.frame_set(1)
+    bpy.context.view_layer.update()
+    return screens
 
 
 def add_studio_lights(scene, center, radius, preset, key_color, rim_color, strength):
@@ -1012,6 +1216,8 @@ def op_shot(req):
     scene = bpy.context.scene
     started = time.time()
     source = req.get("source") or "blend"
+    palette = req.get("palette") or {}
+    native_screens = []
     if source != "blend":
         clear_scene_objects()
         for light in list(bpy.data.lights):
@@ -1020,11 +1226,12 @@ def op_shot(req):
             import_model(req["model"])
         elif source == "title":
             make_title(req.get("title") or {})
+        elif source == "scene":
+            native_screens = build_shot_scene(req["scene"], float(req.get("seconds") or 4), float(req.get("fps") or 30), palette)
         else:
             raise RuntimeError(f"unknown shot source {source}")
     elif not subject_objects(scene):
         raise RuntimeError("the .blend has no renderable subject object")
-    palette = req.get("palette") or {}
     accent = hex_color(palette.get("accent"), "#D9A441")
     accent2 = hex_color(palette.get("accent2"), "#4A8FA3")
     ground = hex_color(palette.get("background"), "#181A1B")
@@ -1038,34 +1245,65 @@ def op_shot(req):
     blend_start, blend_end = scene.frame_start, scene.frame_end
     shot_fps = float(req.get("fps") or 30)
     shot_count = max(2, int(round(float(req.get("seconds") or 4) * shot_fps)))
-    blend_frame = lambda k: min(blend_end, blend_start + int(round(k / shot_fps * blend_fps)))
-    scene.frame_set(blend_frame(shot_count - 1))
-    lo, hi, center, radius = subject_bounds(scene)
+    blend_frame = lambda k: min(blend_end, blend_start + k / shot_fps * blend_fps)
+    def set_shot_frame(k):
+        value = blend_frame(k)
+        scene.frame_set(math.floor(value), subframe=value-math.floor(value))
+    # Frame the swept subject, including its entrance and articulation. A
+    # final-frame-only bound makes earlier motion disappear off screen.
+    sampled_bounds = []
+    for k in sorted(set(int(round(i*(shot_count-1)/11)) for i in range(12))):
+        set_shot_frame(k)
+        bpy.context.view_layer.update()
+        sampled_bounds.append(subject_bounds(scene)[:2])
+    lo = Vector(min(pair[0][axis] for pair in sampled_bounds) for axis in range(3))
+    hi = Vector(max(pair[1][axis] for pair in sampled_bounds) for axis in range(3))
+    center = (lo+hi)/2
+    radius = max((hi-lo).length/2, 1e-4)
     detail_surfaces(scene, req.get("surface"), radius)
 
     # The beauty pass is always transparent; a flat background is composited afterwards so the shadow layer can sit under the subject.
     render = apply_render_settings(scene, {**req, "format": "PNG", "transparent": True})
     render.image_settings.color_mode = "RGBA"
-    try:
-        scene.view_settings.view_transform = "Khronos PBR Neutral"
-    except TypeError:
-        scene.view_settings.view_transform = "Standard"
-    scene.view_settings.look = "None"
-    world = scene.world or bpy.data.worlds.new("YP_World")
-    scene.world = world
-    world.use_nodes = True
-    background = world.node_tree.nodes.get("Background")
-    background.inputs["Color"].default_value = mix_color(ground, (1, 1, 1, 1), 0.04)
-    background.inputs["Strength"].default_value = float(req.get("ambient", 0.35))
+    rig = req.get("rig") or ("scene" if source == "blend" and scene.camera else "orbit")
+    if rig not in RIGS:
+        raise RuntimeError(f"rig must be one of {', '.join(RIGS)}")
+    if rig != "scene":
+        try:
+            scene.view_settings.view_transform = "Khronos PBR Neutral"
+        except TypeError:
+            scene.view_settings.view_transform = "Standard"
+        scene.view_settings.look = "None"
+    # Authored shots retain their world, lights, camera and color management.
+    # An explicit environment replaces the world surface; never assume a
+    # user's Background node still has Blender's default name.
+    if rig != "scene" or req.get("environment") or not scene.world:
+        world = scene.world or bpy.data.worlds.new("YP_World")
+        scene.world = world
+        world.use_nodes = True
+        background = next((n for n in world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+        if not background:
+            background = world.node_tree.nodes.new('ShaderNodeBackground')
+        output = next((n for n in world.node_tree.nodes if n.type == 'OUTPUT_WORLD' and n.is_active_output), None)
+        if not output:
+            output = world.node_tree.nodes.new('ShaderNodeOutputWorld')
+        world.node_tree.links.new(background.outputs['Background'], output.inputs['Surface'])
+        background.inputs["Color"].default_value = mix_color(ground, (1, 1, 1, 1), 0.04)
+        background.inputs["Strength"].default_value = float(req.get("ambient", 0.35))
+        if req.get("environment"):
+            hdri = world.node_tree.nodes.new("ShaderNodeTexEnvironment")
+            hdri.image = bpy.data.images.load(req["environment"], check_existing=True)
+            world.node_tree.links.new(hdri.outputs["Color"], background.inputs["Color"])
+            background.inputs["Strength"].default_value = float(req.get("environmentStrength", .6))
 
-    preset = req.get("lights") or "softbox"
+    preset = req.get("lights") or ("scene" if rig == "scene" else "softbox")
     if preset != "scene":
         for light in [o for o in scene.objects if o.type == "LIGHT" and not o.name.startswith("YP_")]:
             bpy.data.objects.remove(light, do_unlink=True)
         add_studio_lights(scene, center, radius, preset, mix_color(hex_color("#FFF3E2", "#FFF3E2"), accent, 0.06), mix_color(accent2, (1, 1, 1, 1), 0.25), float(req.get("lightStrength", 1.0)))
 
     # shadow: "none" (floating subject), "soft" (EEVEE-friendly ground shadow composited per frame) or "catcher" (Cycles shadow catcher).
-    shadow_mode = req.get("shadow") or ("none" if source == "title" else "soft")
+    shadow_mode = req.get("shadow") or ("none" if source == "title" or rig == "scene" else "soft")
     if shadow_mode not in ("none", "soft", "catcher"):
         raise RuntimeError("shadow must be none, soft or catcher")
     floor = contact_obj = None
@@ -1091,33 +1329,53 @@ def op_shot(req):
             contact_obj.rotation_euler = (0, 0, 0)
             contact_obj.hide_render = True
 
-    cam_data = bpy.data.cameras.new("YP_Camera")
-    cam_data.sensor_fit = "HORIZONTAL"
-    cam_data.sensor_width = 36.0
-    cam_data.lens = float(req.get("lensMm") or 60)
-    cam = bpy.data.objects.new("YP_Camera", cam_data)
-    scene.collection.objects.link(cam)
-    scene.camera = cam
+    if rig == "scene":
+        cam = ensure_camera(scene)
+        cam_data = cam.data
+    else:
+        cam_data = bpy.data.cameras.new("YP_Camera")
+        cam_data.sensor_fit = "HORIZONTAL"
+        cam_data.sensor_width = 36.0
+        cam_data.lens = float(req.get("lensMm") or 60)
+        cam = bpy.data.objects.new("YP_Camera", cam_data)
+        scene.collection.objects.link(cam)
+        scene.camera = cam
     offset = req.get("offset") or [0, 0]
     # Blender shifts the camera frame, so the subject moves the opposite way; negate so a positive offset moves the subject right and up.
-    cam_data.shift_x, cam_data.shift_y = -float(offset[0]), -float(offset[1])
+    if rig != "scene":
+        cam_data.shift_x, cam_data.shift_y = -float(offset[0]), -float(offset[1])
     if req.get("fStop"):
         cam_data.dof.use_dof = True
         cam_data.dof.aperture_fstop = float(req["fStop"])
     if req.get("motionBlur"):
         scene.render.use_motion_blur = True
 
-    rig = req.get("rig") or "turntable"
-    if rig not in RIGS:
-        raise RuntimeError(f"rig must be one of {', '.join(RIGS)}")
     fps, count = shot_fps, shot_count
     params = {
-        "azimuth": float(req.get("azimuth", 28)), "elevation": float(req.get("elevation", 20)), "ease": req.get("ease") or "inOut",
-        "degrees": float(req.get("degrees", 360 if rig == "turntable" else 70 if rig == "orbit" else 80)),
+        "azimuth": float(req.get("azimuth", 8 if source in ("title", "scene") else 28)), "elevation": float(req.get("elevation", 8 if source in ("title", "scene") else 20)), "ease": req.get("ease") or "inOut",
+        "degrees": float(req.get("degrees", 360 if rig == "turntable" else 18 if rig == "orbit" else 80)),
         "travel": float(req.get("travel", 0.62)), "elevation_end": float(req.get("elevationEnd", 36)),
     }
     base_distance = shot_lens_distance(scene, cam_data, radius, float(req.get("margin", 1.18)))
-    anchors = anchor_points(req.get("anchors") or [], lo, hi, center)
+    # Fit the actual bounding corners in the chosen projection instead of a
+    # sphere around them. Thin devices and long text no longer become tiny.
+    if rig != "scene":
+        hfov = 2*math.atan(cam_data.sensor_width/(2*cam_data.lens))
+        vfov = 2*math.atan(math.tan(hfov/2)*render.resolution_y/render.resolution_x)
+        corners = [Vector((x,y,z))-center for x in (lo.x,hi.x) for y in (lo.y,hi.y) for z in (lo.z,hi.z)]
+        distances = []
+        for k in range(count):
+            azimuth, elevation, factor = camera_pose(rig, k/max(1,count-1), params)
+            az, el = math.radians(azimuth), math.radians(elevation)
+            direction = Vector((math.sin(az)*math.cos(el), -math.cos(az)*math.cos(el), math.sin(el)))
+            cam.location = center+direction
+            look_at(cam, center)
+            basis = cam.rotation_euler.to_matrix()
+            right, up = basis.col[0], basis.col[1]
+            required = max(max(p.dot(direction)+abs(p.dot(right))/math.tan(hfov/2), p.dot(direction)+abs(p.dot(up))/math.tan(vfov/2)) for p in corners)
+            distances.append(required/max(.2,factor))
+        base_distance = max(distances)*float(req.get("margin", 1.1))/max(.1,1-2*max(abs(float(v)) for v in offset))
+    anchors = anchor_points(list(req.get("anchors") or [])+native_screens, lo, hi, center)
     poses = []
     for k in range(count):
         t = k / count if rig in LOOPING_RIGS else k / (count - 1)
@@ -1127,6 +1385,8 @@ def op_shot(req):
         poses.append((center + Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el))) * d, d))
 
     def aim(k):
+        if rig == "scene":
+            return
         cam.location, distance = poses[k]
         look_at(cam, center)
         if cam_data.dof.use_dof:
@@ -1134,15 +1394,19 @@ def op_shot(req):
 
     out_dir = req["outputDir"]
     os.makedirs(out_dir, exist_ok=True)
-    files, track = [], []
+    files, track, framing = [], [], []
     subjects = subject_objects(scene)
     flat_background = None if req.get("transparent", True) else display_hex(palette.get("background"), "#181A1B")
     shadow_color = (0.0, 0.0, 0.0)
     for frame in range(1, count + 1):
-        scene.frame_set(blend_frame(frame - 1))
+        set_shot_frame(frame - 1)
         aim(frame - 1)
         bpy.context.view_layer.update()
         depsgraph = bpy.context.evaluated_depsgraph_get()
+        projected = [world_to_camera_view(scene, cam, obj.matrix_world @ Vector(c)) for obj in subject_objects(scene) for c in obj.evaluated_get(depsgraph).bound_box]
+        positive = [p for p in projected if p.z > 0]
+        if positive:
+            framing.append({"frame": frame, "box": [round(min(p.x for p in positive),4), round(1-max(p.y for p in positive),4), round(max(p.x for p in positive)-min(p.x for p in positive),4), round(max(p.y for p in positive)-min(p.y for p in positive),4)], "behindCamera": len(projected)-len(positive)})
         target = os.path.join(out_dir, f"frame-{frame:04d}.png")
         t0 = time.time()
         render_pass(scene, render, target)
@@ -1179,10 +1443,11 @@ def op_shot(req):
         previous_interpolation = edit.keyframe_new_interpolation_type
         edit.keyframe_new_interpolation_type = "LINEAR"
         try:
-            for k in range(count):
-                aim(k)
-                cam.keyframe_insert("location", frame=blend_frame(k))
-                cam.keyframe_insert("rotation_euler", frame=blend_frame(k))
+            if rig != "scene":
+                for k in range(count):
+                    aim(k)
+                    cam.keyframe_insert("location", frame=blend_frame(k))
+                    cam.keyframe_insert("rotation_euler", frame=blend_frame(k))
         finally:
             edit.keyframe_new_interpolation_type = previous_interpolation
         os.makedirs(os.path.dirname(req["save"]) or ".", exist_ok=True)
@@ -1194,6 +1459,7 @@ def op_shot(req):
         "pattern": "frame-%04d.png", "anchors": "anchors.json" if anchors_file else None, "anchorNames": list(anchors),
         "engine": summary["engine"], "samples": summary.get("samples"), "blender": bpy.app.version_string, "subject": {"center": [round(c, 4) for c in center], "radius": round(radius, 4)},
         "secondsPerFrame": round((time.time() - started) / max(1, len(files)), 2),
+        "framing": framing, "screenAnchors": native_screens,
     }
     with open(os.path.join(out_dir, "shot.json"), "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=1)

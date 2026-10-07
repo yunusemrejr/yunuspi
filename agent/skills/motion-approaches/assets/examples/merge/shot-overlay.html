@@ -8,7 +8,7 @@ TAGS      labels callouts annotations pinned tracking following 3D object featur
 CONCEPTS  1) the 3D renderer owns the camera and the object; the page owns type, rules and timing. Anchors are the contract between them:
              Blender projects named 3D points to screen space for every frame, so a label never drifts off the feature it names
           2) frame-exact playback: images are decoded on demand (img.decode()) and cached, so a seek to any t draws that exact frame
-          3) blending between rendered frames lets a 12 fps render play smoothly at 30 fps for slow camera moves; a looping shot wraps, any other holds its last frame
+          3) delivery uses matching source fps; explicit props.blend can ghost edges; a looping shot wraps, any other holds its last frame
           4) occlusion: an anchor's visible flag fades its annotation when the feature turns behind the object
           5) fonts and palette arrive as props from the film's look, so the overlay is typeset like every other scene
 USE       props.shot = "shots/gauge" (a folder with shot.json, anchors.json and frame-0001.png ... relative to this page, or under a
@@ -41,7 +41,7 @@ async function image(state, index) {                                         // 
 }
 window.renderFrame = async t => {
   await fontsReady; const state = await ready, { meta, track } = state;
-  const raw = t * meta.fps, pos = meta.loop ? raw % meta.frames : Math.min(raw, meta.frames - 1), a = Math.floor(pos), b = meta.loop ? (a + 1) % meta.frames : Math.min(a + 1, meta.frames - 1), mix = pos - a;   // loops wrap; other shots hold their last frame
+  const raw = t * meta.fps, pos = meta.loop ? raw % meta.frames : Math.min(raw, meta.frames - 1), a = Math.floor(pos), b = meta.loop ? (a + 1) % meta.frames : Math.min(a + 1, meta.frames - 1), mix = (window.__PROPS__ || {}).blend === true ? pos - a : 0;   // loops wrap; other shots hold their last frame
   const k = Math.min(W / meta.width, H / meta.height), w = meta.width * k, h = meta.height * k, x0 = (W - w) / 2, y0 = (H - h) / 2;   // contain
   ctx.clearRect(0, 0, W, H); if (!P.transparent) { ctx.fillStyle = getComputedStyle(document.body).backgroundColor; ctx.fillRect(0, 0, W, H); }
   ctx.drawImage(await image(state, a), x0, y0, w, h);

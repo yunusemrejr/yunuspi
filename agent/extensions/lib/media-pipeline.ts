@@ -14,7 +14,7 @@ import { validateScene, SCENE_LIMITS } from '../../scripts/scene-model.mjs';
 
 export function planMediaPipeline(params: any) {
   if (!params || typeof params !== 'object' || Array.isArray(params)) throw Error('pipeline must be an object');
-  const allowed = ['clips', 'animation', 'animationTracks', 'narration', 'score', 'scoreGain', 'tracks', 'duration', 'transition', 'transitionDuration', 'includeClipAudio', 'ducking', 'targetLufs', 'width', 'height', 'fps', 'outputDir'];
+  const allowed = ['clips', 'animation', 'animationTracks', 'narration', 'score', 'scoreRender', 'scoreGain', 'tracks', 'duration', 'transition', 'transitionDuration', 'includeClipAudio', 'ducking', 'targetLufs', 'width', 'height', 'fps', 'outputDir'];
   for (const key of Object.keys(params)) if (!allowed.includes(key)) throw Error(`Unknown pipeline field: ${key}`);
   if (params.clips !== undefined && (!Array.isArray(params.clips) || !params.clips.length || params.clips.length > 8)) throw Error('clips accepts 1..8 entries');
   if (params.tracks !== undefined && (!Array.isArray(params.tracks) || params.tracks.length > 8)) throw Error('tracks accepts 0..8 entries');
@@ -27,6 +27,12 @@ export function planMediaPipeline(params: any) {
   if ((params.tracks?.length ?? 0) + (params.score ? 1 : 0) + (params.narration ? 1 : 0) > 8) throw Error('The score and tracks together, including narration, accept at most 8 tracks');
   // Validate score/target before creating any output or running synthesis.
   if (params.score !== undefined) validateScore(params.score);
+  if (params.scoreRender !== undefined) {
+    if (!params.score || !params.scoreRender || typeof params.scoreRender !== 'object' || Array.isArray(params.scoreRender)) throw Error('scoreRender requires a score and renderer options');
+    for (const key of Object.keys(params.scoreRender)) if (!['backend', 'soundfont', 'releaseTail'].includes(key)) throw Error(`Unknown scoreRender field: ${key}`);
+    if (params.scoreRender.backend && !['auto', 'soundfont', 'oscillator'].includes(params.scoreRender.backend)) throw Error('Invalid scoreRender backend');
+    if (params.scoreRender.releaseTail !== undefined) number(params.scoreRender.releaseTail, 1.5, 0, 5, 'releaseTail');
+  }
   if (params.scoreGain !== undefined && params.score === undefined) throw Error('scoreGain requires a score');
   if (params.scoreGain !== undefined) number(params.scoreGain, 0.3, 0, 4, 'scoreGain');
   if (params.targetLufs !== undefined) number(params.targetLufs, -16, -36, -8, 'targetLufs');
@@ -45,6 +51,12 @@ export function planMediaPipeline(params: any) {
 
 export async function mediaPipeline(params: any, cwd: string, signal?: AbortSignal) {
   const started = performance.now(), plan = planMediaPipeline(params);
+  if (params.score && (params.scoreRender?.backend === 'soundfont' || (params.scoreRender?.backend !== 'oscillator' && (params.scoreRender?.soundfont || process.env.YUNUSPI_SOUNDFONT)))) {
+    const font = params.scoreRender?.soundfont ?? process.env.YUNUSPI_SOUNDFONT;
+    if (!font) throw Error('SoundFont rendering needs a local SF2/SF3 bank');
+    const bank = await inputFile(font, cwd);
+    if (!/\.sf[23]$/i.test(bank) || (await fs.stat(bank)).size > 512*1024*1024) throw Error('Use a local SF2/SF3 SoundFont up to 512 MiB');
+  }
   signal?.throwIfAborted();
   let animation: any, svgSource: any;
   if (params.animation !== undefined) {
@@ -90,7 +102,7 @@ export async function mediaPipeline(params: any, cwd: string, signal?: AbortSign
       tracks.push({ path: narration.artifact.path, role: 'voice' });
     }
     if (params.score) {
-      score = await stage('compose_score', () => composeMusic({ score: params.score, outputDir: dir }, cwd, signal));
+      score = await stage('compose_score', () => composeMusic({ ...params.scoreRender, score: params.score, outputDir: dir }, cwd, signal));
       tracks.push({ path: score.files.find((file: any) => file.path.endsWith('.wav')).path, role: 'music', gain: params.scoreGain ?? 0.3, loop: true });
     }
     const mixOptions = { tracks, ducking: params.ducking, targetLufs: params.targetLufs, outputDir: dir };

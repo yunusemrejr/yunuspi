@@ -38,4 +38,4 @@ Decide from the idea, then check cost and failure modes. Several approaches in o
 - `fetch()` of local JSON fails under `file://` in the exporter; use XHR or inline the data (shot-overlay does).
 - Alpha: render with `--alpha` (PNG with transparency) when the page will sit over something; flatten for review only.
 - Colour: Blender's view transform differs from CSS. Set the Blender world and light colours from the palette and judge in the composite, not in isolation.
-- Frame rate: a 12 fps Blender render is fine for slow moves because `BlenderShot` blends neighbours; fast type or flicker needs the film's fps.
+- Frame rate: 12 fps is a draft preview. Delivery uses the film fps; frame blending ghosts outlines and cannot recover missing motion.

@@ -244,6 +244,8 @@
     "video-looks.ts",
     "video-publish.ts",
     "video-shot.ts",
+    "video-compose.ts",
+    "shot-scene.ts",
     "video-studio.ts",
     "workspace-write-lease.ts",
     "worktree-checkpoint.ts",
@@ -663,6 +665,7 @@
     "extensions/lib/utility-mcp/workflow.mjs",
     "scripts/video-render.mjs",
     "scripts/blender-studio.py",
+    "scripts/music-soundfont.py",
     "scripts/video-browser.mjs"
   ]
 }

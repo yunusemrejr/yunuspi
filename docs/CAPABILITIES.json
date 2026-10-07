@@ -3949,19 +3949,19 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 90,
+        "line": 112,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 280,
+        "line": 281,
         "kind": "factory"
       },
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 96,
+        "line": 118,
         "kind": "factory"
       },
       {
@@ -4306,13 +4306,13 @@
       {
         "name": "media_pipeline",
         "source": "agent/extensions/media-tools.ts",
-        "line": 283,
+        "line": 284,
         "kind": "factory"
       },
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 92,
+        "line": 114,
         "kind": "factory"
       },
       {
@@ -4372,7 +4372,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 108,
+        "line": 130,
         "kind": "factory"
       },
       {
@@ -4384,19 +4384,19 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 263,
+        "line": 264,
         "kind": "factory"
       },
       {
         "name": "narration_align",
         "source": "agent/extensions/video-studio.ts",
-        "line": 88,
+        "line": 110,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 84,
+        "line": 106,
         "kind": "factory"
       },
       {
@@ -4522,13 +4522,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 273,
+        "line": 274,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 274,
+        "line": 275,
         "kind": "factory"
       },
       {
@@ -4697,19 +4697,19 @@
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 78,
+        "line": 100,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 94,
+        "line": 116,
         "kind": "factory"
       },
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 279,
+        "line": 280,
         "kind": "factory"
       },
       {
@@ -4721,25 +4721,25 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 30,
+        "line": 49,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 74,
+        "line": 96,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 70,
+        "line": 92,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 51,
+        "line": 71,
         "kind": "factory"
       },
       {
@@ -5473,7 +5473,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          19
+          29
         ],
         "knownNames": [
           "audio_generate",
@@ -5492,7 +5492,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 737,
+      "sourceFiles": 739,
       "registrationSites": 90,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 152,
@@ -6418,6 +6418,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/shot-scene.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/skill-discovery-controller.ts",
         "exists": true
       },
@@ -6527,6 +6531,10 @@
       },
       {
         "path": "agent/extensions/lib/video-browser.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-compose.ts",
         "exists": true
       },
       {
@@ -6965,6 +6973,10 @@
       },
       {
         "path": "agent/scripts/mini-preprocessor.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/music-soundfont.py",
         "exists": true
       },
       {

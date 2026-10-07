@@ -1,16 +1,17 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { cancelRender, continueRender, delayRender, Img, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { cancelRender, continueRender, delayRender, Img, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { screenMatrix } from '../production';
 import { ease, progress } from "../motion";
 import { type, useCanvas, useTheme } from "../theme";
 
 /** A Blender shot from `video_shot`: an RGBA image sequence in public/shots/<name>/
  * with a manifest and, when anchors were requested, the per-frame screen
  * positions of named 3D features. The player is a pure function of the frame;
- * it blends neighbouring frames when the film runs faster than the render, so a
- * 12-15 fps render of a slow move plays smoothly in a 30 fps film. ShotAnchor
+ * delivery renders use the film fps without ghosting. Explicit blending is
+ * available for experiments, and stepped motion is an intentional choice. ShotAnchor
  * and ShotNote pin 2D graphics to 3D features, so labels follow the object. */
 
-export type ShotMeta = { name: string; fps: number; frames: number; width: number; height: number; alpha: boolean; loop: boolean; anchors: string | null; anchorNames: string[]; quality?: string };
+export type ShotMeta = { name: string; fps: number; frames: number; width: number; height: number; alpha: boolean; loop: boolean; anchors: string | null; anchorNames: string[]; quality?: string; framing?: Array<{ box: [number, number, number, number] }> };
 type AnchorPoint = { x: number; y: number; depth: number; visible: boolean };
 type AnchorTrack = { frames: Array<{ frame: number; anchors: Record<string, AnchorPoint> }> };
 export type ShotMode = "hold" | "loop" | "pingpong";
@@ -58,19 +59,27 @@ export function shotPosition(meta: Pick<ShotMeta, "fps" | "frames">, seconds: nu
   return { t, a, b, mix: t - a };
 }
 
-const place = (box: { width: number; height: number }, meta: ShotMeta, fit: "contain" | "cover", align: [number, number], scale: number): Rect => {
-  const k = (fit === "cover" ? Math.max : Math.min)(box.width / meta.width, box.height / meta.height) * scale;
+const place = (box: { width: number; height: number }, meta: ShotMeta, fit: "contain" | "cover", align: [number, number], scale: number, subjectFit: boolean): Rect => {
+  const frames = subjectFit ? meta.framing?.filter(f => f.box.every(Number.isFinite)) ?? [] : [];
+  const left = frames.length ? Math.max(0, Math.min(...frames.map(f => f.box[0])) - .025) : 0;
+  const top = frames.length ? Math.max(0, Math.min(...frames.map(f => f.box[1])) - .025) : 0;
+  const right = frames.length ? Math.min(1, Math.max(...frames.map(f => f.box[0] + f.box[2])) + .025) : 1;
+  const bottom = frames.length ? Math.min(1, Math.max(...frames.map(f => f.box[1] + f.box[3])) + .025) : 1;
+  const cw = Math.max(.05, right - left), ch = Math.max(.05, bottom - top);
+  const k = (fit === "cover" ? Math.max : Math.min)(box.width / (meta.width*cw), box.height / (meta.height*ch)) * scale;
   const w = meta.width * k, h = meta.height * k;
-  return { x: (box.width - w) * align[0], y: (box.height - h) * align[1], w, h };
+  return { x: (box.width - w*cw) * align[0] - left*w, y: (box.height - h*ch) * align[1] - top*h, w, h };
 };
 const frameUrl = (shot: string, index: number) => staticFile(`shots/${shot}/frame-${String(index + 1).padStart(4, "0")}.png`);
 const ShotCtx = createContext<ShotContext | null>(null);
 
 export const BlenderShot: React.FC<{
   shot: string; mode?: ShotMode; speed?: number; offset?: number; fit?: "contain" | "cover"; align?: [number, number]; scale?: number;
-  /** Blend between rendered frames (default true); turn off for stylised, stepped motion. */
+  /** Blend between rendered frames (default false); optical ghosting is not smoother source motion. */
   blend?: boolean; opacity?: number; children?: React.ReactNode;
-}> = ({ shot, mode, speed = 1, offset = 0, fit = "contain", align = [0.5, 0.5], scale = 1, blend = true, opacity = 1, children }) => {
+  bounds?: { width: number; height: number };
+  subjectFit?: boolean;
+}> = ({ shot, mode, speed = 1, offset = 0, fit = "contain", align = [0.5, 0.5], scale = 1, blend = false, opacity = 1, children, bounds, subjectFit = false }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const canvas = useCanvas();
@@ -78,10 +87,10 @@ export const BlenderShot: React.FC<{
   if (!loaded) return null;
   const { meta, track } = loaded;
   const position = shotPosition(meta, frame / fps, mode ?? (meta.loop ? "loop" : "hold"), speed, offset);
-  const rect = place(canvas, meta, fit, align, scale);
+  const rect = place(bounds ?? canvas, meta, fit, align, scale, subjectFit);
   const image: React.CSSProperties = { position: "absolute", left: 0, top: 0, width: "100%", height: "100%" };
   return (
-    <ShotCtx.Provider value={{ meta, track, rect, position }}>
+    <ShotCtx.Provider value={{ meta, track, rect, position: blend ? position : { ...position, mix: 0 } }}>
       <div style={{ position: "absolute", inset: 0, opacity }}>
         <div style={{ position: "absolute", left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
           <Img src={frameUrl(shot, position.a)} style={image} />
@@ -91,6 +100,19 @@ export const BlenderShot: React.FC<{
       </div>
     </ShotCtx.Provider>
   );
+};
+
+/** Real screen footage projected onto the Blender device's tracked corners.
+ * Screen and device stay on the same clock; no separately guessed CSS tilt. */
+export const ShotScreen: React.FC<{ src: string; prefix?: string; startFrom?: number; speed?: number; width?: number; height?: number }> = ({ src, prefix = 'screen', startFrom = 0, speed = 1, width = 1280, height = 720 }) => {
+  const { fps } = useVideoConfig();
+  const corners = ['tl', 'tr', 'br', 'bl'].map(corner => useShotAnchor(`${prefix}:${corner}`));
+  if (corners.some(point => !point || point.visible < .95)) return null;
+  const matrix = screenMatrix(width, height, corners as Array<{ x: number; y: number }>);
+  if (!matrix) return null;
+  return <div style={{ position: 'absolute', left: 0, top: 0, width, height, transformOrigin: '0 0', transform: `matrix3d(${matrix.join(',')})`, overflow: 'hidden', backfaceVisibility: 'hidden' }}>
+    <OffthreadVideo src={staticFile(src)} trimBefore={Math.round(startFrom * fps)} playbackRate={speed} muted style={{ width, height, objectFit: 'cover' }} />
+  </div>;
 };
 
 /** Position of a named anchor in layout units (relative to the BlenderShot's container); `visible` is 0..1, falling when the feature turns behind the subject. */
