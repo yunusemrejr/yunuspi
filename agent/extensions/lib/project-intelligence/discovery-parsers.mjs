@@ -377,7 +377,7 @@ export function parseImports(text, ext, limit = 128) {
           if ([';', 'import', 'export'].includes(current)) break;
           if (current === 'from' && tokens[j + 1]?.type.label === 'string') {
             const members = clause.slice(1, -1).join(' ').split(',').filter(part => part.trim());
-            const typeOnly = clause[0] === 'type' && clause.length > 1
+            const typeOnly = clause[0] === 'type' && clause.length > 1 && clause[1] !== ','
               || clause[0] === '{' && clause.at(-1) === '}' && members.length > 0 && members.every(part => /^\s*type\s+(?!as\b)\S/.test(part));
             add(tokens[j + 1].value, 'javascript import', typeOnly ? { typeOnly: true } : {});
             break;

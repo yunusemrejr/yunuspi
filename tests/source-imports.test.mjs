@@ -42,8 +42,9 @@ test('both graph consumers share exact JS-to-TS conventions and Python package r
 });
 
 test('empty named clauses and a value named type still retain runtime imports', () => {
-  const result = parseImports('import {} from "empty"; export {} from "reexport"; import type from "default-type"; import {type as value} from "value-type"; import { type T, type U as V } from "only-types";', '.ts');
-  assert.deepEqual(result.imports.filter(row => !row.typeOnly).map(row => row.specifier), ['empty', 'reexport', 'default-type', 'value-type']);
+  const result = parseImports('import {} from "empty"; export {} from "reexport"; import type from "default-type"; import {type as value} from "value-type"; import type, { Value } from "default-and-named"; import type, * as ns from "default-and-namespace"; import type T from "type-default"; import { type T, type U as V } from "only-types";', '.ts');
+  assert.deepEqual(result.imports.filter(row => !row.typeOnly).map(row => row.specifier), ['empty', 'reexport', 'default-type', 'value-type', 'default-and-named', 'default-and-namespace']);
+  assert.equal(result.imports.find(row => row.specifier === 'type-default').typeOnly, true);
   assert.equal(result.imports.at(-1).typeOnly, true);
 });
 
@@ -73,6 +74,6 @@ test('cold and returning project discovery agree with source resolution without 
   assert.ok(!JSON.stringify(cold.sources).includes('phantom'));
   const warm = await discoverProject(identity, { metadata: cold.metadata, previousSources: cold.sources });
   assert.equal(warm.stats.filesParsed, 0);
-  const staleParser = await discoverProject(identity, { metadata: { ...cold.metadata, parserSchemaVersion: 2 }, previousSources: cold.sources });
+  const staleParser = await discoverProject(identity, { metadata: { ...cold.metadata, parserSchemaVersion: 3 }, previousSources: cold.sources });
   assert.ok(staleParser.stats.filesParsed > 0, 'a scanner correction invalidates the older cached graph');
 });

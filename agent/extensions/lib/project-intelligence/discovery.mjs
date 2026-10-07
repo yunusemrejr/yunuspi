@@ -61,7 +61,7 @@ const LIMITS = Object.freeze({
   maxLiteral: 420,
 });
 
-const SOURCE_SCHEMA_VERSION = 3;
+const SOURCE_SCHEMA_VERSION = 4;
 // Metadata v2 replaces the old full source payload cache with compact,
 // compressed indexes.  The store remains authoritative for graph payloads;
 // this version only helps discovery decide which files need reparsing.
