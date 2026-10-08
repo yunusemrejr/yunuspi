@@ -12,13 +12,20 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** 'passed', 'failed', 'pending' or 'missing' for the newest main push run of a commit. */
+export const MAIN_TEST_EVENTS = ['push', 'workflow_dispatch', 'schedule'];
+const mainRuns = (runs, sha) => (Array.isArray(runs) ? runs : []).filter(run => run?.head_sha === sha && run.head_branch === 'main' && MAIN_TEST_EVENTS.includes(run.event))
+  .sort((a, b) => b.id - a.id);
+
+/** Status of the newest main run. Its full safety job must also pass before tagging. */
 export function safetyState(runs, sha) {
-  const mine = (Array.isArray(runs) ? runs : []).filter(run => run?.head_sha === sha && run.head_branch === 'main' && run.event === 'push')
-    .sort((a, b) => b.id - a.id)[0];
+  const mine = mainRuns(runs, sha)[0];
   if (!mine) return 'missing';
   if (mine.status !== 'completed') return 'pending';
   return mine.conclusion === 'success' ? 'passed' : 'failed';
+}
+
+export function fullSafetyPassed(jobs) {
+  return Array.isArray(jobs) && jobs.some(job => job.name === 'safety' && job.status === 'completed' && job.conclusion === 'success');
 }
 
 /** Milliseconds to wait when GitHub refuses a lookup because the rate limit is used up (60 an hour without a
@@ -44,7 +51,7 @@ async function main() {
   if (git('rev-parse', 'origin/main') !== sha) throw Error('HEAD is not the pushed tip of origin/main; push main first');
   const match = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(git('remote', 'get-url', 'origin'));
   if (!match) throw Error('origin is not a GitHub repository');
-  const query = new URLSearchParams({ branch: 'main', event: 'push', head_sha: sha, per_page: '20' });
+  const query = new URLSearchParams({ branch: 'main', head_sha: sha, per_page: '20' });
   const url = `https://api.github.com/repos/${match[1]}/actions/workflows/public-safety.yml/runs?${query}`;
   const deadline = Date.now() + limit * 60_000, token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   // Without a token the whole machine shares 60 lookups an hour, so poll once a minute and sit out a refusal.
@@ -58,8 +65,17 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, wait));
       continue;
     }
-    const state = safetyState((await response.json()).workflow_runs, sha);
-    if (state === 'passed') break;
+    const runs = (await response.json()).workflow_runs;
+    const state = safetyState(runs, sha);
+    if (state === 'passed') {
+      const run = mainRuns(runs, sha)[0];
+      const evidence = await fetch(`https://api.github.com/repos/${match[1]}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`, {
+        headers: { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(30_000),
+      });
+      if (evidence.status !== 200) throw Error(`Full safety job lookup failed (${evidence.status})`);
+      if (!fullSafetyPassed((await evidence.json()).jobs)) throw Error('Quick checks alone cannot authorize a release. Run the complete workflow on main before tagging.');
+      break;
+    }
     if (state === 'failed') throw Error(`The main safety run failed for ${sha.slice(0, 7)}; fix it before tagging`);
     if (Date.now() > deadline) throw Error(`The main safety run is still ${state} after ${limit} minutes; rerun later`);
     console.error(`main safety run ${state}; waiting`);

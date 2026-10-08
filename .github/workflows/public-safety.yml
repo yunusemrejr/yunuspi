@@ -5,18 +5,21 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * 0'
 permissions:
   contents: read
-# A new push supersedes older runs on the same branch: cancel them instead of
-# queueing full suites behind each other. Main and release tags never cancel.
+# PR updates supersede their older checks. Recurring/manual runs have separate
+# groups, and cannot cancel an exact main commit needed for a release.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  # Install/build once and let Node schedule the complete suite on this runner.
-  # Release tags reuse this exact commit's successful main run below.
+  # Native integrations run for shared/release changes, weekly, or on demand.
+  # Release tags still require this exact commit's successful full safety job.
   safety:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    needs: [minimum-node]
+    if: ${{ needs.minimum-node.outputs.full == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,16 +33,14 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: node scripts/check-public.mjs
-      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
       - run: npm run build:core
+      - id: browser-version
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
+          key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ steps.browser-version.outputs.version }}
       - name: Install execution isolation prerequisites
         run: |
           sudo apt-get update
@@ -62,27 +63,20 @@ jobs:
           PI_REQUIRE_SOUNDFONT_TEST: '1'
           PI_BROWSER_REQUIRE: '1'
           PI_RENDER_BROWSER_CHANNEL: chromium
-        run: PI_LOCAL_LM=off node --test --test-concurrency=4 tests/*.test.mjs
-      - name: Check concise tool output and required evidence bounds
-        env:
-          PI_LOCAL_LM: 'off'
-        run: node agent/scripts/tool-efficiency-bench.mjs
-      - name: Check adaptive scheduling and coordination bounds
-        env:
-          PI_LOCAL_LM: 'off'
-        run: node agent/scripts/adaptive-execution-bench.mjs
-      - name: Check competence control calibration
-        env:
-          PI_LOCAL_LM: 'off'
-        run: node agent/scripts/competence-replay-bench.mjs
+        run: node scripts/test.mjs
 
-  # The manifest supports Node >=22.19.0 while the full suite runs on 24. This
-  # lane keeps the minimum runtime honest with the deterministic, prerequisite-
-  # free core of the suite: build, cancellation, provider admission, memory and review.
+  # The same small catalogue drives local routine checks and minimum Node CI.
+  # New/changed tests are included; setup of native prerequisites stays in safety.
   minimum-node:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+    env:
+      CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      PI_LOCAL_LM: 'off'
+      PI_PUBLIC_TEST_CONCURRENCY: '2'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -94,22 +88,26 @@ jobs:
           node-version: '22.19.0'
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - id: plan
+        run: node scripts/test.mjs --quick --base "$CI_BASE_SHA" --plan
+      - run: node scripts/check-public.mjs
+      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
       - run: npm run build:core
-      - name: Run the deterministic core on the minimum supported Node
+      - run: node agent/scripts/generate-capabilities-doc.mjs --root "$PWD" --check
+      - run: node scripts/check-syntax.mjs --changed "$CI_BASE_SHA"
+      - name: Run short checks and changed tests on the minimum supported Node
         env:
-          PI_LOCAL_LM: 'off'
-        run: >-
-          node --test --test-concurrency=2
-          tests/command-dispatch.test.mjs tests/core-robustness.test.mjs tests/preflight-stop-cancellation.test.mjs
-          tests/provider-gate.test.mjs tests/provider-health-admission.test.mjs tests/provider-health-stall.test.mjs
-          tests/double-runner.test.mjs tests/quality-review.test.mjs tests/scope-deliberation.test.mjs
-          tests/project-vector-memory.test.mjs tests/memory-embedding-coverage.test.mjs tests/jev-client.test.mjs
-          tests/autonomous-triage-cancellation.test.mjs
-          tests/stream-lifecycle.test.mjs tests/rpc-client-lifecycle.test.mjs tests/guarded-process.test.mjs
-          tests/needle-embedding-cache.test.mjs tests/memory-guard.test.mjs
-          tests/creative-evidence.test.mjs tests/creative-qa.test.mjs tests/ui-doctrine.test.mjs
-          tests/goal-state.test.mjs tests/completion-gate.test.mjs tests/motion-routing-sdk.test.mjs
+          FULL_CHECK: ${{ steps.plan.outputs.full }}
+        run: |
+          if [ "$FULL_CHECK" = true ]; then
+            node scripts/test.mjs --quick
+          else
+            node scripts/test.mjs --quick --base "$CI_BASE_SHA"
+          fi
+      - run: node agent/scripts/tool-efficiency-bench.mjs
+      - run: node agent/scripts/adaptive-execution-bench.mjs
+      - run: node agent/scripts/competence-replay-bench.mjs
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

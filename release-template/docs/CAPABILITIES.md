@@ -2366,6 +2366,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/TASK-PIPELINES.md`](TASK-PIPELINES.md)
 - [`docs/TASK-STATE-GRAPH.md`](TASK-STATE-GRAPH.md)
 - [`docs/TERMINAL-INTERFACE.md`](TERMINAL-INTERFACE.md)
+- [`docs/TESTING.md`](TESTING.md)
 - [`docs/UI-ENGINEERING.md`](UI-ENGINEERING.md)
 - [`docs/UNREAL-INTEGRATION-REVIEW.md`](UNREAL-INTEGRATION-REVIEW.md)
 - [`docs/VECTOR-MEMORY.md`](VECTOR-MEMORY.md)

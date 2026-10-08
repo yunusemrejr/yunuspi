@@ -48,7 +48,7 @@ test('release metadata check detects lock drift and repairs only owned versions'
 
 const releaseInput = { version: '0.2.0', ref: 'refs/tags/v0.2.0', sha: 'a'.repeat(40), repository: 'example/project', changelog: '# Changelog\n\n## 0.2.0 — 2026-09-23\n\nRead [details](docs/ASYNC-AND-STUDIO.md) and [changelog](CHANGELOG.md).\n\n## 0.1.0 — old\nOld notes.' };
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
-test('release reuse requires the latest exact main push and its successful safety job', async () => {
+test('release reuse requires the latest exact full main check and its successful safety job', async () => {
   const valid = { id: 20, workflow_id: 10, path: '.github/workflows/public-safety.yml', head_sha: releaseInput.sha,
     head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success',
     repository: { full_name: releaseInput.repository }, head_repository: { full_name: releaseInput.repository } };
@@ -59,7 +59,7 @@ test('release reuse requires the latest exact main push and its successful safet
     if (parsed.pathname.endsWith('/workflows/public-safety.yml')) return response({ id: 10, path: valid.path }, status);
     if (parsed.pathname.endsWith('/workflows/10/runs')) {
       assert.equal(parsed.searchParams.get('head_sha'), releaseInput.sha);
-      assert.equal(parsed.searchParams.get('branch'), 'main'); assert.equal(parsed.searchParams.get('event'), 'push');
+      assert.equal(parsed.searchParams.get('branch'), 'main'); assert.equal(parsed.searchParams.has('event'), false);
       assert.equal(parsed.searchParams.has('status'), false, 'a newer failed attempt must not be hidden');
       return response({ total_count: rows.length, workflow_runs: rows });
     }
@@ -69,6 +69,7 @@ test('release reuse requires the latest exact main push and its successful safet
   };
   const verify = options => verifiedMainRun(releaseInput.repository, releaseInput.sha, 'fixture', service(options));
   assert.deepEqual(await verify(), { id: 20, url: 'https://github.com/example/project/actions/runs/20' });
+  for (const event of ['workflow_dispatch', 'schedule']) assert.equal((await verify({ rows: [{ ...valid, event }] })).id, 20);
   for (const patch of [{ head_sha: 'b'.repeat(40) }, { head_branch: 'v0.2.0' }, { event: 'pull_request' }, { workflow_id: 11 },
     { path: '.github/workflows/other.yml' }, { repository: { full_name: 'other/project' } }, { head_repository: { full_name: 'fork/project' } },
     { status: 'in_progress', conclusion: null }, { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: 'cancelled' }])
