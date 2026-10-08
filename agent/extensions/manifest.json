@@ -267,6 +267,7 @@
     "ui-recipes.ts",
     "quality-refinement.ts",
     "video-motion.ts",
+    "video-production-flow.ts",
     "blender-studio.ts",
     "guarded-process.ts",
     "splat-studio.ts",

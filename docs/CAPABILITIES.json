@@ -2618,14 +2618,21 @@
           "name": "mode",
           "values": [
             "stills",
+            "review",
             "preview",
-            "final"
+            "segments",
+            "final",
+            "thumbnail"
           ],
-          "summary": "stills with contact sheet, preview of a scene or seconds range, or final."
+          "summary": "stills with contact sheet, review with critical stills plus bounded playback in one browser, preview of a scene or seconds range, resumable segments, final or thumbnail."
         },
         {
           "name": "action",
-          "summary": "Project init/check/install or narration status/install/synthesize."
+          "summary": "Project init/compose/plan/check/install or narration status/install/synthesize."
+        },
+        {
+          "name": "flow|phase|beat",
+          "summary": "Job-specific production plans with current blockers and exact next calls; storyboard beat role/claim/visualAction preserves the visual argument. Plans neither spend nor approve art."
         },
         {
           "name": "kind",
@@ -2672,6 +2679,7 @@
       "sourceFiles": [
         "agent/extensions/video-studio.ts",
         "agent/extensions/lib/video-studio.ts",
+        "agent/extensions/lib/video-production-flow.ts",
         "agent/extensions/lib/video-ambient.ts",
         "agent/extensions/lib/ambient-frames.ts",
         "agent/extensions/lib/video-review-evidence.ts",
@@ -4127,7 +4135,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 148,
+        "line": 152,
         "kind": "factory"
       },
       {
@@ -4139,7 +4147,7 @@
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 160,
+        "line": 164,
         "kind": "factory"
       },
       {
@@ -4490,7 +4498,7 @@
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 156,
+        "line": 160,
         "kind": "factory"
       },
       {
@@ -4550,7 +4558,7 @@
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 172,
+        "line": 176,
         "kind": "factory"
       },
       {
@@ -4568,13 +4576,13 @@
       {
         "name": "narration_align",
         "source": "agent/extensions/video-studio.ts",
-        "line": 146,
+        "line": 150,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 142,
+        "line": 146,
         "kind": "factory"
       },
       {
@@ -4893,19 +4901,19 @@
       {
         "name": "video_ambient",
         "source": "agent/extensions/video-studio.ts",
-        "line": 79,
+        "line": 82,
         "kind": "factory"
       },
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 136,
+        "line": 140,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 158,
+        "line": 162,
         "kind": "factory"
       },
       {
@@ -4923,31 +4931,31 @@
       {
         "name": "video_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 76,
+        "line": 79,
         "kind": "factory"
       },
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 83,
+        "line": 86,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 132,
+        "line": 136,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 128,
+        "line": 132,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 105,
+        "line": 109,
         "kind": "factory"
       },
       {
@@ -5689,7 +5697,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          37
+          38
         ],
         "knownNames": [
           "audio_generate",
@@ -5710,7 +5718,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 754,
+      "sourceFiles": 755,
       "registrationSites": 91,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 157,
@@ -6801,6 +6809,10 @@
       },
       {
         "path": "agent/extensions/lib/video-motion.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/video-production-flow.ts",
         "exists": true
       },
       {

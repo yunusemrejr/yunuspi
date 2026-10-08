@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.0 — 2026-10-08
+
+**Video production has concrete next steps.** `video_project plan` derives promo, explainer, walkthrough, longform and loop decisions from the existing project, its blockers and the requested phase. It selects an early proof scene and returns exact tool parameters for dependencies, timing, asset checks and delivery. Optional storyboard beats retain a claim and its visual action; native text-only explanations receive advisory findings while custom scenes remain available.
+
+**A proof pass covers pixels and bounded playback.** `video_render review` samples full-size frames around cues, motion keys and both sides of cuts, then renders a decoded clip up to twelve seconds. It reports omitted candidates and actual playback coverage. Repeated text diagnostics consolidate by scene and layer while retaining late errors and the smallest measured size. Text-only models receive explicit vision discovery and review parameters without changing the main model or making automatic inference calls.
+
+**Rendering reuses its browser.** Composition discovery, stills and playback share one disposable browser with cleanup on success and failure. Existing bundle reuse, resumable segments, narration checkpoints and delivery review owners remain in place. Production plans and technical checks do not certify artistic quality, motion or listening.
+
 ## 0.34.3 — 2026-10-08
 
 **Automatic work keeps the request that authorized it.** Intervention arbitration accepts immutable inputs, scopes idempotency to the live request and exact effect, and retains original expiry. Native request identities join delayed hooks without combining distinct rapid inputs. Helper launches and checkpoint observations no longer reopen spending budgets inside one request. Double stops its active streams and reconciliation when disabled, reconfigured, interrupted or moved to another session branch; restored mode comes from that branch.

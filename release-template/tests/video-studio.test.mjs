@@ -163,6 +163,7 @@ test("render runner rebuilds failed bundles and preserves published bundles used
           return outDir;
         }`,
       renderer: `import fs from "node:fs"; import path from "node:path";
+        export async function openBrowser() { return { close: async () => {} }; }
         export async function selectComposition({serveUrl}) {
           if(!fs.existsSync(path.join(serveUrl, "bundle.js"))) throw Error("incomplete bundle was reused");
           return {id:"Main",fps:30,width:320,height:180,durationInFrames:30};

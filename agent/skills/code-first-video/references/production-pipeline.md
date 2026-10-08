@@ -30,6 +30,16 @@ Transition in/out: continues from 02's token row (same positions); fades to 04.
 
 Keep the same objects across adjacent beats when the idea continues. Continuity reads as one argument; hard resets read as slides.
 
+The executable storyboard can retain the same intent:
+
+```json
+{"id":"route","seconds":6,"beat":{"role":"explain","claim":"The request moves through one queue","visualAction":"A token travels along the route and the output count increases"}}
+```
+
+`video_project action:"plan"` recomputes prerequisites from the existing project and selects a representative proof using authored roles and observed layer/cue complexity. It never claims that a high complexity score means better design. Promo flows emphasize real outcomes and brand assets; explainers emphasize visible mechanisms; walkthroughs emphasize observed browser events; long films emphasize stable scene IDs and resumable parts; loops emphasize last-to-first picture and audio checks. The author owns the narrative, style and substantive claims.
+
+`video_render mode:"review"` batches critical stills and bounded motion playback. Full-size stills retain glyph/material detail while playback defaults to half scale. Its coverage receipt names omitted cue candidates and whether the whole selected scene is included. This early proof prevents multiplying a weak asset or unreadable visual system across a film. It is separate from final `media_sync`, `video_qa`, playback and listening gates.
+
 ## Using subagents
 
 Delegate when work is separable and large enough to pay back the overhead:

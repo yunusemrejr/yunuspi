@@ -115,7 +115,7 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_understand', 'image_convert', 'image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'video_ambient', 'narration_tts', 'audio_synth', 'video_generate', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'image_convert', 'blender_run'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'video_ambient', 'narration_tts', 'audio_synth', 'video_generate', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'image_convert', 'blender_run'] },
   { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
   { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
   { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'video_shot'] },

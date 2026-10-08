@@ -71,46 +71,57 @@ async function main() {
   const { serveUrl, cached, bundleMs } = await bundled();
   const browserExecutable = request.browserExecutable ?? null;
   const chromiumOptions = { gl: "swangle", ...(request.chromiumOptions ?? {}) };
-  const inputProps=request.mode==='stills'?{reviewLayout:true}:{};
-  const composition = await renderer.selectComposition({ serveUrl, id: request.composition, inputProps, browserExecutable, chromiumOptions, logLevel: "error" });
-  const out = path.resolve(request.outDir);
-  fs.mkdirSync(out, { recursive: true });
-  const common = { serveUrl, composition, inputProps, browserExecutable, chromiumOptions, logLevel: "error", scale: request.scale ?? 1 };
-  const result = { composition: composition.id, fps: composition.fps, width: composition.width, height: composition.height, durationInFrames: composition.durationInFrames, bundleCached: cached, ...(bundleMs ? { bundleMs } : {}) };
-  if (request.mode === "stills") {
-    const stills = [];
-    const layout = [];
-    for (const frame of request.frames) {
-      if (frame < 0 || frame >= composition.durationInFrames) throw new Error(`Frame ${frame} is outside ${composition.id} (0..${composition.durationInFrames - 1})`);
-      const output = path.join(out, `frame-${String(frame).padStart(6, "0")}.png`);
-      await renderer.renderStill({ ...common, frame, output, imageFormat: "png", inputProps:{reviewLayout:true},
-        onBrowserLog: (log) => {
-          if (!log.text?.startsWith('YUNUSPI_LAYOUT ')) return;
-          try { layout.push({...JSON.parse(log.text.slice(15)),deliveredFrame:frame}); } catch { /* an unknown project log cannot approve layout */ }
-        } });
-      stills.push({ frame, seconds: frame / composition.fps, path: output });
-      emit("VIDEO_RENDER_PROGRESS", { stage: "stills", done: stills.length, total: request.frames.length });
+  const inputProps=['stills', 'review'].includes(request.mode)?{reviewLayout:true}:{};
+  // One disposable browser owns composition discovery, critical stills and
+  // optional playback. No browser per still; all failure paths close it.
+  const puppeteerInstance = await renderer.openBrowser('chrome', { browserExecutable, chromiumOptions, logLevel: 'error',
+    forceDeviceScaleFactor: Math.max(request.scale ?? 1, request.stillScale ?? request.scale ?? 1) });
+  try {
+    const composition = await renderer.selectComposition({ serveUrl, id: request.composition, inputProps, browserExecutable, chromiumOptions, puppeteerInstance, logLevel: "error" });
+    const out = path.resolve(request.outDir);
+    fs.mkdirSync(out, { recursive: true });
+    const common = { serveUrl, composition, inputProps, browserExecutable, chromiumOptions, puppeteerInstance, logLevel: "error", scale: request.scale ?? 1 };
+    const result = { composition: composition.id, fps: composition.fps, width: composition.width, height: composition.height, durationInFrames: composition.durationInFrames, bundleCached: cached, browserLaunches: 1, ...(bundleMs ? { bundleMs } : {}) };
+    if (request.mode === "stills" || request.mode === 'review') {
+      const stills = [];
+      const layout = [];
+      for (const frame of request.frames) {
+        if (frame < 0 || frame >= composition.durationInFrames) throw new Error(`Frame ${frame} is outside ${composition.id} (0..${composition.durationInFrames - 1})`);
+        const output = path.join(out, `frame-${String(frame).padStart(6, "0")}.png`);
+        await renderer.renderStill({ ...common, scale: request.stillScale ?? request.scale ?? 1, frame, output, imageFormat: "png", inputProps:{reviewLayout:true},
+          onBrowserLog: (log) => {
+            if (!log.text?.startsWith('YUNUSPI_LAYOUT ')) return;
+            try { layout.push({...JSON.parse(log.text.slice(15)),deliveredFrame:frame}); } catch { /* an unknown project log cannot approve layout */ }
+          } });
+        stills.push({ frame, seconds: frame / composition.fps, path: output });
+        emit("VIDEO_RENDER_PROGRESS", { stage: "stills", done: stills.length, total: request.frames.length });
+      }
+      Object.assign(result, { stills, layout });
+      if (request.mode === 'stills') {
+        emit("VIDEO_RENDER_RESULT", result);
+        return;
+      }
     }
-    emit("VIDEO_RENDER_RESULT", { ...result, stills, layout });
-    return;
-  }
-  const output = path.join(out, request.losslessAudio ? 'segment.mkv' : request.mode === "final" ? "final.mp4" : "preview.mp4");
-  const frameRange = request.range ?? null;
-  const started = Date.now();
-  await renderer.renderMedia({
-    ...common,
-    codec: request.losslessAudio ? 'h264-mkv' : "h264",
-    outputLocation: output,
-    frameRange,
-    crf: request.crf ?? (request.mode === "final" || request.losslessAudio ? 18 : 28),
-    pixelFormat: "yuv420p",
-    audioCodec: request.losslessAudio ? 'pcm-16' : "aac",
-    ...(request.losslessAudio ? { enforceAudioTrack: true } : { audioBitrate: "192k" }),
-    concurrency: request.concurrency ?? null,
-    muted: request.muted === true,
-    onProgress: ({ progress, renderedFrames, encodedFrames }) => emit("VIDEO_RENDER_PROGRESS", { stage: "render", percent: Math.round(progress * 100), renderedFrames, encodedFrames }),
-  });
-  emit("VIDEO_RENDER_RESULT", { ...result, output, frameRange, renderMs: Date.now() - started });
+    const output = path.join(out, request.losslessAudio ? 'segment.mkv' : request.mode === "final" ? "final.mp4" : request.mode === 'review' ? 'review.mp4' : "preview.mp4");
+    const frameRange = request.range ?? null;
+    const started = Date.now();
+    await renderer.renderMedia({
+      ...common,
+      // Layout collection is a still-only diagnostic, not burned into playback.
+      inputProps: {},
+      codec: request.losslessAudio ? 'h264-mkv' : "h264",
+      outputLocation: output,
+      frameRange,
+      crf: request.crf ?? (request.mode === "final" || request.losslessAudio ? 18 : 28),
+      pixelFormat: "yuv420p",
+      audioCodec: request.losslessAudio ? 'pcm-16' : "aac",
+      ...(request.losslessAudio ? { enforceAudioTrack: true } : { audioBitrate: "192k" }),
+      concurrency: request.concurrency ?? null,
+      muted: request.muted === true,
+      onProgress: ({ progress, renderedFrames, encodedFrames }) => emit("VIDEO_RENDER_PROGRESS", { stage: "render", percent: Math.round(progress * 100), renderedFrames, encodedFrames }),
+    });
+    emit("VIDEO_RENDER_RESULT", { ...result, output, frameRange, renderMs: Date.now() - started });
+  } finally { await puppeteerInstance.close({ silent: true }); }
 }
 
 main().catch((error) => {
