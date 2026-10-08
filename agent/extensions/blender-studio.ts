@@ -3,7 +3,9 @@
  * blender-production and gaussian-splatting skills own the workflows and the
  * review discipline. */
 import { Type } from "typebox";
-import { EXPORT_FORMATS as BLENDER_FORMATS, IMAGE_FORMATS, RENDER_ENGINES, blenderExport, blenderInspect, blenderRender, blenderRun, blenderSetup } from "./lib/blender-studio.ts";
+import fs from 'node:fs/promises';
+import { EXPORT_FORMATS as BLENDER_FORMATS, IMAGE_FORMATS, INSPECTION_VIEWS, RENDER_ENGINES, blenderExport, blenderInspect, blenderRender, blenderRun, blenderSetup } from "./lib/blender-studio.ts";
+import { videoReviewRouting } from './lib/video-production-flow.ts';
 import { splatPreview, splatSetup, splatTrain } from "./lib/splat-studio.ts";
 import { choices } from "./lib/tool-schema.ts";
 
@@ -19,7 +21,20 @@ export default function blenderStudio(pi: any) {
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
         const progress = (text: string) => { try { update?.({ content: [{ type: "text", text }], details: { progress: text } }); } catch { /* progress is advisory */ } };
         const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress);
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        const content: any[] = [];
+        if (name === 'blender_render') {
+          const acceptsImages = ctx?.model?.input?.includes('image') === true;
+          const route = videoReviewRouting(result, acceptsImages);
+          if (route) result.visualReview = route;
+          else if (acceptsImages) {
+            const frames = [...new Set([result.contactSheet, result.files?.find((file: any) => /\.(png|jpe?g|webp)$/i.test(file.path))?.path].filter(Boolean))] as string[];
+            for (const frame of frames) try {
+              const mimeType = /\.png$/i.test(frame) ? 'image/png' : /\.webp$/i.test(frame) ? 'image/webp' : 'image/jpeg';
+              if ((await fs.stat(frame)).size <= 8 * 1024 * 1024) content.push({ type: 'image', data: (await fs.readFile(frame)).toString('base64'), mimeType });
+            } catch { /* Report keeps the exact paths for explicit review. */ }
+          }
+        }
+        return { content: [{ type: "text", text: JSON.stringify(result) }, ...content], details: result };
       },
     });
   }
@@ -39,8 +54,8 @@ export default function blenderStudio(pi: any) {
     Type.Object({ code: Type.Optional(Type.String({ maxLength: 200_000 })), script: Type.Optional(localPath), blend: Type.Optional(localPath), args: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 32 })), factoryStartup: Type.Optional(Type.Boolean()), timeoutSec: Type.Optional(Type.Integer({ minimum: 10, maximum: 3500 })) }),
     blenderRun, 3_600_000);
   register("blender_inspect",
-    "Inspect a .blend without rendering: Blender version, scenes, units, render settings, color management, world shader sockets, selected-scene light count, every object's scene membership, transform, dimensions, smooth mesh faces, modifiers, camera lens/clip and area-light size. Material details expose stored Principled/emission socket defaults, immediate links and texture color spaces/packing; linked values are not evaluated shader output. Includes layered action channels, interpolation, driver/NLA counts, optional evaluated world transforms and missing external files (packed textures remain valid). Read before changing or rendering; inspect actual pixels before approving appearance.",
-    Type.Object({ blend: localPath, scene: Type.Optional(Type.String({ maxLength: 120 })), frames: Type.Optional(Type.Array(Type.Integer({ minimum: -100000, maximum: 1000000 }), { minItems: 1, maxItems: 12, description: "Evaluate transforms at specific source frames without rendering; also reports layered-action channels, drivers and NLA" })) }),
+    "Inspect a .blend without rendering. Large scenes return a compact summary and complete inspectionReport. Page view:objects/materials/animation with offset/limit or exact names; reuse inspectionReport with the same blend to avoid restarting Blender (exact source bytes are checked). view:full requests all worker detail. Reports include Blender version, scenes, units, render settings, color management, world shader sockets, selected-scene light count, every object's scene membership, transform, dimensions, smooth mesh faces, modifiers, camera lens/clip and area-light size. Material details expose stored Principled/emission socket defaults, immediate links and texture color spaces/packing; linked values are not evaluated shader output. Includes layered action channels, interpolation, driver/NLA counts, optional evaluated world transforms and missing external files (packed textures remain valid). Read before changing or rendering; inspect actual pixels before approving appearance.",
+    Type.Object({ blend: localPath, view: Type.Optional(choices([...INSPECTION_VIEWS], 'auto keeps small scenes complete and summarizes large scenes; full is an explicit unbounded detail request')), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1000000 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 48 })), names: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 48 })), inspectionReport: Type.Optional(localPath), scene: Type.Optional(Type.String({ maxLength: 120 })), frames: Type.Optional(Type.Array(Type.Integer({ minimum: -100000, maximum: 1000000 }), { minItems: 1, maxItems: 12, description: "Evaluate transforms at specific source frames without rendering; also reports layered-action channels, drivers and NLA" })) }),
     blenderInspect, 400_000);
   register("blender_render",
     "Render a .blend headless with bounded overrides. still: one frame or up to 24 listed frames at full settings. preview: quarter resolution and 16 samples to judge framing and motion cheaply. animation: from/to (optional step) as a PNG sequence assembled into animation.mp4 (holds source-frame gaps at scene fps/fps_base; explicit fps retimes samples uniformly) plus a labelled contact sheet of up to 12 frames. Overrides (engine, width/height, scale, samples, denoise, transparent, format, camera, scene) apply to this render only; the .blend is never modified. Output lands in a fresh folder under outputDir (default .pi/blender). Open the frames with read: a finished render is not visual approval.",

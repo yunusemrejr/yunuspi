@@ -40,7 +40,7 @@ import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
 import { askTypedDecision } from "../../../lib/micro-intelligence/jev-decisions.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
-import { adaptiveExecutionEnabled, automaticChildThinking, classifyExecution, completionExecutionProfile, currentExecutionProfile, type ExecutionProfile } from "../../../lib/adaptive-execution.ts";
+import { adaptiveExecutionEnabled, automaticChildThinking, classifyExecution, completionExecutionProfile, creativeWorkDomains, currentExecutionProfile, type ExecutionProfile } from "../../../lib/adaptive-execution.ts";
 
 type Model = NonNullable<ExtensionContext["model"]>;
 type Launch = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: undefined, ctx: ExtensionContext) => Promise<any>;
@@ -251,6 +251,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	const ownSelection = new AsyncLocalStorage<boolean>();
 	let active: AbortController | undefined;
 	let assistance: AbortController | undefined;
+ let assistanceContext: ExtensionContext | undefined;
 	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 	const visited = new Set<string>();
 	const exhausted = new Set<string>();
@@ -272,7 +273,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// Persist emission time immediately: sendMessage queues until inference resumes.
 		pi.appendEntry("provider-recovery", { emittedAt: now(), check: attempts, elapsedMs: recoveryStart === undefined ? 0 : now() - recoveryStart, text });
 	};
-	const reset = () => { assistance?.abort(); assistance = undefined; active?.abort(); active = undefined; busy = false; if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined; generation++; usedAssist = false; groupUsed = false; attempts = 0; recoveryStart = undefined; restorePrimary = false; automaticRoute = undefined; endpointSelected = false; endpointAttempts = 0; endpointCatalog = undefined; visitedEndpoints.clear(); requestedOutput = undefined; paused = false; visited.clear(); exhausted.clear(); };
+	const reset = () => { assistanceContext = undefined; assistance?.abort(); assistance = undefined; active?.abort(); active = undefined; busy = false; if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined; generation++; usedAssist = false; groupUsed = false; attempts = 0; recoveryStart = undefined; restorePrimary = false; automaticRoute = undefined; endpointSelected = false; endpointAttempts = 0; endpointCatalog = undefined; visitedEndpoints.clear(); requestedOutput = undefined; paused = false; visited.clear(); exhausted.clear(); };
 	on("input", (event, ctx) => {
 		if (event.source === "extension") return;
 		const keepAutomatic = ctx.model && (automaticRoute && route(ctx.model) === automaticRoute || endpointSelected && primary && route(ctx.model) === route(primary));
@@ -691,6 +692,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 	};
  const startAssistance = (ctx: ExtensionContext) => {
   if (child || !freeAssistRequested() || usedAssist || groupUsed || busy || !usefulFreeAssistance(prompt, currentExecutionProfile(ctx))) return;
+  if (pi.getActiveTools && !pi.getActiveTools().includes('subagent')) return;
   const constraints = primary ? recoveryConstraints(ctx, prompt, primary) : undefined;
   if (constraints?.noDelegation || constraints?.fixedRoute || constraints?.sameModel) return;
   usedAssist = true;
@@ -701,12 +703,13 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
   void group(ctx, signal).then(content => {
    if (content && epoch === generation && !signal.aborted) {try{publishReviewerNote(reviewerSessionKey(ctx),"assist",automaticHelpersDigest(content),[],Date.now());}catch{}return pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});}
   }).catch(error => {if(epoch===generation && !signal.aborted) console.warn("[autonomous-recovery] free assistance failed:",error);})
-  .finally(()=>{controller.abort();if(assistance===controller)assistance=undefined;});
+  .finally(()=>{controller.abort();if(assistance===controller)assistance=undefined;if(epoch===generation && !groupUsed)usedAssist=false;});
  };
 	on("before_agent_start", async (event, ctx) => {
 		const startEpoch = generation, startSession = ctx.sessionManager.getSessionFile();
 		const ownsStart = () => startEpoch === generation && !ctx.signal?.aborted && ctx.sessionManager.getSessionFile() === startSession;
 		if (!ownsStart()) return;
+  assistanceContext = ctx;
 		primary ??= ctx.model;
 		prompt ||= event.prompt;
 		skillBrief = "";
@@ -782,10 +785,27 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
     // their role; the shared group budget still prevents stacking helpers.
     if (!['off','0'].includes(process.env.PI_SKILL_DISCOVERY ?? 'on')
       && routeSkills(prompt).length > 0
+      && creativeWorkDomains(prompt).length === 0
       && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(prompt)
       && planAssistance(prompt, false, currentExecutionProfile(ctx)).roles.length === 1) return;
 		startAssistance(ctx);
 	});
+ // The profile owner may count the error after this extension's tool_result
+ // hook. Observe its settled update, after native tool staging, instead of
+ // needing a third error. The same request, permission and one-group gates apply.
+ pi.events?.on?.('adaptive-pipeline-selection', (event: any) => {
+  const ctx = assistanceContext, epoch = generation;
+  if (!ctx || event?.sessionManager !== ctx.sessionManager || event.beforeStart) return;
+  const session = ctx.sessionManager.getSessionFile();
+  queueMicrotask(() => {
+   if (epoch !== generation || ctx !== assistanceContext || ctx.signal?.aborted || ctx.sessionManager.getSessionFile() !== session) return;
+   if ((currentExecutionProfile(ctx)?.failures ?? 0) < 2) return;
+   if (!['0', 'off'].includes((process.env.PI_SCOPE_COUNCIL ?? 'on').toLowerCase())) {
+    try { if (scopeRequest(prompt, ctx.sessionManager.getBranch?.())) return; } catch {}
+   }
+   startAssistance(ctx);
+  });
+ });
 	// A direct request can become genuinely difficult after execution starts.
 	// Re-use the one-group lifecycle; no new scheduler or repeated fan-out.
 	on('tool_result', (event, ctx) => {
@@ -796,7 +816,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		}
 		startAssistance(ctx);
 	});
-	on("agent_end", () => { assistance?.abort(); assistance = undefined; });
+	on("agent_end", () => { assistanceContext = undefined; assistance?.abort(); assistance = undefined; });
 	on("pi_provider_recovery", async (event, ctx) => {
 		if (!primary) return;
 		const errorText = event.message?.errorMessage ?? "";

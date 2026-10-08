@@ -26,11 +26,11 @@ const defaultReadOperations = {
     access: (path) => fsAccess(path, constants.R_OK),
     detectImageMimeType: detectSupportedImageMimeTypeFromFile,
 };
-function getNonVisionImageNote(model) {
+function getNonVisionImageNote(model, path) {
     if (!model || model.input.includes("image")) {
         return undefined;
     }
-    return "[Current model does not support images. The image will be omitted from this request.]";
+    return 'Current model does not support images. The image will be omitted from this request; appearance remains unreviewed. Use image_understand({action:"models"}) to discover available vision routes, then image_understand with an explicit permitted provider/model and paths:' + JSON.stringify([path]) + '. Catalog discovery is read-only; inference follows the selected route and cost permissions. Keep the main session model unchanged. Metadata and successful rendering cannot establish visual quality.';
 }
 export function createReadToolDefinition(cwd, options) {
     const autoResizeImages = options?.autoResizeImages ?? true;
@@ -67,7 +67,7 @@ export function createReadToolDefinition(cwd, options) {
                         const mimeType = ops.detectImageMimeType ? await ops.detectImageMimeType(absolutePath) : undefined;
                         let content;
                         let details;
-                        const nonVisionImageNote = getNonVisionImageNote(ctx?.model);
+                        const nonVisionImageNote = getNonVisionImageNote(ctx?.model, absolutePath);
                         if (mimeType) {
                             // Read image as binary.
                             const buffer = await ops.readFile(absolutePath);

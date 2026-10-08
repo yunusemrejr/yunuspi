@@ -57,8 +57,20 @@ const deliberationCue = /\b(?:architect(?:ure|ural)?|redesign|rearchitect|overha
 const criticalCue = /\b(?:authentication|authorization|credentials|security|billing|payment|production deploy|deploy.{0,32}production|data loss|delete.{0,20}(?:database|production)|schema migration)\b/i;
 const mechanicalCue = /\b(?:typo|spelling|whitespace|indentation|format(?:ting)?|prettier|eslint|gofmt|rustfmt|comment typo|one[- ]line)\b/i;
 const behavioralCue = /\b(?:refactor|redesign|logic|behavior|behaviour|contract|api change|breaking|regression|migration|performance|security|auth|production)\b/i;
-const explicitSimpleCue = /\b(?:single[- ]file|one file|one[- ]line|small|simple|just|only)\b/i;
-const openWorkCue = /\b(?:create|build|design|produce|compose|make)\b[^.!?\n]{0,80}\b(?:website|webpage|landing page|music|soundtrack|animation|video|game)\b|\b(?:improve|polish|refine)\b[^.!?\n]{0,50}\b(?:design|UI|interface|animation|motion|character|experience|layout|architecture|workflow|harness|system)\b|\b(?:fix|change)\b[^.!?\n]{0,60}\b(?:clunky|distracting|annoying|unprofessional|looks? (?:bad|cheap|wrong))\b/i;
+const explicitSimpleCue = /\b(?:single[- ]file|one file|one[- ]line|small|simple)\b/i;
+const openWorkCue = /\b(?:create|build|design|produce|compose|make|remake)\b[^.!?\n]{0,80}\b(?:website|webpage|landing page|music|soundtrack|animation|video|game)\b|\b(?:improve|polish|refine)\b[^.!?\n]{0,50}\b(?:design|UI|interface|animation|motion|character|experience|layout|architecture|workflow|harness|system)\b|\b(?:fix|change)\b[^.!?\n]{0,60}\b(?:clunky|distracting|annoying|unprofessional|looks? (?:bad|cheap|wrong))\b/i;
+
+/** Concrete creative disciplines that can be investigated independently. A
+ * video noun alone is not a reason to fan out, nor is a quoted example. */
+export function creativeWorkDomains(task: string): Array<'scene' | 'audio' | 'motion'> {
+  const text = prose(task);
+  if (!openWorkCue.test(text) || !/\b(?:video|film|animation)\b/i.test(text)) return [];
+  const domains: Array<'scene' | 'audio' | 'motion'> = [];
+  if (/\b(?:blender|3d|geometry|materials|model(?:ling|ing))\b/i.test(text)) domains.push('scene');
+  if (/\b(?:music|soundtrack|narration|voiceover|audio)\b/i.test(text)) domains.push('audio');
+  if (/\b(?:animate|animation|motion|movements?|moving|transitions|camera path|looping)\b/i.test(text)) domains.push('motion');
+  return domains;
+}
 
 export function classifyExecution(input: ExecutionInput): ExecutionProfile {
   const text = prose(input?.task);
@@ -68,10 +80,12 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
   const uncertainty = typeof input?.uncertainty === 'number' && Number.isFinite(input.uncertainty) ? Math.max(0, Math.min(1, input.uncertainty)) : 0;
   const independent = count(input?.independentWorkItems, 8);
   const references = new Set(text.match(/\b[\w/-]+\.(?:ts|js|py|go|rs|tsx|java|php|cpp|c|sh)\b/g) ?? []).size;
-  const broad = broadCue.test(text) || references >= 2 || files >= 5 || independent >= 2;
+  const broad = broadCue.test(text) || references >= 2 || files >= 5 || independent >= 2 || creativeWorkDomains(text).length >= 2;
   const alternatives = alternativesCue.test(text);
   const diagnostic = diagnosticCue.test(text);
-  const deliberation = deliberationCue.test(text) || openWorkCue.test(text) && !explicitSimpleCue.test(text);
+  // Incidental "just/only", especially generated acceptance prose such as
+  // "not only asserted", cannot turn creative production into a typo task.
+  const deliberation = deliberationCue.test(text) || openWorkCue.test(text);
   const critical = input?.risk === 'critical' || input?.risk === 'high' || criticalCue.test(text);
   const stuck = failures >= 2 || repeats >= 2;
   const control: ExecutionControl = { level: input?.control?.level ?? 'standard', ...(input?.control?.burst ? { burst: input.control.burst } : {}) };

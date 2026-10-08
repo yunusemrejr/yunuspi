@@ -4190,31 +4190,31 @@
       {
         "name": "blender_export",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 50,
+        "line": 65,
         "kind": "factory"
       },
       {
         "name": "blender_inspect",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 41,
+        "line": 56,
         "kind": "factory"
       },
       {
         "name": "blender_render",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 45,
+        "line": 60,
         "kind": "factory"
       },
       {
         "name": "blender_run",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 37,
+        "line": 52,
         "kind": "factory"
       },
       {
         "name": "blender_setup",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 33,
+        "line": 48,
         "kind": "factory"
       },
       {
@@ -4769,19 +4769,19 @@
       {
         "name": "splat_preview",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 64,
+        "line": 79,
         "kind": "factory"
       },
       {
         "name": "splat_setup",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 56,
+        "line": 71,
         "kind": "factory"
       },
       {
         "name": "splat_train",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 60,
+        "line": 75,
         "kind": "factory"
       },
       {
@@ -5476,7 +5476,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          15
+          17
         ],
         "knownNames": [
           "blender_export",

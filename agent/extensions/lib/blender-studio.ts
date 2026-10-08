@@ -4,7 +4,7 @@
  * Blender process runs guarded (harness read-only), niced, memory-watched and
  * under a deadline through the shared studio process runner. */
 import fs from "node:fs/promises";
-import { createWriteStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
@@ -189,17 +189,79 @@ export async function blenderSetup(params: any, _cwd: string, signal?: AbortSign
 
 const DEADLINE = { inspect: 300_000, render: 3_500_000, export: 900_000, dataset: 3_500_000, run: 3_500_000 };
 
+export const INSPECTION_VIEWS = ['auto', 'summary', 'objects', 'materials', 'animation', 'full'] as const;
+const INSPECTION_CHARS = 16_000;
+async function fileDigest(file: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const hash = createHash('sha256');
+  for await (const bytes of createReadStream(file)) { signal?.throwIfAborted(); hash.update(bytes); }
+  return hash.digest('hex');
+}
+
+/** Keep the complete worker evidence on disk; default model context is bounded.
+ * Pagination is explicit about missing coverage and never implies approval. */
+export function blenderInspectionView(scene: any, params: any = {}) {
+  const view = params.view ?? 'auto';
+  if (!(INSPECTION_VIEWS as readonly string[]).includes(view)) throw Error('Unknown inspection view');
+  const offset = integer(params.offset, 0, 0, 1_000_000, 'offset');
+  const limit = integer(params.limit, 12, 1, 48, 'limit');
+  if (params.names !== undefined && (!Array.isArray(params.names) || params.names.length > 48 || params.names.some((v: any) => typeof v !== 'string' || !v || v.length > 120))) throw Error('names accepts up to 48 exact object/material names');
+  if (view === 'full' || view === 'auto' && JSON.stringify(scene).length <= INSPECTION_CHARS) return scene;
+  const summary: any = { blender: scene.blender, file: scene.file, scene: scene.scene, scenes: scene.scenes?.slice(0, 32), units: scene.units, render: scene.render, colorManagement: scene.colorManagement,
+    counts: scene.counts ?? {}, warnings: scene.warnings, world: scene.world ? { name: scene.world.name, use_nodes: scene.world.use_nodes, shaderNodes: scene.world.shader?.nodes } : null,
+    cameras: scene.cameras?.slice(0, 24), sceneLights: scene.sceneLights?.slice(0, 24), missingFiles: scene.missingFiles?.slice(0, 12).map((file: string) => file.length > 512 ? file.slice(0, 511) + '…' : file),
+    coverage: { complete: false, objects: scene.objects?.length ?? 0, materialDetails: scene.materialDetails?.length ?? 0,
+      materialDetailsTruncated: scene.materialDetailsTruncated === true, evaluatedFrames: scene.animationSamples?.length ?? 0,
+      missingFiles: scene.missingFiles?.length ?? 0 }, view: view === 'auto' ? 'summary' : view,
+    next: 'Use view:objects/materials/animation with offset/limit or exact names; pass inspectionReport to reuse this report without starting Blender. Full evidence is on disk. Inspect rendered pixels and playback before visual/motion approval.' };
+  const key = view === 'materials' ? 'materialDetails' : 'objects';
+  const source: any[] = scene[key] ?? [];
+  const rows = source.map((value, index) => ({ value, index })).filter(row => (!params.names || params.names.includes(row.value.name)) && (view !== 'animation' || row.value.animation || row.value.dataAnimation));
+  const compact = (row: any) => ({ name: row.name, type: row.type, inScene: row.inScene, dimensions: row.dimensions,
+    animation: row.animation ? { action: row.animation.action, curves: row.animation.curves, keys: row.animation.keys, channels: row.animation.channels?.length, drivers: row.animation.drivers, nlaTracks: row.animation.nlaTracks } : undefined });
+  if (view === 'summary' || view === 'auto') {
+    summary.objects = source.slice(0, limit).map(compact);
+    summary.coverage.omittedObjects = Math.max(0, source.length - summary.objects.length);
+    return summary;
+  }
+  const page: any[] = [];
+  for (const row of rows.slice(offset, offset + limit)) {
+    const value = view === 'animation' ? { name: row.value.name, animation: row.value.animation, dataAnimation: row.value.dataAnimation } : row.value;
+    const entry = JSON.stringify(value).length > 8_000 ? { ...compact(row.value), detailOmitted: true, jsonPointer: `/data/${key}/${row.index}` } : value;
+    if (page.length && JSON.stringify({ ...summary, rows: [...page, entry] }).length > INSPECTION_CHARS) break;
+    page.push(entry);
+  }
+  return { ...summary, rows: page, page: { offset, returned: page.length, total: rows.length, nextOffset: offset + page.length < rows.length ? offset + page.length : null } };
+}
+
 export async function blenderInspect(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const blend = await readablePath(params.blend, cwd);
+  blenderInspectionView({}, params); // Validate paging before launching Blender.
   const frames = params.frames === undefined ? undefined : frameList({ frames: params.frames }, 1);
   if (frames && frames.length > 12) throw Error("Inspect up to 12 evaluated animation frames per call");
+  const blendSha256 = await fileDigest(blend, signal);
+  if (params.inspectionReport) {
+    if (params.frames !== undefined || params.scene !== undefined) throw Error('Cached inspection cannot change scene or evaluated frames; inspect the blend again');
+    const report = await readablePath(params.inspectionReport, cwd);
+    if ((await fs.stat(report)).size > 40 * 1024 * 1024) throw Error('Inspection report exceeds the byte budget');
+    const saved = JSON.parse(await fs.readFile(report, 'utf8'));
+    if (saved.version !== 1 || saved.blend !== blend || saved.blendSha256 !== blendSha256 || !saved.data) throw Error('Inspection report does not match the current blend bytes; inspect the blend again');
+    return { ...blenderInspectionView(saved.data, params), inspectionReport: report, blendSha256, reused: true };
+  }
   const result = await blenderWorker({ op: "inspect", frames, scene: params.scene }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.inspect, progress });
   const { ok: _ok, op: _op, ...scene } = result;
   const warnings: string[] = [];
   if (!scene.render?.camera) warnings.push("No active camera: set scene.camera before rendering");
   if (scene.missingFiles?.length) warnings.push(`${scene.missingFiles.length} linked file(s) are missing; textures or libraries will render pink or empty`);
   if (!(scene.sceneLights ?? scene.lights)?.length && scene.render?.engine !== "BLENDER_WORKBENCH") warnings.push("No visible lights in the selected scene: inspect world shader strength and emissive surfaces before assuming EEVEE/Cycles illumination");
-  return { ...scene, warnings };
+  const data = { ...scene, warnings };
+  const selected = blenderInspectionView(data, params);
+  if (selected === data) return data;
+  if (await fileDigest(blend, signal) !== blendSha256) throw Error('Blend changed during inspection; inspect the current revision again');
+  const folder = await freshOutputDir(undefined, cwd, 'inspect');
+  const inspectionReport = path.join(folder, 'inspection.json');
+  await fs.writeFile(inspectionReport, JSON.stringify({ version: 1, blend, blendSha256, data }, null, 2) + '\n', { mode: 0o600 });
+  return { ...selected, inspectionReport, blendSha256, reused: false };
 }
 
 export function frameList(params: any, fallback: number): number[] {

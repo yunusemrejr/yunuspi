@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {EventEmitter} from 'node:events';
 
 const root=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsSync(path.join(p,'extensions/pi-subagents')));
@@ -35,13 +36,57 @@ function fixture({judge=async()=>({ok:false,skipped:'unavailable'}),launch=async
  const hooks=new Map(),calls=[],messages=[],abort=new AbortController();
  let session='first';
  const ctx={cwd:dir,model:primary,signal:abort.signal,scopedModels:[],modelRegistry:{getAvailable:()=>models},sessionManager:{getSessionFile:()=>session,getBranch:()=>[]},ui:{setStatus(){}}};
- const pi={on:(n,fn)=>hooks.set(n,[...(hooks.get(n)??[]),fn]),getActiveTools:()=>['subagent'],appendEntry(){},
+ const events=new EventEmitter();
+ const pi={events,on:(n,fn)=>hooks.set(n,[...(hooks.get(n)??[]),fn]),getActiveTools:()=>['subagent'],appendEntry(){},
   setModel:()=>{throw Error('Helper changed the main model');},setThinkingLevel:()=>{throw Error('Helper changed thinking');},
   sendMessage:(message,options)=>{messages.push({message,options});return send?.(message,options);}};
  registerAutonomousRecovery(pi,async(...args)=>{calls.push(args);return launch(...args);},{judge});
  const emit=async(n,event={})=>{for(const fn of hooks.get(n)??[])await fn(event,ctx);};
- return {ctx,emit,calls,messages,abort,switch:()=>{session='second';},input:text=>emit('input',{source:'user',text})};
+ return {ctx,emit,events,calls,messages,abort,switch:()=>{session='second';},input:text=>emit('input',{source:'user',text})};
 }
+
+test('settled adaptive failures admit one helper regardless of tool_result registration order',async()=>{
+ const fx=fixture(); const task='Fix the typo in one file';
+ const c=createAdaptiveExecutionController();c.begin({task});
+ const dispose=registerAdaptiveExecution(fx.ctx,()=>c.profile());
+ await fx.input(task);await fx.emit('before_agent_start',{prompt:task});
+ for(let i=0;i<2;i++) {
+  await fx.emit('tool_result',{isError:true}); // Recovery runs before profile owner.
+  c.observe({ok:false,failureKey:'fixture'});
+  fx.events.emit('adaptive-pipeline-selection',{sessionManager:fx.ctx.sessionManager,beforeStart:false});await tick();
+ }
+ assert.equal(fx.calls.length,1);
+ fx.events.emit('adaptive-pipeline-selection',{sessionManager:fx.ctx.sessionManager,beforeStart:false});await tick();
+ assert.equal(fx.calls.length,1,'same admitted budget never fans out twice');
+ dispose();await fx.emit('session_shutdown');
+});
+
+test('unavailable helper capacity does not consume the later failure-driven opportunity',async()=>{
+ const models=[];const fx=fixture({models});const task='Investigate a parser failure';
+ await fx.input(task);await fx.emit('before_agent_start',{prompt:task});await tick();assert.equal(fx.calls.length,0);
+ models.push(model);
+ const dispose=registerAdaptiveExecution(fx.ctx,()=>classifyExecution({task,failures:2}));
+ await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,1);
+ dispose();await fx.emit('session_shutdown');
+});
+
+test('scene, audio and motion advisers run concurrently with the existing read-only cost and tool ceilings',async t=>{
+ const models=['scene','audio','motion'].map(id=>({...model,id:`example/${id}-adviser`}));
+ evidence.publishFreeEvidence(models.map(row=>({id:row.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}})),evidence.FREE_CATALOG_URL);
+ t.after(()=>evidence.publishFreeEvidence([{id:model.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL));
+ const releases=[];
+ const fx=fixture({models,primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>releases.push(resolve))});
+ const task='Remake a music video in Blender, compose music and animate moving clouds. Check the result, not only asserted.';
+ await fx.input(task);await fx.emit('before_agent_start',{prompt:task});await tick();
+ assert.equal(fx.calls.length,3);assert.equal(releases.length,3,'all roles start before any member completes');
+ assert.equal(new Set(fx.calls.map(call=>call[1].model)).size,3);
+ for(const [,args] of fx.calls) {
+  assert.equal(args.context,'fresh');assert.ok(!args.capabilityCeiling.allowedTools.includes('write'));assert.ok(!args.capabilityCeiling.allowedTools.includes('bash'));
+  assert.ok(args.usageBudget.costUsd.hard<=.01);assert.equal(args.toolBudget.hard,AUTOMATIC_HELPER_LIMITS.tools);
+ }
+ releases.forEach(resolve=>resolve(result('Advisory source finding; pixel review remains pending.')));await tick();
+ await fx.emit('session_shutdown');
+});
 
 test('a delayed preparation cannot launch helpers for a newer request, session, or aborted turn',async()=>{
  for(const transition of ['input','session','abort']) {

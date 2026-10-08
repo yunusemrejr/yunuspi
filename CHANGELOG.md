@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.1 — 2026-10-08
+
+**Creative production earns useful assistance.** Incidental “just/only” wording and generated acceptance prose no longer demote a video remake into mechanical work. Creation verbs pass the helper admission gate, and independent Blender, music and motion investigations receive concrete proof tasks under existing read-only, route, cost and tool ceilings. Settled adaptive updates admit failure-driven assistance independently of hook order. Missing capacity leaves the later opportunity available.
+
+**Blender inspection keeps model context bounded.** Large scenes return a compact summary and a complete local report, with explicit object, material and animation pages. Report reuse checks exact blend bytes and avoids another Blender launch. Small scenes keep their full details; explicit full inspection remains available. Coverage and omitted detail are reported. Native previews supply pixels to image-capable models and exact vision-review calls to text-only models; image reads also explain how to obtain permitted pixel review.
+
+**Production proves a short slice first.** Discovery and optional guides put a hero frame, short motion window and listening proof before long renders. Standalone Blender/FFmpeg work does not require a dummy Remotion project, and repeating films can reuse a verified loop or approved ambient plate. Missing audio authentication fails before submission or receipt creation, retaining genuine uncertain-submission protection. Technical checks still do not certify artistic quality.
+
 ## 0.35.0 — 2026-10-08
 
 **Video production has concrete next steps.** `video_project plan` derives promo, explainer, walkthrough, longform and loop decisions from the existing project, its blockers and the requested phase. It selects an early proof scene and returns exact tool parameters for dependencies, timing, asset checks and delivery. Optional storyboard beats retain a claim and its visual action; native text-only explanations receive advisory findings while custom scenes remain available.
