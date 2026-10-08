@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {safetyState,rateLimitWait} from '../scripts/release-tag.mjs';
+import {safetyState,rateLimitWait,fullSafetyPassed} from '../scripts/release-tag.mjs';
 
 const sha='a'.repeat(40);
 const run=(over)=>({id:1,head_sha:sha,head_branch:'main',event:'push',status:'completed',conclusion:'success',...over});
@@ -18,6 +18,12 @@ test('runs for other commits, branches or events never count as evidence',()=>{
   assert.equal(safetyState([run({head_sha:'b'.repeat(40)})],sha),'missing');
   assert.equal(safetyState([run({head_branch:'v1.0.0'})],sha),'missing');
   assert.equal(safetyState([run({event:'pull_request'})],sha),'missing');
+});
+
+test('manual and recurring main checks are reusable, while skipped full checks never authorize a tag',()=>{
+  for(const event of ['workflow_dispatch','schedule']) assert.equal(safetyState([run({event})],sha),'passed');
+  assert.equal(fullSafetyPassed([{name:'safety',status:'completed',conclusion:'success'}]),true);
+  for(const jobs of [undefined,[],[{name:'minimum-node',status:'completed',conclusion:'success'}],[{name:'safety',status:'completed',conclusion:'skipped'}],[{name:'safety',status:'in_progress',conclusion:null}]])assert.equal(fullSafetyPassed(jobs),false);
 });
 
 test('the newest run for the commit decides, so a rerun can recover a failure',()=>{

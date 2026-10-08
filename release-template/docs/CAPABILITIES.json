@@ -9052,6 +9052,10 @@
         "path": "docs/TERMINAL-INTERFACE.md"
       },
       {
+        "name": "TESTING.md",
+        "path": "docs/TESTING.md"
+      },
+      {
         "name": "UI-ENGINEERING.md",
         "path": "docs/UI-ENGINEERING.md"
       },

@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MAIN_TEST_EVENTS, fullSafetyPassed } from './release-tag.mjs';
 
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const commitSha = /^[a-f0-9]{40}$/;
@@ -12,7 +13,7 @@ const githubRequest = (token, request) => (url, options = {}) => request(url, {
   headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
 });
 
-/** Reuse only this repository's completed main push, never a PR or tag run.
+/** Reuse only this repository's completed full main check, never a PR or tag run.
  * A tag pushed before main finishes must be rerun after the safety check passes. */
 export async function verifiedMainRun(repository, sha, token, request = fetch) {
   if (!repositoryName.test(repository ?? '') || !commitSha.test(sha ?? '') || !token) throw Error('Expected a repository, exact commit SHA and GITHUB_TOKEN');
@@ -24,16 +25,16 @@ export async function verifiedMainRun(repository, sha, token, request = fetch) {
   };
   const workflow = await read(`${base}/actions/workflows/public-safety.yml`);
   if (workflow.path !== workflowPath || !Number.isSafeInteger(workflow.id) || workflow.id <= 0) throw Error('Unexpected safety workflow identity');
-  const query = new URLSearchParams({ branch: 'main', event: 'push', head_sha: sha, per_page: '100' });
+  const query = new URLSearchParams({ branch: 'main', head_sha: sha, per_page: '100' });
   const runs = await read(`${base}/actions/workflows/${workflow.id}/runs?${query}`);
   if (!Array.isArray(runs.workflow_runs) || !Number.isSafeInteger(runs.total_count) || runs.total_count > 100) throw Error('Missing or ambiguous main safety evidence');
-  const run = runs.workflow_runs.filter(row => row?.head_sha === sha && row.head_branch === 'main' && row.event === 'push'
+  const run = runs.workflow_runs.filter(row => row?.head_sha === sha && row.head_branch === 'main' && MAIN_TEST_EVENTS.includes(row.event)
     && row.workflow_id === workflow.id && row.path?.split('@')[0] === workflowPath
     && row.repository?.full_name === repository && row.head_repository?.full_name === repository
     && Number.isSafeInteger(row.id) && row.id > 0).sort((a, b) => b.id - a.id)[0];
   if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw Error('The exact release commit has no successful main safety run; wait for main and rerun this release job');
   const jobs = await read(`${base}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-  if (!Array.isArray(jobs.jobs) || !jobs.jobs.some(job => job.name === 'safety' && job.status === 'completed' && job.conclusion === 'success')) throw Error('The main run did not complete its required safety job');
+  if (!fullSafetyPassed(jobs.jobs)) throw Error('The main run did not complete its required safety job');
   return { id: run.id, url: `https://github.com/${repository}/actions/runs/${run.id}` };
 }
 

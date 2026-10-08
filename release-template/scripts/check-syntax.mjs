@@ -3,6 +3,7 @@
  * the runtime cannot load never reaches main. Per-file tests import libraries
  * and can pass while an entry file fails to parse at load.
  * Usage: node scripts/check-syntax.mjs [files...]   (default: every tracked source file)
+ *        node scripts/check-syntax.mjs --changed BASE (changed sources; unknown history checks all)
  *        node scripts/check-syntax.mjs --pre-push    (files changed by the pushed commits; refs on stdin) */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,14 +28,21 @@ function changedByPush(stdin) {
 }
 
 // Explicit paths are checked as given (relative to the repository or absolute); enumerated ones are source files only.
+const tracked = () => git('ls-files', '-z').split('\0').filter(file => SOURCE.test(file));
 let files = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
-if (process.argv.includes('--pre-push')) files = changedByPush(fs.readFileSync(0, 'utf8')).filter(file => SOURCE.test(file));
-else if (!files.length) files = git('ls-files').split('\n').filter(file => SOURCE.test(file));
+if (process.argv.includes('--changed')) {
+  const base = process.argv[process.argv.indexOf('--changed') + 1];
+  try {
+    if (!/^[a-f0-9]{40}$/.test(base ?? '') || ZERO.test(base)) throw Error('Unknown baseline');
+    files = git('diff', '--name-only', '-z', base, 'HEAD', '--').split('\0').filter(file => SOURCE.test(file));
+  } catch { files = tracked(); }
+} else if (process.argv.includes('--pre-push')) files = changedByPush(fs.readFileSync(0, 'utf8')).filter(file => SOURCE.test(file));
+else if (!files.length) files = tracked();
 files = files.filter(file => /\.(?:ts|mts|js|mjs)$/.test(file) && fs.existsSync(path.resolve(root, file)));
 
 let createJiti;
 try { ({ createJiti } = createRequire(path.join(root, 'core/coding-agent/package.json'))('jiti')); }
-catch { console.log('check-syntax: jiti is not installed (run npm install); skipped.'); process.exit(0); }
+catch { console.error('check-syntax: jiti is not installed; run npm ci before checking syntax.'); process.exit(1); }
 const jiti = createJiti(root);
 const failures = [];
 for (const file of files) {

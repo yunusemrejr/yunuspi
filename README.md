@@ -118,6 +118,10 @@ The public repository contains reusable code and clean configuration examples. A
 
 ## Verification and license
 
-`npm test` runs the public regression suite, including installation, discovery, routing, safety, lifecycle and context behavior. Installed structural checks and live provider availability are separate checks; passing local tests does not establish every provider's behavior or model output quality.
+Use `npm run test:quick` for routine development checks; add specific test paths after `--` to cover the behavior being edited. `npm test` runs every public regression test. Both build the owned core first, cap default concurrency at four, and use disposable temp roots to avoid slow sandbox setup in a busy system temp directory.
+
+CI runs the short catalogue plus new/changed tests on ordinary updates. Build, dependency, safety, test infrastructure and native integration changes require the full suite. The complete suite also runs weekly and through **Run workflow**. Release tags require a successful full check of their exact main commit; a quick pass cannot authorize a release. [Testing details](docs/TESTING.md)
+
+Installed structural checks and live provider availability are separate checks; passing local tests does not establish every provider's behavior or model output quality.
 
 Custom code is MIT licensed. Vendored components retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). External models and applications have separate terms.
