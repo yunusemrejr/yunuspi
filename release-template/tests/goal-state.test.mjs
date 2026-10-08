@@ -33,6 +33,10 @@ test('argument grammar separates subcommands from goal text',()=>{
  assert.deepEqual(gs.parseGoalArgs('clear the cache directory and rebuild'),{kind:'set',text:'clear the cache directory and rebuild'},'a goal that merely starts with a subcommand word stays a goal');
 });
 
+test('multiline criteria keep their authored boundaries',()=>{
+ assert.deepEqual(gs.parseGoalArgs('criteria tests pass\ndocs updated'),{kind:'criteria',items:['tests pass','docs updated']});
+});
+
 test('evidence must describe an observation; vague completion claims are refused',()=>{
  const goal=gs.createGoal('Fix the login redirect and add a test');
  assert.match(gs.recordEvidence(goal,'C1','met','done').error,/observed/);
@@ -80,6 +84,16 @@ test('completion is refused once for open criteria and unverified writes, then b
  assert.equal(gs.goalCompletionGate(done,{unverifiedWrites:0,refused:new Set()}).block,false);
  const stale=gs.goalCompletionGate(done,{unverifiedWrites:3,refused:new Set()});
  assert.equal(stale.block,true);assert.match(stale.reason,/3 file change/);
+});
+
+test('a completion refusal for an earlier edit cannot waive a new edit with the same debt count', () => {
+ const goal = settleAll(gs.createGoal('Ship the exporter'));
+ const refused = new Set();
+ const first = gs.goalCompletionGate(goal, { unverifiedWrites: 1, writeRevision: 1, refused });
+ refused.add(first.key);
+ const next = gs.goalCompletionGate(goal, { unverifiedWrites: 1, writeRevision: 2, refused });
+ assert.equal(next.block, true);
+ assert.notEqual(next.key, first.key);
 });
 
 test('the stop gate continues only a clean stop, and never loops without new evidence',()=>{
@@ -165,6 +179,46 @@ function harness({failSend=false}={}){
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
  return {commands,entries,sent,sentOptions,notes,emit,call,ctx};
 }
+
+test('an earlier background verification cannot clear later edits',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ await h.emit('tool_call',{toolName:'bg_run',toolCallId:'check',input:{command:'npm test'}});
+ await h.emit('tool_result',{toolName:'bg_run',toolCallId:'check',input:{command:'npm test'},details:{taskId:'check-1'}});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'b.ts'}});
+ await h.emit('message_end',{message:{role:'custom',customType:'background-task-notification',details:{taskId:'check-1',status:'completed',exitCode:0,command:'npm test'}}});
+ assert.match(await h.call({action:'complete'}),/file change/);
+});
+
+test('restoring a goal preserves unverified edits',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ await h.emit('session_start');
+ assert.match(await h.call({action:'complete'}),/file change/);
+});
+
+test('planning a check does not verify a goal',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ await h.emit('tool_result',{toolName:'project_tests',input:{action:'plan'},details:{projectTests:{status:'planned'}}});
+ assert.match(await h.call({action:'complete'}),/file change/);
+});
+
+test('one settled run can issue only one goal continuation',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});
+ await h.emit('agent_settled');
+ await h.emit('agent_settled');
+ assert.equal(h.sent.length,2);
+ assert.equal(h.entries.at(-1).data.nudges,1);
+});
 
 test('/goal drives a session: kickoff, evidence-gated completion, and a bounded continuation',async()=>{
  const h=harness();

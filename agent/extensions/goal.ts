@@ -23,12 +23,19 @@ const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
 const WRITE_TOOLS = new Set(["edit", "write", "bulk_edit"]);
 /** Tools whose successful run is itself a verification of built output. */
-const VERIFY_TOOLS = new Set(["project_tests", "render_see", "browser_session", "video_qa", "video_render", "visual_diff", "desktop_session", "quality_review"]);
+const VERIFY_TOOLS = new Set(["render_see", "video_qa", "video_render", "visual_diff"]);
 
 export default function goalExtension(pi: ExtensionAPI): void {
 	if (process.env.PI_GOAL === "0") return;
 	let goal: GoalState | undefined;
-	let unverifiedWrites = 0;
+	type CheckStart = { goalId: string; revision: number; command: string; tool: string };
+	const checkStarts = new Map<string, CheckStart>();
+	const backgroundChecks = new Map<string, CheckStart>();
+	const debt = () => Math.max(0, (goal?.verification?.revision ?? 0) - (goal?.verification?.checked ?? 0));
+	const remember = (map: Map<string, CheckStart>, key: string, value: CheckStart) => {
+		map.set(key, value);
+		while (map.size > 64) map.delete(map.keys().next().value!);
+	};
 	const refused = new Set<string>();
 	let lastStop: string | undefined;
 
@@ -47,7 +54,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 	const restore = (ctx: ExtensionContext) => {
 		try { goal = restoreGoal(ctx.sessionManager.getBranch()); } catch { goal = undefined; }
-		unverifiedWrites = 0;
+		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 		refused.clear();
 		show(ctx);
 	};
@@ -58,7 +65,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		if (event.source !== 'interactive' && event.source !== 'rpc') return;
 		const next = reopenRejectedGoal(goal, event.originalText ?? event.text);
 		if (!next) return;
-		unverifiedWrites = 0; refused.clear(); persist(next, ctx);
+		checkStarts.clear(); backgroundChecks.clear(); refused.clear(); persist({ ...next, verification: { revision: 0, checked: 0 } }, ctx);
 		ctx.ui?.notify?.('Goal reopened for your correction; prior completion evidence needs verification on the revised result.', 'info');
 	});
 
@@ -72,14 +79,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// A resumed session with a live goal must be able to record evidence even
 	// though tool discovery starts from the small default tool set.
 	pi.on("before_agent_start", (_event, ctx) => {
+		lastStop = undefined;
 		try {
 			pi.events?.emit('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['goal'], persistent: goalIsLive(goal), beforeStart: true });
 		} catch { /* discovery still stages the tool from the kickoff marker */ }
 	});
 
-	pi.on("message_end", (event) => {
+	pi.on("message_end", (event, ctx) => {
 		if (event.message.role === "assistant") lastStop = event.message.stopReason;
-		else if ((event.message as any).customType === "background-task-notification") settleBackgroundCheck((event.message as any).details);
+		else if ((event.message as any).customType === "background-task-notification") settleBackgroundCheck((event.message as any).details, ctx);
 	});
 
 	/**
@@ -88,25 +96,55 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	 * background suite then still left the goal free to close. The terminal receipt
 	 * carries the original command and the real exit state, so verify there instead.
 	 */
-	const settleBackgroundCheck = (details: any) => {
-		if (!goalIsLive(goal) || !details || details.status !== "completed" || details.signal) return;
-		const exit = details.exitCode;
-		if (typeof exit === "number" && exit !== 0) return;
-		if (isTestLikeCommand(String(details.command ?? ""))) unverifiedWrites = 0;
+	const cover = (start: CheckStart | undefined, ctx: ExtensionContext) => {
+		if (!goalIsLive(goal) || !start || start.goalId !== goal.id) return;
+		const revision = goal.verification?.revision ?? 0;
+		const checked = Math.max(goal.verification?.checked ?? 0, Math.min(revision, start.revision));
+		if (checked !== (goal.verification?.checked ?? 0)) persist({ ...goal, verification: { revision, checked } }, ctx);
+	};
+	const settleBackgroundCheck = (details: any, ctx: ExtensionContext) => {
+		if (!goalIsLive(goal) || !details) return;
+		const key = String(details.id ?? details.taskId ?? `command:${details.command ?? ""}`);
+		const start = backgroundChecks.get(key) ?? backgroundChecks.get(`command:${details.command ?? ""}`);
+		if (["completed", "failed", "killed"].includes(details.status)) {
+			backgroundChecks.delete(key);
+			backgroundChecks.delete(`command:${details.command ?? ""}`);
+		}
+		if (details.status === "completed" && details.exitCode === 0 && !details.signal && isTestLikeCommand(String(details.command ?? ""))) cover(start, ctx);
 	};
 
-	pi.on("tool_result", (event: { toolName?: string; input?: Record<string, unknown>; isError?: boolean }) => {
-		if (!goalIsLive(goal) || event.isError) return;
+	pi.on("tool_call", (event) => {
+		if (!goalIsLive(goal)) return;
+		remember(checkStarts, event.toolCallId, { goalId: goal.id, revision: goal.verification?.revision ?? 0,
+			command: String(event.input?.command ?? ""), tool: event.toolName });
+	});
+	pi.on("tool_result", (event: { toolName?: string; toolCallId?: string; input?: Record<string, unknown>; details?: any; isError?: boolean }, ctx) => {
+		const start = event.toolCallId ? checkStarts.get(event.toolCallId) : undefined;
+		if (event.toolCallId) checkStarts.delete(event.toolCallId);
+		if (!goalIsLive(goal) || event.isError || start && start.goalId !== goal.id) return;
 		const name = event.toolName ?? "";
-		if (WRITE_TOOLS.has(name)) unverifiedWrites++;
-		else if (VERIFY_TOOLS.has(name)) unverifiedWrites = 0;
-		else if (name === "bash" && isTestLikeCommand(String(event.input?.command ?? ""))) unverifiedWrites = 0;
+		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
+		if (WRITE_TOOLS.has(name)) persist({ ...goal, verification: { revision: (goal.verification?.revision ?? 0) + 1, checked: goal.verification?.checked ?? 0 } }, ctx);
+		else if (name === "bg_run" && isTestLikeCommand(observed.command)) {
+			if (event.toolCallId && !start) return;
+			const id = event.details?.task?.id ?? event.details?.taskId;
+			remember(backgroundChecks, id ? String(id) : `command:${observed.command}`, observed);
+			if (event.details?.task) settleBackgroundCheck(event.details.task, ctx);
+		}
+		else if (event.toolCallId && !start) return;
+		else if (name === "bash" && isTestLikeCommand(observed.command) && (event.details?.exitCode === undefined || event.details.exitCode === 0)) cover(observed, ctx);
+		else if (name === "project_tests" && event.details?.need === null && event.details?.projectTests?.plannedChecks?.length
+			&& event.details.projectTests.plannedChecks.every((check: any) => check.outcome === "passed")) cover(observed, ctx);
+		else if (name === "quality_review" && event.details?.status === "accepted" && !event.details.staleReports) cover(observed, ctx);
+		else if (VERIFY_TOOLS.has(name) && !["plan", "status", "inspect", "list"].includes(String(event.input?.action ?? ""))) cover(observed, ctx);
 	});
 
 	// One continuation per settled run; bounded and stall-aware inside stopGate.
 	pi.on("agent_settled", (_event, ctx) => {
 		try {
-			const decision = stopGate(goal, { lastStop, hasPendingMessages: ctx.hasPendingMessages() });
+			const stop = lastStop;
+			lastStop = undefined;
+			const decision = stopGate(goal, { lastStop: stop, hasPendingMessages: ctx.hasPendingMessages() });
 			if (!decision) return;
 			persist(decision.goal, ctx);
 			if (decision.notice) ctx.ui?.notify?.(decision.notice.text, decision.notice.level);
@@ -139,7 +177,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					case "status": return notify(goalSummary(goal));
 					case "set": {
 						const next = createGoal(command.text);
-						unverifiedWrites = 0;
+						checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 						refused.clear();
 						persist(next, ctx);
 						notify(`Goal ${next.id} set with ${next.criteria.length} criteria. The session keeps working until each has evidence. /goal shows progress.`);
@@ -204,7 +242,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					return text("Goal marked blocked and shown to the user. Stop and wait for their answer; /goal resume continues afterwards.");
 				}
 				case "complete": {
-					const decision = goalCompletionGate(goal, { unverifiedWrites, refused, verification: collectVerificationReceipts(32, ctx.sessionManager) });
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: collectVerificationReceipts(32, ctx.sessionManager) });
 					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");

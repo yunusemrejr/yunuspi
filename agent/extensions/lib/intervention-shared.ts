@@ -20,9 +20,8 @@ const SESSION_KEY = Symbol.for("yunuspi.shared-control.v1");
 const CYCLE_KEY = Symbol.for("yunuspi.shared-cycle.v1");
 const GRANTS_KEY = Symbol.for("yunuspi.shared-flow-grants.v1");
 
-/** Input hooks on the same user request fire within milliseconds of each
- *  other; each must join the SAME canonical cycle. InputEvent carries no
- *  id, so reuse the open cycle inside this window, else open a new one. */
+/** Compatibility window for older input producers without native request metadata.
+ * Native hooks join by exact session/request identity regardless of latency. */
 export const SHARED_CYCLE_WINDOW_MS = 1000;
 
 type IntentInput = Omit<InterventionIntent, "requestId"> & { requestId?: string };
@@ -43,15 +42,17 @@ export function getSharedSession(): InterventionSession {
 
 /** Join or open the canonical request cycle. Every subsystem's input hook
  *  calls this; hooks on the same request share the returned cycle. */
-export function noteUserInput(now: number = Date.now()): string {
+export function noteUserInput(now: number = Date.now(), input?: { requestId?: string; sessionId?: string }): string {
   const g = store();
-  const open = g[CYCLE_KEY] as { cycle: string; openedAt: number } | undefined;
+  const open = g[CYCLE_KEY] as { cycle: string; openedAt: number; identity?: string } | undefined;
   const session = getSharedSession();
-  if (open && open.cycle === session.control().currentCycle() && now - open.openedAt < SHARED_CYCLE_WINDOW_MS) {
+  const identity = input?.requestId ? JSON.stringify([input.sessionId ?? '', input.requestId]) : undefined;
+  if (open && open.cycle === session.control().currentCycle()
+    && (identity ? identity === open.identity : !open.identity && now >= open.openedAt && now - open.openedAt < SHARED_CYCLE_WINDOW_MS)) {
     return open.cycle;
   }
   const cycle = session.beginRequest("shared-input");
-  g[CYCLE_KEY] = { cycle, openedAt: now };
+  g[CYCLE_KEY] = { cycle, openedAt: now, identity };
   g[GRANTS_KEY] = { cycle, ids: new Set<string>() };
   return cycle;
 }
@@ -94,9 +95,12 @@ function grants(): { cycle: string | null; ids: Set<string> } {
  *  shadow seams. */
 export function enforceFlow(flowId: string, intent: IntentInput): InterventionDecision {
   const id = typeof flowId === "string" && flowId ? flowId.slice(0, 160) : "flow";
+  const session = getSharedSession();
+  // Acquire an implicit cycle before taking its grant set. Otherwise the first
+  // submission opens a cycle after grants() and loses that flow's admission.
+  if (!session.control().currentCycle()) session.beginRequest("implicit");
   const g = grants();
   if (g.ids.has(id)) {
-    const session = getSharedSession();
     const cycle = session.control().currentCycle() ?? session.beginRequest("implicit");
     return {
       outcome: "admitted",

@@ -63,6 +63,8 @@ function validateIntent(intent) {
         return "source";
     if (!boundedString(intent.requestId, 64))
         return "requestId";
+    if (intent.id !== undefined && !boundedString(intent.id, 160))
+        return "id";
     if (!CATEGORIES.includes(intent.category))
         return "category";
     if (!finiteNumber(intent.priority) || intent.priority < 0 || intent.priority > 100)
@@ -179,12 +181,28 @@ export class InterventionControl {
     evaluate(raw) {
         return this.decide(raw, true);
     }
-    /** Evaluate + spend. Idempotent per intent id: re-commits replay the stored decision. */
+    /** Evaluate + spend. Replay only the same live request and immutable effect. */
     commit(raw) {
-        if (raw && typeof raw.id === "string" && this.committed.has(raw.id))
-            return this.committed.get(raw.id);
-        const decision = this.decide(raw, false);
-        this.committed.set(decision.intentId, decision);
+        const valid = validateIntent(raw) === null;
+        const key = valid && raw.id ? JSON.stringify([raw.requestId, raw.id]) : undefined;
+        const fingerprint = valid ? JSON.stringify([
+            raw.source, raw.category, raw.priority, raw.reason, raw.stabilityKey,
+            raw.contentHash, raw.ttlMs, raw.estimatedChars, raw.estimatedCost,
+            raw.blocking, raw.slot, raw.evidence, raw.createdAt,
+        ]) : undefined;
+        const previous = key ? this.committed.get(key) : undefined;
+        if (previous && raw.requestId === this.current && this.cycles.get(raw.requestId)?.endedAt === null) {
+            if (previous.fingerprint !== fingerprint) {
+                return this.record({ outcome: "rejected-invalid", intentId: raw.id, requestId: raw.requestId,
+                    category: raw.category, priority: raw.priority, reason: "invalid:id-reused", at: this.clock() }, raw.source, false);
+            }
+            if (this.clock() <= previous.createdAt + raw.ttlMs)
+                return previous.decision;
+        }
+        const decision = this.decide(previous ? { ...raw, createdAt: previous.createdAt } : raw, false);
+        if (valid && decision.intentId !== "none") this.committed.set(key ?? JSON.stringify([raw.requestId, decision.intentId]), {
+            decision, fingerprint, createdAt: previous?.createdAt ?? raw.createdAt ?? decision.at,
+        });
         while (this.committed.size > MAX_DEDUP)
             this.committed.delete(this.committed.keys().next().value);
         return decision;
@@ -242,11 +260,7 @@ export class InterventionControl {
                 category: "context", priority: 0, reason: `invalid:${invalid ?? "not-object"}`, at: now,
             }, "unknown", shadow);
         }
-        if (!raw.id)
-            raw.id = this.idSource();
-        if (!finiteNumber(raw.createdAt))
-            raw.createdAt = now;
-        const intent = raw;
+        const intent = { ...raw, id: raw.id ?? this.idSource(), createdAt: raw.createdAt ?? now };
         const cycle = this.cycles.get(intent.requestId);
         if (!cycle) {
             return this.record({
@@ -266,8 +280,8 @@ export class InterventionControl {
                 category: intent.category, priority: intent.priority, reason: "expired:ttl", at: now,
             }, intent.source, shadow);
         }
-        this.pruneDedup(now);
-        const key = `${intent.category}|${intent.stabilityKey}|${intent.contentHash ?? ""}`;
+        if (!shadow) this.pruneDedup(now);
+        const key = JSON.stringify([intent.category, intent.stabilityKey, intent.contentHash ?? ""]);
         const dup = this.dedup.get(key);
         if (dup && now < dup.expiresAt) {
             return this.record({
@@ -345,8 +359,6 @@ export class InterventionControl {
         for (const [key, entry] of this.dedup) {
             if (now >= entry.expiresAt)
                 this.dedup.delete(key);
-            else
-                break; // insertion-ordered; entries expire roughly in order
         }
     }
     record(decision, source, shadow, slot) {

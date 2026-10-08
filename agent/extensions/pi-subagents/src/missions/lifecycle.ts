@@ -7,7 +7,7 @@ import { PROMPT_REDACTED } from "../shared/utils.ts";
 import type { Details, SubagentRunMode } from "../shared/types.ts";
 import { validateMissionLaunch } from "./actions.ts";
 import type { MissionArtifact, MissionRecord, MissionRunLink, MissionRunMode, MissionStatus, MissionStoreConfig, MissionStoreLocation } from "./types.ts";
-import { createMission, MissionNotFoundError, missionRecordPath, readMission, resolveMissionStoreLocation, updateMission, updateMissionFromCurrent, validateMissionId } from "./store.ts";
+import { createMission, MissionNotFoundError, missionRecordPath, missionStatusForRuns, readMission, resolveMissionStoreLocation, updateMission, updateMissionFromCurrent, validateMissionId } from "./store.ts";
 
 export const MISSION_BINDING_FILE = "mission.json";
 
@@ -100,15 +100,7 @@ function runStatusForResult(result: AgentToolResult<Details>): string {
 }
 
 function missionStatusForRun(record: MissionRecord, runId: string, runStatus: string): MissionStatus {
-	if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record.status;
-	if (runStatus === "active" || runStatus === "queued" || runStatus === "running") return "active";
-	if (record.goal) return "active";
-	if (runStatus === "paused") return "waiting";
-	const otherActive = record.runs.some((run) => run.runId !== runId && (run.status === "active" || run.status === "queued" || run.status === "running"));
-	if (otherActive) return "active";
-	if (runStatus === "completed" || runStatus === "complete") return "completed";
-	if (runStatus === "stopped" || runStatus === "rejected" || runStatus === "cancelled") return "cancelled";
-	return "failed";
+	return missionStatusForRuns(record, [...record.runs.filter(run => run.runId !== runId), { runId, mode: "external", status: runStatus }]);
 }
 
 function usageForResult(result: AgentToolResult<Details>): { tokens: number } | undefined {

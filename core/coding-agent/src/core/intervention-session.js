@@ -16,7 +16,9 @@ export function createInterventionSession(options = {}) {
         ...(options.clock ? { clock: options.clock } : {}),
         ...(options.idSource ? { idSource: options.idSource } : {}),
     });
-    const limit = options.journalLimit ?? DEFAULT_JOURNAL_LIMIT;
+    const requestedLimit = options.journalLimit;
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(4096, Math.max(1, Math.trunc(requestedLimit))) : DEFAULT_JOURNAL_LIMIT;
     const records = [];
     const submit = (intent, mode) => {
         const requestId = intent.requestId ?? control.currentCycle() ?? control.beginCycle("implicit");

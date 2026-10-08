@@ -105,16 +105,54 @@ export function classifyToolOutcome(input: ToolOutcomeInput): StepOutcome {
 }
 
 const digest = (value: string) => createHash('sha1').update(value).digest('hex').slice(0, 16);
-const stable = (value: unknown, budget = { chars: 6000 }): string => {
-  if (value === null || typeof value !== 'object') { const text = JSON.stringify(value) ?? 'undefined'; budget.chars -= text.length; return budget.chars < 0 ? '' : text; }
-  if (Array.isArray(value)) return `[${value.map(item => stable(item, budget)).join(',')}]`;
-  return `{${Object.keys(value as object).sort().map(key => `${JSON.stringify(key)}:${stable((value as any)[key], budget)}`).join(',')}}`;
+/** A partial fingerprint is not evidence that two calls match. Stop traversal
+ * at the budget and decline repeat detection for oversized or cyclic input. */
+const stable = (value: unknown): string | undefined => {
+  let remaining = 6000;
+  const ancestors = new WeakSet<object>();
+  const take = (text: string) => { remaining -= text.length; return remaining >= 0 ? text : undefined; };
+  const visit = (item: any, depth: number): string | undefined => {
+    if (remaining <= 0 || depth > 64) return undefined;
+    if (item === null || typeof item !== 'object') {
+      if (typeof item === 'string' && item.length > remaining) return undefined;
+      return take(JSON.stringify(item) ?? 'undefined');
+    }
+    if (ancestors.has(item)) return undefined;
+    ancestors.add(item);
+    try {
+      const array = Array.isArray(item), parts: string[] = [];
+      if (take(array ? '[]' : '{}') === undefined) return undefined;
+      const keys: string[] = [];
+      if (!array) {
+        for (const key in item) {
+          if (!Object.hasOwn(item, key)) continue;
+          keys.push(key);
+          if (keys.length * 3 > remaining) return undefined;
+        }
+        keys.sort();
+      }
+      const length = array ? item.length : keys.length;
+      for (let i = 0; i < length; i++) {
+        if (i > 0 && take(',') === undefined) return undefined;
+        const key = array ? i : keys[i];
+        if (typeof key === 'string' && key.length > remaining) return undefined;
+        const prefix = array ? '' : take(`${JSON.stringify(key)}:`);
+        if (prefix === undefined) return undefined;
+        const text = visit(item[key], depth + 1);
+        if (text === undefined) return undefined;
+        parts.push(prefix + text);
+      }
+      return array ? `[${parts.join(',')}]` : `{${parts.join(',')}}`;
+    } finally { ancestors.delete(item); }
+  };
+  try { return visit(value, 0); } catch { return undefined; }
 };
 
 /** Detects waste that needs memory across calls: an identical call returning an
  * identical result while the workspace did not change, and an edit that undoes
  * an earlier edit of the same file. The caller supplies workspace-change truth. */
 export function createStepTracker(maxEntries = 256) {
+  const capacity = Number.isFinite(maxEntries) && maxEntries > 0 ? Math.min(4096, Math.max(1, Math.trunc(maxEntries))) : 256;
   const seen = new Map<string, { result: string; epoch: number }>();
   const removed = new Map<string, Set<string>>();
   let epoch = 0;
@@ -134,18 +172,21 @@ export function createStepTracker(maxEntries = 256) {
           for (const pair of editPairs(input.args)) {
             if (pair.newText.length >= 12 && known.has(digest(pair.newText))) reversed = true;
             if (pair.oldText.length >= 12) known.add(digest(pair.oldText));
+            while (known.size > capacity) known.delete(known.values().next().value!);
           }
           removed.set(path, known);
           if (removed.size > 64) removed.delete(removed.keys().next().value!);
         }
       }
       if (input.mutated || MUTATING_TOOLS.has(tool) && !input.isError) epoch++;
-      const key = `${tool}:${digest(stable(input.args))}`;
-      const result = digest(input.text.slice(0, 4000));
+      const args = stable(input.args);
+      if (args === undefined) return { repeated: false, reversed };
+      const key = `${tool}:${digest(args)}`;
+      const result = digest(input.text);
       const previous = seen.get(key);
       const repeated = !input.isError && !input.mutated && !MUTATING_TOOLS.has(tool) && previous !== undefined && previous.result === result && previous.epoch === epoch;
       seen.delete(key); seen.set(key, { result, epoch });
-      while (seen.size > maxEntries) seen.delete(seen.keys().next().value!);
+      while (seen.size > capacity) seen.delete(seen.keys().next().value!);
       return { repeated, reversed };
     },
   };

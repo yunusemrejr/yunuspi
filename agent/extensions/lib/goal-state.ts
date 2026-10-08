@@ -37,6 +37,8 @@ export interface GoalState {
 	note?: string;
 	createdAt: number;
 	updatedAt: number;
+	/** Native writes and the latest revision covered by a successful check. */
+	verification?: { revision: number; checked: number };
 }
 
 export const MAX_CRITERIA = 12;
@@ -90,7 +92,7 @@ export function parseGoalArgs(args: string): GoalCommand {
 	if (SUBCOMMANDS.has(word) && rest.length === 0) return { kind: word as "status" };
 	if (word === "stop" && rest.length === 0) return { kind: "clear" };
 	if (word === "criteria" && rest.length) {
-		const items = rest.join(" ").split(/\s*(?:;|\n)\s*/).map((item) => clip(item, 240)).filter((item) => item.length >= 4);
+		const items = text.slice(head.length).trim().split(/\s*(?:;|\n)\s*/).map((item) => clip(item, 240)).filter((item) => item.length >= 4);
 		if (items.length) return { kind: "criteria", items: items.slice(0, MAX_CRITERIA - 1) };
 	}
 	return { kind: "set", text };
@@ -103,7 +105,7 @@ const open = (goal: GoalState) => goal.criteria.filter((criterion) => criterion.
 
 /** Fingerprint of everything that counts as progress: evidence state, not chatter. */
 export function progressMark(goal: GoalState): string {
-	return goal.criteria.map((criterion) => `${criterion.id}:${criterion.status}:${criterion.evidence?.length ?? 0}`).join("|");
+	return JSON.stringify(goal.criteria.map((criterion) => [criterion.id, criterion.status, criterion.evidence ?? ""]));
 }
 
 /** Replace the open criteria (met and waived ones keep their record). The verification criterion always remains. */
@@ -148,6 +150,8 @@ export function recordEvidence(goal: GoalState, id: string, status: "met" | "wai
 export interface CompletionContext {
 	/** Files were written or edited after the last passing verification command. */
 	unverifiedWrites: number;
+	/** Native write revision distinguishes fresh debt from a previously refused edit. */
+	writeRevision?: number;
 	/** Verification receipts already refused once, so the same request becomes a recorded waiver. */
 	refused: ReadonlySet<string>;
 	verification?: readonly GateReceipt[];
@@ -160,7 +164,7 @@ export function goalCompletionGate(goal: GoalState, context: CompletionContext):
 	}));
 	if (context.unverifiedWrites > 0) {
 		receipts.push({
-			source: "goal", id: "writes", state: "unverified", count: context.unverifiedWrites,
+			source: "goal", id: "writes", revision: String(context.writeRevision ?? goal.verification?.revision ?? 0), state: "unverified", count: context.unverifiedWrites,
 			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`,
 		});
 	}

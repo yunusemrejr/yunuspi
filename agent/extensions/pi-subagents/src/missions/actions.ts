@@ -24,6 +24,7 @@ import {
 	listMissions,
 	missionRecordPath,
 	readMission,
+	refreshMissionRuns,
 	resolveMissionStoreLocation,
 	updateMission,
 	validateMissionId,
@@ -234,55 +235,6 @@ function validateMissionUpdate(value: unknown): MissionUpdateInput {
 	return update;
 }
 
-function refreshLinkedRunStatus(location: MissionStoreLocation, record: MissionRecord): { record: MissionRecord; warnings: string[] } {
-	const warnings: string[] = [];
-	const updates = record.runs.flatMap((run) => {
-		if (!run.asyncDir) return [];
-		const statusPath = path.join(run.asyncDir, "status.json");
-		if (!fs.existsSync(statusPath)) return [];
-		let status: unknown;
-		try {
-			status = JSON.parse(fs.readFileSync(statusPath, "utf-8"));
-		} catch (error) {
-			warnings.push(`Failed to read linked run status '${statusPath}': ${error instanceof Error ? error.message : String(error)}`);
-			return [];
-		}
-		if (!status || typeof status !== "object" || Array.isArray(status)) {
-			warnings.push(`Linked run status '${statusPath}' must be an object`);
-			return [];
-		}
-		const state = (status as { state?: unknown }).state;
-		if (typeof state !== "string" || !state.trim()) {
-			warnings.push(`Linked run status '${statusPath}' is missing state`);
-			return [];
-		}
-		if (state === run.status) return [];
-		return [{
-			...run,
-			status: state,
-			...(!["queued", "running"].includes(state) && !run.completedAt ? { completedAt: new Date().toISOString() } : {}),
-		}];
-	});
-	if (updates.length === 0) return { record, warnings };
-	const merged = record.runs.map((run) => updates.find((update) => update.runId === run.runId && update.childIndex === run.childIndex) ?? run);
-	const states = merged.map((run) => run.status);
-	const status: MissionStatus = record.status === "completed" || record.status === "failed" || record.status === "cancelled"
-		? record.status
-		: record.goal && !states.some((state) => state === "queued" || state === "running" || state === "active")
-		? "active"
-		: states.some((state) => state === "queued" || state === "running" || state === "active")
-		? "active"
-		: states.some((state) => state === "paused")
-			? "waiting"
-			: states.some((state) => state === "failed")
-				? "failed"
-				: states.some((state) => state === "stopped" || state === "rejected" || state === "cancelled")
-					? "cancelled"
-					: states.length > 0 && states.every((state) => state === "complete" || state === "completed")
-						? "completed"
-						: record.status;
-	return { record: updateMission(location, record.id, { status, addRuns: updates }), warnings };
-}
 
 function formatMission(record: MissionRecord): string {
 	const lines = [
@@ -372,7 +324,7 @@ export function handleMissionAction(
 		return textResult(lines.join("\n"), { mode: "management", results: [], missions: { records: listed.records, warnings: listed.warnings } });
 	}
 	if (action === "mission.show") {
-		const refreshed = refreshLinkedRunStatus(location, readMission(location, requireMissionId(params)));
+		const refreshed = refreshMissionRuns(location, requireMissionId(params));
 		const lines = [formatMission(refreshed.record), `State: ${missionStatePath(location, refreshed.record.id)}`];
 		if (refreshed.warnings.length) lines.push("", ...refreshed.warnings.map((warning) => `Warning: ${warning}`));
 		return textResult(lines.join("\n"), {

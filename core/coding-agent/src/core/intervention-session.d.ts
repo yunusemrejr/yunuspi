@@ -23,6 +23,7 @@ export interface InterventionSessionOptions {
     budgets?: Partial<InterventionBudgets>;
     clock?: () => number;
     idSource?: () => string;
+    /** Positive journal capacity, capped at 4096. Invalid values use 200. */
     journalLimit?: number;
 }
 export interface InterventionSession {

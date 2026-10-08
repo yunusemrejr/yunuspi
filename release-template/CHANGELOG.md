@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.34.3 — 2026-10-08
+
+**Automatic work keeps the request that authorized it.** Intervention arbitration accepts immutable inputs, scopes idempotency to the live request and exact effect, and retains original expiry. Native request identities join delayed hooks without combining distinct rapid inputs. Helper launches and checkpoint observations no longer reopen spending budgets inside one request. Double stops its active streams and reconciliation when disabled, reconfigured, interrupted or moved to another session branch; restored mode comes from that branch.
+
+**Goal evidence follows the edits it checked.** Multiline criteria retain their boundaries. Durable write revisions survive restore; a green background check covers only edits present when it started. Planning tests or inspecting an application does not clear verification debt. Completion refusals distinguish new edits with the same debt count. Duplicate settled notifications issue at most one continuation, and progress compares actual evidence instead of its length.
+
+**Missions share one refresh and status policy.** Management inspection, lifecycle results and goal continuation use the same accounting. Recorded consumption cannot disappear during unrelated updates, raised budgets preserve an explicit pause, and active siblings keep a mission active. Unchanged run states still refresh usage. Refresh reads and updates under the mission lock, retains terminal results against late active reports, avoids unchanged rewrites and isolates corrupt linked receipts from healthy missions.
+
+**Repeated work is judged from complete bounded evidence.** Task state records later transitions back to the same status and retains renamed todo rows. Result ownership reads root JSON fields in one structural scan, so nested metadata cannot hide a parent's completion or force full parsing of a foreign result. Competence repeat detection checks complete output, stops argument traversal at its budget and declines partial or cyclic fingerprints. Its memory and eviction bounds remain finite, and inherited-looking route names cannot corrupt aggregates.
+
+Regression tests reproduce request replay, cancellation, restore, delayed verification, mission accounting, repeated transitions, nested ownership and fingerprint edge cases. Existing main model selection, thinking, permission ceilings and reviewer policies remain authoritative.
+
 ## 0.34.2 — 2026-10-08
 
 **Installation verification recognizes the shipped XML parser.** The canonical vendored dependency inventory now includes the pinned `@xmldom/xmldom` runtime dependency introduced for strict SVG parsing. A cross-source regression keeps that inventory synchronized with the runtime package manifest, so a valid installation cannot report this dependency as drift. The review, cancellation, provider-admission and memory fixes from 0.34.1 are retained.

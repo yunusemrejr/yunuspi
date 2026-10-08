@@ -8,7 +8,7 @@
 // paths use the shared control (D-011 contingency for assistance grants).
 import { assistanceLaunchIntent } from "../../../../lib/intervention-intents.ts";
 import { registerShadowSource } from "../../../../lib/intervention-registry.ts";
-import { enforceFlow, getSharedSession, noteUserInput, sharedSourceAudit } from "../../../../lib/intervention-shared.ts";
+import { enforceFlow, getSharedSession, sharedSourceAudit } from "../../../../lib/intervention-shared.ts";
 
 export interface AssistanceLaunchInput {
   agent?: unknown; task?: unknown; model?: unknown; runId?: unknown; stepIndex?: unknown; mode?: unknown;
@@ -26,7 +26,6 @@ function ensureRegistry(): void {
 export function shadowAssistanceLaunch(input: AssistanceLaunchInput): void {
   try {
     ensureRegistry();
-    noteUserInput();
     getSharedSession().shadow(assistanceLaunchIntent(input));
   } catch {
     /* shadow observation never affects launch */
@@ -41,7 +40,6 @@ export function shadowAssistanceLaunch(input: AssistanceLaunchInput): void {
 export function enforceAssistanceFlow(flowId: string, input: AssistanceLaunchInput): "admitted" | "refused" {
   try {
     ensureRegistry();
-    noteUserInput();
     return enforceFlow(flowId, assistanceLaunchIntent(input)).outcome === "admitted" ? "admitted" : "refused";
   } catch {
     return "admitted";

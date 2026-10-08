@@ -91,7 +91,7 @@ export function statusEvent(
 	why = "",
 ): EntityStatusEvent {
 	return {
-		eventId: `ev-${stableId(["status", entityId, status, why])}`,
+		eventId: `ev-${stableId(["status", entityId, status, why, ctx.ts])}`,
 		ts: ctx.ts,
 		sessionId: ctx.sessionId,
 		taskId: ctx.taskId,
@@ -257,7 +257,7 @@ export function todoEvents(
 			title: clip(task.title ?? `todo ${task.id}`, 240),
 			provenance: "main-agent",
 			refs: { todoId: task.id },
-		}, `todo:${ctx.taskId}:${task.id}:${task.status ?? ""}`));
+		}, `todo:${ctx.taskId}:${task.id}:${task.status ?? ""}:${clip(task.title ?? `todo ${task.id}`, 240)}:${ctx.ts}`));
 		events.push(linkEvent(ctx, id, ctx.taskId, "child-of"));
 	}
 	return events;

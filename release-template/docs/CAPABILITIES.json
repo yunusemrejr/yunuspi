@@ -3741,12 +3741,12 @@
       {
         "name": "custom-double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 452
+        "line": 458
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 432
+        "line": 438
       },
       {
         "name": "effort",
@@ -3766,7 +3766,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 124
+        "line": 162
       },
       {
         "name": "google-account",
@@ -4388,7 +4388,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 171,
+        "line": 209,
         "kind": "literal"
       },
       {
@@ -4803,7 +4803,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 780,
+        "line": 783,
         "kind": "definition"
       },
       {
@@ -5166,7 +5166,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 171,
+        "line": 209,
         "kind": "literal"
       },
       {
@@ -5582,7 +5582,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          831
+          834
         ],
         "knownNames": [
           "subagent"

@@ -297,6 +297,22 @@ test('replay and double delivery are idempotent (no duplicate logical facts)', (
   assert.equal(again.entities['req-task-x-R1']?.status, 'active');
 });
 
+test('recurring status transitions and todo snapshots do not collide with older receipts', () => {
+  const graph = reduce([opened(),
+    ingest.upsertEvent(ctx(), { id:'work',kind:'work',status:'active',title:'Work',provenance:'main-agent' }),
+    ingest.statusEvent({...ctx(),ts:1001},'work','implemented','checked'),
+    ingest.statusEvent({...ctx(),ts:1002},'work','active','reopened'),
+    ingest.statusEvent({...ctx(),ts:1003},'work','implemented','checked'),
+    ...ingest.todoEvents({...ctx(),ts:1004},[{id:1,title:'Initial name',status:'in_progress'}]),
+    ...ingest.todoEvents({...ctx(),ts:1005},[{id:1,title:'Renamed task',status:'in_progress'}]),
+    ...ingest.todoEvents({...ctx(),ts:1006},[{id:1,title:'Renamed task',status:'completed'}]),
+    ...ingest.todoEvents({...ctx(),ts:1007},[{id:1,title:'Renamed task',status:'in_progress'}]),
+  ]);
+  assert.equal(graph.entities.work.status,'implemented');
+  assert.equal(graph.entities['todo-task-x-1'].title,'Renamed task');
+  assert.equal(graph.entities['todo-task-x-1'].status,'active');
+});
+
 test('equal-timestamp batches keep log order (upsert before link)', () => {
   const c = { sessionId: 'sid-test', taskId: 'task-x', ts: 5000 };
   const graph = reduce([

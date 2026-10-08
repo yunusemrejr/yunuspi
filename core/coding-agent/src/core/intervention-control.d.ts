@@ -125,7 +125,7 @@ export declare class InterventionControl {
     endCycle(id: string): boolean;
     /** Shadow-safe: computes the decision without spending or recording dedup. */
     evaluate(raw: InterventionIntent): InterventionDecision;
-    /** Evaluate + spend. Idempotent per intent id: re-commits replay the stored decision. */
+    /** Evaluate + spend. Exact intent replays are idempotent within the live request and TTL; changed effects are rejected. */
     commit(raw: InterventionIntent): InterventionDecision;
     /** Out-of-band hook-latency observation against the per-cycle envelope. */
     noteHookLatency(ms: number): void;

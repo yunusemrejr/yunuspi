@@ -109,26 +109,32 @@ interface ResultScanStats {
 	startedAt: number;
 }
 
-function jsonStringProperty(raw: string, property: string): string | undefined {
-	const matches = raw.matchAll(new RegExp(`"${property}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`, "g"));
-	let encoded: string | undefined;
-	for (const match of matches) encoded = match[1];
-	if (!encoded) return undefined;
-	try {
-		const value = JSON.parse(encoded) as unknown;
-		return typeof value === "string" && value ? value : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 function resultFileIdentity(raw: string, file: string): ResultFileIdentity {
-	return {
-		sessionId: jsonStringProperty(raw, "sessionId"),
-		completionOwnerId: jsonStringProperty(raw, "completionOwnerId"),
-		runId: file.replace(/\.json$/i, ""),
-		asyncDir: jsonStringProperty(raw, "asyncDir"),
-	};
+	const identity: ResultFileIdentity = { runId: file.replace(/\.json$/i, "") };
+	// One structural scan reads only root string fields. A nested child's
+	// session or structured output cannot replace the parent ownership lease.
+	// Foreign files still avoid allocation of their complete parsed payload.
+	let depth = 0, previous = "", property: "sessionId" | "completionOwnerId" | "asyncDir" | undefined;
+	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\],:]/g)) {
+		const token = match[0];
+		if (token === "{" || token === "[") { depth++; property = undefined; }
+		else if (token === "}" || token === "]") { depth--; property = undefined; }
+		else if (depth === 1 && token.startsWith('"')) {
+			try {
+				if (previous === "{" || previous === ",") {
+					const value: unknown = token.length <= 256 ? JSON.parse(token) : undefined;
+					property = value === "sessionId" || value === "completionOwnerId" || value === "asyncDir" ? value : undefined;
+					if (property) identity[property] = undefined;
+				} else if (previous === ":" && property) {
+					const value: unknown = JSON.parse(token);
+					identity[property] = typeof value === "string" && value ? value : undefined;
+					property = undefined;
+				}
+			} catch { return { runId: identity.runId }; }
+		} else if (token === ",") property = undefined;
+		previous = token;
+	}
+	return identity;
 }
 
 function sanitizeNestedResultChildren(value: unknown, resultPath: string, label: string): NestedRunSummary[] | undefined {

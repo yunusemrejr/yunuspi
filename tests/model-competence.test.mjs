@@ -56,6 +56,47 @@ test('step tracker flags only unchanged repeats and edits that undo earlier edit
   assert.equal(tracker.track(repeatedFailure).repeated, false, 'repeated failures are already counted as slips');
 });
 
+test('step tracker sees changed result tails and refuses partial argument fingerprints', () => {
+  const tracker = createStepTracker();
+  const input = { toolName: 'read', args: { path: 'a.ts' }, text: 'x'.repeat(5000) + 'old', isError: false, mutated: false };
+  tracker.track(input);
+  assert.equal(tracker.track({ ...input, text: 'x'.repeat(5000) + 'new' }).repeated, false);
+  const large = { ...input, args: { path: 'a.ts', padding: 'x'.repeat(9000), target: 'first' } };
+  tracker.track(large);
+  assert.equal(tracker.track({ ...large, args: { ...large.args, target: 'second' } }).repeated, false);
+});
+
+test('step tracker bounds argument traversal and tolerates cycles', () => {
+  let reads = 0;
+  const args = Object.fromEntries(Array.from({ length: 20_000 }, (_, i) => [`k${i}`, 'v']));
+  const observed = new Proxy(args, { get: (target, key) => { reads++; return target[key]; } });
+  const input = { toolName: 'read', args: observed, text: 'same', isError: false, mutated: false };
+  const tracker = createStepTracker();
+  assert.equal(tracker.track(input).repeated, false);
+  assert.ok(reads < 1000, `fingerprint work must stop at its budget, read ${reads} values`);
+  const cyclic = {}; cyclic.self = cyclic;
+  assert.doesNotThrow(() => tracker.track({ ...input, args: cyclic }));
+});
+
+test('competence store handles inherited-looking route names without corrupting evidence', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-route-key-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = competenceStoreFile(dir);
+  const store = writeCompetenceDeltas(file, { constructor: { slip: 1, mass: 10 } }, 100);
+  assert.equal(store.constructor.mass, 10);
+  assert.equal(store.constructor.slip, 1);
+  assert.equal(readCompetenceStore(file).constructor.mass, 10);
+});
+
+test('invalid step tracker capacity cannot spin its eviction loop', () => {
+  const input = { toolName: 'read', args: { path: 'a' }, text: 'same', isError: false, mutated: false };
+  for (const capacity of [-1, Number.NaN, Infinity, 0]) {
+    const tracker = createStepTracker(capacity);
+    assert.equal(tracker.track(input).repeated, false);
+    assert.equal(tracker.track(input).repeated, true);
+  }
+});
+
 test('Wilson bounds narrow with evidence and stay inside the unit interval', () => {
   const narrow = wilsonBounds(0.04, 200, 1.28), wide = wilsonBounds(0.04, 20, 1.28);
   assert.ok(narrow.hi - narrow.lo < wide.hi - wide.lo);

@@ -520,7 +520,6 @@ function registerHistory(
 		// Fail-open on control error.
 		let admitted = true;
 		try {
-			noteUserInput();
 			admitted = enforceShared(checkpointHistoryIntent({ missing: missing.length, content })).outcome === "admitted";
 			if (admitted) getSharedSession().release("checkpoint-history", "checkpoint");
 		} catch { admitted = true; }
@@ -708,7 +707,10 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		pending.clear();
 		return content || undefined;
 	});
-	pi.on("input", (event, ctx) => { projectTests.input(event); quality.input(event); stopInputUnlocks(event, ctx); });
+	pi.on("input", (event, ctx) => {
+		if (event.source !== "extension") { try { noteUserInput(Date.now(), event); } catch { /* automation control never breaks input */ } }
+		projectTests.input(event); quality.input(event); stopInputUnlocks(event, ctx);
+	});
 	pi.on("agent_settled", async (event, ctx) => {
 		// A stopped session stays silent: no test/review follow-ups revive it.
 		if (isSessionStopped(ctx)) return;

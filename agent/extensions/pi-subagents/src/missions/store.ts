@@ -39,6 +39,8 @@ const MISSION_RECEIPT_KINDS = new Set<MissionReceiptKind>(["pull_request", "ci",
 const MISSION_RECEIPT_STATUSES = new Set<MissionReceiptStatus>(["pending", "ready", "succeeded", "failed"]);
 const MISSION_STATUS_SET = new Set<MissionStatus>(MISSION_STATUSES);
 const TERMINAL_MISSION_STATUSES = new Set<MissionStatus>(["completed", "failed", "cancelled"]);
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "active"]);
+const TERMINAL_RUN_STATUSES = new Set(["complete", "completed", "failed", "stopped", "rejected", "cancelled"]);
 const DEFAULT_TERMINAL_MISSION_RETENTION = 200;
 const MISSION_LOCK_WAIT_MS = 10_000;
 const MISSION_LOCK_POLL_MS = 10;
@@ -648,11 +650,22 @@ export function listMissions(location: MissionStoreLocation): MissionListResult 
 
 function updateMissionLocked(location: MissionStoreLocation, missionId: string, current: MissionRecord, update: MissionUpdateInput, now: Date, retainTerminal: number): MissionRecord {
 	const runs = [...current.runs];
+	const runKey = (run: MissionRunLink) => JSON.stringify([run.runId, run.childIndex]);
+	const runIndices = new Map(runs.map((run, index) => [runKey(run), index]));
 	for (const candidate of update.addRuns ?? []) {
 		const run = parseRunLink(candidate, "mission.update.addRuns[]");
-		const existingIndex = runs.findIndex((item) => item.runId === run.runId && item.childIndex === run.childIndex);
-		if (existingIndex === -1) runs.push(run);
-		else runs[existingIndex] = { ...runs[existingIndex]!, ...run };
+		const existingIndex = runIndices.get(runKey(run));
+		if (existingIndex === undefined) { runIndices.set(runKey(run), runs.length); runs.push(run); }
+		else {
+			const previous = runs[existingIndex]!;
+			const merged = { ...previous, ...run };
+			if (TERMINAL_RUN_STATUSES.has(previous.status ?? "") && ACTIVE_RUN_STATUSES.has(run.status ?? "")) {
+				merged.status = previous.status;
+				merged.completedAt = previous.completedAt;
+			}
+			if (previous.usage) merged.usage = { tokens: Math.max(previous.usage.tokens, run.usage?.tokens ?? 0) };
+			runs[existingIndex] = merged;
+		}
 	}
 	const workflowChildren = [...current.workflowChildren];
 	for (const candidate of update.upsertWorkflowChildren ?? []) {
@@ -718,11 +731,11 @@ function updateMissionLocked(location: MissionStoreLocation, missionId: string, 
 	const budget = update.budget !== undefined ? parseBudget(update.budget, "mission.update.budget") : current.budget;
 	const usage = update.usage !== undefined
 		? parseUsage(update.usage, "mission.update.usage")
-		: { tokens: runs.reduce((total, run) => total + (run.usage?.tokens ?? 0), 0) };
+		: { tokens: Math.max(current.usage?.tokens ?? 0, runs.reduce((total, run) => total + (run.usage?.tokens ?? 0), 0)) };
 	let goal = update.goal === false ? undefined : update.goal !== undefined ? parseGoal(update.goal, "mission.update.goal") : current.goal;
 	if (goal && !budget) throw new Error("mission.update.budget is required when enabling a goal mission");
 	if (goal && budget) {
-		goal = usage.tokens >= budget.tokens
+		goal = goal.status === "paused" ? goal : usage.tokens >= budget.tokens
 			? { status: "budget-exhausted" }
 			: goal.status === "budget-exhausted"
 				? { status: "active" }
@@ -763,13 +776,14 @@ function updateMissionLocked(location: MissionStoreLocation, missionId: string, 
 export function updateMissionFromCurrent(
 	location: MissionStoreLocation,
 	missionId: string,
-	deriveUpdate: (current: MissionRecord) => MissionUpdateInput,
+	deriveUpdate: (current: MissionRecord) => MissionUpdateInput | undefined,
 	now?: Date,
 	retainTerminal = location.retainTerminal ?? DEFAULT_TERMINAL_MISSION_RETENTION,
 ): MissionRecord {
 	return withMissionLock(location, missionId, () => {
 		const current = readMission(location, missionId);
 		const update = deriveUpdate(current);
+		if (!update) return current;
 		return updateMissionLocked(location, missionId, current, update, now ?? new Date(), retainTerminal);
 	});
 }
@@ -782,6 +796,55 @@ export function updateMission(
 	retainTerminal = location.retainTerminal ?? DEFAULT_TERMINAL_MISSION_RETENTION,
 ): MissionRecord {
 	return updateMissionFromCurrent(location, missionId, () => update, now, retainTerminal);
+}
+
+/** One status policy for lifecycle results, inspection and goal continuation. */
+export function missionStatusForRuns(record: MissionRecord, runs = record.runs): MissionStatus {
+	if (TERMINAL_MISSION_STATUSES.has(record.status)) return record.status;
+	const states = runs.map(run => run.status);
+	if (states.some(state => ACTIVE_RUN_STATUSES.has(state ?? "")) || record.goal) return "active";
+	if (states.includes("paused")) return "waiting";
+	if (states.includes("failed")) return "failed";
+	if (states.some(state => ["stopped", "rejected", "cancelled"].includes(state ?? ""))) return "cancelled";
+	return states.length && states.every(state => state === "complete" || state === "completed") ? "completed" : record.status;
+}
+
+const reportedTokens = (value: unknown): number | undefined => {
+	const total = value && typeof value === "object" ? (value as { total?: unknown }).total : undefined;
+	return Number.isSafeInteger(total) && (total as number) >= 0 ? total as number : undefined;
+};
+
+/** Refresh linked receipts under the same lock that owns the mission update.
+ * Unchanged state still carries new usage. A broken receipt affects only its
+ * mission; unchanged refreshes neither rewrite the record nor its index. */
+export function refreshMissionRuns(location: MissionStoreLocation, missionId: string): { record: MissionRecord; warnings: string[] } {
+	const warnings: string[] = [];
+	const record = updateMissionFromCurrent(location, missionId, current => {
+		const updates = new Map<MissionRunLink, MissionRunLink>();
+		for (const run of current.runs) {
+			if (!run.asyncDir) continue;
+			const statusPath = path.join(run.asyncDir, "status.json");
+			try {
+				if (!fs.existsSync(statusPath)) continue;
+				const status = asObject(JSON.parse(fs.readFileSync(statusPath, "utf-8")), `Linked run status '${statusPath}'`);
+				const state = requiredString(status.state, `Linked run status '${statusPath}'.state`);
+				const tokens = reportedTokens(status.totalTokens) ?? (Array.isArray(status.steps)
+					? status.steps.reduce((sum, step) => sum + (reportedTokens(step?.tokens) ?? 0), 0) : undefined);
+				const next = { ...run,
+					status: TERMINAL_RUN_STATUSES.has(run.status ?? "") && ACTIVE_RUN_STATUSES.has(state) ? run.status : state,
+					...(tokens !== undefined ? { usage: { tokens: Math.max(run.usage?.tokens ?? 0, tokens) } } : {}),
+				};
+				if (TERMINAL_RUN_STATUSES.has(next.status ?? "") && !next.completedAt) next.completedAt = new Date().toISOString();
+				if (JSON.stringify(next) !== JSON.stringify(run)) updates.set(run, next);
+			} catch (error) {
+				warnings.push(`Failed to read linked run status '${statusPath}': ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		const merged = current.runs.map(run => updates.get(run) ?? run);
+		if (!updates.size && !(current.goal?.status === "active" && (current.usage?.tokens ?? 0) >= (current.budget?.tokens ?? Infinity))) return undefined;
+		return { status: missionStatusForRuns(current, merged), addRuns: [...updates.values()] };
+	});
+	return { record, warnings };
 }
 
 export function listGlobalMissions(globalIndexDir: string): GlobalMissionListResult {

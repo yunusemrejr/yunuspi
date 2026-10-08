@@ -328,6 +328,10 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	let acknowledgementNoted = false;
 	let pairNotice: string | undefined;
 	let pairUnavailableWarned = false;
+	const activeControllers = new Set<AbortController>();
+	const cancelActive = (reason: string) => {
+		for (const controller of activeControllers) controller.abort(new Error(reason));
+	};
 
 	// The streams launch through the executor, not through the model-facing tool, so what matters is that the
 	// capability is registered. First-turn tool staging deactivates `subagent` for direct (small) tasks; reading
@@ -362,7 +366,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		: undefined);
 
 	for (const event of ["session_start", "session_switch", "session_tree", "session_fork"]) {
-		pi.on?.(event, () => { sessionEpoch++; });
+		pi.on?.(event, () => { sessionEpoch++; cancelActive("Double session changed."); });
 	}
 	pi.registerMessageRenderer?.(DOUBLE_PROGRESS, renderDoubleProgress);
 
@@ -373,7 +377,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 	let inputFromExtension = false;
 	pi.on?.("input", (event: any) => { inputFromExtension = event?.source === "extension"; return undefined; });
 
-	pi.on?.("session_start", (_event: any, ctx: any) => {
+	const restoreMode = (_event: any, ctx: any) => {
 		enabled = false;
 		pair = undefined;
 		pairNotice = undefined;
@@ -381,7 +385,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		capabilityWarned = false;
 		acknowledgementNoted = false;
 		try {
-			const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+			const entries = ctx?.sessionManager?.getBranch?.() ?? ctx?.sessionManager?.getEntries?.() ?? [];
 			for (let index = entries.length - 1; index >= 0; index -= 1) {
 				const entry = entries[index];
 				if (entry?.type === "custom" && entry?.customType === DOUBLE_MODE_ENTRY) {
@@ -396,9 +400,11 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			}
 		} catch { /* an unreadable ledger leaves Double off */ }
 		showIdleStatus(ctx);
-	});
+	};
+	for (const event of ["session_start", "session_switch", "session_tree", "session_fork"]) pi.on?.(event, restoreMode);
 
 	const setEnabled = (next: boolean, ctx: any, nextPair?: DoublePair): void => {
+		cancelActive(next ? "Double configuration changed." : "Double turned off.");
 		enabled = next;
 		pair = next ? nextPair : undefined;
 		pairNotice = undefined;
@@ -694,6 +700,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 		}
 
 		const controller = new AbortController();
+		activeControllers.add(controller);
 		const deadlineTimer = setTimeout(() => controller.abort(new Error("Double deadline reached.")), DOUBLE_LIMITS.deadlineMs);
 		deadlineTimer.unref?.();
 		const deadlineAt = now() + DOUBLE_LIMITS.deadlineMs;
@@ -945,7 +952,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			} catch {
 				return undefined;
 			}
-			if (!ownsSession() || signal.aborted) return undefined;
+			if (!current()) return undefined;
 			if (packaged.usable.length === 0) {
 				progress("Unified action", "unavailable");
 				try {
@@ -958,7 +965,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			}
 			setStatus("Double · reconciling A ∥ B");
 			const reconciled = signal.aborted || !ownsSession() ? { text: "", gap: "" } : await runReconcile(outcomeA, outcomeB);
-			if (!ownsSession()) return undefined;
+			if (!current()) return undefined;
 			let directive: string;
 			let degraded: boolean;
 			try {
@@ -982,6 +989,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 			statusOwner = undefined;
 			return { message: { customType: DOUBLE_DIRECTIVE_TYPE, content: directive, display: true } };
 		} finally {
+			activeControllers.delete(controller);
 			clearTimeout(deadlineTimer);
 			if (statusOwner === statusToken) {
 				statusOwner = undefined;

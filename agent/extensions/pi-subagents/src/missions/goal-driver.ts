@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RetainedChild } from "../runs/background/retained-children.ts";
 import type { ControlEvent } from "../shared/types.ts";
-import { listMissions, readMission, updateMission } from "./store.ts";
-import type { MissionRecord, MissionRunLink, MissionStoreLocation } from "./types.ts";
+import { listMissions, refreshMissionRuns } from "./store.ts";
+import type { MissionRecord, MissionStoreLocation } from "./types.ts";
 import { missionStatePath } from "./workflow-state.ts";
 
 const TERMINAL_MISSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -19,44 +19,6 @@ export interface GoalContinuationNotice {
 function bounded(value: string): string {
 	const normalized = value.replace(/\s+/g, " ").trim();
 	return normalized.length > MAX_ACTION_LENGTH ? `${normalized.slice(0, MAX_ACTION_LENGTH - 1)}…` : normalized;
-}
-
-function tokenUsage(value: unknown): number | undefined {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-	const total = (value as { total?: unknown }).total;
-	return Number.isSafeInteger(total) && (total as number) >= 0 ? total as number : undefined;
-}
-
-function readLinkedRun(run: MissionRunLink): MissionRunLink {
-	if (!run.asyncDir) return run;
-	const statusPath = path.join(run.asyncDir, "status.json");
-	if (!fs.existsSync(statusPath)) return run;
-	const status = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as Record<string, unknown>;
-	if (typeof status.state !== "string" || !status.state.trim()) throw new Error(`Linked run status '${statusPath}' is missing state`);
-	const tokens = tokenUsage(status.totalTokens)
-		?? (Array.isArray(status.steps)
-			? status.steps.reduce((total, step) => {
-				if (!step || typeof step !== "object") return total;
-				return total + (tokenUsage((step as { tokens?: unknown }).tokens) ?? 0);
-			}, 0)
-			: undefined);
-	return {
-		...run,
-		status: status.state,
-		...(!ACTIVE_RUN_STATUSES.has(status.state) && !run.completedAt ? { completedAt: new Date().toISOString() } : {}),
-		...(tokens !== undefined ? { usage: { tokens } } : {}),
-	};
-}
-
-function refreshGoalMission(location: MissionStoreLocation, record: MissionRecord): MissionRecord {
-	const runs = record.runs.map(readLinkedRun);
-	const changed = runs.some((run, index) => JSON.stringify(run) !== JSON.stringify(record.runs[index]));
-	if (!changed) return record;
-	const active = runs.some((run) => run.status && ACTIVE_RUN_STATUSES.has(run.status));
-	return updateMission(location, record.id, {
-		status: active ? "active" : record.goal ? "active" : record.status,
-		addRuns: runs,
-	});
 }
 
 function readyActionFromValue(value: unknown, pathLabel = "state", depth = 0): string | undefined {
@@ -123,20 +85,28 @@ export function collectGoalContinuationNotices(input: {
 	retainedChildren: RetainedChild[];
 	turnId: number;
 	now?: number;
+	onWarning?: (message: string) => void;
 }): GoalContinuationNotice[] {
 	const notices: GoalContinuationNotice[] = [];
-	const seen = new Set<string>();
 	for (const listed of listMissions(input.location).records) {
 		if (listed.ownerSessionId !== input.ownerSessionId || !listed.goal || TERMINAL_MISSION_STATUSES.has(listed.status)) continue;
-		let record = refreshGoalMission(input.location, readMission(input.location, listed.id));
-		if (!record.goal || record.goal.status !== "active" || !record.budget) continue;
-		if ((record.usage?.tokens ?? 0) >= record.budget.tokens) {
-			record = updateMission(input.location, record.id, { usage: record.usage ?? { tokens: 0 } });
-			if (record.goal?.status === "budget-exhausted") continue;
+		let record: MissionRecord;
+		let action: string;
+		try {
+			const refreshed = refreshMissionRuns(input.location, listed.id);
+			if (refreshed.warnings.length) {
+				for (const warning of refreshed.warnings) input.onWarning?.(warning);
+				continue;
+			}
+			record = refreshed.record;
+			if (record.ownerSessionId !== input.ownerSessionId || TERMINAL_MISSION_STATUSES.has(record.status)
+				|| record.goal?.status !== "active" || !record.budget || (record.usage?.tokens ?? 0) >= record.budget.tokens
+				|| record.runs.some(run => ACTIVE_RUN_STATUSES.has(run.status ?? ""))) continue;
+			action = nextReadyAction(input.location, record, input.retainedChildren);
+		} catch (error) {
+			input.onWarning?.(`Goal mission ${listed.id}: ${error instanceof Error ? error.message : String(error)}`);
+			continue;
 		}
-		if (record.runs.some((run) => run.status && ACTIVE_RUN_STATUSES.has(run.status))) continue;
-		if (seen.has(record.id) || !record.budget) continue;
-		seen.add(record.id);
 		const budget = record.budget.tokens;
 		const used = record.usage?.tokens ?? 0;
 		const remaining = Math.max(0, budget - used);
@@ -144,7 +114,7 @@ export function collectGoalContinuationNotices(input: {
 			`Goal mission needs attention: ${bounded(record.title)}`,
 			`Mission: ${record.id}`,
 			`Remaining budget: ${remaining} tokens (${used}/${budget} used)`,
-			`Next ready action: ${nextReadyAction(input.location, record, input.retainedChildren)}`,
+			`Next ready action: ${action}`,
 		].join("\n");
 		notices.push({
 			missionId: record.id,

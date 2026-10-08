@@ -41,8 +41,8 @@ export function writeCompetenceDeltas(file: string, deltas: Record<string, Compe
   const store = readCompetenceStore(file);
   let changed = false;
   for (const [route, delta] of Object.entries(deltas)) {
-    if (!validRoute(route) || !(delta.mass > 0)) continue;
-    store[route] = mergeCompetence(store[route], delta, now);
+    if (!validRoute(route) || finite(delta?.mass) === undefined || !(delta.mass > 0) || finite(delta.slip) === undefined || delta.slip > delta.mass) continue;
+    store[route] = mergeCompetence(Object.hasOwn(store, route) ? store[route] : undefined, delta, now);
     store[FLEET_KEY] = mergeCompetence(store[FLEET_KEY], delta, now);
     changed = true;
   }

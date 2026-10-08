@@ -108,6 +108,43 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
+test('Stop during reconciliation cancels the owner and emits no directive', async () => {
+  const pi = makePi();
+  const abort = new AbortController();
+  let reconciled = false;
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => {
+    if (kindOf(params) === 'reconcile') { reconciled = true; abort.abort(); return okResult(RECONCILED); }
+    return okResult(kindOf(params) === 'A' ? ANALYSIS_A : ANALYSIS_B);
+  } });
+  const ctx = makeCtx(pi, { ctx: { signal: abort.signal } });
+  await pi.commands.get('double').handler('on', ctx);
+  const [reply] = await fire(pi, 'before_agent_start', { prompt: 'Fix the login flow' }, ctx);
+  assert.equal(reconciled, true);
+  assert.equal(reply, undefined);
+});
+
+for (const boundary of ['off', 'session_tree']) test(`Double ${boundary} cancels both running streams promptly`, async () => {
+  const pi = makePi();
+  const entered = deferred();
+  const signals = [];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, _params, signal) => {
+    signals.push(signal);
+    if (signals.length === 2) entered.resolve();
+    return new Promise(resolve => signal.addEventListener('abort', () => resolve(failResult('cancelled')), { once: true }));
+  } });
+  const ctx = makeCtx(pi);
+  await pi.commands.get('double').handler('on', ctx);
+  const work = fire(pi, 'before_agent_start', { prompt: 'Fix the login flow' }, ctx);
+  await entered.promise;
+  if (boundary === 'off') await pi.commands.get('double').handler('off', ctx);
+  else await fire(pi, boundary, {}, ctx);
+  const cancelled = signals.every(signal => signal.aborted);
+  // Always clean up the test, including the counterexample on old code.
+  globalThis[DOUBLE_RUNNER].dispose();
+  await work;
+  assert.equal(cancelled, true);
+});
+
 test('the /double command toggles, reports status and persists within the session', async () => {
   const pi = makePi();
   registerDoubleMode(pi, { launch: async () => ({}) });

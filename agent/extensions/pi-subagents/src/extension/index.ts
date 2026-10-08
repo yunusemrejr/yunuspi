@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { registerAutonomousRecovery } from "./autonomous-recovery.ts";
 import { registerDoubleMode } from "./double-runner.ts";
 import { registerSubagentContinuation } from "./continuation-notice.ts";
-import { noteSessionTurnover } from "../../../lib/intervention-shared.ts";
+import { noteSessionTurnover, noteUserInput } from "../../../lib/intervention-shared.ts";
 import { ACTIVITY_MESSAGE_TYPE, ACTIVITY_TAGS, type ActivityDetails } from "../../../lib/activity-indicators.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -435,6 +435,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	if (process.env[SUBAGENT_CHILD_ENV] === "1") {
 		return;
 	}
+	pi.on("input", (event) => {
+		if (event.source !== "extension") { try { noteUserInput(Date.now(), event); } catch { /* automation control never breaks input */ } }
+	});
 	const runtimeRegistry = getRuntimeRegistry();
 
 	DIRS.results = ensureAccessibleDir(DIRS.results);
@@ -840,7 +843,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		try {
 			const location = resolveMissionStoreLocation({ projectRoot: state.baseCwd, ...(config.missions ? { config: config.missions } : {}) });
 			const retainedChildren = listRetainedChildren(DIRS.async, ownerSessionId);
-			for (const notice of collectGoalContinuationNotices({ location, ownerSessionId, retainedChildren, turnId: goalTurnId })) {
+			for (const notice of collectGoalContinuationNotices({ location, ownerSessionId, retainedChildren, turnId: goalTurnId, onWarning: message => console.warn(message) })) {
 				handleSubagentControlNotice({
 					pi,
 					state,
