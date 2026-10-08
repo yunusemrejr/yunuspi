@@ -853,7 +853,7 @@ export class ProjectVectorStore {
   }
 
   /** Lexical search over title/text/concepts. Terms are OR-ed with prefix match. */
-  lexicalSearch(query: string, limit = 40): LexicalHit[] {
+  lexicalSearch(query: string, limit = 40, opts: { types?: ChunkType[]; since?: string; minAuthority?: number } = {}): LexicalHit[] {
     const terms = query
       .normalize("NFKC")
       .toLowerCase()
@@ -865,7 +865,17 @@ export class ProjectVectorStore {
     kept = kept.slice(0, 12);
     if (!kept.length) return [];
     const match = kept.map((t) => `"${t.replace(/"/g, "")}"*`).join(" OR ");
-    const rows = this.db.prepare(`SELECT (SELECT id FROM chunks WHERE chunks.rowid = chunks_fts.rowid) AS id, bm25(chunks_fts) AS rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`).all(match, Math.max(1, Math.min(200, limit))) as Array<{ id: string | null; rank: number }>;
+    const conditions = ['chunks_fts MATCH ?'];
+    const params: unknown[] = [match];
+    if (opts.types?.length) {
+      conditions.push(`c.source_type IN (${opts.types.map(() => '?').join(',')})`);
+      params.push(...opts.types);
+    }
+    if (opts.since) { conditions.push('c.timestamp >= ?'); params.push(opts.since); }
+    if (opts.minAuthority !== undefined) { conditions.push('c.authority >= ?'); params.push(opts.minAuthority); }
+    // Eligibility belongs before LIMIT; excluded matches must not crowd out
+    // eligible evidence or suppress semantic fallback for an exact lookup.
+    const rows = this.db.prepare(`SELECT c.id, bm25(chunks_fts) AS rank FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid WHERE ${conditions.join(' AND ')} ORDER BY rank LIMIT ?`).all(...params, Math.max(1, Math.min(200, limit))) as Array<{ id: string; rank: number }>;
     return rows.filter((row) => row.id).map((row) => ({ id: row.id as string, rank: row.rank }));
   }
 

@@ -871,14 +871,33 @@ export async function gateRequest(input: GateRequestInput): Promise<GateOutcome>
 	const now = input.now ?? Date.now();
 	const route = `${input.provider}/${input.model ?? ""}`;
 	const evaluate = (at: number) => evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: at });
-	const admit = async (deferredMs: number): Promise<GateOutcome> => {
-		const admittedAt = Date.now();
-		await bestEffort(() => recordRequestAsync({ provider: input.provider, model: input.model, estTokens: input.estTokens, now: admittedAt }, input.signal), input.signal);
-		await bestEffort(() => clearPending(route, input.session, input.signal), input.signal);
-		return { allowed: true, deferredMs, admittedAt };
-	};
 	let decision = evaluate(now);
-	if (decision.allowed) return admit(0);
+	const admit = async (deferredMs: number): Promise<GateOutcome | undefined> => {
+		let admission: { decision: RouteDecision; admittedAt: number } | undefined;
+		await bestEffort(async () => {
+			admission = await mutateHealthAsync(state => {
+				// A sibling may publish a hold while lock acquisition yields. Choose
+				// admission from that current state, before recording any traffic.
+				const admittedAt = Date.now();
+				const current = evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: admittedAt }, state);
+				if (current.allowed) {
+					pushRequest(state, input, admittedAt);
+					replacePending(state, route, input.session);
+				}
+				return { decision: current, admittedAt };
+			}, input.signal);
+		}, input.signal);
+		input.signal?.throwIfAborted();
+		// Failed bookkeeping stays fail-open for a healthy route, but cannot
+		// reuse the earlier decision after its awaited lock attempt.
+		decision = admission?.decision ?? evaluate(Date.now());
+		if (!decision.allowed) return undefined;
+		return { allowed: true, deferredMs, admittedAt: admission?.admittedAt ?? Date.now() };
+	};
+	if (decision.allowed) {
+		const outcome = await admit(0);
+		if (outcome) return outcome;
+	}
 	const maxWaitMs = input.maxWaitMs ?? resolveMaxWaitMs();
 	const deny = async (): Promise<never> => {
 		await bestEffort(() => denyPending(route, decision, input.session, input.signal), input.signal);
@@ -899,7 +918,10 @@ export async function gateRequest(input: GateRequestInput): Promise<GateOutcome>
 			input.signal?.throwIfAborted();
 			const now2 = Date.now();
 			decision = evaluate(now2);
-			if (decision.allowed) return await admit(now2 - startedAt);
+			if (decision.allowed) {
+				const outcome = await admit(now2 - startedAt);
+				if (outcome) return outcome;
+			}
 			if (now2 - startedAt + decision.waitMs > maxWaitMs) return await deny();
 		}
 	} catch (err) {

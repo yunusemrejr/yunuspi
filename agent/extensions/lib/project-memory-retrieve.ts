@@ -135,6 +135,8 @@ export interface MemoryHit {
    * hit is lexical-only. What a compact candidate shows; the parent behind
    * project_memory_read holds the authoritative context. */
   fragment: string;
+  /** Source span of the matched fragment, retained for bounded reranker input. */
+  fragmentSource?: string;
   signals: {
     lexicalRank: number | null;
     vectorRank: number | null;
@@ -191,14 +193,14 @@ const containsLiteralTerms = (chunk: StoredChunk, query: string): boolean => {
 
 /** Literal symbol/path lookups already have strong lexical evidence. Keep
  * that evidence first and avoid both embedding and reranking calls. */
-function exactLookup(stores: ProjectVectorStore[], query: string): boolean {
+function exactLookup(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions): boolean {
   if (query.split(/\s+/).length > 3 || !/(?:[_.\/:]|[a-z][A-Z]|\b[A-Z][A-Z0-9]{2,}\b|^[a-f0-9]{7,40}$)/.test(query)) return false;
-  return stores.some(store => store.getChunks(store.lexicalSearch(query, 8).map(hit => hit.id))
+  return stores.some(store => store.getChunks(store.lexicalSearch(query, 8, { ...opts, types: opts.types?.filter(isChunkType) }).map(hit => hit.id))
     .some(chunk => containsLiteralTerms(chunk, query)));
 }
 
 async function queryEmbedding(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions): Promise<QueryEmbedding> {
-  if (exactLookup(stores, query)) return { batch: null, degraded: [], skipped: 'exact-lexical' };
+  if (exactLookup(stores, query, opts)) return { batch: null, degraded: [], skipped: 'exact-lexical' };
   if (opts.signal?.aborted) return { batch: null, degraded: ['cancelled'] };
   const spaces = stores.flatMap(store => store.embeddingSpaces().filter(space => space.count > 0));
   const compatible = new Set(spaces.map(space => space.id));
@@ -232,7 +234,7 @@ export async function retrieveProjectMemory(
   const now = opts.now ?? Date.now;
 
   const types = opts.types?.filter(isChunkType);
-  const lexical = store.lexicalSearch(clean, 40);
+  const lexical = store.lexicalSearch(clean, 40, { types, since: opts.since, minAuthority: opts.minAuthority });
   let vectorRanks: Array<{ id: string; score: number; atomId?: string; source?: "atom" | "chunk" }> = [];
   const semantic = prepared ?? await queryEmbedding([store], clean, opts);
   degraded.push(...semantic.degraded);
@@ -333,7 +335,7 @@ export async function retrieveProjectMemory(
   if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
-      order = await ranker.rank(clean, head.map((hit) => ({ id: hit.chunk.id, text: `${hit.chunk.title}\n${hit.chunk.text}` })), opts.signal);
+      order = await ranker.rank(clean, head.map((hit) => ({ id: hit.chunk.id, text: rerankText(hit) })), opts.signal);
     } catch {
       order = undefined;
     }
@@ -391,7 +393,17 @@ export function hydrateFragments(store: ProjectVectorStore, hits: MemoryHit[], q
   for (const hit of hits) {
     const matched = hit.signals.atomId ? (atoms.get(hit.chunk.id) ?? []).find((atom) => atom.id === hit.signals.atomId) : undefined;
     hit.fragment = centerFragment(matched?.text ?? hit.chunk.text, matched ? query : "", MEMORY_FRAGMENT_CHARS);
+    hit.fragmentSource = citePath(matched ? { ...hit.chunk, source_start: matched.source_start, source_end: matched.source_end } : hit.chunk);
   }
+}
+
+/** Put the actual match before the parent beginning: Needle truncates at 800
+ * characters, while remote rankers can retain the bounded parent context. */
+function rerankText(hit: MemoryHit): string {
+  const match = hit.signals.atomId
+    ? `Matched atom ${hit.signals.atomId.slice(-80)} (${(hit.fragmentSource ?? citePath(hit.chunk)).slice(-180)}):\n${hit.fragment}\n\n`
+    : '';
+  return `${match}${hit.chunk.title}\n${hit.chunk.text}`.slice(0, 4000);
 }
 
 function citePath(chunk: StoredChunk): string {
@@ -467,7 +479,7 @@ export async function retrieveFamily(
   if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
-      order = await ranker.rank(clean, head.map((hit) => ({ id: `${hit.projectId}:${hit.chunk.id}`, text: `${hit.chunk.title}\n${hit.chunk.text}` })), opts.signal);
+      order = await ranker.rank(clean, head.map((hit) => ({ id: `${hit.projectId}:${hit.chunk.id}`, text: rerankText(hit) })), opts.signal);
     } catch {
       order = undefined;
     }

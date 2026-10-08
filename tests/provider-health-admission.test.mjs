@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -104,6 +105,30 @@ test('denied attempts are not recorded as outgoing pressure, admitted ones are',
   assert.equal(health.readHealth().providers.p.requests.length, 0);
   await health.gateRequest({ provider: 'q', model: 'm', estTokens: 40 });
   assert.equal(health.readHealth().providers.q.requests.length, 1);
+});
+
+test('a sibling cooldown published during admission lock wait prevents HTTP dispatch and pressure', async (t) => {
+  reset();
+  let dispatches = 0;
+  const server = createServer((_req, res) => { dispatches++; res.end('ok'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  fs.mkdirSync(lockDir);
+  t.after(() => fs.rmSync(lockDir, { recursive: true, force: true }));
+  let settled = false;
+  const outgoing = (async () => {
+    await health.gateRequest({ provider: 'p', model: 'm', estTokens: 90000, maxWaitMs: 0 });
+    await fetch(`http://127.0.0.1:${server.address().port}`);
+  })().finally(() => { settled = true; });
+  // The first actor has evaluated a healthy route and is waiting for the
+  // lock. The sibling publishes its failure before releasing that barrier.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  fs.rmSync(lockDir, { recursive: true, force: true });
+  health.recordFailure({ provider: 'p', model: 'm', errorMessage: '429 too many requests' });
+  await assert.rejects(outgoing, error => error?.code === 'PI_AUTONOMOUS_REQUEST_DENIED');
+  assert.equal(dispatches, 0, 'the cooling route never reaches HTTP');
+  assert.equal(health.readHealth().providers.p.requests.length, 0, 'denied work never counts as traffic');
 });
 
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));

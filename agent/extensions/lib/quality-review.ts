@@ -335,11 +335,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     return scanned;
   };
   /** Aspects a set of moved files can affect. Semantic routing needs the files' CURRENT content: invalidation
-   * drops their cues, so a changed file is re-read here, and a file whose content is gone is assumed to touch
-   * every aspect that content cues can select. A pass whose coverage cannot be shown unchanged is not reusable. */
+   * drops their cues, so a changed file is re-read here. Missing or skipped content has unknown coverage
+   * for every content-selected aspect. A pass whose coverage cannot be shown unchanged is not reusable. */
   const touchedAspects = (files: string[], scanned: ReturnType<typeof scanSource>) => {
     const touched = new Set(reviewAspects(files, '', [], [...scanned.values()].flatMap(value => Array.isArray(value) ? value : [])).map(aspect => aspect.id));
-    if ([...scanned.values()].includes('missing')) for (const id of ['security', 'interface', 'runtime']) touched.add(id);
+    if ([...scanned.values()].some(value => value === 'missing' || value === 'skipped'))
+      for (const id of ['security', 'interface', 'runtime']) touched.add(id);
     return touched;
   };
   const parentReports = () => {

@@ -1429,7 +1429,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 762; literal)
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 408; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 560; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 812; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 813; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 270; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 93; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)

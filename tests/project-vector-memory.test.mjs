@@ -1146,6 +1146,60 @@ test('semantic retrieval sees text beyond the old 2000-char embedding bound', as
   assert.ok(hit.fragment.includes('quasarflux'));
 });
 
+for (const filter of ['types', 'since', 'minAuthority']) test(`lexical ${filter} eligibility applies before the forty-candidate limit`, async t => {
+  const dir = tmpRoot(); cleanup(t, dir);
+  const store = openTestStore(dir); t.after(() => store.close());
+  const common = { project_id: store.projectId, source_type: 'decision', timestamp: '2026-10-02T00:00:00.000Z', authority: 1 };
+  const excluded = filter === 'types' ? { source_type: 'code' } : filter === 'since' ? { timestamp: '2026-09-01T00:00:00.000Z' } : { authority: 0 };
+  for (let i = 0; i < 50; i++) store.upsertChunk({ ...common, ...excluded, id: `excluded-${i}`, text: 'quasarflux', content_hash: `excluded-${i}` });
+  store.upsertChunk({ ...common, id: 'eligible', text: 'quasarflux ' + 'background details '.repeat(100), content_hash: 'eligible' });
+  assert.ok(!store.lexicalSearch('quasarflux', 40).some(hit => hit.id === 'eligible'), 'the eligible row is below the unfiltered limit');
+  const opts = filter === 'types' ? { types: ['decision'] } : filter === 'since' ? { since: '2026-10-01T00:00:00.000Z' } : { minAuthority: 0.9 };
+  const result = await retrieveProjectMemory(store, 'quasarflux', { ...opts, rerank: false });
+  assert.deepEqual(result.hits.map(hit => hit.chunk.id), ['eligible']);
+});
+
+for (const family of [false, true]) test(`an excluded exact match cannot suppress ${family ? 'family' : 'project'} semantic recall`, async t => {
+  const dir = tmpRoot(); cleanup(t, dir);
+  const store = openTestStore(dir); t.after(() => store.close());
+  const space = { id: 'eligible:space', backend: 'test', model: 'eligible', version: 1, dim: 2 };
+  store.upsertChunk({ id: 'excluded', project_id: store.projectId, source_type: 'code', text: 'getWidget', content_hash: 'excluded' });
+  store.upsertChunk({ id: 'semantic', project_id: store.projectId, source_type: 'decision', text: 'Recover the requested object through its registered accessor.', content_hash: 'semantic', embeddingSpace: space, embedding: [1, 0] });
+  let calls = 0;
+  const embedder = { id: space.id, space, embed: async () => { calls++; return [[1, 0]]; } };
+  const opts = { types: ['decision'], embedder, rerank: false };
+  const result = family ? await retrieveFamily([{ store, relation: 'self' }], 'getWidget', opts) : await retrieveProjectMemory(store, 'getWidget', opts);
+  assert.equal(calls, 1, 'only eligible literal matches can skip query embedding');
+  assert.deepEqual(result.hits.map(hit => hit.chunk.id), ['semantic']);
+});
+
+for (const family of [false, true]) test(`${family ? 'family' : 'project'} reranking receives the source-linked matched tail atom`, async t => {
+  const dir = tmpRoot(); cleanup(t, dir);
+  const store = openTestStore(dir); t.after(() => store.close());
+  const space = { id: 'tail:space', backend: 'test', model: 'tail', version: 1, dim: 2 };
+  const parent = 'Routine session preamble. '.repeat(200);
+  const tail = 'quasarflux cryogenic recalibration resolves the capacitor failure';
+  store.upsertChunk({ id: 'tail', project_id: store.projectId, source_type: 'decision', title: 'Long evidence', text: parent + tail, source_path: 'notes/long.md', source_start: 1, source_end: 124, content_hash: 'tail' });
+  store.setAtoms('tail', [{ id: 'tail:a0', chunk_id: 'tail', text: tail, source_start: 120, source_end: 124, char_start: parent.length, char_end: parent.length + tail.length, content_hash: 'tail-atom' }]);
+  store.setAtomEmbedding('tail:a0', space, [1, 0]);
+  store.upsertChunk({ id: 'decoy', project_id: store.projectId, source_type: 'decision', text: 'quasarflux cryogenic history without the repair', content_hash: 'decoy', embeddingSpace: space, embedding: [0.8, 0.6] });
+  let seen;
+  const embedder = { id: space.id, space, embed: async () => [[1, 0]] };
+  const rerank = { rank: async (_query, candidates) => {
+    seen = candidates;
+    return candidates.slice().sort((a, b) => Number(b.text.includes('resolves the capacitor failure')) - Number(a.text.includes('resolves the capacitor failure'))).map(c => c.id);
+  } };
+  const opts = { embedder, rerank, limit: 1 };
+  const result = family ? await retrieveFamily([{ store, relation: 'self' }], 'quasarflux cryogenic recalibration', opts) : await retrieveProjectMemory(store, 'quasarflux cryogenic recalibration', opts);
+  assert.equal(result.stats.reranked, true);
+  const evidence = seen.find(c => c.id === (family ? `${store.projectId}:tail` : 'tail')).text;
+  assert.ok(evidence.length <= 4000, 'the ranker view bounds remote context while preserving the local prefix');
+  assert.match(evidence.slice(0, 800), /resolves the capacitor failure/);
+  assert.match(evidence, /notes\/long\.md:120-124/);
+  assert.match(evidence, /tail:a0/);
+  assert.equal(result.hits[0].chunk.id, 'tail');
+});
+
 test('legacy chunk vectors stay retrievable alongside atoms', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);

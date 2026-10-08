@@ -735,7 +735,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 						instructions: "Which skill best matches this task?",
 						criteria: Object.fromEntries(names.map((name) => [name, null])),
 					},
-				}, { pi });
+				}, { pi, signal: ctx.signal });
 				if (!ownsStart()) return;
 				if (!judged.ok) {
 					metrics.skip("jev", judged.skipped);

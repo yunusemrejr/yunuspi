@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.34.1 — 2026-10-08
+
+**Review passes require known unchanged coverage.** Oversized files and exhausted source-scan budgets invalidate content-dependent security, interface and runtime passes during repairs, just like unavailable source. A skipped scan cannot certify unchanged behavior.
+
+**Stop owns automatic skill triage.** The JEV route judgment receives the preflight request signal. Cancellation releases that caller promptly; an identical judgment stays available to a live shared caller, and the last departing caller aborts the transport without starting another judge or fallback.
+
+**Cooldown admission uses current shared state.** Requests recheck route and endpoint eligibility after acquiring the bookkeeping lock, before recording pressure. A sibling's intervening 429 prevents HTTP dispatch and outgoing-pressure counts. Pending cleanup shares the admission transaction, and failed bookkeeping still rechecks lock-free cooldown state.
+
+**Memory filters and rerankers see eligible evidence.** FTS selection applies type, timestamp and authority filters before its candidate limit and exact-match shortcuts. Excluded literal matches no longer suppress semantic fallback. Project and family rerankers receive a bounded matched atom with its source span before the parent beginning, keeping tail evidence visible inside local input limits while retaining bounded parent context for remote ranking.
+
+Regressions cover oversized and budget-exhausted review repairs, abort-aware shared JEV transport, a two-actor cooldown barrier with a loopback HTTP server, more than forty excluded memory rows, excluded exact matches and tail-only reranking. The transport and ranker fixtures do not establish live judge billing or model-ranking improvements.
+
 ## 0.34.0 — 2026-10-08
 
 **Generation results survive interruption.** Completed image bytes are saved before local decoding and registration; corrupt bytes retain honest recovery evidence. URL-only results receive private checkpoints and a GET-only `image_generate recover` action. Speech retains complete paid responses and unknown submission checkpoints. `narration_tts recover` uses saved chunks only, without requesting generation. A later pipeline failure preserves paid narration with an actionable recovery receipt. Score renderer, SoundFont and source options are checked before narration starts.

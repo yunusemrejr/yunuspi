@@ -1655,6 +1655,24 @@ test('deleting the file that justified a semantic aspect never presents its old 
  assert.ok(!security || !/Carried forward/.test(security.evidence[0] ?? ''), 'a removed file cannot be certified by its earlier pass');
 });
 
+for (const reason of ['oversized file', 'aggregate scan budget']) test(`a repair with an ${reason} cannot reuse content-dependent passes`, async (t) => {
+ const f = await fixture(t);
+ f.api.input({ source: 'interactive', text: 'Check security, interface and runtime performance while implementing this behavior.' });
+ if (reason === 'aggregate scan budget') {
+  for (let i = 0; i < 8; i++) await f.mutate(`src/padding-${i}.js`, '// padding\n' + ' '.repeat(239900));
+ }
+ await f.mutate('src/service.js', 'export const value=1;');
+ await f.tool({ action: 'review' });
+ assert.ok(['security', 'interface', 'runtime'].every(id => f.calls.at(-1)[0].aspects.some(a => a.id === id)));
+ await f.mutate('src/service.js', 'export const value=2;\n' + ' '.repeat(reason === 'oversized file' ? 256001 : 100000));
+ const second = await f.tool({ action: 'review' });
+ const data = second.details ?? JSON.parse(second.content[0].text);
+ for (const id of ['security', 'interface', 'runtime']) {
+  assert.ok(f.calls.at(-1)[0].aspects.some(a => a.id === id), `${id} coverage is unknown until re-reviewed`);
+  assert.ok(!data.reports.find(r => r.aspect === id).evidence.some(e => /Carried forward/.test(e)));
+ }
+});
+
 test('review parent receipts compact duplicate findings while inspect retains full original evidence', async t => {
   const detail = 'The login handler persists session credentials in browser-visible cookies without HttpOnly protection, allowing injected scripts to capture the token and impersonate the authenticated user.';
   const f = await fixture(t, { runner: async req => req.aspects.map(aspect => ({ aspect: aspect.id, ok: true, text: JSON.stringify({
