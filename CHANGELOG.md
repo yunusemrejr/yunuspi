@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.2 — 2026-10-08
+
+**Installation verification recognizes the shipped XML parser.** The canonical vendored dependency inventory now includes the pinned `@xmldom/xmldom` runtime dependency introduced for strict SVG parsing. A cross-source regression keeps that inventory synchronized with the runtime package manifest, so a valid installation cannot report this dependency as drift. The review, cancellation, provider-admission and memory fixes from 0.34.1 are retained.
+
 ## 0.34.1 — 2026-10-08
 
 **Review passes require known unchanged coverage.** Oversized files and exhausted source-scan budgets invalidate content-dependent security, interface and runtime passes during repairs, just like unavailable source. A skipped scan cannot certify unchanged behavior.

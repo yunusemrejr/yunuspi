@@ -2090,6 +2090,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - `@ast-grep/cli`
 - `@ast-grep/napi`
 - `@mozilla/readability`
+- `@xmldom/xmldom`
 - `acorn`
 - `defuddle`
 - `jiti`

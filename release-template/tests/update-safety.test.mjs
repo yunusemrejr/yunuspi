@@ -11,6 +11,13 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => f
 const {updateInvocation} = await import(pathToFileURL(path.join(agent, 'scripts/core-update.mjs')));
 const {CORE_COMPATIBILITY_TESTS} = await import(pathToFileURL(path.join(agent, 'scripts/lib/core-compatibility.mjs')));
 
+test('the verifier dependency inventory matches the shipped runtime dependencies', () => {
+ const manifest=JSON.parse(fs.readFileSync(path.join(agent,'extensions/manifest.json'),'utf8'));
+ const runtime=JSON.parse(fs.readFileSync(path.join(agent,'npm/package.json'),'utf8'));
+ assert.deepEqual([...manifest.vendoredDeps].sort(),Object.keys(runtime.dependencies).sort(),
+  'a shipped runtime dependency must not be reported as installation drift');
+});
+
 test('retirement checks match whole component names', () => {
  const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
  const declaration=source.match(/function retireNameRe\(name\) \{[\s\S]*?\n\}/)?.[0];assert.ok(declaration);

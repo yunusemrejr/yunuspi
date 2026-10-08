@@ -7341,6 +7341,7 @@
       "@ast-grep/cli",
       "@ast-grep/napi",
       "@mozilla/readability",
+      "@xmldom/xmldom",
       "acorn",
       "defuddle",
       "jiti",
