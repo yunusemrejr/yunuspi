@@ -113354,7 +113354,12 @@ function activateExtension(hostPi) {
         if (generation !== runtime.sessionGeneration || getStableSessionId(checkCtx) !== sessionId || checkCtx.signal?.aborted || probeCtxActive(checkCtx) === false) return cancelled();
         const result = await runDeferredMutationDrain(checkCtx, true, readbackPath);
         if (generation !== runtime.sessionGeneration || getStableSessionId(checkCtx) !== sessionId || checkCtx.signal?.aborted || probeCtxActive(checkCtx) === false) return cancelled();
-        if (result?.failed?.length || result?.requeued) return {block:true,reason:"Pi Lens deferred formatting/autofix failed before verification. Resolve the configured formatter errors or explicitly disable automatic formatting, then rerun the check/review."};
+        if (result?.failed?.length || result?.requeued) {
+          // Name the files and errors: a bare refusal left agents unable to find what to fix.
+          const root = typeof checkCtx.cwd === "string" ? `${checkCtx.cwd.replace(/\/+$/, "")}/` : "";
+          const detail = (result.failed ?? []).slice(0, 3).map((row) => `${String(row.filePath ?? "").startsWith(root) && root ? String(row.filePath).slice(root.length) : row.filePath}: ${String(row.errors?.[0] ?? "unknown error").replace(/\s+/g, " ").slice(0, 240)}`).join("; ");
+          return {block:true,reason:`Pi Lens deferred formatting/autofix failed before verification${detail ? ` (${detail})` : ""}. Resolve the configured formatter errors or explicitly disable automatic formatting, then rerun the check/review.`};
+        }
       } finally { setAmbientAbortSignal(void 0); }
     }, (checkCtx) => {
       const sessionId = getStableSessionId(checkCtx);

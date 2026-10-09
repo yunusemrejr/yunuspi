@@ -354,7 +354,7 @@ export async function projectDir(value: unknown, cwd: string, mustExist = true):
   const dir = canonicalMutationPath(value, root);
   const denial = selfMutationDenial(path.join(dir, "video.json"), root);
   if (denial) throw new Error(denial);
-  if (mustExist && !existsSync(path.join(dir, "video.json"))) throw new Error(`${dir} is not a video project (no video.json); create one with video_project action:"init"`);
+  if (mustExist && !existsSync(path.join(dir, "video.json"))) throw new Error(`${dir} is not a video project (no video.json); create one with video_project action:"init", or for standalone audio use music_compose or audio_generate`);
   return dir;
 }
 

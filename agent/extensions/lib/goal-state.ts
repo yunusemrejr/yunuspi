@@ -116,7 +116,9 @@ export function setCriteria(goal: GoalState, items: readonly string[], now = Dat
 	const known = new Set(settled.map((criterion) => criterion.text.toLowerCase()));
 	const added: GoalCriterion[] = [];
 	for (const item of items) {
-		const text = clip(item, 240);
+		// Agents often number their items ("C1: …"); the owner assigns ids, so a
+		// kept prefix displayed as "C15: C1: …".
+		const text = clip(String(item).replace(/^\s*(?:C\d+|V)\s*[:.)-]\s*/, ""), 240);
 		if (text.length < 4 || known.has(text.toLowerCase())) continue;
 		known.add(text.toLowerCase());
 		added.push({ id: `C${++counter}`, text, status: "open" });

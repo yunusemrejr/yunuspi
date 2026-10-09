@@ -11,6 +11,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
+import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
 import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts } from './lib/continuation-notice.ts';
 import {
@@ -213,10 +214,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			action: StringEnum(["status", "met", "waive", "criteria", "blocked", "complete"] as const),
 			id: Type.Optional(Type.String({ maxLength: 8, description: "Criterion id such as C1 or V" })),
-			evidence: Type.Optional(Type.String({ maxLength: 600, description: "What was observed: command and result, file and line, screenshot finding" })),
-			items: Type.Optional(Type.Array(Type.String({ maxLength: 240 }), { maxItems: MAX_CRITERIA - 1 })),
-			reason: Type.Optional(Type.String({ maxLength: 400 })),
-			summary: Type.Optional(Type.String({ maxLength: 800 })),
+			// The owner clips each text and keeps at most MAX_CRITERIA - 1 items; a
+			// schema refusal of longer input only cost a retry turn per call.
+			evidence: Type.Optional(Type.String({ maxLength: 500 * RATIONALE_INTAKE, description: "What was observed: command and result, file and line, screenshot finding" })),
+			items: Type.Optional(Type.Array(Type.String({ maxLength: 240 * RATIONALE_INTAKE }), { maxItems: (MAX_CRITERIA - 1) * 2 })),
+			reason: Type.Optional(Type.String({ maxLength: 400 * RATIONALE_INTAKE })),
+			summary: Type.Optional(Type.String({ maxLength: 800 * RATIONALE_INTAKE })),
 		}),
 		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: ExtensionContext) {
 			if (!goal || !goalIsLive(goal)) return text("No live goal in this session; nothing to record.");

@@ -3,9 +3,13 @@ import { Type } from "typebox";
 
 /** A string enum as `{type:"string",enum:[...]}`. The `Type.Union` of `Type.Literal`s it replaces
  * serialized every value as its own `anyOf` object on every model turn, roughly three times the tokens.
- * Depends on typebox only, so modules that are loaded in isolation (tests, sandboxes) can use it. */
-export const choices = (values: readonly string[], description?: string) =>
-  Type.Unsafe<string>({ type: "string", enum: [...values], ...(description ? { description } : {}) });
+ * Depends on typebox only, so modules that are loaded in isolation (tests, sandboxes) can use it.
+ * Numeric values get a numeric type: `{type:"string",enum:[2,4]}` accepts neither 4 nor "4". */
+export const choices = (values: readonly (string | number)[], description?: string) =>
+  Type.Unsafe<string>({
+    type: values.every((value) => typeof value === "number") ? (values.every(Number.isInteger) ? "integer" : "number") : "string",
+    enum: [...values], ...(description ? { description } : {}),
+  });
 
 /** Largest free-text rationale a tool accepts before the call is refused, as a multiple of what the owner keeps.
  * Over-long rationales used to fail schema validation outright: each refusal cost the agent a whole retry turn

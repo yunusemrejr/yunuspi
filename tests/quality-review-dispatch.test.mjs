@@ -203,6 +203,14 @@ try {
  assert.equal(autoPaidOnly.calls.length,0,'automatic paid-only capacity stays unattempted');
  const explicitPaid=fixture({models:[cheapPaid]});
  assert.ok((await explicitPaid.run({...request,automatic:false})).every(r=>r.ok),'explicit reviews may spend paid');
+ const {enforceAssistanceFlow}=await import(shared+'assistance-shadow.ts');
+ const spent=fixture();
+ assert.equal(enforceAssistanceFlow('council-elsewhere',{agent:'automatic-free-assistant',task:'other automatic help'}),'admitted');
+ assert.ok((await spent.run({...request,automatic:false})).every(r=>r.ok),'an explicit review is never refused by the automation budget');
+ assert.ok(spent.calls.length>0);
+ const spentAuto=fixture();
+ assert.equal(enforceAssistanceFlow('council-elsewhere',{agent:'automatic-free-assistant',task:'other automatic help'}),'admitted');
+ assert.ok((await spentAuto.run({...request,automatic:true})).every(r=>!r.ok&&r.unattempted===true),'automatic reviews still respect the spent budget');
  const priorCouncil=process.env.PI_SCOPE_COUNCIL,priorDiscovery=process.env.PI_SKILL_DISCOVERY;
  process.env.PI_SCOPE_COUNCIL='off';process.env.PI_SKILL_DISCOVERY='off';
  try{

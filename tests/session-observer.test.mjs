@@ -796,3 +796,17 @@ test('changed child state invalidates undelivered and carried orchestration advi
   assert.ok(h.receipts.some(([type,data]) => type === 'session-observer-delivery-v1' && data.status === 'dropped:stale'));
   h.close();
 });
+
+test('empty reviews build a quiet backoff even while routine backlog remains', async () => {
+  const time = clock(); let calls = 0, revision = 0;
+  const observer = createSessionObserver({ ...time,
+    snapshot: () => ({ packet: packet(), route, reviewKey: String(++revision), backlog: 4, reviewed() {} }),
+    notice() {}, receipt() {}, dispatch: async () => { calls++; return { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] }; },
+  });
+  observer.begin('owner'); observer.start();
+  for (let i = 0; i < 20; i++) await time.advance(30_000);
+  // Ten minutes at a 30s cadence: backlog alone used to force all 20 reviews.
+  assert.ok(calls <= 8, `quiet reviews backed off (${calls} reviews)`);
+  assert.ok(calls >= 3, 'the bounded hold still lets reviews arrive');
+  observer.close();
+});

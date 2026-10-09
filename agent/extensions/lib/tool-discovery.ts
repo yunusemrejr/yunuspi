@@ -319,6 +319,7 @@ export function registerToolDiscovery(pi: any) {
   let generation = 0, manager: any;
   let automatic = new Set<string>(), explicitSelections = new Set<string>(), usedCore = new Set<string>(), namedCore = new Set<string>();
   const sessionSelections = new Set<string>();
+  let known = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
   let pendingInput: { id: string; text: string; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '';
   const excluded = (name: string, prompt = routingTask) => pipelineToolExcluded(prompt, name) || pipelineToolExcluded(authoredTask, name);
@@ -332,9 +333,45 @@ export function registerToolDiscovery(pi: any) {
     let live: Set<string> | undefined;
     try { live = new Set(pi.getActiveTools()); } catch { /* No live list: apply the staged change anyway. */ }
     if (live && live.size === next.length && next.every(name => live.has(name))) { flushed = new Set(next); return; }
-    try { pi.setActiveTools(next); flushed = new Set(next); } catch { /* Host keeps its wire if refused; staging stays logical. */ }
+    try { pi.setActiveTools(next); } catch { return; /* Host keeps its wire if refused; staging stays logical. */ }
+    // The host ignores names it no longer registers. Record the wire it
+    // actually applied; a staged ghost name would otherwise read as an
+    // external selection change and lock activation for the session.
+    try { flushed = new Set(pi.getActiveTools()); } catch { flushed = new Set(next); }
+    for (const name of next) if (!flushed.has(name)) { expected.delete(name); allowed.delete(name); }
+  };
+  // Other owners widen the wire too: Pi Lens's activation tool (and /goal
+  // before 0.32) enabled registered tools, and the host auto-activates tools
+  // registered after startup. Treating either as an external selection locked
+  // activation for the rest of the session. Keep a registered tool another
+  // owner enabled, adopt a newly registered one as discoverable, and drop names
+  // the host no longer registers. Narrowing a registered tool off the wire
+  // remains an external restriction, and discovery fails closed for it.
+  const reconcile = () => {
+    let live: Set<string>, registered: Set<string>;
+    try { live = new Set(pi.getActiveTools()); } catch { return false; }
+    if (same(live, flushed)) return true;
+    try { registered = new Set(pi.getAllTools().map((tool: any) => tool.name)); } catch { return false; }
+    const removed = [...flushed].filter(name => !live.has(name));
+    if (removed.some(name => registered.has(name))) return false;
+    for (const name of live) if (!flushed.has(name)) {
+      allowed.add(name);
+      if (known.has(name)) { explicitSelections.add(name); expected.add(name); }
+    }
+    known = registered;
+    for (const name of removed) { allowed.delete(name); expected.delete(name); explicitSelections.delete(name); automatic.delete(name); }
+    flushed = live;
+    wireDirty = !same(expected, flushed);
+    return true;
+  };
+  const wireDrift = () => {
+    try {
+      const live = new Set<string>(pi.getActiveTools());
+      return {added: [...live].filter(name => !flushed.has(name)).slice(0, 8), removed: [...flushed].filter(name => !live.has(name)).slice(0, 8)};
+    } catch { return undefined; }
   };
   const flushPending = () => {
+    if (owner) reconcile();
     if (!wireDirty) return;
     // A host narrowing access between discovery and the boundary wins.
     const live = new Set<string>(pi.getActiveTools());
@@ -365,6 +402,7 @@ export function registerToolDiscovery(pi: any) {
     const current = pi.getActiveTools();
     if (!current.includes('tool_search')) return;
     const available = new Set(pi.getAllTools().map((tool: any) => tool.name));
+    known = available;
     // Compare against the last flushed wire state, not the staging set:
     // internally staged (wireDirty) additions must not read as an external
     // selection change, or re-init drops them along with their receipts.
@@ -385,7 +423,17 @@ export function registerToolDiscovery(pi: any) {
   for (const event of ['session_before_switch', 'session_before_fork', 'session_before_tree', 'session_shutdown']) pi.on(event, invalidate);
   // turn_end precedes the owned core's next-turn context snapshot. turn_start
   // would be too late; mutating in execute would split a parallel tool batch.
-  pi.on('turn_end', flushPending);
+  pi.on('turn_end', (event: any, ctx: any) => {
+    // A call to a registered tool that lazy discovery kept off the wire fails
+    // as "not found" (measured: todo on a direct-tier start). Stage it within
+    // the original ceiling so the retry on the next turn finds it.
+    if (owner && ctx && identity(ctx) === owner) for (const result of event?.toolResults ?? []) {
+      const name = result?.toolName;
+      if (result?.isError && typeof name === 'string' && allowed.has(name) && !expected.has(name) && !excluded(name)
+        && result.content?.[0]?.text === `Tool ${name} not found`) { automatic.add(name); expected.add(name); wireDirty = true; }
+    }
+    flushPending();
+  });
   pi.on('input', (event: any) => {
     if (!['interactive', 'rpc'].includes(event.source)) return;
     const text = typeof event.originalText === 'string' ? event.originalText : event.text;
@@ -394,7 +442,7 @@ export function registerToolDiscovery(pi: any) {
   pi.on('before_agent_start', (event: any, ctx: any) => {
     // Stage strong-intent studio bundles only while discovery owns the wire.
     try {
-      if (owner && identity(ctx) === owner && same(flushed, new Set(pi.getActiveTools()))) {
+      if (owner && identity(ctx) === owner && reconcile()) {
         if (pendingInput?.signal?.aborted) { flushPending(); return; }
         const nextTask = !started || Boolean(pendingInput && pendingInput.id !== acceptedInput);
         // Release inferred schemas on the next task, preserving deliberate
@@ -428,7 +476,7 @@ export function registerToolDiscovery(pi: any) {
     // Discovery remains the sole wire owner. Automatic selection can expose
     // schemas only from the caller's original tool ceiling.
     try {
-      if (!same(flushed, new Set(pi.getActiveTools()))) return;
+      if (!reconcile()) return;
       // Session owners such as /goal retain their control schema across the
       // next authored-task reset without mutating the wire behind discovery.
       for (const name of event.names) if (allowed.has(name) && !excluded(name)) {
@@ -477,14 +525,15 @@ export function registerToolDiscovery(pi: any) {
       const signal = _signal ? AbortSignal.any([_signal, sessionController.signal]) : sessionController.signal;
       const superseded = () => signal.aborted || ticket !== generation || identity(ctx) !== requestOwner
         || activationRequested && !same(flushed, new Set(pi.getActiveTools()));
-      const active = new Set(pi.getActiveTools());
       const ownerMatches = Boolean(owner && identity(ctx)===owner);
+      if (ownerMatches) reconcile();
+      const active = new Set(pi.getActiveTools());
       const selectionChanged = !ownerMatches || !same(flushed,active);
       // Read-only metadata discovery remains useful after an external tool
       // selection change. Any request that can alter schemas still requires
       // the discovery-owned active set and therefore fails closed.
       if (activationRequested && selectionChanged)
-        return answer({error:'Tool activation is unavailable because the active selection is externally owned or changed outside discovery. Use metadata browsing, or start without an explicit tool restriction.'},true);
+        return answer({error:'Tool activation is unavailable because the active selection is externally owned or changed outside discovery. Use metadata browsing, or start without an explicit tool restriction.', ...(ownerMatches ? {drift: wireDrift()} : {})},true);
 
       if (kind !== 'tools' && kind !== 'capabilities' && kind !== 'commands')
         return answer({error:'Unknown discovery kind. Use "tools", "capabilities", or "commands".'},true);

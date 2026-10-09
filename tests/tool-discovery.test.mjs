@@ -161,6 +161,43 @@ test("unknown names cannot broaden authority, and external selection changes are
  assert.equal((await f.call({ names: ["http_request"] })).isError, true);
  assert.deepEqual(f.active(), ["read", "tool_search"]);
 });
+test("tools registered after startup do not lock activation for the session", async () => {
+ const f = fixture();
+ // The host auto-activates a post-bind registration (the subagent supervisor
+ // registers on session_start); discovery adopts it as discoverable.
+ f.api.registerTool({ name: "subagent_supervisor", description: "Answer child requests", parameters: { type: "object" } });
+ const result = await f.call({ names: ["http_request"] });
+ assert.notEqual(result.isError, true, JSON.stringify(result.details));
+ f.hooks.before_agent_start();
+ assert.ok(f.active().includes("http_request"));
+ assert.ok(!f.active().includes("subagent_supervisor"), "late tools stay lazily discoverable");
+ assert.notEqual((await f.call({ names: ["subagent_supervisor"] })).isError, true);
+ f.hooks.turn_end();
+ assert.ok(f.active().includes("subagent_supervisor"));
+});
+test("another owner enabling a registered tool keeps it and leaves activation available", async () => {
+ const f = fixture();
+ // /goal before 0.32 and Pi Lens's activation tool widen the wire directly.
+ f.api.setActiveTools([...f.active(), "browser_session"]);
+ const result = await f.call({ names: ["http_request"] });
+ assert.notEqual(result.isError, true, JSON.stringify(result.details));
+ f.hooks.before_agent_start();
+ assert.ok(f.active().includes("http_request"));
+ assert.ok(f.active().includes("browser_session"), "the other owner's choice stays on the wire");
+ f.api.setActiveTools(f.active().filter(name => name !== "read" && name !== "http_request"));
+ const narrowed = await f.call({ names: ["http_request"] });
+ assert.equal(narrowed.isError, true);
+ assert.match(narrowed.details.error, /externally owned/, "narrowing a registered tool still fails closed");
+ assert.deepEqual(narrowed.details.drift.removed.sort(), ["http_request", "read"]);
+});
+test("a call to a registered but undiscovered tool stages it for the retry", () => {
+ const f = fixture();
+ assert.ok(!f.active().includes("http_request"));
+ f.hooks.turn_end({ toolResults: [{ toolName: "http_request", isError: true, content: [{ type: "text", text: "Tool http_request not found" }] }] }, f.ctx);
+ assert.ok(f.active().includes("http_request"));
+ f.hooks.turn_end({ toolResults: [{ toolName: "not_registered", isError: true, content: [{ type: "text", text: "Tool not_registered not found" }] }] }, f.ctx);
+ assert.ok(!f.active().includes("not_registered"), "unknown names never broaden authority");
+});
 test("activation receipts restore on resume and separate session switches retain discovery", async () => {
  const f = fixture();
  await f.call({ names: ["http_request"] });

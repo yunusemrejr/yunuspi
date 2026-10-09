@@ -164,6 +164,7 @@ test('configured format disablement stays exact and failures block before check 
   const failed=fixture(t,{failFormat:true});failed.queue();
   const block=await flushLensBeforeVerification(event('quality_review'),failed.ctx);
   assert.equal(block.block,true);assert.match(block.reason,/formatter errors/);
+  assert.match(block.reason,/\(range\.js: (?:Error: )?Synthetic configured formatter failure\)/,'the refusal names the failing file and error');
   assert.equal(failed.runtime.pendingDeferredMutationCount,1,'a failed formatter remains retryable, never accepted');
 });
 

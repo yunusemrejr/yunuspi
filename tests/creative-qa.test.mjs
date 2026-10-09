@@ -82,6 +82,7 @@ test("creativeVerificationLines gate only newest blocking receipts", () => {
   assert.deepEqual(qa.creativeVerificationLines([fail, clean]), []);
   assert.deepEqual(qa.creativeVerificationLines([clean, fail]), [], "order-independent: newest receipt wins");
   assert.match(qa.creativeVerificationLines([], { name: "brief" })[0], /no visual review is recorded yet/);
+  assert.deepEqual(qa.creativeVerificationLines([], { name: "brief" }, true), [], "a recorded video_qa review covers a film's direction");
   assert.deepEqual(qa.creativeVerificationLines([]), []);
 });
 

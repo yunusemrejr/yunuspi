@@ -56,6 +56,11 @@ test('criteria replacement keeps settled records and always keeps verification',
  assert.equal(new Set(goal.criteria.map(c=>c.id)).size,goal.criteria.length,'ids stay unique');
 });
 
+test('criteria drop agent-supplied id prefixes so ids are not nested',()=>{
+ const goal=gs.setCriteria(gs.createGoal('Ship the exporter'),['C1: export CSV with header','V. verified end to end','C12) handles unicode']);
+ assert.deepEqual(goal.criteria.filter(c=>c.status==='open').slice(0,3).map(c=>c.text),['export CSV with header','verified end to end','handles unicode']);
+});
+
 test('a full criteria list still keeps the verification criterion',()=>{
  let goal=gs.createGoal('Ship the exporter');
  goal=met(goal,'C1');

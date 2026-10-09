@@ -408,7 +408,10 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			const launchId = `quality-review-${randomUUID()}`, assigned = groups[index];
 			const memberSignal = legSignal;
 			const pending = assigned.map((a:any)=>({aspect:a.id,ok:false,text:'',gap:'The native reviewer failed or returned no usable result.'}));
-			if (enforceAssistanceFlow(recoveryFlowId, { agent: 'automatic-free-assistant', task: `quality-review: ${request.task}`, model: member.route, runId: recoveryFlowId }) !== 'admitted') {
+			// Automation budgets bind only harness-initiated reviews. An explicit
+			// quality_review call was refused here while the completion gate kept
+			// requiring that same review, so a finished goal could only end blocked.
+			if (request.automatic === true && enforceAssistanceFlow(recoveryFlowId, { agent: 'automatic-free-assistant', task: `quality-review: ${request.task}`, model: member.route, runId: recoveryFlowId }) !== 'admitted') {
 				return pending.map(r=>({...r,gap:'Independent review skipped: the automatic assistance budget for this request is already spent.',unattempted:true}));
 			}
 			const reviewTools = Math.min(REVIEW_LIMITS.maxTools, REVIEW_LIMITS.tools + Math.max(0, assigned.length - 1) * REVIEW_LIMITS.toolsPerExtraAspect);

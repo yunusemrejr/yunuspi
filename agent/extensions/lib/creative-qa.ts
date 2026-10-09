@@ -598,7 +598,7 @@ export function receiptKey(source: string, revision: string): string {
 /** Verification lines for the completion gate. A receipt blocks only while
  * it is the newest receipt for its source AND carries FAIL sections; a
  * newer clean receipt on the same source resolves it. Pure. */
-export function creativeVerificationLines(receipts: readonly VisualReceipt[], direction?: { name: string } | undefined): string[] {
+export function creativeVerificationLines(receipts: readonly VisualReceipt[], direction?: { name: string } | undefined, mediaReviewed = false): string[] {
   const lines: string[] = [];
   const newest = new Map<string, VisualReceipt>();
   for (const receipt of receipts) {
@@ -611,7 +611,7 @@ export function creativeVerificationLines(receipts: readonly VisualReceipt[], di
       lines.push(`visual review: ${receipt.blocking} blocking finding(s) open on ${receipt.source} (rev ${receipt.revision}): ${ids}`.slice(0, 280));
     }
   }
-  if (direction && !receipts.length) lines.push(`creative direction "${direction.name}" is set but no visual review is recorded yet`);
+  if (direction && !receipts.length && !mediaReviewed) lines.push(`creative direction "${direction.name}" is set but no visual review is recorded yet`);
   return lines.slice(0, 8);
 }
 

@@ -462,7 +462,7 @@ interface ObserverSnapshot {
   /** An unread failure, intervention or completion claim needs the full reviewer. */
   requiresFullReview?: boolean;
   current?: (advice?: ObserverAdvice) => boolean | string; reviewed?: () => void;
-  /** Unread events left after this packet; a backlog is never quiet. */
+  /** Unread events left after this packet; it skips one quiet hold, not a quiet streak. */
   backlog?: number;
   /** Called once when the review is actually dispatched. */
   dispatched?: () => void;
@@ -604,7 +604,10 @@ export function createSessionObserver(ports: ObserverPorts) {
     if ((snapshot.reviewKey ?? snapshot.packet.hash) === lastHash) { checkIn('No new evidence to review; no repeated advice sent.'); return; }
     const hold = holdMs();
     let salience = 0; try { salience = ports.salience?.() ?? 0; } catch { /* Salience only shortens a wait. */ }
-    if (!triageDeferred && hold && now() - lastReviewAt < hold && salience === salienceMark && !(Number(snapshot.backlog) > 0)) {
+    // Leftover backlog skips one quiet hold, not a streak: measured sessions kept
+    // some unread routine rows after nearly every review, so empty reviews
+    // never built a backoff and a paid review ran every interval.
+    if (!triageDeferred && hold && now() - lastReviewAt < hold && salience === salienceMark && !(Number(snapshot.backlog) > 0 && quiet < 2)) {
       checkIn(quiet ? `Quiet stretch: ${quiet} review${quiet === 1 ? '' : 's'} without new advice; the next review waits up to ${Math.round(hold / 1000)}s unless errors, results, claims or plan changes arrive.`
         : `Recent observer responses were unusable; the next review waits up to ${Math.round(hold / 1000)}s unless errors, results, claims or plan changes arrive.`);
       return;
@@ -718,11 +721,10 @@ export function createSessionObserver(ports: ObserverPorts) {
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
       lastReviewed = { evidence: snapshot.packet.evidence.map(row => ({ ...row })), note: advice.note };
       const overlap = typeof freshness === 'string' ? freshness : undefined;
-      const backlog = Number(snapshot.backlog) > 0;
       // A quiet, failed or duplicate review says nothing about whether the
       // previous note reached the main agent. Retain that one bounded pending
       // note until a receipt consumes it; its own freshness guard still runs.
-      if (!advice.note) { quiet = backlog ? 0 : quiet + 1; notice('reviewed', `Chunk ${++check}: no useful new reminder${suffix}.`); return; }
+      if (!advice.note) { quiet++; notice('reviewed', `Chunk ${++check}: no useful new reminder${suffix}.`); return; }
       const body = (ports.adviceText ?? observerAdviceText)(advice), key = normalize(body), tokens = new Set(normalize(advice.note).split(' '));
       const similarity = (previous: Set<string>) => [...tokens].filter(token => previous.has(token)).length / new Set([...tokens, ...previous]).size;
       // A paraphrase that recommends only tools/skills the last notes already
@@ -741,7 +743,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       let topic: string | undefined; try { topic = ports.repeatKey?.(advice); } catch { topic = undefined; }
       const topicRepeat = Boolean(topic) && (topics.get(topic!) ?? 0) >= 2;
       const repeated = delivered.has(key) || sameMove || peerRepeat || topicRepeat || recentAdvice.some(previous => tokens.size >= 6 && similarity(previous) >= .8);
-      if (repeated) { quiet = backlog ? 0 : quiet + 1; notice('reviewed', `Chunk ${++check}: repeated advice suppressed${suffix}.`); return; }
+      if (repeated) { quiet++; notice('reviewed', `Chunk ${++check}: repeated advice suppressed${suffix}.`); return; }
       quiet = 0;
       if (topic) topics.set(topic, (topics.get(topic) ?? 0) + 1);
       delivered.add(key); if (delivered.size > 256) delivered.delete(delivered.values().next().value!);

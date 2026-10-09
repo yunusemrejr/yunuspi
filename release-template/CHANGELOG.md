@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.35.2 — 2026-10-09
+
+**Tool discovery stays usable when another owner touches the wire.** Discovery failed closed for the rest of a session whenever anything else changed the active tool set. In the 10-05 to 10-07 sessions reviewed, the first `tool_search` activation already failed as "externally owned" (the `/goal` schema was added behind discovery, fixed in 0.32.0), and calling Pi Lens's own `pi_lens_activate_tools` or registering a tool after startup still produced the same lock on 0.35.1. A registered tool another owner enables now stays enabled, a newly registered tool becomes discoverable, the wire the host actually applied is recorded, and a host or command-line narrowing still fails closed with the drift named. A call to a registered tool that lazy discovery kept off the wire stages it for the next turn instead of repeating "Tool … not found".
+
+**Completion no longer deadlocks on its own gates.** An explicit `quality_review` call was refused by the automatic-assistance budget while the completion gate kept requiring that review, so finished goals could only end blocked. Explicit reviews now bypass that budget; automatic reviews still respect it. A film's creative direction is satisfied by a recorded `video_qa` review instead of the page-oriented `visual_review`, whose rubric rejects raster frames and demanded responsive and accessibility evidence for MP4 deliveries.
+
+**Numeric choices validate.** `music_compose` and `media_pipeline` time-signature denominators and `image_convert` rotation declared numbers as a string enum, so no value could pass. The shared helper now types numeric enums, and the extension-graph test rejects any enum whose values contradict its declared type.
+
+**Vision calls return observations.** Reasoning routes keep answer room beyond their reasoning: a high-thinking call spent its whole 2,048-token allowance thinking and returned nothing, still billed. The extra ceiling costs nothing unless used. Refusals for a text-only or unknown model now list available vision models, same provider first, then cheapest, instead of leaving the agent to guess ids.
+
+**Fewer wasted turns and paid reviews.** Goal criteria, evidence and reasons accept text the owner clips anyway instead of failing schema validation, and agent-numbered criteria no longer nest ids such as "C15: C1:". Observer and watchmaker reviews that find nothing now build their quiet backoff even while routine backlog remains; measured watchmaker spend was 17–78% of the main session's, mostly on empty reviews. Pi Lens names the failing files and formatter errors when it blocks verification. `audio_synth` outside a video project points to `music_compose` and `audio_generate`.
+
 ## 0.35.1 — 2026-10-08
 
 **Creative production earns useful assistance.** Incidental “just/only” wording and generated acceptance prose no longer demote a video remake into mechanical work. Creation verbs pass the helper admission gate, and independent Blender, music and motion investigations receive concrete proof tasks under existing read-only, route, cost and tool ceilings. Settled adaptive updates admit failure-driven assistance independently of hook order. Missing capacity leaves the later opportunity available.

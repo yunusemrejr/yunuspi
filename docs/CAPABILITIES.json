@@ -3774,7 +3774,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 162
+        "line": 163
       },
       {
         "name": "google-account",
@@ -3809,52 +3809,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113833
+        "line": 113838
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113537
+        "line": 113542
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113594
+        "line": 113599
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113629
+        "line": 113634
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113606
+        "line": 113611
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113748
+        "line": 113753
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113562
+        "line": 113567
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113530
+        "line": 113535
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113767
+        "line": 113772
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113544
+        "line": 113549
       },
       {
         "name": "logs",
@@ -4117,7 +4117,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 491,
+        "line": 497,
         "kind": "factory"
       },
       {
@@ -4298,13 +4298,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 595,
+        "line": 601,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 300,
+        "line": 306,
         "kind": "factory"
       },
       {
@@ -4396,7 +4396,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 209,
+        "line": 210,
         "kind": "literal"
       },
       {
@@ -4438,7 +4438,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 537,
+        "line": 543,
         "kind": "factory"
       },
       {
@@ -4564,7 +4564,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 425,
+        "line": 431,
         "kind": "factory"
       },
       {
@@ -4823,13 +4823,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 456,
+        "line": 462,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 451,
+        "line": 457,
         "kind": "factory"
       },
       {
@@ -4871,19 +4871,19 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 451,
+        "line": 499,
         "kind": "literal"
       },
       {
         "name": "ui_consistency",
         "source": "agent/extensions/art-direction.ts",
-        "line": 414,
+        "line": 420,
         "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 388,
+        "line": 394,
         "kind": "factory"
       },
       {
@@ -4967,7 +4967,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 342,
+        "line": 348,
         "kind": "factory"
       },
       {
@@ -5174,7 +5174,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 209,
+        "line": 210,
         "kind": "literal"
       },
       {
@@ -5420,7 +5420,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 451,
+        "line": 499,
         "kind": "literal"
       },
       {
@@ -5455,7 +5455,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          267
+          273
         ],
         "knownNames": [
           "asset_register",

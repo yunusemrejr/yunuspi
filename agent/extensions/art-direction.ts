@@ -55,6 +55,8 @@ interface SessionCreative {
   autoSvgStamp?: string;
   browserOrigins: Map<string, { source: string; stamp: string }>;
   verifiedHashes: Map<string, string>;
+  /** A delivered film's direction was reviewed with video_qa record. */
+  mediaReviewed?: boolean;
 }
 
 const isChild = () => process.env.PI_SUBAGENT_CHILD === "1";
@@ -110,8 +112,8 @@ export default function artDirection(pi: any) {
       const own = state;
       disposeNotice = registerContinuationSource({ name: 'creative', session: ctx.sessionManager,
         pending: () => automatic() && own.followups < 2 && own.evidence.gaps().length && !isSessionStopped(ctx) ? ['finish current UI and SVG verification'] : [],
-        verification: () => [...(automatic() ? own.evidence.gaps() : []), ...creativeVerificationLines(own.receipts, own.direction), ...own.blockingRuns.values()],
-        verificationReceipts: () => [...(automatic() ? own.evidence.verification() : []), ...[...creativeVerificationLines(own.receipts, own.direction), ...own.blockingRuns.values()].map(line => ({ id: line, revision: own.evidence.stamp(), state: 'unresolved', line }))].slice(0, 10).map(row => ({ source: 'creative', ...row, brief: row.line })),
+        verification: () => [...(automatic() ? own.evidence.gaps() : []), ...creativeVerificationLines(own.receipts, own.direction, own.mediaReviewed), ...own.blockingRuns.values()],
+        verificationReceipts: () => [...(automatic() ? own.evidence.verification() : []), ...[...creativeVerificationLines(own.receipts, own.direction, own.mediaReviewed), ...own.blockingRuns.values()].map(line => ({ id: line, revision: own.evidence.stamp(), state: 'unresolved', line }))].slice(0, 10).map(row => ({ source: 'creative', ...row, brief: row.line })),
       });
     }
     return { sid, state };
@@ -172,7 +174,7 @@ export default function artDirection(pi: any) {
     if (event.source === 'extension' || !ctx?.cwd) return;
     const { state } = sessionOf(ctx);
     state.followups = 0;
-    if (!state.evidence.gaps().length && !state.blockingRuns.size && !creativeVerificationLines(state.receipts, state.direction).length) {
+    if (!state.evidence.gaps().length && !state.blockingRuns.size && !creativeVerificationLines(state.receipts, state.direction, state.mediaReviewed).length) {
       for (const row of state.evidence.changed()) state.verifiedHashes.set(row.file, row.hash);
       while (state.verifiedHashes.size > 64) state.verifiedHashes.delete(state.verifiedHashes.keys().next().value!);
       state.evidence = createCreativeEvidence();
@@ -213,6 +215,10 @@ export default function artDirection(pi: any) {
     if (call.epoch !== epoch) return;
     const state = await refresh(ctx);
     if (event.isError || call.epoch !== epoch) return;
+    // A film's direction is reviewed against its delivered frames with video_qa
+    // record. visual_review's page rubric rejects raster media, so requiring it
+    // held finished videos open through repeated failing review calls.
+    if (event.toolName === 'video_qa' && call.input.action === 'record') state.mediaReviewed = true;
     if (event.toolName === 'image_understand' && event.details?.observations && event.details?.provider && !event.details?.truncated) {
       for (const image of event.details.images ?? []) if (typeof image.hash === 'string' && !image.region) state.evidence.vision(image.hash);
     }

@@ -36,7 +36,16 @@ test("the installed extension graph registers every shipped command without load
       await loader.reload();
       const result = loader.getExtensions();
       const commands = result.extensions.flatMap(extension => [...extension.commands.values()]);
-      console.log(JSON.stringify({extensions: result.extensions.length, errors: result.errors,
+      // An enum whose values contradict its declared type can never validate.
+      const kinds = {string: v => typeof v === 'string', integer: Number.isInteger, number: v => typeof v === 'number', boolean: v => typeof v === 'boolean'};
+      const badEnums = [];
+      const walk = (node, where) => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node.enum) && kinds[node.type] && !node.enum.every(kinds[node.type])) badEnums.push(where);
+        for (const [key, child] of Object.entries(node)) walk(child, where + '.' + key);
+      };
+      for (const extension of result.extensions) for (const [name, tool] of extension.tools ?? []) walk(tool.definition?.parameters, name);
+      console.log(JSON.stringify({extensions: result.extensions.length, errors: result.errors, badEnums,
         commands: commands.map(command => command.name).sort(), invalid: commands.filter(command => typeof command.handler !== 'function').map(command => command.name)}));
       process.exit(0);
     `;
@@ -49,6 +58,7 @@ test("the installed extension graph registers every shipped command without load
     const result = JSON.parse(child.stdout.trim().split("\n").at(-1));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
+    assert.deepEqual(result.badEnums, []);
     assert.equal(result.extensions, 63);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");

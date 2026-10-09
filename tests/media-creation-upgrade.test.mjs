@@ -145,11 +145,24 @@ test('vision uses current provider registry, thinking and real cropped attachmen
   const ctx = { model, thinkingLevel: 'high', modelRegistry: { completeSimple: async (...args) => { calls.push(args); return { stopReason: 'stop', content: [{ type: 'text', text: 'Visible red rectangle.' }], usage: { totalTokens: 12 } }; } } };
   const result = await vision.imageUnderstand({ path: 'ref.png', prompt: 'Describe visible evidence', region: { x: 4, y: 0, width: 8, height: 8 } }, cwd, undefined, ctx, { onUsage: (_, s) => usage.push(s) });
   assert.equal(calls[0][0], model); assert.equal(calls[0][2].reasoning, 'high'); assert.equal(ctx.model, model);
+  assert.equal(calls[0][2].maxTokens, 2048, 'a non-reasoning route keeps the requested ceiling');
+  const thinker = { ...model, reasoning: true, maxTokens: 65536 }, thinkingCalls = [];
+  const lengthOnly = { stopReason: 'length', content: [{ type: 'thinking', thinking: 'long deliberation' }], usage: { totalTokens: 2048 } };
+  await assert.rejects(vision.imageUnderstand({ path: 'ref.png', prompt: 'Describe' }, cwd, undefined, { ...ctx, model: thinker }, { complete: async (...args) => { thinkingCalls.push(args); return lengthOnly; } }), /whole output allowance \(including reasoning\)/);
+  assert.equal(thinkingCalls[0][2].maxTokens, 2048 + 8192, 'reasoning routes keep answer room beyond their reasoning');
   const attachment = calls[0][1].messages[0].content.find(c => c.type === 'image');
   const pixels = await design.decodeImage(Buffer.from(attachment.data, 'base64'));
   assert.equal(pixels.sourceWidth, 8); assert.equal(result.images[0].original.width, 16);
   assert.deepEqual(usage, ['pending', 'completed']);
   assert.throws(() => vision.visionModel({}, { model: { ...model, input: ['text'] } }), /does not accept images/);
+  const registry = { getAvailable: () => [
+    { provider: 'other', id: 'dear', input: ['text', 'image'], cost: { input: 5, output: 15 } },
+    { provider: 'other', id: 'cheap', input: ['text', 'image'], cost: { input: 0.1, output: 0.4 } },
+    { provider: 'fixture', id: 'text-only', input: ['text'] },
+    { provider: 'fixture', id: 'sibling', input: ['text', 'image'], cost: { input: 1, output: 2 } },
+  ] };
+  assert.throws(() => vision.visionModel({}, { model: { ...model, input: ['text'] }, modelRegistry: registry }),
+    /provider:"fixture" model:"sibling", provider:"other" model:"cheap", provider:"other" model:"dear" \(action:models lists all 3\)/);
   await assert.rejects(vision.imageUnderstand({ path: 'ref.png', prompt: 'Describe', region: { x: -1, y: 0, width: 8, height: 8 } }, cwd, undefined, ctx), /inside the source/);
   assert.equal(calls.length, 1);
 });
