@@ -172,10 +172,11 @@ export async function studioFolder(value: unknown, cwd: string, prefix: string):
     await fs.writeFile(path.join(parent, ".gitignore"), "*\n", { flag: "wx" }).catch(() => {});
   } else parent = canonicalMutationPath(textPath(value), root);
   if (!containsPath(root, parent)) throw new Error("Output directory must be inside the current workspace");
-  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory must already exist");
   const output = path.join(parent, `${prefix}-${randomBytes(5).toString("hex")}`);
   const denial = selfMutationDenial(output, root);
   if (denial) throw new Error(denial);
+  await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory must be a directory");
   await fs.mkdir(output, { mode: 0o700 });
   return output;
 }

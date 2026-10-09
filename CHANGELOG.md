@@ -12,6 +12,8 @@
 
 **Fewer wasted turns and paid reviews.** Goal criteria, evidence and reasons accept text the owner clips anyway instead of failing schema validation, and agent-numbered criteria no longer nest ids such as "C15: C1:". Observer and watchmaker reviews that find nothing now build their quiet backoff even while routine backlog remains; measured watchmaker spend was 17–78% of the main session's, mostly on empty reviews. Pi Lens names the failing files and formatter errors when it blocks verification. `audio_synth` outside a video project points to `music_compose` and `audio_generate`.
 
+**Media tools create the folder you name.** Media, music, speech and design tools refused an `outputDir` that did not exist yet with a raw `ENOENT`, a retry turn each time an agent named a fresh folder such as `audio` or `out/takes`. They now create it inside the workspace after the existing containment and self-mutation checks; two tools already did this through a flag that is now the default. Timeline validation also matches `cueWords` the way measured narration words are matched, so a cue on `example.com.` or `e-mail` no longer fails as "does not occur in the narration".
+
 ## 0.35.1 — 2026-10-08
 
 **Creative production earns useful assistance.** Incidental “just/only” wording and generated acceptance prose no longer demote a video remake into mechanical work. Creation verbs pass the helper admission gate, and independent Blender, music and motion investigations receive concrete proof tasks under existing read-only, route, cost and tool ceilings. Settled adaptive updates admit failure-driven assistance independently of hook order. Missing capacity leaves the later opportunity available.

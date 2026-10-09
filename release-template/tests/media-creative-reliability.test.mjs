@@ -13,12 +13,24 @@ const { prepareSvgSource, svgRender, svgDiagnosticCollector } = await load('svg-
 const { imageGenerateRun, imageEditRun } = await load('image-generate.ts');
 const { encodeImage, decodeImage } = await load('design-studio.ts');
 const { mediaPipeline } = await load('media-pipeline.ts');
-const { run } = await load('media-process.ts');
+const { run, outputFolder } = await load('media-process.ts');
+const { studioFolder } = await load('design-studio.ts');
 const workspace = async t => { const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'media-creative-reliability-')); t.after(() => fs.rm(cwd, { recursive: true, force: true })); return cwd; };
 const source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path id="shape" fill="#2255aa" d="M8 8L32 8L32 32Z"/></svg>';
 const score = { bpm: 120, beats: 2, tracks: [{ notes: [{ pitch: 57, start: 0, duration: 2 }] }] };
 const env = { PI_IMAGE_BACKEND: 'openai-compatible', PI_IMAGE_API_URL: 'https://fixture.invalid/v1', PI_IMAGE_API_KEY: 'TEST_fixture_only', PI_IMAGE_MODEL: 'fixture/image' };
 const picture = () => encodeImage({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4).fill(255) }, 'png');
+
+test('a named output folder is created inside the workspace and never outside it', async t => {
+  const cwd = await workspace(t);
+  const dir = await outputFolder('audio/score', cwd);
+  assert.equal(path.dirname(dir), path.join(await fs.realpath(cwd), 'audio', 'score'));
+  assert.match(path.basename(await studioFolder('out/takes', cwd, 'take')), /^take-/);
+  await assert.rejects(outputFolder('../escape', cwd), /inside the current workspace/);
+  assert.equal(existsSync(path.join(path.dirname(cwd), 'escape')), false);
+  await fs.writeFile(path.join(cwd, 'file.txt'), 'x');
+  await assert.rejects(outputFolder('file.txt', cwd));
+});
 
 test('SVG diagnostics preserve late distinct findings without repeating every frame', () => {
   const collector = svgDiagnosticCollector();

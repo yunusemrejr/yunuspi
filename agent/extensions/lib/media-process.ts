@@ -28,15 +28,17 @@ export async function inputFile(value: unknown, cwd: string): Promise<string> {
   if (!stat.isFile()) throw new Error("Input must be a regular local file");
   return file;
 }
-export async function outputFolder(value: unknown, cwd: string, createParent = false): Promise<string> {
+export async function outputFolder(value: unknown, cwd: string): Promise<string> {
   const root = await fs.realpath(cwd);
   const parent = canonicalMutationPath(textPath(value ?? "."), root);
   if (!containsPath(root, parent)) throw new Error("Output directory must be inside the current workspace");
   const output = path.join(parent, `media-${randomBytes(8).toString("hex")}`);
   const denial = selfMutationDenial(output, root);
   if (denial) throw new Error(denial);
-  if (createParent) await fs.mkdir(parent, { recursive: true, mode: 0o700 });
-  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory must already exist");
+  // Agents name a fresh folder (out/takes, audio) as often as an existing one;
+  // refusing it cost a retry turn per tool. The path is already confined.
+  await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+  if (!(await fs.stat(parent)).isDirectory()) throw new Error("Output directory must be a directory");
   // Unique directory and no-overwrite FFmpeg semantics preserve all source files.
   await fs.mkdir(output, { mode: 0o700 });
   return output;

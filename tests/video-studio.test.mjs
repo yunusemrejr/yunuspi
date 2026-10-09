@@ -70,6 +70,11 @@ test("timeline validation reports structure, cue, narration and asset defects", 
   bad.audio.sfx = [{ src: "audio/hit.wav", at: 99 }];
   const messages = studio.validateVideoSpec(bad, new Set(["A"]), () => false).issues.map((i) => i.message).join("\n");
   for (const expected of [/duplicate scene id/, /not registered/, /cue "late" must be inside/, /narration audio .* is missing/, /overruns the scene/, /music .* is missing/, /outside the timeline/]) assert.match(messages, expected);
+  const domain = baseSpec();
+  Object.assign(domain.scenes[0], { narration: "Visit example.com. Or e-mail us.", cues: { a: 1, lockup: 2, mail: 3, part: 4 }, cueWords: { lockup: "example.com.", mail: "e-mail" } });
+  assert.deepEqual(studio.validateVideoSpec(domain, new Set(["A"]), () => true).issues, [], "words with inner punctuation match like measured words");
+  domain.scenes[0].cueWords = { part: "com" };
+  assert.match(studio.validateVideoSpec(domain, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n"), /cueWords.part = "com" does not occur/);
   const fast = baseSpec();
   Object.assign(fast.scenes[0], { narration: "An extraordinarily complicated representation, unquestionably overwhelming comprehension.", narrationAudio: "n.wav", narrationSeconds: 2 });
   assert.match(studio.validateVideoSpec(fast, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n"), /syllables\/s is hard to follow/);

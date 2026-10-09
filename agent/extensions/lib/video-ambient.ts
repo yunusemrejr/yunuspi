@@ -34,7 +34,7 @@ export async function videoAmbient(params: any, cwd: string, signal?: AbortSigna
   if (params.action === undefined || params.action === 'plan') return { plan, direction, sources, next: 'Inspect plate and sky mask pixels, then preview. Final delivery needs video_qa visual/playback/listening verdicts.' };
   const release = await acquire(signal);
   try {
-    const dir = await outputFolder(params.outputDir, cwd, true), preview = params.action === 'preview';
+    const dir = await outputFolder(params.outputDir, cwd), preview = params.action === 'preview';
     const pw = Math.min(plan.width, 960);
     const rendering = preview ? { ...plan, width: pw, height: Math.max(2, Math.round(pw * plan.height / plan.width / 2) * 2), seconds: Math.min(plan.seconds, 6), frames: Math.round(Math.min(plan.seconds, 6) * plan.fps) } : plan;
     const framePixels=rendering.width*rendering.height*rendering.frames;

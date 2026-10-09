@@ -157,7 +157,9 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     if (raw.chapter !== undefined && (typeof raw.chapter !== "string" || !raw.chapter.trim() || raw.chapter.length > 60)) err("chapter must be a title of at most 60 characters", id);
     if (raw.cueWords !== undefined) {
       if (!object(raw.cueWords)) err("cueWords must be an object of spoken words", id);
-      const tokens = typeof raw.narration === "string" ? raw.narration.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [] : [];
+      // Match the runtime: measured words are whitespace tokens without
+      // punctuation, so "example.com." is one word, not "example" and "com".
+      const tokens = typeof raw.narration === "string" ? raw.narration.toLowerCase().split(/\s+/).map((token: string) => token.replace(/[^\p{L}\p{N}']/gu, "")).filter(Boolean) : [];
       for (const [name, word] of Object.entries(object(raw.cueWords) ? raw.cueWords : {})) {
         if (typeof word !== "string" || !word.trim()) { err(`cueWords.${name} must name a spoken word`, id); continue; }
         if (!(name in (object(raw.cues) ? raw.cues : {}))) err(`cueWords.${name} needs a placeholder cue of the same name in cues (narration_tts overwrites it with the time of the word; scenes read cues before narration exists)`, id);
