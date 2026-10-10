@@ -92,7 +92,10 @@ function main(args) {
   const tempRoot = createDistributionTempRoot();
   try {
     console.log(`Running ${plan.selected.length} test files (${explicit.length && !quick ? 'focused' : plan.full ? 'full' : 'quick'}${shard ? `, shard ${shard.join('/')}` : ''}, concurrency ${concurrency})`);
-    const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...native, ...plan.selected], {
+    // On GitHub Actions a failed test also becomes an annotation, readable without log access.
+    const reporters = process.env.GITHUB_ACTIONS === 'true' && !native.some(arg => arg.startsWith('--test-reporter'))
+      ? ['--test-reporter=spec', '--test-reporter-destination=stdout', `--test-reporter=${path.join(root, 'scripts/ci-failure-reporter.mjs')}`, '--test-reporter-destination=stdout'] : [];
+    const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...plan.selected], {
       cwd: root, stdio: 'inherit', timeout: 15 * 60_000,
       env: { ...process.env, NODE_TEST_CONTEXT: undefined, PI_LOCAL_LM: 'off', PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot },
     });

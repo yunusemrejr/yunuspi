@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { QUICK_TESTS, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
+import { annotation } from '../scripts/ci-failure-reporter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const files = fs.readdirSync(path.join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).map(name => `tests/${name}`).sort();
@@ -104,4 +105,9 @@ test('CI plans first, runs the complete suite as parallel shards and keeps one s
   assert.match(quick, /check-syntax\.mjs/);
   assert.doesNotMatch(quick, /apt-get|playwright install/);
   assert.match(workflow.concurrency.group, /github.event_name/);
+});
+
+test('a failed test becomes one escaped GitHub annotation naming its file', () => {
+  const line = annotation({ name: 'handles: odd, names\n100%', file: path.join(root, 'tests/x.test.mjs'), details: { error: { cause: { message: 'expected 1, got 2\nstack' } } } }, root);
+  assert.equal(line, '::error file=tests/x.test.mjs,title=handles%3A odd%2C names%0A100%25::expected 1%2C got 2\n');
 });
