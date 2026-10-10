@@ -545,8 +545,13 @@ function parsePreferences(value: unknown, warnings: string[]): LlmPreferencesCon
 		// Two raw keys can normalize to the same canonical role (for example
 		// error_review and bug_reviews). The later list wins, as before, but the
 		// collision is reported instead of silently discarding the earlier one.
-		if (out[canonical]) warnings.push(`duplicate preference role ${canonical}; the later list replaced the earlier one`);
-		out[canonical] = { models };
+		// The former swarm and fusion roles are one fan-out role: a document that still names both keeps
+		// both routes (merged, in order) instead of losing one list to the other.
+		if (out[canonical] && canonical === "fanout") out[canonical] = { models: [...out[canonical].models, ...models] };
+		else {
+			if (out[canonical]) warnings.push(`duplicate preference role ${canonical}; the later list replaced the earlier one`);
+			out[canonical] = { models };
+		}
 	}
 	return out;
 }

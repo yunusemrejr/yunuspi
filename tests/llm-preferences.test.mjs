@@ -567,3 +567,15 @@ test("disk failures preserve canonical bytes, return diagnostics, and release th
     assert.equal(fs.existsSync(`${configPath}.lock`), false);
   } finally { fs.renameSync = originalRename; fs.fsyncSync = originalFsync; syncBuiltinESMExports(); }
 });
+
+test("a document that still names both the former swarm and fusion roles keeps both route lists as one fan-out role", () => {
+	fs.writeFileSync(prefsFile, JSON.stringify({ version: 1, preferences: { swarm: { models: ["or_route"] }, fusion: { models: ["other_provider"] } } }));
+	clearLlmPreferencesCache();
+	const loaded = prefs.loadLlmPreferences(prefsFile);
+	assert.deepEqual(loaded.config.preferences.fanout.models, ["or_route", "other_provider"]);
+	assert.ok(!(loaded.warnings ?? []).some(text => /duplicate preference role/.test(text)), JSON.stringify(loaded.warnings));
+	assert.equal(prefs.normalizePreferenceRole("fusion"), "fanout");
+	assert.equal(prefs.normalizePreferenceRole("swarms"), "fanout");
+	fs.rmSync(prefsFile, { force: true });
+	clearLlmPreferencesCache();
+});
