@@ -238,7 +238,7 @@ export async function inspectGltf(file: string, signal?: AbortSignal) {
     resources: [...resources.values()].slice(0, 16).map(r => ({ ...r, file: r.file.slice(0, 256), pathTruncated: r.file.length > 256 })), resourceCount: resources.size, resourcesTruncated: resources.size > 16,
     meshLocalBounds: meshBounds, boundsComplete, imageDimensions, animationClips, extensionsRequired, warnings,
     checked: 'Local containment, bounded bytes/work, GLB chunks, buffer/accessor ranges, primitive index ranges, node cycles, finite decoded positions and increasing animation times.',
-    unverified: 'Full Khronos conformance, compressed/sparse payload decoding, world/skinned bounds, texture decode, runtime GPU cost, appearance and playback. Use the existing Three.js/Model3D renderer for pixels; scene_create accepts procedural scene JSON, not imported models.',
+    unverified: 'Full Khronos conformance, compressed/sparse payload decoding, world/skinned bounds, texture decode, runtime GPU cost, appearance and playback. Use the existing Three.js/Model3D renderer for pixels.',
   };
 }
 

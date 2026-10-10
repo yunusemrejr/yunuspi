@@ -1166,7 +1166,7 @@ export async function narrationSpeak(params: any, cwd: string, signal?: AbortSig
     await fs.writeFile(path.join(dir, "captions.srt"), toSrt(track), { flag: "wx" });
     await fs.writeFile(path.join(dir, "captions.vtt"), toVtt(track), { flag: "wx" });
     await fs.rm(raw, { force: true });
-    const delivery = { voice: plan.voice, style: plan.style, speed: plan.speed, artifact: await produced(file), seconds, timing: made.exact ? "measured" : "estimated", words: made.words, captions: { srt: path.join(dir, "captions.srt"), vtt: path.join(dir, "captions.vtt") }, loudnessLufs: mastered.lufs, lexiconEdits: plan.spoken.edits, note: "Local Piper speech; listen for intelligibility, pacing and pronunciation. Caption timing is labeled measured or estimated. Use role:voice in audio_mix/media_pipeline to duck a music bed." };
+    const delivery = { voice: plan.voice, style: plan.style, speed: plan.speed, artifact: await produced(file), seconds, timing: made.exact ? "measured" : "estimated", words: made.words, captions: { srt: path.join(dir, "captions.srt"), vtt: path.join(dir, "captions.vtt") }, loudnessLufs: mastered.lufs, lexiconEdits: plan.spoken.edits, note: "Local Piper speech; listen for intelligibility, pacing and pronunciation. Caption timing is labeled measured or estimated. Use role:voice in audio_mix to duck a music bed." };
     await fs.writeFile(path.join(dir, "narration.json"), JSON.stringify(delivery, null, 2) + "\n", { flag: "wx" });
     signal?.throwIfAborted();
     return delivery;

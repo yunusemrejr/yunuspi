@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.36.2 — 2026-10-10
+
+**Subagents start again.** 0.36.0 and 0.36.1 deleted the `bash-router` and `reasoning-aids` extensions but left the built-in agent definitions (`scout`, `worker`, `reviewer`, `oracle`, `researcher`, `delegate`, `automatic-free-assistant`) listing them, so a child failed at launch with "Extension path does not exist" and the native reviewer behind `quality_review` always reported itself unavailable. The dead paths are gone.
+
+**Six tools and the post-edit check come back.** Deleting `reasoning-aids` also dropped `math_check`, `value_convert`, `data_query`, `context_slice`, `symbol_expand`, `ast_diff` and the advisory source check after `write`/`edit`, and the agent definitions then asked children for tools that no longer existed. They are registered by `utility-tools` again, which every agent definition already loads. Two tests now fail the build if an agent definition names an extension path that does not exist, or allows a tool that the installed extension graph does not register.
+
+**Tool text stops recommending removed tools.** Descriptions, error hints and docs that pointed at `image_ocr`, `env_audit`, `syntax_check`, `wait_for`, `video_ambient`, `research_toolkit` and the old per-action `agentmail_*` names now say what to do with the tools that exist.
+
 ## 0.36.1 — 2026-10-10
 
 **Second pass over the reduction.** Every one of the 25 skill summaries was fact-checked against the originals it replaced; about 35 invented or wrong flags, numbers and tool names were corrected, and removed tools are no longer recommended anywhere.

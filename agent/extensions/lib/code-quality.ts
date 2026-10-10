@@ -790,7 +790,7 @@ export async function codeQuality(params: any, cwd: string, signal?: AbortSignal
       sourceRevision: digest(scope.files.map(file => `${file.path}:${digest(file.source)}`).sort().join('\n')),
       counts, findings: findings.slice(0, limit), omittedFindings: Math.max(0, findings.length - limit),
       duplicates: { groups: duplicates.groups, duplicatedLines: duplicates.duplicatedLines, truncated: duplicates.truncated },
-      structure, next: 'Inspect each located cue, reuse the established owner and retain intentional repetition. Run syntax_check and project linters/types/tests for affected files; inspect actual UI pixels/contrast and input states for interface changes.',
+      structure, next: 'Inspect each located cue, reuse the established owner and retain intentional repetition. Run the project linters/types/tests for affected files; inspect actual UI pixels/contrast and input states for interface changes.',
       note: 'A combined deterministic source baseline, not a correctness/security certification. No project code or linter runs. Source findings are advisory and unchanged copies are indexed for DRY comparison. Coverage limits remain explicit.' };
   }
   if (operation === "duplicates") {

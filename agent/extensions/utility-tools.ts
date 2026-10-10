@@ -1,12 +1,20 @@
 import { TOOLS } from './lib/utility-mcp/catalog.mjs';
 import { UtilityClient } from './lib/utility-client.ts';
 import fs from 'node:fs';
+import registerSmallTools from './lib/small-tools.ts';
+import registerSourceCheck from './lib/source-check.ts';
+import { registerContextCodeTools } from './pi-lens/context-tools.ts';
 
 // Identical guidelines let Pi deduplicate this shared advice across the utility tools.
-const UTILITY_GUIDANCE = 'Prefer utility probes and env_audit over shell/Python inspection snippets. Use explicit paths for files; inspect truncation flags and narrow or paginate incomplete results.';
+const UTILITY_GUIDANCE = 'Prefer utility probes over shell/Python inspection snippets. Use explicit paths for files; inspect truncation flags and narrow or paginate incomplete results.';
 
 /** Native tool exposure, MCP lifecycle and prompt guidance share one catalog. */
 export default function utilityTools(pi: any) {
+  // Local checks (math_check, value_convert, data_query), AST context tools and the advisory post-edit source check
+  // share this owner so subagents that list utility-tools.ts get them too.
+  registerSmallTools(pi);
+  registerContextCodeTools(pi);
+  registerSourceCheck(pi);
   let client: UtilityClient | undefined;
   const ensure = (cwd: string) => {
     const root = fs.realpathSync(cwd);

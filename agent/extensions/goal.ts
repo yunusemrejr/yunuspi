@@ -25,7 +25,7 @@ const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
 const WRITE_TOOLS = new Set(["edit", "write", "bulk_edit"]);
 /** Tools whose successful run is itself a verification of built output. */
-const VERIFY_TOOLS = new Set(["render_see", "video_qa", "video_render", "visual_diff"]);
+const VERIFY_TOOLS = new Set(["render_see", "video_qa", "video_render"]);
 
 export default function goalExtension(pi: ExtensionAPI): void {
 	if (process.env.PI_GOAL === "0") return;

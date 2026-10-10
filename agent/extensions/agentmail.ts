@@ -672,7 +672,7 @@ function transportFailure(error: unknown, signal?: AbortSignal) {
 }
 
 const GUIDELINE =
-  "Use agentmail_status before the first send to confirm the key and the inbox; keep agentmail_send recipients verified from a real source page, respect any suppression list, and never pad a campaign to a requested count.";
+  "Use action status before the first send to confirm the key and the inbox; keep send recipients verified from a real source page, respect any suppression list, and never pad a campaign to a requested count.";
 
 const SEND_SCHEMA = Type.Object({
   inboxId: Type.Optional(

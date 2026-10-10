@@ -1,8 +1,7 @@
 /**
  * Child-only provider for the local-intelligence context tools.
  *
- * The parent session gets `context_score`, `handoff_capsule` and
- * `evidence_cache` and `claim_check` from `pi-memory/index.ts`. Subagent children launch with
+ * The parent session gets `handoff_capsule` from `pi-memory/index.ts`. Subagent children launch with
  * ambient extension discovery disabled, so a builtin agent that lists those
  * tool names in its strict `tools` allowlist must also load a provider path
  * through `subagentOnlyExtensions`. This module registers only those tools.

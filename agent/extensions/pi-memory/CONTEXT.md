@@ -13,26 +13,14 @@ provider request, daemon, or background training. `PI_CONTEXT_MEMORY=off`
 disables the new tools, compaction priorities, salience ranking and fork capsules.
 Existing memory and manual reminders retain their behavior.
 
-- `context_score`: accepts `task` and `items` (JSON array with `id`, `text`,
-  optional `kind`, `source`, `timestamp`, `unresolved`). Scores are deterministic
-  ranking priorities, not calibrated probabilities. Kinds are `goal`,
-  `constraint`, `finding`, `decision`, `file`, `failure`, `next_action`.
-- `handoff_capsule`: accepts `goal`, the same `items`, optional `maxChars`.
+- `handoff_capsule`: accepts `goal`, `items` (JSON array with `id`, `text`, optional `kind`, `source`,
+  `timestamp`, `unresolved`; kinds are `goal`, `constraint`, `finding`, `decision`, `file`,
+  `failure`, `next_action`) and optional `maxChars`.
   Default 2200 characters; roughly 500 English tokens, not a tokenizer guarantee.
   Goals, constraints, failures, unresolved items and next actions cannot be
   silently dropped. If they do not fit, the tool rejects with a full-context
   fallback recommendation. It does not infer facts or erase the source state.
   Pass the returned JSON in a fresh subagent's task when useful.
-- `evidence_cache`: `action: put` requires a project-relative `source` and a
-  verbatim `quote` (8–1000 characters). `action: query` requires `query`.
-  Observations carry version 1 and SHA256 of the original UTF-8 file. Retrieval
-  checks the current file hash and the originating session/active branch.
-  Changed, missing, inaccessible or invalid files are excluded and counted as
-  stale. Inferred claims and sensitive paths/credential-looking quotes are
-  rejected. The bounded cache stores 64 records per project under the existing
-  memory directory, sharing the existing writer lock and atomic replacement.
-  External web research must have an attributable local source first. A quote
-  is evidence of what the file says; it is not proof that its assertion is true.
 
 Memory priming is enabled by default and uses salience to select up to three
 task-relevant blocks within 1600 characters, once per session. Unrelated and

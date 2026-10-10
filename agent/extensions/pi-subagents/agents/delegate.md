@@ -2,7 +2,7 @@
 name: delegate
 description: Lightweight subagent that inherits the parent model with no default reads
 aliases: generic, general-purpose
-subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../media-tools.ts, ../../reasoning-aids.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
+subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../media-tools.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: append
 inheritProjectContext: true
 tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, media_info, video_frames, audio_analyze, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, math_check, value_convert, data_query, handoff_capsule, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session

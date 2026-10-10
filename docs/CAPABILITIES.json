@@ -4649,7 +4649,7 @@
           "registration loops over the static TOOLS catalog; catalog names are enumerated"
         ],
         "lines": [
-          23
+          31
         ],
         "knownNames": [
           "archive_probe",

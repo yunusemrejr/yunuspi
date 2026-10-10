@@ -585,7 +585,7 @@ export default function (pi: ExtensionAPI) {
 	const register = (cwd: string) => {
 		const def = createBashToolDefinition(cwd, { operations });
 		def.description =
-			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands such as wait_for may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; default last 2000 lines or 50KB. For verbose checks use maxOutputBytes:8192 and outputMode:head-tail. Truncated full output is saved privately; capture failures are explicit.";
+			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; default last 2000 lines or 50KB. For verbose checks use maxOutputBytes:8192 and outputMode:head-tail. Truncated full output is saved privately; capture failures are explicit.";
 		pi.registerTool(def);
 	};
 	register(process.cwd());
@@ -619,7 +619,7 @@ export default function (pi: ExtensionAPI) {
 		name: "process",
 		label: "process",
 		description:
-			"Manage supervised helper commands created by wait_for or other internal managed-bash captures. These jobs use the process registry; explicit bg_run tasks belong to bg_status/bg_logs/bg_kill and never appear here. Use this tool to inspect, wait for, or terminate a helper instead of rerunning commands blindly.",
+			"Manage supervised helper commands created by internal managed-bash captures. These jobs use the process registry; explicit bg_run tasks belong to bg_status/bg_logs/bg_kill and never appear here. Use this tool to inspect, wait for, or terminate a helper instead of rerunning commands blindly.",
 		parameters: processSchema,
 		async execute(_id, args, signal) {
 			signal?.throwIfAborted();

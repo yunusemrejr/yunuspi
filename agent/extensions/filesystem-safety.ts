@@ -1638,9 +1638,8 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	};
 	const pendingWaiters = new Map<string, number>();
 	pi.on("tool_call", async (event, ctx) => {
-		// Only intercept shell commands: bash, background runs and commands
-		// launched into a desktop_session virtual display.
-		if (event.toolName !== "bash" && event.toolName !== "bg_run" && !(event.toolName === "desktop_session" && event.input?.action === "launch")) {
+		// Only intercept shell commands: bash and background runs.
+		if (event.toolName !== "bash" && event.toolName !== "bg_run") {
 			return undefined;
 		}
 

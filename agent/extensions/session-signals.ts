@@ -1218,7 +1218,7 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
   const backgroundHandles: Record<string, string> = {};
   if (activeTools.includes("process"))
     backgroundHandles.process =
-      "Supervised internal helper/wait_for handles only; ephemeral to this Pi process. Ordinary bash waits; bg_run and subagent IDs have their own owners.";
+      "Supervised internal helper handles only; ephemeral to this Pi process. Ordinary bash waits; bg_run and subagent IDs have their own owners.";
   if (activeTools.includes("bg_status"))
     backgroundHandles.bg_status =
       "bg_run task IDs; completion normally notifies. Inspect existing work before relaunching.";

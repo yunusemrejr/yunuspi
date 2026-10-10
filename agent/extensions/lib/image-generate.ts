@@ -64,7 +64,7 @@ export function resolveImageBackend(env: Record<string, string | undefined> = pr
   env = imageBackendEnvironment(env, providerKeyAvailable);
   const name = (env.PI_IMAGE_BACKEND ?? "").toLowerCase().trim();
   if (!name || name === "off" || name === "none") {
-    return { configured: false, name: "none", reason: "No image backend configured (PI_IMAGE_BACKEND is unset). Deterministic plates remain available via image_create.", setup: SETUP };
+    return { configured: false, name: "none", reason: "No image backend configured (PI_IMAGE_BACKEND is unset).", setup: SETUP };
   }
   if (!["openai-compatible", "openrouter"].includes(name)) return { configured: false, name, reason: `Unknown PI_IMAGE_BACKEND "${name}": use "openai-compatible" or "openrouter".`, setup: SETUP };
   const apiUrl = (env.PI_IMAGE_API_URL ?? (name === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1")).trim().replace(/\/+$/, "");

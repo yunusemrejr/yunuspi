@@ -2,7 +2,7 @@
 name: automatic-free-assistant
 description: Bounded read-only autonomous assistance; never a writer
 tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, read, grep, find, ls, math_check, value_convert, data_query, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, git_info
-subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../git-tools.ts
+subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../pi-observations.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../git-tools.ts
 thinking: off
 systemPromptMode: replace
 inheritProjectContext: true

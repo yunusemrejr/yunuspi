@@ -174,12 +174,14 @@ test('extension prewarms automatically and closes its MCP process at shutdown', 
   const { default: extension } = await import(pathToFileURL(path.join(agent, 'extensions/utility-tools.ts')));
   const events = new Map(), registered = new Map();
   extension({ on: (name, fn) => events.set(name, fn), registerTool: t => registered.set(t.name, t) });
-  assert.equal(registered.size, TOOLS.length);
+  // The owner also registers the local checks and code-context tools that subagents load through this file.
+  for (const spec of TOOLS) assert.ok(registered.has(spec.name), spec.name);
+  for (const name of ['math_check', 'value_convert', 'data_query', 'context_slice', 'symbol_expand', 'ast_diff']) assert.ok(registered.has(name), name);
   await events.get('session_start')({}, { cwd: root });
   try {
     const value = await registered.get('package_probe').execute('id', { package: 'demo' }, undefined, undefined, { cwd: root });
     assert.equal(value.isError, false);
-    for (const tool of registered.values()) assert.ok(tool.promptGuidelines.length);
+    for (const spec of TOOLS) assert.ok(registered.get(spec.name).promptGuidelines.length);
   } finally { events.get('session_shutdown')(); }
 });
 
