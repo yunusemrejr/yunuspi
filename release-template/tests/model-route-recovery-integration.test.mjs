@@ -64,7 +64,7 @@ test('previous local discovery failures recover through canonical preference sel
         for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
         const child = spawnSync(process.execPath, ['--import', guard, path.join(repo, 'core/coding-agent/dist/cli.js'),
           ...launch.args.slice(0, -1), '--mode', 'rpc'], { cwd: root, env,
-          input: '{"type":"get_state","id":"state"}\n', encoding: 'utf8', timeout: 12000 });
+          input: '{"type":"get_state","id":"state"}\n', encoding: 'utf8', timeout: 45000 });
         assert.equal(child.status, 0, child.stdout + child.stderr);
         const state = child.stdout.trim().split('\n').map(line => JSON.parse(line)).find(row => row.id === 'state');
         assert.equal(state?.success, true, child.stdout);

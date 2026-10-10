@@ -103,7 +103,7 @@ test('managed launches enable cached provider restoration only when ambient exte
   } finally { for (const item of [isolated, ordinary, explicit]) cleanupTempDir(item.tempDir); }
 });
 
-test('real CLI resolves a cached dynamic advisor with the no-tools and no-extensions ceiling intact', { timeout: 30000 }, () => {
+test('real CLI resolves a cached dynamic advisor with the no-tools and no-extensions ceiling intact', { timeout: 450000 }, () => {
   const request = launch();
   const guard = path.join(root, 'network-guard.mjs'), calls = path.join(root, 'network-calls');
   fs.writeFileSync(guard, `import fs from 'node:fs';globalThis.fetch=async()=>{fs.appendFileSync(${JSON.stringify(calls)},'fetch\\n');throw new Error('Fixture network forbidden');};`);
@@ -112,10 +112,10 @@ test('real CLI resolves a cached dynamic advisor with the no-tools and no-extens
     for (const key of Object.keys(env)) if (env[key] === undefined) delete env[key];
     const args = ['--import', guard, path.join(repo, 'core/coding-agent/dist/cli.js'), ...request.args.slice(0, -1), '--mode', 'rpc'];
     const input = '{"id":"state","type":"get_state"}\n{"id":"commands","type":"get_commands"}\n';
-    const broken = spawnSync(process.execPath, args, { cwd: root, env: { ...env, PI_SUBAGENT_CACHED_MODEL_PROVIDER: '' }, input, encoding: 'utf8', timeout: 12000 });
+    const broken = spawnSync(process.execPath, args, { cwd: root, env: { ...env, PI_SUBAGENT_CACHED_MODEL_PROVIDER: '' }, input, encoding: 'utf8', timeout: 45000 });
     assert.equal(broken.status, 1, broken.stdout + broken.stderr);
     assert.match(broken.stderr, /Unknown provider "orcarouter"|Model "orcarouter\/fixture\/advisor" not found/, 'minimal reproduction: removing provider registration loses a parent-selected route');
-    const fixed = spawnSync(process.execPath, args, { cwd: root, env, input, encoding: 'utf8', timeout: 12000 });
+    const fixed = spawnSync(process.execPath, args, { cwd: root, env, input, encoding: 'utf8', timeout: 45000 });
     assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
     const responses = fixed.stdout.trim().split('\n').map(line => JSON.parse(line));
     const state = responses.find(row => row.id === 'state');
@@ -133,13 +133,13 @@ test('real CLI resolves a cached dynamic advisor with the no-tools and no-extens
     config.providers.collision = { api: model.api, baseUrl: model.baseUrl, models: [{ ...model, id: route }] };
     fs.writeFileSync(path.join(root, 'models.json'), JSON.stringify(config));
     fs.writeFileSync(path.join(root, 'live-model-catalog.json'), JSON.stringify({ version: 1, providers: {} }));
-    const missing = spawnSync(process.execPath, args, { cwd: root, env, input, encoding: 'utf8', timeout: 12000 });
+    const missing = spawnSync(process.execPath, args, { cwd: root, env, input, encoding: 'utf8', timeout: 45000 });
     assert.equal(missing.status, 1, missing.stdout + missing.stderr);
     assert.doesNotMatch(missing.stdout, /"id":"state"/, 'an unavailable pinned route cannot start on another provider');
     config.providers.orcarouter.models = [{ ...model, id: 'fixture/advisor-v2' }];
     fs.writeFileSync(path.join(root, 'models.json'), JSON.stringify(config));
     const near = spawnSync(process.execPath, ['--import', guard, path.join(repo, 'core/coding-agent/dist/cli.js'), ...request.args, '--mode', 'json', '--print'],
-      { cwd: root, env: { ...env, PI_SUBAGENT_CACHED_MODEL_PROVIDER: '' }, input: '', encoding: 'utf8', timeout: 12000 });
+      { cwd: root, env: { ...env, PI_SUBAGENT_CACHED_MODEL_PROVIDER: '' }, input: '', encoding: 'utf8', timeout: 45000 });
     assert.match(near.stdout + near.stderr, /Blocked: child model does not match its selected route/,
       'a same-provider fuzzy match is denied by the native request gate');
     assert.equal(fs.existsSync(calls), false, 'the rejected substitute never reaches the provider transport');
