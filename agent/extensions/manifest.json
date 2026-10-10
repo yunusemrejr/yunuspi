@@ -574,16 +574,6 @@
       "why": "0 uses; ML training is plain bash/python guidance in the ml skill. Do not recreate"
     },
     {
-      "name": "code-audit.ts",
-      "retired": "2026-10-10",
-      "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
-    },
-    {
-      "name": "code-quality.ts",
-      "retired": "2026-10-10",
-      "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
-    },
-    {
       "name": "last-model.ts",
       "retired": "2026-10-10",
       "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"

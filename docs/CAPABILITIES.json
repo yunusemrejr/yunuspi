@@ -6225,16 +6225,6 @@
         "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
       },
       {
-        "name": "code-audit.ts",
-        "retired": "2026-10-10",
-        "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
-      },
-      {
-        "name": "code-quality.ts",
-        "retired": "2026-10-10",
-        "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
-      },
-      {
         "name": "context-composition.json",
         "retired": "2026-08-31",
         "why": "orphan of deleted pi-context-router; no writer/reader since 2026-08-12"
