@@ -114,27 +114,19 @@ test('cloud scene checkpoints survive failure and selected scenes retain neighbo
   await assert.rejects(video.narrationTts(params, dir), /fps/); assert.equal(requests.length, 4, 'bad timeline fails before paid work');
 });
 
-test('forced alignment verifies transcript coverage and music generation measures the actual file', async t => {
+test('music generation measures the actual file and refuses an invalid duration before paid work', async t => {
   const dir = await workspace(t), bytes = await audioFixture(dir), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   let calls = 0;
   globalThis.fetch = async (url, options) => {
     calls++;
-    if (String(url).endsWith('/forced-alignment')) {
-      assert.ok(options.body instanceof FormData); assert.ok(options.body.get('file') instanceof Blob);
-      return Response.json({ words: [{ text: 'Hello', start: .1, end: .7, loss: .03 }, { text: 'world.', start: .8, end: 1.5, loss: .05 }], loss: .04 });
-    }
     const body = JSON.parse(options.body); assert.equal(body.force_instrumental, true); assert.equal(body.music_length_ms, 3000);
     return new Response(bytes, { headers: { 'song-id': 'fixture-song' } });
   };
-  const aligned = await eleven.narrationAlign({ path: 'fixture.mp3', text: 'Hello world.' }, dir, undefined, env);
-  assert.equal(aligned.textMatches, true); assert.match(await fs.readFile(aligned.captions.srt, 'utf8'), /Hello world/);
-  const mismatch = await eleven.narrationAlign({ path: 'fixture.mp3', text: 'Hello planet.' }, dir, undefined, env);
-  assert.equal(mismatch.textMatches, false); assert.equal(mismatch.captions, undefined);
   const music = await eleven.audioGenerate({ kind: 'music', prompt: 'Authored instrumental fixture', seconds: 3 }, dir, undefined, env);
   assert.equal(music.decodeVerified, true); assert.ok(music.seconds < 2.1); assert.equal(music.requestedSeconds, 3);
   await assert.rejects(eleven.audioGenerate({ kind: 'music', prompt: 'Fixture', seconds: 1000 }, dir, undefined, env), /seconds/);
-  assert.equal(calls, 3, 'invalid duration never reaches the paid provider');
+  assert.equal(calls, 1, 'invalid duration never reaches the paid provider');
 });
 
 test('sync catches stale durations, speech across cuts, repeated cue words and last-frame overflow', () => {

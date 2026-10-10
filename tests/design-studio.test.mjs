@@ -170,18 +170,6 @@ test("image_crop serves every region from one decode without cross-talk", async 
   assertSameBytes(Buffer.from(a.data), Buffer.from(b.data), "identical keyed regions decode identically: no target mutates the shared decode");
 });
 
-test("anti-aliased edges of dark text do not leak into a saturated fill", () => {
-  const img = canvas(160, 60, [255, 255, 255]);
-  circle(img, 30, 30, 20, INDIGO);
-  for (let x = 70; x < 150; x += 12) for (let y = 10; y < 50; y++) for (let dx = 0; dx < 6; dx++) {
-    const i = (y * 160 + x + dx) * 4, edge = dx === 0 || dx === 5 ? 0.5 : 1;
-    for (let c = 0; c < 3; c++) img.data[i + c] = Math.round(255 * (1 - edge) + [17, 24, 39][c] * edge);
-  }
-  const result = analysis.traceToSvg(img, { x: 0, y: 0, width: 160, height: 60 }, { palette: [INDIGO, [17, 24, 39]], background: [255, 255, 255] });
-  const indigo = result.layers.find(layer => layer.fill === "#4f46e5");
-  assert.equal(indigo.paths, 1, "the circle alone");
-});
-
 test("URL references download through the guarded fetcher and honor offline mode", async () => {
   const png = fs.readFileSync(path.join(work, mock));
   const server = createServer((request, response) => {

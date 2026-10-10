@@ -8,7 +8,7 @@ description: "Design and review HTTP APIs and security: REST/OpenAPI contracts, 
 - Actions: POST sub-resources (`/orders/42/cancel`); 201+Location; 429+Retry-After.
 - Errors: RFC 9457 problem+json, stable codes; never leak stacks, SQL or other tenants' IDs; echo X-Request-Id.
 - Keyset pagination, capped limit. Version in path (breaks mean /v2, dated sunset). Diff OpenAPI in CI.
-- Retried POSTs need Idempotency-Key (store response, expire 24-48 h); concurrent edits need ETag plus If-Match (412/409 when stale).
+- Retried POSTs need Idempotency-Key (store response, expire 24-48 h); concurrent edits need ETag plus If-Match (409 when stale).
 - Webhooks: HMAC plus timestamp (reject skew >5 min); retries with DLQ; receivers dedupe event ids.
 
 ## Authorization and web vulns

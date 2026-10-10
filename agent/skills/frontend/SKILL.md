@@ -15,7 +15,7 @@ description: "Build, review and debug browser UI: visual systems, interaction an
 ## Accessibility
 - Start from task states, not ARIA; native controls first; custom widgets follow APG keyboard patterns.
 - Modals: accessible name, focus in and contained, Escape, focus back to trigger or a surviving neighbor.
-- Test whole tasks by keyboard at 200% zoom, reduced motion; scanners miss focus order and names.
+- Test whole tasks by keyboard at 200% zoom, reduced motion; scanners do not prove focus behavior.
 ## JS runtime
 - Batch DOM reads before writes; rAF for visual writes; no busy-waits.
 - Untrusted text goes in textContent, never innerHTML.
@@ -40,13 +40,13 @@ description: "Build, review and debug browser UI: visual systems, interaction an
 - Budgets: LCP <2.0 s, INP <200 ms, CLS <0.1, initial JS <150 KB gz (aim 100), route delta <50 KB; enforce in CI.
 - Judge by field p75 (RUM), not lab Lighthouse; INP trouble is tasks over 50 ms; third-party tags are the top source.
 ## Mockup to code
-- Read the reference with image_understand; recover landmarks, bands, repeated components, color roles; sample hex values.
+- Read the reference with image_understand; recover landmarks, bands, repeated components, color roles.
 - Text is HTML; boxes, gradients, shadows are CSS; icons SVG; logos need real files; photos are placeholder crops (image_crop).
-- Snap to a system before coding: 4/8 spacing, 4-8 color roles, 4.5:1 body contrast, 2 radii max. No absolute positioning.
+- Snap to a system before coding: spacing on one unit, 4-8 color roles, 4.5:1 body contrast. No absolute positioning.
 - Verify with render_see at 390/768/1280 px; fix vertical drift top-down; stop once structure, spacing, color match.
 ## CSS shapes
 - Two stops at one position (`#fff 0 50%, #000 0`) give crisp edges; `border-radius:50%` on a non-square box is an ellipse; `repeating-conic-gradient` makes checkers and stars.
 ## Browser ML
 - Start from ONNX; quantize int8 (~4x smaller, 1-2% loss); re-evaluate on your data (small-font OCR can drop 5-10%).
-- transformers.js for small LLMs (~0.5-4B in browser); ONNX Runtime Web for vision, audio, classification.
+- transformers.js for small LLMs (~0.5-8B in browser); ONNX Runtime Web for vision, audio, classification.
 - WebGPU when navigator.gpu exists, else WASM; test the WASM path; run in a Worker; keep first load under ~30 MB.

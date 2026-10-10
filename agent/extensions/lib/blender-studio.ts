@@ -1,6 +1,5 @@
 /** Headless Blender for agents: a pinned local install, free-form bpy
- * scripts, scene inspection, bounded renders with contact sheets, asset
- * export and multi-view dataset capture for Gaussian-splat training. Every
+ * scripts, scene inspection and bounded renders with contact sheets. Every
  * Blender process runs guarded (harness read-only), niced, memory-watched and
  * under a deadline through the shared studio process runner. */
 import fs from "node:fs/promises";
@@ -186,7 +185,7 @@ export async function blenderSetup(params: any, _cwd: string, signal?: AbortSign
 
 // ───────────────────────────── tools ─────────────────────────────
 
-const DEADLINE = { inspect: 300_000, render: 3_500_000, export: 900_000, dataset: 3_500_000, run: 3_500_000 };
+const DEADLINE = { inspect: 300_000, render: 3_500_000, run: 3_500_000 };
 
 export const INSPECTION_VIEWS = ['auto', 'summary', 'objects', 'materials', 'animation', 'full'] as const;
 const INSPECTION_CHARS = 16_000;

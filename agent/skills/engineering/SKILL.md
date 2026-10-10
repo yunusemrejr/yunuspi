@@ -10,19 +10,20 @@ description: "Use when writing, refactoring, reviewing, debugging, testing or pr
 - Smallest general fix. Read the exact target region before editing; never overwrite a whole file to get past a failed match.
 - Before claiming done: rerun after the last edit, recompute key numbers a second way, try the negative and boundary case, recheck each explicit requirement.
 - Report what ran, what is unverified and residual risk.
+- Production, credentials, data sync, deletes and deploys need explicit task authorization.
 
 ## Code and design
-- Names reveal intent; a name needing a comment is wrong. Avoid double negatives (`isActive`, not `!isNotDeleted`).
+- A name needing a comment is wrong; avoid double negatives (`isActive`, not `!isNotDeleted`).
 - Functions: one abstraction level, few args, no boolean params (use two functions), no side effects hidden in reads.
-- Validate and parse unknown input into typed values at every boundary (HTTP, file, config, IPC). Replace impossible flag combos with a sum type.
+- Parse unknown input into typed values at every boundary (HTTP, file, config, IPC); make impossible flag combos a sum type.
 - Catch only to retry, translate with context, or propagate. Dispatch on error codes, never message text.
 - One writer per contended state; prefer immutable values. Comments say why; TODOs need an owner or date.
 - Delete before adding. Abstract at the third occurrence. Prefer stdlib and native features to new dependencies; mark a known shortcut `ponytail:` with its ceiling and upgrade path.
 
 ## Tests and contracts
 - Test public behavior: happy path, one typed failure, one edge boundary. Fakes over mocks; no test-only branches in production.
-- Mutate the code once; no red test means the test proves nothing.
-- Property tests need an independent oracle and must fail on a known-bad implementation; keep shrunk counterexamples as regressions. Round trips alone miss paired encoder/decoder bugs.
+- After each new test, mutate the code; no red run means the test proves nothing.
+- Property tests need an independent oracle that fails on a known-bad implementation; keep shrunk counterexamples as regressions. Round trips miss paired encoder/decoder bugs.
 - Lifecycle bugs: state the invariant ("one accepted job, at most one terminal result"), enumerate orderings (cancel vs complete, late result after restart), reproduce with the real lifecycle.
 - A timeout does not prove non-execution; retry only with deduplication or status reconciliation.
 - Incremental caches must key on every input (content, flags, tool versions); compare against clean rebuilds across edit sequences.
@@ -41,7 +42,7 @@ description: "Use when writing, refactoring, reviewing, debugging, testing or pr
 ## Decisions
 - Name the tradeoff: "X over Y because Z; revisit when W." One-way doors (data model, public API, vendor) get a short written record and a second reader.
 - Default to boring tech; each dependency is a permanent license, security and upkeep cost.
-- Small PRs (under ~400 diff lines), split by concern. Report bad news early with the fix attached.
+- Small PRs (under ~400 diff lines), split by concern.
 
 ## TypeScript and Node
 - Match module and moduleResolution to the real runtime; check path aliases and packaged ESM/CJS output, not only `tsc`.

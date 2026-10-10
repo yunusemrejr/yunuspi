@@ -810,3 +810,24 @@ test('empty reviews build a quiet backoff even while routine backlog remains', a
   assert.ok(calls >= 3, 'the bounded hold still lets reviews arrive');
   observer.close();
 });
+
+test('the observer packet carries one stable time-ledger row from measured tool time and repeats', async () => {
+  const { observerTimeText } = await import('../agent/extensions/lib/session-observer.ts');
+  const ledger = new Map([['bash', { calls: 4, ms: 125_000 }], ['read', { calls: 9, ms: 900 }]]);
+  const repeats = new Map([['read src/a.ts', { count: 3 }], ['bash npm', { count: 2 }]]);
+  assert.equal(observerTimeText(65_000, new Map(), new Map()), '', 'no measured calls, no row');
+  assert.match(observerTimeText(65_000, ledger, repeats), /^Task wall 1m5s; 13 calls, 2m5s summed tool time: bash×4\/2m5s, read×9\/0s; repeated 3\+ times: read src\/a\.ts ×3\./);
+  assert.doesNotMatch(observerTimeText(undefined, ledger, repeats), /wall/, 'the review key text carries no ticking wall clock');
+
+  const h = harness();
+  h.input('Fix parser validation.');
+  h.emit('tool_execution_start', { toolCallId: 'c1', toolName: 'bash', args: { command: 'npm test' } });
+  await h.advance(4000);
+  h.emit('tool_result', { toolCallId: 'c1', toolName: 'bash', input: { command: 'npm test' }, content: [{ type: 'text', text: 'ok' }] });
+  await h.advance(30000);
+  const row = h.packets.at(-1).evidence.find(item => item.id === 'time-ledger');
+  assert.ok(row, 'the first review packet includes the time ledger');
+  assert.equal(row.kind, 'current state');
+  assert.match(row.text, /1 calls?, 4s summed tool time: bash×1\/4s/);
+  h.close();
+});

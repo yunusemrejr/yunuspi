@@ -2,7 +2,7 @@
 
 YunusPi checks code quality locally: hints after each edit, the static audit and syntax steps of the goal completion check, git review and blame, a commit guard, and static SEO checks. Nothing is installed and no project code runs. Findings carry `file:line`; intentional repetition, technical wording and deliberate style remain valid.
 
-The static audit and syntax check also run as steps of the goal completion check, on files changed since `HEAD`. See [goals](GOAL.md) for how they gate completion.
+The static audit and syntax check also run as steps of the goal completion check, on files changed since `HEAD`. See [goals](GOAL.md) for how they gate completion. The same check prints non-blocking source-quality advisories from the local baseline (duplicated blocks, flagged patterns, import cycles among the changed files); they inform the agent and never refuse completion.
 
 ## Static SEO checks
 

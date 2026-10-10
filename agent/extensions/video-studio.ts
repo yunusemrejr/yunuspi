@@ -1,4 +1,3 @@
-import { imageUsage } from "./lib/image-generate.ts";
 import { selectedMediaParams } from "./lib/media-model-routing.ts";
 
 /** Code-first video tools. Discovered on demand through tool_search; the
@@ -43,15 +42,6 @@ export default function videoStudio(pi: any) {
         const progress = (text: string) => { try { update?.({ content: [{ type: "text", text }], details: { progress: text } }); } catch { /* progress is advisory */ } };
         if (name === 'narration_tts') params = selectedMediaParams(params, 'speech', ctx?.mediaModels);
         if (name === 'audio_generate') params = selectedMediaParams(params, params.kind, ctx?.mediaModels);
-        if (name === 'video_generate') {
-          params = selectedMediaParams(params, 'video', ctx?.mediaModels);
-          const ownerSession = ctx?.sessionManager?.getSessionId?.();
-          params.runtime = { providerKey: process.env.PI_VIDEO_API_KEY || process.env.OPENROUTER_API_KEY ? undefined : await ctx?.modelRegistry?.getApiKeyForProvider?.('openrouter'),
-            onUsage: (usage: any, status: string, jobId?: string, model?: string) => {
-              if (ctx?.sessionManager?.getSessionId?.() !== ownerSession) return;
-              try { pi.appendEntry?.('auxiliary-model-usage-v1', { id: jobId ?? _id, owner: 'video-generate', provider: 'openrouter', model: model ?? params.model, status, ...(usage ? { usage: imageUsage(usage) } : {}) }); } catch { /* receipt remains authoritative */ }
-            } };
-        }
         if (name==='video_qa') await reviews.assertVisualReviews(params,ctx,bounded);
         const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress);
         const reviewRouting = videoReviewRouting(result, ctx?.model?.input?.includes('image') !== false);

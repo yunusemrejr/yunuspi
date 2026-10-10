@@ -1,12 +1,20 @@
 # Changelog
 
+## 0.36.1 — 2026-10-10
+
+**Second pass over the reduction.** Every one of the 25 skill summaries was fact-checked against the originals it replaced; about 35 invented or wrong flags, numbers and tool names were corrected, and removed tools are no longer recommended anywhere.
+
+**`goal check` also shows source-quality notes.** Duplicated blocks, flagged patterns and import cycles in the files changed since the last commit appear as an advisory line. They never block completion. The syntax step now parses new untracked data files only when Git already tracks them, so a probe's `.json` output no longer reopens a finished goal.
+
+**More dead code removed.** The scene studio (`scene-model`, `scene-runtime`), ambient frame generation, narration alignment, image tracing, the unreachable hosted-video model route (`video-generate`) and the Blender operations no tool could reach are gone, with their tests.
+
 ## 0.36.0 — 2026-10-10
 
 **A much smaller harness.** Measured against 1,817 sessions from the last 45 days, 64 of 157 tools were never called. The tool surface is now 98 tools (from 157), 42 extensions (from 54), 274 hook registrations (from 311), 25 skills (from 170, each a summary of at most 60 lines, from 3.7 MB to 1 MB), 14 Observer Book chapters (from 59), 59 docs (from 76) and 374 test files (from 388). Roughly 45,000 lines are gone. Unused tools were removed with their dead code and tests (ML lab, desktop sessions, file organizer, research toolkit, context profile, reasoning aids, mail/OpenAPI/coverage/contract/environment probes, scene, pipeline, OCR, image conversion/analysis/tracing and ambient/hosted-video generators, splat training), orphaned contract-only modules were deleted, and the 311-hook reminder table was pruned to the 14 rules that fire in real sessions.
 
 **Related tools became one tool with actions.** `blender` (setup, run, inspect, render), `agentmail` (status, messages, search, message, send) and `project_memory` (search, read, status; indexing and recall were already automatic) replace 17 tools, through one shared `actionTool` helper that keeps each part's schema and validation.
 
-**Swarm and Fusion are one fan-out.** One assistance mode, role, review kind, todo execution value, metric and capability record; `lib/fanout.ts`-style planning (provenance-preserving merge plus bounded respawn) lives in one module. Old `swarm`/`fusion` preference keys and saved todo plans keep loading.
+**Swarm and Fusion are one fan-out.** One assistance mode, role, review kind, todo execution value, metric and capability record; `runs/shared/fanout.ts` planning (provenance-preserving merge plus bounded respawn) lives in one module. Old `swarm`/`fusion` preference keys and saved todo plans keep loading.
 
 **One background reviewer.** The session observer now carries the Watchmaker's time evidence (a time-ledger row of measured tool time and repeats) and names the biggest time sink in its single note. The Watchmaker, its model role, command, scratchpad memos and retrieval role are gone, which also removes one paid review loop per session.
 

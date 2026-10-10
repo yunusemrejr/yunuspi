@@ -263,26 +263,6 @@ export async function elevenVoices(signal?: AbortSignal, env: Env = process.env)
   return { provider: 'elevenlabs', voices: (body.voices ?? []).slice(0, 100).map((v: any) => ({ id: v.voice_id, name: v.name, category: v.category, labels: v.labels })), truncated: (body.voices?.length ?? 0) > 100 };
 }
 
-export async function narrationAlign(params: any, cwd: string, signal?: AbortSignal, env: Env = process.env) {
-  const file = await inputFile(params.path, cwd), info = await probe(file, signal); requireStream(info, 'audio');
-  if ((await fs.stat(file)).size > 32 * 1024 * 1024) throw Error('Alignment upload exceeds 32 MiB; align narration scene by scene');
-  if (typeof params.text !== 'string' || !params.text.trim() || params.text.length > 100_000) throw Error('Alignment needs text of 1..100000 characters');
-  const form = new FormData(); form.set('file', new Blob([await fs.readFile(file)]), path.basename(file)); form.set('text', params.text);
-  const response = await request('/forced-alignment', form, signal, env);
-  const json = JSON.parse(response.bytes.toString('utf8')), seconds = Number(info.format?.duration);
-  const words = (json.words ?? []).map((w: any) => ({ w: w.text, s: w.start, e: w.end, loss: w.loss }));
-  if (!words.length || words.some((w: any, i: number) => typeof w.w !== 'string' || !Number.isFinite(w.s) || !Number.isFinite(w.e) || w.s < 0 || w.e <= w.s || w.e > seconds + 0.05 || i > 0 && w.s < words[i - 1].e - 0.02)) throw Error('Invalid forced-alignment word spans');
-  const normalize = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  const textMatches = normalize(words.map((w: any) => w.w).join(' ')) === normalize(params.text);
-  const dir = await outputFolder(params.outputDir, cwd);
-  try {
-    const result = { provider: 'elevenlabs', source: file, seconds, timing: 'forced-alignment', words, textMatches, loss: json.loss, requestId: response.requestId,
-      captions: textMatches ? await writeSpeechCaptions(dir, words.map((w: any) => w.w).join(' '), seconds, words) : undefined,
-      note: 'Alignment locates the supplied transcript in audio; it does not independently verify what was spoken. Inspect high-loss words and listen before trusting a cue.' };
-    await fs.writeFile(path.join(dir, 'alignment.json'), JSON.stringify(result, null, 2) + '\n'); return result;
-  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
-}
-
 export async function audioGenerate(params: any, cwd: string, signal?: AbortSignal, env: Env = process.env) {
   const music = params.kind === 'music';
   if (!music && params.kind !== 'sfx') throw Error('kind must be music or sfx');

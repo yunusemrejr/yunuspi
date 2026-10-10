@@ -616,12 +616,12 @@ async function mediaFixture(t) {
   return { ...f, ctx: session.extensionRunner.createContext(), session, settings, settingsPath };
 }
 
-test('/models browser selects image, video and audio using the real session API without changing LLM state', async t => {
+test('/models browser selects image and audio using the real session API without changing LLM state', async t => {
   const f = await mediaFixture(t), original = fs.readFileSync(f.configPath, 'utf8');
   const thinking = f.session.thinkingLevel, model = f.session.model, reads = [];
   const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath, resolveRole: f.resolver, mediaCatalogLoader: async kind => {
     reads.push(kind);
-    return [{ kind, id: 'openrouter/vendor/'+kind, name: 'Fixture '+kind, description: 'Reference and alpha asset generation.', source: 'live catalog', capabilities: kind === 'image' ? { supported_parameters: { input_references: { max: 4 }, background: { values: ['transparent'] }, aspect_ratio: { values: ['16:9', '1:1'] } } } : { supported_durations: [4, 8], supported_frame_images: ['first_frame'], supported_resolutions: ['720p'], generate_audio: true } }];
+    return [{ kind, id: 'openrouter/vendor/'+kind, name: 'Fixture '+kind, description: 'Reference and alpha asset generation.', source: 'live catalog', capabilities: { supported_parameters: { input_references: { max: 4 }, background: { values: ['transparent'] }, aspect_ratio: { values: ['16:9', '1:1'] } } } }];
   } });
   t.after(() => handle.close());
   const page = await openPage(t, handle.url), errors = [];
@@ -637,11 +637,6 @@ test('/models browser selects image, video and audio using the real session API 
   await page.getByRole('status').filter({ hasText: 'Media choices applied to this session.' }).waitFor();
   assert.equal(f.ctx.mediaModels.image, 'openrouter/vendor/image');
   assert.equal(JSON.parse(fs.readFileSync(f.settingsPath)).mediaModels, undefined, 'session use does not persist');
-  await page.getByRole('button', { name: 'Video', exact: true }).click();
-  const video = page.getByRole('combobox', { name: 'Video model', exact: true });
-  await video.locator('option[value="openrouter/vendor/video"]').waitFor({ state: 'attached' });
-  await video.selectOption('openrouter/vendor/video');
-  await page.getByText(/Duration: 4, 8 seconds/).waitFor();
   await page.getByRole('button', { name: 'Audio', exact: true }).click();
   await page.getByRole('combobox', { name: 'Speech model', exact: true }).selectOption('elevenlabs/eleven_flash_v2_5');
   await page.getByRole('combobox', { name: 'Music model', exact: true }).selectOption('local/procedural');
@@ -649,11 +644,11 @@ test('/models browser selects image, video and audio using the real session API 
   await page.getByRole('button', { name: 'Save media choices', exact: true }).press('Enter');
   await page.getByRole('status').filter({ hasText: 'Media choices saved for future sessions.' }).waitFor();
   const stored = JSON.parse(fs.readFileSync(f.settingsPath));
-  assert.deepEqual(stored.mediaModels, { image: 'openrouter/vendor/image', video: 'openrouter/vendor/video', speech: 'elevenlabs/eleven_flash_v2_5', music: 'local/procedural', sfx: 'elevenlabs/eleven_text_to_sound_v2' });
+  assert.deepEqual(stored.mediaModels, { image: 'openrouter/vendor/image', speech: 'elevenlabs/eleven_flash_v2_5', music: 'local/procedural', sfx: 'elevenlabs/eleven_text_to_sound_v2' });
   assert.equal(stored.defaultModel, 'language'); assert.equal(stored.defaultThinkingLevel, 'high'); assert.deepEqual(stored.enabledModels, ['fixture/language']);
   assert.equal(f.session.model, model); assert.equal(f.session.thinkingLevel, thinking);
   assert.equal(fs.readFileSync(f.configPath, 'utf8'), original, 'LLM role JSON remains byte-identical');
-  assert.deepEqual(reads, ['image', 'video']);
+  assert.deepEqual(reads, ['image']);
   await page.screenshot({ path: '/var/tmp/yunuspi-media-models-wide.png', fullPage: true });
   await page.reload(); await page.getByRole('button', { name: 'Audio', exact: true }).click();
   assert.equal(await page.getByRole('combobox', { name: 'Speech model', exact: true }).inputValue(), stored.mediaModels.speech);
@@ -676,7 +671,7 @@ test('media writes reject foreign origins, malformed choices and stale session r
   const snapshot = await (await post(handle.url, token, 'media-snapshot', {})).json();
   const valid = { revision: snapshot.revision, selections: { image: 'openrouter/auto' }, persist: false };
   assert.equal((await post(handle.url, token, 'media-save', valid, { origin: 'https://foreign.invalid' })).status, 403);
-  for (const selections of [{ unknown: 'openrouter/auto' }, { speech: 'openrouter/auto' }, { video: 'local/imaginary' }, { image: 'https://invalid' }, []]) {
+  for (const selections of [{ unknown: 'openrouter/auto' }, { speech: 'openrouter/auto' }, { image: 'https://invalid' }, []]) {
     assert.equal((await post(handle.url, token, 'media-save', { ...valid, selections })).status, 400);
     assert.deepEqual(f.ctx.mediaModels, {});
   }
@@ -684,6 +679,20 @@ test('media writes reject foreign origins, malformed choices and stale session r
   assert.equal((await post(handle.url, token, 'media-save', valid)).status, 200);
   assert.equal((await post(handle.url, token, 'media-save', valid)).status, 409);
   assert.equal(JSON.parse(fs.readFileSync(f.settingsPath)).mediaModels, undefined);
+});
+
+test('a retired hosted-video choice in saved config is ignored: not shown, not rejected, not written back', async t => {
+  const f = await mediaFixture(t), handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath, resolveRole: f.resolver });
+  t.after(() => handle.close());
+  const token = new URL(handle.url).pathname.slice(1);
+  await f.ctx.setMediaModels({ image: 'openrouter/vendor/saved', video: 'openrouter/vendor/legacy' });
+  const snapshot = await (await post(handle.url, token, 'media-snapshot', {})).json();
+  assert.deepEqual(snapshot.selections, { image: 'openrouter/vendor/saved' });
+  assert.equal(snapshot.models.some(row => row.kind === 'video'), false);
+  const saved = await post(handle.url, token, 'media-save', { revision: snapshot.revision, selections: { image: 'openrouter/vendor/saved', video: 'openrouter/vendor/legacy' }, persist: true });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).selections, { image: 'openrouter/vendor/saved' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.settingsPath)).mediaModels, { image: 'openrouter/vendor/saved' });
 });
 
 test('media catalog timeout and offline mode retain saved choices in the browser', async t => {

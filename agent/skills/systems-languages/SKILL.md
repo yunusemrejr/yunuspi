@@ -5,7 +5,7 @@ description: "Use when writing, reviewing or shipping C, C++, Rust, Go, Java, .N
 
 # Systems Languages
 ## C
-- Document ownership, length, alignment and errors; check `n > SIZE_MAX / sizeof *p` before allocating; keep the old pointer when realloc fails.
+- Document ownership, length, alignment, errors; check `n > SIZE_MAX / sizeof *p` before allocating; keep the old pointer when realloc fails.
 - Signed overflow is UB; serialize with explicit width and endianness, never raw structs.
 - `restrict` is a promise: check a scalar reference, then tails and unaligned buffers, before SIMD.
 ## C and C++ multiplatform
@@ -31,7 +31,7 @@ description: "Use when writing, reviewing or shipping C, C++, Rust, Go, Java, .N
 - Trimming and Native AOT break reflection-heavy code; test the published artifact on Linux. Path case and ICU matter.
 ## PHP
 - Use prepared statements; allowlist SQL identifiers; escape HTML by context; never expose phpinfo or `.env`.
-- Web SAPI and CLI can differ in version and php.ini; `php -S` is not production. A file rollback does not undo a migration.
+- Web SAPI and CLI can differ in php.ini and extensions; `php -S` is not production. A file rollback does not undo a migration.
 ## x86 assembly
 - Confirm ISA, syntax and ABI first; System V and Win64 differ in argument and preserved registers.
 - CPUID is not enough for SIMD: check OS state support; keep a scalar path; test tail, overlap and guard-page sizes.
@@ -40,7 +40,7 @@ description: "Use when writing, reviewing or shipping C, C++, Rust, Go, Java, .N
 - `do concurrent` asserts independence. Validate with manufactured solutions and an independent reference, not two builds of one bug.
 ## Embedded devices
 - Identify exact board, chip, port and artifact; check pinout, voltage limits and boot straps before flash, erase or reset.
-- Compile first; keep compile, upload and monitor separate. Opening a serial port can toggle reset lines.
+- Check build hooks first; they can upload or run commands. Compile first; keep compile, upload, monitor separate. Opening a serial port can toggle reset lines.
 - Stop on unexpected reset or identity change; never auto-erase or disable the watchdog. Report compiled, flashed and ran separately.
 ## Compiler construction
 - Keep source spans for diagnostics; specify precedence, scoping and evaluation order.

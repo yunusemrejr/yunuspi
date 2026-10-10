@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { ambientPlan, createAmbientFrames, skylineMask } from '../agent/extensions/lib/ambient-frames.ts';
 import { videoQa } from '../agent/extensions/lib/video-studio.ts';
 import { blenderWorker } from '../agent/extensions/lib/blender-studio.ts';
 import { run } from '../agent/extensions/lib/media-process.ts';
@@ -15,24 +14,6 @@ import { goalCompletionGate, createGoal, recordEvidence, complete, reopenRejecte
 import { visionModel } from '../agent/extensions/lib/image-understand.ts';
 
 async function workspace(t) { const dir = await fs.mkdtemp(path.join(os.tmpdir(),'yunuspi-media-repair-')); t.after(() => fs.rm(dir,{recursive:true,force:true})); return dir; }
-test('RGB atmosphere preserves stationary detail and neutral pixels; absolute-time rain is deterministic', () => {
-  const plan=ambientPlan({width:64,height:64,seconds:2,clouds:0,rain:0}), base=new Uint8Array(64*64*3).fill(92);
-  const render=createAmbientFrames(base,undefined,plan);
-  assert.deepEqual(render(0),Buffer.from(base)); assert.deepEqual(render(1.7),Buffer.from(base));
-  const rain=createAmbientFrames(base,undefined,{...plan,rain:1});
-  assert.deepEqual(rain(.8),rain(.8)); assert.notDeepEqual(rain(.8),rain(1.2));
-  const mask=new Uint8Array(base.length); mask.fill(255,0,64*24*3);
-  const sky=createAmbientFrames(Uint8Array.from(base,(_,i)=>i%251),mask,{...plan,clouds:1,cloudSpeed:10});
-  assert.deepEqual(sky(2).subarray(64*24*3),sky(0).subarray(64*24*3),'station/terrain stay exact');
-  assert.notDeepEqual(sky(2).subarray(0,64*24*3),sky(0).subarray(0,64*24*3),'masked clouds move');
-  assert.throws(()=>ambientPlan({clouds:1}),/skyMask/);
-  assert.throws(()=>ambientPlan({clouds:0,width:65}),/even/);
-  assert.equal(ambientPlan({clouds:0,seconds:.25,fps:1}).seconds,1,'timeline is quantized to at least one frame');
-  const boundary=skylineMask([[0,.4],[1,.4]],64,64);
-  assert.equal(boundary[(32*64+20)*3],0,'skyline cannot move the foreground');
-  assert.throws(()=>ambientPlan({skyline:[[0,.2],[.8,.5]]}),/skyline/);
-});
-
 test('raw QA metadata edits and superseded takes cannot approve delivery', {timeout:60000}, async t => {
   const cwd=await workspace(t), output=path.join(cwd,'take.mp4');
   await run('ffmpeg',['-v','error','-f','lavfi','-i','color=c=0x5a646e:s=64x64:r=6:d=1','-c:v','libx264','-pix_fmt','yuv420p',output]);

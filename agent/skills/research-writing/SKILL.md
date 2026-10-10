@@ -39,7 +39,8 @@ description: "Research questions from primary sources, papers (arXiv, PubMed, Cr
 - Cut "Welcome to X" openers, slogans that say nothing, and team bands with no decision.
 
 ## Email
-- Send only with explicit user authorization; draft before sending.
+- Send only with explicit user authorization; verify before sending.
+- Local mail: snapshot the store and parse the copy; an empty search is incomplete coverage, so check trash, sent and archive.
 - Verify the recipient from a real source, the sender identity, the suppression list and an opt-out line for bulk mail.
 - Never pad a list to reach a count. Never write credentials into files, commands or logs.
 - Report what was sent, to whom and when; do not present unverified addresses as facts.

@@ -1,6 +1,6 @@
 ---
 name: growth-finance
-description: "Build and check financial models (unit economics, runway, DCF), analyze filings and reconciliations, measure portfolio risk and backtests, run marketing experiments, improve SEO and search discoverability, and govern authorized community posting; use for CAC, LTV, valuation, 10-K, VaR, drawdown, SEO, sitemaps and forum promotion."
+description: "Build and check financial models (unit economics, runway, DCF), analyze filings, measure portfolio risk and backtests, run marketing experiments, improve SEO and search discoverability, and govern authorized community posting; use for CAC, LTV, valuation, 10-K, VaR, drawdown, SEO, sitemaps and forum promotion."
 ---
 
 ## Financial models
@@ -45,4 +45,5 @@ description: "Build and check financial models (unit economics, runway, DCF), an
 - Post only under explicit publishing authorization; a discovery or site-build request does not grant it. Keep that authorization across resumptions.
 - Before any post, read the venue's current rules, the thread and existing answers. An available API or logged-in browser is not permission.
 - Stop at logins, MFA, CAPTCHA or moderation blocks; never bypass them or create replacement identities.
+- Record `submitting` before each post; after a timeout or restart, read the venue for the post before any retry.
 - Disclose affiliation; invent no experience, endorsements or identities; no bulk, fake grassroots or undisclosed incentives. Answer the real question; a link is optional.

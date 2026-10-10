@@ -359,3 +359,21 @@ test('a continuation that cannot be sent is reported, not swallowed',async()=>{
  assert.match(h.notes.at(-1).text,/criteria are still open; \/goal resume restarts it/);
  assert.equal(h.entries.at(-1).data.nudges,1,'the attempt is still counted, and the stall gate still bounds it');
 });
+
+test('goal check lists criteria and unverified edits, then reports every step settled',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ const open=await h.call({action:'check'});
+ assert.match(open,/\[ \] C1 /);
+ assert.match(open,/Open steps above/);
+ for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ const edited=await h.call({action:'check'});
+ assert.match(edited,/\[!\] 1 file change\(s\) since the last passing test/);
+ assert.doesNotMatch(edited,/Every step is settled/);
+ await h.emit('tool_call',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'}});
+ await h.emit('tool_result',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'},details:{exitCode:0}});
+ const settled=await h.call({action:'check'});
+ assert.match(settled,/Every step is settled; call goal complete\./);
+ assert.match(await h.call({action:'complete'}),/Goal achieved/);
+});

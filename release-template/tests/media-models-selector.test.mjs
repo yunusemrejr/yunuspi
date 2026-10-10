@@ -10,7 +10,7 @@ import { initTheme } from '../core/coding-agent/src/modes/interactive/theme/them
 import { setKeybindings } from '@yunuspi/tui';
 import { InteractiveMode } from '../core/coding-agent/src/modes/interactive/interactive-mode.js';
 import { KeybindingsManager } from '../core/coding-agent/src/core/keybindings.js';
-import { selectedMediaParams, imageCapabilityIssues, quoteImageEndpoint, quoteVideoModel, videoCapabilityIssues, costLimit } from '../agent/extensions/lib/media-model-routing.ts';
+import { selectedMediaParams, imageCapabilityIssues, quoteImageEndpoint, costLimit } from '../agent/extensions/lib/media-model-routing.ts';
 
 test('media selector keyboard choices and save never alter LLM cycling or unsaved LLM edits', () => {
   initTheme('dark', false);
@@ -74,14 +74,10 @@ test('media parameter precedence preserves explicit providers and independent lo
   assert.equal(selectedMediaParams({}, 'music', { music: 'elevenlabs/music_v2_5' }).model, 'music_v2_5');
 });
 
-test('quotes keep unknown billing unknown and include image variants, references, resolution and audio', () => {
+test('quotes keep unknown billing unknown and include image variants and references', () => {
   assert.equal(quoteImageEndpoint({ pricing: [{ billable: 'output_image', unit: 'image', cost_usd: .02 }, { billable: 'output_image', unit: 'image', cost_usd: .04, variant: '4k' }, { billable: 'input_reference', unit: 'image', cost_usd: .01 }] }, 2), .06);
   assert.equal(quoteImageEndpoint({ pricing: [{ billable: 'output_image', unit: 'token', cost_usd: .00001 }] }), null);
   assert.ok(imageCapabilityIssues({ supported_parameters: { input_references: { min: 1, max: 2 } } }, { transparent: true }, 0).length >= 2);
-  assert.equal(quoteVideoModel({ pricing_skus: { cents_per_video_output_second_720p: '3', cents_per_image_input: '1', cents_per_video_output_second_1080p: '14' } }, { seconds: 4, resolution: '720p', firstFrame: 'frame.png', generateAudio: false }), .13);
-  assert.equal(quoteVideoModel({ pricing_skus: { duration_seconds_without_audio_720p: '.03', duration_seconds_with_audio_720p: '.05' } }, { seconds: 4, resolution: '720p', generateAudio: false }), .12);
-  assert.equal(quoteVideoModel({ pricing_skus: { video_tokens: '.00001' } }, { seconds: 4, resolution: '720p' }), null);
-  assert.ok(videoCapabilityIssues({ id: 'v', supported_durations: [4], supported_resolutions: ['720p'], supported_aspect_ratios: ['16:9'] }, { seconds: 4, resolution: '720p', aspectRatio: '16:9', lastFrame: 'x' }).includes('last frame'));
   for (const value of [0, -1, NaN, Infinity, '2']) assert.throws(() => costLimit(value, 1), /maxCostUsd/);
 });
 

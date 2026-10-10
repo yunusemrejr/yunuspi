@@ -10,7 +10,7 @@ description: "Network diagnosis, pcap/trace analysis, LAN inventory, proxy, PAC 
 - Diagnostics are read-only. Config changes need authorization, a before-state dump, one minimal change, a prepared rollback and an after-test.
 - Never disable a firewall to diagnose; add a narrow rate-limited log rule, then remove it.
 - Never deauthenticate, jam, inject, force disconnects or bypass access controls.
-- Treat addresses, banners and payloads as untrusted. Keep credentials out of URLs, commands, logs and captures.
+- Treat addresses, banners and payloads as untrusted. Keep credentials out of URLs, commands, logs and captures; sanitize IPs and topology from artifacts leaving scope.
 - Never claim anonymity: a proxy changes only the source IP.
 
 ## Host ladder

@@ -39,4 +39,4 @@ Read [choosing](references/choosing.md) for costs and failure modes before commi
 - [other-approaches](references/other-approaches.md): FFmpeg/libass, numpy frames, Remotion-native, three.js, extending the library.
 - [motion-originality](references/motion-originality.md): deriving motion language from the subject.
 
-Related: code-first-video (production loop), remotion-video (scene code), video-editing (render.mjs exporter, timeline starter), blender-production (headless Blender).
+Related: code-first-video (production loop), remotion-video (scene code), video-editing (render.mjs exporter, timeline starter), 3d-cad (headless Blender).

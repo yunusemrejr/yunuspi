@@ -223,10 +223,8 @@
     "video-looks.ts",
     "video-publish.ts",
     "video-shot.ts",
-    "video-generate.ts",
     "media-model-routing.ts",
     "video-compose.ts",
-    "ambient-frames.ts",
     "video-review-evidence.ts",
     "video-color-evidence.ts",
     "shot-scene.ts",
@@ -612,6 +610,26 @@
       "name": "bash-router.ts",
       "retired": "2026-10-10",
       "why": "annotation hook that nudged bash commands toward dedicated tools; the nudges duplicated tool descriptions and tool_search. The pure classifier stays in lib/bash-routing.ts for guidance and test detection. Do not recreate"
+    },
+    {
+      "name": "ambient-frames.ts",
+      "retired": "2026-10-10",
+      "why": "fixed-camera RGB atmosphere had no tool after video_ambient was removed. Do not recreate"
+    },
+    {
+      "name": "scene-model.mjs",
+      "retired": "2026-10-10",
+      "why": "scene studio runtime had no tool after scene_create/scene_render were removed. Do not recreate"
+    },
+    {
+      "name": "scene-runtime.mjs",
+      "retired": "2026-10-10",
+      "why": "scene studio runtime had no tool after scene_create/scene_render were removed. Do not recreate"
+    },
+    {
+      "name": "video-generate.ts",
+      "retired": "2026-10-10",
+      "why": "hosted video generation had no tool after video_generate was removed. Do not recreate"
     }
   ],
   "supportFiles": [
@@ -709,8 +727,6 @@
     "extensions/lib/micro-intelligence/router-shadow.ts",
     "extensions/lib/micro-intelligence/model-qual-lab.ts",
     "scripts/render-design-state.mjs",
-    "scripts/scene-model.mjs",
-    "scripts/scene-runtime.mjs",
     "extensions/lib/utility-mcp/local-reference.mjs",
     "extensions/lib/utility-mcp/web-assets.mjs",
     "scripts/video-render.mjs",

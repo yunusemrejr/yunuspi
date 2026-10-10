@@ -37,7 +37,7 @@ description: "Create, edit, convert and verify Word (docx, odt), Excel (xlsx, xl
 - Never overwrite the source or convert onto the only copy; write a new, clearly named file.
 - Reopen the saved file; compare text, structure, page or slide count, aspect ratio and required facts.
 - Inspect every changed page or slide at readable size: overlaps, off-page objects, cropping, font substitution, orphan headings, displaced footnotes, cut cells, #### or scientific notation, chart labels.
-- An exit code proves little; a fresh, non-empty output must open and render.
+- An exit code proves little; a fresh, non-empty output must open and render. `deliverable_check` opens any produced file.
 - A PDF is a static preview, not proof of animation, Word pagination or Excel rendering.
 - Accessibility claims need application checks: heading order, language, alt text, table headers, reading order.
 - Deliver one clearly named editable file plus an optional matching preview; state untested checks and unsupported features.
