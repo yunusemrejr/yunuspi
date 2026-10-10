@@ -13,7 +13,6 @@ work, cancellation and receipts.
 | Broad independent work or competing approaches | Up to three independent workers, up to three completion reviewers, observer at 60 seconds |
 | High consequence work | Independent assurance, observer at 30 seconds |
 
-Watchmaker reviews substantial or failing work at a 120-second routine cadence.
 Failure evidence can shorten reviewer admission to the scheduler's next tick.
 The scheduler applies cheap admission before building a packet. It still keeps
 single-flight dispatch, cancellation, evidence freshness, quiet backoff and
@@ -121,27 +120,13 @@ scope, user constraints, required checks or deliberate tool calls. See
 [competence control](COMPETENCE-CONTROL.md) for the estimator, the measured
 calibration and `PI_COMPETENCE_STORE=off`.
 
-## Verification and benchmark
+## Verification
 
 Run the policy, scheduler, helper and completion-review regressions:
 
 ```sh
 PI_LOCAL_LM=off node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/automatic-helper-lifecycle.test.mjs tests/skill-discovery-runner.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
-PI_LOCAL_LM=off node agent/scripts/adaptive-execution-bench.mjs
-PI_LOCAL_LM=off node agent/scripts/competence-replay-bench.mjs
 ```
-
-The benchmark replays the actual observer scheduler for the same simulated
-180-second task timeline and fixture responses, with and without the shared
-policy. In its three fixtures, automatic reviewer dispatches and packet builds
-change from 9 to 0 for direct work, 9 to 4 for complex work, and 9 to 7 for high
-consequence work. Required capabilities remain deliberately callable.
-
-These are measured dispatch counts in an offline replay. Packet token counts
-are estimates from UTF-8 bytes divided by four. Local replay timing measures
-scheduler evaluation only. This benchmark does not measure live model latency,
-provider billing or end-to-end task completion; paired live CLI experiments
-must report those separately.
 
 ## Tool exposure and assurance output in 0.18
 
@@ -169,7 +154,3 @@ their own small bundle; negative cases stay quiet (bug fixes, "research the
 codebase", HTML email templates, prompts that say not to search). The bundles
 are intent patterns in `lib/tool-discovery.ts`; the host tool ceiling still
 applies.
-
-CI runs `tool-efficiency-bench.mjs` to enforce the deterministic schema-count and
-output-size contracts while preserving required checks and blockers. Its fixture
-byte counts are prompt-overhead bounds, not estimates of model latency or billing.

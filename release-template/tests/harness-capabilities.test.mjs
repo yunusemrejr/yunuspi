@@ -74,8 +74,8 @@ test("browse and search return small bounded previews with progressive detail", 
   assert.equal(memoryNext.remaining, 0);
 
   const searches = [
-    ["swarm", "swarm-execution"],
-    ["fusion", "fusion-review"],
+    ["swarm", "fanout-execution"],
+    ["fusion", "fanout-execution"],
     ["free:true", "model-selection"],
     ["future session notes", "memory-notes"],
     ["prior memory", "memory-retrieval"],

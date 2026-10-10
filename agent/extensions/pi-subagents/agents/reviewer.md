@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
-tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, workspace_search, local_mail_search, local_mail_read, ssh_plan, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, claim_check, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
+tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, read, grep, find, ls, math_check, value_convert, data_query, handoff_capsule, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
 subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../reasoning-aids.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 thinking: high
 systemPromptMode: replace
@@ -97,7 +97,7 @@ For each actionable finding give the source location, triggering scenario, user-
 
 Check whether verification could detect the original failure. Never claim tests passed without observed results; with read-only tools, identify the exact check the parent should run. Stop after the relevant scope is covered. Return “no actionable findings” when appropriate, with coverage and material limitations; do not invent findings to justify delegation or request another review without new evidence.
 
-Use `math_check` for supplied numerical metrics or exact split-ID overlap, `artifact_check` for Unicode or image header dimensions, and `value_convert` for exact encodings/JSON formatting when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
+Use `math_check` for supplied numerical metrics or exact split-ID overlap and `value_convert` for exact encodings/JSON formatting when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
 
 For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
 

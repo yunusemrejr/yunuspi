@@ -1,6 +1,6 @@
 # Vanilla HTML/CSS/JS for advanced motion
 
-A page is a self-contained scene. It exposes `window.renderFrame(seconds)`; the exporter (`motion-graphics-production/scripts/render.mjs`) or Remotion's `HtmlMotion` calls it once per frame and takes a screenshot. Everything on the page is a pure function of `seconds`. Each worked example in `motion_examples` (approach `html`) carries its own header listing the concepts; this file explains the toolbox and the contract.
+A page is a self-contained scene. It exposes `window.renderFrame(seconds)`; the exporter (`video-editing/scripts/render.mjs`) or Remotion's `HtmlMotion` calls it once per frame and takes a screenshot. Everything on the page is a pure function of `seconds`. Each worked example in `motion_examples` (approach `html`) carries its own header listing the concepts; this file explains the toolbox and the contract.
 
 ## The page contract
 

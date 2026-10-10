@@ -166,10 +166,10 @@ export function expertVerdictSummary(verdict: ExpertVerdict): string {
   return verdict.converged ? "Expert pass: converged." : `Expert pass: ${verdict.reason.replaceAll("-", " ")}.`;
 }
 
-/** Reviewer evidence rows shared by Observer and Watchmaker. Pure: reads
+/** Reviewer evidence rows for the Observer. Pure: reads
  * only the supplied branch entries. Observer receives domain focus and
- * doctrine so it judges against the excellence bar; Watchmaker receives
- * pass/yield rows so it can spot low-value perfectionism. Guardian needs
+ * doctrine so it judges against the excellence bar and can spot low-value
+ * perfectionism from pass/yield rows. Guardian needs
  * no new row: it already fingerprints expert_director tool evidence and
  * completion claims through its existing signals. */
 export interface ExpertReviewerRow {

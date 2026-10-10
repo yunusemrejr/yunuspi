@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createJiti} from 'jiti';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+
+// The completion check's static steps read the git change set of ctx.cwd, as the SDK always supplies it.
+// A clean one-commit repository gives them a real, deterministic input with nothing to report.
+const cleanRepo=(()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'goal-state-repo-'));
+ const git=args=>execFileSync('git',['-c','commit.gpgsign=false','-c','user.name=fixture','-c','user.email=fixture@example.invalid',...args],{cwd:dir,stdio:'ignore'});
+ git(['init','-q']);fs.writeFileSync(path.join(dir,'README.md'),'fixture\n');git(['add','README.md']);git(['commit','-q','-m','fixture']);
+ process.on('exit',()=>fs.rmSync(dir,{recursive:true,force:true}));
+ return dir;
+})();
 
 const jiti=createJiti(import.meta.dirname);
 const gs=await jiti.import('../agent/extensions/lib/goal-state.ts');
@@ -178,7 +192,7 @@ function harness({failSend=false}={}){
   sendUserMessage:async(text,options)=>{if(failSend)throw new Error('input queue closed');sent.push(text);sentOptions.push(options);},
   getActiveTools:()=>['read'],setActiveTools:()=>{},
  };
- const ctx={ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries},hasPendingMessages:()=>false};
+ const ctx={cwd:cleanRepo,ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries},hasPendingMessages:()=>false};
  goalExtension(pi);
  const emit=async(name,event={})=>{for(const fn of handlers[name]??[])await fn(event,ctx);};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);

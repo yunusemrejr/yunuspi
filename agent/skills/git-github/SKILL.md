@@ -1,60 +1,51 @@
 ---
 name: git-github
-description: Git and GitHub in practice — object model, reflog recovery, pickaxe/bisect, commit discipline, rebase vs merge, force-push rules, conflict handling, gh CLI workflows, branch protection, CI essentials, and common disaster recovery. Use for any git operation, PR/review work, or when a repo is in a bad state.
+description: "Git and GitHub end to end: history recovery, rebase and force-push rules, gh CLI and CI triage, GitHub Actions hardening, READMEs, repo health files, changelogs and release notes, and multi-developer branching, promotion and rollback."
 ---
 
-# Git & GitHub
+# Git and GitHub
 
-## Model (30 seconds)
+## Recovery and history
+- Lost commits: `git reflog`, then `git branch recovery <sha>`. Orphaned objects: `git fsck --lost-found`.
+- Find causes with `git log -S'str'` (pickaxe), `-G regex`, `--follow`, `git blame -L`; `git bisect run ./check.sh` (exit 1 = bad).
+- `git diff A...B` shows what B added since the merge-base. After merging main into a feature branch, `git rebase --onto main <merge-sha> feature`, then confirm `git log main..feature` lists only your commits.
+- Rebase only unpublished commits (`commit --fixup=<sha>`, `rebase -i --autosquash`). `--abort` is always safe; confirm with `git cherry` before `--skip`.
+- Push with `--force-with-lease`, never `--force`; never force a protected branch.
+- Conflicts: read both sides' intent (`git diff --diff3`). Silently deleting one side is the classic corruption.
+- Prefer a WIP commit or `git worktree` to `git stash`. Dry-run `git clean -fdn`; test ignore rules with `git check-ignore -v`.
 
-- Objects: **blob** (file content), **tree** (directory), **commit** (tree + parents + message), **ref** (name → commit or reflog). There is no "working copy" in the model — the index (staging) is a *prepared tree*.
-- `git status` = worktree vs index vs HEAD. `git diff` = worktree vs index; `git diff HEAD` = worktree vs HEAD; `git diff A..B` = two commits; `git diff A...B` = the changes B makes relative to the merge-base (what "what did B add" means).
-- **`git reflog` is the undo button.** Every HEAD move is logged: `git reflog`, `git checkout <sha>` or `git reset --hard <sha>` to recover anything "lost" (detached HEAD, bad reset, deleted branch → `git branch recovered <sha>`).
+## Review and merge
+- One merge strategy per repo (squash, rebase or merge); mixing them confuses bisect and revert.
+- Protect the default branch: required review and passing checks. CODEOWNERS routes reviews; an ownerless rule breaks.
+- Review behavior and invariants, inline. REQUEST CHANGES only for blockers.
 
-## Reading (before changing anything)
+## gh CLI and CI triage
+- `gh pr create --fill`, `gh pr checks --watch`, `gh pr merge --rebase --auto`, `gh run view <id> --log-failed`. Read the first real error in the failed step, not the first warning.
+- Never mask a gate with `continue-on-error` or `|| true`; retry flaky network steps with bounded backoff.
+- Required-check names must match job names. A renamed or `if:`-skipped job leaves its required check pending forever.
 
-- `git log --oneline --graph --decorate -20` · `git log -p -- <path>` (history of one file) · `git log -S'needle'` (pickaxe: commits that added/removed the literal) · `-G'regex'` · `git log --follow <file>` (through renames) · `git show <sha>` · `git blame -L <n>,<m> <file>` (useful for "who and why" when the message is thin: read the commit the blame points at).
-- `git bisect run ./script.sh` — automate bisection (script exits 1 on bad). For a config flip, bisect over *values*.
+## GitHub Actions hardening
+- Top-level `permissions: contents: read`; write scopes per job. Pin third-party actions to commit SHAs, version in a comment.
+- Never combine `pull_request_target` with an untrusted checkout. Route `github.event.*` through `env:`, never `run:` interpolation.
+- Fork PRs get no secrets; gate deploys with environment reviewers. Prefer OIDC scoped to repo, branch and environment. Self-hosted runners never run untrusted PRs.
+- Set `timeout-minutes`; `concurrency` with `cancel-in-progress` for PRs only, never releases; cache on the lockfile hash.
 
-## Working rules
+## READMEs and repo health
+- A README says what the project is, who it is for and how to start, within the first screen. Run every documented command from a clean checkout. No secrets or private hostnames.
+- At most five badges, each live (CI, release, license). Never hardcode coverage. Images need alt text.
+- Health files: one-line description and 5-10 topics; full LICENSE text; CONTRIBUTING with commands that work; SECURITY with supported versions and a private reporting channel; a monitored contact in CODE_OF_CONDUCT; PR template asking for verification evidence; CODEOWNERS paths that exist.
+- Check from outside: logged out, then a fresh clone following CONTRIBUTING.
 
-- **Commit small and often, locally.** Unwinding 90-minute commits is how Fridays die.
-- Message: `type(scope): subject` ≤ 72 chars, imperative ("fix", not "fixed"/"fixes"); body = *why* the diff can't say + issue ref; `BREAKING CHANGE:` footer for the big ones.
-- **Only rebase your own unpublished commits.** `git rebase -i` → `reword` messages, `drop` junk, `fixup` (pair with `--autosquash`: commit with `git commit --fixup=<sha>`), `squash` to merge. Never rebase after someone has built on your commits.
-- **`git push --force-with-lease`**, never `--force` (lease fails when someone pushed in between). On main/protected: never.
-- **Merge vs rebase:** rebase keeps your branch history linear (pre-merge); `git merge` (or `--no-ff` merge on main) preserves the branch's existence + integrates. Team convention wins; apply one per repo and be consistent.
-- Stash: **last resort**, WIP commit on a branch (or a `git worktree` for parallel work) beats `git stash` (stash is invisible, forgettable, misapplies across branches).
-- Tags: annotated for releases (`git tag -a v1.2.3 -m "…"` + `git push --tags`); lightweight tags for scratch.
-- `git clean -fdn` (dry run!) before any clean; `git gc --prune=now` only when you understand reflog + object retention.
+## Changelogs and releases
+- Derive notes from merges since the last tag (`git log --oneline vX..HEAD`, `gh pr list --state merged`), not memory.
+- Version by the most severe change: removed or changed public behavior is major; a compatible capability is minor. In 0.x, state breaking changes explicitly.
+- Lead with upgrade steps and breaking changes, with before/after code; link PRs.
+- Keep `## [Unreleased]`; never rewrite shipped sections. Tag the exact shipped commit and attach checksums or provenance. Correct a published release openly.
 
-## Conflicts
-
-- `git rebase`/`merge` → resolve markers, `git add`, `git rebase --continue` / `git commit`. **Read both sides' intent** — deleting one side's line because "mine is cleaner" is the classic silent corruption. `git diff --diff3` shows the common ancestor.
-- Long rebase: `git rebase --abort` is always safe; `git rebase --skip` only if you know the commit's content is already present (verify: `git cherry`).
-- Renames + edits conflict: check `git status` for unmerged entries (both modified / added by both) and resolve each, then `git add`.
-
-## GitHub / gh CLI
-
-- `gh auth status` first. Day-to-day:
-  - `gh pr create --fill` (auto-drafts title/body from commits), `gh pr view -w` (checks + timeline), `gh pr checks` (CI status, `--watch`), `gh pr diff`, `gh pr merge --rebase --auto`
-  - `gh run list --branch X`, `gh run watch <id>`, `gh run view <id> --log-failed` (CI failure triage: start at the failed step's log, read the *last* error, not the first warning)
-  - `gh issue list --label bug`, `gh api repos/.../commits` (raw data when the CLI lacks the shape), `gh api --paginate` for lists.
-- **Review etiquette:** comment on behavior/invariants (see `software-engineering-wisdom`); `REQUEST CHANGES` for blockers only, `APPROVE` when you'd merge your own version; inline > general.
-- **Branch protection on main:** require PR + review + passing status checks; `CODEOWNERS` (per-path `@team`) to route the right reviewer — the rule with no owner is the rule that breaks.
-- CI: `on: pull_request` + `on: push` to main; cache deps (`actions/setup-node` + `actions/cache` or built-in); `concurrency: {group: refs/pull/$number, cancel-in-progress: true}` stops zombie builds; secrets in repo/org settings, never in workflow files; filter (path) so unrelated PRs don't wait on the full suite.
-- **Release:** tag → GitHub release (or a release workflow); update `CHANGELOG` from the PR list, not memory.
-
-## Disaster recovery playbook
-
-- **Lost commits (bad reset):** `git reflog` → find the sha → `git checkout -b recovery <sha>` (keep the old branch, don't overwrite).
-- **Deleted branch with work:** reflog of any commit on it, or `git fsck --lost-found` for fully orphaned objects.
-- **Amended a pushed commit** (you already should not): push fails; `--force-with-lease` if you own the branch alone; otherwise re-create the original commit on a new branch and re-apply.
-- **Brought main into a feature branch and now merge hell:** `git rebase --onto main <merge> feature` (move feature's commits onto main, skipping the merge commit). Verify with `git log --oneline main..feature` (only *your* commits should be listed).
-- **Submodules:** prefer not (they are a support burden); when present, `git submodule update --init --recursive`; commit the *sha*, never the submodule's dirty state; `--force` to override a stray local detach.
-
-## Housekeeping
-
-- `.gitignore`: ignore build outputs, secrets, local config; **test it** (`git check-ignore -v path`) — a missing ignore rule is how `.env` ships.
-- `.gitattributes`: `* text=auto eol=lf` (or per-platform), `*.png binary`, linguist-ignore for generated dirs.
-- `git config pull.rebase true` (local default: rebase your pulls) — set intentionally, document in onboarding, don't surprise.
-- `git config core.hooksPath` → shared pre-commit checks (or use a real hook framework) for lint/test gates pre-push.
+## Multi-developer flow
+- Map branches, environments, gates and promoters before changing anything. Keep main releasable with short-lived branches; write down branch lifetimes and merge direction.
+- Build once; promote the same artifact digest with its config revision. Secrets never live in manifests, chat or CI logs.
+- Separate deploy from release. Release flags get an owner and removal date; kill switches and entitlements follow different rules.
+- Every promotion names its rollback (previous digest, flag flip, traffic shift). Migrations must be backward-compatible or have a forward fix. Practice rollback on staging.
+- Hotfixes use the same pipeline at higher priority: branch from the release tag, second reviewer, forward-merge to main. Pre-agree when to roll back instead of fixing forward.
+- Track lead time, change-failure rate and time to restore. Quarantine flaky checks with an owner and expiry.

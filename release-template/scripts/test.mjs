@@ -30,6 +30,18 @@ export function testPlan({ files, changed = [], event, knownBase = true, quick =
   return { full, selected };
 }
 
+/** Split files into `count` shards balanced by file size (a stable proxy for run time). */
+export function shardFiles(selected, index, count, sizeOf = file => fs.statSync(path.join(root, file)).size) {
+  if (!Number.isInteger(count) || count < 1 || count > 32 || !Number.isInteger(index) || index < 1 || index > count) throw Error('--shard expects i/n with 1 <= i <= n <= 32');
+  const bins = Array.from({ length: count }, () => ({ load: 0, files: [] }));
+  for (const file of [...selected].sort((a, b) => sizeOf(b) - sizeOf(a) || a.localeCompare(b))) {
+    const bin = bins.reduce((lightest, candidate) => candidate.load < lightest.load ? candidate : lightest);
+    bin.files.push(file);
+    bin.load += sizeOf(file);
+  }
+  return bins[index - 1].files.sort();
+}
+
 export function testConcurrency(value, cores = os.availableParallelism()) {
   if (value === undefined) return Math.max(1, Math.min(4, cores));
   if (!/^(?:[1-9]|1[0-6])$/.test(value)) throw Error('PI_PUBLIC_TEST_CONCURRENCY must be 1-16 (default capped at 4)');
@@ -37,7 +49,7 @@ export function testConcurrency(value, cores = os.availableParallelism()) {
 }
 
 function main(args) {
-  let quick = false, list = false, planOnly = false, base;
+  let quick = false, list = false, planOnly = false, base, shard;
   const explicit = [], native = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -45,6 +57,7 @@ function main(args) {
     else if (arg === '--list') list = true;
     else if (arg === '--plan') planOnly = true;
     else if (arg === '--base') base = args[++i] ?? '';
+    else if (arg === '--shard') shard = /^(\d+)\/(\d+)$/.exec(args[++i] ?? '')?.slice(1).map(Number) ?? [0, 0];
     else if (/^tests\/[^/]+\.test\.mjs$/.test(arg)) explicit.push(arg);
     else if (/^--test-(?:name-pattern|skip-pattern|reporter|reporter-destination|timeout)(?:=|$)/.test(arg)) {
       const flag = arg.split('=')[0], value = arg.includes('=') ? arg.slice(flag.length + 1) : args[++i];
@@ -68,6 +81,7 @@ function main(args) {
     plan.selected = [...new Set(quick ? [...plan.selected, ...explicit] : explicit)].sort();
     if (!quick) plan.full = false;
   }
+  if (shard) plan.selected = shardFiles(plan.selected, ...shard);
   if (planOnly) {
     console.log(JSON.stringify({ ...plan, count: plan.selected.length }));
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `full=${plan.full}\n`);
@@ -77,7 +91,7 @@ function main(args) {
   const concurrency = testConcurrency(process.env.PI_PUBLIC_TEST_CONCURRENCY);
   const tempRoot = createDistributionTempRoot();
   try {
-    console.log(`Running ${plan.selected.length} test files (${explicit.length && !quick ? 'focused' : plan.full ? 'full' : 'quick'}, concurrency ${concurrency})`);
+    console.log(`Running ${plan.selected.length} test files (${explicit.length && !quick ? 'focused' : plan.full ? 'full' : 'quick'}${shard ? `, shard ${shard.join('/')}` : ''}, concurrency ${concurrency})`);
     const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...native, ...plan.selected], {
       cwd: root, stdio: 'inherit', timeout: 15 * 60_000,
       env: { ...process.env, NODE_TEST_CONTEXT: undefined, PI_LOCAL_LM: 'off', PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot },

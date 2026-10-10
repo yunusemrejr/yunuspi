@@ -40,11 +40,6 @@ import {
   TYPE_WEIGHTS,
 } from '../agent/extensions/lib/project-memory-index.ts';
 import {
-  consolidate,
-  findClusters,
-  formatConsolidateReport,
-} from '../agent/extensions/lib/project-memory-consolidate.ts';
-import {
   FAMILY_WEIGHTS,
   formatFamilyHits,
   formatMemoryHits,
@@ -527,9 +522,9 @@ test('role views of one query scan each store once', async (t) => {
     store[name] = (...args) => { counts[key]++; return original(...args); };
   }
   const views = await retrieveFamilyViews([{ store, relation: 'self' }], 'observer advice receipt', { embedder, rerank: false });
-  assert.deepEqual(Object.keys(views).sort(), ['main', 'observer', 'subagent', 'watchmaker']);
+  assert.deepEqual(Object.keys(views).sort(), ['main', 'observer', 'subagent']);
   assert.ok(views.main.length > 0);
-  assert.deepEqual(counts, { lexical: 1, vector: 1, atom: 1 }, 'four role views share one scan per store');
+  assert.deepEqual(counts, { lexical: 1, vector: 1, atom: 1 }, 'three role views share one scan per store');
 });
 
 // ---------------------------------------------------------------------------
@@ -582,7 +577,6 @@ test('role policies re-rank identical evidence; observer prefers mistakes', asyn
   assert.equal(subagent.hits[0].chunk.source_type, 'code');
   assert.equal(observer.hits[0].chunk.source_type, 'todo');
   assert.ok(ROLE_POLICIES.observer.typeBoost.error > 1);
-  assert.ok(ROLE_POLICIES.watchmaker.recencyHalfLifeDays < ROLE_POLICIES.observer.recencyHalfLifeDays);
 });
 
 test('observer role surfaces errors above session chatter', async (t) => {
@@ -620,33 +614,6 @@ test('temporal filters, superseded demotion and validation', async (t) => {
 // consolidation
 // ---------------------------------------------------------------------------
 
-test('consolidation clusters near-duplicates and ratifies a canonical fact', async (t) => {
-  const dir = tmpRoot();
-  cleanup(t, dir);
-  const store = openTestStore(dir, 'prj_con');
-  t.after(() => store.close());
-  await indexEvent(store, 'prj_con', { kind: 'observation', sessionId: 's', concepts: ['gizmo'], text: 'The gizmo cache lives in memory and expires after one hour of idle time.' });
-  await indexEvent(store, 'prj_con', { kind: 'observation', sessionId: 's', concepts: ['gizmo'], text: 'The gizmo cache lives in memory, expiring after one hour of idle time.' });
-  await indexEvent(store, 'prj_con', { kind: 'observation', sessionId: 's', concepts: ['gizmo'], text: 'Gizmo cache lives in memory and expires after one idle hour.' });
-  await indexEvent(store, 'prj_con', { kind: 'decision', sessionId: 's', concepts: ['deploy'], text: 'Deployments go out on Thursdays after the integration suite passes.' });
-  const found = await findClusters(store, {});
-  assert.equal(found.clusters.length, 1);
-  assert.equal(found.clusters[0].ids.length, 3);
-  const dry = consolidate(store, found.clusters, { dryRun: true });
-  assert.equal(dry.dryRun, true);
-  assert.equal(store.getChunk(found.clusters[0].ids[1]).valid_until, null);
-  assert.ok(formatConsolidateReport({ ...dry, scanned: found.scanned }).includes('DRY RUN'));
-  const applied = consolidate(store, found.clusters, { dryRun: false });
-  assert.equal(applied.superseded.length, 2);
-  const canonical = store.getChunk(applied.canonicalized[0]);
-  assert.equal(canonical.authority, 1.0);
-  assert.deepEqual([...canonical.supersedes].sort(), [...applied.superseded].sort());
-  for (const id of applied.superseded) {
-    assert.equal(store.getChunk(id).superseded_by, canonical.id);
-  }
-  assert.ok(formatConsolidateReport({ ...applied, scanned: found.scanned }).includes('APPLIED'));
-});
-
 // ---------------------------------------------------------------------------
 // extension
 // ---------------------------------------------------------------------------
@@ -667,51 +634,34 @@ const fakePi = () => {
 
 const fakeCtx = (cwd) => ({ cwd, hasUI: false, sessionManager: { getSessionId: () => 'sess_test' } });
 
-test('extension registers tools, remembers, searches, forgets and restores', async (t) => {
+test('extension registers one project_memory tool and the command, and refuses bad search and read input', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);
   const cwd = path.join(dir, 'proj');
   fs.mkdirSync(cwd, { recursive: true });
   const pi = fakePi();
   piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
-  for (const name of ['project_memory_search', 'project_memory_read', 'project_memory_remember', 'project_memory_status', 'project_memory_index_path', 'project_memory_forget', 'project_memory_restore', 'project_memory_consolidate']) {
-    assert.ok(pi.tools.has(name), `registers ${name}`);
-  }
+  assert.deepEqual([...pi.tools.keys()], ['project_memory']);
   assert.ok(pi.commands.has('project-memory'));
   const ctx = fakeCtx(cwd);
-  const status = await pi.tools.get('project_memory_status').execute('1', {}, undefined, undefined, ctx);
+  pi.handlers.get('session_start')({}, ctx);
+  const status = await pi.tools.get('project_memory').execute('1', { action: 'status' }, undefined, undefined, ctx);
   assert.ok(status.content[0].text.includes('prj_'));
-  const remember = await pi.tools.get('project_memory_remember').execute('2', {
-    text: 'Quasar routing decisions are recorded in the observer book margins.',
-    type: 'decision',
-  }, undefined, undefined, ctx);
-  const rememberedId = remember.details.id;
-  assert.match(rememberedId, /^mem_/);
-  const search = await pi.tools.get('project_memory_search').execute('3', { query: 'Quasar routing observer book' }, undefined, undefined, ctx);
-  assert.ok(search.content[0].text.includes('Quasar routing'));
-  const forget = await pi.tools.get('project_memory_forget').execute('4', { id: rememberedId }, undefined, undefined, ctx);
-  assert.equal(forget.details.forgotten, true);
-  const restore = await pi.tools.get('project_memory_restore').execute('5', { id: rememberedId }, undefined, undefined, ctx);
-  assert.equal(restore.details.restored, true);
-  const consolidateDry = await pi.tools.get('project_memory_consolidate').execute('6', { dry_run: true }, undefined, undefined, ctx);
-  assert.ok(consolidateDry.content[0].text.includes('DRY RUN'));
-  await assert.rejects(() => pi.tools.get('project_memory_search').execute('7', { query: 'Quasar', role: 'nope' }, undefined, undefined, ctx), /Unknown role/);
-  await assert.rejects(() => pi.tools.get('project_memory_search').execute('8', { query: 'ab' }, undefined, undefined, ctx), /3–512/);
+  await assert.rejects(() => pi.tools.get('project_memory').execute('2', { action: 'search', query: 'Quasar', role: 'nope' }, undefined, undefined, ctx), /Unknown role/);
+  await assert.rejects(() => pi.tools.get('project_memory').execute('3', { action: 'search', query: 'ab' }, undefined, undefined, ctx), /query/);
+  await assert.rejects(() => pi.tools.get('project_memory').execute('4', { action: 'read', id: 'mem_missing' }, undefined, undefined, ctx), /Unknown project memory id/);
+  await assert.rejects(() => pi.tools.get('project_memory').execute('5', { action: 'remember', text: 'Removed action.' }, undefined, undefined, ctx), /Unknown action/);
 });
 
-test('extension indexes files and session events incrementally', async (t) => {
+test('extension indexes session events incrementally', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);
   const cwd = path.join(dir, 'proj');
   fs.mkdirSync(cwd, { recursive: true });
-  fs.writeFileSync(path.join(cwd, 'app.ts'), 'export const nebulaFactor = 42;\n'.repeat(10));
   const pi = fakePi();
   piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
   const ctx = fakeCtx(cwd);
   pi.handlers.get('session_start')({}, ctx);
-  const indexed = await pi.tools.get('project_memory_index_path').execute('1', { path: 'app.ts' }, undefined, undefined, ctx);
-  assert.ok(indexed.details.result.inserted >= 1);
-  await assert.rejects(() => pi.tools.get('project_memory_index_path').execute('2', { path: 'missing.ts' }, undefined, undefined, ctx), /not found/);
   // User prompt + error + edit + commit flow through the queue on settle.
   pi.handlers.get('input')({ source: 'user', text: 'Please fix the nebula calibration drift today' }, ctx);
   pi.handlers.get('input')({ source: 'user', text: '/project-memory' }, ctx); // slash commands are skipped
@@ -723,40 +673,12 @@ test('extension indexes files and session events incrementally', async (t) => {
   pi.handlers.get('tool_result')({ toolCallId: 'c3', toolName: 'bash', content: [{ type: 'text', text: '[main abc1234] nebula' }] }, ctx);
   pi.handlers.get('session_compact')({ summary: 'Session summary: nebula calibration work finished with all tests green and docs updated.' }, ctx);
   await pi.handlers.get('agent_settled')({}, ctx);
-  const search = async (query) => pi.tools.get('project_memory_search').execute('x', { query, limit: 10 }, undefined, undefined, ctx);
+  const search = async (query) => pi.tools.get('project_memory').execute('x', { action: 'search', query, limit: 10 }, undefined, undefined, ctx);
   await waitFor(async () => (await search('nebula calibration drift')).content[0].text.includes('drift'));
   const kinds = (await search('nebula')).details.hits;
   assert.ok(kinds.length >= 4, `expected queued events to flush, got ${kinds.length}`);
   const command = await pi.commands.get('project-memory').handler([], ctx);
   assert.match(command, /chunks/i);
-});
-
-test('file provenance is anchored to the project root, not the session workdir', async (t) => {
-  const dir = tmpRoot();
-  cleanup(t, dir);
-  const root = path.join(dir, 'proj');
-  const client = path.join(root, 'client');
-  const server = path.join(root, 'server');
-  fs.mkdirSync(client, { recursive: true });
-  fs.mkdirSync(server, { recursive: true });
-  fs.writeFileSync(path.join(root, '.pi-project-id'), 'rooted-project\n');
-  const same = 'export const listenPort = 8080;\n'.repeat(6);
-  fs.writeFileSync(path.join(client, 'config.ts'), same);
-  fs.writeFileSync(path.join(server, 'config.ts'), same);
-  const pi = fakePi();
-  piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
-  const index = (cwd, file) => pi.tools.get('project_memory_index_path').execute('1', { path: file }, undefined, undefined, fakeCtx(cwd));
-  pi.handlers.get('session_start')({}, fakeCtx(client));
-  const fromClient = await index(client, 'config.ts');
-  const fromServer = await index(server, 'config.ts');
-  const fromRoot = await index(root, 'client/config.ts');
-  assert.equal(fromClient.details.result.inserted, 1);
-  assert.equal(fromServer.details.result.inserted, 1, 'same-named files in different subdirectories are distinct sources');
-  assert.equal(fromRoot.details.result.inserted, 0, 'the same file indexed from another workdir is the same source');
-  const store = openProjectStore(path.join(dir, 'projects', 'rooted-project', 'memory.sqlite'), { projectId: 'rooted-project', create: false });
-  t.after(() => store.close());
-  const paths = store.listRecent(20).map((chunk) => chunk.source_path).sort();
-  assert.deepEqual(paths, ['client/config.ts', 'server/config.ts']);
 });
 
 test('a session switch drains the old queue into the old project, not the void', async (t) => {
@@ -777,7 +699,7 @@ test('a session switch drains the old queue into the old project, not the void',
   // Switch before any flush: the old code void-flushed and then cleared the
   // queue, destroying both events.
   pi.handlers.get('session_switch')({}, ctxB);
-  const search = (ctx, query) => pi.tools.get('project_memory_search').execute('x', { query, limit: 10 }, undefined, undefined, ctx);
+  const search = (ctx, query) => pi.tools.get('project_memory').execute('x', { action: 'search', query, limit: 10 }, undefined, undefined, ctx);
   await waitFor(async () => (await search(ctxA, 'nebula calibration drift')).content[0].text.includes('drift'));
   const hitsA = (await search(ctxA, 'nebula')).details.hits;
   assert.ok(hitsA.length >= 2, `expected both old-project events to survive the switch, got ${hitsA.length}`);
@@ -799,7 +721,7 @@ test('a full queue sheds file-edit markers before continuity evidence and report
     pi.handlers.get('tool_result')({ toolCallId: `f${i}`, toolName: 'edit', content: [{ type: 'text', text: 'ok' }] }, ctx);
   }
   pi.handlers.get('session_compact')({ summary: 'Session summary: quasar routing work finished with the nebula ledger verified end to end.' }, ctx);
-  const status = () => pi.tools.get('project_memory_status').execute('s', {}, undefined, undefined, ctx);
+  const status = () => pi.tools.get('project_memory').execute('s', { action: 'status' }, undefined, undefined, ctx);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   for (let i = 0; i < 60; i++) {
     if ((await status()).details.queue === 0) break;
@@ -811,7 +733,7 @@ test('a full queue sheds file-edit markers before continuity evidence and report
   assert.equal(final.details.dropped, 2, 'one edit at fill plus one edit displaced by the summary');
   assert.deepEqual(final.details.droppedByKind, { file_edit: 2 });
   assert.match(final.content[0].text, /dropped: 2/);
-  const search = await pi.tools.get('project_memory_search').execute('x', { query: 'quasar routing nebula ledger', limit: 10 }, undefined, undefined, ctx);
+  const search = await pi.tools.get('project_memory').execute('x', { action: 'search', query: 'quasar routing nebula ledger', limit: 10 }, undefined, undefined, ctx);
   assert.ok(search.content[0].text.includes('quasar routing'), 'the high-priority summary survives the burst');
 });
 
@@ -820,7 +742,7 @@ test('children search and read only; PI_PROJECT_MEMORY=off disables all', (t) =>
   cleanup(t, dir);
   const child = fakePi();
   piVectorMemory(child, { env: { ...testEnv(dir), PI_SUBAGENT_CHILD: '1' }, embedder: testEmbedder(8) });
-  assert.deepEqual([...child.tools.keys()].sort(), ['project_memory_read', 'project_memory_search', 'project_memory_status']);
+  assert.deepEqual([...child.tools.keys()], ['project_memory']);
   assert.deepEqual([...child.handlers.keys()].sort(), ['session_shutdown', 'session_start']);
   const off = fakePi();
   piVectorMemory(off, { env: { ...testEnv(dir), PI_PROJECT_MEMORY: 'off' }, embedder: testEmbedder(8) });
@@ -844,7 +766,7 @@ test('extension survives a missing git binary and odd event shapes', async (t) =
   pi.handlers.get('tool_result')({ bogus: true }, ctx);
   pi.handlers.get('session_compact')({}, ctx);
   await pi.handlers.get('agent_settled')({}, ctx);
-  const status = await pi.tools.get('project_memory_status').execute('1', {}, undefined, undefined, ctx);
+  const status = await pi.tools.get('project_memory').execute('1', { action: 'status' }, undefined, undefined, ctx);
   assert.ok(status.content[0].text.includes('prj_'));
 });
 
@@ -1032,7 +954,7 @@ test('descendant projects of equal depth are listed in path order', async (t) =>
       fs.writeFileSync(path.join(sub, '.pi-project-id'), `ord-${name}\n`);
       const pi = fakePi();
       piVectorMemory(pi, { env, embedder: testEmbedder(16) });
-      await pi.tools.get('project_memory_remember').execute(name, { text: `Ordering fixture memory for ${name}.`, type: 'decision' }, undefined, undefined, fakeCtx(sub));
+      pi.handlers.get('session_start')({}, fakeCtx(sub));
     }
     assert.deepEqual(findDescendantProjects(big, env).map((d) => d.id), ['ord-aa', 'ord-bb', 'ord-cc'], order.join());
   }
@@ -1053,34 +975,39 @@ test('parent sees child memories and vice versa; project scope isolates', async 
   piVectorMemory(childPi, { env, embedder: testEmbedder(16) });
   const parentCtx = fakeCtx(big);
   const childCtx = fakeCtx(sub);
-  await childPi.tools.get('project_memory_remember').execute('1', {
-    text: 'Child implementation detail for teapot regulation compliance hooks.',
-    type: 'decision',
-  }, undefined, undefined, childCtx);
-  await parentPi.tools.get('project_memory_remember').execute('2', {
-    text: 'Parent-level decree about teapot regulation policy.',
-    type: 'decision',
-  }, undefined, undefined, parentCtx);
+  childPi.handlers.get('session_start')({}, childCtx);
+  parentPi.handlers.get('session_start')({}, parentCtx);
+  // Each project's memory settles through the same queue a real session uses.
+  childPi.handlers.get('input')({ source: 'user', text: 'Child implementation detail for teapot regulation compliance hooks.' }, childCtx);
+  await childPi.handlers.get('agent_settled')({}, childCtx);
+  parentPi.handlers.get('input')({ source: 'user', text: 'Parent-level decree about teapot regulation policy.' }, parentCtx);
+  await parentPi.handlers.get('agent_settled')({}, parentCtx);
   // Descendant discovery: the parent registry knows the child root.
   const descendants = findDescendantProjects(big, env);
   assert.equal(descendants.length, 1);
   assert.equal(descendants[0].id, 'fam-child');
+  const search = (pi, ctx, extra = {}) => pi.tools.get('project_memory').execute('x', { action: 'search', query: 'teapot regulation', limit: 10, ...extra }, undefined, undefined, ctx);
+  await waitFor(async () => {
+    const fromChildRelations = (await search(childPi, childCtx)).details.hits.map((h) => h.relation);
+    const fromParentRelations = (await search(parentPi, parentCtx)).details.hits.map((h) => h.relation);
+    return fromChildRelations.includes('ancestor') && fromParentRelations.includes('descendant');
+  });
   // Child sees parent (ancestor); parent sees child (descendant).
-  const fromChild = await childPi.tools.get('project_memory_search').execute('3', { query: 'teapot regulation', limit: 10 }, undefined, undefined, childCtx);
+  const fromChild = await search(childPi, childCtx);
   const childRelations = fromChild.details.hits.map((h) => h.relation).sort();
   assert.ok(childRelations.includes('self'), 'child sees own memory');
   assert.ok(childRelations.includes('ancestor'), 'child sees parent memory');
   assert.ok(fromChild.content[0].text.includes('from fam-parent (ancestor)'));
-  const fromParent = await parentPi.tools.get('project_memory_search').execute('4', { query: 'teapot regulation', limit: 10 }, undefined, undefined, parentCtx);
+  const fromParent = await search(parentPi, parentCtx);
   const parentRelations = fromParent.details.hits.map((h) => h.relation).sort();
   assert.deepEqual(parentRelations, ['descendant', 'self']);
   assert.ok(fromParent.content[0].text.includes('from fam-child (descendant)'));
   // Project scope isolates to the querying project only.
-  const narrow = await childPi.tools.get('project_memory_search').execute('5', { query: 'teapot regulation', limit: 10, scope: 'project' }, undefined, undefined, childCtx);
+  const narrow = await search(childPi, childCtx, { scope: 'project' });
   assert.ok(narrow.details.hits.every((h) => !('relation' in h) || h.relation === undefined || h.project === 'fam-child'));
   assert.ok(!narrow.content[0].text.includes('from fam-parent'));
-  await assert.rejects(() => childPi.tools.get('project_memory_search').execute('6', { query: 'teapot regulation', scope: 'nope' }, undefined, undefined, childCtx), /Unknown scope/);
-  const status = await childPi.tools.get('project_memory_status').execute('7', {}, undefined, undefined, childCtx);
+  await assert.rejects(() => search(childPi, childCtx, { scope: 'nope' }), /Unknown scope/);
+  const status = await childPi.tools.get('project_memory').execute('7', { action: 'status' }, undefined, undefined, childCtx);
   assert.ok(status.content[0].text.includes('fam-child < fam-parent') || status.content[0].text.includes('Family:'));
 });
 
@@ -1280,22 +1207,6 @@ test('storedVectors pools atom vectors for atom-only chunks', async (t) => {
   assert.deepEqual(store.storedVectors([res.ids[0]], 'other-space'), new Map());
 });
 
-test('consolidation clusters atom-embedded near-duplicates without endpoint calls', async (t) => {
-  const dir = tmpRoot();
-  cleanup(t, dir);
-  const store = openTestStore(dir, 'prj_ccon');
-  t.after(() => store.close());
-  const embedder = testEmbedder(32);
-  await indexEvent(store, 'prj_ccon', { kind: 'observation', sessionId: 's', concepts: ['widget'], text: 'The widget cache lives in memory and expires after one hour of idle time.' }, { embedder });
-  await indexEvent(store, 'prj_ccon', { kind: 'observation', sessionId: 's', concepts: ['widget'], text: 'The widget cache lives in memory, expiring after one hour of idle time.' }, { embedder });
-  let calls = 0;
-  const counting = { ...embedder, embed: async (...args) => { calls++; return embedder.embed(...args); } };
-  const found = await findClusters(store, { embedder: counting });
-  assert.equal(calls, 0);
-  assert.equal(found.clusters.length, 1);
-  assert.equal(found.clusters[0].ids.length, 2);
-});
-
 test('indexed code gains definition-aware atoms with file positions', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);
@@ -1314,7 +1225,7 @@ test('indexed code gains definition-aware atoms with file positions', async (t) 
 });
 
 // ---------------------------------------------------------------------------
-// project_memory_read: expanded evidence for one memory
+// project_memory read: expanded evidence for one memory
 // ---------------------------------------------------------------------------
 
 test('readMemoryChunk expands one memory with atoms, siblings and history', async (t) => {
@@ -1375,21 +1286,28 @@ test('extension reads memories in full after compact search', async (t) => {
   const pi = fakePi();
   piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
   const ctx = fakeCtx(cwd);
+  pi.handlers.get('session_start')({}, ctx);
   const longText = `Quasar lattice calibration decision. ${'Supporting analysis paragraph with filler wording. '.repeat(30)} Final verdict: recalibrate nightly.`;
-  const remember = await pi.tools.get('project_memory_remember').execute('1', { text: longText, type: 'decision' }, undefined, undefined, ctx);
-  const id = remember.details.id;
-  const search = await pi.tools.get('project_memory_search').execute('2', { query: 'Quasar lattice calibration verdict' }, undefined, undefined, ctx);
+  pi.handlers.get('input')({ source: 'user', text: longText }, ctx);
+  await pi.handlers.get('agent_settled')({}, ctx);
+  const find = (query) => pi.tools.get('project_memory').execute('2', { action: 'search', query }, undefined, undefined, ctx);
+  let search;
+  await waitFor(async () => {
+    search = await find('Quasar lattice calibration verdict');
+    return search.details.hits.length > 0;
+  });
+  const id = search.details.hits[0].id;
   const body = search.content[0].text;
-  assert.ok(body.includes('project_memory_read'));
+  assert.ok(body.includes('project_memory with action read'));
   assert.ok(body.includes(id));
   assert.ok(search.details.hits[0].fragment.length > 0);
   assert.ok(body.length < longText.length, 'search returns a bounded excerpt, not the body');
-  const read = await pi.tools.get('project_memory_read').execute('3', { id }, undefined, undefined, ctx);
+  const read = await pi.tools.get('project_memory').execute('3', { action: 'read', id }, undefined, undefined, ctx);
   assert.ok(read.content[0].text.includes('Final verdict: recalibrate nightly.'));
   assert.ok(read.content[0].text.includes('Quasar lattice calibration decision.'));
   assert.equal(read.details.status, 'current');
   assert.ok(read.details.atoms.length >= 2);
-  await assert.rejects(() => pi.tools.get('project_memory_read').execute('4', { id: 'mem_missing' }, undefined, undefined, ctx), /Unknown project memory id/);
+  await assert.rejects(() => pi.tools.get('project_memory').execute('4', { action: 'read', id: 'mem_missing' }, undefined, undefined, ctx), /Unknown project memory id/);
 });
 
 test('streamed top-k scans equal a naive full sort for atoms and legacy chunk vectors', (t) => {

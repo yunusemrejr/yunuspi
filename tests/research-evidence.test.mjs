@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { researchDossier, researchPassages, sourceDigest } from '../agent/extensions/lib/research-evidence.ts';
-import registerResearch from '../agent/extensions/research-toolkit.ts';
 
 const source = { id: 'official', title: 'Reference', url: 'https://example.org/guide', text: 'Measured throughput is 20 requests per second.\nThis applies to the test configuration.', kind: 'primary', retrievedAt: '2026-10-06T09:00:00Z' };
 const claim = { id: 'throughput', text: 'Throughput was measured in a test configuration.', citations: [{ sourceId: 'official', quote: 'Measured throughput is 20 requests per second.', relation: 'supports' }] };
@@ -76,15 +75,3 @@ test('dossiers reject unsafe URLs, invalid identifiers/dates and oversized input
   assert.throws(() => researchDossier({ goal: 'x', sources: [source], claims: [] }, AbortSignal.abort()));
 });
 
-test('research tool reads a local JSON snapshot, paginates and refuses workspace escape', async t => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'research-dossier-')); t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
-  let tool; registerResearch({ registerTool(value) { tool = value; } });
-  fs.writeFileSync(path.join(cwd, 'dossier.json'), JSON.stringify({ goal: 'Compare evidence', sources: [source], claims: [claim] }));
-  const result = await tool.execute('dossier', { action: 'dossier', path: 'dossier.json' }, undefined, undefined, { cwd });
-  assert.equal(result.details.counts.claimsWithGaps, 0);
-  assert.equal(JSON.parse(result.content[0].text).nextOffset, null);
-  for (const input of [{ path: '../escape.json' }, { path: 'dossier.json', sources: [source] }]) {
-    assert.equal((await tool.execute('dossier', { action: 'dossier', ...input }, undefined, undefined, { cwd })).isError, true);
-  }
-  assert.equal((await tool.execute('dossier', { action: 'dossier', path: 'dossier.json' }, AbortSignal.abort(), undefined, { cwd })).isError, true);
-});

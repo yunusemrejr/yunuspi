@@ -27,7 +27,7 @@ test('UI goals, source mutations and short follow-ups refresh real SDK tools and
    additionalExtensionPaths:['art-direction.ts','design-studio.ts','render-and-wait.ts','blender-studio.ts'].map(file=>path.join(root,'agent/extensions',file)),extensionFactories:[registerToolDiscovery,registerWorkflows]});
   await loader.reload();assert.deepEqual(loader.getExtensions().errors,[]);
   const model={id:'ui-fixture',name:'UI fixture',api:'openai-completions',provider:'fixture',baseUrl:'https://invalid.example',reasoning:true,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:131072,maxTokens:8192};
-  const plans=[{name:'read',arguments:{path:'index.html'}},{name:'ui_recipe',arguments:{action:'plan',pattern:'scroll-story'}},{name:'write',arguments:{path:'index.html',content:html+'\n<!-- integration revision -->'}}];
+  const plans=[{name:'read',arguments:{path:'index.html'}},{name:'creative_direct',arguments:{action:'set',direction:{intent:['layered','scroll-driven'],ambition:'balanced',hierarchy:{primary:'story sections'},signature:'scroll-driven layers'}}},{name:'write',arguments:{path:'index.html',content:html+'\n<!-- integration revision -->'}}];
   const contexts=[],errors=[];
   const modelRuntime={getModel:()=>model,getAvailable:()=>[model],hasConfiguredAuth:()=>true,isUsingSubscription:()=>false,getAuth:async()=>({auth:{apiKey:'synthetic-fixture'}}),
    streamSimple(selected,context,options){
@@ -39,10 +39,10 @@ test('UI goals, source mutations and short follow-ups refresh real SDK tools and
   await session.bindExtensions({onError:error=>errors.push(error)});
   await session.prompt('/goal Build a responsive interface with layered scroll animations and a Three.js model. Keep shared tokens consistent across pages. No image generation.',{source:'rpc'});
   assert.equal(contexts.length,6,'the three owned calls and their boundary allow only two native missing-UI-evidence follow-ups');assert.deepEqual(errors,[]);
-  for(const name of ['creative_direct','ui_recipe','asset_register'])assert.ok(contexts[0].tools.includes(name),`${name} available at the authored goal boundary: ${contexts[0].tools.join(', ')}; ${JSON.stringify(contexts[0].messages).slice(-2000)}`);
+  for(const name of ['creative_direct','asset_register'])assert.ok(contexts[0].tools.includes(name),`${name} available at the authored goal boundary: ${contexts[0].tools.join(', ')}; ${JSON.stringify(contexts[0].messages).slice(-2000)}`);
   assert.ok(contexts.every(context=>!context.tools.includes('image_generate')),'authored exclusion persists after observed source and tool receipts');
   const results=session.messages.filter(message=>message.role==='toolResult');
-  assert.equal(results.find(message=>message.toolCallId==='ui-2').isError,false,'real ui_recipe plan dispatch');
+  assert.equal(results.find(message=>message.toolCallId==='ui-2').isError,false,'real creative_direct direction dispatch');
   assert.equal(results.find(message=>message.toolCallId==='ui-3').isError,false,'native write mutation dispatch');
   for(const name of ['ui_explore','motion_inspect','ui_consistency'])assert.ok(contexts[3].tools.includes(name),`${name} ready after implementation receipt`);
   assert.match(JSON.stringify(contexts[3].messages),/ui-scroll|forward\/backtrack|forward and backward/);
@@ -52,7 +52,7 @@ test('UI goals, source mutations and short follow-ups refresh real SDK tools and
   assert.match(JSON.stringify(contexts[phoneBoundary].messages),/Three\.js|three-model/,'original purpose survives steering');
   const arithmeticBoundary=contexts.length;
   await session.prompt('Calculate 2 + 2.',{source:'rpc'});
-  assert.ok(!contexts[arithmeticBoundary].tools.includes('ui_recipe'));assert.ok(!contexts[arithmeticBoundary].tools.includes('ui_consistency'));
+  assert.ok(!contexts[arithmeticBoundary].tools.includes('ui_consistency'));
   assert.ok(contexts.every(context=>context.model==='ui-fixture'));assert.equal(session.model.id,'ui-fixture');assert.equal(session.thinkingLevel,'high');
  } finally {
   if(session){await emitSessionShutdownEvent(session.extensionRunner,{type:'session_shutdown',reason:'exit'});session.dispose();}

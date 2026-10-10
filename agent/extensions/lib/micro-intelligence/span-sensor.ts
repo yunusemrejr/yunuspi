@@ -6,7 +6,7 @@
  * probabilities. The sensor is advisory only:
  *
  * - It never mutates, blocks, or settles anything on its own.
- * - Scores reach Guardian, Observer, Watchmaker, quality and recovery logic
+ * - Scores reach Guardian, Observer, quality and recovery logic
  *   only through `spanAdvisory`, which requires a calibrated present
  *   probability AND deterministic corroborating evidence for anything
  *   stronger than a shadow record.

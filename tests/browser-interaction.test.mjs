@@ -57,13 +57,13 @@ test("lease keeps new reads free and budgets new mutations", () => {
   assert.equal(lease.receipt().actionsRemaining, 196);
 });
 
-test("guidance treats new mutations like clicks and new reads like inspection", () => {
+test("failed mutations and reads get recovery guidance while successful calls stay quiet", () => {
   for (const action of ["evaluate", "hover", "scroll", "drag"]) {
     assert.equal(matchHook("browser_session", { action }, true, {details:{failure:{outcome:"unknown"}}}).key, "browser-session-recovery");
-    assert.equal(matchHook("browser_session", { action }).key, "browser-session-workflow");
+    assert.equal(matchHook("browser_session", { action }), null, "successful mutations get no workflow guidance");
   }
   assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }, true, {details:{failure:{outcome:"unknown"}}}).key, "browser-session-recovery");
-  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }).key, "browser-session-workflow");
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }), null, "successful waits get no workflow guidance");
   assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }, true).key, "browser-session-read-recovery");
   assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }), null);
   for (const action of ["markers", "observe", "html", "tabs", "read", "navigate", "new_tab", "back", "forward", "reload"]) {

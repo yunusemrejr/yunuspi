@@ -106,7 +106,7 @@ test('the guidance says what each ambition permits, and the immersive level lift
   const immersive = open('immersive');
   assert.match(immersive, /Ambition: immersive/);
   assert.match(immersive, /signature-experience/);
-  assert.match(immersive, /count caps in frontend-design and web-effects stop applying/);
+  assert.match(immersive, /count caps in frontend and web-motion stop applying/);
   assert.match(immersive, /static baseline first/);
   assert.match(immersive, /fallback \(reduced motion, no WebGL, phone\)/);
   assert.doesNotMatch(open('restrained'), /count caps/, 'the quiet levels keep the caps');

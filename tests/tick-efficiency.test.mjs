@@ -8,7 +8,6 @@ let agent = path.resolve(import.meta.dirname, '../agent');
 try { fs.accessSync(agent); } catch { agent = path.resolve(import.meta.dirname, '../..'); }
 const { relevant, clearRelevantTokenCache } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-observer.ts')));
 const { buildSkillIndex, rankSkills, clearRankSkillsCache, skillCatalogFingerprint } = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-relevance.ts')));
-const { formatWatchmakerPace } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-watchmaker.ts')));
 const { coordinationRoot, clearCoordinationRootCache, fileVersion, clearFileVersionCache } = await import(pathToFileURL(path.join(agent, 'extensions/siblings.ts')));
 
 test('capability ranking reuses token sets without ever serving a stale description', () => {
@@ -107,11 +106,3 @@ test('file versions cache by stat identity and change with content', () => {
   }
 });
 
-test('watchmaker counts direct calls without treating missing edit calls as proof of a stall', () => {
-  const reads = formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 0 });
-  assert.match(reads, /12 completed calls in 10m0s.*12 direct read calls/);
-  assert.doesNotMatch(reads, /STALL|0 edits/, 'shell, script and child work cannot be inferred from direct-call counts');
-  assert.match(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 10, delegated: 2, activeChildren: 0 }), /10 direct read calls.*2 subagent calls/);
-  assert.match(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 3 }), /3 children active/);
-  assert.match(formatWatchmakerPace({ elapsed: 65_000, calls: 3, edits: 1, reads: 2, delegated: 0, activeChildren: 0 }), /3 completed calls in 1m5s.*2 direct read calls.*1 direct edit\/write calls/);
-});

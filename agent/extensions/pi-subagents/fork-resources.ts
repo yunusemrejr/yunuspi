@@ -16,7 +16,7 @@ const baseDir = dirname(fileURLToPath(import.meta.url));
 
 const PROMPTS = [
 	"council.md",
-	"fusion.md",
+	"fanout.md",
 	"gather-context-and-clarify.md",
 	"parallel-cleanup.md",
 	"parallel-research.md",

@@ -142,8 +142,6 @@ export default function adaptiveWorkflows(pi: any) {
     const paths = new Set<string>();
     const nativePath = event.details?.fileMutation?.resolved ?? event.input?.path;
     if (['edit', 'write'].includes(event.toolName) && (!event.isError || event.details?.fileMutation) && typeof nativePath === 'string') paths.add(nativePath);
-    if (event.toolName === 'ui_recipe' && event.input?.action === 'scaffold' && !event.isError && event.details?.action === 'scaffold')
-      for (const file of event.details.files ?? []) if (typeof file?.path === 'string' && typeof file.sha256 === 'string') paths.add(file.path);
     if (event.toolName === 'bulk_edit' && event.input?.action === 'apply') {
       // The native bulk tool returns committed paths in its JSON result;
       // input.files alone is a requested set, not a commit receipt.
@@ -449,24 +447,12 @@ export default function adaptiveWorkflows(pi: any) {
     }
     if (call.revision === revision && !failed && event.toolName === 'browser_session' && event.input?.action === 'verify' && event.details?.ok && event.details?.verification?.matches === true)
       record('ui-interaction', 'interaction', source);
-    if (call.revision === revision && !failed && event.toolName === 'code_quality' && event.input?.operation === 'baseline') {
-      const data = event.details;
-      if (data?.operation === 'baseline' && data.status === 'inspected' && data.scope?.targetFiles > 0)
-        record('source-quality', 'inspection', source, data.scope.truncated || data.scope.missingFocus?.length ? 'blocked' : 'passed');
-    }
-    if (call.revision === revision && !failed && event.toolName === 'research_toolkit' && event.input?.action === 'dossier') {
-      const data = event.details;
-      if (data?.operation === 'dossier' && data.counts?.claims > 0) {
-        record('research-evidence', 'inspection', source, data.counts.claimsWithGaps ? 'blocked' : 'passed');
-        if (selection.ids.every(id => id === 'research')) record('validation', 'inspection', source, data.counts.claimsWithGaps ? 'blocked' : 'passed');
-      }
-    }
     const mediaOnly = selection.ids.length > 0 && selection.ids.every(id => ['video', 'audio', 'svg-art'].includes(id));
     const inspectedSource = typeof event.details?.path === 'string' || typeof event.details?.source === 'string' || event.details?.files?.length > 0;
     if (mediaOnly && call.revision === revision && !failed && ['media_info', 'audio_analyze', 'svg_inspect'].includes(event.toolName) && inspectedSource && !event.details?.disabled) {
       record('discovery', 'inspection', source);
     }
-    if (mediaOnly && call.revision === revision && !failed && ['media_pipeline', 'audio_mix', 'video_compose', 'media_edit', 'scene_render'].includes(event.toolName)) {
+    if (mediaOnly && call.revision === revision && !failed && event.toolName === 'audio_mix') {
       const artifact = event.details?.artifact ?? event.details?.video;
       if (event.details?.decodeVerified === true && typeof artifact?.path === 'string' && artifact.bytes > 0) {
         record('implementation', 'artifact', source);
@@ -474,18 +460,11 @@ export default function adaptiveWorkflows(pi: any) {
         record('validation', 'execution', source, technicalFailure ? 'failed' : 'passed');
       }
     }
-    // Office documents and folder organization verify themselves; their results are the receipts.
-    if (call.revision === revision && !event.isError && !event.details?.disabled && ['fs_organize', 'office_doc', 'deliverable_check'].includes(event.toolName)) {
+    // Office documents verify themselves; their results are the receipts.
+    if (call.revision === revision && !event.isError && !event.details?.disabled && ['office_doc', 'deliverable_check'].includes(event.toolName)) {
       const details = event.details ?? {}, action = event.input?.action;
       const built = ledger.receipts.some(row => row.scope === scope && row.stageId === 'implementation' && row.status === 'passed');
-      if (event.toolName === 'fs_organize') {
-        if (action === 'scan' || action === 'plan') record('discovery', 'inspection', source);
-        if (action === 'apply' && details.moved > 0) {
-          record('discovery', 'inspection', source); record('implementation', 'artifact', source);
-          record('validation', 'execution', source, details.verification?.ok === false ? 'failed' : 'passed');
-        }
-        if (action === 'verify' && built) record('validation', 'execution', source, details.ok === false ? 'failed' : 'passed');
-      } else if (event.toolName === 'office_doc' && action === 'build') {
+      if (event.toolName === 'office_doc' && action === 'build') {
         record('discovery', 'inspection', source); record('implementation', 'artifact', source);
         record('validation', 'execution', source, details.verification?.status === 'fail' ? 'failed' : 'passed');
       } else {

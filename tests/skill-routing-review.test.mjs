@@ -22,12 +22,13 @@ afterEach(()=>{
   else process.env.PI_SKILL_REVIEW=inheritedSkillReview;
 });
 
-function fixture(names=['python-software-engineering','typescript-contract-engineering'], skillRoot='/fixture/skills') {
-  const active=['read','edit','write','skill_review','syntax_check'];
+function fixture(names=['engineering','systems-languages'], skillRoot='/fixture/skills') {
+  const active=['read','edit','write','skill_review'];
   const tools=new Map(),entries=[],hooks=new Map();
   const g=createRelevantGuidance({on:(name,fn)=>hooks.set(name,fn),getActiveTools:()=>active,registerTool:t=>tools.set(t.name,t),appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
   const ctx={cwd:'/fixture/project',sessionManager:{getBranch:()=>entries}};
   const catalog=`<available_skills>${names.map(name=>`<skill><name>${name}</name><description>${name.replaceAll('-',' ')}</description><location>${skillRoot}/${name}/SKILL.md</location></skill>`).join('')}</available_skills>`;
+  // Fixtures name distinct skills of the consolidated catalogue (python and TypeScript both route to engineering).
   const start=(prompt='Fix the reported issue')=>{g.userInput();g.start({prompt,systemPrompt:catalog},ctx);};
   const edit=file=>g.beforeToolCall({toolName:'edit',input:{path:file}});
   const read=(name,extra={})=>g.record({toolName:'read',input:{path:`${skillRoot}/${name}/SKILL.md`,...extra.input},...extra});
@@ -39,8 +40,7 @@ function fixture(names=['python-software-engineering','typescript-contract-engin
 test('positive clauses route languages without importing exclusions or quoted prose',()=>{
   for(const prompt of ['Do not write Python. Implement TypeScript contracts','Do not write Python, but implement TypeScript contracts','Implement TypeScript contracts rather than write Python']) {
     const names=routeSkills(prompt).map(r=>r.name);
-    assert.ok(names.includes('typescript-contract-engineering'),prompt);
-    assert.ok(!names.includes('python-software-engineering'),prompt);
+    assert.ok(names.includes('engineering'),prompt);
   }
   for(const prompt of ['Do not write Python','Explain how to write Python','> Write Python','```\nWrite Python\n```']) {
     assert.deepEqual(routeSkills(prompt),[]);
@@ -64,34 +64,35 @@ test('catalog names match ordinary prose while delivery stays bounded and adviso
 test('failed and partial skill reads preserve honest status without restricting execution',async()=>{
   const f=fixture();f.start('Implement Python and TypeScript');
   const status=async name=>(await f.decide({action:'inspect'})).details.skills.find(skill=>skill.name===name)?.status;
-  const name='python-software-engineering';
+  const name='engineering';
   f.g.commit(f.g.candidates());
+  f.edit('legacy.php'); // routes the second consolidated skill into the review page
   for(const extra of [{isError:true},{input:{path:`/fixture/skills/${name}/SKILL.md`,limit:5}},{details:{truncation:{truncated:true}}}]) {
     f.read(name,extra);assert.equal(await status(name),'unread');assert.equal(f.edit('main.py'),undefined);
   }
   f.read(name);assert.equal(await status(name),'read');
-  assert.equal(await status('typescript-contract-engineering'),'unread');
+  assert.equal(await status('systems-languages'),'unread');
   assert.equal(f.edit('main.ts'),undefined);
 });
 
 test('optional deferrals preserve their own status and expire on new input',async()=>{
-  const f=fixture();f.edit('main.py');f.edit('main.ts');
+  const f=fixture();f.edit('main.py');f.edit('main.ts');f.edit('legacy.php');
   assert.equal((await f.decide({action:'defer',skill:'unknown',reason:'Not relevant to this change'})).isError,true);
-  await f.decide({action:'defer',skill:'python-software-engineering',reason:'Only updating a generated fixture for the parser test'});
+  await f.decide({action:'defer',skill:'engineering',reason:'Only updating a generated fixture for the parser test'});
   let page=(await f.decide({action:'inspect'})).details.skills;
-  assert.equal(page.find(s=>s.name==='python-software-engineering').status,'deferred');
-  assert.equal(page.find(s=>s.name==='typescript-contract-engineering').status,'unread');
-  assert.ok(!f.entries.some(e=>e.data.read?.includes('/fixture/skills/python-software-engineering/SKILL.md')));
+  assert.equal(page.find(s=>s.name==='engineering').status,'deferred');
+  assert.equal(page.find(s=>s.name==='systems-languages').status,'unread','a deferral does not touch other skills');
+  assert.ok(!f.entries.some(e=>e.data.read?.includes('/fixture/skills/engineering/SKILL.md')),'a deferral is not a read receipt');
   f.entries.push({type:'compaction'});f.g.restore(f.ctx);
-  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='python-software-engineering').status,'deferred');
+  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='engineering').status,'deferred');
   f.start();f.edit('main.py');
-  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='python-software-engineering').status,'unread');
+  assert.equal((await f.decide({action:'inspect'})).details.skills.find(s=>s.name==='engineering').status,'unread');
 });
 
 test('skill modes never block relevant execution, including old required settings',async()=>{
   for(const mode of ['required','advisory','off']) {
     process.env.PI_SKILL_REVIEW=mode;
-    const f=fixture(['python-software-engineering','design-slop-prevention','scientific-paper-research']);
+    const f=fixture(['engineering','ui-design','research-writing']);
     f.start('Build a Python website and research scientific papers');
     for(const event of [
       {toolName:'edit',input:{path:'main.py'}}, {toolName:'write',input:{path:'index.html',content:'<main>Hello</main>'}},
@@ -107,11 +108,11 @@ test('skill modes never block relevant execution, including old required setting
 });
 
 test('file-discovered references survive compaction without creating read obligations',async()=>{
-  const f=fixture(['python-software-engineering','typescript-contract-engineering','php-application-engineering','rust-systems-engineering','java-platform-engineering']);
+  const f=fixture(['engineering','systems-languages']);
   for(const file of ['x.py','x.ts','x.php','x.rs','x.java']) assert.equal(f.edit(file),undefined);
-  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.length,5);
-  f.read('python-software-engineering');f.entries.push({type:'compaction'});f.g.restore(f.ctx);
-  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.find(s=>s.name==='python-software-engineering').status,'unread','discarded source text is not presented as retained');
+  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.length,2,'five source files reference two consolidated skills');
+  f.read('engineering');f.entries.push({type:'compaction'});f.g.restore(f.ctx);
+  assert.equal((await f.decide({action:'inspect',limit:8})).details.skills.find(s=>s.name==='engineering').status,'unread','discarded source text is not presented as retained');
   assert.equal(f.context().length,0);assert.equal(f.edit('x.py'),undefined);
 });
 
@@ -156,7 +157,7 @@ test('skill_review search finds a non-task catalogue match without exposing the 
   const inherited=process.env.PI_SKILL_REVIEW;
   delete process.env.PI_SKILL_REVIEW;
   try {
-    const f=fixture(['database-migration','python-software-engineering','typescript-contract-engineering']);
+    const f=fixture(['database-migration','engineering']);
     f.start('Explain the current issue');
     const before=await f.decide({action:'inspect'});
     assert.deepEqual(before.details.skills,[],'a search is usable before any deterministic review target exists');
@@ -166,7 +167,7 @@ test('skill_review search finds a non-task catalogue match without exposing the 
     assert.equal(found.details.results[0].path,'/fixture/skills/database-migration/SKILL.md');
     assert.deepEqual(Object.keys(found.details.results[0]).sort(),['description','name','path']);
     assert.ok(found.details.results.every(result=>result.description.length<=240));
-    assert.doesNotMatch(found.content[0].text,/python-software-engineering|typescript-contract-engineering/);
+    assert.doesNotMatch(found.content[0].text,/python-software-engineering|engineering/);
     assert.equal(f.edit('main.py'),undefined,'advisory search does not create a review obligation');
     const unknown=await f.decide({action:'search',query:'unicorn quantum toaster'});
     assert.deepEqual(unknown.details.results,[]);
@@ -177,10 +178,10 @@ test('skill_review search finds a non-task catalogue match without exposing the 
 });
 
 test('child catalogs offer real references without enforcing them',async()=>{
-  const f=fixture(['python-software-engineering']);
+  const f=fixture(['engineering']);
   f.g.start({prompt:'Implement Python. Build a Blender 3D animation and an Excel workbook with a presentation.',systemPrompt:'<available_skills></available_skills>'+f.catalog},f.ctx);
   const page=await f.decide({action:'inspect'});
-  assert.ok(page.details.skills.some(s=>s.name==='python-software-engineering'));
+  assert.ok(page.details.skills.some(s=>s.name==='engineering'));
   assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
   assert.equal(f.context().length,0);
 });
@@ -244,15 +245,6 @@ test('context skill offers must share a term with the request and stop after two
   assert.equal(entries.length,before,'identical guidance state is not re-persisted');
 });
 
-test('changed config files suggest a single batched source checker using fresh paths',()=>{
-  const f=fixture([]);
-  for(const file of ['first.toml','second.yaml']) f.g.record({toolName:'write',input:{path:file,content:'key = 1'}});
-  const hint=f.g.candidates().find(h=>h.tool==='syntax_check');
-  assert.ok(hint);assert.match(hint.text,/second.yaml/);assert.doesNotMatch(hint.text,/first.toml/);
-  f.g.record({toolName:'syntax_check',input:{paths:['second.yaml']}});
-  assert.ok(!f.g.candidates().some(h=>h.tool==='syntax_check'));
-});
-
 test('overlapping edit batches emit the same targeted recovery cue as stale edits',()=>{
   const f=fixture();
   f.start('Implement Python');
@@ -264,8 +256,8 @@ test('overlapping edit batches emit the same targeted recovery cue as stale edit
 
 test('bounded skill reads report the bytes actually returned after compaction', async () => {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'skill-full-read-'));
-  const name='php-application-engineering', file=path.join(dir,name,'SKILL.md');
-  const body='---\nname: php-application-engineering\n---\n\n# PHP\nVerify syntax and runtime.\n';
+  const name='systems-languages', file=path.join(dir,name,'SKILL.md');
+  const body='---\nname: systems-languages\n---\n\n# PHP\nVerify syntax and runtime.\n';
   fs.mkdirSync(path.dirname(file));fs.writeFileSync(file,body);
   try {
     const f=fixture([name],dir);f.start('Implement PHP');
@@ -280,7 +272,7 @@ test('bounded skill reads report the bytes actually returned after compaction', 
 
 test('successful Bash skill views consume verified text and suppress repeated workflow hints', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-shell-read-'));
-  const name = 'python-software-engineering', file = path.join(dir, name, 'SKILL.md');
+  const name = 'engineering', file = path.join(dir, name, 'SKILL.md');
   const lines = ['# Python workflow', 'Inspect the current parser inputs.', 'Fix the smallest confirmed defect.', 'Run the focused behavior checks.', 'Report the measured result.'];
   const body = lines.join('\n') + '\n';
   fs.mkdirSync(path.dirname(file)); fs.writeFileSync(file, body);

@@ -21,12 +21,7 @@ import {
   directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
   type CreativeDirection,
 } from "./lib/creative-direction.ts";
-import {
-  creativeCompareRun, creativeVerificationLines, normalizeVerdict, planCompare, planUiMatrix,
-  sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun,
-  type QACapture, type VisualReceipt,
-  localRenderPath,
-} from "./lib/creative-qa.ts";
+import { creativeCompareRun, creativeVerificationLines, planCompare, sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
@@ -156,7 +151,7 @@ export default function artDirection(pi: any) {
     if (ticket !== epoch) return;
     await refresh(ctx);
     if (ticket !== epoch) return;
-    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'design_audit', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', 'svg_inspect'] });
+    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', 'svg_inspect'] });
     const svgs = state.evidence.changed().filter(row => row.kind === 'svg').slice(0, 8);
     if (svgs.length && state.autoSvgStamp !== state.evidence.stamp()) {
       try {

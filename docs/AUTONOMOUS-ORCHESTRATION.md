@@ -2,8 +2,8 @@
 
 Automatic helpers remain enabled by default. Admission follows the current
 task's scope, uncertainty, errors and user constraints. Skill routing, child
-tasks, swarm/fusion, reviews, hooks, session observer, Watchmaker, project vector
-memory, Guardian and WASM checks retain their existing owners and lifecycle.
+tasks, fan-out, reviews, hooks, the session observer, project vector memory,
+Guardian and WASM checks retain their existing owners and lifecycle.
 Configuration and deliberate user selections retain priority.
 
 ## Bounded capability retrieval
@@ -45,27 +45,12 @@ cancellation, including cancellation triggered inside the helper itself.
 Late transport failures remain handled. Memory consumers retain their role
 policies and existing store; recalled text stays untrusted evidence.
 
-Observer and Watchmaker reviewers using `max` or `ultra` effort now step down
+The observer reviewers using `max` or `ultra` effort now step down
 after truncated responses and recover after clean reviews within the original
 configured ceiling. Mandatory reviews, error evidence, review receipts and
 the one-deferral limit on JEV review triage are preserved.
 
 ## Verification
-
-Run the dispatch-count workload with:
-
-```sh
-node agent/scripts/orchestration-bench.mjs
-node agent/scripts/orchestration-bench.mjs --baseline /path/to/previous/retrieval.ts
-```
-
-The synthetic workload contains 100 exact-name requests and 100 ambiguous
-requests over 27 authorized candidates. The previous path dispatches 100 JEV
-and 100 Needle calls for the exact-name workload; the current path dispatches
-zero. Both settle the ambiguous workload with 100 batched JEV calls and zero
-local fallbacks. These are dispatch counts, not measured model time or token
-savings. A live three-skill PostgreSQL example selected the SQL workflow using
-one JEV request, with 496 provider-reported input tokens and no child launch.
 
 Behavioral tests cover incomplete distributions, escaping, large catalogs,
 stage/total deadlines, ignored cancellation, late rejection, exact identifiers,

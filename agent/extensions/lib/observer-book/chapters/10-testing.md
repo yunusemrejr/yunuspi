@@ -6,7 +6,7 @@ summary: Evidence that software works: the right test level, red before green, b
 terms: test tests testing unit integration e2e end-to-end spec assert assertion coverage fixture mock stub flaky suite ci verify verification check pass passing fail failing regression tdd jest vitest pytest mocha playwright
 files: .test.ts .spec.ts /tests/ /test/ /__tests__/ /spec/
 tools: bash bg_run quality_review
-skills: property-based-testing behavioral-contracts evidence-first-engineering
+skills: engineering
 ---
 
 # Testing and verification

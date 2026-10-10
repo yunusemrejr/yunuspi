@@ -8,11 +8,11 @@ Building or improving something without looking at how others solved the same pr
    - `compare`: an explicit request to compare with, learn from or search for other products, competitors, alternatives or similar projects.
    - `improve`: an open-ended improvement of a product-level subject ("make the app much better, what is missing"), not a named defect.
    - `build`: new software the user has not specified exactly ("build me a terminal notes app with sync").
-2. **The Expert Director adds one advisory paragraph** to the brief, naming the workflow for that mode and the `prior-art-scouting` skill. It is added even when no excellence domain qualifies, and it is shown in the Director's summary line (`Expert brief: … · prior art (build)`).
-3. **The scouting tools are staged with the first turn** (`github_search`, `web_research`, `fetch_content`, `research_toolkit`), so the agent does not have to discover them.
+2. **The Expert Director adds one advisory paragraph** to the brief, naming the workflow for that mode and the `research-writing` skill. It is added even when no excellence domain qualifies, and it is shown in the Director's summary line (`Expert brief: … · prior art (build)`).
+3. **The scouting tools are staged with the first turn** (`github_search`, `web_research`, `fetch_content`), so the agent does not have to discover them.
 4. **The Observer book carries a passage** (`research › Look at what already exists`) so a reviewer can notice a new product designed without a look at alternatives.
 
-The agent then follows [the skill](../agent/skills/prior-art-scouting/SKILL.md): profile the local project (`research_toolkit` `action:"profile"`), search GitHub from two or three angles, read the best candidates' fact sheets and their issues sorted by reactions, run `web_research` in the background for closed-source products, compare like with like, and record an adopt, adapt, reject or watch verdict for each candidate with source and license. One pass, about ten sources.
+The agent then follows the skill: profile the local project from its manifests, declared scripts, license and README headings (plain shell reads, never environment files), search GitHub from two or three angles, read the best candidates' fact sheets and their issues sorted by reactions, run `web_research` in the background for closed-source products, compare like with like, and record an adopt, adapt, reject or watch verdict for each candidate with source and license. One pass, about ten sources.
 
 ## What never triggers it
 
@@ -25,7 +25,6 @@ The classifier was tuned on the installation's own history: 1,412 distinct user 
 ## Tools
 
 - [`github_search`](ISOLATION-AND-WEB.md#github-search): repositories, issues, code and one repository's fact sheet, without the `gh` CLI.
-- `research_toolkit` `action:"plan"` with `mode:"prior-art"` returns web angles, two GitHub query angles, the order of work and a decision-record template; `action:"profile"` returns the local project's languages, declared scripts and dependencies, license, layout signals, latest tag and README headings, read-only and never reading environment files.
 
 ## Switches and reference providers
 

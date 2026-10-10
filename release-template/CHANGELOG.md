@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.36.0 — 2026-10-10
+
+**A much smaller harness.** Measured against 1,817 sessions from the last 45 days, 64 of 157 tools were never called. The tool surface is now 98 tools (from 157), 42 extensions (from 54), 274 hook registrations (from 311), 25 skills (from 170, each a summary of at most 60 lines, from 3.7 MB to 1 MB), 14 Observer Book chapters (from 59), 59 docs (from 76) and 374 test files (from 388). Roughly 45,000 lines are gone. Unused tools were removed with their dead code and tests (ML lab, desktop sessions, file organizer, research toolkit, context profile, reasoning aids, mail/OpenAPI/coverage/contract/environment probes, scene, pipeline, OCR, image conversion/analysis/tracing and ambient/hosted-video generators, splat training), orphaned contract-only modules were deleted, and the 311-hook reminder table was pruned to the 14 rules that fire in real sessions.
+
+**Related tools became one tool with actions.** `blender` (setup, run, inspect, render), `agentmail` (status, messages, search, message, send) and `project_memory` (search, read, status; indexing and recall were already automatic) replace 17 tools, through one shared `actionTool` helper that keeps each part's schema and validation.
+
+**Swarm and Fusion are one fan-out.** One assistance mode, role, review kind, todo execution value, metric and capability record; `lib/fanout.ts`-style planning (provenance-preserving merge plus bounded respawn) lives in one module. Old `swarm`/`fusion` preference keys and saved todo plans keep loading.
+
+**One background reviewer.** The session observer now carries the Watchmaker's time evidence (a time-ledger row of measured tool time and repeats) and names the biggest time sink in its single note. The Watchmaker, its model role, command, scratchpad memos and retrieval role are gone, which also removes one paid review loop per session.
+
+**One completion check.** `goal({action:"check"})` lists everything still open and `goal complete` runs the same steps: criteria, unverified edits, tests, independent review, deliverables, rendered and media review, plus a static code audit (high-severity findings) and a syntax check of the files changed since HEAD. The standalone `code_audit`, `code_quality`, `syntax_check`, `artifact_check` and `design_audit` tools are gone; the audits still run automatically after each edit.
+
+**Smaller hook surface.** The bash-router annotation hook is removed, `last-model` is part of `model-config`, and the default bash timeout is injected by the bash tool's owner.
+
+**CI finishes in minutes, not tens of minutes.** A few-second `plan` job decides whether a change needs the complete suite; when it does, six balanced shards (`node scripts/test.mjs --shard i/6`) run in parallel and an aggregate `safety` job (the name release verification reads) passes only when all of them did. Quick checks no longer wait for the plan, apt installs retry, and the three benchmark scripts are removed from the pipeline.
+
 ## 0.35.2 — 2026-10-09
 
 **Tool discovery stays usable when another owner touches the wire.** Discovery failed closed for the rest of a session whenever anything else changed the active tool set. In the 10-05 to 10-07 sessions reviewed, the first `tool_search` activation already failed as "externally owned" (the `/goal` schema was added behind discovery, fixed in 0.32.0), and calling Pi Lens's own `pi_lens_activate_tools` or registering a tool after startup still produced the same lock on 0.35.1. A registered tool another owner enables now stays enabled, a newly registered tool becomes discoverable, the wire the host actually applied is recorded, and a host or command-line narrowing still fails closed with the drift named. A call to a registered tool that lazy discovery kept off the wire stages it for the next turn instead of repeating "Tool … not found".

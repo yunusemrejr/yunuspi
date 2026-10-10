@@ -53,10 +53,11 @@ test('noise scans disclose byte/finding bounds and never convert advice into syn
 
 test('successful edit hook emits one bounded advisory per source revision and resets with its session',async()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'code-noise-hook-'));
-  const hooks=new Map(),tools=[];
+  const hooks=new Map();
   const activity=[],sink=Symbol.for('yunus-pi.health.v1'),previousSink=globalThis[sink];
   globalThis[sink]=(kind,data)=>activity.push({kind,...data});
-  registerSourceCheck({registerTool:tool=>tools.push(tool),on:(name,handler)=>hooks.set(name,handler)});
+  // The post-edit hook is the only registration left; the syntax_check tool was removed.
+  registerSourceCheck({registerTool(){},on:(name,handler)=>hooks.set(name,handler)});
   const ctx={cwd:directory,sessionManager:{getSessionId:()=> 'first'}};
   const event={toolName:'write',input:{path:'module.js'},content:[{type:'text',text:'Successfully wrote module.js'}],details:{bytes:25},isError:false};
   try {
@@ -92,6 +93,5 @@ test('successful edit hook emits one bounded advisory per source revision and re
     const pending=hooks.get('tool_result')(event,ctx);
     hooks.get('session_switch')();
     assert.equal(await pending,undefined,'an old session cannot post a late inspection');
-    assert.equal(tools.length,1,'existing syntax_check owns the explicit audit');
   } finally {if(previousSink===undefined)delete globalThis[sink];else globalThis[sink]=previousSink;fs.rmSync(directory,{recursive:true,force:true});}
 });

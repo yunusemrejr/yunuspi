@@ -3,10 +3,12 @@ import type { Task } from '../tool/types.js';
 import { sanitizeTerminalText } from '../tool/sanitize.ts';
 
 export const PLAN_FIELDS = ['parentId', 'execution', 'files', 'acceptance', 'evidence', 'refs', 'runId'] as const;
-export const EXECUTIONS = ['self', 'subagent', 'swarm', 'fusion'] as const;
+export const EXECUTIONS = ['self', 'subagent', 'fanout'] as const;
+/** Plans saved before swarm and fusion became one fan-out mode keep loading. */
+const LEGACY_EXECUTIONS: readonly string[] = ['swarm', 'fusion'];
 export function planFieldError(task: Partial<Task>): string | undefined {
   if (task.parentId != null && (!Number.isSafeInteger(task.parentId) || task.parentId < 1)) return 'parentId must be a positive task id or null';
-  if (task.execution !== undefined && !EXECUTIONS.includes(task.execution)) return 'Unknown execution mode';
+  if (task.execution !== undefined && !EXECUTIONS.includes(task.execution) && !LEGACY_EXECUTIONS.includes(task.execution)) return 'Unknown execution mode';
   // Ownership coherence: a task recovered in the parent cannot still claim
   // delegated execution. Recovery sets owner/execution/evidence/refs/runId
   // together (see lib/todo-linkage.ts); partial states are rejected here.
@@ -120,4 +122,4 @@ export function renderPlan(tasks: readonly Task[], view: 'tree' | 'frontier' = '
   return text;
 }
 
-export const PLAN_GUIDANCE = 'For each actionable user request, create or revise the todo plan autonomously: outcomes → executable steps, parentId, dependencies and acceptance checks. Preserve open work across follow-ups; revise affected nodes, not the whole goal. Choose self/subagent/swarm/fusion per step and record files, owner/runId and project/evidence refs. Mark steps in_progress with activeForm before acting. Modes describe intent, never dispatch or grant permission. Use native orchestration tools, inspect results, record evidence, then complete. Use batch for related edits; list view=frontier for next work.';
+export const PLAN_GUIDANCE = 'For each actionable user request, create or revise the todo plan autonomously: outcomes → executable steps, parentId, dependencies and acceptance checks. Preserve open work across follow-ups; revise affected nodes, not the whole goal. Choose self/subagent/fanout per step and record files, owner/runId and project/evidence refs. Mark steps in_progress with activeForm before acting. Modes describe intent, never dispatch or grant permission. Use native orchestration tools, inspect results, record evidence, then complete. Use batch for related edits; list view=frontier for next work.';

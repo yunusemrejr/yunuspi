@@ -64,7 +64,7 @@ test('repetition needs exact complete request and result and excludes replayed r
 test('new structured tools compact losslessly in block and string forms', () => {
   const text = JSON.stringify({ evidence: Array.from({ length: 40 }, (_, i) => ({ i, note: 'two  spaces stay' })) }, null, 2);
   const compact = createToolJsonCompactor();
-  for (const toolName of ['quality_review', 'skill_review', 'handoff_capsule', 'context_score', 'dependency_plan', 'data_query']) {
+  for (const toolName of ['quality_review', 'skill_review', 'handoff_capsule', 'data_query']) {
     const original = { role: 'toolResult', toolCallId: toolName, toolName, content: text };
     const [result] = compact.transform([original]);
     assert.deepEqual(JSON.parse(result.content), JSON.parse(text));
@@ -92,7 +92,7 @@ test('compaction retries append retention priorities once without changing origi
 test('utility and HTTP JSON histories compact without changing evidence or replay bytes', () => {
   const text = JSON.stringify({rows:Array.from({length:80},(_,id)=>({id,detail:'keep  spacing'}))},null,2);
   const compactor = createToolJsonCompactor();
-  for (const toolName of ['sqlite_probe','package_probe','openapi_probe','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','http_request','sys_probe']) {
+  for (const toolName of ['sqlite_probe','package_probe','net_probe','archive_probe','http_request','sys_probe']) {
     const original = {role:'toolResult',toolName,toolCallId:'fixture',content:[{type:'text',text}]};
     const messages = [original];
     const result = compactor.transform(messages);

@@ -250,8 +250,7 @@
         "workflow-orchestration",
         "agent-model-management",
         "background-tasks",
-        "swarm-execution",
-        "fusion-review"
+        "fanout-execution"
       ],
       "sourceFiles": [
         "agent/extensions/pi-subagents/src/extension/index.ts",
@@ -463,14 +462,16 @@
       "commands": []
     },
     {
-      "id": "swarm-execution",
+      "id": "fanout-execution",
       "group": "orchestration",
-      "summary": "Run separable child investigations in parallel and preserve each outcome, failure and acceptance evidence for parent review.",
+      "summary": "Fan-out (formerly swarm and fusion): run separable investigations or competing approaches as parallel children, preserve each outcome, failure and acceptance evidence, and merge outputs deterministically with provenance (duplicate, complementary and conflicting sections stay visible for parent review).",
       "entrypoints": [
         "subagent.tasks",
         "runs.all",
         "runs.recover",
-        "todo.execution:swarm"
+        "runs.fuse",
+        "runs.fuseFragments",
+        "todo.execution:fanout"
       ],
       "tools": [
         "subagent",
@@ -495,56 +496,11 @@
         },
         {
           "name": "runs.recover",
-          "summary": "Build a bounded respawn plan for failed fanout members."
+          "summary": "Build a bounded respawn plan for failed fan-out members."
         },
-        {
-          "name": "execution",
-          "values": [
-            "swarm"
-          ],
-          "summary": "Todo execution annotation."
-        }
-      ],
-      "related": [
-        "subagent-dispatch",
-        "fusion-review",
-        "todo-planning",
-        "agent-model-management"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts",
-        "agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts",
-        "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts",
-        "agent/extensions/rpiv-todo/tool/types.ts"
-      ],
-      "doc": "docs/MODEL-ROUTING.md",
-      "commands": []
-    },
-    {
-      "id": "fusion-review",
-      "group": "orchestration",
-      "summary": "Merge child outputs deterministically with provenance, retaining duplicate, complementary and conflicting sections for review.",
-      "entrypoints": [
-        "runs.fuse",
-        "runs.fuseFragments",
-        "todo.execution:fusion"
-      ],
-      "tools": [
-        "subagent",
-        "todo"
-      ],
-      "options": [
         {
           "name": "runs.fuse",
-          "summary": "Fuse text outputs from a completed run set."
-        },
-        {
-          "name": "runs.fuseFragments",
-          "summary": "Fuse structured owner/kind/body/updatedAt fragments."
-        },
-        {
-          "name": "fragments[].owner",
-          "summary": "Source worker identity."
+          "summary": "Merge text outputs or ```fragment blocks from a completed run set."
         },
         {
           "name": "fragments[].kind",
@@ -556,34 +512,24 @@
           "summary": "Fragment classification."
         },
         {
-          "name": "fragments[].body",
-          "summary": "Source-preserving fragment body."
-        },
-        {
-          "name": "fragments[].updatedAt",
-          "summary": "Finite ordering timestamp."
-        },
-        {
-          "name": "config.maxBodyChars",
-          "summary": "Positive fused-body bound, at most 131072."
-        },
-        {
           "name": "execution",
           "values": [
-            "fusion"
+            "fanout"
           ],
           "summary": "Todo execution annotation."
         }
       ],
       "related": [
         "subagent-dispatch",
-        "swarm-execution",
+        "todo-planning",
+        "agent-model-management",
         "quality-review"
       ],
       "sourceFiles": [
-        "agent/extensions/pi-subagents/src/runs/shared/fusion.ts",
-        "agent/extensions/pi-subagents/src/workflows/recovery-seam.ts",
-        "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts"
+        "agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/fanout.ts",
+        "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts",
+        "agent/extensions/rpiv-todo/tool/types.ts"
       ],
       "doc": "docs/MODEL-ROUTING.md",
       "commands": []
@@ -631,8 +577,7 @@
       ],
       "related": [
         "scope-council",
-        "fusion-review",
-        "swarm-execution",
+        "fanout-execution",
         "subagent-dispatch"
       ],
       "sourceFiles": [
@@ -786,8 +731,7 @@
       ],
       "related": [
         "agent-model-management",
-        "provider-routing",
-        "fusion-review"
+        "provider-routing"
       ],
       "sourceFiles": [
         "agent/extensions/pi-subagents/src/agents/agent-management.ts",
@@ -879,7 +823,7 @@
         },
         {
           "name": "preferences.<role>.models",
-          "summary": "Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, prompt_analysis, main_session_fallback."
+          "summary": "Ordered alias list per role: subagents, council, fanout, quality_review, project_review, error_review, prompt_analysis, main_session_fallback."
         },
         {
           "name": "/models",
@@ -995,8 +939,7 @@
             "project",
             "error",
             "council",
-            "swarm",
-            "fusion"
+            "fanout"
           ],
           "summary": "Review kind with a distinct purpose and owner."
         },
@@ -1433,8 +1376,7 @@
           "values": [
             "self",
             "subagent",
-            "swarm",
-            "fusion"
+            "fanout"
           ],
           "summary": "Native orchestration annotation."
         },
@@ -1461,8 +1403,7 @@
       ],
       "related": [
         "session-coordination",
-        "swarm-execution",
-        "fusion-review",
+        "fanout-execution",
         "memory-notes"
       ],
       "sourceFiles": [
@@ -1904,15 +1845,9 @@
       "group": "memory",
       "summary": "Keep small verbatim project observations with SHA256 provenance and retrieve unchanged evidence from the active session branch; inferred claims and unattributed URLs are rejected.",
       "entrypoints": [
-        "evidence_cache",
-        "claim_check",
-        "context_score",
         "handoff_capsule"
       ],
       "tools": [
-        "evidence_cache",
-        "claim_check",
-        "context_score",
         "handoff_capsule"
       ],
       "options": [
@@ -1960,7 +1895,6 @@
       ],
       "sourceFiles": [
         "agent/extensions/pi-memory/context-tools.ts",
-        "agent/extensions/pi-memory/context-evidence.ts",
         "agent/extensions/pi-memory/context-salience.ts"
       ],
       "doc": "docs/LOCAL-INTELLIGENCE.md",
@@ -1972,7 +1906,6 @@
       "summary": "Inspect selected-model full-window context occupancy and 80% automatic compaction threshold alongside separate runtime, failure, efficiency and past-session diagnostics.",
       "entrypoints": [
         "session_self",
-        "session_audit",
         "self",
         "cost",
         "metrics",
@@ -1982,8 +1915,7 @@
         "commands"
       ],
       "tools": [
-        "session_self",
-        "session_audit"
+        "session_self"
       ],
       "commands": [
         "self",
@@ -2049,14 +1981,12 @@
       "group": "engineering",
       "summary": "Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
       "entrypoints": [
-        "syntax_check",
         "context_slice",
         "symbol_expand",
         "ast_diff",
         "git_info"
       ],
       "tools": [
-        "syntax_check",
         "context_slice",
         "symbol_expand",
         "ast_diff",
@@ -2125,12 +2055,8 @@
       "id": "code-quality",
       "group": "engineering",
       "summary": "Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby or bounded cross-directory code. baseline combines source slop/security/backend/UI cues, DRY groups and structure in one call. Advisory evidence with file:line, not a quality score.",
-      "entrypoints": [
-        "code_quality"
-      ],
+      "entrypoints": [],
       "tools": [
-        "code_quality",
-        "syntax_check",
         "git_info",
         "lsp_diagnostics",
         "lens_diagnostics"
@@ -2167,7 +2093,6 @@
         "artifact-numeric-checks"
       ],
       "sourceFiles": [
-        "agent/extensions/code-quality.ts",
         "agent/extensions/lib/code-quality.ts",
         "agent/extensions/lib/code-structure.ts",
         "agent/extensions/lib/source-check.ts",
@@ -2179,37 +2104,14 @@
     {
       "id": "static-audits",
       "group": "engineering",
-      "summary": "Audit source and SVG files with local deterministic rules. Explicit quality tools may batch ambiguous prose/UI findings through bounded cached JEV triage; edit hooks remain local and findings never become automatic approvals. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.",
+      "summary": "Audit source and SVG files with local deterministic rules after every edit and as a step of the goal completion check. Security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. High-severity findings and unparseable changed files reopen the goal until fixed or waived. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. Findings never become automatic approvals.",
       "entrypoints": [
-        "code_audit",
         "svg_inspect"
       ],
       "tools": [
-        "code_audit",
-        "svg_inspect",
-        "code_quality",
-        "artifact_check"
+        "svg_inspect"
       ],
       "options": [
-        {
-          "name": "code_audit.domains",
-          "values": [
-            "security",
-            "backend",
-            "efficiency",
-            "patterns",
-            "ui"
-          ],
-          "summary": "Rule families to run; default all."
-        },
-        {
-          "name": "code_audit.paths|changed|base",
-          "summary": "Files or directories, or the current diff against a revision."
-        },
-        {
-          "name": "code_audit.minSeverity|limit",
-          "summary": "Lowest severity reported and result count."
-        },
         {
           "name": "svg_inspect.action",
           "values": [
@@ -2240,7 +2142,6 @@
         "design-studio"
       ],
       "sourceFiles": [
-        "agent/extensions/code-audit.ts",
         "agent/extensions/art-direction.ts",
         "agent/extensions/lib/code-audit.ts",
         "agent/extensions/lib/svg-analysis.ts",
@@ -2255,24 +2156,12 @@
       "group": "engineering",
       "summary": "Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.",
       "entrypoints": [
-        "artifact_check",
         "math_check"
       ],
       "tools": [
-        "artifact_check",
         "math_check"
       ],
       "options": [
-        {
-          "name": "artifact_check.operation",
-          "values": [
-            "svg",
-            "ui",
-            "image",
-            "text"
-          ],
-          "summary": "Explicit artifact inspection."
-        },
         {
           "name": "path|text",
           "summary": "One workspace path or supported inline source; SVG is bounded to 64 KiB."
@@ -2386,14 +2275,11 @@
         "web_probe",
         "github_search",
         "browser_session",
-        "wait_for",
         "render_see",
         "media_info",
         "video_frames",
         "audio_analyze",
-        "media_edit",
-        "music_compose",
-        "image_ocr"
+        "music_compose"
       ],
       "tools": [
         "web_search",
@@ -2404,14 +2290,11 @@
         "web_probe",
         "github_search",
         "browser_session",
-        "wait_for",
         "render_see",
         "media_info",
         "video_frames",
         "audio_analyze",
-        "media_edit",
-        "music_compose",
-        "image_ocr"
+        "music_compose"
       ],
       "commands": [
         "websearch",
@@ -2523,15 +2406,9 @@
       "group": "web_media",
       "summary": "Author editable local 3D scenes and fixed-clock animations, render H.264 video and posters, compose clip transitions and mix local audio. Three.js studio/clay/toon/wireframe styles, keyframes, camera and lights; no hosted generation or model calls.",
       "entrypoints": [
-        "scene_create",
-        "scene_render",
-        "video_compose",
         "audio_mix"
       ],
       "tools": [
-        "scene_create",
-        "scene_render",
-        "video_compose",
         "audio_mix",
         "music_compose",
         "media_info",
@@ -2563,7 +2440,6 @@
       ],
       "sourceFiles": [
         "agent/extensions/media-tools.ts",
-        "agent/extensions/lib/scene-studio.ts",
         "agent/extensions/lib/media-timeline.ts",
         "agent/scripts/scene-runtime.mjs"
       ],
@@ -2578,12 +2454,10 @@
         "video_project",
         "video_render",
         "video_shot",
-        "video_ambient",
         "motion_examples",
         "video_qa",
         "narration_tts",
         "audio_synth",
-        "video_generate",
         "video_browser",
         "image_generate",
         "audio_generate"
@@ -2594,19 +2468,15 @@
         "video_shot",
         "motion_examples",
         "video_assets",
-        "video_ambient",
         "video_qa",
         "narration_tts",
         "audio_synth",
-        "media_pipeline",
         "video_frames",
         "media_info",
         "audio_analyze",
-        "video_generate",
         "video_browser",
         "image_generate",
         "audio_generate",
-        "narration_align",
         "media_sync"
       ],
       "options": [
@@ -2680,11 +2550,9 @@
         "agent/extensions/video-studio.ts",
         "agent/extensions/lib/video-studio.ts",
         "agent/extensions/lib/video-production-flow.ts",
-        "agent/extensions/lib/video-ambient.ts",
         "agent/extensions/lib/ambient-frames.ts",
         "agent/extensions/lib/video-review-evidence.ts",
         "agent/extensions/lib/video-color-evidence.ts",
-        "agent/scripts/video-ambient.mjs",
         "agent/extensions/lib/video-looks.ts",
         "agent/extensions/lib/video-derive.ts",
         "agent/extensions/lib/video-shot.ts",
@@ -2695,7 +2563,6 @@
         "core/coding-agent/src/modes/interactive/components/scoped-models-selector.js",
         "agent/extensions/lib/motion-library.ts",
         "agent/scripts/video-render.mjs",
-        "agent/skills/procedural-audio/scripts/synth.py",
         "agent/skills/motion-approaches/SKILL.md"
       ],
       "doc": "docs/VIDEO-STUDIO.md",
@@ -2704,24 +2571,13 @@
     {
       "id": "3d-studio",
       "group": "web_media",
-      "summary": "Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture with seed points. Splats: Brush (Apache-2.0, wgpu) trains headless on any Vulkan GPU including integrated AMD/Intel, from COLMAP or Blender datasets, exporting PLY with held-out fidelity renders; splat_preview renders a point-cloud turntable. Every process is guarded, niced and memory-watched.",
+      "summary": "Headless Blender as one tool with actions: setup (pinned local 5.2.2 LTS install and engine report), run (agent-authored bpy scripts), inspect (scene summary), render (bounded still/preview/animation with contact sheets; EEVEE headless, Cycles CPU). Every process is guarded, niced and memory-watched.",
       "entrypoints": [
-        "blender_run",
-        "blender_render",
-        "blender_export",
-        "splat_train",
-        "splat_preview"
+        "blender"
       ],
       "tools": [
-        "blender_setup",
-        "blender_run",
-        "blender_inspect",
-        "blender_render",
-        "blender_export",
+        "blender",
         "video_shot",
-        "splat_setup",
-        "splat_train",
-        "splat_preview",
         "video_frames",
         "media_info"
       ],
@@ -2777,11 +2633,8 @@
       "sourceFiles": [
         "agent/extensions/blender-studio.ts",
         "agent/extensions/lib/blender-studio.ts",
-        "agent/extensions/lib/splat-studio.ts",
         "agent/extensions/lib/guarded-process.ts",
-        "agent/scripts/blender-studio.py",
-        "agent/skills/blender-production/SKILL.md",
-        "agent/skills/gaussian-splatting/SKILL.md"
+        "agent/scripts/blender-studio.py"
       ],
       "doc": "docs/3D-STUDIO.md",
       "commands": []
@@ -2873,137 +2726,31 @@
         "agent/extensions/lib/specifics.ts",
         "agent/extensions/lib/pptx-build.ts",
         "agent/extensions/lib/deliverable-inspect.ts",
-        "agent/extensions/lib/deliverable-ledger.ts",
-        "agent/skills/spreadsheet-authoring/SKILL.md",
-        "agent/skills/word-document-authoring/SKILL.md",
-        "agent/skills/presentation-authoring/SKILL.md"
+        "agent/extensions/lib/deliverable-ledger.ts"
       ],
       "doc": "docs/OFFICE-AND-DELIVERABLES.md",
       "commands": []
     },
     {
-      "id": "file-organization",
-      "group": "web_media",
-      "summary": "Sort, rename and clean up a folder of files without losing any. fs_organize works in a fixed order: scan (types, sizes, identical files, names needing cleanup, what is left alone), plan (a reviewable list of moves, nothing touched; by type, extension, date, tidy-names, rules with {year}/{month}/{ext}/{type} folders, or an exact moves list the model decided after reading the files), apply (hard-link-then-unlink moves that never overwrite, name clashes become \"name (2).ext\", a journal of every move, the harness write-scope policy asked for each folder), verify (every moved file present, file count compared) and undo (reverse a plan from its journal, even in a later session). Only regular files move; the home folder, system and hidden configuration folders and software projects are refused, and symlinks, hidden files and unfinished downloads are skipped. Identical copies can be gathered in Duplicates/ and are never deleted.",
-      "entrypoints": [
-        "fs_organize"
-      ],
-      "tools": [
-        "fs_organize",
-        "office_doc",
-        "deliverable_check",
-        "ls",
-        "find"
-      ],
-      "options": [
-        {
-          "name": "action",
-          "values": [
-            "scan",
-            "plan",
-            "apply",
-            "verify",
-            "undo",
-            "plans"
-          ],
-          "summary": "fs_organize operation."
-        },
-        {
-          "name": "by",
-          "values": [
-            "type",
-            "extension",
-            "date",
-            "tidy-names",
-            "rules",
-            "moves"
-          ],
-          "summary": "plan mode."
-        },
-        {
-          "name": "rules",
-          "summary": "plan by rules: ordered [{ext, nameContains, glob, regex, olderThanDays, largerThanMB, to}]; first match wins."
-        },
-        {
-          "name": "moves",
-          "summary": "plan by moves: exact [{from, to}]; a to ending in / keeps the file name."
-        },
-        {
-          "name": "duplicates",
-          "values": [
-            "report",
-            "separate"
-          ],
-          "summary": "report identical files, or gather the extra copies in Duplicates/."
-        },
-        {
-          "name": "PI_ORGANIZE_DIR",
-          "summary": "Where plan journals are kept (default the agent organize folder)."
-        }
-      ],
-      "related": [
-        "office-and-deliverables",
-        "bulk-edit",
-        "background-tasks"
-      ],
-      "sourceFiles": [
-        "agent/extensions/fs-organize.ts",
-        "agent/extensions/lib/fs-organize.ts",
-        "agent/skills/file-organization/SKILL.md"
-      ],
-      "doc": "docs/FILE-ORGANIZATION.md",
-      "commands": []
-    },
-    {
       "id": "ui-engineering",
       "group": "web_media",
-      "summary": "Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_recipe prepares editable focus-safe entrances, section-driven layered scroll tracks and preflighted local Blender/glTF-to-Three.js mechanics without choosing a stock visual identity or installing dependencies. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.",
+      "summary": "Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.",
       "entrypoints": [
-        "ui_recipe",
         "ui_explore",
         "motion_inspect",
         "ui_consistency"
       ],
       "tools": [
-        "ui_recipe",
         "creative_direct",
         "ui_explore",
         "motion_inspect",
         "ui_consistency",
         "render_see",
-        "design_audit",
         "visual_review",
         "browser_session",
         "asset_register",
-        "blender_export",
+        "blender",
         "image_generate"
-      ],
-      "options": [
-        {
-          "name": "ui_recipe.action|pattern",
-          "values": [
-            "scroll-reveal",
-            "scroll-story",
-            "three-model"
-          ],
-          "summary": "Plan or scaffold mechanics; the host page supplies real content and design tokens."
-        },
-        {
-          "name": "motion_inspect.mode|positions",
-          "values": [
-            "time",
-            "scroll"
-          ],
-          "summary": "time inventory or bounded live scroll progress with forward/backtracking and reduced-motion evidence."
-        },
-        {
-          "name": "ui_explore.devices|breakpoints",
-          "summary": "Touch/DPR/orientation profiles and adjacent CSS breakpoint widths; omitted cells stay explicit."
-        },
-        {
-          "name": "ui_consistency.sources|selectorGroups|tokens",
-          "summary": "Compare shared named roles within the same explicit variant and requested CSS custom properties across 2..4 routes."
-        }
       ],
       "related": [
         "design-studio",
@@ -3014,7 +2761,6 @@
       ],
       "sourceFiles": [
         "agent/extensions/design-studio.ts",
-        "agent/extensions/lib/ui-recipes.ts",
         "agent/scripts/ui-motion-runtime.mjs",
         "agent/extensions/art-direction.ts",
         "agent/extensions/lib/creative-qa.ts",
@@ -3023,31 +2769,21 @@
         "agent/extensions/lib/task-pipelines.ts"
       ],
       "doc": "docs/UI-ENGINEERING.md",
-      "commands": []
+      "commands": [],
+      "options": []
     },
     {
       "id": "design-studio",
       "group": "web_media",
-      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. image_convert makes framed/rotated alpha-aware PNG/JPEG/WebP batches; image_understand uses the selected vision model with hashed crop/scale evidence. Pixel measurements and model observations remain evidence, not design intent.",
+      "summary": "Turn design references into code. image_understand uses the selected vision model with hashed crop/scale evidence; image_crop cuts and keys assets at source resolution; render_see compares the build against the reference at the same width. Pixel measurements and model observations remain evidence, not design intent.",
       "entrypoints": [
         "image_understand",
-        "image_convert",
-        "image_analyze",
-        "image_crop",
-        "image_trace",
-        "image_create",
-        "visual_diff"
+        "image_crop"
       ],
       "tools": [
         "image_understand",
-        "image_convert",
-        "image_analyze",
         "image_crop",
-        "image_trace",
-        "image_create",
-        "visual_diff",
-        "render_see",
-        "design_audit"
+        "render_see"
       ],
       "options": [
         {
@@ -3099,11 +2835,8 @@
         "agent/extensions/design-studio.ts",
         "agent/extensions/lib/design-studio.ts",
         "agent/extensions/lib/image-analysis.ts",
-        "agent/extensions/lib/image-convert.ts",
         "agent/extensions/lib/image-understand.ts",
-        "agent/extensions/lib/image-synth.ts",
-        "agent/scripts/render-capture.mjs",
-        "agent/skills/mockup-to-code/SKILL.md"
+        "agent/scripts/render-capture.mjs"
       ],
       "doc": "docs/DESIGN-STUDIO.md",
       "commands": []
@@ -3135,11 +2868,7 @@
         "asset_register",
         "image_generate",
         "creative_compare",
-        "ui_recipe",
-        "render_see",
-        "design_audit",
-        "image_analyze",
-        "visual_diff"
+        "render_see"
       ],
       "options": [
         {
@@ -3207,78 +2936,11 @@
       "commands": []
     },
     {
-      "id": "desktop-computer-use",
-      "group": "engineering",
-      "summary": "Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.",
-      "entrypoints": [
-        "desktop_session"
-      ],
-      "tools": [
-        "desktop_session",
-        "image_ocr",
-        "visual_diff"
-      ],
-      "options": [
-        {
-          "name": "action",
-          "values": [
-            "start",
-            "launch",
-            "screenshot",
-            "click",
-            "move",
-            "drag",
-            "scroll",
-            "type",
-            "key",
-            "focus",
-            "windows",
-            "wait",
-            "logs",
-            "stop",
-            "list"
-          ],
-          "summary": "Session operation."
-        },
-        {
-          "name": "command|cwd",
-          "summary": "launch: shell command run with DISPLAY set, from a workspace directory."
-        },
-        {
-          "name": "x|y|toX|toY|button|double|direction|amount",
-          "summary": "Pointer input in display pixels."
-        },
-        {
-          "name": "text|keys",
-          "summary": "Keyboard input: literal text, or xdotool key names such as ctrl+s."
-        },
-        {
-          "name": "title|timeoutMs",
-          "summary": "wait for a window whose title contains the text."
-        }
-      ],
-      "related": [
-        "web-and-media",
-        "rendered-design-review",
-        "safety-bounds"
-      ],
-      "sourceFiles": [
-        "agent/extensions/desktop-session.ts",
-        "agent/extensions/lib/desktop-session.ts",
-        "agent/extensions/filesystem-safety.ts"
-      ],
-      "doc": "docs/DESKTOP-SESSIONS.md",
-      "commands": []
-    },
-    {
       "id": "rendered-design-review",
       "group": "engineering",
       "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
-      "entrypoints": [
-        "design_audit"
-      ],
+      "entrypoints": [],
       "tools": [
-        "design_audit",
         "render_see",
         "browser_session",
         "web_asset_check"
@@ -3318,17 +2980,14 @@
       "group": "engineering",
       "summary": "Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset references for hosting, and Ubuntu unit/journal metadata without running workflows, publishing sites or mutating services. Source-backed findings with explicit unresolved expressions.",
       "entrypoints": [
-        "workflow_probe",
         "web_asset_check",
         "sys_probe"
       ],
       "tools": [
-        "workflow_probe",
         "web_asset_check",
         "sys_probe",
         "git_info",
-        "package_probe",
-        "env_audit"
+        "package_probe"
       ],
       "options": [
         {
@@ -3367,15 +3026,11 @@
       "summary": "Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection. Prepare inert SSH argv or inspect one explicit server banner without authenticating or executing remote commands.",
       "entrypoints": [
         "workspace_search",
-        "local_mail_search",
-        "local_mail_read",
         "ssh_plan",
         "net_probe"
       ],
       "tools": [
         "workspace_search",
-        "local_mail_search",
-        "local_mail_read",
         "ssh_plan",
         "net_probe"
       ],
@@ -3415,22 +3070,14 @@
       "group": "models",
       "summary": "Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.",
       "entrypoints": [
-        "context_score",
         "handoff_capsule",
-        "evidence_cache",
         "session_self"
       ],
       "tools": [
-        "context_score",
         "handoff_capsule",
-        "evidence_cache",
         "session_self"
       ],
       "options": [
-        {
-          "name": "context_score",
-          "summary": "Rank supplied items by task relevance and protected evidence; scores are priorities, not probabilities."
-        },
         {
           "name": "handoff_capsule",
           "summary": "Prepare a short extractive handoff instead of copying an entire session."
@@ -3454,142 +3101,14 @@
       "commands": []
     },
     {
-      "id": "ml-lab",
-      "group": "engineering",
-      "summary": "Executable ML baseline: split/content/group/time leakage checks, classification/regression slice metrics and paired baseline intervals, correct RL termination/truncation targets, host/memory preflight, static Colab notebook checks and resumable CPU MLP, offline tabular Q, embedding and LoRA training recipes. No hidden model calls, dependency installation or cloud allocation. Actual trainers run through existing execution/background owners and preserve checkpoints, hashes and metrics.",
-      "entrypoints": [
-        "ml_lab"
-      ],
-      "tools": [
-        "ml_lab",
-        "bg_run",
-        "bg_status",
-        "bg_logs",
-        "browser_session",
-        "sys_probe",
-        "env_audit"
-      ],
-      "options": [
-        {
-          "name": "operation",
-          "values": [
-            "preflight",
-            "split_audit",
-            "evaluate",
-            "rl_targets",
-            "notebook",
-            "recipe"
-          ],
-          "summary": "Bounded deterministic check or executable recipe."
-        },
-        {
-          "name": "path|data",
-          "summary": "Workspace JSON/ipynb snapshot or inline operation data; files up to 256 KiB."
-        },
-        {
-          "name": "recipe",
-          "values": [
-            "tiny_mlp",
-            "tabular_q",
-            "embedding",
-            "lora"
-          ],
-          "summary": "Trainer contract with smoke/resume argv and a staged Colab notebook."
-        }
-      ],
-      "related": [
-        "code-quality",
-        "web-and-media",
-        "memory-evidence"
-      ],
-      "sourceFiles": [
-        "agent/extensions/ml-lab.ts",
-        "agent/extensions/lib/ml-lab.ts",
-        "agent/scripts/ml-lab.py",
-        "agent/scripts/ml-transformer-train.py"
-      ],
-      "doc": "docs/RESEARCH-CODE-ML.md",
-      "commands": []
-    },
-    {
-      "id": "research-toolkit",
-      "group": "web_media",
-      "summary": "Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. dossier checks exact source quotations/hashes, duplicate snapshots and claim coverage, exposes contradictory citation labels, and builds an attributable Markdown report. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.",
-      "entrypoints": [
-        "research_toolkit"
-      ],
-      "tools": [
-        "research_toolkit"
-      ],
-      "options": [
-        {
-          "name": "action",
-          "values": [
-            "plan",
-            "profile",
-            "lead",
-            "company",
-            "source",
-            "dossier"
-          ],
-          "summary": "Toolkit operation."
-        },
-        {
-          "name": "goal|context|mode",
-          "values": [
-            "leads",
-            "prior-art"
-          ],
-          "summary": "Research goal and optional context for plan; mode prior-art plans how to find and compare existing products and projects."
-        },
-        {
-          "name": "path",
-          "summary": "Directory to profile (default: the working directory); read-only, never reads environment files."
-        },
-        {
-          "name": "name|company|role|domain",
-          "summary": "Candidate identity fields for lead/company."
-        },
-        {
-          "name": "sourceUrl|retrievedAt",
-          "summary": "Required http(s) provenance and timestamp."
-        },
-        {
-          "name": "evidence|quote",
-          "summary": "Bounded verbatim evidence for lead/company/source."
-        }
-      ],
-      "related": [
-        "web-and-media",
-        "memory-evidence",
-        "safety-bounds"
-      ],
-      "sourceFiles": [
-        "agent/extensions/research-toolkit.ts",
-        "agent/extensions/lib/project-profile.ts",
-        "agent/extensions/lib/prior-art.ts",
-        "agent/extensions/lib/research-evidence.ts"
-      ],
-      "doc": "docs/ISOLATION-AND-WEB.md",
-      "commands": []
-    },
-    {
       "id": "agentmail-email",
       "group": "communication",
       "summary": "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing, full-text search, and single-message reads.",
       "entrypoints": [
-        "agentmail_status",
-        "agentmail_send",
-        "agentmail_messages",
-        "agentmail_search",
-        "agentmail_message"
+        "agentmail"
       ],
       "tools": [
-        "agentmail_status",
-        "agentmail_send",
-        "agentmail_messages",
-        "agentmail_search",
-        "agentmail_message"
+        "agentmail"
       ],
       "options": [
         {
@@ -3697,11 +3216,6 @@
   "tools": {
     "commandRegistrations": [
       {
-        "name": "bash-routes",
-        "source": "agent/extensions/bash-router.ts",
-        "line": 99
-      },
-      {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 528
@@ -3734,12 +3248,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1852
+        "line": 1844
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1405
+        "line": 1397
       },
       {
         "name": "curator",
@@ -3764,7 +3278,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1818
+        "line": 1810
       },
       {
         "name": "export-json",
@@ -3774,7 +3288,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 163
+        "line": 164
       },
       {
         "name": "google-account",
@@ -3874,7 +3388,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 482
+        "line": 476
       },
       {
         "name": "obs",
@@ -3884,7 +3398,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 570
+        "line": 575
       },
       {
         "name": "or-provider",
@@ -3894,7 +3408,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 798
+        "line": 614
       },
       {
         "name": "prompt-workflow",
@@ -3929,7 +3443,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1742
+        "line": 1734
       },
       {
         "name": "subagent-cost",
@@ -4014,7 +3528,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1767
+        "line": 1759
       },
       {
         "name": "task-state",
@@ -4029,12 +3543,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1786
-      },
-      {
-        "name": "watchmaker",
-        "source": "agent/extensions/session-watchmaker.ts",
-        "line": 345
+        "line": 1778
       },
       {
         "name": "websearch",
@@ -4073,51 +3582,15 @@
     ],
     "stableRegistrations": [
       {
-        "name": "agentmail_message",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 1061,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_messages",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 853,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_search",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 965,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_send",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 802,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_status",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 725,
-        "kind": "literal"
-      },
-      {
         "name": "archive_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 38,
+        "line": 24,
         "kind": "catalog"
-      },
-      {
-        "name": "artifact_check",
-        "source": "agent/extensions/lib/small-tools.ts",
-        "line": 115,
-        "kind": "factory"
       },
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 497,
+        "line": 492,
         "kind": "factory"
       },
       {
@@ -4129,31 +3602,31 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 258,
+        "line": 161,
         "kind": "factory"
       },
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 152,
+        "line": 142,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 281,
+        "line": 169,
         "kind": "factory"
       },
       {
         "name": "audio_synth",
         "source": "agent/extensions/video-studio.ts",
-        "line": 164,
+        "line": 154,
         "kind": "factory"
       },
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 574,
+        "line": 586,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -4188,33 +3661,27 @@
         "kind": "definition"
       },
       {
-        "name": "blender_export",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 65,
-        "kind": "factory"
-      },
-      {
         "name": "blender_inspect",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 56,
+        "line": 54,
         "kind": "factory"
       },
       {
         "name": "blender_render",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 60,
+        "line": 58,
         "kind": "factory"
       },
       {
         "name": "blender_run",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 52,
+        "line": 50,
         "kind": "factory"
       },
       {
         "name": "blender_setup",
         "source": "agent/extensions/blender-studio.ts",
-        "line": 48,
+        "line": 46,
         "kind": "factory"
       },
       {
@@ -4236,40 +3703,10 @@
         "kind": "literal"
       },
       {
-        "name": "claim_check",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 9,
-        "kind": "literal"
-      },
-      {
-        "name": "code_audit",
-        "source": "agent/extensions/code-audit.ts",
-        "line": 23,
-        "kind": "literal"
-      },
-      {
-        "name": "code_quality",
-        "source": "agent/extensions/code-quality.ts",
-        "line": 9,
-        "kind": "literal"
-      },
-      {
         "name": "contact_supervisor",
         "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
         "line": 305,
         "kind": "definition"
-      },
-      {
-        "name": "context_profile",
-        "source": "agent/extensions/context-profile.ts",
-        "line": 385,
-        "kind": "literal"
-      },
-      {
-        "name": "context_score",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 14,
-        "kind": "literal"
       },
       {
         "name": "context_slice",
@@ -4278,81 +3715,27 @@
         "kind": "definition"
       },
       {
-        "name": "contract_diff",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 32,
-        "kind": "catalog"
-      },
-      {
-        "name": "coverage_probe",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 30,
-        "kind": "catalog"
-      },
-      {
-        "name": "coverage_select",
-        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 22,
-        "kind": "factory"
-      },
-      {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 601,
+        "line": 596,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 306,
+        "line": 301,
         "kind": "factory"
       },
       {
         "name": "data_query",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 137,
-        "kind": "factory"
-      },
-      {
-        "name": "decision_frontier",
-        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 21,
+        "line": 119,
         "kind": "factory"
       },
       {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
         "line": 135,
-        "kind": "literal"
-      },
-      {
-        "name": "dependency_plan",
-        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "line": 20,
-        "kind": "factory"
-      },
-      {
-        "name": "design_audit",
-        "source": "agent/extensions/render-and-wait.ts",
-        "line": 271,
-        "kind": "literal"
-      },
-      {
-        "name": "desktop_session",
-        "source": "agent/extensions/desktop-session.ts",
-        "line": 15,
-        "kind": "literal"
-      },
-      {
-        "name": "env_audit",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 34,
-        "kind": "catalog"
-      },
-      {
-        "name": "evidence_cache",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 16,
         "kind": "literal"
       },
       {
@@ -4367,12 +3750,6 @@
         "line": 198,
         "kind": "configured-default",
         "configurable": true
-      },
-      {
-        "name": "fs_organize",
-        "source": "agent/extensions/fs-organize.ts",
-        "line": 41,
-        "kind": "literal"
       },
       {
         "name": "get_search_content",
@@ -4396,13 +3773,13 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 210,
+        "line": 211,
         "kind": "literal"
       },
       {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 15,
+        "line": 8,
         "kind": "literal"
       },
       {
@@ -4412,64 +3789,22 @@
         "kind": "literal"
       },
       {
-        "name": "image_analyze",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 40,
-        "kind": "factory"
-      },
-      {
-        "name": "image_convert",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 35,
-        "kind": "factory"
-      },
-      {
-        "name": "image_create",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 57,
-        "kind": "factory"
-      },
-      {
         "name": "image_crop",
         "source": "agent/extensions/design-studio.ts",
-        "line": 44,
+        "line": 32,
         "kind": "factory"
       },
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 543,
-        "kind": "factory"
-      },
-      {
-        "name": "image_ocr",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 257,
-        "kind": "factory"
-      },
-      {
-        "name": "image_trace",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 51,
+        "line": 538,
         "kind": "factory"
       },
       {
         "name": "image_understand",
         "source": "agent/extensions/design-studio.ts",
-        "line": 37,
+        "line": 29,
         "kind": "factory"
-      },
-      {
-        "name": "local_mail_read",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 16,
-        "kind": "catalog"
-      },
-      {
-        "name": "local_mail_search",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 14,
-        "kind": "catalog"
       },
       {
         "name": "math_check",
@@ -4478,27 +3813,15 @@
         "kind": "factory"
       },
       {
-        "name": "media_edit",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 259,
-        "kind": "factory"
-      },
-      {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 255,
-        "kind": "factory"
-      },
-      {
-        "name": "media_pipeline",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 284,
+        "line": 159,
         "kind": "factory"
       },
       {
         "name": "media_sync",
         "source": "agent/extensions/video-studio.ts",
-        "line": 160,
+        "line": 150,
         "kind": "factory"
       },
       {
@@ -4550,45 +3873,33 @@
         "kind": "literal"
       },
       {
-        "name": "ml_lab",
-        "source": "agent/extensions/ml-lab.ts",
-        "line": 11,
-        "kind": "literal"
-      },
-      {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
-        "line": 176,
+        "line": 166,
         "kind": "factory"
       },
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 431,
+        "line": 426,
         "kind": "factory"
       },
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 264,
-        "kind": "factory"
-      },
-      {
-        "name": "narration_align",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 150,
+        "line": 166,
         "kind": "factory"
       },
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 146,
+        "line": 138,
         "kind": "factory"
       },
       {
         "name": "net_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 36,
+        "line": 22,
         "kind": "catalog"
       },
       {
@@ -4604,81 +3915,21 @@
         "kind": "literal"
       },
       {
-        "name": "openapi_probe",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 28,
-        "kind": "catalog"
-      },
-      {
         "name": "package_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 26,
+        "line": 20,
         "kind": "catalog"
       },
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 602,
+        "line": 618,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
         "line": 791,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_consolidate",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 778,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_forget",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 746,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_index_path",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 708,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_read",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 483,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_reembed",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 628,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_remember",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 658,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_restore",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 762,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_search",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 408,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_status",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 560,
         "kind": "literal"
       },
       {
@@ -4690,13 +3941,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 270,
-        "kind": "literal"
-      },
-      {
-        "name": "research_toolkit",
-        "source": "agent/extensions/research-toolkit.ts",
-        "line": 93,
+        "line": 242,
         "kind": "literal"
       },
       {
@@ -4704,18 +3949,6 @@
         "source": "agent/extensions/sandbox.ts",
         "line": 59,
         "kind": "literal"
-      },
-      {
-        "name": "scene_create",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 274,
-        "kind": "factory"
-      },
-      {
-        "name": "scene_render",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 275,
-        "kind": "factory"
       },
       {
         "name": "scratchpad",
@@ -4730,12 +3963,6 @@
         "kind": "literal"
       },
       {
-        "name": "session_audit",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1944,
-        "kind": "literal"
-      },
-      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
@@ -4744,7 +3971,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1881,
+        "line": 1873,
         "kind": "literal"
       },
       {
@@ -4756,7 +3983,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 746,
+        "line": 722,
         "kind": "literal"
       },
       {
@@ -4767,33 +3994,15 @@
         "configurable": true
       },
       {
-        "name": "splat_preview",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 79,
-        "kind": "factory"
-      },
-      {
-        "name": "splat_setup",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 71,
-        "kind": "factory"
-      },
-      {
-        "name": "splat_train",
-        "source": "agent/extensions/blender-studio.ts",
-        "line": 75,
-        "kind": "factory"
-      },
-      {
         "name": "sqlite_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 24,
+        "line": 18,
         "kind": "catalog"
       },
       {
         "name": "ssh_plan",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 18,
+        "line": 14,
         "kind": "catalog"
       },
       {
@@ -4823,13 +4032,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 462,
+        "line": 457,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 457,
+        "line": 452,
         "kind": "factory"
       },
       {
@@ -4837,12 +4046,6 @@
         "source": "agent/extensions/pi-lens/context-tools.ts",
         "line": 11,
         "kind": "definition"
-      },
-      {
-        "name": "syntax_check",
-        "source": "agent/extensions/lib/source-check.ts",
-        "line": 273,
-        "kind": "literal"
       },
       {
         "name": "sys_probe",
@@ -4853,7 +4056,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 568,
+        "line": 547,
         "kind": "literal"
       },
       {
@@ -4871,115 +4074,79 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 499,
+        "line": 491,
         "kind": "literal"
       },
       {
         "name": "ui_consistency",
         "source": "agent/extensions/art-direction.ts",
-        "line": 420,
+        "line": 415,
         "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 394,
-        "kind": "factory"
-      },
-      {
-        "name": "ui_recipe",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 33,
+        "line": 389,
         "kind": "factory"
       },
       {
         "name": "value_convert",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 133,
-        "kind": "factory"
-      },
-      {
-        "name": "video_ambient",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 82,
+        "line": 115,
         "kind": "factory"
       },
       {
         "name": "video_assets",
         "source": "agent/extensions/video-studio.ts",
-        "line": 140,
+        "line": 132,
         "kind": "factory"
       },
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 162,
-        "kind": "factory"
-      },
-      {
-        "name": "video_compose",
-        "source": "agent/extensions/media-tools.ts",
-        "line": 280,
+        "line": 152,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 256,
-        "kind": "factory"
-      },
-      {
-        "name": "video_generate",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 79,
+        "line": 160,
         "kind": "factory"
       },
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 86,
+        "line": 78,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 136,
+        "line": 128,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 132,
+        "line": 124,
         "kind": "factory"
       },
       {
         "name": "video_shot",
         "source": "agent/extensions/video-studio.ts",
-        "line": 109,
-        "kind": "factory"
-      },
-      {
-        "name": "visual_diff",
-        "source": "agent/extensions/design-studio.ts",
-        "line": 66,
+        "line": 101,
         "kind": "factory"
       },
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 348,
+        "line": 343,
         "kind": "factory"
-      },
-      {
-        "name": "wait_for",
-        "source": "agent/extensions/render-and-wait.ts",
-        "line": 105,
-        "kind": "literal"
       },
       {
         "name": "web_asset_check",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 22,
+        "line": 16,
         "kind": "catalog"
       },
       {
@@ -5008,12 +4175,6 @@
         "kind": "literal"
       },
       {
-        "name": "workflow_probe",
-        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 20,
-        "kind": "catalog"
-      },
-      {
         "name": "workspace_search",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 12,
@@ -5021,36 +4182,6 @@
       }
     ],
     "literalRegistrations": [
-      {
-        "name": "agentmail_message",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 1061,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_messages",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 853,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_search",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 965,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_send",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 802,
-        "kind": "literal"
-      },
-      {
-        "name": "agentmail_status",
-        "source": "agent/extensions/agentmail.ts",
-        "line": 725,
-        "kind": "literal"
-      },
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
@@ -5094,69 +4225,15 @@
         "kind": "literal"
       },
       {
-        "name": "claim_check",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 9,
-        "kind": "literal"
-      },
-      {
-        "name": "code_audit",
-        "source": "agent/extensions/code-audit.ts",
-        "line": 23,
-        "kind": "literal"
-      },
-      {
-        "name": "code_quality",
-        "source": "agent/extensions/code-quality.ts",
-        "line": 9,
-        "kind": "literal"
-      },
-      {
-        "name": "context_profile",
-        "source": "agent/extensions/context-profile.ts",
-        "line": 385,
-        "kind": "literal"
-      },
-      {
-        "name": "context_score",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 14,
-        "kind": "literal"
-      },
-      {
         "name": "deliverable_check",
         "source": "agent/extensions/deliverables.ts",
         "line": 135,
         "kind": "literal"
       },
       {
-        "name": "design_audit",
-        "source": "agent/extensions/render-and-wait.ts",
-        "line": 271,
-        "kind": "literal"
-      },
-      {
-        "name": "desktop_session",
-        "source": "agent/extensions/desktop-session.ts",
-        "line": 15,
-        "kind": "literal"
-      },
-      {
-        "name": "evidence_cache",
-        "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 16,
-        "kind": "literal"
-      },
-      {
         "name": "expert_director",
         "source": "agent/extensions/expert-director.ts",
         "line": 63,
-        "kind": "literal"
-      },
-      {
-        "name": "fs_organize",
-        "source": "agent/extensions/fs-organize.ts",
-        "line": 41,
         "kind": "literal"
       },
       {
@@ -5174,13 +4251,13 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 210,
+        "line": 211,
         "kind": "literal"
       },
       {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 15,
+        "line": 8,
         "kind": "literal"
       },
       {
@@ -5238,12 +4315,6 @@
         "kind": "literal"
       },
       {
-        "name": "ml_lab",
-        "source": "agent/extensions/ml-lab.ts",
-        "line": 11,
-        "kind": "literal"
-      },
-      {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
         "line": 821,
@@ -5258,67 +4329,13 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 602,
+        "line": 618,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
         "line": 791,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_consolidate",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 778,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_forget",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 746,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_index_path",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 708,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_read",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 483,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_reembed",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 628,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_remember",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 658,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_restore",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 762,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_search",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 408,
-        "kind": "literal"
-      },
-      {
-        "name": "project_memory_status",
-        "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 560,
         "kind": "literal"
       },
       {
@@ -5330,13 +4347,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 270,
-        "kind": "literal"
-      },
-      {
-        "name": "research_toolkit",
-        "source": "agent/extensions/research-toolkit.ts",
-        "line": 93,
+        "line": 242,
         "kind": "literal"
       },
       {
@@ -5358,12 +4369,6 @@
         "kind": "literal"
       },
       {
-        "name": "session_audit",
-        "source": "agent/extensions/session-signals.ts",
-        "line": 1944,
-        "kind": "literal"
-      },
-      {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
         "line": 816,
@@ -5372,7 +4377,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1881,
+        "line": 1873,
         "kind": "literal"
       },
       {
@@ -5384,19 +4389,13 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 746,
+        "line": 722,
         "kind": "literal"
       },
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
         "line": 940,
-        "kind": "literal"
-      },
-      {
-        "name": "syntax_check",
-        "source": "agent/extensions/lib/source-check.ts",
-        "line": 273,
         "kind": "literal"
       },
       {
@@ -5408,7 +4407,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 568,
+        "line": 547,
         "kind": "literal"
       },
       {
@@ -5420,13 +4419,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 499,
-        "kind": "literal"
-      },
-      {
-        "name": "wait_for",
-        "source": "agent/extensions/render-and-wait.ts",
-        "line": 105,
+        "line": 491,
         "kind": "literal"
       },
       {
@@ -5450,12 +4443,21 @@
     ],
     "dynamicOwners": [
       {
+        "source": "agent/extensions/agentmail.ts",
+        "signals": [
+          "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
+        ],
+        "lines": [
+          1116
+        ]
+      },
+      {
         "source": "agent/extensions/art-direction.ts",
         "signals": [
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          273
+          268
         ],
         "knownNames": [
           "asset_register",
@@ -5476,17 +4478,13 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          17
+          63
         ],
         "knownNames": [
-          "blender_export",
           "blender_inspect",
           "blender_render",
           "blender_run",
-          "blender_setup",
-          "splat_preview",
-          "splat_setup",
-          "splat_train"
+          "blender_setup"
         ]
       },
       {
@@ -5495,17 +4493,11 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          22
+          19
         ],
         "knownNames": [
-          "image_analyze",
-          "image_convert",
-          "image_create",
           "image_crop",
-          "image_trace",
-          "image_understand",
-          "ui_recipe",
-          "visual_diff"
+          "image_understand"
         ]
       },
       {
@@ -5517,7 +4509,6 @@
           85
         ],
         "knownNames": [
-          "artifact_check",
           "data_query",
           "math_check",
           "value_convert"
@@ -5529,7 +4520,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          577
+          589
         ],
         "knownNames": [
           "bash",
@@ -5542,19 +4533,13 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          245
+          149
         ],
         "knownNames": [
           "audio_analyze",
           "audio_mix",
-          "image_ocr",
-          "media_edit",
           "media_info",
-          "media_pipeline",
           "music_compose",
-          "scene_create",
-          "scene_render",
-          "video_compose",
           "video_frames"
         ]
       },
@@ -5597,20 +4582,6 @@
         ]
       },
       {
-        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
-        "signals": [
-          "registration passes names through a local factory; literal factory call sites are enumerated"
-        ],
-        "lines": [
-          9
-        ],
-        "knownNames": [
-          "coverage_select",
-          "decision_frontier",
-          "dependency_plan"
-        ]
-      },
-      {
         "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
         "signals": [
           "registration receives source-owned supervisor tool definitions"
@@ -5634,6 +4605,15 @@
         ],
         "knownNames": [
           "bg_wait"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "signals": [
+          "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
+        ],
+        "lines": [
+          592
         ]
       },
       {
@@ -5676,18 +4656,11 @@
         ],
         "knownNames": [
           "archive_probe",
-          "contract_diff",
-          "coverage_probe",
-          "env_audit",
-          "local_mail_read",
-          "local_mail_search",
           "net_probe",
-          "openapi_probe",
           "package_probe",
           "sqlite_probe",
           "ssh_plan",
           "web_asset_check",
-          "workflow_probe",
           "workspace_search"
         ]
       },
@@ -5697,19 +4670,16 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          38
+          37
         ],
         "knownNames": [
           "audio_generate",
           "audio_synth",
           "media_sync",
           "motion_examples",
-          "narration_align",
           "narration_tts",
-          "video_ambient",
           "video_assets",
           "video_browser",
-          "video_generate",
           "video_project",
           "video_qa",
           "video_render",
@@ -5718,12 +4688,12 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 755,
-      "registrationSites": 91,
-      "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 157,
-      "uniqueStableTools": 156,
-      "dynamicOwnerCount": 16,
+      "sourceFiles": 708,
+      "registrationSites": 64,
+      "indirectRegistrationSites": 21,
+      "stableRegistrationRows": 99,
+      "uniqueStableTools": 98,
+      "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",
         "build",
@@ -5750,10 +4720,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/bash-router.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/blender-studio.ts",
         "exists": true
       },
@@ -5763,18 +4729,6 @@
       },
       {
         "path": "agent/extensions/checkpoints.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/code-audit.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/code-quality.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/context-profile.ts",
         "exists": true
       },
       {
@@ -5790,19 +4744,11 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/desktop-session.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/expert-director.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/filesystem-safety.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/fs-organize.ts",
         "exists": true
       },
       {
@@ -5826,10 +4772,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/last-model.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/live-models.ts",
         "exists": true
       },
@@ -5843,10 +4785,6 @@
       },
       {
         "path": "agent/extensions/micro-intelligence.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/ml-lab.ts",
         "exists": true
       },
       {
@@ -5878,19 +4816,11 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/reasoning-aids.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/reminders.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/render-and-wait.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/research-toolkit.ts",
         "exists": true
       },
       {
@@ -5918,10 +4848,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/session-watchmaker.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/siblings.ts",
         "exists": true
       },
@@ -5935,10 +4861,6 @@
       },
       {
         "path": "agent/extensions/thinking.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/timeout-guard.ts",
         "exists": true
       },
       {
@@ -6004,10 +4926,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/capability-audit.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/capability-groups.ts",
         "exists": true
       },
@@ -6060,6 +4978,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/completion-check.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/completion-gate.ts",
         "exists": true
       },
@@ -6069,10 +4991,6 @@
       },
       {
         "path": "agent/extensions/lib/context-limits.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/context-profile.mjs",
         "exists": true
       },
       {
@@ -6124,10 +5042,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/desktop-session.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/diagnostic-provenance.ts",
         "exists": true
       },
@@ -6176,14 +5090,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/fail-policy.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/fs-organize.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/git-authority.ts",
         "exists": true
       },
@@ -6220,10 +5126,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/harness-invariants.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/harness-notice.ts",
         "exists": true
       },
@@ -6237,10 +5139,6 @@
       },
       {
         "path": "agent/extensions/lib/helper-usage.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/hook-events.ts",
         "exists": true
       },
       {
@@ -6260,15 +5158,7 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/image-convert.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/image-generate.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/image-synth.ts",
         "exists": true
       },
       {
@@ -6328,10 +5218,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/media-pipeline.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/media-process.ts",
         "exists": true
       },
@@ -6357,10 +5243,6 @@
       },
       {
         "path": "agent/extensions/lib/mini-preprocessor.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/ml-lab.ts",
         "exists": true
       },
       {
@@ -6480,10 +5362,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/project-memory-consolidate.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/project-memory-context.ts",
         "exists": true
       },
@@ -6536,10 +5414,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/reasoning-aids.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/relevant-guidance.ts",
         "exists": true
       },
@@ -6573,10 +5447,6 @@
       },
       {
         "path": "agent/extensions/lib/reviewer-board.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/scene-studio.ts",
         "exists": true
       },
       {
@@ -6652,10 +5522,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/session-watchmaker.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/sheet-formula.ts",
         "exists": true
       },
@@ -6708,10 +5574,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/splat-studio.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/stable-tool-order.ts",
         "exists": true
       },
@@ -6744,10 +5606,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/todo-linkage.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/token-budget.ts",
         "exists": true
       },
@@ -6764,15 +5622,7 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/ui-recipes.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/utility-client.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/video-ambient.ts",
         "exists": true
       },
       {
@@ -7006,18 +5856,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/utility-mcp/contract.mjs",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/utility-mcp/coverage.mjs",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/utility-mcp/env.mjs",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/utility-mcp/files.mjs",
         "exists": true
       },
@@ -7034,10 +5872,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/utility-mcp/openapi.mjs",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/utility-mcp/package.mjs",
         "exists": true
       },
@@ -7050,19 +5884,11 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/utility-mcp/shapes.mjs",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/utility-mcp/web-assets.mjs",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/utility-mcp/worker.mjs",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "exists": true
       },
       {
@@ -7095,10 +5921,6 @@
       },
       {
         "path": "agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/pi-memory/context-evidence.ts",
         "exists": true
       },
       {
@@ -7183,10 +6005,6 @@
       },
       {
         "path": "agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs",
-        "exists": true
-      },
-      {
-        "path": "agent/scripts/compatibility/reasoning-aids-loader-test.mjs",
         "exists": true
       },
       {
@@ -7306,10 +6124,6 @@
         "exists": true
       },
       {
-        "path": "agent/scripts/video-ambient.mjs",
-        "exists": true
-      },
-      {
         "path": "agent/scripts/video-browser.mjs",
         "exists": true
       },
@@ -7401,9 +6215,24 @@
         "why": "dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/"
       },
       {
+        "name": "bash-router.ts",
+        "retired": "2026-10-10",
+        "why": "annotation hook that nudged bash commands toward dedicated tools; the nudges duplicated tool descriptions and tool_search. The pure classifier stays in lib/bash-routing.ts for guidance and test detection. Do not recreate"
+      },
+      {
         "name": "capabilities.ts",
         "retired": "2026-09-02",
         "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
+      },
+      {
+        "name": "code-audit.ts",
+        "retired": "2026-10-10",
+        "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
+      },
+      {
+        "name": "code-quality.ts",
+        "retired": "2026-10-10",
+        "why": "code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate"
       },
       {
         "name": "context-composition.json",
@@ -7416,9 +6245,24 @@
         "why": "user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate"
       },
       {
+        "name": "context-profile.ts",
+        "retired": "2026-10-10",
+        "why": "0 uses in 45 days of sessions; context diagnostics live in session_self. Do not recreate"
+      },
+      {
+        "name": "desktop-session.ts",
+        "retired": "2026-10-10",
+        "why": "1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate"
+      },
+      {
         "name": "DOCTRINE.md",
         "retired": "2026-08-12",
         "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "fs-organize.ts",
+        "retired": "2026-10-10",
+        "why": "0 uses; file organization is plain bash guidance in the linux-ops skill. Do not recreate"
       },
       {
         "name": "governor-core.ts",
@@ -7441,6 +6285,11 @@
         "why": "2026-08-12 refactor — do not recreate"
       },
       {
+        "name": "last-model.ts",
+        "retired": "2026-10-10",
+        "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"
+      },
+      {
         "name": "lichtfeld-studio.ts",
         "retired": "2026-10-02",
         "why": "LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate"
@@ -7456,6 +6305,11 @@
         "why": "2026-08-12 refactor — do not recreate"
       },
       {
+        "name": "media-pipeline.ts",
+        "retired": "2026-10-10",
+        "why": "media_pipeline tool removed; lib/media-pipeline.ts batch orchestrator had no production caller left (audio_mix and music_compose remain standalone). Do not recreate"
+      },
+      {
         "name": "micro-agents.ts",
         "retired": "2026-09-02",
         "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate"
@@ -7469,6 +6323,11 @@
         "name": "minify-system-prompt.mjs",
         "retired": "2026-09-02",
         "why": "user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate"
+      },
+      {
+        "name": "ml-lab.ts",
+        "retired": "2026-10-10",
+        "why": "0 uses; ML training is plain bash/python guidance in the ml skill. Do not recreate"
       },
       {
         "name": "openrouter-provider.ts",
@@ -7561,9 +6420,29 @@
         "why": "patch module folded into retry-429-policy.mjs (single owner per file: both edited pi-ai retry.js/retryAssistantCall and that pairing broke once); moved to backups/retired-patches/"
       },
       {
+        "name": "project-memory-consolidate.ts",
+        "retired": "2026-10-10",
+        "why": "project_memory consolidate action removed; lib/project-memory-consolidate.ts had no production caller left. Do not recreate"
+      },
+      {
+        "name": "reasoning-aids.ts",
+        "retired": "2026-10-10",
+        "why": "coverage_select/decision_frontier/dependency_plan had 0 uses; reasoning is the model's job. Do not recreate"
+      },
+      {
         "name": "repo-recon.json",
         "retired": "2026-08-31",
         "why": "orphan of deleted pi-context-router; backup backups/repo-recon.json.20260831.bak"
+      },
+      {
+        "name": "research-toolkit.ts",
+        "retired": "2026-10-10",
+        "why": "0 uses; web_research/fetch_content/web_search cover it. Do not recreate"
+      },
+      {
+        "name": "scene-studio.ts",
+        "retired": "2026-10-10",
+        "why": "scene_create and scene_render tools removed; lib/scene-studio.ts had no production caller left. Do not recreate"
       },
       {
         "name": "session-bridge.ts",
@@ -7574,6 +6453,11 @@
         "name": "session-reviewer.ts",
         "retired": "2026-08-31",
         "why": "review channel superseded by checkpoints; references scrubbed"
+      },
+      {
+        "name": "session-watchmaker.ts",
+        "retired": "2026-10-10",
+        "why": "merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate"
       },
       {
         "name": "subagent-tool-description.md",
@@ -7591,6 +6475,11 @@
         "why": "full /effort alias + dynamic thinking control superseded by minimal extensions/thinking.ts (2026-08-31, same session); pi-native /thinking stays authoritative for native level-setting"
       },
       {
+        "name": "timeout-guard.ts",
+        "retired": "2026-10-10",
+        "why": "merged into managed-bash.ts: the bash tool owner now injects the default timeout. Do not recreate"
+      },
+      {
         "name": "tool-desc-overrides.mjs",
         "retired": "2026-09-02",
         "why": "user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) — patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate"
@@ -7604,17 +6493,21 @@
         "name": "ultimate-pi.ts",
         "retired": "2026-08-12",
         "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "video-ambient.mjs",
+        "retired": "2026-10-10",
+        "why": "worker script of lib/video-ambient.ts, retired with it. Do not recreate"
+      },
+      {
+        "name": "video-ambient.ts",
+        "retired": "2026-10-10",
+        "why": "video_ambient tool removed; lib/video-ambient.ts native ambient renderer had no production caller left. Do not recreate"
       }
     ],
     "serviceOwners": [
       {
         "source": "agent/extensions/checkpoints.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/context-profile.ts",
         "signals": [
           "wrapper/adapter"
         ]
@@ -7711,24 +6604,6 @@
         ]
       },
       {
-        "source": "agent/extensions/lib/utility-mcp/contract.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/utility-mcp/coverage.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/utility-mcp/env.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
         "source": "agent/extensions/lib/utility-mcp/files.mjs",
         "signals": [
           "MCP"
@@ -7747,12 +6622,6 @@
         ]
       },
       {
-        "source": "agent/extensions/lib/utility-mcp/openapi.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
         "source": "agent/extensions/lib/utility-mcp/package.mjs",
         "signals": [
           "MCP"
@@ -7760,12 +6629,6 @@
       },
       {
         "source": "agent/extensions/lib/utility-mcp/server.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/utility-mcp/shapes.mjs",
         "signals": [
           "MCP"
         ]
@@ -7784,12 +6647,6 @@
       },
       {
         "source": "agent/extensions/lib/utility-mcp/worker.mjs",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "signals": [
           "MCP"
         ]
@@ -8103,684 +6960,104 @@
     ],
     "skills": [
       {
-        "name": "accessible-interaction-design",
-        "path": "agent/skills/accessible-interaction-design/SKILL.md"
+        "name": "3d-cad",
+        "path": "agent/skills/3d-cad/SKILL.md"
       },
       {
-        "name": "ai-engineering",
-        "path": "agent/skills/ai-engineering/SKILL.md"
+        "name": "api-security",
+        "path": "agent/skills/api-security/SKILL.md"
       },
       {
-        "name": "algorithm-design",
-        "path": "agent/skills/algorithm-design/SKILL.md"
+        "name": "audio",
+        "path": "agent/skills/audio/SKILL.md"
       },
       {
-        "name": "animation-libraries",
-        "path": "agent/skills/animation-libraries/SKILL.md"
-      },
-      {
-        "name": "anti-ai-slop",
-        "path": "agent/skills/anti-ai-slop/SKILL.md"
-      },
-      {
-        "name": "api-design",
-        "path": "agent/skills/api-design/SKILL.md"
-      },
-      {
-        "name": "audio-processing",
-        "path": "agent/skills/audio-processing/SKILL.md"
-      },
-      {
-        "name": "behavioral-contracts",
-        "path": "agent/skills/behavioral-contracts/SKILL.md"
-      },
-      {
-        "name": "blender-production",
-        "path": "agent/skills/blender-production/SKILL.md"
-      },
-      {
-        "name": "browser-animation-engineering",
-        "path": "agent/skills/browser-animation-engineering/SKILL.md"
-      },
-      {
-        "name": "browser-automation",
-        "path": "agent/skills/browser-automation/SKILL.md"
-      },
-      {
-        "name": "browser-javascript-engineering",
-        "path": "agent/skills/browser-javascript-engineering/SKILL.md"
-      },
-      {
-        "name": "browser-ml",
-        "path": "agent/skills/browser-ml/SKILL.md"
-      },
-      {
-        "name": "browser-task-recovery",
-        "path": "agent/skills/browser-task-recovery/SKILL.md"
-      },
-      {
-        "name": "c-cpp-multiplatform",
-        "path": "agent/skills/c-cpp-multiplatform/SKILL.md"
-      },
-      {
-        "name": "c-systems-engineering",
-        "path": "agent/skills/c-systems-engineering/SKILL.md"
-      },
-      {
-        "name": "cad-engineering",
-        "path": "agent/skills/cad-engineering/SKILL.md"
-      },
-      {
-        "name": "cinematic-pixel-scene",
-        "path": "agent/skills/cinematic-pixel-scene/SKILL.md"
-      },
-      {
-        "name": "classical-ml-modeling",
-        "path": "agent/skills/classical-ml-modeling/SKILL.md"
-      },
-      {
-        "name": "cloudflare-platform-engineering",
-        "path": "agent/skills/cloudflare-platform-engineering/SKILL.md"
+        "name": "browser",
+        "path": "agent/skills/browser/SKILL.md"
       },
       {
         "name": "code-first-video",
         "path": "agent/skills/code-first-video/SKILL.md"
       },
       {
-        "name": "coding-practices",
-        "path": "agent/skills/coding-practices/SKILL.md"
+        "name": "data-science",
+        "path": "agent/skills/data-science/SKILL.md"
       },
       {
-        "name": "color-theory",
-        "path": "agent/skills/color-theory/SKILL.md"
+        "name": "engineering",
+        "path": "agent/skills/engineering/SKILL.md"
       },
       {
-        "name": "colors",
-        "path": "agent/skills/colors/SKILL.md"
-      },
-      {
-        "name": "community-promotion",
-        "path": "agent/skills/community-promotion/SKILL.md"
-      },
-      {
-        "name": "compiler-construction",
-        "path": "agent/skills/compiler-construction/SKILL.md"
-      },
-      {
-        "name": "component-libraries",
-        "path": "agent/skills/component-libraries/SKILL.md"
-      },
-      {
-        "name": "concurrency-memory-models",
-        "path": "agent/skills/concurrency-memory-models/SKILL.md"
-      },
-      {
-        "name": "copywriting",
-        "path": "agent/skills/copywriting/SKILL.md"
-      },
-      {
-        "name": "cpp-performance-engineering",
-        "path": "agent/skills/cpp-performance-engineering/SKILL.md"
-      },
-      {
-        "name": "css-battle",
-        "path": "agent/skills/css-battle/SKILL.md"
-      },
-      {
-        "name": "custom-svg",
-        "path": "agent/skills/custom-svg/SKILL.md"
-      },
-      {
-        "name": "data-analysis",
-        "path": "agent/skills/data-analysis/SKILL.md"
-      },
-      {
-        "name": "data-lineage-validation",
-        "path": "agent/skills/data-lineage-validation/SKILL.md"
-      },
-      {
-        "name": "data-viz",
-        "path": "agent/skills/data-viz/SKILL.md"
-      },
-      {
-        "name": "databases",
-        "path": "agent/skills/databases/SKILL.md"
-      },
-      {
-        "name": "debugging",
-        "path": "agent/skills/debugging/SKILL.md"
-      },
-      {
-        "name": "design-slop-prevention",
-        "path": "agent/skills/design-slop-prevention/SKILL.md"
-      },
-      {
-        "name": "design-systems",
-        "path": "agent/skills/design-systems/SKILL.md"
-      },
-      {
-        "name": "desktop-app-dev",
-        "path": "agent/skills/desktop-app-dev/SKILL.md"
-      },
-      {
-        "name": "desktop-ui",
-        "path": "agent/skills/desktop-ui/SKILL.md"
-      },
-      {
-        "name": "distributed-systems",
-        "path": "agent/skills/distributed-systems/SKILL.md"
-      },
-      {
-        "name": "dotnet-linux-engineering",
-        "path": "agent/skills/dotnet-linux-engineering/SKILL.md"
-      },
-      {
-        "name": "edge-model-deployment",
-        "path": "agent/skills/edge-model-deployment/SKILL.md"
-      },
-      {
-        "name": "email",
-        "path": "agent/skills/email/SKILL.md"
-      },
-      {
-        "name": "embedded-device-engineering",
-        "path": "agent/skills/embedded-device-engineering/SKILL.md"
-      },
-      {
-        "name": "evidence-first-engineering",
-        "path": "agent/skills/evidence-first-engineering/SKILL.md"
-      },
-      {
-        "name": "file-organization",
-        "path": "agent/skills/file-organization/SKILL.md"
-      },
-      {
-        "name": "financial-modeling",
-        "path": "agent/skills/financial-modeling/SKILL.md"
-      },
-      {
-        "name": "financial-statement-analysis",
-        "path": "agent/skills/financial-statement-analysis/SKILL.md"
-      },
-      {
-        "name": "fonts",
-        "path": "agent/skills/fonts/SKILL.md"
-      },
-      {
-        "name": "formal-model-checking",
-        "path": "agent/skills/formal-model-checking/SKILL.md"
-      },
-      {
-        "name": "fortran-scientific-computing",
-        "path": "agent/skills/fortran-scientific-computing/SKILL.md"
-      },
-      {
-        "name": "frontend-design",
-        "path": "agent/skills/frontend-design/SKILL.md"
-      },
-      {
-        "name": "frontend-js",
-        "path": "agent/skills/frontend-js/SKILL.md"
-      },
-      {
-        "name": "gaussian-splatting",
-        "path": "agent/skills/gaussian-splatting/SKILL.md"
-      },
-      {
-        "name": "gif-animation-editing",
-        "path": "agent/skills/gif-animation-editing/SKILL.md"
+        "name": "frontend",
+        "path": "agent/skills/frontend/SKILL.md"
       },
       {
         "name": "git-github",
         "path": "agent/skills/git-github/SKILL.md"
       },
       {
-        "name": "github-actions-workflows",
-        "path": "agent/skills/github-actions-workflows/SKILL.md"
-      },
-      {
-        "name": "github-identity-integration",
-        "path": "agent/skills/github-identity-integration/SKILL.md"
-      },
-      {
-        "name": "github-readme-authoring",
-        "path": "agent/skills/github-readme-authoring/SKILL.md"
-      },
-      {
-        "name": "github-release-notes",
-        "path": "agent/skills/github-release-notes/SKILL.md"
-      },
-      {
-        "name": "github-repo-presentation",
-        "path": "agent/skills/github-repo-presentation/SKILL.md"
-      },
-      {
-        "name": "go-service-engineering",
-        "path": "agent/skills/go-service-engineering/SKILL.md"
-      },
-      {
-        "name": "google-colab-training",
-        "path": "agent/skills/google-colab-training/SKILL.md"
-      },
-      {
-        "name": "google-identity-integration",
-        "path": "agent/skills/google-identity-integration/SKILL.md"
+        "name": "growth-finance",
+        "path": "agent/skills/growth-finance/SKILL.md"
       },
       {
         "name": "harness-self-maintenance",
         "path": "agent/skills/harness-self-maintenance/SKILL.md"
       },
       {
-        "name": "hybrid-ml-systems",
-        "path": "agent/skills/hybrid-ml-systems/SKILL.md"
+        "name": "linux-ops",
+        "path": "agent/skills/linux-ops/SKILL.md"
       },
       {
-        "name": "image-analysis",
-        "path": "agent/skills/image-analysis/SKILL.md"
-      },
-      {
-        "name": "incremental-computation",
-        "path": "agent/skills/incremental-computation/SKILL.md"
-      },
-      {
-        "name": "industrial-automation-control",
-        "path": "agent/skills/industrial-automation-control/SKILL.md"
-      },
-      {
-        "name": "industrial-device-protocols",
-        "path": "agent/skills/industrial-device-protocols/SKILL.md"
-      },
-      {
-        "name": "inference-serving",
-        "path": "agent/skills/inference-serving/SKILL.md"
-      },
-      {
-        "name": "investment-risk-analysis",
-        "path": "agent/skills/investment-risk-analysis/SKILL.md"
-      },
-      {
-        "name": "java-cross-platform",
-        "path": "agent/skills/java-cross-platform/SKILL.md"
-      },
-      {
-        "name": "java-platform-engineering",
-        "path": "agent/skills/java-platform-engineering/SKILL.md"
-      },
-      {
-        "name": "key-visual-art-direction",
-        "path": "agent/skills/key-visual-art-direction/SKILL.md"
-      },
-      {
-        "name": "libreoffice-automation",
-        "path": "agent/skills/libreoffice-automation/SKILL.md"
-      },
-      {
-        "name": "linux",
-        "path": "agent/skills/linux/SKILL.md"
-      },
-      {
-        "name": "linux-desktop-ui-ux",
-        "path": "agent/skills/linux-desktop-ui-ux/SKILL.md"
-      },
-      {
-        "name": "linux-host-defense",
-        "path": "agent/skills/linux-host-defense/SKILL.md"
-      },
-      {
-        "name": "linux-network-engineering",
-        "path": "agent/skills/linux-network-engineering/SKILL.md"
-      },
-      {
-        "name": "llm-dataset-preparation",
-        "path": "agent/skills/llm-dataset-preparation/SKILL.md"
-      },
-      {
-        "name": "llm-fine-tuning",
-        "path": "agent/skills/llm-fine-tuning/SKILL.md"
-      },
-      {
-        "name": "llm-systems-engineering",
-        "path": "agent/skills/llm-systems-engineering/SKILL.md"
-      },
-      {
-        "name": "local-network-analysis",
-        "path": "agent/skills/local-network-analysis/SKILL.md"
-      },
-      {
-        "name": "media-in-web",
-        "path": "agent/skills/media-in-web/SKILL.md"
-      },
-      {
-        "name": "memory-resource-ownership",
-        "path": "agent/skills/memory-resource-ownership/SKILL.md"
-      },
-      {
-        "name": "ml-engineering",
-        "path": "agent/skills/ml-engineering/SKILL.md"
-      },
-      {
-        "name": "mockup-to-code",
-        "path": "agent/skills/mockup-to-code/SKILL.md"
-      },
-      {
-        "name": "model-evaluation",
-        "path": "agent/skills/model-evaluation/SKILL.md"
-      },
-      {
-        "name": "modern-frontend-frameworks",
-        "path": "agent/skills/modern-frontend-frameworks/SKILL.md"
-      },
-      {
-        "name": "motion",
-        "path": "agent/skills/motion/SKILL.md"
+        "name": "ml",
+        "path": "agent/skills/ml/SKILL.md"
       },
       {
         "name": "motion-approaches",
         "path": "agent/skills/motion-approaches/SKILL.md"
       },
       {
-        "name": "motion-graphics-production",
-        "path": "agent/skills/motion-graphics-production/SKILL.md"
+        "name": "networking",
+        "path": "agent/skills/networking/SKILL.md"
       },
       {
-        "name": "multi-developer-pipelines",
-        "path": "agent/skills/multi-developer-pipelines/SKILL.md"
-      },
-      {
-        "name": "music-composition",
-        "path": "agent/skills/music-composition/SKILL.md"
-      },
-      {
-        "name": "natural-editorial-writing",
-        "path": "agent/skills/natural-editorial-writing/SKILL.md"
-      },
-      {
-        "name": "network-iso-compliance",
-        "path": "agent/skills/network-iso-compliance/SKILL.md"
-      },
-      {
-        "name": "network-traffic-analysis",
-        "path": "agent/skills/network-traffic-analysis/SKILL.md"
-      },
-      {
-        "name": "nlp-system-design",
-        "path": "agent/skills/nlp-system-design/SKILL.md"
-      },
-      {
-        "name": "node-runtime-engineering",
-        "path": "agent/skills/node-runtime-engineering/SKILL.md"
-      },
-      {
-        "name": "numerical-computing",
-        "path": "agent/skills/numerical-computing/SKILL.md"
-      },
-      {
-        "name": "optimization-modeling",
-        "path": "agent/skills/optimization-modeling/SKILL.md"
-      },
-      {
-        "name": "organic-growth-engineering",
-        "path": "agent/skills/organic-growth-engineering/SKILL.md"
-      },
-      {
-        "name": "packet-trace-analysis",
-        "path": "agent/skills/packet-trace-analysis/SKILL.md"
-      },
-      {
-        "name": "performance-experiments",
-        "path": "agent/skills/performance-experiments/SKILL.md"
-      },
-      {
-        "name": "php-application-engineering",
-        "path": "agent/skills/php-application-engineering/SKILL.md"
-      },
-      {
-        "name": "physical-animation-systems",
-        "path": "agent/skills/physical-animation-systems/SKILL.md"
-      },
-      {
-        "name": "physics-modeling",
-        "path": "agent/skills/physics-modeling/SKILL.md"
-      },
-      {
-        "name": "ponytail",
-        "path": "agent/skills/ponytail/SKILL.md"
-      },
-      {
-        "name": "presentation-authoring",
-        "path": "agent/skills/presentation-authoring/SKILL.md"
-      },
-      {
-        "name": "prior-art-scouting",
-        "path": "agent/skills/prior-art-scouting/SKILL.md"
-      },
-      {
-        "name": "procedural-animation-math",
-        "path": "agent/skills/procedural-animation-math/SKILL.md"
-      },
-      {
-        "name": "procedural-audio",
-        "path": "agent/skills/procedural-audio/SKILL.md"
-      },
-      {
-        "name": "product-ui-verification",
-        "path": "agent/skills/product-ui-verification/SKILL.md"
-      },
-      {
-        "name": "property-based-testing",
-        "path": "agent/skills/property-based-testing/SKILL.md"
-      },
-      {
-        "name": "proxy-analysis",
-        "path": "agent/skills/proxy-analysis/SKILL.md"
-      },
-      {
-        "name": "proxy-operations",
-        "path": "agent/skills/proxy-operations/SKILL.md"
-      },
-      {
-        "name": "python-software-engineering",
-        "path": "agent/skills/python-software-engineering/SKILL.md"
-      },
-      {
-        "name": "rag-engineering",
-        "path": "agent/skills/rag-engineering/SKILL.md"
-      },
-      {
-        "name": "reinforcement-learning",
-        "path": "agent/skills/reinforcement-learning/SKILL.md"
+        "name": "office-documents",
+        "path": "agent/skills/office-documents/SKILL.md"
       },
       {
         "name": "remotion-video",
         "path": "agent/skills/remotion-video/SKILL.md"
       },
       {
-        "name": "research",
-        "path": "agent/skills/research/SKILL.md"
-      },
-      {
-        "name": "resourceful-market-strategy",
-        "path": "agent/skills/resourceful-market-strategy/SKILL.md"
-      },
-      {
-        "name": "rl-decision-systems",
-        "path": "agent/skills/rl-decision-systems/SKILL.md"
-      },
-      {
-        "name": "rust-systems-engineering",
-        "path": "agent/skills/rust-systems-engineering/SKILL.md"
-      },
-      {
-        "name": "scientific-paper-research",
-        "path": "agent/skills/scientific-paper-research/SKILL.md"
-      },
-      {
-        "name": "scroll-animated-websites",
-        "path": "agent/skills/scroll-animated-websites/SKILL.md"
-      },
-      {
-        "name": "search-discoverability",
-        "path": "agent/skills/search-discoverability/SKILL.md"
+        "name": "research-writing",
+        "path": "agent/skills/research-writing/SKILL.md"
       },
       {
         "name": "signature-experience",
         "path": "agent/skills/signature-experience/SKILL.md"
       },
       {
-        "name": "simulation-engineering",
-        "path": "agent/skills/simulation-engineering/SKILL.md"
+        "name": "svg-images",
+        "path": "agent/skills/svg-images/SKILL.md"
       },
       {
-        "name": "small-model-engineering",
-        "path": "agent/skills/small-model-engineering/SKILL.md"
+        "name": "systems-languages",
+        "path": "agent/skills/systems-languages/SKILL.md"
       },
       {
-        "name": "software-engineering-wisdom",
-        "path": "agent/skills/software-engineering-wisdom/SKILL.md"
+        "name": "ui-design",
+        "path": "agent/skills/ui-design/SKILL.md"
       },
       {
-        "name": "sound-analysis",
-        "path": "agent/skills/sound-analysis/SKILL.md"
+        "name": "video-editing",
+        "path": "agent/skills/video-editing/SKILL.md"
       },
       {
-        "name": "spreadsheet-authoring",
-        "path": "agent/skills/spreadsheet-authoring/SKILL.md"
+        "name": "wasm",
+        "path": "agent/skills/wasm/SKILL.md"
       },
       {
-        "name": "sql-query-engineering",
-        "path": "agent/skills/sql-query-engineering/SKILL.md"
-      },
-      {
-        "name": "statistical-experiments",
-        "path": "agent/skills/statistical-experiments/SKILL.md"
-      },
-      {
-        "name": "storytelling",
-        "path": "agent/skills/storytelling/SKILL.md"
-      },
-      {
-        "name": "svg-assessment",
-        "path": "agent/skills/svg-assessment/SKILL.md"
-      },
-      {
-        "name": "svg-motion-engineering",
-        "path": "agent/skills/svg-motion-engineering/SKILL.md"
-      },
-      {
-        "name": "systems-security",
-        "path": "agent/skills/systems-security/SKILL.md"
-      },
-      {
-        "name": "terminal-video-editing",
-        "path": "agent/skills/terminal-video-editing/SKILL.md"
-      },
-      {
-        "name": "threejs",
-        "path": "agent/skills/threejs/SKILL.md"
-      },
-      {
-        "name": "threejs-animation-engineering",
-        "path": "agent/skills/threejs-animation-engineering/SKILL.md"
-      },
-      {
-        "name": "type-driven-design",
-        "path": "agent/skills/type-driven-design/SKILL.md"
-      },
-      {
-        "name": "typescript-contract-engineering",
-        "path": "agent/skills/typescript-contract-engineering/SKILL.md"
-      },
-      {
-        "name": "ubuntu-operations",
-        "path": "agent/skills/ubuntu-operations/SKILL.md"
-      },
-      {
-        "name": "ui-antipattern-review",
-        "path": "agent/skills/ui-antipattern-review/SKILL.md"
-      },
-      {
-        "name": "ui-ux-principles",
-        "path": "agent/skills/ui-ux-principles/SKILL.md"
-      },
-      {
-        "name": "vanilla-web-libs",
-        "path": "agent/skills/vanilla-web-libs/SKILL.md"
-      },
-      {
-        "name": "video-analysis",
-        "path": "agent/skills/video-analysis/SKILL.md"
-      },
-      {
-        "name": "visual-composition",
-        "path": "agent/skills/visual-composition/SKILL.md"
-      },
-      {
-        "name": "wasm-animation-pipelines",
-        "path": "agent/skills/wasm-animation-pipelines/SKILL.md"
-      },
-      {
-        "name": "wasm-browsers",
-        "path": "agent/skills/wasm-browsers/SKILL.md"
-      },
-      {
-        "name": "wasm-c-cpp",
-        "path": "agent/skills/wasm-c-cpp/SKILL.md"
-      },
-      {
-        "name": "wasm-python",
-        "path": "agent/skills/wasm-python/SKILL.md"
-      },
-      {
-        "name": "wasm-runtime-engineering",
-        "path": "agent/skills/wasm-runtime-engineering/SKILL.md"
-      },
-      {
-        "name": "wasm-rust",
-        "path": "agent/skills/wasm-rust/SKILL.md"
-      },
-      {
-        "name": "web-component-patterns",
-        "path": "agent/skills/web-component-patterns/SKILL.md"
-      },
-      {
-        "name": "web-effects",
-        "path": "agent/skills/web-effects/SKILL.md"
-      },
-      {
-        "name": "web-patterns",
-        "path": "agent/skills/web-patterns/SKILL.md"
-      },
-      {
-        "name": "web-performance",
-        "path": "agent/skills/web-performance/SKILL.md"
-      },
-      {
-        "name": "web-security",
-        "path": "agent/skills/web-security/SKILL.md"
-      },
-      {
-        "name": "web-ui-stack-selection",
-        "path": "agent/skills/web-ui-stack-selection/SKILL.md"
-      },
-      {
-        "name": "windows-on-linux-engineering",
-        "path": "agent/skills/windows-on-linux-engineering/SKILL.md"
-      },
-      {
-        "name": "winecharm",
-        "path": "agent/skills/winecharm/SKILL.md"
-      },
-      {
-        "name": "wireless-signal-analysis",
-        "path": "agent/skills/wireless-signal-analysis/SKILL.md"
-      },
-      {
-        "name": "word-document-authoring",
-        "path": "agent/skills/word-document-authoring/SKILL.md"
-      },
-      {
-        "name": "x86-assembly-engineering",
-        "path": "agent/skills/x86-assembly-engineering/SKILL.md"
+        "name": "web-motion",
+        "path": "agent/skills/web-motion/SKILL.md"
       }
     ],
     "documentation": [
@@ -8809,10 +7086,6 @@
         "path": "docs/ASYNC-AND-STUDIO.md"
       },
       {
-        "name": "AUDIT-CHANGED-FILES.md",
-        "path": "docs/AUDIT-CHANGED-FILES.md"
-      },
-      {
         "name": "AUTONOMOUS-ORCHESTRATION.md",
         "path": "docs/AUTONOMOUS-ORCHESTRATION.md"
       },
@@ -8833,10 +7106,6 @@
         "path": "docs/COMPETENCE-CONTROL.md"
       },
       {
-        "name": "CONTEXT-AUDIT.md",
-        "path": "docs/CONTEXT-AUDIT.md"
-      },
-      {
         "name": "CORE-OWNERSHIP.md",
         "path": "docs/CORE-OWNERSHIP.md"
       },
@@ -8853,14 +7122,6 @@
         "path": "docs/DESIGN-STUDIO.md"
       },
       {
-        "name": "DESKTOP-SESSIONS.md",
-        "path": "docs/DESKTOP-SESSIONS.md"
-      },
-      {
-        "name": "EFFICIENCY-AUDIT.md",
-        "path": "docs/EFFICIENCY-AUDIT.md"
-      },
-      {
         "name": "EMAIL.md",
         "path": "docs/EMAIL.md"
       },
@@ -8873,16 +7134,8 @@
         "path": "docs/EXPERT-DIRECTOR.md"
       },
       {
-        "name": "FILE-ORGANIZATION.md",
-        "path": "docs/FILE-ORGANIZATION.md"
-      },
-      {
         "name": "GOAL.md",
         "path": "docs/GOAL.md"
-      },
-      {
-        "name": "GUARDIAN-IMPLEMENTATION-AUDIT.md",
-        "path": "docs/GUARDIAN-IMPLEMENTATION-AUDIT.md"
       },
       {
         "name": "GUARDIAN-INTELLIGENCE.md",
@@ -8891,10 +7144,6 @@
       {
         "name": "GUIDANCE-AND-DIAGNOSTICS.md",
         "path": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
-      },
-      {
-        "name": "INDEPENDENT-AUDIT.md",
-        "path": "docs/INDEPENDENT-AUDIT.md"
       },
       {
         "name": "INFERENCE-CACHING.md",
@@ -8937,20 +7186,12 @@
         "path": "docs/MODEL-ROUTING.md"
       },
       {
-        "name": "NEEDLE-AUDIT.md",
-        "path": "docs/NEEDLE-AUDIT.md"
-      },
-      {
         "name": "OBSERVER-BOOK.md",
         "path": "docs/OBSERVER-BOOK.md"
       },
       {
         "name": "OFFICE-AND-DELIVERABLES.md",
         "path": "docs/OFFICE-AND-DELIVERABLES.md"
-      },
-      {
-        "name": "OPERATIONS-EVIDENCE-AUDIT.md",
-        "path": "docs/OPERATIONS-EVIDENCE-AUDIT.md"
       },
       {
         "name": "ORCHESTRATION-EVIDENCE.md",
@@ -8973,32 +7214,12 @@
         "path": "docs/PROJECT-INTELLIGENCE.md"
       },
       {
-        "name": "PROJECT-MEMORY-EVALUATION.md",
-        "path": "docs/PROJECT-MEMORY-EVALUATION.md"
-      },
-      {
         "name": "PUBLISHING.md",
         "path": "docs/PUBLISHING.md"
       },
       {
         "name": "RECOVERY-AND-TESTING.md",
         "path": "docs/RECOVERY-AND-TESTING.md"
-      },
-      {
-        "name": "RELEASE-0.17.0-VERIFICATION.md",
-        "path": "docs/RELEASE-0.17.0-VERIFICATION.md"
-      },
-      {
-        "name": "RELEASE-0.18.0-VERIFICATION.md",
-        "path": "docs/RELEASE-0.18.0-VERIFICATION.md"
-      },
-      {
-        "name": "RELEASE-0.23.8-VERIFICATION.md",
-        "path": "docs/RELEASE-0.23.8-VERIFICATION.md"
-      },
-      {
-        "name": "RESEARCH-CODE-ML.md",
-        "path": "docs/RESEARCH-CODE-ML.md"
       },
       {
         "name": "REVIEWS-AND-COUNCILS.md",
@@ -9027,10 +7248,6 @@
       {
         "name": "SESSION-ORCHESTRATION.md",
         "path": "docs/SESSION-ORCHESTRATION.md"
-      },
-      {
-        "name": "SESSION-RECOVERY-AUDIT.md",
-        "path": "docs/SESSION-RECOVERY-AUDIT.md"
       },
       {
         "name": "SITE-SEO.md",
@@ -9073,20 +7290,12 @@
         "path": "docs/UI-ENGINEERING.md"
       },
       {
-        "name": "UNREAL-INTEGRATION-REVIEW.md",
-        "path": "docs/UNREAL-INTEGRATION-REVIEW.md"
-      },
-      {
         "name": "VECTOR-MEMORY.md",
         "path": "docs/VECTOR-MEMORY.md"
       },
       {
         "name": "VIDEO-STUDIO.md",
         "path": "docs/VIDEO-STUDIO.md"
-      },
-      {
-        "name": "WATCHMAKER.md",
-        "path": "docs/WATCHMAKER.md"
       }
     ]
   }

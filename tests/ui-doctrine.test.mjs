@@ -21,8 +21,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 test('the embedded skill ships with frontmatter and the swap test', () => {
   const file = path.join(agent, 'skills', UI_DOCTRINE_SKILL, 'SKILL.md');
   const body = fs.readFileSync(file, 'utf8');
-  assert.match(body, /^---\nname: design-slop-prevention\ndescription: .{40,}\n---/);
-  for (const anchor of ['Generation 1: indigo/purple SaaS', 'Generation 2: cream/terracotta editorial', 'Operating procedure for agents', 'swap test'])
+  assert.match(body, /^---\nname: ui-design\ndescription: .{40,}\n---/);
+  for (const anchor of ['Ground and anti-slop', 'Swap test', 'Banned as defaults', 'Verify by rendering'])
     assert.ok(body.includes(anchor), anchor);
   assert.ok(!/Voidstack|earlier in this conversation/.test(body), 'no unresolvable conversation references');
 });
@@ -96,14 +96,14 @@ test('UI detection offers optional guidance and a read clears it', () => {
 
 function fixture({ withSkill = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-doctrine-'));
-  const skillFile = path.join(dir, 'skills', 'design-slop-prevention', 'SKILL.md');
+  const skillFile = path.join(dir, 'skills', 'ui-design', 'SKILL.md');
   fs.mkdirSync(path.dirname(skillFile), { recursive: true });
-  fs.writeFileSync(skillFile, '---\nname: design-slop-prevention\ndescription: doctrine\n---\n# Doctrine\n');
+  fs.writeFileSync(skillFile, '---\nname: ui-design\ndescription: doctrine\n---\n# Doctrine\n');
   const handlers = {}, entries = [], ctx = { cwd: dir, sessionManager: { getBranch: () => entries } };
   const g = createRelevantGuidance({ getActiveTools: () => ['read', 'write', 'edit', 'skill_review'], appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }),
     on: (name, fn) => { (handlers[name] ??= []).push(fn); } });
   g.restore(ctx);
-  const skills = withSkill ? [{ name: 'design-slop-prevention', description: 'doctrine', filePath: skillFile }] : [];
+  const skills = withSkill ? [{ name: 'ui-design', description: 'doctrine', filePath: skillFile }] : [];
   return { g, dir, skillFile, ctx,
     start(prompt) { g.userInput(); g.start({ prompt, systemPrompt: '', systemPromptOptions: { skills } }, ctx); },
     context() { const out = handlers.context.map((fn) => fn({ messages: [{ role: 'user', content: 'hi' }] }, ctx)).find(Boolean); return out?.messages?.filter((m) => m.customType === 'ui-doctrine-context') ?? []; },

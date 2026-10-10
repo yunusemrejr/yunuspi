@@ -23,7 +23,7 @@ advisory and owns no routing, safety, or completion decisions.
    qualified. See [Prior-art scouting](PRIOR-ART.md).
 3. **Explore (open work only).** Sketch 2–3 materially different approaches,
    choose with explicit criteria, record why in the plan, then execute through
-   one clear owner. Existing fusion/council owners carry deliberate
+   one clear owner. Existing fan-out and council owners carry deliberate
    multi-option work; the brief only sets the protocol.
 4. **Inspect the artifact.** Judge pixels, renders, test/failure evidence, or
    final prose — never source intent or self-reported completion.
@@ -85,10 +85,10 @@ activity. `PI_EXPERT=off` disables the tool and prompt-time briefs.
 
 ## Reviewer integration
 
-Observer and Watchmaker receive `expert quality focus` and `expert
+The observer receive `expert quality focus` and `expert
 convergence` evidence rows (`expertReviewerRows`, pure over branch
-entries): the Observer judges against the domain's excellence bar, and the
-Watchmaker spots polish-only loops. Guardian needs no new row: it already
+entries): the Observer judges against the domain's excellence bar and spots
+polish-only loops. Guardian needs no new row: it already
 fingerprints `expert_director` tool evidence and completion claims through
 its existing loop/evidence signals, so domain-quality failures combine with
 concrete signals before any intervention.
@@ -111,7 +111,7 @@ and convergence need no model and always work.
 - `agent/extensions/lib/expert-brief.ts` — single brief assembly owner
 - Seams: `micro-intelligence.ts` (advisory), `micro-intelligence/status.ts`,
   `session-report.ts` (/metrics), `session-signals.ts` (/used),
-  `session-observer.ts` + `session-watchmaker.ts` (rows),
+  `session-observer.ts` (rows),
   `harness-capabilities.ts` (catalog), `manifest.json` (inventory)
 - Tests: `tests/expert-director.test.mjs` (+ mirror) with the
   `tests/fixtures/expert-*` calibration corpus

@@ -384,7 +384,7 @@ test('Double and the reviewers share one board: reviewer notes go in, a directiv
   assert.match(board.plannerStatusText(), /^Double mode: ON \(the session model, twice\): every user prompt is analyzed by two independent streams/);
   assert.match(board.plannerStatusText(), /Do not advise repeating that deliberation/);
   board.publishReviewerNote(key, 'observer', 'The failing test is test/login.test.ts, not the redirect itself.', [], Date.now() - 90_000);
-  board.publishReviewerNote(key, 'watchmaker', 'Stop re-reading the router; edit it.', [], Date.now() - 20_000);
+  board.publishReviewerNote(key, 'guardian', 'Stop re-reading the router; edit it.', [], Date.now() - 20_000);
   board.publishReviewerNote(key, 'double', 'an older Double digest', [], Date.now() - 5_000);
   const [result] = await fire(pi, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, ctx);
   assert.ok(result);
@@ -392,7 +392,7 @@ test('Double and the reviewers share one board: reviewer notes go in, a directiv
   assert.equal(streamTasks.length, 2);
   for (const task of streamTasks) {
     assert.match(task, /Notes other harness reviewers already gave the agent this session/);
-    assert.match(task, /- Watchmaker, under a minute ago: Stop re-reading the router; edit it\./);
+    assert.match(task, /- Guardian, under a minute ago: Stop re-reading the router; edit it\./);
     assert.match(task, /- Observer, 2 min ago: The failing test is test\/login\.test\.ts/);
     assert.doesNotMatch(task, /older Double digest/, 'its own earlier digest is not fed back as another reviewer');
   }

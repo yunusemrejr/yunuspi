@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { Type } from 'typebox';
+
 import { readSourceFiles } from '../pi-lens/context-code.mjs';
 import {codeNoiseSupported, inspectCodeNoise} from './code-noise.mjs';
 import {codeSlop, familyOf, findDuplicates, neighborSources} from './code-quality.ts';
@@ -13,7 +13,7 @@ import {sessionObservability} from './session-observability.ts';
 
 type Outcome = {status:'passed'|'failed'|'unavailable'|'incomplete'; checker:string; diagnostics:string[]};
 // Patterns precise enough to mention after an edit without being asked.
-// Audit domains cheap and precise enough to run on every edit; patterns stay on demand (code_audit).
+// Audit domains cheap and precise enough to run on every edit; patterns are re-checked by the goal completion check (code audit).
 const AUTOMATIC_AUDIT = ['security','backend','efficiency','ui'] as const;
 const AUTOMATIC_SLOP = new Set(['placeholder-elision','placeholder-implementation','debug-leftover','swallowed-error','bare-except','commented-out-code','redundant-boolean','vacuous-assertion','empty-test','skipped-test']);
 const PYTHON = `import sys,json
@@ -241,7 +241,7 @@ export default function registerSourceCheck(pi: any) {
       }
       noiseActivity(noise);
       const span: [number,number] = changedLines ?? [1,file.source.split('\n').length];
-      // High-precision patterns only; the code_quality tool reports the rest.
+      // High-precision patterns only; the goal completion check re-runs the full audit.
       const noisy = new Set(noise.findings.map((f: any) => f.line));
       const slop = codeSlop(file.path,file.source,span).filter(f => AUTOMATIC_SLOP.has(f.rule) && !(f.rule === 'swallowed-error' && noisy.has(f.line))).slice(0,3);
       let clones: any[] = [];
@@ -265,20 +265,9 @@ export default function registerSourceCheck(pi: any) {
           return `L${mine.start}-${mine.end} repeats ${other.path === file.path ? '' : other.path + ':'}${other.start}-${other.end} (${c.lines} lines, ${c.kind}${c.renamed.length ? `; differs in ${c.renamed.slice(0,3).join(', ')}` : ''}): reuse or extract it if the copies must change together`; }),
         ...audit.map(f => `L${f.line} ${f.domain}/${f.rule} (${f.severity}): ${f.message} Fix: ${f.fix}`),
       ];
-      const more = audit.some(f => f.severity === 'high') ? ' A high-severity cue was found: code_audit({changed:true}) checks the rest of this change.' : '';
+      const more = audit.some(f => f.severity === 'high') ? ' A high-severity cue was found: goal({action:"check"}) audits the rest of this change.' : '';
       return {content:[...event.content,{type:'text',text:`Code review (advisory): ${parts.join('; ')}. Keep intentional behavior; no automatic retry is required.${more}`}],
-        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise},...(slop.length||clones.length?{codeQuality:{slop,clones,coverage:'Bounded neighbours and cross-directory candidates; use code_quality duplicates for the full source scope'}}:{}),...(audit.length?{codeAudit:audit}:{})}};
+        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise},...(slop.length||clones.length?{codeQuality:{slop,clones,coverage:'Bounded neighbours and cross-directory candidates; the goal completion check covers the full change'}}:{}),...(audit.length?{codeAudit:audit}:{})}};
     } catch { /* Advisory inspection must not turn a successful edit into a failed tool. */ }
-  });
-  pi.registerTool({name:'syntax_check',label:'Syntax check',
-    description:'Batch syntax checks for explicit JS/TS/JSX/TSX, Python, Bash, Ruby, PHP, Go, JSON, YAML and TOML files. Installed parsers only; never executes project code, installs tools or writes files. Includes bounded advisory AST checks for comments restating returns and undocumented empty catches in JS/TS/Python. Noise findings do not fail syntax checks. Reports missing parsers and incomplete checks. Syntax does not replace project types/tests or configuration schema validation.',
-    parameters:Type.Object({paths:Type.Array(Type.String({minLength:1,maxLength:1024}),{minItems:1,maxItems:20})}),
-    async execute(_id: any,params: any,signal: AbortSignal,_onUpdate: any,ctx: any) {
-      try {
-        if (process.env.PI_REASONING_AIDS === 'off') throw new Error('Reasoning aids disabled');
-        const result=await sourceCheck({paths:params.paths,cwd:ctx.cwd,signal});
-        return {isError:!result.ok,content:[{type:'text',text:JSON.stringify(result)}],details:result};
-      } catch(error) {return {isError:true,content:[{type:'text',text:signal?.aborted?'Cancelled':compact((error as Error).message)}]};}
-    },
   });
 }

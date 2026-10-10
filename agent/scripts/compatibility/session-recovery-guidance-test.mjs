@@ -33,10 +33,10 @@ assert.match(conflict,/Do not disable ambient discovery/);assert.doesNotMatch(co
 // renderer priority has its own coverage in relevant-guidance-test.mjs.
 const g=createRelevantGuidance({getActiveTools:()=>['read','subagent']});
 const ctx={cwd:'/tmp',sessionManager:{getEntries:()=>[]}};g.restore(ctx);
-g.start({prompt:'Use subagents to refine aesthetics of the landing page, like animations',systemPrompt:'<available_skills><skill><name>product-ui-verification</name><description>UI verification</description><location>/skills/ui/SKILL.md</location></skill></available_skills>'},ctx);
+g.start({prompt:'Use subagents to refine aesthetics of the landing page, like animations',systemPrompt:'<available_skills><skill><name>ui-design</name><description>UI verification</description><location>/skills/ui/SKILL.md</location></skill></available_skills>'},ctx);
 assert.ok(g.candidates().some(h=>h.skill==='/skills/ui/SKILL.md'));
 assert.ok(g.candidates().some(h=>h.key==='delegation-contract'));
-const request={prompt:'Refine the landing page',systemPrompt:'<available_skills><skill><name>product-ui-verification</name><description>UI verification</description><location>/skills/ui/SKILL.md</location></skill></available_skills>'};
+const request={prompt:'Refine the landing page',systemPrompt:'<available_skills><skill><name>ui-design</name><description>UI verification</description><location>/skills/ui/SKILL.md</location></skill></available_skills>'};
 g.commit(g.candidates());g.start(request,ctx);assert.ok(!g.candidates().some(h=>h.skill),'background continuation stays deduplicated');
 g.userInput();g.start(request,ctx);assert.ok(g.candidates().some(h=>h.skill),'new user request can remind an unread skill');
 g.record({toolName:'read',input:{path:'/skills/ui/SKILL.md'},isError:false});g.userInput();g.start(request,ctx);assert.ok(!g.candidates().some(h=>h.skill),'actual skill reads remain deduplicated');

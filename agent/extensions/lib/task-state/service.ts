@@ -38,7 +38,6 @@ import {
 	projectMain,
 	projectObserver,
 	projectSubagentSlice,
-	projectWatchmaker,
 	renderSummary,
 	type GraphDiagnostics,
 } from "./projections.ts";
@@ -392,12 +391,11 @@ export class TaskStateService {
 		return this.state;
 	}
 
-	project(kind: "main" | "observer" | "watchmaker" | "summary", maxChars = 2000): string {
+	project(kind: "main" | "observer" | "summary", maxChars = 2000): string {
 		return safe(this, "project", "(task state unavailable)", () => {
 			const budgets = { maxChars, maxItems: 12 };
 			switch (kind) {
 				case "observer": return projectObserver(this.state, budgets);
-				case "watchmaker": return projectWatchmaker(this.state, budgets);
 				case "summary": return renderSummary(this.state);
 				default: return projectMain(this.state, budgets);
 			}

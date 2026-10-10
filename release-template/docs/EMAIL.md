@@ -21,18 +21,20 @@ export AGENTMAIL_API_KEY=<agentmail-api-key>
 export AGENTMAIL_INBOX_ID=you@your-domain.example
 ```
 
-`agentmail_status` reports whether the key is visible and which inboxes it can
+`agentmail` with `action:"status"` reports whether the key is visible and which inboxes it can
 use, so a session can verify configuration before sending anything.
 
-## Tools
+## Tool
 
-| Tool | Purpose |
+Everything runs through one `agentmail` tool, selected with its `action`.
+
+| Action | Purpose |
 | --- | --- |
-| `agentmail_status` | Configuration check plus the inbox list the key can reach. Read-only. |
-| `agentmail_send` | Send one message from an inbox. Requires a subject and a text and/or HTML body. |
-| `agentmail_messages` | List recent messages with compact rows (ids, from/to, subject, time, labels, preview) and filters such as labels, sender, recipients or subject. |
-| `agentmail_search` | Full-text relevance search across sender, recipients, subject and body, with per-field match highlights. |
-| `agentmail_message` | Read one message body by id; HTML is opt-in because it is token-heavy. |
+| `status` | Configuration check plus the inbox list the key can reach. Read-only. |
+| `send` | Send one message from an inbox. Requires a subject and a text and/or HTML body. |
+| `messages` | List recent messages with compact rows (ids, from/to, subject, time, labels, preview) and filters such as labels, sender, recipients or subject. |
+| `search` | Full-text relevance search across sender, recipients, subject and body, with per-field match highlights. |
+| `message` | Read one message body by id; HTML is opt-in because it is token-heavy. |
 
 Sending is explicit and immediate. The tools bound recipients (50), subject
 length, body size and request size, and reject CR/LF in subjects and addresses so

@@ -1,20 +1,40 @@
 ---
 name: harness-self-maintenance
-description: Maintain the running Pi harness itself—extensions, patches, tools, routing, skills and release machinery—using launch-scoped authority, current ownership discovery and focused regression checks.
+description: "Maintain the running Pi harness itself (extensions, patches, tools, routing, skills, tests, public release) under launch-scoped authority, with ownership discovery and focused regression checks."
 ---
 
 # Harness self-maintenance
 
-Use this workflow when changing the harness that runs the session. Discover its actual root and installed runtime; a similarly named application or public checkout is not automatically the live harness.
+## Authority and discovery
+- Find the actual harness root and installed runtime. A similarly named or public checkout is not the live harness.
+- Authority comes from the human's original launch directory, inside the harness root or a descendant. Home, ancestors, siblings, `cd`, resume, fanout children and env vars grant none. If denied, state the required maintenance launch; never bypass protection.
+- Global and shared skills stay protected; project-local edits stay allowed.
+- Before reopening an intentional choice (e.g. the 80% compaction threshold or the publish lock), read `HARNESS-DECISIONS.md` at the root.
+- Read the extension manifest and recent maintenance entries with bounded reads. Follow registration and imports to the policy owner, consumers and tests.
+- Patch durable source and use its supported deployment path. Dependency-only edits vanish on update.
 
-Maintenance authority comes from the human's original launch directory, inside the actual harness root or a descendant. Home, ancestors and sibling directories grant no authority. Changing directory, resuming, spawning children or setting environment variables cannot grant it. Preserve this guard and protection of global/shared skills; ordinary project-local edits must remain allowed. If denied, explain the required maintenance launch instead of bypassing protection.
+## Change and verify
+- Reproduce the behavior first. Preserve credentials, manual reminders, active sessions and unrelated work.
+- Trace each change from registration through execution and cleanup. Permission changes need direct tools, shell and interpreter runs, background jobs, workflows, symlink paths, nonexistent descendants and fanout child launches. Test denied harness mutation and allowed project mutation.
+- Process wrappers fail closed when required isolation is missing; label the real boundary.
+- Reminders and skill routing: test positive and unrelated negative requests, bounded delivery, read-receipt dedup and fanout child delivery.
+- Provider changes: verify request serialization and usage accounting with fixtures before any live inference.
+- Core changes: check the build identity. Never install an upstream package or reapply core patches.
+- Run focused suites; broaden only for failures or shared dependencies. Do not run paid smoke tests or restart active services for a green report.
+- Select tests with `node scripts/test-harness.mjs --match NAME --list` (drop `--list` to run) where the private runner exists; in the public checkout use `node --test tests/NAME.test.mjs` and `npm test`. Name matching is not dependency analysis; follow imports.
+- Keep one canonical fixture per installed behavior. Regressions target observable failures, not prose.
+- Run the read-only `verify-harness.mjs`; use `--fix` only for diagnosed local drift.
+- After deploying a skill, confirm the model reads that copy. User `settings.json` skill paths shadow shipped copies silently: `node ~/.pi/agent/scripts/skill-mirrors.mjs` lists shadows; `--apply` refreshes uncustomized copies with a backup.
+- Report what was measured and what remains unverified.
 
-Read the extension manifest and newest relevant maintenance entries with bounded reads. Before reopening an intentional choice (for example the 80% compaction threshold or the publish lock), read the durable decision registry in `HARNESS-DECISIONS.md` at the harness root; it records what was decided, why, and what would change it. Follow registration and imports to find the policy owner, consumers and existing tests. Distinguish durable source, installed dependencies, generated assets and runtime state. Patch durable source and apply its supported deployment path; dependency-only edits disappear on updates.
+## Workspace hygiene
+- Keep temporary exports, dependency installs and validation checkouts outside the harness root, e.g. a private dir under `/var/tmp`. Old dependency trees inside it slow every guarded shell call.
+- Archive verified inactive generated copies before removing them. Keep source changes, worktree registrations and live dependencies.
+- Append a dated maintenance entry: rationale, coverage, required restart. Do not restart sessions with unfinished work.
 
-Reproduce the behavior before changing it. Preserve credentials, manual reminders, active sessions and unrelated work. Verify the changed behavior and its consequential failure path with focused tests and the read-only structural verifier; expand coverage when shared dependencies or failures justify it. For permissions, verify both denied harness mutation and allowed project mutation. Read [verification and releases](references/verification-release.md) for process, permission, patch or publication changes.
-
-Keep temporary public exports, dependency installations and validation checkouts outside the live harness root, for example under a private directory in `/var/tmp`. Every guarded project command checks protected files for outside hard-link aliases; accumulating old dependency trees inside the harness makes ordinary shell calls repeatedly scan them. Keep private artifacts private, and archive verified inactive generated copies before removing them; preserve source changes, worktree registrations and live runtime dependencies.
-
-Append a dated maintenance entry with rationale, coverage and any required restart. Separate source validation from live behavior; do not restart sessions owning unfinished work.
-
-Check for a Git remote. Commit and push verified durable changes when authorized. A private non-Git installation must use its sanitized exporter and public checkout: follow `PUBLIC-RELEASE.md` and public `docs/PUBLISHING.md`. Review the export diff; publication runs distribution tests and scans before commit/push. Never publish runtime data, private backups or sessions, and never bypass a scanner finding.
+## Release
+- Check for a Git remote. Commit and push verified durable changes only when authorized.
+- Without Git, export through the sanitized exporter to the public checkout, following `PUBLIC-RELEASE.md` and `docs/PUBLISHING.md`. Review the export diff.
+- `publish-public.mjs` runs distribution tests and scans before commit and push; `--verify-only` validates without publishing. Do not run it twice unchanged. Never bypass a scanner finding.
+- Private backups may hold credentials and history: keep them private and verify restore structure and permissions.
+- Exports exclude runtime data, sessions, private datasets, credentials and machine config. Never copy the live harness wholesale or rely on `.gitignore` to clean history. Preserve third-party notices.

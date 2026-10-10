@@ -8,7 +8,7 @@ import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { packetRequirements } from './lib/requirement-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, plannerStatusText, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { observerTimeText, buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, plannerStatusText, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -78,6 +78,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const failureKeys = new Map<string, string>();
   const completed = new Map<string, string>(), toolInputs = new Map<string, string>(), startedEvents = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
+  // Time ledger for the current task: measured tool time per tool and repeated tool+target pairs.
+  const ledger = new Map<string, { calls: number; ms: number }>(), repeats = new Map<string, { count: number }>();
+  let taskStartAt = 0;
   const now = testing.now ?? Date.now;
   let inputRestrictions: any = {}, inputBlocked = false;
   // Observer Book state. The profile and selection belong to the current task;
@@ -177,6 +180,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const currentState = (withElapsed = true): ObserverEvidence[] => {
     const rows: ObserverEvidence[] = [];
     if (runningTools.size) rows.push({ id: 'running-tools', kind: 'current state', text: [...runningTools.values()].slice(-3).map(tool => `${tool.name} ${tool.foreground ? 'foreground' : 'running'}${withElapsed ? ` elapsed=${Math.floor((now() - tool.startedAt) / 1000)}s` : ''} ${tool.input}`).join('; ') });
+    const timeText = observerTimeText(withElapsed ? now() - taskStartAt : undefined, ledger, repeats);
+    if (timeText) rows.push({ id: 'time-ledger', kind: 'current state', text: timeText });
     if (completed.size) rows.push({ id: 'completed-tools', kind: 'current state', text: 'Recently completed tools (do not suggest repeating without a new reason): ' + [...completed.values()].join('; ').slice(-370) });
     const visibleTodos = todos.filter(task => task.status !== 'deleted');
     if (visibleTodos.length) {
@@ -246,7 +251,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     return rows;
   };
   const reset = (context: any) => { cancelHelpers(); clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; urgent = reviewedUrgent = 0; planEvidenceId = undefined; supersededEvidence.clear(); adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
-    profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
+    profile.reset(''); ledger.clear(); repeats.clear(); taskStartAt = now(); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${reviewerLabel(peer.reviewer)} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
@@ -366,7 +371,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       let routing: string;
       if (includeRouting) try {
         const focus = `${request} ${recent.slice(0, 12).map(row => row.text).join(' ')}`;
-        const preferredRoles = [/\b(?:swarm|parallel|fanout)\b/i.test(focus) ? 'swarm' : '', /\b(?:fusion|reconcile|conflicting)\b/i.test(focus) ? 'fusion' : ''].filter(Boolean);
+        const preferredRoles = /\b(?:swarm|parallel|fan-?out|fusion|reconcile|conflicting)\b/i.test(focus) ? ['fanout'] : [];
         routing = observerModelEvidence({ models: available, entries: ctx.sessionManager.getBranch?.() ?? [], currentModel: ctx.model, restrictions: constraints, preferredRoles });
       }
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
@@ -651,7 +656,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; parentEditsThisTask = 0; closeNoteEdits = -1; agentResponded = false;
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; parentEditsThisTask = 0; closeNoteEdits = -1; agentResponded = false; ledger.clear(); repeats.clear(); taskStartAt = now();
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
@@ -724,7 +729,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!event.isError && ['edit', 'write', 'bulk_edit'].includes(event.toolName)) parentEditsThisTask++;
     if (event.isError) urgent++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
+    const startedAt = runningTools.get(event.toolCallId)?.startedAt;
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);
+    if (startedAt !== undefined) {
+      const spent = Math.max(0, now() - startedAt), row = ledger.get(event.toolName) ?? { calls: 0, ms: 0 };
+      ledger.set(event.toolName, { calls: row.calls + 1, ms: row.ms + spent });
+      const target = (input.match(/(?:path|file_path|query|pattern|command)=([^\s]+)/)?.[1] ?? '').slice(0, 80);
+      if (target) { const key = `${event.toolName} ${target}`; repeats.set(key, { count: (repeats.get(key)?.count ?? 0) + 1 }); if (repeats.size > 64) repeats.delete(repeats.keys().next().value!); }
+    }
     // The result row repeats the input, so an unread start row only doubles
     // queue pressure (and the overflow that loses coverage).
     const started = startedEvents.get(event.toolCallId);

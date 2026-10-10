@@ -26,51 +26,12 @@ async function call(name, args, error = false) {
   assert.ok(Buffer.byteLength(response.content[0].text) <= 24576);
   return JSON.parse(response.content[0].text);
 }
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 
 before(async () => {
   write('package.json', { name: 'fixture', dependencies: { demo: '^2.0.0' } });
   write('node_modules/demo/package.json', { name: 'demo', version: '2.3.4', exports: { '.': { types: './index.d.ts', import: './index.mjs' } }, types: 'index.d.ts', bin: { demo: 'cli.js' }, peerDependencies: { peer: '^3' }, scripts: { install: 'THIS_MUST_NEVER_EXECUTE' } });
   write('node_modules/transitive/package.json', { name: 'transitive', version: '1.0.0' });
   write('package-lock.json', { lockfileVersion: 3, packages: { '': { name: 'fixture' }, 'node_modules/demo': { version: '2.3.4', resolved: 'https://registry.example/demo.tgz', integrity: 'sha512-fixture' }, 'node_modules/transitive': { version: '1.0.0' } } });
-  write('openapi.yaml', `openapi: 3.1.0
-security: [{apiKey: []}]
-components:
-  securitySchemes:
-    apiKey: {type: apiKey, in: header, name: X-Key}
-  schemas:
-    User:
-      type: object
-      required: [id]
-      properties:
-        id: {type: integer}
-        child: {$ref: '#/components/schemas/User'}
-paths:
-  /users/{id}:
-    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
-    get:
-      operationId: readUser
-      responses:
-        '200':
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/User'}
-    post:
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/User'}
-      responses:
-        '204': {description: Done}
-`);
-  write('src/a.js', 'const a = process.env.DATABASE_URL;\nconst b = process.env["TOKEN"];\nconst c = process.env.OPTIONAL ?? "SENTINEL_SECRET";\nconst d = process.env[dynamicName];\n');
-  write('src/b.py', 'import os\nx = os.getenv("DATABASE_URL")\ny = os.getenv("DEFAULTED", "SENTINEL_SECRET")\n');
-  write('.env.example', 'DATABASE_URL=SENTINEL_SECRET\nUNUSED=SENTINEL_SECRET\n');
-  write('compose.yaml', 'services:\n  app:\n    environment:\n      OPTIONAL: SENTINEL_SECRET\n    env_file: .env\n');
-  write('covered.js', 'one\ntwo\nthree\nfour\n');
-  write('coverage.info', 'TN:\nSF:covered.js\nFN:1,3,work\nFNDA:0,work\nDA:1,1\nDA:2,0\nDA:3,0\nBRDA:2,0,0,0\nBRDA:2,0,1,1\nend_of_record\n');
   execFileSync('python3', ['-c', `
 import sqlite3, pathlib, zipfile, tarfile, io, shutil
 p=pathlib.Path(${JSON.stringify(root)})
@@ -87,15 +48,12 @@ with tarfile.open(p/'bundle.tar.gz','w:gz') as t:
  m=tarfile.TarInfo('hello.txt'); m.size=5; t.addfile(m,io.BytesIO(b'hello'))
  m=tarfile.TarInfo('link'); m.type=tarfile.SYMTYPE; m.linkname='/etc/passwd'; t.addfile(m)
 `], { timeout: 5000 });
-  git(['init', '-q']); git(['config', 'user.email', 'fixture@example.test']); git(['config', 'user.name', 'Fixture']);
-  git(['add', 'covered.js']); git(['commit', '-qm', 'fixture']);
-  write('covered.js', 'one\nchanged\nthree\nfour\nfive\n');
   await client.start();
 });
 after(() => { client.close(); fs.rmSync(root, { recursive: true, force: true }); });
 
 test('single MCP exposes all bounded read-only tool schemas', async () => {
-  assert.ok(TOOLS.length >= 14);
+  assert.deepEqual(TOOLS.map(t => t.name), ['workspace_search', 'ssh_plan', 'web_asset_check', 'sqlite_probe', 'package_probe', 'net_probe', 'archive_probe']);
   assert.equal(new Set(TOOLS.map(t => t.name)).size, TOOLS.length);
   for (const tool of TOOLS) assert.equal(tool.annotations.readOnlyHint, true);
   const first = client.child.pid;
@@ -133,7 +91,6 @@ test('SQLite snapshot includes WAL and never creates a workspace shm file', asyn
 test('workspace escape, directories, missing files, bounds and invalid actions fail closed', async () => {
   fs.symlinkSync('/etc/passwd', path.join(root, 'outside'));
   for (const p of ['/etc/passwd', '../passwd', 'outside', '.', 'missing.sqlite']) await call('sqlite_probe', { path: p, action: 'tables' }, true);
-  await call('openapi_probe', { path: 'outside', action: 'schema' }, true);
   await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: 'SELECT 1', limit: 201 }, true);
   await call('sqlite_probe', { path: 'data.sqlite', action: 'delete' }, true);
 });
@@ -165,71 +122,6 @@ test('pnpm and Yarn lock candidates do not masquerade as exact installed resolut
   write('yarn/yarn.lock', '"demo@^1":\n  version "1.2.0"\n  resolved "https://registry.example/demo.tgz"\n');
   const yarn = await call('package_probe', { package: 'demo', project: 'yarn' });
   assert.equal(yarn.lockfile.resolution.version, '1.2.0');
-});
-test('OpenAPI endpoints, schema refs/cycles, operation, request, responses and auth', async () => {
-  assert.equal((await call('openapi_probe', { path: 'openapi.yaml', action: 'list_endpoints' })).total, 2);
-  const schema = await call('openapi_probe', { path: 'openapi.yaml', action: 'schema', name: 'User' });
-  assert.equal(schema.shape.properties.child.properties.child.recursive, true);
-  const op = await call('openapi_probe', { path: 'openapi.yaml', action: 'operation', operation_id: 'readUser' });
-  assert.equal(op.request.parameters[0].name, 'id');
-  assert.equal(op.responses['200'].content['application/json'].properties.id.type, 'integer');
-  assert.equal((await call('openapi_probe', { path: 'openapi.yaml', action: 'request_shape', endpoint: '/users/{id}', method: 'post' })).body.required, true);
-  assert.ok((await call('openapi_probe', { path: 'openapi.yaml', action: 'response_shape', operation_id: 'readUser', status: '200' })).responses['200']);
-  assert.equal((await call('openapi_probe', { path: 'openapi.yaml', action: 'auth' })).schemes.apiKey.in, 'header');
-  assert.equal((await call('openapi_probe', { path: 'openapi.yaml', action: 'auth', endpoint: '/users/{id}', method: 'post' })).anonymous_allowed, true);
-  await call('openapi_probe', { path: 'openapi.yaml', action: 'operation', operation_id: 'missing' }, true);
-});
-test('Swagger 2 bodies and response schemas work; external refs are not fetched', async () => {
-  write('swagger.json', { swagger: '2.0', paths: { '/a': { post: { parameters: [{ in: 'body', name: 'body', schema: { $ref: '#/definitions/A' } }], responses: { 200: { schema: { $ref: 'https://example.test/never-fetch.json' } } } } } }, definitions: { A: { type: 'object', properties: { a: { type: 'string' } } } } });
-  const result = await call('openapi_probe', { path: 'swagger.json', action: 'operation', endpoint: '/a', method: 'post' });
-  assert.equal(result.request.parameters[0].shape.properties.a.type, 'string');
-  assert.equal(result.responses['200'].content['application/json'].external, true);
-});
-test('contract comparison ignores values, reports structural and schema optionality changes', async () => {
-  const same = await call('contract_diff', { before_value: { a: 'SECRET_ONE' }, after_value: { a: 'SECRET_TWO' } });
-  assert.equal(same.identical_shape, true); assert.doesNotMatch(JSON.stringify(same), /SECRET/);
-  const value = await call('contract_diff', { before_value: { a: 1, old: true, list: [{ x: 1 }] }, after_value: { a: 'x', added: null, list: [{ x: 1 }, {}] } });
-  for (const kind of ['type_change', 'added_field', 'removed_field', 'array_shape_change', 'optionality_change']) assert.ok(value.items.some(i => i.kind === kind), kind);
-  const schema = await call('contract_diff', { mode: 'schema', before_value: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] }, after_value: { type: 'object', properties: { x: { type: 'string' } } } });
-  assert.equal(schema.items[0].kind, 'optionality_change');
-  const nested = await call('contract_diff', { before_value: { name: 'a' }, after_value: { user: { name: 'b' } } });
-  assert.ok(nested.items.some(c => c.kind === 'nesting_change' && c.from === '/name' && c.to === '/user/name'));
-  await call('contract_diff', { before_value: {}, after: 'openapi.yaml' }, true);
-});
-test('environment audit returns names/locations, no values, and marks unresolved accesses', async () => {
-  const result = await call('env_audit', { sources: ['src/a.js', 'src/b.py'], configs: ['.env.example', 'compose.yaml'] });
-  assert.deepEqual(result['required-but-undocumented'], ['TOKEN']);
-  assert.deepEqual(result['documented-but-unused'], ['UNUSED']);
-  assert.deepEqual(result['referenced-across-files'][0], { name: 'DATABASE_URL', files: ['src/a.js', 'src/b.py'] });
-  assert.ok(result.unresolved.some(r => r.kind === 'dynamic_reference'));
-  assert.ok(result.unresolved.some(r => r.kind === 'external_environment_source_not_followed'));
-  assert.doesNotMatch(JSON.stringify(result), /SENTINEL_SECRET/);
-  write('bad.yaml', 'env: [SENTINEL_SECRET: : invalid');
-  const error = await call('env_audit', { sources: ['src/a.js'], configs: ['bad.yaml'] }, true);
-  assert.doesNotMatch(JSON.stringify(error), /SENTINEL_SECRET/);
-});
-test('LCOV coverage intersects actual unstaged, staged and untracked Git lines', async () => {
-  const args = { artifacts: ['coverage.info'], files: ['covered.js'], changed: 'all' };
-  const result = (await call('coverage_probe', args)).items[0];
-  assert.equal(result.lines.total, 3); assert.deepEqual(result.uncovered_lines, [2, 3]);
-  assert.deepEqual(result.changed.added_or_modified_lines, [2, 5]);
-  assert.deepEqual(result.changed.uncovered_lines, [2]); assert.deepEqual(result.changed.uninstrumented_lines, [5]);
-  assert.equal(result.changed.uncovered_functions[0].name, 'work');
-  git(['add', 'covered.js']);
-  assert.deepEqual((await call('coverage_probe', { ...args, changed: 'staged' })).items[0].changed.added_or_modified_lines, [2, 5]);
-  write('new.js', 'hello\nworld\n');
-  const untracked = (await call('coverage_probe', { ...args, files: ['new.js'] })).items[0];
-  assert.equal(untracked.present, false); assert.deepEqual(untracked.changed.uninstrumented_lines, [1, 2]);
-});
-test('Istanbul and Cobertura coverage preserve uncovered branch/function evidence', async () => {
-  write('coverage-final.json', { 'covered.js': { path: 'covered.js', statementMap: { 0: { start: { line: 2 }, end: { line: 2 } } }, s: { 0: 0 }, fnMap: { 0: { name: 'fn', loc: { start: { line: 1 }, end: { line: 3 } } } }, f: { 0: 0 }, branchMap: { 0: { type: 'if', line: 2, locations: [{ start: { line: 2 }, end: { line: 2 } }, { start: { line: 2 }, end: { line: 2 } }] } }, b: { 0: [0, 1] } } });
-  const istanbul = (await call('coverage_probe', { artifacts: ['coverage-final.json'], files: ['covered.js'] })).items[0];
-  assert.deepEqual(istanbul.uncovered_lines, [2]); assert.equal(istanbul.uncovered_branches.length, 1); assert.equal(istanbul.uncovered_functions[0].name, 'fn');
-  write('coverage.xml', '<coverage><packages><package><classes><class filename="covered.js"><methods><method name="fn"><lines><line number="2" hits="0"/></lines></method></methods><lines><line number="2" hits="0" branch="true" condition-coverage="50% (1/2)"/></lines></class></classes></package></packages></coverage>');
-  const cobertura = (await call('coverage_probe', { artifacts: ['coverage.xml'], files: ['covered.js'] })).items[0];
-  assert.equal(cobertura.lines.total, 1); assert.equal(cobertura.uncovered_branches.length, 1); assert.equal(cobertura.uncovered_functions[0].name, 'fn');
-  write('entity.xml', '<!DOCTYPE coverage [<!ENTITY steal SYSTEM "file:///etc/passwd">]><coverage>&steal;</coverage>');
-  await call('coverage_probe', { artifacts: ['entity.xml'], files: ['covered.js'] }, true);
 });
 test('ZIP/TAR list, stat, find and bounded text reads never extract members', async () => {
   assert.equal((await call('archive_probe', { path: 'bundle.zip', action: 'list' })).total, 4);
@@ -274,10 +166,9 @@ test('server cancellation and crash recovery require no manual setup', async () 
   await call('package_probe', { package: 'demo' });
   assert.notEqual(client.child.pid, old.pid);
 });
-test('output remains valid JSON within cap for large schemas and source changes invalidate hash', async () => {
-  write('large.json', { openapi: '3.0.0', paths: {}, components: { schemas: { Large: { type: 'object', properties: Object.fromEntries(Array.from({ length: 5000 }, (_, i) => ['field' + i, { type: 'string' }])) } } } });
-  const result = await call('openapi_probe', { path: 'large.json', action: 'schema', name: 'Large' });
-  assert.equal(result.output_truncated, true);
+test('output remains valid JSON within cap for large results', async () => {
+  const result = await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: "SELECT printf('%.*c', 30000, 'x') AS big" });
+  assert.equal(result.rows[0][0].truncated, true); assert.equal(result.rows[0][0].characters, 30000);
 });
 test('extension prewarms automatically and closes its MCP process at shutdown', async () => {
   const { default: extension } = await import(pathToFileURL(path.join(agent, 'extensions/utility-tools.ts')));

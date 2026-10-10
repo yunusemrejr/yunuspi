@@ -2,7 +2,7 @@
  * Managed Bash — optimistic foreground -> supervised background execution.
  *
  * WHY: the builtin bash tool blocks the agent for the full `timeout` (default
- * 120s injected by timeout-guard, sometimes minutes when the model passes a
+ * 120s injected below, sometimes minutes when the model passes a
  * large explicit timeout). A long command therefore froze the whole session:
  * no partial output, no kill, no parallel work. This extension replaces the
  * bash tool (extension-registered tools override built-ins by name in pi's
@@ -566,6 +566,18 @@ function jobTailText(job: Job, bytes: number, includeStatus = true): string {
 	);
 }
 
+/** Bounded bash: a call without a valid positive `timeout` gets one before execution (a stuck command can
+ * no longer block a session): 120 s for ordinary commands, 180 s for downloads and installs. Explicit positive
+ * timeouts stay authoritative. Defaults are not log events: stdout is RPC/JSON framing and command previews can
+ * contain credentials. */
+const DEFAULT_BASH_TIMEOUT_SECONDS = 120;
+const DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 180;
+const DOWNLOAD_COMMAND_RE = /(^|[\s|;&])(wget|curl|git\s+(clone|pull|fetch)|scp|rsync|sftp|npm\s+(install|ci|i)|npx|pnpm\s+(install|add)|yarn\s+(install|add)|pip(\d*)\s+install|uv\s+(pip\s+install|sync|add|tool\s+install)|conda\s+install|mamba\s+install|apt(-get)?\s+(update|install|upgrade|dist-upgrade)|dnf\s+(install|update|upgrade)|yum\s+(install|update|upgrade)|pacman\s+-S|snap\s+install|flatpak\s+install|docker\s+(pull|build|compose\s+pull)|podman\s+(pull|build)|go\s+(get|install)|cargo\s+(install|add|update)|huggingface-cli\s+download|hf\s+download|kaggle\s+(datasets\s+download|competitions\s+download)|gh\s+(repo\s+clone|release\s+download)|gdown|azcopy|gsutil\s+(cp|rsync)|aws\s+s3\s+(cp|sync)|rclone\s+copy)/;
+const positiveSeconds = (value: unknown): number | undefined => {
+	const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
 export default function (pi: ExtensionAPI) {
 	// Keep the user-facing builtin bash sequential. Internal bounded helpers
 	// call runManagedCommand and intentionally opt into the supervised registry.
@@ -577,6 +589,10 @@ export default function (pi: ExtensionAPI) {
 		pi.registerTool(def);
 	};
 	register(process.cwd());
+	pi.on("tool_call", (event: any) => {
+		if (event.toolName !== "bash") return;
+		event.input.timeout = positiveSeconds(event.input.timeout) ?? (DOWNLOAD_COMMAND_RE.test(String(event.input.command ?? "")) ? DEFAULT_DOWNLOAD_TIMEOUT_SECONDS : DEFAULT_BASH_TIMEOUT_SECONDS);
+	});
 	pi.on("session_start", (_event, ctx) => {
 		const cwd = (ctx as { cwd?: unknown }).cwd;
 		register(typeof cwd === "string" ? cwd : process.cwd());

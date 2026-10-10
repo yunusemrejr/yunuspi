@@ -214,7 +214,8 @@ try {
  const priorCouncil=process.env.PI_SCOPE_COUNCIL,priorDiscovery=process.env.PI_SKILL_DISCOVERY;
  process.env.PI_SCOPE_COUNCIL='off';process.env.PI_SKILL_DISCOVERY='off';
  try{
-  for(const [label,prompt] of [['swarm','Investigate multiple independent subsystems and verify their interfaces.'],['fusion','Compare competing architecture approaches and their tradeoffs with source evidence.']]){
+  // Swarm and fusion are one fanout concept now; both prompts report the fanout activity label.
+  for(const [label,prompt] of [['fanout','Investigate multiple independent subsystems and verify their interfaces.'],['fanout','Compare competing architecture approaches and their tradeoffs with source evidence.']]){
    const offset=activity.length;
    const helpers=fixture({result:async()=>({details:{results:[{exitCode:0,output:'Source evidence supports checking the existing boundary conditions.'}]}})});
    await helpers.emit('input',{source:'interactive',text:prompt});

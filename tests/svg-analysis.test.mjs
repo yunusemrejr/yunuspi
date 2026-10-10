@@ -155,11 +155,10 @@ test('a saved .svg gets review findings on the existing svg-check note',async()=
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 
-test('security, backend, SVG and pattern requests stage the audit tools; unrelated prompts do not',()=>{
-  for(const prompt of ['Audit the backend API for security holes','Fix the SQL injection in the login endpoint','Fix the slow endpoint, it runs an N+1 query per row','Review our coding patterns and anti-patterns','Run an accessibility audit on the checkout'])
-    assert.ok(intentBundleTools(prompt).includes('code_audit'),prompt);
+test('SVG requests stage the SVG inspector; unrelated prompts do not',()=>{
+  // code_audit was removed, so security, backend and pattern prompts no longer stage an audit tool.
   for(const prompt of ['Optimize the SVG icons in /assets','Design a vector logo mark','Fix icons.svg so it scales'])
     assert.ok(intentBundleTools(prompt).includes('svg_inspect'),prompt);
   for(const prompt of ['Fix the off-by-one error in the pagination helper','Rename the variable in the parser','Explain how the cache works'])
-    assert.deepEqual(intentBundleTools(prompt).filter(t=>t==='code_audit'||t==='svg_inspect'),[],prompt);
+    assert.deepEqual(intentBundleTools(prompt).filter(t=>t==='svg_inspect'),[],prompt);
 });

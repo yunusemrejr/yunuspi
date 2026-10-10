@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {renderCapture} from '../agent/scripts/render-capture.mjs';
-import registerRender from '../agent/extensions/render-and-wait.ts';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'design-noise-patterns-'));
 process.on('exit',()=>fs.rmSync(root,{recursive:true,force:true}));
 let sequence=0;
@@ -90,17 +89,9 @@ test('copy density measures bounded visible UI and preserves long-form content a
  assert.equal(kinds(longForm.rendered).includes('dense-interface-copy'),false);
 });
 
-test('viewport changes exclude responsive clones and the native design tool returns fuller same-capture evidence',async()=>{
- const {source,rendered}=await capture('<style>@media(max-width:500px){.desktop{display:none}}</style><span class="pill desktop"><i class="dot"></i>Online</span>',{width:390,height:844});
+test('viewport changes exclude responsive clones at phone width',async()=>{
+ const {rendered}=await capture('<style>@media(max-width:500px){.desktop{display:none}}</style><span class="pill desktop"><i class="dot"></i>Online</span>',{width:390,height:844});
  assert.deepEqual(kinds(rendered),[]);
- const previous=process.env.PI_CODING_AGENT_DIR;process.env.PI_CODING_AGENT_DIR=path.join(root,'native-agent');
- try{
-  const tools=new Map();registerRender({registerTool:tool=>tools.set(tool.name,tool),on(){}});
-  const result=await tools.get('design_audit').execute('patterns',{source,output:'text',width:1200,height:900},undefined,undefined,{cwd:root,model:{input:['text']},sessionManager:{getSessionId:()=> 'noise-patterns'}});
-  assert.equal(result.details.noise.findings[0].kind,'animated-status-pill');
-  assert.deepEqual(result.details.noise.measurements.viewport,{width:1200,height:900});
-  const receipt=JSON.parse(result.content[0].text);assert.deepEqual(receipt.noise,result.details.noise);assert.ok(!('score' in receipt.noise));
- }finally{if(previous===undefined)delete process.env.PI_CODING_AGENT_DIR;else process.env.PI_CODING_AGENT_DIR=previous;}
 });
 
 test('new advisory output remains bounded under repeated badges and explicit scans',async()=>{

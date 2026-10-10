@@ -97,10 +97,10 @@ test("the skill, its references and its routing are wired for autonomous deliver
   for (const tool of ["motion_examples", "video_shot"]) assert.ok(bundled.includes(tool), `${tool} is staged on the first turn`);
 });
 
-const rendering = process.env.YUNUSPI_SKIP_MOTION_RENDER === "1" ? "YUNUSPI_SKIP_MOTION_RENDER" : (() => { try { execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "quiet", "-version"]); return fs.existsSync(path.join(agent, "scripts/../skills/motion-graphics-production/scripts/render.mjs")) ? false : "no exporter"; } catch { return "ffmpeg is not installed"; } })();
+const rendering = process.env.YUNUSPI_SKIP_MOTION_RENDER === "1" ? "YUNUSPI_SKIP_MOTION_RENDER" : (() => { try { execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "quiet", "-version"]); return fs.existsSync(path.join(agent, "scripts/../skills/video-editing/scripts/render.mjs")) ? false : "no exporter"; } catch { return "ffmpeg is not installed"; } })();
 test("vanilla examples render distinct, non-blank frames through the exporter", { skip: rendering, timeout: 240_000 }, () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-motion-render-"));
-  const exporter = path.join(skill, "../motion-graphics-production/scripts/render.mjs");
+  const exporter = path.join(skill, "../video-editing/scripts/render.mjs");
   for (const id of ["waapi-timeline", "svg-morph-draw", "kinetic-type-lines", "css-3d-stage", "data-reveal", "svg-filter-liquid", "halftone-transition", "canvas-flow-field"]) {
     const dir = path.join(out, id); fs.mkdirSync(dir);
     execFileSync("node", [exporter, path.join(skill, "assets/examples/html", `${id}.html`), dir, "2", "6", "320", "180"], { stdio: "pipe", timeout: 90_000 });

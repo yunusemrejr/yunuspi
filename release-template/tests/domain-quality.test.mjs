@@ -63,26 +63,21 @@ test('frame statistics use measured milliseconds and rendering memory scales wit
   ])assert.throws(()=>check(input),/numeric_check:/);
 });
 
-test('registered artifact and numeric operations preserve workspace boundaries, cancellation and switches',async t=>{
+test('registered numeric operations preserve cancellation and switches (artifact_check was removed)',async t=>{
   const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'domain-quality-'));t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
   const envKeys=['PI_SMALL_TOOLS','PI_REASONING_AIDS','PI_SUBAGENT_CHILD'],saved=Object.fromEntries(envKeys.map(k=>[k,process.env[k]]));
   t.after(()=>{for(const k of envKeys)if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];});
   for(const k of envKeys)delete process.env[k];
   fs.mkdirSync(path.join(cwd,'workspace'));const workspace=path.join(cwd,'workspace');
-  fs.writeFileSync(path.join(workspace,'icon.svg'),svg('<use href="#missing"/>'));
-  fs.writeFileSync(path.join(cwd,'outside.svg'),svg(''));fs.symlinkSync('../outside.svg',path.join(workspace,'escape.svg'));
   const tools=new Map();register({registerTool:t=>tools.set(t.name,t)});
   const call=(name,input,signal)=>tools.get(name).execute('check',input,signal,undefined,{cwd:workspace});
-  const result=await call('artifact_check',{operation:'svg',path:'icon.svg'});
-  assert.notEqual(result.isError,true);assert.equal(result.details.status,'issues');assert.deepEqual(JSON.parse(result.content[0].text),result.details);
-  assert.equal((await call('artifact_check',{operation:'svg',text:svg('')})).details.status,'inspected');
-  for(const input of [{operation:'svg',path:'../outside.svg'},{operation:'svg',path:'escape.svg'},{operation:'svg',path:'.'},{operation:'svg',text:svg(''),path:'icon.svg'}])assert.equal((await call('artifact_check',input)).isError,true);
-  assert.equal((await call('artifact_check',{operation:'svg',path:'icon.svg'},AbortSignal.abort())).isError,true);
+  assert.equal(tools.has('artifact_check'),false,'artifact_check is no longer registered');
   assert.equal((await call('math_check',{operation:'frame_budget',values:[10]})).details.meanMs,10);
   assert.equal((await call('math_check',{operation:'render_budget',width:10,height:10})).details.attachmentBytes,800);
-  process.env.PI_SMALL_TOOLS='off';assert.equal((await call('artifact_check',{operation:'svg',text:svg('')})).isError,true);
+  assert.equal((await call('math_check',{operation:'frame_budget',values:[10]},AbortSignal.abort())).isError,true);
+  process.env.PI_SMALL_TOOLS='off';assert.equal((await call('math_check',{operation:'frame_budget',values:[10]})).isError,true);
   process.env.PI_SUBAGENT_CHILD='1';const child=new Map();register({registerTool:t=>child.set(t.name,t)});
-  assert.ok(child.has('artifact_check'),'stable definitions in child profiles');
+  assert.ok(child.has('math_check'),'stable definitions in child profiles');
   assert.equal((await child.get('math_check').execute('disabled',{operation:'frame_budget',values:[10]},undefined,undefined,{cwd:workspace})).isError,true);
 });
 
@@ -110,7 +105,7 @@ test('successful SVG saves run a bounded full-file check while unrelated and fai
   const originalRealpath=fs.promises.realpath;let reads=0;
   fs.promises.realpath=async()=>{reads++;throw Error('unexpected I/O');};
   try{
-    for(const [file,extra]of [['drawing.svg',{isError:true}],['drawing.svg',{toolName:'read'}],['drawing.svg',{toolName:'artifact_check'}],['drawing.png',{}],['vendor/drawing.svg',{}],['generated/drawing.svg',{}],['fixtures/drawing.svg',{}]])assert.equal(await call(file,extra),undefined);
+    for(const [file,extra]of [['drawing.svg',{isError:true}],['drawing.svg',{toolName:'read'}],['drawing.svg',{toolName:'math_check'}],['drawing.png',{}],['vendor/drawing.svg',{}],['generated/drawing.svg',{}],['fixtures/drawing.svg',{}]])assert.equal(await call(file,extra),undefined);
     process.env.PI_SMALL_TOOLS='off';assert.equal(await call('drawing.svg'),undefined);delete process.env.PI_SMALL_TOOLS;
     process.env.PI_REASONING_AIDS='off';assert.equal(await call('drawing.svg'),undefined);delete process.env.PI_REASONING_AIDS;
     assert.equal(reads,0,'failed/disabled/non-SVG/generated inputs never touch filesystem');

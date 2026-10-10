@@ -1,5 +1,5 @@
 /**
- * /goal — a session goal with a real definition of done.
+ * /goal — a session goal with a real definition of done and one completion check.
  *
  * The user states one demand; the harness turns it into criteria, keeps the
  * definition of done in context every turn, refuses to close the goal without
@@ -14,8 +14,9 @@ import { StringEnum } from "@yunuspi/ai";
 import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
 import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts } from './lib/continuation-notice.ts';
+import { completionReport, staticCompletionSteps } from "./lib/completion-check.ts";
 import {
-	block, complete, createGoal, goalAnchor, goalCompletionGate, goalIsLive, goalKickoff, goalSummary,
+	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
 
@@ -210,9 +211,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "goal",
 		label: "goal",
-		description: "Track the user's /goal definition of done. met records evidence for one criterion (what you ran or saw and its result); waive drops an unnecessary or impossible criterion with the reason; criteria replaces the open criteria with a sharper list; blocked reports that only the user can unblock the work; complete closes the goal after every criterion has evidence and nothing changed since the last verification; status prints progress.",
+		description: "Track the user's /goal definition of done. check runs the whole completion check (criteria, tests, review, deliverables, rendered/media review, static audit, syntax) and lists what is still open; met records evidence for one criterion (what you ran or saw and its result); waive drops an unnecessary or impossible criterion with the reason; criteria replaces the open criteria with a sharper list; blocked reports that only the user can unblock the work; complete closes the goal after every criterion has evidence and nothing changed since the last verification; status prints progress.",
 		parameters: Type.Object({
-			action: StringEnum(["status", "met", "waive", "criteria", "blocked", "complete"] as const),
+			action: StringEnum(["status", "check", "met", "waive", "criteria", "blocked", "complete"] as const),
 			id: Type.Optional(Type.String({ maxLength: 8, description: "Criterion id such as C1 or V" })),
 			// The owner clips each text and keeps at most MAX_CRITERIA - 1 items; a
 			// schema refusal of longer input only cost a retry turn per call.
@@ -221,10 +222,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			reason: Type.Optional(Type.String({ maxLength: 400 * RATIONALE_INTAKE })),
 			summary: Type.Optional(Type.String({ maxLength: 800 * RATIONALE_INTAKE })),
 		}),
-		async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: ExtensionContext) {
+		async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: ExtensionContext) {
 			if (!goal || !goalIsLive(goal)) return text("No live goal in this session; nothing to record.");
 			switch (params.action) {
 				case "status": return text(goalSummary(goal));
+				case "check": {
+					// The one completion check: criteria plus every test, review, delivery, media, audit and syntax step.
+					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await staticCompletionSteps(ctx.cwd, signal)];
+					const report = completionReport(goal.criteria, receipts);
+					return text(`${report.lines.join("\n")}\n${report.clear ? "Every step is settled; call goal complete." : "Open steps above: do the work, then record evidence with met/waive or check again."}`);
+				}
 				case "criteria": {
 					persist(setCriteria(goal, params.items ?? []), ctx);
 					return text(goalSummary(goal));
@@ -245,7 +252,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					return text("Goal marked blocked and shown to the user. Stop and wait for their answer; /goal resume continues afterwards.");
 				}
 				case "complete": {
-					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: collectVerificationReceipts(32, ctx.sessionManager) });
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...await staticCompletionSteps(ctx.cwd, signal)] });
 					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");

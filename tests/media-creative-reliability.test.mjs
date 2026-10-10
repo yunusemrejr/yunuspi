@@ -11,13 +11,11 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => e
 const load = file => import(pathToFileURL(path.join(agent, 'extensions/lib', file)));
 const { prepareSvgSource, svgRender, svgDiagnosticCollector } = await load('svg-render.ts');
 const { imageGenerateRun, imageEditRun } = await load('image-generate.ts');
-const { encodeImage, decodeImage } = await load('design-studio.ts');
-const { mediaPipeline } = await load('media-pipeline.ts');
+const { encodeImage } = await load('design-studio.ts');
 const { run, outputFolder } = await load('media-process.ts');
 const { studioFolder } = await load('design-studio.ts');
 const workspace = async t => { const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'media-creative-reliability-')); t.after(() => fs.rm(cwd, { recursive: true, force: true })); return cwd; };
 const source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path id="shape" fill="#2255aa" d="M8 8L32 8L32 32Z"/></svg>';
-const score = { bpm: 120, beats: 2, tracks: [{ notes: [{ pitch: 57, start: 0, duration: 2 }] }] };
 const env = { PI_IMAGE_BACKEND: 'openai-compatible', PI_IMAGE_API_URL: 'https://fixture.invalid/v1', PI_IMAGE_API_KEY: 'TEST_fixture_only', PI_IMAGE_MODEL: 'fixture/image' };
 const picture = () => encodeImage({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4).fill(255) }, 'png');
 
@@ -46,7 +44,7 @@ test('SVG diagnostics preserve late distinct findings without repeating every fr
   assert.equal(bounded.result().diagnosticsTruncated, true); assert.equal(bounded.result().omittedDiagnosticObservations, 1);
 });
 
-test('SVG XML and namespace errors fail preflight before pipeline synthesis allocates outputs', async t => {
+test('SVG XML and namespace errors fail source preparation', async t => {
   const cwd = await workspace(t);
   const invalid = [
     source.replace('<path', '<text>R&D</text><path'),
@@ -55,12 +53,7 @@ test('SVG XML and namespace errors fail preflight before pipeline synthesis allo
     source.replace('<path', '<prefix:rect/><path'),
     source.replace('<path', '<text>&undefined;</text><path'),
   ];
-  for (const svg of invalid) {
-    await assert.rejects(prepareSvgSource({ svg }, cwd), /XML|namespace/i);
-    await fs.writeFile(path.join(cwd, 'scene.svg'), svg);
-    await assert.rejects(mediaPipeline({ animation: 'scene.svg', score }, cwd), /XML|namespace/i);
-    assert.deepEqual(await fs.readdir(cwd), ['scene.svg']);
-  }
+  for (const svg of invalid) await assert.rejects(prepareSvgSource({ svg }, cwd), /XML|namespace/i);
   await prepareSvgSource({ svg: source.replace('<path', '<text>A &amp; B</text><path') }, cwd);
   await prepareSvgSource({ svg: source.replace('<path', '<style><![CDATA[path{fill:#336699}]]></style><path') }, cwd);
 });
@@ -158,32 +151,8 @@ test('media child abort waits for process closure before caller cleanup', { time
   await assert.rejects(run(process.execPath, ['-e', 'process.stderr.write("fixture failure"); process.exit(2)']), /fixture failure/);
 });
 
-test('a concurrent source edit cannot change the preflighted animation/audio clock', { timeout: 120_000 }, async t => {
-  const cwd = await workspace(t), file = path.join(cwd, 'scene.json');
-  const scene = { width: 160, height: 96, duration: 1, fps: 6, objects: [{ id: 'box', geometry: 'box' }], tracks: [{ target: 'box', property: 'rotation', keys: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [0, 1.5, 0] }] }] };
-  await fs.writeFile(file, JSON.stringify(scene));
-  let mutation, changed = false;
-  const watcher = watch(cwd, (_event, name) => { if (!changed && name?.startsWith('media-')) { changed = true; mutation = fs.writeFile(file, JSON.stringify({ ...scene, duration: 2 })); } });
-  t.after(() => watcher.close());
-  let result;
-  try { result = await mediaPipeline({ animation: file, score }, cwd); }
-  catch (error) { if (process.env.PI_REQUIRE_MEDIA_TEST !== '1' && /Executable doesn't exist|browser.*not found|not installed|distribution.*not found/i.test(error.message)) { t.skip(error.message); return; } throw error; }
-  await mutation;
-  assert.equal(changed, true); assert.equal(JSON.parse(await fs.readFile(file)).duration, 2);
-  assert.equal(result.duration, 1); assert.equal(result.decodeVerified, true);
-  assert.equal(JSON.parse(await fs.readFile(result.visual.snapshot)).duration, 1);
-  assert.equal(result.visual.source, file); assert.match(result.visual.sourceHash, /^[a-f0-9]{64}$/);
-  assert.ok(result.visual.motion); assert.equal(result.samples.length, 3);
-});
-
-test('SVG pipelines retain review evidence and reject CSS/data-track owner collisions', { timeout: 120_000 }, async t => {
-  const cwd = await workspace(t), file = path.join(cwd, 'scene.svg'); await fs.writeFile(file, source);
-  let result;
-  try { result = await mediaPipeline({ animation: file, duration: 1, width: 64, height: 64, fps: 6, animationTracks: [{ target: 'shape', property: 'transform', keys: [{ time: 0, value: 'translate(0)' }, { time: 1, value: 'translate(24)' }] }] }, cwd); }
-  catch (error) { if (process.env.PI_REQUIRE_MEDIA_TEST !== '1' && /Executable doesn't exist|browser.*not found|not installed|distribution.*not found/i.test(error.message)) { t.skip(error.message); return; } throw error; }
-  assert.ok(result.visual.contactSheet.bytes > 0); assert.ok(result.visual.diagnostics.length > 0); assert.ok(result.visual.motion);
-  const first = await decodeImage(await fs.readFile(result.samples[0].path)), last = await decodeImage(await fs.readFile(result.samples.at(-1).path));
-  assert.notDeepEqual(first.data, last.data, 'valid transforms change actual rendered pixels');
+test('SVG renders reject CSS and data-track owner collisions', { timeout: 120_000 }, async t => {
+  const cwd = await workspace(t);
   const collision = source.replace('<path', '<style>@keyframes width{from{stroke-width:1}to{stroke-width:4}}#shape{stroke:#ff0000;animation:width 1s linear forwards}</style><path');
   await assert.rejects(svgRender({ svg: collision, width: 64, height: 64, duration: 1, tracks: [{ target: 'shape', property: 'stroke-width', keys: [{ time: 0, value: 1 }, { time: 1, value: 4 }] }] }, cwd), /owner collision/);
 });

@@ -10,15 +10,12 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')]
 const {routeSkills} = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-routing.ts')));
 
 const names = [
-  'java-cross-platform',
-  'c-cpp-multiplatform',
-  'linux-network-engineering',
-  'linux-desktop-ui-ux',
-  'proxy-analysis',
-  'packet-trace-analysis',
-  'multi-developer-pipelines',
-  'modern-frontend-frameworks',
-  'gif-animation-editing',
+  'systems-languages',
+  'networking',
+  'ui-design',
+  'git-github',
+  'frontend',
+  'svg-images',
 ];
 
 test('expanded skills ship with descriptions and resolvable references', () => {
@@ -39,42 +36,40 @@ test('expanded skills ship with descriptions and resolvable references', () => {
 
 test('deterministic routing selects the intended expanded skill', () => {
   const positives = [
-    ['java-cross-platform','Package this Java app for Windows and macOS with jpackage'],
-    ['java-cross-platform','Port this Java app from Linux to Windows and macOS'],
-    ['c-cpp-multiplatform','Build this C++ project to cross-compile for ARM Linux with CMake'],
-    ['c-cpp-multiplatform','Port this C firmware to ARM and embedded Linux targets'],
-    ['linux-network-engineering','Diagnose the DNS resolution failure on this Linux server'],
-    ['linux-network-engineering','Run mtr to investigate packet loss on the uplink'],
-    ['linux-desktop-ui-ux','Design a GTK settings dialog for GNOME following the system theme'],
-    ['proxy-analysis','Set up a proxy chain and check for DNS leaks'],
-    ['packet-trace-analysis','Analyze this TCP handshake and retransmission pattern in the trace'],
-    ['multi-developer-pipelines','Set up trunk-based development with release trains for our team'],
-    ['modern-frontend-frameworks','Fix the hydration mismatch in our Next.js app with server components'],
-    ['gif-animation-editing','Remove the background of this animated gif and compress it'],
-    ['gif-animation-editing','Combine these two gifs side by side with ffmpeg'],
+    ['systems-languages','Package this Java app for Windows and macOS with jpackage'],
+    ['systems-languages','Port this Java app from Linux to Windows and macOS'],
+    ['systems-languages','Build this C++ project to cross-compile for ARM Linux with CMake'],
+    ['systems-languages','Port this C firmware to ARM and embedded Linux targets'],
+    ['networking','Diagnose the DNS resolution failure on this Linux server'],
+    ['networking','Run mtr to investigate packet loss on the uplink'],
+    ['ui-design','Design a GTK settings dialog for GNOME following the system theme'],
+    ['networking','Set up a proxy chain and check for DNS leaks'],
+    ['networking','Analyze this TCP handshake and retransmission pattern in the trace'],
+    ['git-github','Set up trunk-based development with release trains for our team'],
+    ['frontend','Fix the hydration mismatch in our Next.js app with server components'],
+    ['svg-images','Remove the background of this animated gif and compress it'],
+    ['svg-images','Combine these two gifs side by side with ffmpeg'],
   ];
   for (const [name, prompt] of positives) {
     assert.ok(routeSkills(prompt).some(route => route.name === name), prompt);
   }
-  assert.ok(routeSkills('', 'build/CMakeLists.txt').some(route => route.name === 'c-cpp-multiplatform'));
-  assert.ok(routeSkills('', 'ui/dialog.ui').some(route => route.name === 'linux-desktop-ui-ux'));
-  assert.ok(routeSkills('', 'src/App.vue').some(route => route.name === 'modern-frontend-frameworks'));
-  assert.ok(routeSkills('', 'src/Widget.svelte').some(route => route.name === 'modern-frontend-frameworks'));
-  assert.ok(routeSkills('', 'etc/resolv.conf').some(route => route.name === 'linux-network-engineering'));
+  assert.ok(routeSkills('', 'build/CMakeLists.txt').some(route => route.name === 'systems-languages'));
+  assert.ok(routeSkills('', 'ui/dialog.ui').some(route => route.name === 'ui-design'));
+  assert.ok(routeSkills('', 'src/App.vue').some(route => route.name === 'frontend'));
+  assert.ok(routeSkills('', 'src/Widget.svelte').some(route => route.name === 'frontend'));
+  assert.ok(routeSkills('', 'etc/resolv.conf').some(route => route.name === 'networking'));
 });
 
 test('expanded routing ignores unrelated, negated and explain-only prompts', () => {
   const negatives = [
-    ['multi-developer-pipelines','Refactor the build pipeline of the transpiler'],
-    ['multi-developer-pipelines','Explain the changelog format'],
-    ['multi-developer-pipelines','Fix the license header check in CI'],
-    ['linux-network-engineering','Implement security policy enforcement in the gateway'],
-    ['proxy-analysis','Find Tailscale exit nodes for the office'],
-    ['gif-animation-editing','Explain how GIF encoding works'],
-    ['modern-frontend-frameworks','Explain how React hooks work'],
-    ['java-cross-platform','Explain how Java garbage collection works'],
-    ['packet-trace-analysis','Explain what a TCP handshake is'],
-    ['c-cpp-multiplatform','Do not port this C tool to Windows'],
+    ['git-github','Refactor the build pipeline of the transpiler'],
+    ['git-github','Explain the changelog format'],
+    ['networking','Implement security policy enforcement in the gateway'],
+    ['svg-images','Explain how GIF encoding works'],
+    ['frontend','Explain how React hooks work'],
+    ['systems-languages','Explain how Java garbage collection works'],
+    ['networking','Explain what a TCP handshake is'],
+    ['systems-languages','Do not port this C tool to Windows'],
   ];
   for (const [name, prompt] of negatives) {
     assert.ok(!routeSkills(prompt).some(route => route.name === name), prompt);
@@ -83,9 +78,9 @@ test('expanded routing ignores unrelated, negated and explain-only prompts', () 
 
 test('office prompts route to the authoring skills that stage office_doc, including saves, legacy files and conversions', () => {
   const route = (text) => (routeSkills(text, '') ?? []).map(entry => entry.name ?? entry);
-  assert.ok(route('Can you save this Word file as a PDF for me?').includes('word-document-authoring'));
-  assert.ok(route('read the contract.doc and summarize the termination clause').includes('word-document-authoring'));
-  assert.ok(route('Open invoice-2019.doc and tell me the total due, then convert prices.xls to a CSV file').includes('spreadsheet-authoring'));
-  assert.ok(route('Make a 6-slide PowerPoint deck pitch.pptx for our new product with speaker notes.').includes('presentation-authoring'));
-  assert.ok(!route('save the changes to the repository and push').includes('word-document-authoring'), 'a save that names no office document routes nowhere');
+  assert.ok(route('Can you save this Word file as a PDF for me?').includes('office-documents'));
+  assert.ok(route('read the contract.doc and summarize the termination clause').includes('office-documents'));
+  assert.ok(route('Open invoice-2019.doc and tell me the total due, then convert prices.xls to a CSV file').includes('office-documents'));
+  assert.ok(route('Make a 6-slide PowerPoint deck pitch.pptx for our new product with speaker notes.').includes('office-documents'));
+  assert.ok(!route('save the changes to the repository and push').includes('office-documents'), 'a save that names no office document routes nowhere');
 });

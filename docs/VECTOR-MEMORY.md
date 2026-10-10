@@ -19,7 +19,6 @@ agent/extensions/lib/project-identity.ts        stable project ids, chains, desc
 agent/extensions/lib/project-vector-store.ts    SQLite schema, FTS5, vector similarity
 agent/extensions/lib/project-memory-index.ts    chunking, enrichment, events, embeddings
 agent/extensions/lib/project-memory-retrieve.ts hybrid retrieval, role policies, families
-agent/extensions/lib/project-memory-consolidate.ts clustering + canonical facts
 agent/extensions/lib/project-memory-embedder.ts local/remote transports, space contracts
 agent/extensions/lib/project-memory-context.ts  session-scoped access for existing consumers
 tests/project-vector-memory.test.mjs            storage, retrieval, family and extension tests
@@ -104,22 +103,9 @@ that vector while retaining its text, content hash and parent provenance.
 Different chunks can coexist in different spaces, and retrieval only compares
 compatible ones.
 
-For a Qwen migration, select OpenRouter in the session configuration and call:
+Once the session is configured for OpenRouter, existing chunks are backfilled in bounded batches. Successful batches are durable, interrupted batches remain eligible, and unchanged compatible content is not embedded again. Queries never implicitly upload the existing corpus. If Qwen is unavailable, retrieval can use existing compatible Needle3 atoms or legacy chunk vectors; otherwise FTS5 still serves. It never compares a Qwen query against Needle3 document vectors.
 
-```text
-project_memory_reembed backend=openrouter model=qwen/qwen3-embedding-8b limit=32
-```
-
-Repeat to resume until `remaining=0`. The limit is 1–256 chunks; successful
-batches are durable, interrupted batches remain eligible, and unchanged compatible
-content is not embedded again. This tool does not change the session's configured
-backend. Unchanged content re-indexed after a model change is also eligible for
-bounded backfill. Queries never implicitly upload the existing corpus. If Qwen
-is unavailable, retrieval can use existing compatible Needle3 atoms or legacy
-chunk vectors; otherwise FTS5 still serves. It never compares a Qwen query
-against Needle3 document vectors.
-
-Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later settled turn adds at most four earlier eligible chunks to its bounded batch, even when no new events arrived. Compatible local vectors are reused during cooldown. Explicit `project_memory_reembed` remains an exact-backend operation. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Automatic recall waits at most 900ms for semantics, then returns lexical history within the existing 1200ms consumer budget. The single query embedding may finish in the background (bounded to eight seconds) and supplies later role consumers from the same session cache. Switching or closing the session cancels that work; foreground deadline expiry does not repeatedly cancel otherwise healthy provider requests.
+Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later settled turn adds at most four earlier eligible chunks to its bounded batch, even when no new events arrived. Compatible local vectors are reused during cooldown. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Automatic recall waits at most 900ms for semantics, then returns lexical history within the existing 1200ms consumer budget. The single query embedding may finish in the background (bounded to eight seconds) and supplies later role consumers from the same session cache. Switching or closing the session cancels that work; foreground deadline expiry does not repeatedly cancel otherwise healthy provider requests.
 
 Raw tool-result exhaust and automatic file-edit markers stay lexical. Explicitly
 indexed code and durable decisions, corrections, architecture, observations,
@@ -129,7 +115,7 @@ private keys, authorization headers, credential assignments, credential URLs,
 JWTs and secret environment values before remote transmission. Only bounded
 retrieval text is sent; repositories are not uploaded automatically.
 
-`project_memory_status` and `/project-memory` show the selected backend/model,
+`project_memory` `action:"status"` and `/project-memory` show the selected backend/model,
 observed dimension, vector spaces and counts, Qwen3/Needle3/unembedded counts,
 backfill progress, lexical/vector/reranker state and the last embedding error.
 Embedding and recall events also enter the existing health/activity surfaces.
@@ -165,12 +151,11 @@ only new chunks are embedded:
 |---|---|---|
 | user prompt (`input`) | `user_request` | first 2000 chars; `/commands` skipped |
 | tool error (`tool_result`) | `error` | tool + compact input + 800-char excerpt |
-| file edit (`tool_result`) | `code` | path marker; full text via `project_memory_index_path` |
+| file edit (`tool_result`) | `code` | path marker |
 | `git commit` (`tool_result`) | `commit` | command + output excerpt |
 | completed assistant response (`agent_end` → `agent_settled`) | `observation` | final report only, labeled unverified; errors/tool calls/aborts excluded |
 | compaction (`session_compact`) | `session_summary` | committed `compactionEntry.summary`, importance 0.9 |
-| `project_memory_remember` | any | curated, authority ≥ 0.8 |
-| `project_memory_index_path` | `code`/`architecture` | hash-changed chunks only |
+| curated `memory_write` entries | any | curated, authority ≥ 0.8 |
 
 Type weights keep raw exhaust below curated knowledge: decision 1.0,
 architecture 0.95, concept/session_summary 0.9, convention 0.85,
@@ -204,7 +189,7 @@ matched fragment centered on the query terms — not full bodies. Each hit
 carries its matched atom id and fragment in `details` plus an `atoms`
 admission count in `stats` for retrieval tracing. Full parent evidence
 (text, atom map, adjacent source blocks, supersession chain) lives behind
-`project_memory_read`. Automatic priming still inlines bounded slices, so
+`project_memory` `action:"read"`. Automatic priming still inlines bounded slices, so
 background recall pays no extra round trip.
 
 Role policies (`role` param) — same store, different ranking:
@@ -213,7 +198,6 @@ Role policies (`role` param) — same store, different ranking:
 - `observer`: mistakes/regressions/issues/constraints first (error/bug ×1.6,
   observation ×1.4, decision ×1.3; code/tool_result down).
 - `subagent`: task-focused code/architecture/decisions; session chatter down.
-- `watchmaker`: progress/timing evidence (summaries ×1.6, commits/todos ×1.4).
 
 Scores rank candidates; they prove nothing. Every hit cites
 `[id] type · path:lines · commit · date · authority`, and rendered output
@@ -230,48 +214,30 @@ Siblings are excluded by design.
 
 | Tool | Purpose |
 |---|---|
-| `project_memory_search` | compact hybrid candidates (`query`, `role`, `types`, `limit`, `since`, `include_superseded`, `scope`) |
-| `project_memory_read` | expand one memory id (`id`, `context`, `source`, `history`); chunk or atom ids, family-wide |
-| `project_memory_remember` | record a durable typed fact (`text`, `type`, `title`, `path`, `concepts`, `importance`, `supersedes`) |
-| `project_memory_status` | identity, chain, chunk/atom counts, backend health |
-| `project_memory_index_path` | index a repo file (regular files ≤ 500 KiB, no symlinks) |
-| `project_memory_forget` | tombstone by id (provenance kept, restorable) |
-| `project_memory_restore` | clear a tombstone |
-| `project_memory_reembed` | controlled compatible-vector backfill (`backend`, `model`, `limit`) |
-| `project_memory_consolidate` | cluster + ratify canonical facts (dry-run default) |
+| `project_memory` `action:"search"` | compact hybrid candidates (`query`, `role`, `types`, `limit`, `since`, `include_superseded`, `scope`) |
+| `project_memory` `action:"read"` | expand one memory id (`id`, `context`, `source`, `history`); chunk or atom ids, family-wide |
+| `project_memory` `action:"status"` | identity, chain, chunk/atom counts, backend health |
 
-`/project-memory` prints status plus recent entries. Subagent children get
-search + read + status (query and read; the parent session is the sole
-writer, mirroring the harness child-mutation policy).
+Indexing and recall are automatic; durable writes go through `memory_write`.
 
-## Consolidation
-
-`project_memory_consolidate` (or `findClusters` + `consolidate`) groups
-near-duplicate same-concept chunks (Jaccard ≥ 0.5, or cosine ≥ 0.92 with
-compatible stored vectors and Jaccard ≥ 0.25), picks the canonical survivor (highest authority, then newest),
-boosts it to authority 1.0, and tombstones members with backlinks. History
-is never deleted. Dry-run by default; agent-authored canonicals via
-`project_memory_remember` with `supersedes=[…]` always outrank engine output
-(the engine ratifies, never invents). It reuses persisted vectors — legacy
-chunk vectors, or mean-pooled atom vectors for atom-only chunks — and makes no
-embedding requests; proposed clusters remain reviewable in dry-run output.
+`/project-memory` prints status plus recent entries. Subagent children get search, read and status (the parent session is the sole writer, mirroring the harness child-mutation policy).
 
 ## Consumer integration
 
 **Main agent and subagents.** The existing once-per-session memory priming
 flow includes cited project-vector history using the `main` or `subagent` policy.
-`/memory-prime` still controls that flow. Previous-session follow-ups are carried only for an explicit continuation or when their terms match the new request; their completion status is unknown until verified. Search/status tools remain available for
+`/memory-prime` still controls that flow. Previous-session follow-ups are carried only for an explicit continuation or when their terms match the new request; their completion status is unknown until verified. The `search` and `status` actions remain available for
 explicit recall; children cannot mutate memory.
 
-**Observer and Watchmaker.** Each accepted task starts one bounded background
+**The observer.** Each accepted task starts one bounded background
 recall using its role policy. These background consumers can await the same query for up to eight seconds without holding the main turn; foreground priming retains its shorter wait. Repeated periodic reviews reuse the result. The
 observer receives previous mistakes, corrections, constraints and rejected
-approaches; Watchmaker receives historical progress evidence. Results pass through
+approaches. Results pass through
 the existing evidence packets and byte budgets and cannot create requirements.
 Session-owner and task-generation guards reject stale replies.
 
 All consumers call the session-scoped vector-memory owner. Identical task queries
-share one embedding across all four policy views and the project family, without
+share one embedding across all three policy views and the project family, without
 extra remote reranking calls. Recall includes timestamps and matched fragments, labels earlier user requests and unverified assistant reports, and explicitly gives the current user request precedence. Historical requests may already be complete or superseded; memory does not make them active tasks again. Automatic priming waits at most 1.2 seconds; slow
 or unavailable helpers leave the session running normally. Structural code questions
 still belong to AST/LSP/project-intelligence tools.
@@ -309,4 +275,4 @@ lexical + real Needle3, and lexical + real OpenRouter Qwen3. Only the checked-in
 public synthetic fixture is transmitted. The script reports relevance ranks,
 false-positive occupancy, indexing/query latency, calls, tokens and current
 provider pricing. Reranking is disabled equally for the three configurations.
-See [the measured report](PROJECT-MEMORY-EVALUATION.md) for results and limits.
+See the measured report for results and limits.

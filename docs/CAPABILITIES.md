@@ -128,9 +128,9 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing, full-text search, and single-message reads.
 
-**Entrypoints:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_search`, `agentmail_message`
+**Entrypoints:** `agentmail`
 
-**Catalog tool pointers:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_search`, `agentmail_message`
+**Catalog tool pointers:** `agentmail`
 
 **Options:**
 
@@ -182,9 +182,9 @@ Coordinate independent Pi sessions through checkout scope/check receipts and exp
 
 Inspect selected-model full-window context occupancy and 80% automatic compaction threshold alongside separate runtime, failure, efficiency and past-session diagnostics.
 
-**Entrypoints:** `session_self`, `session_audit`, `self`, `cost`, `metrics`, `sys-prompt`, `used`, `errors`, `commands`
+**Entrypoints:** `session_self`, `self`, `cost`, `metrics`, `sys-prompt`, `used`, `errors`, `commands`
 
-**Catalog tool pointers:** `session_self`, `session_audit`
+**Catalog tool pointers:** `session_self`
 
 **Commands:** `/self`, `/cost`, `/metrics`, `/sys-prompt`, `/used`, `/errors`, `/commands`
 
@@ -258,9 +258,9 @@ Preview active tool schemas by group or query, then explicitly enable selected n
 
 Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.
 
-**Entrypoints:** `syntax_check`, `context_slice`, `symbol_expand`, `ast_diff`, `git_info`
+**Entrypoints:** `context_slice`, `symbol_expand`, `ast_diff`, `git_info`
 
-**Catalog tool pointers:** `syntax_check`, `context_slice`, `symbol_expand`, `ast_diff`, `git_info`
+**Catalog tool pointers:** `context_slice`, `symbol_expand`, `ast_diff`, `git_info`
 
 **Options:**
 
@@ -283,9 +283,7 @@ Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, call
 
 Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity, import-graph structure (cycles, orphans, hotspots, oversized files, undeclared and unused dependencies); edits automatically get high-precision hints when a new block repeats nearby or bounded cross-directory code. baseline combines source slop/security/backend/UI cues, DRY groups and structure in one call. Advisory evidence with file:line, not a quality score.
 
-**Entrypoints:** `code_quality`
-
-**Catalog tool pointers:** `code_quality`, `syntax_check`, `git_info`, `lsp_diagnostics`, `lens_diagnostics`
+**Catalog tool pointers:** `git_info`, `lsp_diagnostics`, `lens_diagnostics`
 
 **Options:**
 
@@ -296,30 +294,27 @@ Measure duplication, code slop, prose quality and complexity without installing 
 
 **Related records:** `source-intelligence`, `quality-review`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
+**Source:** [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 
 **Documentation:** [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 
 #### static-audits
 
-Audit source and SVG files with local deterministic rules. Explicit quality tools may batch ambiguous prose/UI findings through bounded cached JEV triage; edit hooks remain local and findings never become automatic approvals. code_audit covers security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls, unhandled async routes), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. The same rules run automatically after edits and feed review routing; these tools are the whole-tree form.
+Audit source and SVG files with local deterministic rules after every edit and as a step of the goal completion check. Security (injection, secrets, deserialization, TLS, CORS, cookies, JWT, path traversal, SSRF), backend (timeouts, N+1 queries, mass assignment, error leaks, blocking calls), efficiency, coding patterns and UI source, in JS/TS, Python, Go, PHP, shell, CSS, HTML and config files. High-severity findings and unparseable changed files reopen the goal until fixed or waived. svg_inspect (action review) scores an SVG for clipped art, theming, bloat, accessibility and active content, and writes a verified lossless optimized copy. Findings never become automatic approvals.
 
-**Entrypoints:** `code_audit`, `svg_inspect`
+**Entrypoints:** `svg_inspect`
 
-**Catalog tool pointers:** `code_audit`, `svg_inspect`, `code_quality`, `artifact_check`
+**Catalog tool pointers:** `svg_inspect`
 
 **Options:**
 
-- `code_audit.domains`: Rule families to run; default all. Values: `security`, `backend`, `efficiency`, `patterns`, `ui`.
-- `code_audit.paths|changed|base`: Files or directories, or the current diff against a revision.
-- `code_audit.minSeverity|limit`: Lowest severity reported and result count.
 - `svg_inspect.action`: inspect measures, review scores with fixes, matrix rasterizes sizes. Values: `inspect`, `review`, `matrix`.
 - `svg_inspect.kind`: review: override icon/logo/illustration inference. Values: `icon`, `logo`, `illustration`.
 - `svg_inspect.optimize|precision|outputDir`: review: write verified lossless copies into a fresh git-ignored folder; the original is untouched.
 
 **Related records:** `code-quality`, `artifact-numeric-checks`, `quality-review`, `design-studio`
 
-**Source:** [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts), [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts), [`agent/extensions/lib/svg-analysis.ts`](../agent/extensions/lib/svg-analysis.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts)
+**Source:** [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/code-audit.ts`](../agent/extensions/lib/code-audit.ts), [`agent/extensions/lib/svg-analysis.ts`](../agent/extensions/lib/svg-analysis.ts), [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts)
 
 **Documentation:** [`docs/CODE-AUDIT.md`](CODE-AUDIT.md)
 
@@ -327,13 +322,12 @@ Audit source and SVG files with local deterministic rules. Explicit quality tool
 
 Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.
 
-**Entrypoints:** `artifact_check`, `math_check`
+**Entrypoints:** `math_check`
 
-**Catalog tool pointers:** `artifact_check`, `math_check`
+**Catalog tool pointers:** `math_check`
 
 **Options:**
 
-- `artifact_check.operation`: Explicit artifact inspection. Values: `svg`, `ui`, `image`, `text`.
 - `path|text`: One workspace path or supported inline source; SVG is bounded to 64 KiB.
 - `math_check.operation`: Deterministic numeric calculation. Values: `frame_budget`, `render_budget`, `summarize`, `compare`, `classify`, `vectors`, `split_overlap`.
 - `values|target_fps`: Observed frame durations in milliseconds and target rate.
@@ -345,35 +339,11 @@ Check SVG references and source cues, image/text metadata, measured frame timing
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
-#### desktop-computer-use
-
-Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.
-
-**Entrypoints:** `desktop_session`
-
-**Catalog tool pointers:** `desktop_session`, `image_ocr`, `visual_diff`
-
-**Options:**
-
-- `action`: Session operation. Values: `start`, `launch`, `screenshot`, `click`, `move`, `drag`, `scroll`, `type`, `key`, `focus`, `windows`, `wait`, `logs`, `stop`, `list`.
-- `command|cwd`: launch: shell command run with DISPLAY set, from a workspace directory.
-- `x|y|toX|toY|button|double|direction|amount`: Pointer input in display pixels.
-- `text|keys`: Keyboard input: literal text, or xdotool key names such as ctrl+s.
-- `title|timeoutMs`: wait for a window whose title contains the text.
-
-**Related records:** `web-and-media`, `rendered-design-review`, `safety-bounds`
-
-**Source:** [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts), [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts), [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
-
-**Documentation:** [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
-
 #### rendered-design-review
 
 Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.
 
-**Entrypoints:** `design_audit`
-
-**Catalog tool pointers:** `design_audit`, `render_see`, `browser_session`, `web_asset_check`
+**Catalog tool pointers:** `render_see`, `browser_session`, `web_asset_check`
 
 **Options:**
 
@@ -391,9 +361,9 @@ Collect rendered typography, spacing, surface effects, solid-color text contrast
 
 Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset references for hosting, and Ubuntu unit/journal metadata without running workflows, publishing sites or mutating services. Source-backed findings with explicit unresolved expressions.
 
-**Entrypoints:** `workflow_probe`, `web_asset_check`, `sys_probe`
+**Entrypoints:** `web_asset_check`, `sys_probe`
 
-**Catalog tool pointers:** `workflow_probe`, `web_asset_check`, `sys_probe`, `git_info`, `package_probe`, `env_audit`
+**Catalog tool pointers:** `web_asset_check`, `sys_probe`, `git_info`, `package_probe`
 
 **Options:**
 
@@ -411,9 +381,9 @@ Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset ref
 
 Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection. Prepare inert SSH argv or inspect one explicit server banner without authenticating or executing remote commands.
 
-**Entrypoints:** `workspace_search`, `local_mail_search`, `local_mail_read`, `ssh_plan`, `net_probe`
+**Entrypoints:** `workspace_search`, `ssh_plan`, `net_probe`
 
-**Catalog tool pointers:** `workspace_search`, `local_mail_search`, `local_mail_read`, `ssh_plan`, `net_probe`
+**Catalog tool pointers:** `workspace_search`, `ssh_plan`, `net_probe`
 
 **Options:**
 
@@ -427,26 +397,6 @@ Search explicit workspace roots and local Maildir/mbox exports with scan limits,
 **Source:** [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts), [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py), [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
-
-#### ml-lab
-
-Executable ML baseline: split/content/group/time leakage checks, classification/regression slice metrics and paired baseline intervals, correct RL termination/truncation targets, host/memory preflight, static Colab notebook checks and resumable CPU MLP, offline tabular Q, embedding and LoRA training recipes. No hidden model calls, dependency installation or cloud allocation. Actual trainers run through existing execution/background owners and preserve checkpoints, hashes and metrics.
-
-**Entrypoints:** `ml_lab`
-
-**Catalog tool pointers:** `ml_lab`, `bg_run`, `bg_status`, `bg_logs`, `browser_session`, `sys_probe`, `env_audit`
-
-**Options:**
-
-- `operation`: Bounded deterministic check or executable recipe. Values: `preflight`, `split_audit`, `evaluate`, `rl_targets`, `notebook`, `recipe`.
-- `path|data`: Workspace JSON/ipynb snapshot or inline operation data; files up to 256 KiB.
-- `recipe`: Trainer contract with smoke/resume argv and a staged Colab notebook. Values: `tiny_mlp`, `tabular_q`, `embedding`, `lora`.
-
-**Related records:** `code-quality`, `web-and-media`, `memory-evidence`
-
-**Source:** [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts), [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts), [`agent/scripts/ml-lab.py`](../agent/scripts/ml-lab.py), [`agent/scripts/ml-transformer-train.py`](../agent/scripts/ml-transformer-train.py)
-
-**Documentation:** [`docs/RESEARCH-CODE-ML.md`](RESEARCH-CODE-ML.md)
 
 ### memory
 
@@ -504,9 +454,9 @@ Record future-session notes, project-scoped decisions and checklist state, with 
 
 Keep small verbatim project observations with SHA256 provenance and retrieve unchanged evidence from the active session branch; inferred claims and unattributed URLs are rejected.
 
-**Entrypoints:** `evidence_cache`, `claim_check`, `context_score`, `handoff_capsule`
+**Entrypoints:** `handoff_capsule`
 
-**Catalog tool pointers:** `evidence_cache`, `claim_check`, `context_score`, `handoff_capsule`
+**Catalog tool pointers:** `handoff_capsule`
 
 **Options:**
 
@@ -521,7 +471,7 @@ Keep small verbatim project observations with SHA256 provenance and retrieve unc
 
 **Related records:** `memory-notes`, `memory-retrieval`, `context-diagnostics`
 
-**Source:** [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts), [`agent/extensions/pi-memory/context-evidence.ts`](../agent/extensions/pi-memory/context-evidence.ts), [`agent/extensions/pi-memory/context-salience.ts`](../agent/extensions/pi-memory/context-salience.ts)
+**Source:** [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts), [`agent/extensions/pi-memory/context-salience.ts`](../agent/extensions/pi-memory/context-salience.ts)
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
@@ -575,7 +525,7 @@ Filter the live session model registry by exact name, free eligibility, provider
 - `added:this-month|added:YYYY-MM`: Filter provider catalog addition timestamps in UTC.
 - `model: provider/id:thinking`: Pass an exact route with optional supported thinking suffix.
 
-**Related records:** `agent-model-management`, `provider-routing`, `fusion-review`
+**Related records:** `agent-model-management`, `provider-routing`
 
 **Source:** [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-selection.ts`](../agent/extensions/pi-subagents/src/runs/shared/model-selection.ts), [`agent/extensions/pi-subagents/src/shared/model-info.ts`](../agent/extensions/pi-subagents/src/shared/model-info.ts)
 
@@ -613,7 +563,7 @@ Prefer explicit per-role model/provider choices from llm_preferences.json, with 
 **Options:**
 
 - `models`: Reusable alias registry of provider/model/thinking/provider_options entries.
-- `preferences.<role>.models`: Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, prompt_analysis, main_session_fallback.
+- `preferences.<role>.models`: Ordered alias list per role: subagents, council, fanout, quality_review, project_review, error_review, prompt_analysis, main_session_fallback.
 - `/models`: Open the graphical editor for ordered role routes, upstream pins and canonical JSON recovery.
 - `thinking`: Explicit level, auto for dynamic logic, or none for off. Values: `auto`, `none`, `low`, `medium`, `high`, `max`.
 - `provider_options.routing`: OpenRouter backend control; auto preserves normal selection. Values: `auto`, `pinned`, `custom`.
@@ -628,13 +578,12 @@ Prefer explicit per-role model/provider choices from llm_preferences.json, with 
 
 Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.
 
-**Entrypoints:** `context_score`, `handoff_capsule`, `evidence_cache`, `session_self`
+**Entrypoints:** `handoff_capsule`, `session_self`
 
-**Catalog tool pointers:** `context_score`, `handoff_capsule`, `evidence_cache`, `session_self`
+**Catalog tool pointers:** `handoff_capsule`, `session_self`
 
 **Options:**
 
-- `context_score`: Rank supplied items by task relevance and protected evidence; scores are priorities, not probabilities.
 - `handoff_capsule`: Prepare a short extractive handoff instead of copying an entire session.
 - `automatic preprocessing`: Optional local SLM selects original paragraphs; unavailable workers preserve source text. No direct inference tool is implied.
 
@@ -698,7 +647,7 @@ Launch one child, native parallel tasks or a sequential chain with explicit cont
 - `acceptance`: Structured completion contract.
 - `gate`: Host gate command, mutually exclusive with acceptance.
 
-**Related records:** `workflow-orchestration`, `agent-model-management`, `background-tasks`, `swarm-execution`, `fusion-review`
+**Related records:** `workflow-orchestration`, `agent-model-management`, `background-tasks`, `fanout-execution`
 
 **Source:** [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts), [`agent/extensions/pi-subagents/src/extension/schemas.ts`](../agent/extensions/pi-subagents/src/extension/schemas.ts), [`agent/extensions/pi-subagents/src/extension/public-execution.ts`](../agent/extensions/pi-subagents/src/extension/public-execution.ts), [`agent/extensions/pi-subagents/src/intercom/result-intercom.ts`](../agent/extensions/pi-subagents/src/intercom/result-intercom.ts)
 
@@ -760,11 +709,11 @@ Discover package, user and project Markdown prompt workflows, substitute positio
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
-#### swarm-execution
+#### fanout-execution
 
-Run separable child investigations in parallel and preserve each outcome, failure and acceptance evidence for parent review.
+Fan-out (formerly swarm and fusion): run separable investigations or competing approaches as parallel children, preserve each outcome, failure and acceptance evidence, and merge outputs deterministically with provenance (duplicate, complementary and conflicting sections stay visible for parent review).
 
-**Entrypoints:** `subagent.tasks`, `runs.all`, `runs.recover`, `todo.execution:swarm`
+**Entrypoints:** `subagent.tasks`, `runs.all`, `runs.recover`, `runs.fuse`, `runs.fuseFragments`, `todo.execution:fanout`
 
 **Catalog tool pointers:** `subagent`, `todo`
 
@@ -774,37 +723,14 @@ Run separable child investigations in parallel and preserve each outcome, failur
 - `commonTask`: Shared brief injected into every child.
 - `concurrency`: Positive native task concurrency.
 - `async`: Keep the composite running without blocking the parent.
-- `runs.recover`: Build a bounded respawn plan for failed fanout members.
-- `execution`: Todo execution annotation. Values: `swarm`.
-
-**Related records:** `subagent-dispatch`, `fusion-review`, `todo-planning`, `agent-model-management`
-
-**Source:** [`agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts`](../agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts), [`agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts`](../agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts)
-
-**Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
-
-#### fusion-review
-
-Merge child outputs deterministically with provenance, retaining duplicate, complementary and conflicting sections for review.
-
-**Entrypoints:** `runs.fuse`, `runs.fuseFragments`, `todo.execution:fusion`
-
-**Catalog tool pointers:** `subagent`, `todo`
-
-**Options:**
-
-- `runs.fuse`: Fuse text outputs from a completed run set.
-- `runs.fuseFragments`: Fuse structured owner/kind/body/updatedAt fragments.
-- `fragments[].owner`: Source worker identity.
+- `runs.recover`: Build a bounded respawn plan for failed fan-out members.
+- `runs.fuse`: Merge text outputs or ```fragment blocks from a completed run set.
 - `fragments[].kind`: Fragment classification. Values: `duplicate`, `complementary`, `conflict`.
-- `fragments[].body`: Source-preserving fragment body.
-- `fragments[].updatedAt`: Finite ordering timestamp.
-- `config.maxBodyChars`: Positive fused-body bound, at most 131072.
-- `execution`: Todo execution annotation. Values: `fusion`.
+- `execution`: Todo execution annotation. Values: `fanout`.
 
-**Related records:** `subagent-dispatch`, `swarm-execution`, `quality-review`
+**Related records:** `subagent-dispatch`, `todo-planning`, `agent-model-management`, `quality-review`
 
-**Source:** [`agent/extensions/pi-subagents/src/runs/shared/fusion.ts`](../agent/extensions/pi-subagents/src/runs/shared/fusion.ts), [`agent/extensions/pi-subagents/src/workflows/recovery-seam.ts`](../agent/extensions/pi-subagents/src/workflows/recovery-seam.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts)
+**Source:** [`agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts`](../agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts), [`agent/extensions/pi-subagents/src/runs/shared/fanout.ts`](../agent/extensions/pi-subagents/src/runs/shared/fanout.ts), [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts)
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
@@ -823,7 +749,7 @@ Session mode that analyzes every user request twice before the agent starts and 
 - `/custom-double provider/model[:thinking] provider/model[:thinking]`: Pin two chosen routes without the popup.
 - `reconcile`: Which route reconciles the two analyses. Values: `a`, `b`, `session`.
 
-**Related records:** `scope-council`, `fusion-review`, `swarm-execution`, `subagent-dispatch`
+**Related records:** `scope-council`, `fanout-execution`, `subagent-dispatch`
 
 **Source:** [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts), [`agent/extensions/pi-subagents/src/extension/double-pair.ts`](../agent/extensions/pi-subagents/src/extension/double-pair.ts), [`agent/extensions/pi-subagents/src/slash/double-pair-picker.ts`](../agent/extensions/pi-subagents/src/slash/double-pair-picker.ts), [`agent/extensions/lib/double.ts`](../agent/extensions/lib/double.ts), [`agent/extensions/lib/reviewer-board.ts`](../agent/extensions/lib/reviewer-board.ts)
 
@@ -845,14 +771,14 @@ Maintain a durable hierarchical plan with dependencies, execution annotations, f
 
 - `action`: Plan mutation. Values: `create`, `update`, `list`, `get`, `delete`, `clear`, `batch`.
 - `view`: List projection. Values: `tree`, `frontier`.
-- `execution`: Native orchestration annotation. Values: `self`, `subagent`, `swarm`, `fusion`.
+- `execution`: Native orchestration annotation. Values: `self`, `subagent`, `fanout`.
 - `parentId|blockedBy`: Hierarchy and dependency ids.
 - `files`: Explicit relative paths in a task scope.
 - `acceptance|evidence`: Completion contract and observed verification.
 - `refs`: Project fact, observation or source references.
 - `operations`: Atomic create/update/delete batch, up to 32.
 
-**Related records:** `session-coordination`, `swarm-execution`, `fusion-review`, `memory-notes`
+**Related records:** `session-coordination`, `fanout-execution`, `memory-notes`
 
 **Source:** [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts), [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts), [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
 
@@ -964,7 +890,7 @@ Coordinate distinct review kinds (quality, project, error) with trivial-work sup
 
 **Options:**
 
-- `kind`: Review kind with a distinct purpose and owner. Values: `quality`, `project`, `error`, `council`, `swarm`, `fusion`.
+- `kind`: Review kind with a distinct purpose and owner. Values: `quality`, `project`, `error`, `council`, `fanout`.
 - `isTrivialChangeRequest`: Formatting/lint/trivial-cleanup suppression for automatic checks.
 - `evaluateStuckSignal`: Strong stuck-pattern detection with transient exclusion.
 - `shouldSuggestReview`: Cooldown, session-cap and recent-run gating for suggestions.
@@ -1073,9 +999,9 @@ Proactive public-site SEO: route purpose and content planning, built HTML inspec
 
 Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.
 
-**Entrypoints:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `github_search`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`, `image_ocr`
+**Entrypoints:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `github_search`, `browser_session`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `music_compose`
 
-**Catalog tool pointers:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `github_search`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`, `image_ocr`
+**Catalog tool pointers:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `github_search`, `browser_session`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `music_compose`
 
 **Commands:** `/websearch`, `/search`, `/curator`, `/google-account`
 
@@ -1108,9 +1034,9 @@ Search and read web sources, operate browser tabs with DOM refs, screenshots, co
 
 Author editable local 3D scenes and fixed-clock animations, render H.264 video and posters, compose clip transitions and mix local audio. Three.js studio/clay/toon/wireframe styles, keyframes, camera and lights; no hosted generation or model calls.
 
-**Entrypoints:** `scene_create`, `scene_render`, `video_compose`, `audio_mix`
+**Entrypoints:** `audio_mix`
 
-**Catalog tool pointers:** `scene_create`, `scene_render`, `video_compose`, `audio_mix`, `music_compose`, `media_info`, `video_frames`, `audio_analyze`
+**Catalog tool pointers:** `audio_mix`, `music_compose`, `media_info`, `video_frames`, `audio_analyze`
 
 **Options:**
 
@@ -1121,7 +1047,7 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 **Related records:** `web-and-media`, `artifact-numeric-checks`, `background-tasks`
 
-**Source:** [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts), [`agent/extensions/lib/scene-studio.ts`](../agent/extensions/lib/scene-studio.ts), [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts), [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
+**Source:** [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts), [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts), [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -1129,9 +1055,9 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/video/speech/music/SFX choices, capability-aware image plans, resumable hosted clip jobs with explicit price estimates and no paid retry, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and fixed-camera RGB atmosphere over approved detailed plates, and revision-bound visual/playback/listening review alongside technical QA.
 
-**Entrypoints:** `video_project`, `video_render`, `video_shot`, `video_ambient`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`
+**Entrypoints:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`, `video_browser`, `image_generate`, `audio_generate`
 
-**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_ambient`, `video_qa`, `narration_tts`, `audio_synth`, `media_pipeline`, `video_frames`, `media_info`, `audio_analyze`, `video_generate`, `video_browser`, `image_generate`, `audio_generate`, `narration_align`, `media_sync`
+**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_qa`, `narration_tts`, `audio_synth`, `video_frames`, `media_info`, `audio_analyze`, `video_browser`, `image_generate`, `audio_generate`, `media_sync`
 
 **Options:**
 
@@ -1148,17 +1074,17 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 **Related records:** `creative-studio`, `web-and-media`, `background-tasks`, `3d-studio`
 
-**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-production-flow.ts`](../agent/extensions/lib/video-production-flow.ts), [`agent/extensions/lib/video-ambient.ts`](../agent/extensions/lib/video-ambient.ts), [`agent/extensions/lib/ambient-frames.ts`](../agent/extensions/lib/ambient-frames.ts), [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts), [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts), [`agent/scripts/video-ambient.mjs`](../agent/scripts/video-ambient.mjs), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../agent/skills/procedural-audio/scripts/synth.py), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
+**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-production-flow.ts`](../agent/extensions/lib/video-production-flow.ts), [`agent/extensions/lib/ambient-frames.ts`](../agent/extensions/lib/ambient-frames.ts), [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts), [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/video-generate.ts`](../agent/extensions/lib/video-generate.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
 #### 3d-studio
 
-Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS install, agent-authored bpy scripts, scene inspection, bounded still/preview/animation renders with contact sheets (EEVEE headless, Cycles CPU), glTF/OBJ/PLY/USD/FBX export and multi-view transforms.json dataset capture with seed points. Splats: Brush (Apache-2.0, wgpu) trains headless on any Vulkan GPU including integrated AMD/Intel, from COLMAP or Blender datasets, exporting PLY with held-out fidelity renders; splat_preview renders a point-cloud turntable. Every process is guarded, niced and memory-watched.
+Headless Blender as one tool with actions: setup (pinned local 5.2.2 LTS install and engine report), run (agent-authored bpy scripts), inspect (scene summary), render (bounded still/preview/animation with contact sheets; EEVEE headless, Cycles CPU). Every process is guarded, niced and memory-watched.
 
-**Entrypoints:** `blender_run`, `blender_render`, `blender_export`, `splat_train`, `splat_preview`
+**Entrypoints:** `blender`
 
-**Catalog tool pointers:** `blender_setup`, `blender_run`, `blender_inspect`, `blender_render`, `blender_export`, `video_shot`, `splat_setup`, `splat_train`, `splat_preview`, `video_frames`, `media_info`
+**Catalog tool pointers:** `blender`, `video_shot`, `video_frames`, `media_info`
 
 **Options:**
 
@@ -1171,7 +1097,7 @@ Headless Blender and Gaussian splatting. Blender: a pinned local 5.2.2 LTS insta
 
 **Related records:** `video-studio`, `creative-studio`, `web-and-media`, `background-tasks`
 
-**Source:** [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts), [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts), [`agent/extensions/lib/splat-studio.ts`](../agent/extensions/lib/splat-studio.ts), [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts), [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py), [`agent/skills/blender-production/SKILL.md`](../agent/skills/blender-production/SKILL.md), [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
+**Source:** [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts), [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts), [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts), [`agent/scripts/blender-studio.py`](../agent/scripts/blender-studio.py)
 
 **Documentation:** [`docs/3D-STUDIO.md`](3D-STUDIO.md)
 
@@ -1196,61 +1122,31 @@ Read, build, verify and render Office files with no office suite, and open any p
 
 **Related records:** `creative-studio`, `video-studio`, `quality-review`, `background-tasks`
 
-**Source:** [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/binary-read.ts`](../agent/extensions/lib/binary-read.ts), [`agent/extensions/lib/specifics.ts`](../agent/extensions/lib/specifics.ts), [`agent/extensions/lib/pptx-build.ts`](../agent/extensions/lib/pptx-build.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts), [`agent/skills/spreadsheet-authoring/SKILL.md`](../agent/skills/spreadsheet-authoring/SKILL.md), [`agent/skills/word-document-authoring/SKILL.md`](../agent/skills/word-document-authoring/SKILL.md), [`agent/skills/presentation-authoring/SKILL.md`](../agent/skills/presentation-authoring/SKILL.md)
+**Source:** [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts), [`agent/extensions/lib/office-read.ts`](../agent/extensions/lib/office-read.ts), [`agent/extensions/lib/office-build.ts`](../agent/extensions/lib/office-build.ts), [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts), [`agent/extensions/lib/office-zip.ts`](../agent/extensions/lib/office-zip.ts), [`agent/extensions/lib/xml-lite.ts`](../agent/extensions/lib/xml-lite.ts), [`agent/extensions/lib/office-render.ts`](../agent/extensions/lib/office-render.ts), [`agent/extensions/lib/binary-read.ts`](../agent/extensions/lib/binary-read.ts), [`agent/extensions/lib/specifics.ts`](../agent/extensions/lib/specifics.ts), [`agent/extensions/lib/pptx-build.ts`](../agent/extensions/lib/pptx-build.ts), [`agent/extensions/lib/deliverable-inspect.ts`](../agent/extensions/lib/deliverable-inspect.ts), [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts)
 
 **Documentation:** [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
 
-#### file-organization
-
-Sort, rename and clean up a folder of files without losing any. fs_organize works in a fixed order: scan (types, sizes, identical files, names needing cleanup, what is left alone), plan (a reviewable list of moves, nothing touched; by type, extension, date, tidy-names, rules with {year}/{month}/{ext}/{type} folders, or an exact moves list the model decided after reading the files), apply (hard-link-then-unlink moves that never overwrite, name clashes become "name (2).ext", a journal of every move, the harness write-scope policy asked for each folder), verify (every moved file present, file count compared) and undo (reverse a plan from its journal, even in a later session). Only regular files move; the home folder, system and hidden configuration folders and software projects are refused, and symlinks, hidden files and unfinished downloads are skipped. Identical copies can be gathered in Duplicates/ and are never deleted.
-
-**Entrypoints:** `fs_organize`
-
-**Catalog tool pointers:** `fs_organize`, `office_doc`, `deliverable_check`, `ls`, `find`
-
-**Options:**
-
-- `action`: fs_organize operation. Values: `scan`, `plan`, `apply`, `verify`, `undo`, `plans`.
-- `by`: plan mode. Values: `type`, `extension`, `date`, `tidy-names`, `rules`, `moves`.
-- `rules`: plan by rules: ordered [{ext, nameContains, glob, regex, olderThanDays, largerThanMB, to}]; first match wins.
-- `moves`: plan by moves: exact [{from, to}]; a to ending in / keeps the file name.
-- `duplicates`: report identical files, or gather the extra copies in Duplicates/. Values: `report`, `separate`.
-- `PI_ORGANIZE_DIR`: Where plan journals are kept (default the agent organize folder).
-
-**Related records:** `office-and-deliverables`, `bulk-edit`, `background-tasks`
-
-**Source:** [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts), [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts), [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
-
-**Documentation:** [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
-
 #### ui-engineering
 
-Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_recipe prepares editable focus-safe entrances, section-driven layered scroll tracks and preflighted local Blender/glTF-to-Three.js mechanics without choosing a stock visual identity or installing dependencies. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.
+Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.
 
-**Entrypoints:** `ui_recipe`, `ui_explore`, `motion_inspect`, `ui_consistency`
+**Entrypoints:** `ui_explore`, `motion_inspect`, `ui_consistency`
 
-**Catalog tool pointers:** `ui_recipe`, `creative_direct`, `ui_explore`, `motion_inspect`, `ui_consistency`, `render_see`, `design_audit`, `visual_review`, `browser_session`, `asset_register`, `blender_export`, `image_generate`
-
-**Options:**
-
-- `ui_recipe.action|pattern`: Plan or scaffold mechanics; the host page supplies real content and design tokens. Values: `scroll-reveal`, `scroll-story`, `three-model`.
-- `motion_inspect.mode|positions`: time inventory or bounded live scroll progress with forward/backtracking and reduced-motion evidence. Values: `time`, `scroll`.
-- `ui_explore.devices|breakpoints`: Touch/DPR/orientation profiles and adjacent CSS breakpoint widths; omitted cells stay explicit.
-- `ui_consistency.sources|selectorGroups|tokens`: Compare shared named roles within the same explicit variant and requested CSS custom properties across 2..4 routes.
+**Catalog tool pointers:** `creative_direct`, `ui_explore`, `motion_inspect`, `ui_consistency`, `render_see`, `visual_review`, `browser_session`, `asset_register`, `blender`, `image_generate`
 
 **Related records:** `design-studio`, `art-direction`, `3d-studio`, `source-intelligence`, `task-pipelines`
 
-**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/ui-recipes.ts`](../agent/extensions/lib/ui-recipes.ts), [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs), [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts), [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts)
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs), [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts), [`agent/extensions/lib/creative-qa.ts`](../agent/extensions/lib/creative-qa.ts), [`agent/extensions/lib/motion-inspect.ts`](../agent/extensions/lib/motion-inspect.ts), [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts), [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts)
 
 **Documentation:** [`docs/UI-ENGINEERING.md`](UI-ENGINEERING.md)
 
 #### design-studio
 
-Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. image_convert makes framed/rotated alpha-aware PNG/JPEG/WebP batches; image_understand uses the selected vision model with hashed crop/scale evidence. Pixel measurements and model observations remain evidence, not design intent.
+Turn design references into code. image_understand uses the selected vision model with hashed crop/scale evidence; image_crop cuts and keys assets at source resolution; render_see compares the build against the reference at the same width. Pixel measurements and model observations remain evidence, not design intent.
 
-**Entrypoints:** `image_understand`, `image_convert`, `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`
+**Entrypoints:** `image_understand`, `image_crop`
 
-**Catalog tool pointers:** `image_understand`, `image_convert`, `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`, `render_see`, `design_audit`
+**Catalog tool pointers:** `image_understand`, `image_crop`, `render_see`
 
 **Options:**
 
@@ -1265,7 +1161,7 @@ Turn design references into code. image_analyze maps a mockup, screenshot or ima
 
 **Related records:** `rendered-design-review`, `web-and-media`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-convert.ts`](../agent/extensions/lib/image-convert.ts), [`agent/extensions/lib/image-understand.ts`](../agent/extensions/lib/image-understand.ts), [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-understand.ts`](../agent/extensions/lib/image-understand.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs)
 
 **Documentation:** [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
 
@@ -1275,7 +1171,7 @@ Close the creative loop around one shared direction. creative_direct owns the st
 
 **Entrypoints:** `creative_direct`, `visual_review`, `ui_explore`, `ui_consistency`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`
 
-**Catalog tool pointers:** `creative_direct`, `visual_review`, `ui_explore`, `ui_consistency`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`, `ui_recipe`, `render_see`, `design_audit`, `image_analyze`, `visual_diff`
+**Catalog tool pointers:** `creative_direct`, `visual_review`, `ui_explore`, `ui_consistency`, `motion_inspect`, `svg_render`, `svg_inspect`, `asset_register`, `image_generate`, `creative_compare`, `render_see`
 
 **Options:**
 
@@ -1296,29 +1192,6 @@ Close the creative loop around one shared direction. creative_direct owns the st
 
 **Documentation:** [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 
-#### research-toolkit
-
-Plan research angles (market or prior-art), profile the local project for comparison with other products, and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. dossier checks exact source quotations/hashes, duplicate snapshots and claim coverage, exposes contradictory citation labels, and builds an attributable Markdown report. Local-only; compose with web_search/fetch_content/web_research/github_search and verify primary sources.
-
-**Entrypoints:** `research_toolkit`
-
-**Catalog tool pointers:** `research_toolkit`
-
-**Options:**
-
-- `action`: Toolkit operation. Values: `plan`, `profile`, `lead`, `company`, `source`, `dossier`.
-- `goal|context|mode`: Research goal and optional context for plan; mode prior-art plans how to find and compare existing products and projects. Values: `leads`, `prior-art`.
-- `path`: Directory to profile (default: the working directory); read-only, never reads environment files.
-- `name|company|role|domain`: Candidate identity fields for lead/company.
-- `sourceUrl|retrievedAt`: Required http(s) provenance and timestamp.
-- `evidence|quote`: Bounded verbatim evidence for lead/company/source.
-
-**Related records:** `web-and-media`, `memory-evidence`, `safety-bounds`
-
-**Source:** [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts), [`agent/extensions/lib/project-profile.ts`](../agent/extensions/lib/project-profile.ts), [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts), [`agent/extensions/lib/research-evidence.ts`](../agent/extensions/lib/research-evidence.ts)
-
-**Documentation:** [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
-
 ## Static tool and command registrations
 
 Tool names come from literal registrations and source-owned factory definitions, catalogs and constants. Command names come from literal `registerCommand` calls. Computed registration names are listed as owners below; they are not guessed. Use `tool_search` for the authoritative live registry and activation state.
@@ -1329,77 +1202,46 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `agentmail_message` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 1061; literal)
-- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 853; literal)
-- `agentmail_search` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 965; literal)
-- `agentmail_send` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 802; literal)
-- `agentmail_status` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 725; literal)
-- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
-- `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
-- `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 497; factory)
+- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
+- `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 492; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
-- `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 258; factory)
-- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 152; factory)
-- `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 281; factory)
-- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 164; factory)
-- `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 574; sdk-factory)
+- `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 161; factory)
+- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 142; factory)
+- `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 169; factory)
+- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 154; factory)
+- `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 586; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 827; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 781; literal)
 - `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 691; literal)
 - `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 750; literal)
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
-- `blender_export` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 65; factory)
-- `blender_inspect` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 56; factory)
-- `blender_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 60; factory)
-- `blender_run` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 52; factory)
-- `blender_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 48; factory)
+- `blender_inspect` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 54; factory)
+- `blender_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 58; factory)
+- `blender_run` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 50; factory)
+- `blender_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 46; factory)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 155; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
-- `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
-- `code_audit` — [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts) (line 23; literal)
-- `code_quality` — [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts) (line 9; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
-- `context_profile` — [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) (line 385; literal)
-- `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 14; literal)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
-- `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
-- `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
-- `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 22; factory)
-- `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 601; factory)
-- `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 306; factory)
-- `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 137; factory)
-- `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
+- `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 596; factory)
+- `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 301; factory)
+- `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 119; factory)
 - `deliverable_check` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 135; literal)
-- `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
-- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 271; literal)
-- `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
-- `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
-- `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 198; configured-default)
-- `fs_organize` — [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts) (line 41; literal)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 210; literal)
-- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
+- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 211; literal)
+- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
-- `image_analyze` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 40; factory)
-- `image_convert` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 35; factory)
-- `image_create` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 57; factory)
-- `image_crop` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 44; factory)
-- `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 543; factory)
-- `image_ocr` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 257; factory)
-- `image_trace` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 51; factory)
-- `image_understand` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 37; factory)
-- `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
-- `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
+- `image_crop` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 32; factory)
+- `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 538; factory)
+- `image_understand` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 29; factory)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 102; factory)
-- `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 259; factory)
-- `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 255; factory)
-- `media_pipeline` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 284; factory)
-- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 160; factory)
+- `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 159; factory)
+- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 150; factory)
 - `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2567; literal)
 - `memory_read` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2427; literal)
 - `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2710; literal)
@@ -1408,122 +1250,95 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 499; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
-- `ml_lab` — [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts) (line 11; literal)
-- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 176; factory)
-- `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 431; factory)
-- `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 264; factory)
-- `narration_align` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 150; factory)
-- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 146; factory)
-- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
+- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 166; factory)
+- `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 426; factory)
+- `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 166; factory)
+- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 138; factory)
+- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 821; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
-- `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
-- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
-- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 602; literal)
+- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
+- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 791; literal)
-- `project_memory_consolidate` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 778; literal)
-- `project_memory_forget` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 746; literal)
-- `project_memory_index_path` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 708; literal)
-- `project_memory_read` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 483; literal)
-- `project_memory_reembed` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 628; literal)
-- `project_memory_remember` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 658; literal)
-- `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 762; literal)
-- `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 408; literal)
-- `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 560; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 813; literal)
-- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 270; literal)
-- `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 93; literal)
+- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
-- `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 274; factory)
-- `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 275; factory)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2240; literal)
 - `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1944; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 816; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1881; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1873; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 746; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 722; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
-- `splat_preview` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 79; factory)
-- `splat_setup` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 71; factory)
-- `splat_train` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 75; factory)
-- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
+- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
+- `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 940; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 783; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
-- `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 462; factory)
-- `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 457; factory)
+- `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 457; factory)
+- `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 452; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
-- `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 273; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 568; literal)
+- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 547; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 499; literal)
-- `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 420; factory)
-- `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 394; factory)
-- `ui_recipe` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 33; factory)
-- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 133; factory)
-- `video_ambient` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 82; factory)
-- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 140; factory)
-- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 162; factory)
-- `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 280; factory)
-- `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 256; factory)
-- `video_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 79; factory)
-- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 86; factory)
-- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 136; factory)
-- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 132; factory)
-- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 109; factory)
-- `visual_diff` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 66; factory)
-- `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 348; factory)
-- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 105; literal)
-- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 491; literal)
+- `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 415; factory)
+- `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 389; factory)
+- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
+- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 132; factory)
+- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 152; factory)
+- `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
+- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 78; factory)
+- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 128; factory)
+- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 124; factory)
+- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 101; factory)
+- `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 343; factory)
+- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 73; literal)
 - `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `workdir_snapshot` — [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts) (line 12; literal)
-- `workflow_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 
 ### Dynamic tool owners
 
-- [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_consistency`, `ui_explore`, `visual_review` (lines 273)
-- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_export`, `blender_inspect`, `blender_render`, `blender_run`, `blender_setup`, `splat_preview`, `splat_setup`, `splat_train` (lines 17)
-- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred; known tools: `image_analyze`, `image_convert`, `image_create`, `image_crop`, `image_trace`, `image_understand`, `ui_recipe`, `visual_diff` (lines 22)
-- [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 85)
-- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 577)
-- [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `media_pipeline`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 245)
+- [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 1116)
+- [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `svg_render`, `ui_consistency`, `ui_explore`, `visual_review` (lines 268)
+- [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `blender_inspect`, `blender_render`, `blender_run`, `blender_setup` (lines 63)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred; known tools: `image_crop`, `image_understand` (lines 19)
+- [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `data_query`, `math_check`, `value_convert` (lines 85)
+- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 589)
+- [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `media_info`, `music_compose`, `video_frames` (lines 149)
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
 - [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 834)
-- [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `coverage_select`, `decision_frontier`, `dependency_plan` (lines 9)
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
+- [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 592)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1668, 2256, 2410, 2809)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
-- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
-- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_align`, `narration_tts`, `video_ambient`, `video_assets`, `video_browser`, `video_generate`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 38)
+- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `net_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workspace_search` (lines 23)
+- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_tts`, `video_assets`, `video_browser`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 37)
 
 ### Literal slash commands
 
-- /bash-routes — [`agent/extensions/bash-router.ts`](../agent/extensions/bash-router.ts) (line 99)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 570)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 562)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 578)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1662)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1852)
-- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1405)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1844)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1397)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3404)
 - /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 458)
 - /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 438)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
-- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1818)
+- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1810)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 163)
+- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 164)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3446)
 - /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 907)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
@@ -1543,18 +1358,18 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 623)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 221)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
-- /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 482)
+- /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 476)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 570)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 575)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
-- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 798)
+- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 614)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 476)
 - /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1201)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3494)
-- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1742)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1734)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 916)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1280)
@@ -1571,11 +1386,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1054)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1006)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1767)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1759)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 554)
-- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1786)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 345)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1778)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3143)
 
 ### Dynamic command owners
@@ -1588,7 +1402,6 @@ Tool names come from literal registrations and source-owned factory definitions,
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) — `wrapper/adapter`
-- [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) — `wrapper/adapter`
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
 - [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) — `wrapper/adapter`
@@ -1604,20 +1417,14 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
 - [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/contract.mjs`](../agent/extensions/lib/utility-mcp/contract.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../agent/extensions/lib/utility-mcp/coverage.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/env.mjs`](../agent/extensions/lib/utility-mcp/env.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../agent/extensions/lib/utility-mcp/local-reference.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../agent/extensions/lib/utility-mcp/openapi.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/package.mjs`](../agent/extensions/lib/utility-mcp/package.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../agent/extensions/lib/utility-mcp/shapes.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/system-probe.mjs`](../agent/extensions/lib/utility-mcp/system-probe.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../agent/extensions/lib/utility-mcp/web-assets.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs) — `MCP`
-- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../agent/extensions/lib/utility-mcp/workflow.mjs) — `MCP`
 - [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts) — `wrapper/adapter`
 - [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) — `wrapper/adapter`
 - [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) — `wrapper/adapter`
@@ -1679,31 +1486,23 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/agent-context-tools.ts`](../agent/extensions/agent-context-tools.ts)
 - [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts)
 - [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts)
-- [`agent/extensions/bash-router.ts`](../agent/extensions/bash-router.ts)
 - [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts)
 - [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts)
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts)
-- [`agent/extensions/code-audit.ts`](../agent/extensions/code-audit.ts)
-- [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts)
-- [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts)
 - [`agent/extensions/continuation-notice.ts`](../agent/extensions/continuation-notice.ts)
 - [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts)
 - [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts)
-- [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts)
 - [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
-- [`agent/extensions/fs-organize.ts`](../agent/extensions/fs-organize.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 - [`agent/extensions/goal.ts`](../agent/extensions/goal.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
 - [`agent/extensions/health-log.ts`](../agent/extensions/health-log.ts)
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts)
-- [`agent/extensions/last-model.ts`](../agent/extensions/last-model.ts)
 - [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts)
 - [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts)
-- [`agent/extensions/ml-lab.ts`](../agent/extensions/ml-lab.ts)
 - [`agent/extensions/model-config.ts`](../agent/extensions/model-config.ts)
 - [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts)
 - [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts)
@@ -1711,22 +1510,18 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts)
 - [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts)
 - [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts)
-- [`agent/extensions/reasoning-aids.ts`](../agent/extensions/reasoning-aids.ts)
 - [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts)
 - [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts)
-- [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts)
 - [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts)
 - [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts)
 - [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts)
 - [`agent/extensions/session-hooks.ts`](../agent/extensions/session-hooks.ts)
 - [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts)
 - [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts)
-- [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts)
 - [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts)
 - [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts)
 - [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts)
 - [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts)
-- [`agent/extensions/timeout-guard.ts`](../agent/extensions/timeout-guard.ts)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts)
 - [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts)
 
@@ -1745,7 +1540,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/blender-studio.ts`](../agent/extensions/lib/blender-studio.ts)
 - [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts)
 - [`agent/extensions/lib/bulk-edit.ts`](../agent/extensions/lib/bulk-edit.ts)
-- [`agent/extensions/lib/capability-audit.ts`](../agent/extensions/lib/capability-audit.ts)
 - [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
 - [`agent/extensions/lib/capability-health.ts`](../agent/extensions/lib/capability-health.ts)
 - [`agent/extensions/lib/catalog-cache-lock.ts`](../agent/extensions/lib/catalog-cache-lock.ts)
@@ -1759,10 +1553,10 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/compact-tool-json.ts`](../agent/extensions/lib/compact-tool-json.ts)
 - [`agent/extensions/lib/compaction-policy.ts`](../agent/extensions/lib/compaction-policy.ts)
 - [`agent/extensions/lib/competence-store.ts`](../agent/extensions/lib/competence-store.ts)
+- [`agent/extensions/lib/completion-check.ts`](../agent/extensions/lib/completion-check.ts)
 - [`agent/extensions/lib/completion-gate.ts`](../agent/extensions/lib/completion-gate.ts)
 - [`agent/extensions/lib/context-anchor.ts`](../agent/extensions/lib/context-anchor.ts)
 - [`agent/extensions/lib/context-limits.ts`](../agent/extensions/lib/context-limits.ts)
-- [`agent/extensions/lib/context-profile.mjs`](../agent/extensions/lib/context-profile.mjs)
 - [`agent/extensions/lib/context-provenance.ts`](../agent/extensions/lib/context-provenance.ts)
 - [`agent/extensions/lib/continuation-notice.ts`](../agent/extensions/lib/continuation-notice.ts)
 - [`agent/extensions/lib/cost-evidence.ts`](../agent/extensions/lib/cost-evidence.ts)
@@ -1775,7 +1569,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/deliverable-ledger.ts`](../agent/extensions/lib/deliverable-ledger.ts)
 - [`agent/extensions/lib/design-direction.ts`](../agent/extensions/lib/design-direction.ts)
 - [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
-- [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts)
 - [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
 - [`agent/extensions/lib/disk-guard.ts`](../agent/extensions/lib/disk-guard.ts)
 - [`agent/extensions/lib/double.ts`](../agent/extensions/lib/double.ts)
@@ -1788,8 +1581,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/expert-doctrine.ts`](../agent/extensions/lib/expert-doctrine.ts)
 - [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts)
 - [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
-- [`agent/extensions/lib/fail-policy.ts`](../agent/extensions/lib/fail-policy.ts)
-- [`agent/extensions/lib/fs-organize.ts`](../agent/extensions/lib/fs-organize.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
@@ -1799,19 +1590,15 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/guidance-topics.ts`](../agent/extensions/lib/guidance-topics.ts)
 - [`agent/extensions/lib/harness-activity.ts`](../agent/extensions/lib/harness-activity.ts)
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts)
-- [`agent/extensions/lib/harness-invariants.ts`](../agent/extensions/lib/harness-invariants.ts)
 - [`agent/extensions/lib/harness-notice.ts`](../agent/extensions/lib/harness-notice.ts)
 - [`agent/extensions/lib/harness-orientation.ts`](../agent/extensions/lib/harness-orientation.ts)
 - [`agent/extensions/lib/health-log.ts`](../agent/extensions/lib/health-log.ts)
 - [`agent/extensions/lib/helper-usage.ts`](../agent/extensions/lib/helper-usage.ts)
-- [`agent/extensions/lib/hook-events.ts`](../agent/extensions/lib/hook-events.ts)
 - [`agent/extensions/lib/hook-ledger.ts`](../agent/extensions/lib/hook-ledger.ts)
 - [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts)
 - [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts)
 - [`agent/extensions/lib/image-compaction.ts`](../agent/extensions/lib/image-compaction.ts)
-- [`agent/extensions/lib/image-convert.ts`](../agent/extensions/lib/image-convert.ts)
 - [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts)
-- [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts)
 - [`agent/extensions/lib/image-understand.ts`](../agent/extensions/lib/image-understand.ts)
 - [`agent/extensions/lib/intent-context.ts`](../agent/extensions/lib/intent-context.ts)
 - [`agent/extensions/lib/intervention-control.ts`](../agent/extensions/lib/intervention-control.ts)
@@ -1826,7 +1613,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/local-lm.ts`](../agent/extensions/lib/local-lm.ts)
 - [`agent/extensions/lib/local-models.ts`](../agent/extensions/lib/local-models.ts)
 - [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts)
-- [`agent/extensions/lib/media-pipeline.ts`](../agent/extensions/lib/media-pipeline.ts)
 - [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
 - [`agent/extensions/lib/media-sync.ts`](../agent/extensions/lib/media-sync.ts)
 - [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts)
@@ -1834,7 +1620,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/memory-redaction.ts`](../agent/extensions/lib/memory-redaction.ts)
 - [`agent/extensions/lib/metrics-panel.ts`](../agent/extensions/lib/metrics-panel.ts)
 - [`agent/extensions/lib/mini-preprocessor.ts`](../agent/extensions/lib/mini-preprocessor.ts)
-- [`agent/extensions/lib/ml-lab.ts`](../agent/extensions/lib/ml-lab.ts)
 - [`agent/extensions/lib/model-competence.ts`](../agent/extensions/lib/model-competence.ts)
 - [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
@@ -1864,7 +1649,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts)
 - [`agent/extensions/lib/process-owner.ts`](../agent/extensions/lib/process-owner.ts)
 - [`agent/extensions/lib/project-identity.ts`](../agent/extensions/lib/project-identity.ts)
-- [`agent/extensions/lib/project-memory-consolidate.ts`](../agent/extensions/lib/project-memory-consolidate.ts)
 - [`agent/extensions/lib/project-memory-context.ts`](../agent/extensions/lib/project-memory-context.ts)
 - [`agent/extensions/lib/project-memory-embedder.ts`](../agent/extensions/lib/project-memory-embedder.ts)
 - [`agent/extensions/lib/project-memory-index.ts`](../agent/extensions/lib/project-memory-index.ts)
@@ -1878,7 +1662,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/quality-review-owner.ts`](../agent/extensions/lib/quality-review-owner.ts)
 - [`agent/extensions/lib/quality-review-signals.ts`](../agent/extensions/lib/quality-review-signals.ts)
 - [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts)
-- [`agent/extensions/lib/reasoning-aids.ts`](../agent/extensions/lib/reasoning-aids.ts)
 - [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts)
 - [`agent/extensions/lib/reminders-state.ts`](../agent/extensions/lib/reminders-state.ts)
 - [`agent/extensions/lib/render-queue.ts`](../agent/extensions/lib/render-queue.ts)
@@ -1888,7 +1671,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/retry-policy.ts`](../agent/extensions/lib/retry-policy.ts)
 - [`agent/extensions/lib/review-coordinator.ts`](../agent/extensions/lib/review-coordinator.ts)
 - [`agent/extensions/lib/reviewer-board.ts`](../agent/extensions/lib/reviewer-board.ts)
-- [`agent/extensions/lib/scene-studio.ts`](../agent/extensions/lib/scene-studio.ts)
 - [`agent/extensions/lib/scope-deliberation.ts`](../agent/extensions/lib/scope-deliberation.ts)
 - [`agent/extensions/lib/scoped-snapshots.ts`](../agent/extensions/lib/scoped-snapshots.ts)
 - [`agent/extensions/lib/self-mutation-guard.ts`](../agent/extensions/lib/self-mutation-guard.ts)
@@ -1907,7 +1689,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-signals.ts`](../agent/extensions/lib/session-signals.ts)
 - [`agent/extensions/lib/session-stop.ts`](../agent/extensions/lib/session-stop.ts)
 - [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts)
-- [`agent/extensions/lib/session-watchmaker.ts`](../agent/extensions/lib/session-watchmaker.ts)
 - [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts)
 - [`agent/extensions/lib/shot-scene.ts`](../agent/extensions/lib/shot-scene.ts)
 - [`agent/extensions/lib/skill-discovery-controller.ts`](../agent/extensions/lib/skill-discovery-controller.ts)
@@ -1921,7 +1702,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/smol-preprocessor.ts`](../agent/extensions/lib/smol-preprocessor.ts)
 - [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts)
 - [`agent/extensions/lib/specifics.ts`](../agent/extensions/lib/specifics.ts)
-- [`agent/extensions/lib/splat-studio.ts`](../agent/extensions/lib/splat-studio.ts)
 - [`agent/extensions/lib/stable-tool-order.ts`](../agent/extensions/lib/stable-tool-order.ts)
 - [`agent/extensions/lib/stall-core.ts`](../agent/extensions/lib/stall-core.ts)
 - [`agent/extensions/lib/svg-analysis.ts`](../agent/extensions/lib/svg-analysis.ts)
@@ -1930,14 +1710,11 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/svg-render.ts`](../agent/extensions/lib/svg-render.ts)
 - [`agent/extensions/lib/sys-probe.ts`](../agent/extensions/lib/sys-probe.ts)
 - [`agent/extensions/lib/task-pipelines.ts`](../agent/extensions/lib/task-pipelines.ts)
-- [`agent/extensions/lib/todo-linkage.ts`](../agent/extensions/lib/todo-linkage.ts)
 - [`agent/extensions/lib/token-budget.ts`](../agent/extensions/lib/token-budget.ts)
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts)
 - [`agent/extensions/lib/tool-schema.ts`](../agent/extensions/lib/tool-schema.ts)
 - [`agent/extensions/lib/ui-doctrine.ts`](../agent/extensions/lib/ui-doctrine.ts)
-- [`agent/extensions/lib/ui-recipes.ts`](../agent/extensions/lib/ui-recipes.ts)
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts)
-- [`agent/extensions/lib/video-ambient.ts`](../agent/extensions/lib/video-ambient.ts)
 - [`agent/extensions/lib/video-art.ts`](../agent/extensions/lib/video-art.ts)
 - [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts)
 - [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts)
@@ -1999,21 +1776,15 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/project-intelligence/viewer.mjs`](../agent/extensions/lib/project-intelligence/viewer.mjs)
 - [`agent/extensions/lib/project-intelligence/worker.mjs`](../agent/extensions/lib/project-intelligence/worker.mjs)
 - [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs)
-- [`agent/extensions/lib/utility-mcp/contract.mjs`](../agent/extensions/lib/utility-mcp/contract.mjs)
-- [`agent/extensions/lib/utility-mcp/coverage.mjs`](../agent/extensions/lib/utility-mcp/coverage.mjs)
-- [`agent/extensions/lib/utility-mcp/env.mjs`](../agent/extensions/lib/utility-mcp/env.mjs)
 - [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs)
 - [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py)
 - [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../agent/extensions/lib/utility-mcp/local-reference.mjs)
 - [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
-- [`agent/extensions/lib/utility-mcp/openapi.mjs`](../agent/extensions/lib/utility-mcp/openapi.mjs)
 - [`agent/extensions/lib/utility-mcp/package.mjs`](../agent/extensions/lib/utility-mcp/package.mjs)
 - [`agent/extensions/lib/utility-mcp/probe.py`](../agent/extensions/lib/utility-mcp/probe.py)
 - [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs)
-- [`agent/extensions/lib/utility-mcp/shapes.mjs`](../agent/extensions/lib/utility-mcp/shapes.mjs)
 - [`agent/extensions/lib/utility-mcp/web-assets.mjs`](../agent/extensions/lib/utility-mcp/web-assets.mjs)
 - [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs)
-- [`agent/extensions/lib/utility-mcp/workflow.mjs`](../agent/extensions/lib/utility-mcp/workflow.mjs)
 - [`agent/extensions/pi-background-tasks/src/core/completion-wake.ts`](../agent/extensions/pi-background-tasks/src/core/completion-wake.ts)
 - [`agent/extensions/pi-lens/context-code.mjs`](../agent/extensions/pi-lens/context-code.mjs)
 - [`agent/extensions/pi-lens/context-lsp.mjs`](../agent/extensions/pi-lens/context-lsp.mjs)
@@ -2022,7 +1793,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs`](../agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs)
 - [`agent/extensions/pi-lens/semantic-radar/rank-features.mjs`](../agent/extensions/pi-lens/semantic-radar/rank-features.mjs)
 - [`agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json`](../agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json)
-- [`agent/extensions/pi-memory/context-evidence.ts`](../agent/extensions/pi-memory/context-evidence.ts)
 - [`agent/extensions/pi-memory/context-salience.ts`](../agent/extensions/pi-memory/context-salience.ts)
 - [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts)
 - [`agent/extensions/pi-memory/mutation.ts`](../agent/extensions/pi-memory/mutation.ts)
@@ -2044,7 +1814,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/compatibility/autonomous-recovery-test.mjs`](../agent/scripts/compatibility/autonomous-recovery-test.mjs)
 - [`agent/scripts/compatibility/harness-load-test.mjs`](../agent/scripts/compatibility/harness-load-test.mjs)
 - [`agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs`](../agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs)
-- [`agent/scripts/compatibility/reasoning-aids-loader-test.mjs`](../agent/scripts/compatibility/reasoning-aids-loader-test.mjs)
 - [`agent/scripts/compatibility/retry-lifecycle-test.mjs`](../agent/scripts/compatibility/retry-lifecycle-test.mjs)
 - [`agent/scripts/compatibility/session-recovery-guidance-test.mjs`](../agent/scripts/compatibility/session-recovery-guidance-test.mjs)
 - [`agent/scripts/compatibility/skill-pack-routing-test.mjs`](../agent/scripts/compatibility/skill-pack-routing-test.mjs)
@@ -2074,7 +1843,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
 - [`agent/scripts/transaction.mjs`](../agent/scripts/transaction.mjs)
 - [`agent/scripts/ui-motion-runtime.mjs`](../agent/scripts/ui-motion-runtime.mjs)
-- [`agent/scripts/video-ambient.mjs`](../agent/scripts/video-ambient.mjs)
 - [`agent/scripts/video-browser.mjs`](../agent/scripts/video-browser.mjs)
 - [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs)
 - [`agent/scripts/wait-condition.mjs`](../agent/scripts/wait-condition.mjs)
@@ -2118,178 +1886,33 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 170 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 25 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
-- `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
-- `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
-- `algorithm-design` — [`agent/skills/algorithm-design/SKILL.md`](../agent/skills/algorithm-design/SKILL.md)
-- `animation-libraries` — [`agent/skills/animation-libraries/SKILL.md`](../agent/skills/animation-libraries/SKILL.md)
-- `anti-ai-slop` — [`agent/skills/anti-ai-slop/SKILL.md`](../agent/skills/anti-ai-slop/SKILL.md)
-- `api-design` — [`agent/skills/api-design/SKILL.md`](../agent/skills/api-design/SKILL.md)
-- `audio-processing` — [`agent/skills/audio-processing/SKILL.md`](../agent/skills/audio-processing/SKILL.md)
-- `behavioral-contracts` — [`agent/skills/behavioral-contracts/SKILL.md`](../agent/skills/behavioral-contracts/SKILL.md)
-- `blender-production` — [`agent/skills/blender-production/SKILL.md`](../agent/skills/blender-production/SKILL.md)
-- `browser-animation-engineering` — [`agent/skills/browser-animation-engineering/SKILL.md`](../agent/skills/browser-animation-engineering/SKILL.md)
-- `browser-automation` — [`agent/skills/browser-automation/SKILL.md`](../agent/skills/browser-automation/SKILL.md)
-- `browser-javascript-engineering` — [`agent/skills/browser-javascript-engineering/SKILL.md`](../agent/skills/browser-javascript-engineering/SKILL.md)
-- `browser-ml` — [`agent/skills/browser-ml/SKILL.md`](../agent/skills/browser-ml/SKILL.md)
-- `browser-task-recovery` — [`agent/skills/browser-task-recovery/SKILL.md`](../agent/skills/browser-task-recovery/SKILL.md)
-- `c-cpp-multiplatform` — [`agent/skills/c-cpp-multiplatform/SKILL.md`](../agent/skills/c-cpp-multiplatform/SKILL.md)
-- `c-systems-engineering` — [`agent/skills/c-systems-engineering/SKILL.md`](../agent/skills/c-systems-engineering/SKILL.md)
-- `cad-engineering` — [`agent/skills/cad-engineering/SKILL.md`](../agent/skills/cad-engineering/SKILL.md)
-- `cinematic-pixel-scene` — [`agent/skills/cinematic-pixel-scene/SKILL.md`](../agent/skills/cinematic-pixel-scene/SKILL.md)
-- `classical-ml-modeling` — [`agent/skills/classical-ml-modeling/SKILL.md`](../agent/skills/classical-ml-modeling/SKILL.md)
-- `cloudflare-platform-engineering` — [`agent/skills/cloudflare-platform-engineering/SKILL.md`](../agent/skills/cloudflare-platform-engineering/SKILL.md)
+- `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
+- `api-security` — [`agent/skills/api-security/SKILL.md`](../agent/skills/api-security/SKILL.md)
+- `audio` — [`agent/skills/audio/SKILL.md`](../agent/skills/audio/SKILL.md)
+- `browser` — [`agent/skills/browser/SKILL.md`](../agent/skills/browser/SKILL.md)
 - `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../agent/skills/code-first-video/SKILL.md)
-- `coding-practices` — [`agent/skills/coding-practices/SKILL.md`](../agent/skills/coding-practices/SKILL.md)
-- `color-theory` — [`agent/skills/color-theory/SKILL.md`](../agent/skills/color-theory/SKILL.md)
-- `colors` — [`agent/skills/colors/SKILL.md`](../agent/skills/colors/SKILL.md)
-- `community-promotion` — [`agent/skills/community-promotion/SKILL.md`](../agent/skills/community-promotion/SKILL.md)
-- `compiler-construction` — [`agent/skills/compiler-construction/SKILL.md`](../agent/skills/compiler-construction/SKILL.md)
-- `component-libraries` — [`agent/skills/component-libraries/SKILL.md`](../agent/skills/component-libraries/SKILL.md)
-- `concurrency-memory-models` — [`agent/skills/concurrency-memory-models/SKILL.md`](../agent/skills/concurrency-memory-models/SKILL.md)
-- `copywriting` — [`agent/skills/copywriting/SKILL.md`](../agent/skills/copywriting/SKILL.md)
-- `cpp-performance-engineering` — [`agent/skills/cpp-performance-engineering/SKILL.md`](../agent/skills/cpp-performance-engineering/SKILL.md)
-- `css-battle` — [`agent/skills/css-battle/SKILL.md`](../agent/skills/css-battle/SKILL.md)
-- `custom-svg` — [`agent/skills/custom-svg/SKILL.md`](../agent/skills/custom-svg/SKILL.md)
-- `data-analysis` — [`agent/skills/data-analysis/SKILL.md`](../agent/skills/data-analysis/SKILL.md)
-- `data-lineage-validation` — [`agent/skills/data-lineage-validation/SKILL.md`](../agent/skills/data-lineage-validation/SKILL.md)
-- `data-viz` — [`agent/skills/data-viz/SKILL.md`](../agent/skills/data-viz/SKILL.md)
-- `databases` — [`agent/skills/databases/SKILL.md`](../agent/skills/databases/SKILL.md)
-- `debugging` — [`agent/skills/debugging/SKILL.md`](../agent/skills/debugging/SKILL.md)
-- `design-slop-prevention` — [`agent/skills/design-slop-prevention/SKILL.md`](../agent/skills/design-slop-prevention/SKILL.md)
-- `design-systems` — [`agent/skills/design-systems/SKILL.md`](../agent/skills/design-systems/SKILL.md)
-- `desktop-app-dev` — [`agent/skills/desktop-app-dev/SKILL.md`](../agent/skills/desktop-app-dev/SKILL.md)
-- `desktop-ui` — [`agent/skills/desktop-ui/SKILL.md`](../agent/skills/desktop-ui/SKILL.md)
-- `distributed-systems` — [`agent/skills/distributed-systems/SKILL.md`](../agent/skills/distributed-systems/SKILL.md)
-- `dotnet-linux-engineering` — [`agent/skills/dotnet-linux-engineering/SKILL.md`](../agent/skills/dotnet-linux-engineering/SKILL.md)
-- `edge-model-deployment` — [`agent/skills/edge-model-deployment/SKILL.md`](../agent/skills/edge-model-deployment/SKILL.md)
-- `email` — [`agent/skills/email/SKILL.md`](../agent/skills/email/SKILL.md)
-- `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../agent/skills/embedded-device-engineering/SKILL.md)
-- `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../agent/skills/evidence-first-engineering/SKILL.md)
-- `file-organization` — [`agent/skills/file-organization/SKILL.md`](../agent/skills/file-organization/SKILL.md)
-- `financial-modeling` — [`agent/skills/financial-modeling/SKILL.md`](../agent/skills/financial-modeling/SKILL.md)
-- `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../agent/skills/financial-statement-analysis/SKILL.md)
-- `fonts` — [`agent/skills/fonts/SKILL.md`](../agent/skills/fonts/SKILL.md)
-- `formal-model-checking` — [`agent/skills/formal-model-checking/SKILL.md`](../agent/skills/formal-model-checking/SKILL.md)
-- `fortran-scientific-computing` — [`agent/skills/fortran-scientific-computing/SKILL.md`](../agent/skills/fortran-scientific-computing/SKILL.md)
-- `frontend-design` — [`agent/skills/frontend-design/SKILL.md`](../agent/skills/frontend-design/SKILL.md)
-- `frontend-js` — [`agent/skills/frontend-js/SKILL.md`](../agent/skills/frontend-js/SKILL.md)
-- `gaussian-splatting` — [`agent/skills/gaussian-splatting/SKILL.md`](../agent/skills/gaussian-splatting/SKILL.md)
-- `gif-animation-editing` — [`agent/skills/gif-animation-editing/SKILL.md`](../agent/skills/gif-animation-editing/SKILL.md)
+- `data-science` — [`agent/skills/data-science/SKILL.md`](../agent/skills/data-science/SKILL.md)
+- `engineering` — [`agent/skills/engineering/SKILL.md`](../agent/skills/engineering/SKILL.md)
+- `frontend` — [`agent/skills/frontend/SKILL.md`](../agent/skills/frontend/SKILL.md)
 - `git-github` — [`agent/skills/git-github/SKILL.md`](../agent/skills/git-github/SKILL.md)
-- `github-actions-workflows` — [`agent/skills/github-actions-workflows/SKILL.md`](../agent/skills/github-actions-workflows/SKILL.md)
-- `github-identity-integration` — [`agent/skills/github-identity-integration/SKILL.md`](../agent/skills/github-identity-integration/SKILL.md)
-- `github-readme-authoring` — [`agent/skills/github-readme-authoring/SKILL.md`](../agent/skills/github-readme-authoring/SKILL.md)
-- `github-release-notes` — [`agent/skills/github-release-notes/SKILL.md`](../agent/skills/github-release-notes/SKILL.md)
-- `github-repo-presentation` — [`agent/skills/github-repo-presentation/SKILL.md`](../agent/skills/github-repo-presentation/SKILL.md)
-- `go-service-engineering` — [`agent/skills/go-service-engineering/SKILL.md`](../agent/skills/go-service-engineering/SKILL.md)
-- `google-colab-training` — [`agent/skills/google-colab-training/SKILL.md`](../agent/skills/google-colab-training/SKILL.md)
-- `google-identity-integration` — [`agent/skills/google-identity-integration/SKILL.md`](../agent/skills/google-identity-integration/SKILL.md)
+- `growth-finance` — [`agent/skills/growth-finance/SKILL.md`](../agent/skills/growth-finance/SKILL.md)
 - `harness-self-maintenance` — [`agent/skills/harness-self-maintenance/SKILL.md`](../agent/skills/harness-self-maintenance/SKILL.md)
-- `hybrid-ml-systems` — [`agent/skills/hybrid-ml-systems/SKILL.md`](../agent/skills/hybrid-ml-systems/SKILL.md)
-- `image-analysis` — [`agent/skills/image-analysis/SKILL.md`](../agent/skills/image-analysis/SKILL.md)
-- `incremental-computation` — [`agent/skills/incremental-computation/SKILL.md`](../agent/skills/incremental-computation/SKILL.md)
-- `industrial-automation-control` — [`agent/skills/industrial-automation-control/SKILL.md`](../agent/skills/industrial-automation-control/SKILL.md)
-- `industrial-device-protocols` — [`agent/skills/industrial-device-protocols/SKILL.md`](../agent/skills/industrial-device-protocols/SKILL.md)
-- `inference-serving` — [`agent/skills/inference-serving/SKILL.md`](../agent/skills/inference-serving/SKILL.md)
-- `investment-risk-analysis` — [`agent/skills/investment-risk-analysis/SKILL.md`](../agent/skills/investment-risk-analysis/SKILL.md)
-- `java-cross-platform` — [`agent/skills/java-cross-platform/SKILL.md`](../agent/skills/java-cross-platform/SKILL.md)
-- `java-platform-engineering` — [`agent/skills/java-platform-engineering/SKILL.md`](../agent/skills/java-platform-engineering/SKILL.md)
-- `key-visual-art-direction` — [`agent/skills/key-visual-art-direction/SKILL.md`](../agent/skills/key-visual-art-direction/SKILL.md)
-- `libreoffice-automation` — [`agent/skills/libreoffice-automation/SKILL.md`](../agent/skills/libreoffice-automation/SKILL.md)
-- `linux` — [`agent/skills/linux/SKILL.md`](../agent/skills/linux/SKILL.md)
-- `linux-desktop-ui-ux` — [`agent/skills/linux-desktop-ui-ux/SKILL.md`](../agent/skills/linux-desktop-ui-ux/SKILL.md)
-- `linux-host-defense` — [`agent/skills/linux-host-defense/SKILL.md`](../agent/skills/linux-host-defense/SKILL.md)
-- `linux-network-engineering` — [`agent/skills/linux-network-engineering/SKILL.md`](../agent/skills/linux-network-engineering/SKILL.md)
-- `llm-dataset-preparation` — [`agent/skills/llm-dataset-preparation/SKILL.md`](../agent/skills/llm-dataset-preparation/SKILL.md)
-- `llm-fine-tuning` — [`agent/skills/llm-fine-tuning/SKILL.md`](../agent/skills/llm-fine-tuning/SKILL.md)
-- `llm-systems-engineering` — [`agent/skills/llm-systems-engineering/SKILL.md`](../agent/skills/llm-systems-engineering/SKILL.md)
-- `local-network-analysis` — [`agent/skills/local-network-analysis/SKILL.md`](../agent/skills/local-network-analysis/SKILL.md)
-- `media-in-web` — [`agent/skills/media-in-web/SKILL.md`](../agent/skills/media-in-web/SKILL.md)
-- `memory-resource-ownership` — [`agent/skills/memory-resource-ownership/SKILL.md`](../agent/skills/memory-resource-ownership/SKILL.md)
-- `ml-engineering` — [`agent/skills/ml-engineering/SKILL.md`](../agent/skills/ml-engineering/SKILL.md)
-- `mockup-to-code` — [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
-- `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../agent/skills/model-evaluation/SKILL.md)
-- `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../agent/skills/modern-frontend-frameworks/SKILL.md)
-- `motion` — [`agent/skills/motion/SKILL.md`](../agent/skills/motion/SKILL.md)
+- `linux-ops` — [`agent/skills/linux-ops/SKILL.md`](../agent/skills/linux-ops/SKILL.md)
+- `ml` — [`agent/skills/ml/SKILL.md`](../agent/skills/ml/SKILL.md)
 - `motion-approaches` — [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
-- `motion-graphics-production` — [`agent/skills/motion-graphics-production/SKILL.md`](../agent/skills/motion-graphics-production/SKILL.md)
-- `multi-developer-pipelines` — [`agent/skills/multi-developer-pipelines/SKILL.md`](../agent/skills/multi-developer-pipelines/SKILL.md)
-- `music-composition` — [`agent/skills/music-composition/SKILL.md`](../agent/skills/music-composition/SKILL.md)
-- `natural-editorial-writing` — [`agent/skills/natural-editorial-writing/SKILL.md`](../agent/skills/natural-editorial-writing/SKILL.md)
-- `network-iso-compliance` — [`agent/skills/network-iso-compliance/SKILL.md`](../agent/skills/network-iso-compliance/SKILL.md)
-- `network-traffic-analysis` — [`agent/skills/network-traffic-analysis/SKILL.md`](../agent/skills/network-traffic-analysis/SKILL.md)
-- `nlp-system-design` — [`agent/skills/nlp-system-design/SKILL.md`](../agent/skills/nlp-system-design/SKILL.md)
-- `node-runtime-engineering` — [`agent/skills/node-runtime-engineering/SKILL.md`](../agent/skills/node-runtime-engineering/SKILL.md)
-- `numerical-computing` — [`agent/skills/numerical-computing/SKILL.md`](../agent/skills/numerical-computing/SKILL.md)
-- `optimization-modeling` — [`agent/skills/optimization-modeling/SKILL.md`](../agent/skills/optimization-modeling/SKILL.md)
-- `organic-growth-engineering` — [`agent/skills/organic-growth-engineering/SKILL.md`](../agent/skills/organic-growth-engineering/SKILL.md)
-- `packet-trace-analysis` — [`agent/skills/packet-trace-analysis/SKILL.md`](../agent/skills/packet-trace-analysis/SKILL.md)
-- `performance-experiments` — [`agent/skills/performance-experiments/SKILL.md`](../agent/skills/performance-experiments/SKILL.md)
-- `php-application-engineering` — [`agent/skills/php-application-engineering/SKILL.md`](../agent/skills/php-application-engineering/SKILL.md)
-- `physical-animation-systems` — [`agent/skills/physical-animation-systems/SKILL.md`](../agent/skills/physical-animation-systems/SKILL.md)
-- `physics-modeling` — [`agent/skills/physics-modeling/SKILL.md`](../agent/skills/physics-modeling/SKILL.md)
-- `ponytail` — [`agent/skills/ponytail/SKILL.md`](../agent/skills/ponytail/SKILL.md)
-- `presentation-authoring` — [`agent/skills/presentation-authoring/SKILL.md`](../agent/skills/presentation-authoring/SKILL.md)
-- `prior-art-scouting` — [`agent/skills/prior-art-scouting/SKILL.md`](../agent/skills/prior-art-scouting/SKILL.md)
-- `procedural-animation-math` — [`agent/skills/procedural-animation-math/SKILL.md`](../agent/skills/procedural-animation-math/SKILL.md)
-- `procedural-audio` — [`agent/skills/procedural-audio/SKILL.md`](../agent/skills/procedural-audio/SKILL.md)
-- `product-ui-verification` — [`agent/skills/product-ui-verification/SKILL.md`](../agent/skills/product-ui-verification/SKILL.md)
-- `property-based-testing` — [`agent/skills/property-based-testing/SKILL.md`](../agent/skills/property-based-testing/SKILL.md)
-- `proxy-analysis` — [`agent/skills/proxy-analysis/SKILL.md`](../agent/skills/proxy-analysis/SKILL.md)
-- `proxy-operations` — [`agent/skills/proxy-operations/SKILL.md`](../agent/skills/proxy-operations/SKILL.md)
-- `python-software-engineering` — [`agent/skills/python-software-engineering/SKILL.md`](../agent/skills/python-software-engineering/SKILL.md)
-- `rag-engineering` — [`agent/skills/rag-engineering/SKILL.md`](../agent/skills/rag-engineering/SKILL.md)
-- `reinforcement-learning` — [`agent/skills/reinforcement-learning/SKILL.md`](../agent/skills/reinforcement-learning/SKILL.md)
+- `networking` — [`agent/skills/networking/SKILL.md`](../agent/skills/networking/SKILL.md)
+- `office-documents` — [`agent/skills/office-documents/SKILL.md`](../agent/skills/office-documents/SKILL.md)
 - `remotion-video` — [`agent/skills/remotion-video/SKILL.md`](../agent/skills/remotion-video/SKILL.md)
-- `research` — [`agent/skills/research/SKILL.md`](../agent/skills/research/SKILL.md)
-- `resourceful-market-strategy` — [`agent/skills/resourceful-market-strategy/SKILL.md`](../agent/skills/resourceful-market-strategy/SKILL.md)
-- `rl-decision-systems` — [`agent/skills/rl-decision-systems/SKILL.md`](../agent/skills/rl-decision-systems/SKILL.md)
-- `rust-systems-engineering` — [`agent/skills/rust-systems-engineering/SKILL.md`](../agent/skills/rust-systems-engineering/SKILL.md)
-- `scientific-paper-research` — [`agent/skills/scientific-paper-research/SKILL.md`](../agent/skills/scientific-paper-research/SKILL.md)
-- `scroll-animated-websites` — [`agent/skills/scroll-animated-websites/SKILL.md`](../agent/skills/scroll-animated-websites/SKILL.md)
-- `search-discoverability` — [`agent/skills/search-discoverability/SKILL.md`](../agent/skills/search-discoverability/SKILL.md)
+- `research-writing` — [`agent/skills/research-writing/SKILL.md`](../agent/skills/research-writing/SKILL.md)
 - `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../agent/skills/signature-experience/SKILL.md)
-- `simulation-engineering` — [`agent/skills/simulation-engineering/SKILL.md`](../agent/skills/simulation-engineering/SKILL.md)
-- `small-model-engineering` — [`agent/skills/small-model-engineering/SKILL.md`](../agent/skills/small-model-engineering/SKILL.md)
-- `software-engineering-wisdom` — [`agent/skills/software-engineering-wisdom/SKILL.md`](../agent/skills/software-engineering-wisdom/SKILL.md)
-- `sound-analysis` — [`agent/skills/sound-analysis/SKILL.md`](../agent/skills/sound-analysis/SKILL.md)
-- `spreadsheet-authoring` — [`agent/skills/spreadsheet-authoring/SKILL.md`](../agent/skills/spreadsheet-authoring/SKILL.md)
-- `sql-query-engineering` — [`agent/skills/sql-query-engineering/SKILL.md`](../agent/skills/sql-query-engineering/SKILL.md)
-- `statistical-experiments` — [`agent/skills/statistical-experiments/SKILL.md`](../agent/skills/statistical-experiments/SKILL.md)
-- `storytelling` — [`agent/skills/storytelling/SKILL.md`](../agent/skills/storytelling/SKILL.md)
-- `svg-assessment` — [`agent/skills/svg-assessment/SKILL.md`](../agent/skills/svg-assessment/SKILL.md)
-- `svg-motion-engineering` — [`agent/skills/svg-motion-engineering/SKILL.md`](../agent/skills/svg-motion-engineering/SKILL.md)
-- `systems-security` — [`agent/skills/systems-security/SKILL.md`](../agent/skills/systems-security/SKILL.md)
-- `terminal-video-editing` — [`agent/skills/terminal-video-editing/SKILL.md`](../agent/skills/terminal-video-editing/SKILL.md)
-- `threejs` — [`agent/skills/threejs/SKILL.md`](../agent/skills/threejs/SKILL.md)
-- `threejs-animation-engineering` — [`agent/skills/threejs-animation-engineering/SKILL.md`](../agent/skills/threejs-animation-engineering/SKILL.md)
-- `type-driven-design` — [`agent/skills/type-driven-design/SKILL.md`](../agent/skills/type-driven-design/SKILL.md)
-- `typescript-contract-engineering` — [`agent/skills/typescript-contract-engineering/SKILL.md`](../agent/skills/typescript-contract-engineering/SKILL.md)
-- `ubuntu-operations` — [`agent/skills/ubuntu-operations/SKILL.md`](../agent/skills/ubuntu-operations/SKILL.md)
-- `ui-antipattern-review` — [`agent/skills/ui-antipattern-review/SKILL.md`](../agent/skills/ui-antipattern-review/SKILL.md)
-- `ui-ux-principles` — [`agent/skills/ui-ux-principles/SKILL.md`](../agent/skills/ui-ux-principles/SKILL.md)
-- `vanilla-web-libs` — [`agent/skills/vanilla-web-libs/SKILL.md`](../agent/skills/vanilla-web-libs/SKILL.md)
-- `video-analysis` — [`agent/skills/video-analysis/SKILL.md`](../agent/skills/video-analysis/SKILL.md)
-- `visual-composition` — [`agent/skills/visual-composition/SKILL.md`](../agent/skills/visual-composition/SKILL.md)
-- `wasm-animation-pipelines` — [`agent/skills/wasm-animation-pipelines/SKILL.md`](../agent/skills/wasm-animation-pipelines/SKILL.md)
-- `wasm-browsers` — [`agent/skills/wasm-browsers/SKILL.md`](../agent/skills/wasm-browsers/SKILL.md)
-- `wasm-c-cpp` — [`agent/skills/wasm-c-cpp/SKILL.md`](../agent/skills/wasm-c-cpp/SKILL.md)
-- `wasm-python` — [`agent/skills/wasm-python/SKILL.md`](../agent/skills/wasm-python/SKILL.md)
-- `wasm-runtime-engineering` — [`agent/skills/wasm-runtime-engineering/SKILL.md`](../agent/skills/wasm-runtime-engineering/SKILL.md)
-- `wasm-rust` — [`agent/skills/wasm-rust/SKILL.md`](../agent/skills/wasm-rust/SKILL.md)
-- `web-component-patterns` — [`agent/skills/web-component-patterns/SKILL.md`](../agent/skills/web-component-patterns/SKILL.md)
-- `web-effects` — [`agent/skills/web-effects/SKILL.md`](../agent/skills/web-effects/SKILL.md)
-- `web-patterns` — [`agent/skills/web-patterns/SKILL.md`](../agent/skills/web-patterns/SKILL.md)
-- `web-performance` — [`agent/skills/web-performance/SKILL.md`](../agent/skills/web-performance/SKILL.md)
-- `web-security` — [`agent/skills/web-security/SKILL.md`](../agent/skills/web-security/SKILL.md)
-- `web-ui-stack-selection` — [`agent/skills/web-ui-stack-selection/SKILL.md`](../agent/skills/web-ui-stack-selection/SKILL.md)
-- `windows-on-linux-engineering` — [`agent/skills/windows-on-linux-engineering/SKILL.md`](../agent/skills/windows-on-linux-engineering/SKILL.md)
-- `winecharm` — [`agent/skills/winecharm/SKILL.md`](../agent/skills/winecharm/SKILL.md)
-- `wireless-signal-analysis` — [`agent/skills/wireless-signal-analysis/SKILL.md`](../agent/skills/wireless-signal-analysis/SKILL.md)
-- `word-document-authoring` — [`agent/skills/word-document-authoring/SKILL.md`](../agent/skills/word-document-authoring/SKILL.md)
-- `x86-assembly-engineering` — [`agent/skills/x86-assembly-engineering/SKILL.md`](../agent/skills/x86-assembly-engineering/SKILL.md)
+- `svg-images` — [`agent/skills/svg-images/SKILL.md`](../agent/skills/svg-images/SKILL.md)
+- `systems-languages` — [`agent/skills/systems-languages/SKILL.md`](../agent/skills/systems-languages/SKILL.md)
+- `ui-design` — [`agent/skills/ui-design/SKILL.md`](../agent/skills/ui-design/SKILL.md)
+- `video-editing` — [`agent/skills/video-editing/SKILL.md`](../agent/skills/video-editing/SKILL.md)
+- `wasm` — [`agent/skills/wasm/SKILL.md`](../agent/skills/wasm/SKILL.md)
+- `web-motion` — [`agent/skills/web-motion/SKILL.md`](../agent/skills/web-motion/SKILL.md)
 
 ## Migration test fixtures
 
@@ -2305,28 +1928,21 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/ANTI-SLOP-CHECKLIST.md`](ANTI-SLOP-CHECKLIST.md)
 - [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 - [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
-- [`docs/AUDIT-CHANGED-FILES.md`](AUDIT-CHANGED-FILES.md)
 - [`docs/AUTONOMOUS-ORCHESTRATION.md`](AUTONOMOUS-ORCHESTRATION.md)
 - [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 - [`docs/CODE-AUDIT.md`](CODE-AUDIT.md)
 - [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 - [`docs/COMPETENCE-CONTROL.md`](COMPETENCE-CONTROL.md)
-- [`docs/CONTEXT-AUDIT.md`](CONTEXT-AUDIT.md)
 - [`docs/CORE-OWNERSHIP.md`](CORE-OWNERSHIP.md)
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)
 - [`docs/COST-ACCOUNTING.md`](COST-ACCOUNTING.md)
 - [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
-- [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
-- [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/ENGINEERING-RELIABILITY.md`](ENGINEERING-RELIABILITY.md)
 - [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
-- [`docs/FILE-ORGANIZATION.md`](FILE-ORGANIZATION.md)
 - [`docs/GOAL.md`](GOAL.md)
-- [`docs/GUARDIAN-IMPLEMENTATION-AUDIT.md`](GUARDIAN-IMPLEMENTATION-AUDIT.md)
 - [`docs/GUARDIAN-INTELLIGENCE.md`](GUARDIAN-INTELLIGENCE.md)
 - [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
-- [`docs/INDEPENDENT-AUDIT.md`](INDEPENDENT-AUDIT.md)
 - [`docs/INFERENCE-CACHING.md`](INFERENCE-CACHING.md)
 - [`docs/INSTALL.md`](INSTALL.md)
 - [`docs/INTENT.md`](INTENT.md)
@@ -2337,22 +1953,15 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/MEDIA-PREFLIGHT.md`](MEDIA-PREFLIGHT.md)
 - [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
-- [`docs/NEEDLE-AUDIT.md`](NEEDLE-AUDIT.md)
 - [`docs/OBSERVER-BOOK.md`](OBSERVER-BOOK.md)
 - [`docs/OFFICE-AND-DELIVERABLES.md`](OFFICE-AND-DELIVERABLES.md)
-- [`docs/OPERATIONS-EVIDENCE-AUDIT.md`](OPERATIONS-EVIDENCE-AUDIT.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
 - [`docs/PATCH-MIGRATION.md`](PATCH-MIGRATION.md)
 - [`docs/PLATFORMS.md`](PLATFORMS.md)
 - [`docs/PRIOR-ART.md`](PRIOR-ART.md)
 - [`docs/PROJECT-INTELLIGENCE.md`](PROJECT-INTELLIGENCE.md)
-- [`docs/PROJECT-MEMORY-EVALUATION.md`](PROJECT-MEMORY-EVALUATION.md)
 - [`docs/PUBLISHING.md`](PUBLISHING.md)
 - [`docs/RECOVERY-AND-TESTING.md`](RECOVERY-AND-TESTING.md)
-- [`docs/RELEASE-0.17.0-VERIFICATION.md`](RELEASE-0.17.0-VERIFICATION.md)
-- [`docs/RELEASE-0.18.0-VERIFICATION.md`](RELEASE-0.18.0-VERIFICATION.md)
-- [`docs/RELEASE-0.23.8-VERIFICATION.md`](RELEASE-0.23.8-VERIFICATION.md)
-- [`docs/RESEARCH-CODE-ML.md`](RESEARCH-CODE-ML.md)
 - [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 - [`docs/SANDBOXES.md`](SANDBOXES.md)
 - [`docs/SCREENSHOTS.md`](SCREENSHOTS.md)
@@ -2360,7 +1969,6 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/SESSION-METRICS.md`](SESSION-METRICS.md)
 - [`docs/SESSION-OBSERVER.md`](SESSION-OBSERVER.md)
 - [`docs/SESSION-ORCHESTRATION.md`](SESSION-ORCHESTRATION.md)
-- [`docs/SESSION-RECOVERY-AUDIT.md`](SESSION-RECOVERY-AUDIT.md)
 - [`docs/SITE-SEO.md`](SITE-SEO.md)
 - [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 - [`docs/STRUCTURE.md`](STRUCTURE.md)
@@ -2371,10 +1979,8 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/TERMINAL-INTERFACE.md`](TERMINAL-INTERFACE.md)
 - [`docs/TESTING.md`](TESTING.md)
 - [`docs/UI-ENGINEERING.md`](UI-ENGINEERING.md)
-- [`docs/UNREAL-INTEGRATION-REVIEW.md`](UNREAL-INTEGRATION-REVIEW.md)
 - [`docs/VECTOR-MEMORY.md`](VECTOR-MEMORY.md)
 - [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
-- [`docs/WATCHMAKER.md`](WATCHMAKER.md)
 
 ## Retired source markers
 
@@ -2385,20 +1991,29 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `auto-apply-extensions.sh` — retired 2026-09-01: sole consumer of the PI_AUTOUPDATE banner trigger; removed with it (auto-update.sh also no longer runs pi update --extensions)
 - `auto-recover.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `auto-update-extensions.mjs` — retired 2026-09-01: dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/
+- `bash-router.ts` — retired 2026-10-10: annotation hook that nudged bash commands toward dedicated tools; the nudges duplicated tool descriptions and tool_search. The pure classifier stays in lib/bash-routing.ts for guidance and test detection. Do not recreate
 - `capabilities.ts` — retired 2026-09-02: user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate
+- `code-audit.ts` — retired 2026-10-10: code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate
+- `code-quality.ts` — retired 2026-10-10: code_audit/code_quality tools had 0-1 uses; the static audit now runs automatically after edits and as a step of the goal completion check (lib/completion-check.ts). Do not recreate
 - `context-composition.json` — retired 2026-08-31: orphan of deleted pi-context-router; no writer/reader since 2026-08-12
 - `context-mode` — retired 2026-09-01: user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate
+- `context-profile.ts` — retired 2026-10-10: 0 uses in 45 days of sessions; context diagnostics live in session_self. Do not recreate
+- `desktop-session.ts` — retired 2026-10-10: 1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate
 - `DOCTRINE.md` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `fs-organize.ts` — retired 2026-10-10: 0 uses; file organization is plain bash guidance in the linux-ops skill. Do not recreate
 - `governor-core.ts` — retired 2026-09-02: user direction: governor policy core removed with governor.ts (see that tombstone) — no broker remains; each extension owns its own injection gating. Do not recreate
 - `governor.ts` — retired 2026-09-02: user direction: injection-budget broker removed permanently (no backup) — governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate
 - `greybeard` — retired 2026-09-01: user direction: Greybeard standards engine removed entirely — fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate
 - `harness-config.json` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `last-model.ts` — retired 2026-10-10: merged into model-config.ts (one model bookkeeping extension). Do not recreate
 - `lichtfeld-studio.ts` — retired 2026-10-02: LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate
 - `long-prompt-offload.ts` — retired 2026-08-31: long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted
 - `loop.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `media-pipeline.ts` — retired 2026-10-10: media_pipeline tool removed; lib/media-pipeline.ts batch orchestrator had no production caller left (audio_mix and music_compose remain standalone). Do not recreate
 - `micro-agents.ts` — retired 2026-09-02: user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate
 - `micro-intelligence/coordinator.ts` — retired 2026-09-19: Removed unused duplicate caches and write-only evidence ledger; helper owners retain their production caches and metrics.
 - `minify-system-prompt.mjs` — retired 2026-09-02: user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate
+- `ml-lab.ts` — retired 2026-10-10: 0 uses; ML training is plain bash/python guidance in the ml skill. Do not recreate
 - `openrouter-provider.ts` — retired 2026-08-31: provider routing redundant with native catalogs + suffix selectors; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/provider-cmd.ts (/provider + /or-provider slash command: interactive pick, order/only/sort/list/status/clear/json, persists providers.openrouter.modelOverrides[].compat.openRouterRouting)
 - `pi-agent-extensions.ts` — retired 2026-08-12: todo duty moved to the rpiv-todo fork
 - `pi-cache-optimizer.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
@@ -2417,12 +2032,20 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `pi-ux.ts` — retired 2026-09-01: user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate
 - `ponytail` — retired 2026-08-31: pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename "pilot" deliberately NOT tombstoned — too generic a token for word-boundary matching.)
 - `pressure-journal.mjs` — retired 2026-09-01: patch module folded into retry-429-policy.mjs (single owner per file: both edited pi-ai retry.js/retryAssistantCall and that pairing broke once); moved to backups/retired-patches/
+- `project-memory-consolidate.ts` — retired 2026-10-10: project_memory consolidate action removed; lib/project-memory-consolidate.ts had no production caller left. Do not recreate
+- `reasoning-aids.ts` — retired 2026-10-10: coverage_select/decision_frontier/dependency_plan had 0 uses; reasoning is the model's job. Do not recreate
 - `repo-recon.json` — retired 2026-08-31: orphan of deleted pi-context-router; backup backups/repo-recon.json.20260831.bak
+- `research-toolkit.ts` — retired 2026-10-10: 0 uses; web_research/fetch_content/web_search cover it. Do not recreate
+- `scene-studio.ts` — retired 2026-10-10: scene_create and scene_render tools removed; lib/scene-studio.ts had no production caller left. Do not recreate
 - `session-bridge.ts` — retired 2026-08-31: cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations
 - `session-reviewer.ts` — retired 2026-08-31: review channel superseded by checkpoints; references scrubbed
+- `session-watchmaker.ts` — retired 2026-10-10: merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate
 - `subagent-tool-description.md` — retired 2026-09-02: runtime-orphaned custom tool-description file (its toolDescriptionMode: 'custom' loader retired with the tool-desc-overrides seam 2026-09-02). Delegation posture folded into the pi-subagents fork's DEFAULT_SUBAGENT_TOOL_DESCRIPTION + SUBAGENT_TOOL_PROMPT_GUIDELINES (src/extension/tool-description.ts), which now own the subagent tool prompt; file moved to backups/retired-extensions/. Do not recreate
 - `telemetry.json` — retired 2026-08-31: orphan of deleted pi-context-router; nothing wrote or read it since 2026-08-12
 - `thinking-control.ts` — retired 2026-08-31: full /effort alias + dynamic thinking control superseded by minimal extensions/thinking.ts (2026-08-31, same session); pi-native /thinking stays authoritative for native level-setting
+- `timeout-guard.ts` — retired 2026-10-10: merged into managed-bash.ts: the bash tool owner now injects the default timeout. Do not recreate
 - `tool-desc-overrides.mjs` — retired 2026-09-02: user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) — patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate
 - `tool-loader.ts` — retired 2026-09-01: user direction: default pi tool exposure restored. Its reason to exist was the oversized tool/skill surface of context-mode + greybeard + pi-ux, all retired 2026-09-01; gating 6 groups (files/intel/web/memory/delegate/bg) behind `load_tools` no longer pays for itself. Removed: load_tools + skills catalogue tools, session_start group deactivation, turn_end settle re-apply, drift warning, JIT skills/pi-docs prompt strips, deferred-skill path tracking. Consequence (accepted): every registered tool schema ships every turn (~86KB at 15 extensions) and the skills/pi-docs prompt blocks are no longer stripped. File moved to backups/retired-extensions/tool-loader.ts. Do not recreate
 - `ultimate-pi.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `video-ambient.mjs` — retired 2026-10-10: worker script of lib/video-ambient.ts, retired with it. Do not recreate
+- `video-ambient.ts` — retired 2026-10-10: video_ambient tool removed; lib/video-ambient.ts native ambient renderer had no production caller left. Do not recreate

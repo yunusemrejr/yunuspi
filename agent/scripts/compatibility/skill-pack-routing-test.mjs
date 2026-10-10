@@ -8,58 +8,58 @@ import {skillRoutes, routeSkills} from '../../extensions/lib/skill-routing.ts';
 import {createRelevantGuidance} from '../../extensions/lib/relevant-guidance.ts';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const cases=[
- ['search-discoverability','Audit SEO and structured data'],
- ['linux-host-defense','Harden the Ubuntu server firewall'],
- ['ubuntu-operations','Configure apt on Ubuntu'],
- ['web-component-patterns','Build an accessible web dialog'],
- ['web-ui-stack-selection','Choose a UI library and CDN setup'],
- ['php-application-engineering','Implement a PHP endpoint'],
- ['browser-javascript-engineering','Fix vanilla JavaScript stale updates'],
- ['python-software-engineering','Write a Python desktop tool'],
- ['node-runtime-engineering','Build a Node.js server'],
- ['c-systems-engineering','Implement this in C'],
- ['cpp-performance-engineering','Optimize this C++ renderer'],
- ['rust-systems-engineering','Review Rust FFI code'],
- ['go-service-engineering','Build a Go service'],
- ['java-platform-engineering','Fix a Java transaction'],
- ['x86-assembly-engineering','Optimize the x86-64 SIMD kernel'],
- ['fortran-scientific-computing','Review Fortran array handling'],
- ['dotnet-linux-engineering','Build a C# Linux application'],
+ ['growth-finance','Audit SEO and structured data'],
+ ['api-security','Harden the Ubuntu server firewall'],
+ ['linux-ops','Configure apt on Ubuntu'],
+ ['frontend','Build an accessible web dialog'],
+ ['frontend','Choose a UI library and CDN setup'],
+ ['systems-languages','Implement a PHP endpoint'],
+ ['frontend','Fix vanilla JavaScript stale updates'],
+ ['engineering','Write a Python desktop tool'],
+ ['engineering','Build a Node.js server'],
+ ['systems-languages','Implement this in C'],
+ ['systems-languages','Optimize this C++ renderer'],
+ ['systems-languages','Review Rust FFI code'],
+ ['systems-languages','Build a Go service'],
+ ['systems-languages','Fix a Java transaction'],
+ ['systems-languages','Optimize the x86-64 SIMD kernel'],
+ ['systems-languages','Review Fortran array handling'],
+ ['systems-languages','Build a C# Linux application'],
  ['winecharm','Install WineCharm via flatpak'],
- ['windows-on-linux-engineering','Debug exe load failure under Proton'],
- ['sql-query-engineering','Review SQL joins'],
- ['typescript-contract-engineering','Write TypeScript contracts'],
- ['wasm-runtime-engineering','Debug WebAssembly memory growth'],
- ['cloudflare-platform-engineering','Integrate Cloudflare Turnstile'],
- ['google-identity-integration','Implement signup with Google'],
- ['github-identity-integration','Implement GitHub login'],
- ['edge-model-deployment','Deploy edge ML on ESP32'],
- ['llm-systems-engineering','Optimize LLM attention kernels'],
- ['small-model-engineering','Train a small language model'],
- ['nlp-system-design','Evaluate multilingual NLP tokenization'],
- ['classical-ml-modeling','Train a tabular classifier'],
- ['hybrid-ml-systems','Evaluate a hybrid ML model ensemble'],
- ['rl-decision-systems','Train an SLM with reinforcement learning'],
- ['physics-modeling','Derive a quantum physics simulation'],
- ['resourceful-market-strategy','Design a marketing experiment'],
- ['anti-ai-slop','Review this artifact for anti-ai-slop'],
- ['natural-editorial-writing','Rewrite this article in my voice'],
- ['ui-antipattern-review','Review this generic UI design'],
- ['github-readme-authoring','Write a README for the new library'],
- ['github-repo-presentation','Add a CONTRIBUTING guide and issue templates'],
- ['github-release-notes','Write release notes for v1.2.0'],
- ['github-actions-workflows','Add a GitHub Actions workflow that runs the tests'],
+ ['linux-ops','Debug exe load failure under Proton'],
+ ['data-science','Review SQL joins'],
+ ['engineering','Write TypeScript contracts'],
+ ['wasm','Debug WebAssembly memory growth'],
+ ['api-security','Integrate Cloudflare Turnstile'],
+ ['api-security','Implement signup with Google'],
+ ['api-security','Implement GitHub login'],
+ ['ml','Deploy edge ML on ESP32'],
+ ['ml','Optimize LLM attention kernels'],
+ ['ml','Train a small language model'],
+ ['ml','Evaluate multilingual NLP tokenization'],
+ ['ml','Train a tabular classifier'],
+ ['ml','Evaluate a hybrid ML model ensemble'],
+ ['ml','Train an SLM with reinforcement learning'],
+ ['data-science','Derive a quantum physics simulation'],
+ ['growth-finance','Design a marketing experiment'],
+ ['ui-design','Review this artifact for ui-design'],
+ ['research-writing','Rewrite this article in my voice'],
+ ['ui-design','Review this generic UI design'],
+ ['git-github','Write a README for the new library'],
+ ['git-github','Add a CONTRIBUTING guide and issue templates'],
+ ['git-github','Write release notes for v1.2.0'],
+ ['git-github','Add a GitHub Actions workflow that runs the tests'],
 ];
 assert.equal(cases.length,41);
 for(const prompt of ['Inspect the user interface design and marketing security, then publish these changes to the hosting server','Review website security on a shared hosting server'])
- assert.ok(!routeSkills(prompt).some(r=>r.name==='linux-host-defense'),'generic site security/hosting does not imply Linux host administration');
+ assert.ok(!routeSkills(prompt).some(r=>r.name==='api-security'),'generic site security/hosting does not imply Linux host administration');
 for(const prompt of ['Inspect and improve the user interface and landing page','Review the website layout and screenshots'])
- assert.ok(routeSkills(prompt).some(r=>r.name==='product-ui-verification'),'parent and child share UI workflow routing');
+ assert.ok(routeSkills(prompt).some(r=>r.name==='ui-design'),'parent and child share UI workflow routing');
 for(const prompt of ['Harden the Ubuntu server firewall','Secure the server','Review host intrusion and exposed SSH ports'])
- assert.ok(routeSkills(prompt).some(r=>r.name==='linux-host-defense'),'actual host administration remains routed');
+ assert.ok(routeSkills(prompt).some(r=>r.name==='api-security'),'actual host administration remains routed');
 
-assert.ok(routeSkills('Review C++20 code').some(r=>r.name==='cpp-performance-engineering'));
-assert.ok(routeSkills('Write frontend JS').some(r=>r.name==='browser-javascript-engineering'));
+assert.ok(routeSkills('Review C++20 code').some(r=>r.name==='systems-languages'));
+assert.ok(routeSkills('Write frontend JS').some(r=>r.name==='frontend'));
 const catalog='<available_skills>'+cases.map(([name])=>`<skill><name>${name}</name><description>fixture</description><location>${root}skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
 function fixture(prompt='',systemPrompt=catalog) {
  const entries=[];const ctx={cwd:'/routing-case',sessionManager:{getBranch:()=>entries}};
@@ -85,19 +85,19 @@ for(const [name,prompt] of cases) {
 }
 for(const prompt of ['Go on','What is Python?','Write a story about where we go','Review the vitamin C label','Write JavaScript for a browser','Fix the Go button','Review this assembly of parts']) {
  const routes=routeSkills(prompt).map(r=>r.name);
- assert.ok(!routes.includes('go-service-engineering'),prompt);
- assert.ok(!routes.includes('c-systems-engineering'),prompt);
- assert.ok(!routes.includes('java-platform-engineering'),prompt);
- assert.ok(!routes.includes('x86-assembly-engineering'),prompt);
+ assert.ok(!routes.includes('systems-languages'),prompt);
+ assert.ok(!routes.includes('systems-languages'),prompt);
+ assert.ok(!routes.includes('systems-languages'),prompt);
+ assert.ok(!routes.includes('systems-languages'),prompt);
 }
 assert.equal(routeSkills('What is Python?').length,0);
-assert.ok(!routeSkills('Write an article with wit').some(r=>r.name==='wasm-runtime-engineering'));
-assert.ok(!routeSkills('Build an Arduino blinking LED').some(r=>r.name==='edge-model-deployment'));
+assert.ok(!routeSkills('Write an article with wit').some(r=>r.name==='wasm'));
+assert.ok(!routeSkills('Build an Arduino blinking LED').some(r=>r.name==='ml'));
 const noOutputScan=fixture('Fix this');
 noOutputScan.g.record({toolName:'read',input:{path:'notes.txt'},content:[{type:'text',text:'Implement PHP Google login'}],isError:false});
 assert.equal(noOutputScan.g.candidates().length,0,'document prose does not become task intent');
 const failedFile=fixture('Fix this');failedFile.g.record({toolName:'read',input:{path:'missing.php'},isError:true});assert.equal(failedFile.g.candidates().length,0,'failed read is not file evidence');
-for(const [file,name] of [['src/main.c','c-systems-engineering'],['src/a.cpp','cpp-performance-engineering'],['x.cs','dotnet-linux-engineering'],['x.f90','fortran-scientific-computing'],['a.rs','rust-systems-engineering'],['a.go','go-service-engineering'],['a.java','java-platform-engineering'],['a.py','python-software-engineering'],['a.php','php-application-engineering'],['a.tsx','typescript-contract-engineering'],['a.sql','sql-query-engineering'],['module.wat','wasm-runtime-engineering'],['wrangler.toml','cloudflare-platform-engineering']]) {
+for(const [file,name] of [['src/main.c','systems-languages'],['src/a.cpp','systems-languages'],['x.cs','systems-languages'],['x.f90','systems-languages'],['a.rs','systems-languages'],['a.go','systems-languages'],['a.java','systems-languages'],['a.py','engineering'],['a.php','systems-languages'],['a.tsx','engineering'],['a.sql','data-science'],['module.wat','wasm'],['wrangler.toml','api-security']]) {
  const {g}=fixture('Fix this');g.record({toolName:'read',input:{path:file},isError:false});
  assert.ok(g.candidates().some(h=>h.skill?.endsWith(`/${name}/SKILL.md`)),file);
 }
@@ -119,19 +119,19 @@ const core=path.join(resolveOwnedCore(),'dist/core/skills.js');
 const {loadSkillsFromDir}=await import(pathToFileURL(core));
 const loaded=loadSkillsFromDir({dir:path.join(root,'skills'),source:'user'});assert.deepEqual(loaded.diagnostics,[]);
 for(const {name} of skillRoutes)assert.ok(loaded.skills.some(s=>s.name===name),`Pi SDK loads ${name}`);
-const threejs=loaded.skills.find(s=>s.name==='threejs');assert.ok(threejs,'Pi SDK loads threejs');assert.match(threejs.description,/voxel\/low-poly/);
+const threejs=loaded.skills.find(s=>s.name==='web-motion');assert.ok(threejs,'Pi SDK loads threejs');assert.match(threejs.description,/voxel\/low-poly/);
 const voxelCatalog='<available_skills>'+loaded.skills.map(s=>`<skill><name>${s.name}</name><description>${s.description}</description><location>${s.filePath}</location></skill>`).join('')+'</available_skills>';
 const voxelEntries=[];const voxelCtx={cwd:root,sessionManager:{getBranch:()=>voxelEntries}};
 const voxelGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>voxelEntries.push({type:'custom',customType,data})});
 voxelGuidance.restore(voxelCtx);voxelGuidance.start({prompt:'Create a voxel Three.js scene with low-poly composition',systemPrompt:voxelCatalog},voxelCtx);
 assert.ok(voxelGuidance.candidates().some(h=>h.skill===threejs.filePath&&/Voxel and low-poly art/.test(h.text)),'voxel task reaches the loaded threejs section');
 for(const prompt of ['Search old emails about the license renewal','Find Thunderbird inbox messages from last year','Send the newsletter to our subscribers','Triage the support mailbox','Check mail on the IMAP server','Read my gmail inbox'])
- assert.ok(routeSkills(prompt).some(r=>r.name==='email'),`email routes: ${prompt}`);
+ assert.ok(routeSkills(prompt).some(r=>r.name==='research-writing'),`email routes: ${prompt}`);
 for(const prompt of ['Write a spring newsletter','Rewrite this article in my voice','Implement signup with Google','What is email?','Do not send email','Check the installed package version'])
- assert.ok(!routeSkills(prompt).some(r=>r.name==='email'),`email ignores: ${prompt}`);
-assert.ok(routeSkills('','snap/thunderbird/common/.thunderbird/x/prefs.js').some(r=>r.name==='email'),'thunderbird profile path routes email');
-assert.ok(routeSkills('','mail/Archive.mbox').some(r=>r.name==='email'),'mbox file routes email');
-const emailLoaded=loaded.skills.find(s=>s.name==='email');assert.ok(emailLoaded,'Pi SDK loads email');
+ assert.ok(!routeSkills(prompt).some(r=>r.name==='research-writing'),`email ignores: ${prompt}`);
+assert.ok(routeSkills('','snap/thunderbird/common/.thunderbird/x/prefs.js').some(r=>r.name==='research-writing'),'thunderbird profile path routes email');
+assert.ok(routeSkills('','mail/Archive.mbox').some(r=>r.name==='research-writing'),'mbox file routes email');
+const emailLoaded=loaded.skills.find(s=>s.name==='research-writing');assert.ok(emailLoaded,'Pi SDK loads email');
 const emailCatalog=`<available_skills><skill><name>email</name><description>${emailLoaded.description}</description><location>${emailLoaded.filePath}</location></skill></available_skills>`;
 const emailEntries=[];const emailCtx={cwd:'/email-case',sessionManager:{getBranch:()=>emailEntries}};
 const emailGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>emailEntries.push({type:'custom',customType,data})});
@@ -145,4 +145,4 @@ assert.ok(emailRef.includes('https://'),'email: primary references');
 assert.doesNotMatch(emailBody+'\n'+emailRef,/\[TODO\]|TODO:|TBD/);
 console.log(`PASS: ${cases.length} task fixtures, intent/file routing, ambiguity, priority, limits, receipts, compaction, voxel relevance and real Pi discovery (${loaded.skills.length} total skills)`);
 
-assert.ok(!routeSkills('sudo cp /etc/sudoers.d/rule ~/backup\nsetfacl: /workspace/lib/Net.cpp.o: Operation not permitted').some(r=>r.name==='cpp-performance-engineering'));
+assert.ok(!routeSkills('sudo cp /etc/sudoers.d/rule ~/backup\nsetfacl: /workspace/lib/Net.cpp.o: Operation not permitted').some(r=>r.name==='systems-languages'));

@@ -109,7 +109,7 @@ test("capability inventory is deterministic, complete, and generated from public
 			`${item.path} must resolve from the manifest entry`,
 		);
 	assert.ok(metadata.inventory.forks.length >= 5);
-	assert.ok(metadata.inventory.skills.length >= 100);
+	assert.ok(metadata.inventory.skills.length >= 20);
 	assert.deepEqual(
 		metadata.inventory.patchModules,
 		[],

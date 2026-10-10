@@ -91,7 +91,7 @@ test("pronunciation lexicon validates, orders longest-first and applies literall
 test("procedural drums follow the style arrangement, can be removed and stay deterministic", { skip: !hasNumpy }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "synth-drums-"));
   try {
-    const synth = path.join(agent, "skills/procedural-audio/scripts/synth.py");
+    const synth = path.join(agent, "skills/audio/scripts/synth.py");
     const render = (spec, out) => {
       const specPath = path.join(root, `${out}.json`);
       fs.writeFileSync(specPath, JSON.stringify(spec));
@@ -147,17 +147,12 @@ test("score audition adds band-limited square/saw, pan and stereo without changi
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("video workflow hooks fire once per session on their tools", () => {
-  for (const key of ["video-timeline-check", "video-render-review", "video-qa-review", "narration-fit", "audio-synth-balance", "timeline-compose-review"]) {
+test("video render and QA hooks fire on their tools", () => {
+  for (const key of ["video-render-review", "video-qa-review"]) {
     assert.ok(hooks.HOOK_RULES.some((rule) => rule.key === key), `${key} is registered`);
   }
-  assert.equal(hooks.matchHook("video_project", {})?.key, "video-timeline-check");
   assert.equal(hooks.matchHook("video_render", {})?.key, "video-render-review");
   assert.equal(hooks.matchHook("video_qa", {})?.key, "video-qa-review");
-  assert.equal(hooks.matchHook("narration_tts", { action: "synthesize" })?.key, "narration-fit");
-  assert.equal(hooks.matchHook("audio_synth", {})?.key, "audio-synth-balance");
-  assert.equal(hooks.matchHook("video_compose", {})?.key, "timeline-compose-review");
-  assert.equal(hooks.matchHook("audio_mix", {})?.key, "timeline-compose-review");
 });
 
 test("template wires vertical transitions, timing helpers and new primitives", () => {

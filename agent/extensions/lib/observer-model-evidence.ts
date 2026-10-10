@@ -35,7 +35,7 @@ export function observerModelEvidence(input: { models: any[]; entries: any[]; pr
     if (attempt.acceptance.status === 'failed') value.acceptanceFailures++;
     if (attempt.state === 'completed') value.completed++;
   }
-  const extraRoles = [...new Set(input.preferredRoles ?? [])].filter(role => ['swarm', 'fusion'].includes(role) && loaded.ok && loaded.config?.preferences[role]);
+  const extraRoles = [...new Set(input.preferredRoles ?? [])].filter(role => role === 'fanout' && loaded.ok && loaded.config?.preferences[role]);
   const preferred = ['subagents', ...extraRoles, 'council', 'quality_review'].map(role => ({ role, routes: loaded.ok && loaded.config
     ? preferenceEntriesFor(role, loaded.config).slice(0, 3).flatMap(entry => {
       const requested = entry.provider ? `${entry.provider}/${entry.model ?? ''}` : entry.model;

@@ -107,13 +107,9 @@ test("sourceRevision hashes files and marks live sources", async () => {
   }
 });
 
-test("creative hook rules bind the QA loop", () => {
-  assert.equal(hooks.matchHook("creative_direct", { action: "set" })?.key, "creative-direction-loop");
+test("visual review hook rule binds the QA loop", () => {
+  // creative-direction-loop and art-qa-evidence were pruned from the hook table with their tools.
   assert.equal(hooks.matchHook("visual_review", { action: "run" })?.key, "visual-review-receipt");
-  assert.equal(hooks.matchHook("ui_explore", {})?.key, "art-qa-evidence");
-  assert.equal(hooks.matchHook("motion_inspect", {})?.key, "art-qa-evidence");
-  assert.equal(hooks.matchHook("svg_inspect", {})?.key, "art-qa-evidence");
-  assert.equal(hooks.matchHook("creative_compare", {})?.key, "art-qa-evidence");
 });
 
 test("qaFolder creates a missing workspace output folder instead of failing with ENOENT", async (t) => {

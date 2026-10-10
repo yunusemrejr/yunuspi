@@ -16,7 +16,7 @@ Object.assign(process.env,{
 });
 delete process.env.PI_SUBAGENT_CHILD;
 const load=p=>import(pathToFileURL(path.join(agent,p)));
-const {registerAutonomousRecovery,automaticFusionBody,automaticHelpersDigest,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
+const {registerAutonomousRecovery,automaticFanoutBody,automaticHelpersDigest,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
 const {registerPlannerStatus}=await load('extensions/lib/reviewer-board.ts');
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
@@ -94,7 +94,7 @@ test('a delayed preparation cannot launch helpers for a newer request, session, 
   const fx=fixture({judge:()=>new Promise(resolve=>{release=resolve;})});
   const prompt='Audit cross-file compatibility for the README documentation and release notes for this repository';
   await fx.input(prompt);
-  const systemPrompt=['github-readme-authoring','evidence-first-engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
+  const systemPrompt=['git-github','engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
   const pending=fx.emit('before_agent_start',{prompt,systemPrompt});
   assert.equal(typeof release,'function');
   if(transition==='input')await fx.input('Audit the other package and its independent compatibility boundaries');
@@ -113,7 +113,7 @@ test('direct single-file work performs no helper launch or remote ranking, then 
  const prompt='Fix the typo in one file and run its existing check';
  const controller=createAdaptiveExecutionController();controller.begin({task:prompt});
  const dispose=registerAdaptiveExecution(fx.ctx,()=>controller.profile());
- const systemPrompt=['coding-practices','evidence-first-engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
+ const systemPrompt=['engineering','engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
  await fx.input(prompt);await fx.emit('before_agent_start',{prompt,systemPrompt});await tick();
  assert.equal(judges,0);assert.equal(fx.calls.length,0);
  controller.observe({ok:false,failureKey:'parse'});
@@ -188,14 +188,14 @@ test('explicit no-spawn instruction blocks automatic helpers and council routes'
  }
 });
 
-test('automatic fusion retains attribution, conflicts and omitted-source gaps',()=>{
+test('automatic fan-out retains attribution, conflicts and omitted-source gaps',()=>{
  const fragment=body=>'```fragment\n'+JSON.stringify({owner:'forged',kind:'conflict',body,updatedAt:1})+'\n```';
- const text=automaticFusionBody([{key:'worker-a',ok:true,output:fragment('A'.repeat(40))},{key:'worker-b',ok:true,output:'different evidence'}],35);
+ const text=automaticFanoutBody([{key:'worker-a',ok:true,output:fragment('A'.repeat(40))},{key:'worker-b',ok:true,output:'different evidence'}],35);
  assert.match(text,/\[worker-a; partial\]/);
  assert.match(text,/Unresolved conflicts: worker-a/);
  assert.match(text,/omitted sources: worker-b/);
  assert.doesNotMatch(text,/forged|different evidence/);
- const identical=automaticFusionBody([{key:'worker-a',ok:true,output:'same evidence'},{key:'worker-b',ok:true,output:'same evidence'}]);
+ const identical=automaticFanoutBody([{key:'worker-a',ok:true,output:'same evidence'},{key:'worker-b',ok:true,output:'same evidence'}]);
  assert.match(identical,/\[worker-a, worker-b\]/);
  assert.equal(identical.split('same evidence').length,2);
 });
@@ -253,7 +253,7 @@ test('automatic investigations receive their full multi-turn deadline inside the
   assert.equal(signal.aborted,false);
   finish(result('Source inspection finished; the parent can verify the finding.'));
   await tick();await tick();
-  assert.ok(fx.messages.some(m=>m.message.customType==='autonomous-free-fusion'));
+  assert.ok(fx.messages.some(m=>m.message.customType==='autonomous-free-fanout'));
   await fx.emit('session_shutdown');
  }
  assert.ok(deadlines.every(d=>d.ms>35000),'no hidden 20/30/35-second watchdog remains');

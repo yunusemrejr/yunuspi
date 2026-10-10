@@ -9,7 +9,6 @@ export const CORE_COMPATIBILITY_TESTS = Object.freeze([
   "hook-lifecycle-integrity-test.mjs",
   "tool-integrity-test.mjs",
   "skill-pack-routing-test.mjs",
-  "reasoning-aids-loader-test.mjs",
   "utility-mcp-loader-test.mjs",
   "session-recovery-guidance-test.mjs",
   "autonomous-recovery-test.mjs",

@@ -364,7 +364,7 @@ Production scores are record-only: measured in metrics, ledgered for cost,
 and available for comparison with deterministic outcomes. The benchmark
 helper `spanAdvisory` tests P(present) ≥ 0.80 with deterministic corroboration;
 it is not a production intervention path. Changing the shadow flag alone
-does not connect scores to Guardian, Observer or Watchmaker.
+does not connect scores to Guardian or Observer.
 
 Transport is the OpenRouter decisions endpoint (Span is a decisions model;
 chat completions refuses it): the bounded trace is the state and each
@@ -386,7 +386,7 @@ Jev/Kev decisions, each with a question builder and
 heuristic acceptance bars in one registry so call sites cannot drift
 into ad-hoc thresholds: requirement-to-evidence closure, final-answer
 claim/evidence verification, high-blast-radius tool-intent alignment,
-Observer/Watchmaker admission and focus, quality-review aspect
+Observer admission and focus, quality-review aspect
 selection (add-only: Jev may suggest aspects, never remove the
 deterministic set), memory classification/admission, delegation
 topology, recovery strategy, verification method, evidence relevance,
@@ -402,7 +402,7 @@ abstains:
   Bars are 0.7 to accept and 0.25 to reject; the live probe scored real
   interface requests 0.78–0.98 and non-visual look-alikes 0.02–0.18.
   When it says yes, `relevant-guidance` demands the embedded
-  `design-slop-prevention` skill (see
+  `ui-design` skill (see
   [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md)).
 - `scope-council-need` may veto only a heuristic yes for the change-scope
   council, and only when the request is confidently a small self-contained
@@ -522,7 +522,7 @@ cannot execute tools, edit files, or establish completion.
 ## Remote rerank — configured precision stage
 
 Project memory uses one shared refinement path for main sessions, children,
-Observer and Watchmaker: lexical/vector retrieval, local Needle ranking,
+The observer: lexical/vector retrieval, local Needle ranking,
 then a configured remote reranker before final selection. The remote stage
 preserves the local ordering on unavailable, malformed or low-value results;
 cancellation suppresses late rankings. Exact lexical matches still bypass
@@ -712,7 +712,7 @@ counted as successes.
 
 ## Audit evidence and owned core identity
 
-[Needle audit measurements](NEEDLE-AUDIT.md) record reproducible fixtures, observed
+Needle audit measurements record reproducible fixtures, observed
 failures, latency and the limits of these small evaluations. Mock judge tests
 verify contracts rather than model accuracy or paid-call savings.
 
@@ -725,4 +725,4 @@ The independent audit also removed a Jev emergency-compaction override that
 dropped unselected middle messages and clipped retained facts. The remaining
 remote audit plan had no consumer, so that call was removed as well. Normal
 compaction and explicit overflow recovery retain authoritative history without
-that unnecessary remote latency or spend. See [CONTEXT-AUDIT.md](CONTEXT-AUDIT.md).
+that unnecessary remote latency or spend. See CONTEXT-AUDIT.md.

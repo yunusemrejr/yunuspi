@@ -27,7 +27,7 @@ for (const peer of ['none', 'surviving', 'cancelled']) test(`Stop cancels automa
   jev.configureJevClient({ fetchImpl: async (_url, opts) => {
     requests++; transport = opts.signal; body = JSON.parse(opts.body); begin();
     return new Promise((resolve, reject) => {
-      respond = () => resolve({ ok: true, status: 200, json: async () => ({ answers: { skill: { type: 'choice', choice: 'evidence-first-engineering', probabilities: Object.fromEntries(Object.keys(body.questions.skill.criteria).map(name => [name, name === 'evidence-first-engineering' ? 1 : 0])) } } }) });
+      respond = () => resolve({ ok: true, status: 200, json: async () => ({ answers: { skill: { type: 'choice', choice: 'engineering', probabilities: Object.fromEntries(Object.keys(body.questions.skill.criteria).map(name => [name, name === 'engineering' ? 1 : 0])) } } }) });
       opts.signal.addEventListener('abort', () => reject(opts.signal.reason), { once: true });
     });
   }, schedule: () => ({}) });
@@ -37,7 +37,7 @@ for (const peer of ['none', 'surviving', 'cancelled']) test(`Stop cancels automa
   registerAutonomousRecovery(pi, async () => { throw Error('Unexpected delegation'); });
   const emit = async (name, event) => { for (const fn of hooks.get(name) ?? []) await fn(event, ctx); };
   const prompt = 'Audit cross-file compatibility of README documentation and release notes across independent packages';
-  const systemPrompt = ['github-readme-authoring', 'evidence-first-engineering'].map(name => `<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
+  const systemPrompt = ['git-github', 'engineering'].map(name => `<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
   await emit('input', { source: 'user', text: prompt });
   const triage = emit('before_agent_start', { prompt, systemPrompt });
   await Promise.race([started, triage.then(() => { throw Error('Automatic triage did not reach its transport'); })]);

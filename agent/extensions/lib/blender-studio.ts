@@ -31,7 +31,6 @@ export const BLENDER_RELEASE = {
   dir: "blender-5.2.2-linux-x64",
 };
 export const RENDER_ENGINES = ["EEVEE", "CYCLES", "WORKBENCH"] as const;
-export const EXPORT_FORMATS = ["glb", "gltf", "obj", "ply", "stl", "usd", "usda", "usdc", "usdz", "fbx", "abc", "blend", "dataset"] as const;
 export const IMAGE_FORMATS = ["PNG", "JPEG", "WEBP", "OPEN_EXR", "TIFF"] as const;
 
 /** Binary resolution order: explicit env, the harness-local pinned install, then PATH. */
@@ -44,7 +43,7 @@ export function blenderBinary(): string | undefined {
 
 function requireBlender(): string {
   const binary = blenderBinary();
-  if (!binary) throw new Error('Blender is not installed; run blender_setup action:"install" (downloads the pinned 5.2.2 LTS portable build once, ≈350 MB) or set YUNUSPI_BLENDER to an existing binary');
+  if (!binary) throw new Error('Blender is not installed; run blender {action:"setup", install:true} (downloads the pinned 5.2.2 LTS portable build once, ≈350 MB) or set YUNUSPI_BLENDER to an existing binary');
   return binary;
 }
 
@@ -144,7 +143,7 @@ export async function blenderStatus(signal?: AbortSignal) {
     installed: Boolean(binary), binary, version, pinned: BLENDER_RELEASE.version, home: blenderHome(),
     engines: binary ? ["EEVEE (headless, software GL)", "CYCLES (CPU)", "WORKBENCH"] : [],
     memoryBudgetMb: memoryBudgetMb(), cpuThreads: os.availableParallelism(),
-    note: binary ? "Renders run guarded, niced and memory-watched; GPU rendering is never assumed." : 'Not installed: blender_setup action:"install"',
+    note: binary ? "Renders run guarded, niced and memory-watched; GPU rendering is never assumed." : 'Not installed: blender {action:"setup", install:true}',
   };
 }
 
@@ -182,7 +181,7 @@ export async function blenderInstall(signal?: AbortSignal, progress?: Progress) 
 }
 
 export async function blenderSetup(params: any, _cwd: string, signal?: AbortSignal, progress?: Progress) {
-  return params.action === "install" ? blenderInstall(signal, progress) : blenderStatus(signal);
+  return params.install === true ? blenderInstall(signal, progress) : blenderStatus(signal);
 }
 
 // ───────────────────────────── tools ─────────────────────────────
@@ -361,35 +360,6 @@ export async function assembleSequence(outputDir: string, files: Array<{ frame: 
   return out;
 }
 
-/** Export scene geometry or capture a multi-view training dataset (transforms.json + images). */
-export async function blenderExport(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
-  const blend = await readablePath(params.blend, cwd);
-  const format = String(params.format || "glb").toLowerCase();
-  if (!(EXPORT_FORMATS as readonly string[]).includes(format)) throw new Error(`format must be one of ${EXPORT_FORMATS.join(", ")}`);
-  if (format === "dataset") {
-    const outputDir = await freshOutputDir(params.outputDir, cwd, "dataset");
-    const req = { op: "dataset", outputDir, views: params.views ?? 60, radius: params.radius, center: params.center, elevations: params.elevations, lensMm: params.lensMm, width: params.width ?? 800, height: params.height ?? 800, scale: params.scale, engine: params.engine ?? "EEVEE", samples: params.samples ?? 32, transparent: params.transparent ?? true, seed: params.seed };
-    const result = await blenderWorker(req, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.dataset, progress });
-    const { ok: _ok, op: _op, ...dataset } = result;
-    return { format, ...dataset, next: `splat_train dataset:${JSON.stringify(outputDir)} trains Gaussian splats from this dataset (nerfstudio transforms.json with init.ply seed points; Blender world axes, so splat_preview uses up:[0,0,1])` };
-  }
-  const target = await writablePath(params.path ?? path.join(".pi", "blender", `${path.basename(blend, ".blend")}.${format}`), cwd);
-  const result = await blenderWorker({ op: "export", path: target, format, objects: params.objects, applyModifiers: params.applyModifiers, animation: params.animation }, { cwd: path.dirname(blend), blend, signal, timeoutMs: DEADLINE.export, progress });
-  const webAsset = ['glb', 'gltf'].includes(format) ? await blenderWebAsset(target, signal) : undefined;
-  return { format, files: result.files, objects: result.objects, ...(webAsset ? { webAsset, next: webAsset.status === 'inspected' ? 'Use ui_recipe pattern:"three-model" to prepare the actual served Three.js path, or video_project feature:"3d". Carry the bundle hash, mobile budget warnings and required loaders into browser/pixel verification.' : 'Export completed and is preserved. Repair the reported glTF preflight gap before importing; reuse the export instead of repeating Blender.' } : {}) };
-}
-
-/** A successful export is preserved even when browser-asset preflight fails. */
-export async function blenderWebAsset(file: string, signal?: AbortSignal) {
-  try {
-    const report = await inspectGltf(file, signal);
-    return { status: 'inspected' as const, ...report, loaders: report.extensionsRequired.filter(extension => ['KHR_draco_mesh_compression', 'EXT_meshopt_compression', 'KHR_texture_basisu'].includes(extension)), verification: { structure: 'inspected', appearance: 'unverified', browser: 'unverified' } };
-  } catch (error: any) {
-    if (signal?.aborted) throw error;
-    return { status: 'blocked' as const, error: String(error?.message ?? error).slice(0, 600), verification: { structure: 'blocked', appearance: 'unverified', browser: 'unverified' }, artifactPreserved: true };
-  }
-}
-
 /** Run an agent-authored bpy script headless; the script may print `YUNUSPI_RESULT {json}` to return structured data. */
 export async function blenderRun(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const root = await workspaceRoot(cwd);
@@ -423,7 +393,7 @@ export async function blenderRun(params: any, cwd: string, signal?: AbortSignal,
   } finally { if (temporary) await fs.rm(script, { force: true }); }
 }
 
-/** Cheap mtime snapshot of the workspace's top two levels so blender_run can report what a script produced. */
+/** Cheap mtime snapshot of the workspace's top two levels so blender run can report what a script produced. */
 async function snapshot(root: string): Promise<Map<string, number>> {
   const seen = new Map<string, number>();
   async function walk(dir: string, depth: number) {

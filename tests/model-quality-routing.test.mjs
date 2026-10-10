@@ -441,7 +441,7 @@ try {
   },
  );
  check(
-  "planner uses a helper for bounded work, fusion for alternatives, swarm for independent project work",
+  "planner uses a helper for bounded work, fanout for alternatives and for independent project work",
   () => {
    assert.equal(
     planAssistance(
@@ -453,13 +453,13 @@ try {
     planAssistance(
      "Compare architectural alternatives for the API cache implementation",
     ).mode,
-    "fusion",
+    "fanout",
    );
    const p = planAssistance(
     "Implement cross-file changes in the frontend and backend with tests",
     true,
    );
-   assert.equal(p.mode, "swarm");
+   assert.equal(p.mode, "fanout");
    assert.equal(p.roles.length, 3);
   },
  );
@@ -469,7 +469,7 @@ try {
    for (const text of [
     "Fix this typo",
     "Do not delegate. Investigate the repository failure",
-    "Do not use fusion. Compare architectural alternatives for the API",
+    "Do not use fanout. Compare architectural alternatives for the API",
    ])
     assert.equal(planAssistance(text).mode, "none");
    assert.equal(
@@ -531,7 +531,7 @@ try {
   const alias = model(fresh.id, "orcarouter");
   const prefsFile = path.join(root, "llm-prefs-aliases.json");
   fs.writeFileSync(prefsFile, JSON.stringify({
-   preferences: { fusion: [
+   preferences: { fanout: [
     { provider: fresh.provider, model: fresh.id },
     { provider: alias.provider, model: alias.id },
    ] },
@@ -549,7 +549,7 @@ try {
    assert.notEqual(team[1].route, alias.fullId, "a router alias cannot serve as independent critique");
    assert.notEqual(team[1].route, fresh.fullId);
    fs.writeFileSync(prefsFile, JSON.stringify({
-    preferences: { fusion: [
+    preferences: { fanout: [
      { provider: fresh.provider, model: fresh.id },
      { provider: alias.provider, model: alias.id },
      { provider: other.provider, model: other.id },
@@ -576,7 +576,7 @@ try {
   ];
   assert.deepEqual([...unreliableRoutes(history, now)], ["orcarouter/z-ai/slow"], "harness verdicts, stale runs and sparse samples demote nothing");
   const prefsFile = path.join(root, "llm-prefs-unreliable.json");
-  fs.writeFileSync(prefsFile, JSON.stringify({ preferences: { fusion: [
+  fs.writeFileSync(prefsFile, JSON.stringify({ preferences: { fanout: [
    { provider: fresh.provider, model: fresh.id }, { provider: other.provider, model: other.id }, { provider: old.provider, model: old.id },
   ] } }));
   const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
@@ -617,7 +617,7 @@ try {
       thinking: "low",
      },
     },
-    preferences: { swarm: { models: ["paid_one"] } },
+    preferences: { fanout: { models: ["paid_one"] } },
    }),
   );
   const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
@@ -628,7 +628,7 @@ try {
     "Migrate the billing and auth subsystems end to end",
     true,
    );
-   assert.equal(p.mode, "swarm");
+   assert.equal(p.mode, "fanout");
    const strict = selectAssistanceTeam([paid], cfg, p, {
     freeOnly: true,
     requiresTools: false,

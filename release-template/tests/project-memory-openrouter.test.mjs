@@ -8,7 +8,6 @@ import { openRouterMemoryEmbedder, configuredMemoryEmbedder, embedMemory, validM
 import { openProjectStore } from '../agent/extensions/lib/project-vector-store.ts';
 import { indexEvent, indexFile, reindexEmbeddings, redactSecrets } from '../agent/extensions/lib/project-memory-index.ts';
 import { retrieveProjectMemory, retrieveFamily, retrieveFamilyViews } from '../agent/extensions/lib/project-memory-retrieve.ts';
-import { findClusters } from '../agent/extensions/lib/project-memory-consolidate.ts';
 import { recallProjectContext, PROJECT_MEMORY_RECALL } from '../agent/extensions/lib/project-memory-context.ts';
 import piVectorMemory from '../agent/extensions/pi-vector-memory.ts';
 import { createAdaptiveExecutionController, registerAdaptiveExecution } from '../agent/extensions/lib/adaptive-execution.ts';
@@ -26,6 +25,13 @@ function storeFor(t, name = 'project') {
 }
 const remember = (store, text, embedder, extra = {}) => indexEvent(store, store.projectId, { kind: 'decision', text, ...extra }, { embedder });
 const put = (store, id, embedder = 'needle3', embedding = [1, 0], text = `Historical architectural evidence for ${id}`) => store.upsertChunk({ id, project_id: store.projectId, source_type: 'decision', text, content_hash: id, embedder, embedding });
+const waitFor = async (ready, tries = 200) => {
+  for (let i = 0; i < tries; i++) {
+    if (await ready()) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error('timed out waiting for async flush');
+};
 
 test('project recall observes cancellation triggered inside the recall hook and handles late rejection', async t => {
   const owner=sessionObservability(),previous=owner[PROJECT_MEMORY_RECALL],controller=new AbortController();
@@ -301,15 +307,6 @@ test('family and role views share one query vector; exact identifiers skip embed
   assert.equal(calls, 0); assert.equal(exact.hits[0].chunk.source_type, 'bug');
 });
 
-test('consolidation uses compatible persisted vectors and never calls an embedding endpoint', async t => {
-  const { store } = storeFor(t);
-  put(store, 'a', 'needle3', [1, 0], 'Do not add another helper when this capability already exists');
-  put(store, 'b', 'other/model', [1, 0], 'Always invent a parallel architecture regardless of current abstractions');
-  let calls = 0;
-  const found = await findClusters(store, { embedder: local('needle3', async () => { calls++; throw Error(); }) });
-  assert.equal(calls, 0); assert.equal(found.clusters.length, 0);
-});
-
 test('schema v1 upgrades add metadata without rebuilding lexical state', t => {
   const { store, db } = storeFor(t); put(store, 'legacy'); store.close();
   const raw = new DatabaseSync(db); raw.exec("DROP TABLE embedding_spaces; ALTER TABLE chunks DROP COLUMN embedded_at; UPDATE meta SET value='1' WHERE key='schema_version'"); raw.close();
@@ -319,22 +316,23 @@ test('schema v1 upgrades add metadata without rebuilding lexical state', t => {
   migrated.close();
 });
 
-test('extension exposes status, controlled backfill, and session-scoped recall without service failure', async t => {
+test('extension exposes status, search and session-scoped recall without service failure', async t => {
   const { dir } = storeFor(t); const hooks = new Map(), tools = new Map();
   const pi = { on: (name, fn) => hooks.set(name, fn), registerTool: def => tools.set(def.name, def), registerCommand() {} };
   const e = remote(async () => new Response('', { status: 503 }));
   piVectorMemory(pi, { env: { PI_PROJECTS_DIR: path.join(dir, 'projects') }, embedder: e });
   const ctx = { cwd: dir, sessionManager: { getSessionId: () => 'fixture' } };
   hooks.get('session_start')({}, ctx);
-  const call = (name, params = {}) => tools.get(name).execute('t', params, undefined, undefined, ctx);
-  const r = await call('project_memory_remember', { text: 'An architecture decision survived a remote provider outage', type: 'decision' });
-  assert.equal(r.details.result.inserted, 1); assert.equal(r.details.result.embedded, 0);
-  const status = await call('project_memory_status');
-  assert.equal(status.details.health.lastError, 'http-503'); assert.equal(status.details.counts.chunks, 1);
+  const call = (action, params = {}) => tools.get('project_memory').execute('t', { action, ...params }, undefined, undefined, ctx);
+  // Memory arrives automatically: a settled prompt persists lexically while the embedding provider is down.
+  hooks.get('input')({ source: 'user', text: 'An architecture decision survived a remote provider outage' }, ctx);
+  hooks.get('agent_settled')({}, ctx);
+  await waitFor(async () => (await call('status')).details.health.lastError === 'http-503');
+  const status = await call('status');
+  assert.equal(status.details.health.lastError, 'http-503'); assert.equal(status.details.counts.chunks, 1); assert.equal(status.details.counts.embedded, 0);
   assert.match(status.content[0].text, /qwen\/qwen3-embedding-8b/); assert.match(status.content[0].text, /lexical retrieval: healthy/);
-  assert.ok((await call('project_memory_search', { query: 'architecture decision' })).details.hits.length);
+  assert.ok((await call('search', { query: 'architecture decision' })).details.hits.length);
   assert.ok((await recallProjectContext(dir, 'architecture decision survived outage', 'observer')).includes('architecture decision'));
-  const migrated = await call('project_memory_reembed', { limit: 2 }); assert.equal(migrated.details.embedded, 0);
   assert.ok(globalThis[PROJECT_MEMORY_RECALL]);
   hooks.get('session_shutdown')({}, ctx); await new Promise(r => setImmediate(r)); assert.equal(globalThis[PROJECT_MEMORY_RECALL], undefined);
 });
@@ -351,7 +349,10 @@ test('automatic recall preserves lexical history when semantic work consumes its
  const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'deadline'}};
  hooks.get('session_start')({},ctx);
  t.after(()=>hooks.get('session_shutdown')({},ctx));
- await tools.get('project_memory_remember').execute('r',{text:'Reuse architecture decisions and existing routing boundaries.',type:'decision'},undefined,undefined,ctx);
+ hooks.get('input')({source:'user',text:'Reuse architecture decisions and existing routing boundaries.'},ctx);
+ hooks.get('agent_settled')({},ctx);
+ await waitFor(async()=>(await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx)).details.counts.embedded===1);
+ await new Promise(r=>setTimeout(r,20));
  const result=await recallProjectContext(dir,'Find architecture decisions about routing boundaries','observer');
  assert.match(result,/Reuse architecture decisions/);assert.equal(queries,1);
  assert.match(await recallProjectContext(dir,'Find architecture decisions about routing boundaries','subagent'),/Reuse architecture decisions/);
@@ -385,7 +386,7 @@ test('session switches fence remote indexing and discard queued records from the
   hooks.get('agent_settled')({},ctx(a));
   for(let i=0;i<30&&!release;i++) await new Promise(r=>setImmediate(r));
   hooks.get('session_switch')({},ctx(b)); release(); await new Promise(r=>setTimeout(r,5));
-  const status = await tools.get('project_memory_status').execute('t',{},undefined,undefined,ctx(b));
+  const status = await tools.get('project_memory').execute('t',{action:'status'},undefined,undefined,ctx(b));
   assert.equal(status.details.counts.chunks,0); assert.equal(status.details.queue,0);
   hooks.get('session_shutdown')({},ctx(b)); await new Promise(r=>setImmediate(r));
 });
@@ -401,11 +402,11 @@ test('settled events persist lexical evidence before one shared embedding batch'
   for (const text of ['Remember the architectural boundary', 'Keep the regression fix in shared routing', 'Preserve earlier user corrections']) hooks.get('input')({source:'user',text},ctx);
   hooks.get('agent_settled')({},ctx);
   for (let i=0;i<30&&!release;i++) await new Promise(r=>setImmediate(r));
-  const status = await tools.get('project_memory_status').execute('status',{},undefined,undefined,ctx);
+  const status = await tools.get('project_memory').execute('status',{action:'status'},undefined,undefined,ctx);
   assert.equal(status.details.counts.chunks,3); assert.equal(status.details.counts.embedded,0);
   assert.equal(calls.length,1); assert.equal(calls[0].length,3);
   release(); await new Promise(r=>setImmediate(r));
-  const after = await tools.get('project_memory_status').execute('status',{},undefined,undefined,ctx);
+  const after = await tools.get('project_memory').execute('status',{action:'status'},undefined,undefined,ctx);
   assert.equal(after.details.counts.embedded,3);
   hooks.get('session_shutdown')({},ctx); await new Promise(r=>setImmediate(r));
 });
@@ -423,7 +424,7 @@ function adaptiveMemory(t, task = 'Correct a one-line README spelling typo') {
  hooks.get('session_start')({},ctx);
  t.after(async()=>{await hooks.get('session_shutdown')({},ctx);dispose();fs.rmSync(dir,{recursive:true,force:true});priorMode===undefined?delete process.env.PI_ADAPTIVE_EXECUTION:process.env.PI_ADAPTIVE_EXECUTION=priorMode;});
  const call=(name,args={})=>tools.get(name).execute('memory-test',args,undefined,undefined,ctx);
- const status=async()=>(await call('project_memory_status')).details;
+ const status=async()=>(await call('project_memory',{action:'status'})).details;
  const input=text=>hooks.get('input')({source:'interactive',text},ctx);
  const settled=async()=>{hooks.get('agent_settled')({},ctx);await new Promise(resolve=>setImmediate(resolve));};
  const saved=async()=>{const state=await status();return openProjectStore(path.join(projects,state.projectId,'memory.sqlite'),{projectId:state.projectId});};
@@ -459,24 +460,6 @@ test('direct automatic memory flush persists raw text, atoms, lexical recall and
  await f.hooks.get('session_shutdown')({},f.ctx);
  assert.equal(f.requests.length,0,'shutdown drains native lexical work without starting deferred inference');
  const persisted=await f.saved();try{assert.equal(persisted.counts().chunks,5);}finally{persisted.close();}
-});
-
-test('explicit backfill, remember, file index and semantic search stay effective in a direct scope',async t=>{
- const f=adaptiveMemory(t);
- f.input('Preserve the orchard transaction convention for a later architectural decision.');
- f.input('Preserve the orchard delivery boundary for later work.');await f.settled();
- assert.equal(f.requests.length,0);
- const backfill=await f.call('project_memory_reembed',{limit:2});
- assert.equal(backfill.details.embedded,2);assert.equal(backfill.details.remaining,0);assert.equal(f.requests.length,1);
- assert.equal((await f.status()).counts.chunks,2,'backfill preserves existing raw records');
- const remembered=await f.call('project_memory_remember',{text:'Explicit durable orchard decisions use the existing transaction boundary.',type:'decision'});
- assert.equal(remembered.details.result.embedded,1);
- fs.writeFileSync(path.join(f.dir,'design.md'),'# Orchard boundary\n\nThe existing transaction boundary owns delivery retries.\n');
- assert.equal((await f.call('project_memory_index_path',{path:'design.md'})).details.result.embedded,1);
- const before=f.requests.length;
- const search=await f.call('project_memory_search',{query:'Why did we keep the orchard transaction boundary?',scope:'project'});
- assert.ok(search.details.hits.length>0);assert.ok(f.requests.length>before,'deliberate semantic search remains available');
- assert.ok(f.receipts.some(receipt=>receipt.status==='completed'&&receipt.usage));
 });
 
 test('disposing a known direct profile during lexical persistence cannot start deferred semantic cleanup',async t=>{
@@ -562,11 +545,14 @@ test('slow automatic query embeddings finish after lexical fallback and serve la
  piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
  const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'slow-query'}};
  hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
- await tools.get('project_memory_remember').execute('r',{text:'The orchard service stores transactions durably.',type:'decision'},undefined,undefined,ctx);
+ hooks.get('input')({source:'user',text:'The orchard service stores transactions durably.'},ctx);
+ hooks.get('agent_settled')({},ctx);
+ await waitFor(async()=>(await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx)).details.counts.embedded===1);
+ await new Promise(r=>setTimeout(r,20));
  const start=Date.now();const first=await recallProjectContext(dir,'How should purchases survive a machine restart?','observer');
  assert.ok(Date.now()-start<1200);assert.equal(first,'','paraphrase has no lexical overlap');
  assert.equal(querySignal.aborted,false,'foreground lexical deadline must not cancel reusable semantic work');
- const background=recallProjectContext(dir,'How should purchases survive a machine restart?','watchmaker',undefined,{background:true});
+ const background=recallProjectContext(dir,'How should purchases survive a machine restart?','observer',undefined,{background:true});
  release();await new Promise(r=>setImmediate(r));
  assert.match(await recallProjectContext(dir,'How should purchases survive a machine restart?','subagent'),/orchard/);
  assert.match(await background,/orchard/,'background reviewer consumes the completed semantic result');
@@ -581,11 +567,11 @@ test('one settled hook persists the whole bounded queue and real compaction entr
  for(let i=0;i<20;i++)hooks.get('input')({source:'user',text:`Preserve orchard constraint number ${i} for later work`},ctx);
  hooks.get('agent_settled')({},ctx);
  await new Promise(r=>setTimeout(r,20));
- let status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ let status=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  assert.equal(status.details.counts.chunks,20);assert.equal(status.details.queue,0);
  hooks.get('session_compact')({compactionEntry:{summary:'The orchard persistence layer now records a durable transaction before sending the delivery receipt.'}},ctx);
  await new Promise(r=>setTimeout(r,20));
- status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ status=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  assert.equal(status.details.counts.types.session_summary,1);
 });
 
@@ -598,11 +584,11 @@ test('settled assistant reports become unverified observations and historical re
  hooks.get('input')({source:'user',text:'Please replace orchard receipts with durable transaction records.'},ctx);
  hooks.get('agent_end')({messages:[{role:'assistant',stopReason:'error',content:[{type:'text',text:'The orchard persistence changes were completed and fully tested.'}]}]},ctx);
  hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
- let status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ let status=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  assert.equal(status.details.counts.types.observation,undefined);
  hooks.get('agent_end')({messages:[{role:'assistant',stopReason:'stop',content:[{type:'text',text:'The orchard receipt regression was fixed by reusing durable transaction records.'}]}]},ctx);
  hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
- status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ status=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  assert.equal(status.details.counts.types.observation,1);
  const recalled=await recallProjectContext(dir,'Inspect the orchard receipts without changing records.','main');
  assert.match(recalled,/current user request takes precedence/);assert.match(recalled,/may already be completed or superseded/);
@@ -615,9 +601,12 @@ test('a settled turn without new events repairs prior unembedded history', async
  piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
  const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'backlog'}};
  hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
- await tools.get('project_memory_remember').execute('r',{text:'Reuse durable orchard transactions for receipt retries.',type:'decision'},undefined,undefined,ctx);
+ hooks.get('input')({source:'user',text:'Reuse durable orchard transactions for receipt retries.'},ctx);
+ hooks.get('agent_settled')({},ctx);
+ await waitFor(async()=>(await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx)).details.counts.chunks===1);
+ await new Promise(r=>setTimeout(r,20));
  online=true;hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
- const status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ const status=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  assert.equal(status.details.counts.embedded,1);assert.equal(status.details.backfill.remaining,0);
 });
 
@@ -632,7 +621,7 @@ test('shutdown fences pending local embeddings, closes the owner, and preserves 
  hooks.get('input')({source:'user',text:'Preserve the orchard receipt ownership boundary.'},ctx);
  hooks.get('agent_settled')({},ctx);await started;
  hooks.get('input')({source:'user',text:'Preserve the remaining orchard delivery requirement.'},ctx);
- const before=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ const before=await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx);
  await Promise.race([hooks.get('session_shutdown')({},ctx),new Promise((_,reject)=>setTimeout(()=>reject(Error('shutdown waited for abandoned inference')),250))]);
  assert.equal(signal.aborted,true);
  assert.equal(globalThis[PROJECT_MEMORY_RECALL],undefined);
@@ -650,7 +639,10 @@ test('project switches cancel in-flight semantic recall and never return the pre
  const a=path.join(dir,'a'),b=path.join(dir,'b');fs.mkdirSync(a);fs.mkdirSync(b);fs.writeFileSync(path.join(a,'.pi-project-id'),'a');fs.writeFileSync(path.join(b,'.pi-project-id'),'b');
  const ctx=cwd=>({cwd,sessionManager:{getSessionId:()=>cwd}});
  hooks.get('session_start')({},ctx(a));
- await tools.get('project_memory_remember').execute('r',{text:'The orchard transaction boundary belongs only to the first project.',type:'decision'},undefined,undefined,ctx(a));
+ hooks.get('input')({source:'user',text:'The orchard transaction boundary belongs only to the first project.'},ctx(a));
+ hooks.get('agent_settled')({},ctx(a));
+ await waitFor(async()=>(await tools.get('project_memory').execute('s',{action:'status'},undefined,undefined,ctx(a))).details.counts.embedded===1);
+ await new Promise(r=>setTimeout(r,20));
  const pending=recallProjectContext(a,'Recall the orchard transaction boundary','main');await started;
  hooks.get('session_switch')({},ctx(b));
  assert.equal(await pending,'');assert.equal(querySignal.aborted,true);

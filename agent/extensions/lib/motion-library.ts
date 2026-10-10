@@ -127,7 +127,7 @@ export async function motionExample(id: string, withSource: boolean) {
 function destination(example: MotionExample, name: string): { rel: string[]; then: string } {
   if(example.approach==='native')return {rel:['storyboard',`${name}.json`],then:`video_project action:"compose" storyboard:"storyboard/${name}.json"; edit its scenes and keep the project's own palette/type, then render stills and a preview`};
   if (example.file.endsWith(".html")) return { rel: ["public", "html", `${name}.html`], then: `{"component":"HtmlScene","props":{"src":"html/${name}.html","props":{}}} in video.json; the page reads window.__PROPS__ (theme and fonts arrive automatically)` };
-  if (example.approach === "blender") return { rel: ["blender", "scripts", `${name}.py`], then: `blender_run script:"blender/scripts/${name}.py" with the args its header lists, then video_shot on the saved .blend` };
+  if (example.approach === "blender") return { rel: ["blender", "scripts", `${name}.py`], then: `blender {action:"run"} script:"blender/scripts/${name}.py" with the args its header lists, then video_shot on the saved .blend` };
   return { rel: ["scripts", `${name}${path.extname(example.file)}`], then: `run it from the project: ${example.file.endsWith(".py") ? "python3" : "node"} scripts/${name}${path.extname(example.file)} (see its header for arguments)` };
 }
 

@@ -19,7 +19,7 @@ import {
   summarizeLedger,
   type LogicalChildTask,
 } from "./pi-subagents/src/runs/shared/child-ledger.ts";
-import { scanSessionAudit } from "./lib/session-audit.ts";
+
 import { collectSessionErrors, type SessionErrorsReport } from "./lib/session-errors.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
@@ -320,8 +320,7 @@ export type UsedSummary = {
     costPending: number;
   };
   hooks: { name: string; calls: number; errors: number; ms: number; changed: number; activeMs?: number; confirmWaitMs?: number; confirmDialogs?: number }[];
-  swarms: number;
-  fusions: number;
+  fanouts: number;
   recoveries: number;
   councils: { status: string; evidence: number; incomplete: boolean }[];
   reviews: { rounds: number; disposition: string; aspects: { aspect: string; outcome: string }[] } | null;
@@ -704,8 +703,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
       name: name.slice(0, 200), calls: finite(value.calls), errors: finite(value.errors), ms: finite(value.ms), changed: finite(value.changed),
       ...(finite(value.confirmWaitMs) > 0 ? { activeMs: finite(value.activeMs), confirmWaitMs: finite(value.confirmWaitMs), confirmDialogs: finite(value.confirmDialogs) } : {}),
     })),
-    swarms: metrics.swarms ?? 0,
-    fusions: metrics.fusions ?? 0,
+    fanouts: metrics.fanouts ?? 0,
     recoveries: metrics.recoveries ?? 0,
     councils,
     reviews,
@@ -887,9 +885,9 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   sections.push(harnessUsageHtml(summary.harnessUsage??collectHarnessUsage([])));
 
   const review = summary.reviews;
-  const coordinationBody = `<ul>${usedRow("Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
+  const coordinationBody = `<ul>${usedRow("Parallel agent groups (fan-outs)", plural(summary.fanouts, "group"), "verified parallel child groups")}${usedRow("Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
     `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>`;
-  sections.push(group("Coordination", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, coordinationBody));
+  sections.push(group("Coordination", `${summary.fanouts} parallel groups · ${summary.recoveries} recoveries`, coordinationBody));
   const reviewBody = `<ul>${review ? usedRow(plural(review.rounds, "round"), review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
   const expert = summary.expert;
   const expertBody = `<ul>${expert ? usedRow(plural(expert.runs, "run"), expert.verdict ?? "no verdict", `${expert.domains.join("+") || "no brief"}${expert.taskType ? ` · ${expert.taskType}` : ""}${expert.openEnded ? " · open" : ""}`, expert.verdict === "converged" ? "complete" : "info") : `<li><span class="empty">No Expert Director run recorded</span></li>`}</ul>`;
@@ -1149,9 +1147,7 @@ function sessionSkills(ctx: any) {
     "module_report",
     "symbol_search",
     "context_slice",
-    "context_score",
     "handoff_capsule",
-    "evidence_cache",
     "quality_review",
     "skill_review",
     "subagent",
@@ -1160,11 +1156,9 @@ function sessionSkills(ctx: any) {
     "browser_session",
     // Session introspection without shell archaeology: email, background,
     // project, planning and research bundles are capability usage too.
-    "agentmail_status",
-    "agentmail_send",
-    "agentmail_messages",
-    "agentmail_search",
-    "agentmail_message",
+    "agentmail",
+    "blender",
+    "project_memory",
     "bg_run",
     "bg_status",
     "bg_logs",
@@ -1175,13 +1169,11 @@ function sessionSkills(ctx: any) {
     "tool_search",
     "obs_read",
     "checkpoint_read",
-    "research_toolkit",
     "web_research",
     "fetch_content",
     "source_check",
     "lsp_diagnostics",
     "symbol_expand",
-    "syntax_check",
   ];
   return {
     view: "skills",
@@ -1885,7 +1877,7 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics by view: context (window occupancy, compaction threshold, output and safety headroom), failures (grouped tool/model/child/workflow evidence with recovery clues), efficiency (largest returned text and exact repeated request/result pairs; use it after repeated inspection or large output to pick focused tools and reuse evidence), runtime (live cwd, model, active tools, background-handle owners), messages (this session's user messages, bounded), children (per-child and per-run status, model, tokens, cache, cost, turns), skills (suggested, read and partial skill use plus capability call counts), report (full bounded report), shadow (control-plane shadow rollup, observation only). Runtime facts do not authorize new work. session_audit gives aggregates across past sessions.",
+      "Current session diagnostics by view: context (window occupancy, compaction threshold, output and safety headroom), failures (grouped tool/model/child/workflow evidence with recovery clues), efficiency (largest returned text and exact repeated request/result pairs; use it after repeated inspection or large output to pick focused tools and reuse evidence), runtime (live cwd, model, active tools, background-handle owners), messages (this session's user messages, bounded), children (per-child and per-run status, model, tokens, cache, cost, turns), skills (suggested, read and partial skill use plus capability call counts), report (full bounded report), shadow (control-plane shadow rollup, observation only). Runtime facts do not authorize new work.",
     parameters: Type.Object({
       view: Type.Optional(
         StringEnum([
@@ -1935,28 +1927,6 @@ export default function (pi: any) {
                         : p.view === "context"
                           ? facts(ctx)
                           : self(ctx);
-      return {
-        content: [{ type: "text", text: JSON.stringify(details) }],
-        details,
-      };
-    },
-  });
-  pi.registerTool({
-    name: "session_audit",
-    label: "Session audit",
-    description:
-      "Bounded offline aggregate of persisted past-session activity. The default workspace scope includes only session headers whose cwd canonicalizes exactly to the active workspace; choose scope all explicitly for a harness-wide audit. Returns tool, skill, child, workflow and failure counts only, with no prompts, paths or raw errors; no model or network calls.",
-    parameters: Type.Object({
-      scope: Type.Optional(StringEnum(["workspace", "all"])),
-    }),
-    async execute(_id: any, p: any, signal: any, _u: any, ctx: any) {
-      const details = await scanSessionAudit({
-        sessionsDir: path.join(getAgentDir(), "sessions"),
-        workspace: ctx.cwd,
-        scope: p?.scope === "all" ? "all" : "workspace",
-        maxFiles: 100,
-        signal,
-      });
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,

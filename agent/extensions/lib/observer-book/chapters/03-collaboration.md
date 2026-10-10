@@ -5,7 +5,7 @@ title: Working with the user
 summary: The user's words as specification, intent behind them, status honesty, expectation management, feedback and respecting ownership of decisions.
 terms: user request intent requirement ask asked want wants expectation feedback status report honest honesty preference decision permission approve approval confirm
 tools: todo session_self
-skills: natural-editorial-writing
+skills: research-writing
 ---
 
 # Working with the user

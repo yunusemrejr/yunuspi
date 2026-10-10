@@ -30,7 +30,7 @@ const scene = () => ({ render: { camera: 'Camera', engine: 'BLENDER_EEVEE_NEXT' 
 test('creative production is not demoted by incidental scope words or generated goal acceptance', () => {
   for (const prefix of ['', 'Just ', 'Only ']) {
     const p = classifyExecution({ task: prefix + production });
-    assert.equal(p.tier, 'complex'); assert.equal(p.assistance.mode, 'swarm');
+    assert.equal(p.tier, 'complex'); assert.equal(p.assistance.mode, 'fanout');
     const plan = planAssistance(prefix + production, true, p);
     assert.equal(plan.roles.length, 3);
     assert.match(plan.roles[0], /hero-frame proof/); assert.match(plan.roles[1], /musical arrangement/); assert.match(plan.roles[2], /periodic endpoints/);
@@ -45,7 +45,7 @@ test('creative production is not demoted by incidental scope words or generated 
 test('small pipeline budgets retain early Blender proof and the text-only vision handoff', () => {
   const selection = selectTaskPipelines({ prompt: production });
   const text = buildPipelineContext(selection, createPipelineLedger(), { scope: 'task', revision: 'fixture', maxChars: 2400 });
-  assert.ok(text.length <= 2400); assert.match(text, /Before long renders/); assert.match(text, /blender_render preview/); assert.match(text, /image_understand/);
+  assert.ok(text.length <= 2400); assert.match(text, /Before long renders/); assert.match(text, /blender render preview/); assert.match(text, /image_understand/);
 });
 
 test('large Blender evidence is bounded, pageable, precise and explicit about omitted detail', () => {
@@ -113,7 +113,7 @@ test('real Blender reports retain complete evidence and native previews respect 
   const detail = await blenderInspect({ blend, inspectionReport: inspected.inspectionReport, view: 'objects', names: ['Rain255'] }, dir);
   assert.equal(detail.reused, true); assert.equal(detail.rows[0].name, 'Rain255');
   const tools = []; registerBlender({ registerTool: tool => tools.push(tool) });
-  const render = tools.find(tool => tool.name === 'blender_render'), args = { blend, mode: 'still', width: 64, height: 36, engine: 'WORKBENCH' };
+  const render = tools.find(tool => tool.name === 'blender'), args = { action: 'render', blend, mode: 'still', width: 64, height: 36, engine: 'WORKBENCH' };
   const text = await render.execute('text-proof', args, undefined, undefined, { cwd: dir, model: { input: ['text'] } });
   assert.equal(text.details.visualReview.state, 'needs-vision'); assert.ok(!text.content.some(c => c.type === 'image'));
   assert.deepEqual(text.details.visualReview.analyze.parameters.paths, [text.details.files[0].path]);

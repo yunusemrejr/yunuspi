@@ -312,8 +312,8 @@ export function inspectAnimationClock(timeMs) {
 }
 
 // WebGL pages are captured in software: Chrome's SwiftShader rasterizes on the CPU inside the sandbox, with no
-// GPU device access, so the pixels are real while the isolation holds. This is the launch flag scene_render
-// already uses (lib/scene-studio.ts). The first pass keeps WebGL off so ordinary pages stay fast and strict.
+// GPU device access, so the pixels are real while the isolation holds. This is the launch flag the retired 3D scene renderer
+// used. The first pass keeps WebGL off so ordinary pages stay fast and strict.
 const SOFTWARE_WEBGL_ARGS = ["--use-angle=swiftshader"];
 async function renderCaptureOnce(p, output, signal) {
   const software = p.webgl === "software";

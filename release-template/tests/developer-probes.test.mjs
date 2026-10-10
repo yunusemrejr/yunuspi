@@ -8,7 +8,6 @@ const tree=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(tree,'agent'),path.resolve(tree,'..')].find(p=>fs.existsSync(path.join(p,'extensions/utility-tools.ts')));
 const load=name=>import(pathToFileURL(path.join(agent,'extensions',name)));
 const {UtilityClient}=await load('lib/utility-client.ts');
-const {matrixSummary}=await load('lib/utility-mcp/workflow.mjs');
 const {serviceProbe}=await load('lib/service-probe.ts');
 const {default:registerSys}=await load('sys-probe.ts');
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-developer-'));
@@ -17,79 +16,6 @@ const client=new UtilityClient(root);
 after(()=>{client.close();fs.rmSync(root,{recursive:true,force:true});fs.rmSync(outside,{recursive:true,force:true});});
 const write=(name,text)=>{const target=path.join(root,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,text);};
 const call=async(name,args,isError=false)=>{const result=await client.call(name,args);assert.equal(result.isError,isError,JSON.stringify(result));assert.ok(Buffer.byteLength(result.content[0].text)<=24576);return JSON.parse(result.content[0].text);};
-
-test('native workflow tool parses jobs, exact literal matrices, local references and source locations without executable values',async()=>{
- write('actions/setup/action.yml','runs: {using: composite, steps: [{run: NEVER_EXECUTE_WORKFLOW_CANARY}]}');
- write('.github/workflows/reuse.yml','on: workflow_call\njobs: {}');
- write('.github/workflows/check.yml',`on: [push, pull_request]
-env: {PRIVATE: NEVER_EXPOSE_WORKFLOW_CANARY}
-jobs:
-  build:
-    strategy:
-      matrix:
-        os: [linux, windows]
-        node: [20, 22]
-        exclude: [{os: windows, node: 20}]
-        include: [{extra: value}, {os: other, node: 24}]
-    steps:
-      - uses: ./actions/setup
-      - run: echo NEVER_EXECUTE_WORKFLOW_CANARY
-      - uses: actions/checkout@v4
-  test:
-    needs: build
-    uses: ./.github/workflows/reuse.yml
-`);
- const result=await call('workflow_probe',{path:'.github/workflows/check.yml'});
- assert.deepEqual(result.triggers,['push','pull_request']);assert.equal(result.items[0].matrix.combinations,4);
- assert.equal(result.items[0].line,5);assert.deepEqual(result.topological_order,['build','test']);
- assert.deepEqual(result.items[0].uses.map(row=>row.status),['present','not-fetched']);
- assert.equal(result.items[1].uses[0].kind,'local-workflow');assert.equal(result.items[1].uses[0].status,'present');
- assert.equal(result.findings.length,0);assert.match(result.input_hash,/^[a-f0-9]{64}$/);
- assert.doesNotMatch(JSON.stringify(result),/NEVER_|\bextra\b/);
- const page=await call('workflow_probe',{path:'.github/workflows/check.yml',limit:1,offset:1});assert.equal(page.items[0].id,'test');assert.equal(page.total,2);
-});
-
-test('workflow graph reports cycles, unknown needs and unresolved matrices without inventing evaluation',async()=>{
- write('bad.yml',`on: push
-jobs:
-  first:
-    needs: [second, absent]
-    strategy: {matrix: '\${{ fromJSON(needs.secret.outputs.value) }}'}
-    steps: [{uses: ./actions/missing}]
-  second:
-    needs: first
-    steps: [{uses: ../not-a-local-action}]
-`);
- const result=await call('workflow_probe',{path:'bad.yml'});
- assert.equal(result.topological_order,null);assert.equal(result.cycles.length,1);
- assert.ok(result.findings.some(row=>row.code==='unknown-needed-job'));
- assert.ok(result.findings.some(row=>row.code==='local-use-missing'));
- assert.equal(result.items[0].matrix.status,'unresolved');assert.equal(result.items[0].matrix.combinations,undefined);
- assert.doesNotMatch(JSON.stringify(result),/secret.outputs/);
- assert.equal(matrixSummary({include:[{os:'linux'},{os:'windows'}]}).combinations,2);
- assert.equal(matrixSummary({os:['a','b'],include:[{x:1},{x:2}]}).combinations,2);
- assert.equal(matrixSummary({os:['a'],exclude:[{os:'a'}],include:[{os:'a'}]}).combinations,1);
- assert.equal(matrixSummary({x:Array(100).fill(1),y:Array(100).fill(1)}).status,'limit');
- assert.equal(matrixSummary({x:[]}).status,'invalid');
- assert.equal(matrixSummary({}).status,'invalid');
- assert.equal(matrixSummary({x:[1],include:null}).status,'invalid');
- assert.equal(matrixSummary({x:[{name:'one'}]}).status,'unresolved');
-});
-
-test('workflow malformed YAML, alias abuse, paths and limits stay bounded; reference changes invalidate hash',async()=>{
- write('duplicate.yml','jobs:\n  first: {}\n  first: {run: NEVER_EXPOSE_PARSE_CANARY}\n');
- const invalid=await call('workflow_probe',{path:'duplicate.yml'});
- assert.equal(invalid.parsed,false);assert.equal(invalid.findings[0].line,3);assert.doesNotMatch(JSON.stringify(invalid),/CANARY/);
- write('escape.yml','jobs:\n  build:\n    steps: [{uses: ./outside}]\n');fs.symlinkSync(outside,path.join(root,'outside'));
- const escaped=await call('workflow_probe',{path:'escape.yml'});assert.equal(escaped.items[0].uses[0].status,'outside-root');
- await call('workflow_probe',{path:'outside/secret.yml'},true);
- write('huge.yml','#'+'x'.repeat(512*1024));await call('workflow_probe',{path:'huge.yml'},true);
- write('many.yml','jobs:\n'+Array.from({length:201},(_,i)=>`  job${i}: {}`).join('\n'));await call('workflow_probe',{path:'many.yml'},true);
- write('local.yml','jobs:\n  build:\n    steps: [{uses: ./future}]\n');
- const before=await call('workflow_probe',{path:'local.yml'});write('future/action.yaml','name: fixture');
- const after=await call('workflow_probe',{path:'local.yml'});assert.notEqual(before.input_hash,after.input_hash);assert.equal(after.items[0].uses[0].status,'present');
- await call('workflow_probe',{path:'local.yml',execute:true},true);
-});
 
 test('web asset tool resolves explicit HTML/CSS/manifest and hosted base paths with private queries omitted',async()=>{
  write('public/assets/Logo.svg','<svg/>');write('public/app.js','throw new Error("NEVER_EXECUTE_ASSET_CANARY")');
@@ -159,24 +85,3 @@ test('native sys tool exposes and validates both new actions',async()=>{
  const wrong=await tool.execute('fixture',{action:'host',unit:'example.service'});assert.equal(wrong.isError,true);
 });
 
-
-test('local Actions require metadata and reusable workflow references use the supported directory',async()=>{
- write('container-only/Dockerfile','FROM scratch');write('reuse.yml','on: workflow_call\njobs: {}');
- write('.github/workflows/nested/reuse.yml','on: workflow_call\njobs: {}');
- write('action-locations.yml',`jobs:
-  build:
-    steps: [{uses: ./container-only}]
-  wrong_root:
-    uses: ./reuse.yml
-  nested:
-    uses: ./.github/workflows/nested/reuse.yml
-  bound_repository:
-    uses: $/.github/workflows/reuse.yml
-`);
- const result=await call('workflow_probe',{path:'action-locations.yml'});
- assert.equal(result.items[0].uses[0].status,'missing-action-definition');
- assert.deepEqual(result.items.slice(1,3).map(job=>job.uses[0].status),['unsupported-workflow-location','unsupported-workflow-location']);
- assert.equal(result.items[3].uses[0].status,'unresolved');
- write('container-only/action.yml','runs: {using: docker, image: Dockerfile}');
- assert.equal((await call('workflow_probe',{path:'action-locations.yml'})).items[0].uses[0].status,'present');
-});

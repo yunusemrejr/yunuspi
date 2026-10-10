@@ -93,10 +93,10 @@ export const CORE_TOOLS = new Set([
   // These readers are dependencies of existing context/safety hook owners.
   'project_intel','project_tests','obs_read','checkpoint_read','todo',
   'project_report','module_report','symbol_search','context_slice',
-  // Local ML/statistical salience. The relevant-guidance owner only delivers a
-  // utility hint when the tool is already active, so leaving these to lazy
-  // discovery made their shipped guidance unreachable.
-  'context_score','handoff_capsule','evidence_cache',
+  // Context packaging. The relevant-guidance owner only delivers a utility
+  // hint when the tool is already active, so leaving this to lazy discovery
+  // made its shipped guidance unreachable.
+  'handoff_capsule',
   // The bash tool description unconditionally points at explicit background
   // work through bg_run/bg_status/bg_logs/bg_kill; keep the quartet with bg_wait.
   'bg_run','bg_status','bg_logs','bg_kill',
@@ -114,18 +114,16 @@ export const DIRECT_CORE_TOOLS = new Set([
  * (one source of truth); attached images count as the reference for an
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
-  { skill: 'mockup-to-code', tools: ['image_understand', 'image_convert', 'image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'video_ambient', 'narration_tts', 'audio_synth', 'video_generate', 'video_assets', 'media_pipeline', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'image_convert', 'blender_run'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender_run', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
-  { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
-  { skill: 'blender-production', tools: ['blender_setup', 'blender_inspect', 'blender_run', 'blender_render', 'blender_export', 'video_shot'] },
-  { skill: 'gaussian-splatting', tools: ['splat_setup', 'splat_train', 'splat_preview', 'blender_export', 'video_frames'] },
+  { skill: 'frontend', tools: ['image_understand', 'image_crop', 'render_see'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'blender'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
+  { skill: '3d-cad', tools: ['blender', 'video_shot'] },
+  { skill: '3d-cad', tools: ['blender', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
-  { skill: 'spreadsheet-authoring', tools: ['office_doc', 'deliverable_check'] },
-  { skill: 'word-document-authoring', tools: ['office_doc', 'deliverable_check'] },
-  { skill: 'presentation-authoring', tools: ['office_doc', 'deliverable_check'] },
+  { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
+  { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
+  { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
   // Sorting, renaming and cleaning up folders goes through one journaled, no-overwrite tool instead of mv and rm loops.
-  { skill: 'file-organization', tools: ['fs_organize'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
@@ -140,7 +138,7 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
   // relying on a discovery round trip the agent may not make (an SEO session ran 190 calls without one search).
   { pattern: /\b(?:search (?:the )?(?:web|internet)|(?:web|online|market|competitor|competitive|keyword|literature|user) research|research (?:the )?(?:competitors?|market|competition|alternatives|options|vendors|prices|pricing|trends|topic|history|news)|competitors?|competitive (?:analysis|landscape)|serp|look ?up (?:online|on the web)|google (?:it|this|for)|latest\b[^.\n]{0,30}\b(?:version|release|news|changes|lts)\b|find out (?:what|which|who|when|how many|whether)|what(?:'s| is) new in|state of the art|literature review)\b/i, tools: ['web_search', 'fetch_content', 'get_search_content'] },
   // Mailbox actions (not HTML email templates) stage the inbox tools.
-  { pattern: /\b(?:send|draft|write|compose|check|read|triage|answer|search|summari[sz]e|follow up (?:on|with)|reply to)\b(?![^.\n]{0,40}\b(?:templates?|html|mjml|css)\b)[^.\n]{0,60}\b(?:e-?mails?|inbox|mailbox|newsletter subscribers?)\b|\b(?:inbox|mailbox|agentmail|cold (?:e-?mail|outreach)|e-?mail (?:campaign|outreach|list))\b/i, tools: ['agentmail_status', 'agentmail_messages', 'agentmail_message', 'agentmail_search', 'agentmail_send'] },
+  { pattern: /\b(?:send|draft|write|compose|check|read|triage|answer|search|summari[sz]e|follow up (?:on|with)|reply to)\b(?![^.\n]{0,40}\b(?:templates?|html|mjml|css)\b)[^.\n]{0,60}\b(?:e-?mails?|inbox|mailbox|newsletter subscribers?)\b|\b(?:inbox|mailbox|agentmail|cold (?:e-?mail|outreach)|e-?mail (?:campaign|outreach|list))\b/i, tools: ['agentmail'] },
   { pattern: /\b(?:promote|promotion|launch (?:post|announcement|campaign)|social media|reddit|hacker news|product hunt|linkedin post|tweet|marketing (?:campaign|plan|copy))\b/i, tools: ['web_search', 'fetch_content', 'browser_session'] },
   { pattern: /\b(?:call|hit|query|poll|test|curl|fetch)\b[^.\n]{0,50}\b(?:(?:rest|graphql|http|json|public) api|api endpoints?|endpoints?|webhooks?)\b|\bhttp requests?\b|\bapi (?:call|request)s?\b/i, tools: ['http_request'] },
   { pattern: /\b(?:scrape|crawl|browse (?:to|the web)|log in(?:to)?\b|sign ?(?:in|up) (?:to|for|on)\b|fill (?:in|out) (?:the |a )?(?:form|application)|submit (?:the |a )?form|go to (?:https?:\/\/|www\.))/i, tools: ['browser_session', 'fetch_content'], acting: true },
@@ -148,19 +146,15 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
   { pattern: /\b(?:linux|systemd|cgroup|memory pressure|disk pressure|listening port|service unit)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|failure|resource|unavailable|slow)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:linux|systemd|cgroup|service unit)\b/i, tools: ['sys_probe'] },
   { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
   { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['motion_inspect', 'media_info'] },
-  { pattern: /\b(?:image editing|image generation|image converting|image understanding|edit (?:an? |the |this )?(?:image|photo)|generate (?:an? |the |this )?image|convert (?:an? |the |this )?image)\b/i, tools: ['image_generate', 'image_understand', 'image_convert'] },
+  { pattern: /\b(?:image editing|image generation|image converting|image understanding|edit (?:an? |the |this )?(?:image|photo)|generate (?:an? |the |this )?image|convert (?:an? |the |this )?image)\b/i, tools: ['image_generate', 'image_understand'] },
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
-  { pattern: /\b(?:code_quality|refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality'] },
   // Security, backend, efficiency and UI-source audits: staged for work that ships to users or handles untrusted input.
-  { pattern: /\b(?:security (?:audit|review|hardening|scan)|audit (?:the |this |my )?(?:code|backend|api|app|security)|vulnerabilit\w*|owasp|injection|xss|csrf|ssrf|hardcoded (?:secrets?|credentials?)|leaked? (?:secrets?|keys?)|(?:rest|http|graphql|backend|server-side|web) (?:api|service|server)s?|backend (?:code|engineering|service)s?|endpoints?|middleware|n\+1|slow quer(?:y|ies)|rate limit\w*|authentication|authorization|auth (?:flow|system|middleware)|login (?:flow|system)|sql (?:query|queries|injection)|performance (?:audit|review|bugs?|issues?)|coding (?:patterns?|best practices?)|anti-?patterns?|accessibility (?:audit|review|issues?))\b/i, tools: ['code_audit'] },
   { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect', 'svg_render'] },
   { pattern: /\b(?:git(?:hub)?|commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit|repository history|release (?:process|pipeline|version|tag))\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with
   // the first turn instead of waiting for a late discovery heuristic.
   { pattern: /\b(?:(?:re-?design|restyle|re-?skin|revamp|remake|moderni[sz]e|beautify|polish|improve|fix|build|create|make|update|rework)\w*\s+(?:[\w'-]+\s+){0,3}(?:user interfaces?|ui|ux|front-?end|web ?(?:app|page|site)s?|landing pages?|websites?|dashboards?|layouts?|css|themes?|mascots?|animations?|visuals?)|(?:user interface|ui|ux|front-?end|visual) (?:re-?design|overhaul|polish|revamp|refresh))\b/i, tools: ['browser_session', 'render_see', 'ui_explore', 'visual_review', 'image_understand', 'creative_direct'] },
-  { pattern: /\b(?:desktop (?:app|application|gui|window)s?|electron app|gtk|pyqt|pyside|qt (?:app|widget|window)s?|tkinter|wxpython|x11 (?:app|window)s?|gui (?:app|application|test)s?)\b/i, tools: ['desktop_session'] },
-  { pattern: /\b(?:copywriting|(?:landing|marketing|sales|product) (?:page )?copy|blog post|newsletter|press release|release notes|proofread|rewrite (?:the |this )?(?:text|copy|prose|docs?)|readme|documentation)\b/i, tools: ['code_quality'] },
 ];
 const WEB_TARGET = /\b(?:websites?|web ?pages?|landing pages?|home ?pages?|sites?|pages?|html|css|tailwind|react|vue|svelte|components?|ui|front-?end|layout|app screens?)\b/i;
 const IMAGE_ASK = /\b(?:this|these|attached|like|match\w*|same|similar|based on|from|recreate|replicate|clone|turn|convert|build|make|implement|copy)\b/i;
@@ -186,7 +180,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
   for (const bundle of INTENT_BUNDLES) {
     const route = skillRoutes.find(candidate => candidate.name === bundle.skill);
     const routed = !!route && segments.some(part => route.intent.test(route.pathIntent ? part : part.replace(/(?:\S*\/)+\S*/g, ' ')));
-    const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
+    const pictured = bundle.skill === 'frontend' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
   for (const bundle of DIRECT_BUNDLES) if ((!bundle.tools.includes('seo_toolkit') || seoTaskIntent(text).relevant) && (bundle.acting ? clauses : segments).some(part => bundle.pattern.test(part))) for (const name of bundle.tools) if (name !== 'git_info' || !pipelineGitExcluded(text)) out.add(name);
@@ -195,9 +189,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
   for (const part of clauses) {
     if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(part)) out.add('music_compose');
     if (/\b(?:mix|denoise|time[- ]stretch)\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(part)) out.add('audio_mix');
-    if (/\b(?:trim|normalize)\b[^\n]{0,60}\b(?:audio|sound|music)\b/i.test(part)) out.add('media_edit');
     if (/\b(?:create|make|generate|synthesize)\b[^\n]{0,60}\b(?:sound effects?|sfx)\b/i.test(part)) out.add('audio_synth');
-    if (/\b(?:soundtrack|ducking|voice and music)\b|\bmix\b[^\n]{0,80}\b(?:master|normaliz|video)\w*\b|\b(?:music|audio)\b[^\n]{0,80}\b(?:pipeline|workflow)\b/i.test(part)) out.add('media_pipeline');
   }
   const pipeline = selectTaskPipelines({ prompt: !adaptiveExecutionEnabled() ? '' : text });
   for (const name of automaticPipelineTools(pipeline, { prompt: text })) out.add(name);

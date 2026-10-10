@@ -12,8 +12,6 @@ const agentRoot = [path.join(root, "agent"), path.resolve(root, "..")].find(cand
 assert.ok(agentRoot, "design studio ships with the distribution");
 const studio = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/design-studio.ts")));
 const analysis = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-analysis.ts")));
-const synth = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-synth.ts")));
-const register = (await import(pathToFileURL(path.join(agentRoot, "extensions/design-studio.ts")))).default;
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "design-studio-"));
 process.on("exit", () => fs.rmSync(work, { recursive: true, force: true }));
@@ -101,9 +99,6 @@ function landing({ shift = 0, cta = INDIGO, heroImage = true } = {}) {
 }
 const write = async (name, img) => { fs.writeFileSync(path.join(work, name), await studio.encodeImage(img, "png")); return name; };
 const mock = await write("mock.png", landing());
-await write("build.png", landing({ shift: 40, cta: [220, 38, 38], heroImage: false }));
-let analyzed;
-const analyze = async () => analyzed ??= await studio.imageAnalyze({ path: mock }, work);
 
 test("images are recognized by content, never by name, and vector input is redirected", () => {
   const png = fs.readFileSync(path.join(work, mock));
@@ -138,47 +133,20 @@ test("device pixel ratio follows common export widths unless given", () => {
   assert.deepEqual(studio.inferDpr(2880, 9000, 1), { dpr: 1, assumed: false, reason: "given" });
 });
 
-test("image_analyze maps bands, components, palette roles and a type scale", async () => {
-  const result = await analyze();
-  const map = JSON.parse(fs.readFileSync(path.join(work, result.files.map), "utf8"));
-  assert.equal(map.format, "yunuspi-design-map-v1");
-  assert.deepEqual(map.sections.map(s => s.role), ["navigation", "hero", "feature-grid", "call-to-action", "spacer", "footer"]);
-  const role = name => map.palette.find(color => color.role === name)?.hex;
-  assert.equal(role("background"), "#ffffff");
-  assert.equal(role("primary"), "#4f46e5");
-  assert.equal(role("surface"), "#f5f3ff");
-  assert.equal(role("surface-2"), "#f8fafc");
-  assert.equal(role("dark-surface"), "#0f172a");
-  assert.equal(role("heading"), "#111827");
-  assert.equal(role("text"), "#4b5563");
-  const cards = map.components.find(group => group.role === "card");
-  assert.equal(cards.count, 3); assert.equal(cards.fill, "#f8fafc");
-  assert.ok(Math.abs(cards.width - 380) <= 4 && Math.abs(cards.height - 360) <= 4);
-  assert.match(cards.children, /icon/); assert.match(cards.children, /text/);
-  assert.ok(map.blocks.filter(block => block.role === "button").length >= 4, "nav, hero and CTA buttons");
-  assert.equal(map.blocks.filter(block => block.kind === "image").length, 1, "one photograph");
-  assert.equal(result.assets.raster.length, 1); assert.equal(result.assets.icons.length, 3);
-  const body = map.typography.find(level => level.name === "body");
-  assert.ok(body && Math.abs(body.fontSize - 16) <= 2, `body ≈ 16px, got ${body?.fontSize}`);
-  assert.ok(Math.abs(Math.max(...map.typography.map(level => level.fontSize)) - 56) <= 5, "display ≈ 56px");
-  assert.equal(map.layout.columns.find(column => column.section === "s3")?.count, 3);
-  const tokens = fs.readFileSync(path.join(work, result.files.tokens), "utf8");
-  assert.match(tokens, /--color-primary: #4f46e5;/); assert.match(tokens, /--font-size-body: 1[5-7]px;/); assert.match(tokens, /--container: \d+px;/);
-  assert.ok(fs.statSync(path.join(work, result.files.overlay)).size > 1000);
-  assert.equal(fs.readFileSync(path.join(work, ".pi/design/.gitignore"), "utf8"), "*\n", "scratch artifacts stay out of git");
-  assert.ok(JSON.stringify(result).length < 12_000, "tool result stays compact; details live in the map");
-});
-
-test("image_crop cuts mapped assets, keys backgrounds with de-fringing and picks formats", async () => {
-  const result = await analyze();
-  const cut = await studio.imageCrop({ map: result.files.map, kinds: ["image", "icon"] }, work);
+test("image_crop cuts mapped blocks and regions, keys backgrounds with de-fringing and picks formats", async () => {
+  // A hand-written design map: the analyzer that wrote maps is retired, so the map
+  // input is exercised directly with the boxes the synthetic landing page places.
+  const map = { format: studio.MAP_FORMAT, analysis: { scale: 1 }, source: { path: mock, dpr: 1 }, blocks: [
+    { id: "b1", kind: "image", x: 780, y: 150, width: 540, height: 480 },
+    { id: "b2", kind: "icon", x: 150, y: 910, width: 52, height: 52 },
+  ] };
+  fs.writeFileSync(path.join(work, "design-map.json"), JSON.stringify(map));
+  const cut = await studio.imageCrop({ map: "design-map.json", kinds: ["image", "icon"] }, work);
   const photoAsset = cut.assets.find(asset => asset.kind === "image");
   assert.equal(photoAsset.format, "webp");
   assert.ok(Math.abs(photoAsset.css.width - 540) <= 8 && Math.abs(photoAsset.css.height - 480) <= 8, JSON.stringify(photoAsset.css));
-  assert.equal(cut.assets.filter(asset => asset.kind === "icon").length, 3);
-  const map = JSON.parse(fs.readFileSync(path.join(work, result.files.map), "utf8"));
-  const icon = map.blocks.find(block => block.kind === "icon").id;
-  const keyed = await studio.imageCrop({ map: result.files.map, blocks: [icon], key: "auto", trim: true, format: "png" }, work);
+  assert.equal(cut.assets.filter(asset => asset.kind === "icon").length, 1);
+  const keyed = await studio.imageCrop({ map: "design-map.json", blocks: ["b2"], key: "auto", trim: true, format: "png" }, work);
   const asset = keyed.assets[0];
   assert.equal(asset.alpha, true); assert.equal(asset.background, "#f8fafc");
   const decoded = await studio.decodeImage(fs.readFileSync(path.join(work, asset.file)));
@@ -202,21 +170,6 @@ test("image_crop serves every region from one decode without cross-talk", async 
   assertSameBytes(Buffer.from(a.data), Buffer.from(b.data), "identical keyed regions decode identically: no target mutates the shared decode");
 });
 
-test("image_trace vectorizes flat marks faithfully and flags photographs", async () => {
-  const result = await analyze();
-  const map = JSON.parse(fs.readFileSync(path.join(work, result.files.map), "utf8"));
-  const icon = map.blocks.find(block => block.kind === "icon").id;
-  const traced = await studio.imageTrace({ map: result.files.map, block: icon, colors: 2 }, work);
-  assert.equal(traced.verdict, "good"); assert.ok(traced.fidelity >= 0.95); assert.ok(traced.posterizationError < 4);
-  const svg = fs.readFileSync(path.join(work, traced.svg), "utf8");
-  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 \d+ \d+" width="\d+" height="\d+">/);
-  assert.match(svg, /<path fill="#1[67]a3[45]b"/); assert.match(svg, /\dC\d/, "curves, not only polygon edges");
-  assert.doesNotMatch(svg, /<script|href=/);
-  const photoBlock = map.blocks.find(block => block.kind === "image").id;
-  const poor = await studio.imageTrace({ map: result.files.map, block: photoBlock, colors: 4 }, work);
-  assert.match(poor.verdict, /^poor/);
-});
-
 test("anti-aliased edges of dark text do not leak into a saturated fill", () => {
   const img = canvas(160, 60, [255, 255, 255]);
   circle(img, 30, 30, 20, INDIGO);
@@ -229,39 +182,7 @@ test("anti-aliased edges of dark text do not leak into a saturated fill", () => 
   assert.equal(indigo.paths, 1, "the circle alone");
 });
 
-test("visual_diff finds spacing drift, recolored bands, removed images and new colors", async () => {
-  const result = await analyze();
-  const diff = await studio.visualDiff({ map: result.files.map, candidate: "build.png" }, work, undefined, undefined);
-  assert.notEqual(diff.verdict, "close");
-  assert.ok(diff.shifts.some(shift => /^s3 .* 40px lower/.test(shift)), diff.shifts.join("; "));
-  assert.ok(diff.extraColors.some(color => color.startsWith("#dc2626")));
-  assert.ok(diff.regions.some(region => region.referenceBlocks?.some(block => / image$/.test(block))), "the missing hero image is named");
-  assert.ok(diff.worstSections[0].startsWith("s4"), "the recolored call-to-action band is worst");
-  for (const file of [diff.files.compare, diff.files.heat, ...diff.files.zooms]) assert.ok(fs.statSync(path.join(work, file)).size > 500);
-  const same = await studio.visualDiff({ reference: mock, candidate: mock }, work, undefined, undefined);
-  assert.equal(same.verdict, "close"); assert.equal(same.ssim, 1); assert.equal(same.changedPercent, 0);
-  await assert.rejects(studio.visualDiff({ reference: mock, source: "index.html" }, work, undefined, undefined), /render_see/);
-});
-
-test("visual_diff renders long pages in clipped slices and stitches them", async () => {
-  const calls = [];
-  const reference = canvas(400, 5200, [255, 255, 255]);
-  for (let y = 0; y < 5200; y += 400) rect(reference, 0, y, 400, 200, [(y / 20) % 255, 120, 200]);
-  await write("tall.png", reference);
-  const fake = async (params, destination) => {
-    calls.push(params.clip);
-    const slice = canvas(400, params.clip.height, [255, 255, 255]);
-    slice.data.set(reference.data.subarray(params.clip.y * 400 * 4, (params.clip.y + params.clip.height) * 400 * 4));
-    fs.writeFileSync(destination, await studio.encodeImage(slice, "png"));
-    return { output: destination, conditions: { documentSize: { width: 400, height: 5300 } } };
-  };
-  const diff = await studio.visualDiff({ reference: "tall.png", source: "page.html", referenceScale: 1 }, work, undefined, fake);
-  assert.deepEqual(calls, [{ y: 0, height: 4000 }, { y: 4000, height: 1200 }]);
-  assert.equal(diff.verdict, "close"); assert.equal(diff.size.heightDelta, 100, "page height comes from the renderer");
-  assert.match(diff.next[0], /100px taller/);
-});
-
-test("URL references download through the guarded fetcher, are kept locally and honor offline mode", async () => {
+test("URL references download through the guarded fetcher and honor offline mode", async () => {
   const png = fs.readFileSync(path.join(work, mock));
   const server = createServer((request, response) => {
     if (request.url === "/mock.png") { response.writeHead(200, { "content-type": "image/png" }); response.end(png); }
@@ -271,65 +192,16 @@ test("URL references download through the guarded fetcher, are kept locally and 
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const result = await studio.imageAnalyze({ url: `${base}/redirect`, maxBlocks: 40 }, work);
-    assert.ok(fs.existsSync(path.join(work, result.files.reference)), "downloaded reference is saved for reuse");
-    assert.equal(result.source.url, `${base}/mock.png`);
+    const fetched = await studio.loadImage({ url: `${base}/redirect` }, work);
+    assert.equal(fetched.url, `${base}/mock.png`, "redirects resolve to the final image URL");
+    assert.equal(fetched.format, "png");
+    assertSameBytes(fetched.bytes, png, "the guarded fetch returns the served bytes");
     await assert.rejects(studio.loadImage({ url: `${base}/page` }, work), /Unexpected content type text\/html/);
     const previous = process.env.PI_OFFLINE;
     process.env.PI_OFFLINE = "1";
     try { await assert.rejects(studio.loadImage({ url: `${base}/mock.png` }, work), /Offline session/); }
     finally { if (previous === undefined) delete process.env.PI_OFFLINE; else process.env.PI_OFFLINE = previous; }
   } finally { server.close(); }
-});
-
-test("outputs stay inside the workspace and tools register with bounded schemas", async () => {
-  await assert.rejects(studio.imageAnalyze({ path: mock, outputDir: os.tmpdir() }, work), /inside the current workspace/);
-  const tools = new Map();
-  register({ registerTool: definition => tools.set(definition.name, definition) });
-  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_convert", "image_create", "image_crop", "image_trace", "image_understand", "ui_recipe", "visual_diff"]);
-  for (const tool of tools.values()) assert.ok(tool.description.length > 200 && tool.description.length < 900, tool.name);
-  const out = await tools.get("image_trace").execute("t", { path: mock, region: { x: 80, y: 24, width: 32, height: 32 }, colors: 1 }, undefined, undefined, { cwd: work });
-  assert.equal(out.details.verdict, "good");
-});
-
-test("image_create synthesizes deterministic plates and rejects bad inputs", async () => {
-  assert.deepEqual([...synth.SYNTH_OPS], ["solid", "linear-gradient", "checker", "noise", "grid"]);
-  const pixel = (img, x, y) => [...img.data.subarray((y * img.width + x) * 4, (y * img.width + x) * 4 + 3)];
-  const solid = synth.synthSolid(8, 6, [11, 22, 33]);
-  assert.deepEqual(pixel(solid, 0, 0), [11, 22, 33]); assert.deepEqual(pixel(solid, 7, 5), [11, 22, 33]);
-  const gradient = synth.synthLinearGradient(100, 10, [{ color: [0, 0, 0], at: 0 }, { color: [255, 255, 255], at: 1 }], 0);
-  assert.ok(pixel(gradient, 0, 5)[0] <= 2 && pixel(gradient, 99, 5)[0] >= 253, "corners pin the stop range");
-  assert.ok(pixel(gradient, 49, 5)[0] >= 120 && pixel(gradient, 50, 5)[0] <= 135, "midpoint interpolates");
-  const hard = synth.synthLinearGradient(100, 4, [{ color: [255, 0, 0], at: 0 }, { color: [255, 0, 0], at: 0.5 }, { color: [0, 0, 255], at: 0.5 }, { color: [0, 0, 255], at: 1 }], 0);
-  assert.deepEqual(pixel(hard, 49, 1), [255, 0, 0]); assert.deepEqual(pixel(hard, 50, 1), [0, 0, 255]);
-  assert.deepEqual(synth.resolveStops([{ color: "#ff0000" }, { color: "#0000ff" }]).map(s => s.at), [0, 1]);
-  assert.deepEqual(synth.resolveStops([{ color: "#000000", at: 0 }, { color: "#ffffff" }, { color: "#ffffff", at: 1 }]).map(s => s.at), [0, 0.5, 1]);
-  const checker = synth.synthChecker(4, 4, 2, [255, 255, 255], [0, 0, 0]);
-  assert.deepEqual([pixel(checker, 0, 0), pixel(checker, 2, 0), pixel(checker, 0, 2), pixel(checker, 2, 2)], [[255, 255, 255], [0, 0, 0], [0, 0, 0], [255, 255, 255]]);
-  const grain = synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7);
-  assertSameBytes(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7).data), "same seed renders same bytes");
-  assert.notDeepEqual(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 8).data), "seeds diverge");
-  assert.ok(pixel(grain, 3, 9).every(v => v >= 104 && v <= 152), "mono grain stays inside base ± strength");
-  assert.equal(new Set([pixel(grain, 3, 9), pixel(grain, 20, 20)].flat()).size > 1, true, "grain varies across pixels");
-  const grid = synth.synthGrid(10, 10, 5, [255, 255, 255], [0, 0, 0], 1);
-  assert.deepEqual([pixel(grid, 0, 0), pixel(grid, 1, 1), pixel(grid, 5, 3), pixel(grid, 4, 4)], [[0, 0, 0], [255, 255, 255], [0, 0, 0], [255, 255, 255]]);
-  const created = await synth.imageCreate({ op: "checker", width: 64, height: 48, size: 8 }, work);
-  assert.equal(created.op, "checker"); assert.equal(created.format, "png"); assert.deepEqual(created.pixels, { width: 64, height: 48 });
-  const decoded = await studio.decodeImage(fs.readFileSync(path.join(work, created.file)));
-  assert.deepEqual([decoded.width, decoded.height], [64, 48]);
-  const jpg = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#112233", format: "jpg" }, work);
-  assert.ok(jpg.file.endsWith(".jpg") && jpg.bytes > 0);
-  const graded = await synth.imageCreate({ op: "linear-gradient", width: 16, height: 16, angle: 90, stops: [{ color: "#000000" }, { color: "#ffffff" }] }, work);
-  assert.deepEqual(graded.design.stops.map(s => s.at), [0, 1]);
-  await assert.rejects(synth.imageCreate({ op: "radial" }, work), /op must be/);
-  await assert.rejects(synth.imageCreate({ op: "solid", width: 4097 }, work), /width must be/);
-  await assert.rejects(synth.imageCreate({ op: "solid", color: "red" }, work), /must be #rrggbb/);
-  await assert.rejects(synth.imageCreate({ op: "linear-gradient", stops: [{ color: "#000000" }] }, work), /2\.\.8/);
-  await assert.rejects(synth.imageCreate({ op: "linear-gradient", stops: [{ color: "#000000", at: 0.8 }, { color: "#ffffff", at: 0.2 }] }, work), /ascend/);
-  await assert.rejects(synth.imageCreate({ op: "checker", colors: ["#ffffff"] }, work), /pair/);
-  await assert.rejects(synth.imageCreate({ op: "noise", mono: "yes" }, work), /boolean/);
-  await assert.rejects(synth.imageCreate({ op: "grid", format: "gif" }, work), /format must be/);
-  await assert.rejects(synth.imageCreate({ op: "solid", outputDir: os.tmpdir() }, work), /inside the current workspace/);
 });
 
 test("real renderer captures a clipped slice of a long page", { timeout: 60_000 }, async () => {
@@ -352,29 +224,14 @@ test("image-to-code prompts route to the skill and stage the studio tools; verif
   const discovery = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/tool-discovery.ts")));
   for (const prompt of ["turn this mockup into a website", "make my pricing page look more like this screenshot", "Convert the attached image to HTML/CSS",
     "Here is https://example.com/hero.png, recreate it in React", "implement this Figma design as Vue components", "edit site to look more like this: https://cdn.example.com/ref.jpg"]) {
-    assert.ok(routing.routeSkills(prompt).some(route => route.name === "mockup-to-code"), prompt);
-    assert.ok(discovery.intentBundleTools(prompt).includes("image_analyze"), prompt);
+    assert.ok(routing.routeSkills(prompt).some(route => route.name === "frontend"), prompt);
+    assert.ok(discovery.intentBundleTools(prompt).includes("image_understand"), prompt);
   }
   for (const prompt of ["take a screenshot of the page", "compare the screenshot with the page", "Create a website for my bakery", "update the screenshot in the README", "fix the css bug on the page"]) {
-    assert.equal(routing.routeSkills(prompt).some(route => route.name === "mockup-to-code"), false, prompt);
-    assert.equal(discovery.intentBundleTools(prompt).some(name => ["image_analyze", "image_crop", "image_trace", "visual_diff"].includes(name)), false, prompt);
+    assert.equal(routing.routeSkills(prompt).some(route => route.name === "frontend"), false, prompt);
+    assert.equal(discovery.intentBundleTools(prompt).includes("image_crop"), false, prompt);
   }
-  assert.ok(discovery.intentBundleTools("make the site look like this", 1).includes("visual_diff"), "an attached image is the reference");
+  assert.ok(discovery.intentBundleTools("make the site look like this", 1).includes("image_understand"), "an attached image is the reference");
   assert.deepEqual(discovery.intentBundleTools("what is in this picture?", 1), []);
   assert.ok(discovery.intentBundleTools("Make a 60 second explainer video about attention").includes("video_project"));
-});
-
-test("image_create synthesizes deterministic plates with bounded parameters", async () => {
-  const synth = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-synth.ts")));
-  assert.deepEqual([...synth.SYNTH_OPS], ["solid", "linear-gradient", "checker", "noise", "grid"]);
-  const tools = new Map();
-  register({ registerTool: definition => tools.set(definition.name, definition) });
-  assert.ok(tools.has("image_create"));
-  const first = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#ff0000" }, work);
-  const second = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#ff0000" }, work);
-  assert.equal(first.format, "png"); assert.deepEqual(first.pixels, { width: 8, height: 8 });
-  assert.deepEqual(first.design, { color: "#ff0000" });
-  assertSameBytes(fs.readFileSync(path.join(work, first.file)), fs.readFileSync(path.join(work, second.file)), "same inputs render the same bytes");
-  await assert.rejects(synth.imageCreate({ op: "solid", width: 5000, height: 8 }, work), /width/);
-  await assert.rejects(synth.imageCreate({ op: "photo", width: 8, height: 8 }, work), /op must be one of/);
 });

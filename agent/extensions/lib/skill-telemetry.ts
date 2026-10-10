@@ -77,19 +77,19 @@ export interface SkillPrecision {
 
 /** Skills whose keyword triggers are known-overbroad without evidence. */
 const EVIDENCE_GATED: Array<{ skill: string; needs: RegExp; evidence: string }> = [
-	{ skill: "github-repo-presentation", needs: /\b(license|contributing|code of conduct|issue template|codeowners|repo health|open-source readiness)\b/i, evidence: "repo-health artifact or explicit request" },
-	{ skill: "github-readme-authoring", needs: /\breadme\b/i, evidence: "README scope" },
-	{ skill: "presentation-authoring", needs: /\b(powerpoint|pptx|odp|slide deck|impress)\b|\bslides?\b(?![^a-z]*(?:carousel|css|slider))/i, evidence: "slide-deck artifact, not UI presentation layer" },
-	{ skill: "word-document-authoring", needs: /\b(docx|odt|word document|writer)\b/i, evidence: "document artifact" },
-	{ skill: "spreadsheet-authoring", needs: /\b(xlsx|spreadsheet|workbook|pivot)\b/i, evidence: "spreadsheet artifact" },
+	{ skill: "git-github", needs: /\b(license|contributing|code of conduct|issue template|codeowners|repo health|open-source readiness)\b/i, evidence: "repo-health artifact or explicit request" },
+	{ skill: "git-github", needs: /\breadme\b/i, evidence: "README scope" },
+	{ skill: "office-documents", needs: /\b(powerpoint|pptx|odp|slide deck|impress)\b|\bslides?\b(?![^a-z]*(?:carousel|css|slider))/i, evidence: "slide-deck artifact, not UI presentation layer" },
+	{ skill: "office-documents", needs: /\b(docx|odt|word document|writer)\b/i, evidence: "document artifact" },
+	{ skill: "office-documents", needs: /\b(xlsx|spreadsheet|workbook|pivot)\b/i, evidence: "spreadsheet artifact" },
 ];
 
 const ACTION_AFFINITY: Record<string, string[]> = {
-	implement: ["coding-practices", "debugging", "property-based-testing", "type-driven-design"],
-	review: ["code-review", "debugging", "systems-security", "web-security"],
-	investigate: ["debugging", "research", "data-lineage-validation"],
-	plan: ["api-design", "software-engineering-wisdom", "type-driven-design"],
-	operate: ["ubuntu-operations", "linux", "git-github"],
+	implement: ["engineering", "debugging", "engineering"],
+	review: ["code-review", "debugging", "api-security"],
+	investigate: ["debugging", "research", "data-science"],
+	plan: ["api-security", "engineering"],
+	operate: ["linux-ops", "linux", "git-github"],
 };
 
 /**

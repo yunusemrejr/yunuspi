@@ -3,9 +3,9 @@ id: agent-workflow
 part: process
 title: Agent workflow in this harness
 summary: How the main agent should use the harness itself: plans, delegation, background work, context hygiene, discovering tools and skills, asking versus deciding, finishing.
-terms: agent harness todo plan planning subagent child delegate delegation background bg_run context compaction tool_search skill_review discover capability workflow swarm council fusion session memory
+terms: agent harness todo plan planning subagent child delegate delegation background bg_run context compaction tool_search skill_review discover capability workflow fan-out council fan-out session memory
 tools: todo subagent bg_run bg_status bg_wait tool_search skill_review session_self quality_review
-skills: harness-self-maintenance evidence-first-engineering
+skills: harness-self-maintenance engineering
 ---
 
 # Agent workflow in this harness
@@ -26,7 +26,7 @@ YunusPi gives the main agent more capabilities than fit in its context at once: 
 **Traps.** Plans for one-step tasks; spending turns grooming the list instead of working.
 
 ## Delegate independent, well-specified work {#delegate}
-<!-- terms: subagent child delegate parallel independent spawn review verify result swarm council | watch: child-failed many-children(4) -->
+<!-- terms: subagent child delegate parallel independent spawn review verify result fan-out council | watch: child-failed many-children(4) -->
 
 **Principle.** Hand a child a task only when it is independent, specifiable in a paragraph, and checkable; then verify what comes back before building on it.
 

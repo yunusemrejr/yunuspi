@@ -480,7 +480,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		catch { return unavailable("The available model registry could not be read safely for automatic scope deliberation."); }
 		if (!Array.isArray(models)) return unavailable("The available model registry is unavailable for automatic scope deliberation.");
 		const plan: AssistancePlan = {
-			mode: "fusion",
+			mode: "fanout",
 			roles: ["Preserve explicit user references and constraints", "Determine meaningful change scope", "Critique both independent scope opinions"],
 			reason: "bounded change-scope deliberation",
 			deadlineMs: limits.deadlineMs,

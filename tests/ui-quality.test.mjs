@@ -12,8 +12,6 @@ const {authoredReviewSnippets,authoredReviewSignals}=await load('extensions/lib/
 const {createQualityReviewLifecycle,reviewAspects}=await load('extensions/lib/quality-review.ts');
 const {createRelevantGuidance}=await load('extensions/lib/relevant-guidance.ts');
 const {routeSkills}=await load('extensions/lib/skill-routing.ts');
-const {default:registerSmallTools}=await load('extensions/lib/small-tools.ts');
-const {HOOK_RULES}=await load('extensions/lib/session-hooks.ts');
 const pill='<span className="rounded-full"><span className="animate-ping" />Live</span>';
 const keys=(file,text)=>signals(file,text,12).map(s=>s.key);
 
@@ -80,21 +78,10 @@ test('large authored files retain policy cues ahead of advisory noise without ex
   assert.ok(!keys('theme.css',':root{--warning:#c9a24a;--accent:#125bbc}').includes('ui-stock-warm-palette'));
 });
 
-test('UI artifact operation uses safe workspace reads in parent and child profiles',async t=>{
-  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'ui-source-check-'));t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
-  fs.writeFileSync(path.join(cwd,'Status.tsx'),pill);fs.writeFileSync(path.join(cwd,'large.tsx'),'x'.repeat(196609));
-  const tools=new Map();registerSmallTools({registerTool:t=>tools.set(t.name,t)});
-  const call=(p,signal)=>tools.get('artifact_check').execute('check',p,signal,undefined,{cwd});
-  const result=await call({operation:'ui',path:'Status.tsx'});assert.notEqual(result.isError,true);assert.equal(result.details.findings[0].key,'ui-live-pill');assert.match(result.details.sourceHash,/^[a-f0-9]{64}$/);
-  for(const p of [{operation:'ui',text:pill},{operation:'ui',path:'../outside.tsx'},{operation:'ui',path:'large.tsx'}]) assert.equal((await call(p)).isError,true);
-  assert.equal((await call({operation:'ui',path:'Status.tsx'},AbortSignal.abort())).isError,true);
-  const hook=HOOK_RULES.find(h=>h.key==='ui-source-evidence');assert.ok(hook.when({operation:'ui'}));assert.ok(!hook.when({operation:'image'}));
-});
-
 test('anti-boilerplate intent routes the shared worker and parent policy without treating quotations as tasks',()=>{
-  assert.ok(routeSkills('Improve anti-boilerplate checks').some(s=>s.name==='anti-ai-slop'));
-  assert.ok(routeSkills('Review blinking status dots in UI components').some(s=>s.name==='ui-antipattern-review'));
-  assert.ok(routeSkills('Review font combinations').some(s=>s.name==='ui-antipattern-review'));
+  assert.ok(routeSkills('Improve anti-boilerplate checks').some(s=>s.name==='ui-design'));
+  assert.ok(routeSkills('Review blinking status dots in UI components').some(s=>s.name==='ui-design'));
+  assert.ok(routeSkills('Review font combinations').some(s=>s.name==='ui-design'));
   assert.deepEqual(routeSkills('> Review blinking status dots'),[]);
   assert.deepEqual(routeSkills('Do not review font combinations'),[]);
   assert.match(reviewAspects(['Status.tsx']).find(a=>a.id==='interface').rubric,/learned similarity only select inspection targets/);
@@ -102,9 +89,9 @@ test('anti-boilerplate intent routes the shared worker and parent policy without
 
 test('redesign and generic-look prompts route anti-slop doctrine instead of nothing',()=>{
   for(const prompt of ['Redesign our pricing page','Restyle the homepage','Polish the homepage and fix the links','The homepage looks generic, fix it','Make the site look less generic','Make the homepage look more premium'])
-    assert.ok(routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+    assert.ok(routeSkills(prompt).some(s=>s.name==='ui-design'),prompt);
   for(const prompt of ['Rebuild the site search index','Rebuild the container image','Do not redesign the homepage','Explain how to redesign a website','> Redesign the homepage'])
-    assert.ok(!routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+    assert.ok(!routeSkills(prompt).some(s=>s.name==='ui-design'),prompt);
 });
 
 test('log-only error handlers cue the same contract check as an empty catch',()=>{
@@ -266,11 +253,11 @@ test('copy cues catch transformation CTAs, vague headings and placeholder identi
 
 test('de-slop and ornament complaints route the anti-slop workflows', () => {
   for (const prompt of ['Fix the homepage hero and de-slop the copy','Rebuild the pricing header to unslop it','Humanize the design before launch'])
-    assert.ok(routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+    assert.ok(routeSkills(prompt).some(s=>s.name==='ui-design'),prompt);
   for (const prompt of ['Fix the pill spam in the header','Remove the badge spam','Remove the gradient text','Audit the glassmorphism panels','Fix the autoplaying carousel','Add the missing alt text'])
-    assert.ok(routeSkills(prompt).some(s=>s.name==='ui-antipattern-review'),prompt);
+    assert.ok(routeSkills(prompt).some(s=>s.name==='ui-design'),prompt);
   for (const prompt of ['Explain what gradient text is','Do not fix the pill spam','> Fix the badge spam'])
-    assert.ok(!routeSkills(prompt).some(s=>s.name==='ui-antipattern-review'),prompt);
+    assert.ok(!routeSkills(prompt).some(s=>s.name==='ui-design'),prompt);
 });
 
 test('user-banned ornaments are cued at edit time: accent rails, dot markers and icon tiles', () => {
@@ -330,9 +317,9 @@ test('ported copy cues catch work-thought leaks, vague nav and leak vocabulary, 
 
 test('ported de-slop and ornament complaints route the anti-slop workflows', () => {
   for (const prompt of ['Remove the fake badges from the header', 'Fix invented labels in the pricing table', 'Fix the work thought leaks in our copy', 'Fix the made-up labels'])
-    assert.ok(routeSkills(prompt).some(s => s.name === 'anti-ai-slop'), prompt);
+    assert.ok(routeSkills(prompt).some(s => s.name === 'ui-design'), prompt);
   for (const prompt of ['Fix the glowing dots', 'Remove the eyebrow pills', 'Kill the animate-ping badge', 'Fix the ping dots pattern'])
-    assert.ok(routeSkills(prompt).some(s => s.name === 'ui-antipattern-review'), prompt);
+    assert.ok(routeSkills(prompt).some(s => s.name === 'ui-design'), prompt);
   for (const prompt of ['Do not fix the glowing dots', '> Remove the eyebrow pills'])
-    assert.ok(!routeSkills(prompt).some(s => s.name === 'ui-antipattern-review'), prompt);
+    assert.ok(!routeSkills(prompt).some(s => s.name === 'ui-design'), prompt);
 });

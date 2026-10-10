@@ -56,24 +56,26 @@ test('local routing indexes skills beyond the model discovery packet limit',()=>
 
 test('short technical terms survive tokenization and compound routing', () => {
  assert.deepEqual(skillTerms('a an to of C++ C# API SQL CSS PDF AI ML'), ['c++','c#','api','sql','css','pdf','ai','ml']);
- const index=buildSkillIndex([skill('sql-query-engineering','Relational transactions and query plans'),skill('php-application','Secure request handling'),...unrelated]);
- assert.equal(rankSkills(index,'SQL')[0]?.skill.name,'sql-query-engineering');
- assert.equal(rankSkills(index,'PHP')[0]?.skill.name,'php-application');
+ // Descriptions follow the consolidated SKILL.md summaries, which name the technologies they cover.
+ const index=buildSkillIndex([skill('data-science','SQL and Postgres schema, indexes, transactions and migrations; numerical methods'),skill('systems-languages','Use when writing C, C++, Rust, Go, Java, PHP or embedded firmware'),...unrelated]);
+ // A lone description-only term is not a route; the consolidated names no longer carry SQL or PHP, so pair them with a term that does.
+ assert.equal(rankSkills(index,'SQL Postgres')[0]?.skill.name,'data-science');
+ assert.equal(rankSkills(index,'PHP Java')[0]?.skill.name,'systems-languages');
 });
 
 
 test('generic engineering nouns do not route native work into unrelated platforms',()=>{
- const index=buildSkillIndex([skill('java-platform-engineering','Engineer Java runtime behavior'),skill('cloudflare-platform-engineering','Deploy Cloudflare workers'),skill('llm-systems-engineering','LLM attention and inference'),skill('cpp-performance-engineering','C++ native memory and buffer contracts'),...unrelated]);
+ const index=buildSkillIndex([skill('systems-languages','Engineer Java runtime behavior'),skill('api-security','Deploy Cloudflare workers'),skill('ml','LLM attention and inference'),skill('systems-languages','C++ native memory and buffer contracts'),...unrelated]);
  assert.deepEqual(rankSkills(index,'quality platform systems making title'),[]);
  const context=skillEvidenceContext({files:['src/window.cpp']});
- assert.equal(rankSkills(index,context)[0]?.skill.name,'cpp-performance-engineering');
- assert.ok(!rankSkills(index,context).some(r=>r.skill.name==='llm-systems-engineering'));
- assert.equal(rankSkills(index,'Cloudflare workers')[0]?.skill.name,'cloudflare-platform-engineering');
+ assert.equal(rankSkills(index,context)[0]?.skill.name,'systems-languages');
+ assert.ok(!rankSkills(index,context).some(r=>r.skill.name==='ml'));
+ assert.equal(rankSkills(index,'Cloudflare workers')[0]?.skill.name,'api-security');
 });
 test('three-letter technical acronyms are routing terms instead of falling under the length floor',()=>{
  for(const term of ['dns','tcp','tls','git','ssh','svg','seo','gpu'])assert.ok(skillTerms(`the ${term.toUpperCase()} failed`).includes(term),term);
  for(const noise of ['the','and','for','but'])assert.ok(!skillTerms(`${noise} ${noise}`).includes(noise),noise);
- const index=buildSkillIndex([skill('linux-network-engineering','Diagnose Linux networks: link, IP, route, DNS, TCP and TLS ladder with ss, dig and nftables playbooks'),skill('copywriting','Write product and marketing copy: headlines, onboarding and microcopy'),...unrelated]);
- assert.equal(rankSkills(index,'DNS resolves but TCP connects time out')[0]?.skill.name,'linux-network-engineering');
+ const index=buildSkillIndex([skill('networking','Diagnose Linux networks: link, IP, route, DNS, TCP and TLS ladder with ss, dig and nftables playbooks'),skill('copywriting','Write product and marketing copy: headlines, onboarding and microcopy'),...unrelated]);
+ assert.equal(rankSkills(index,'DNS resolves but TCP connects time out')[0]?.skill.name,'networking');
  assert.equal(rankSkills(index,'The TLS handshake fails from the new subnet').length,0,'one acronym alone is still not a two-term match');
 });

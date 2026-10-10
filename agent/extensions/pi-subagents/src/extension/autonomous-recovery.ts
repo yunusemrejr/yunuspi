@@ -95,7 +95,7 @@ export function automaticHelperBody(result: any, options: { maxChars?: number } 
 }
 
 /** Keep worker attribution and unresolved gaps visible in the parent's brief. */
-export function automaticFusionBody(results: unknown, maxBodyChars = 10000): string {
+export function automaticFanoutBody(results: unknown, maxBodyChars = 10000): string {
  const fused = fuseChildOutputs(results, { maxBodyChars });
  const sections = new Map<string, { owners: string[]; start: number; end: number; truncated?: boolean }>();
  const omitted: string[] = [];
@@ -107,11 +107,11 @@ export function automaticFusionBody(results: unknown, maxBodyChars = 10000): str
  }
  const body = [...sections.values()].map(section => `[${section.owners.join(", ")}${section.truncated ? "; partial" : ""}]\n${fused.fusedBody.slice(section.start, section.end)}`);
  if (fused.unresolvedConflicts?.length) body.push(`Unresolved conflicts: ${fused.unresolvedConflicts.join(", ")}.`);
- if (fused.truncated) body.push(`Fusion excerpt truncated; verify retained evidence${omitted.length ? `; omitted sources: ${[...new Set(omitted)].join(", ")}` : ""}.`);
+ if (fused.truncated) body.push(`Merged excerpt truncated; verify retained evidence${omitted.length ? `; omitted sources: ${[...new Set(omitted)].join(", ")}` : ""}.`);
  return body.join("\n\n");
 }
 
-/** What an automatic helper team (subagent, swarm or fusion) handed the agent, in a few lines for the
+/** What an automatic helper team (subagent or fan-out) handed the agent, in a few lines for the
  * peers that must not repeat or contradict it: the reviewers and Double read the same board. */
 export function automaticHelpersDigest(content: string, max = 420): string {
 	const flat = String(content ?? "").replace(/\s+/g, " ").trim();
@@ -356,7 +356,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		const models = available(ctx).filter(model => !rejectedRoutes!.has(route(model)));
 		const execution = completionExecutionProfile(request.task,request.files,currentExecutionProfile(ctx));
 		const reviewers = request.automatic === true && adaptiveExecutionEnabled() ? Math.max(1,execution.review.reviewers) : REVIEW_LIMITS.reviewers;
-		const plan = { mode:'swarm' as const, roles:aspects.slice(0,reviewers).map((a:any)=>`Review ${a.id} quality`), reason:'bounded completion quality review', deadlineMs:REVIEW_LIMITS.deadlineMs, maxCostUsd:REVIEW_LIMITS.costUsd };
+		const plan = { mode:'fanout' as const, roles:aspects.slice(0,reviewers).map((a:any)=>`Review ${a.id} quality`), reason:'bounded completion quality review', deadlineMs:REVIEW_LIMITS.deadlineMs, maxCostUsd:REVIEW_LIMITS.costUsd };
 		// Automatic rounds fill free-only: autonomous paid spend at review
 		// scale fails outright, and surprise spend is worse than an honest
 		// capacity gap (the round is refunded for a later attempt). Explicit
@@ -602,7 +602,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		// auto-assist group per cycle, shared by all routes under the grant.
 		const autoAssistFlowId = `auto-assist-flow-${randomUUID()}`;
 		const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
-		if (routes.length > 1) try { metrics?.('swarms'); } catch {}
+		if (routes.length > 1) try { metrics?.('fanouts'); } catch {}
 
 		const mode = routes.length === 1 ? "subagent" : plan.mode;
   pi.appendEntry("model-routing-decision",{mode,reason:plan.reason,members:routes.map(({route,proof,explanation})=>({route,proof,explanation})),maxCostUsd:plan.maxCostUsd,deadlineMs:plan.deadlineMs});
@@ -610,7 +610,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		let branch: unknown;
 		try { branch = ctx.sessionManager.getBranch?.(); } catch { /* missing evidence is unknown */ }
 		const intent = helperIntentEvidence(prompt, branch);
-		const finishActivity = beginHarnessActivity(mode === 'fusion' ? 'fusion' : mode === 'swarm' ? 'swarm' : 'agents');
+		const finishActivity = beginHarnessActivity(mode === 'fanout' ? 'fanout' : 'agents');
 		let activityOutcome: ActivityOutcome = 'error';
 		try {
 		const results = await Promise.all(routes.map(async (candidate, index) => {
@@ -688,8 +688,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		const good = results.filter(r => r.ok && r.output.trim());
 		activityOutcome = good.length === routes.length ? 'ok' : good.length ? 'skipped' : 'error';
 		if (!good.length) { notice(ctx, "Automatic helpers returned no usable evidence; parent continues without respawning the group."); return; }
-		const body = good.length === 1 ? `[${good[0].key}]\n${good[0].output}` : automaticFusionBody(results);
-		if (good.length > 1) try { metrics?.('fusions'); } catch {}
+		const body = good.length === 1 ? `[${good[0].key}]\n${good[0].output}` : automaticFanoutBody(results);
 		return `Read-only ${metered ? "free/low-cost" : "free"} ${mode} assistance (${good.length}/${routes.length} supplied advisory output; failed members: ${results.filter(r=>!r.ok || !r.output.trim()).map(r=>r.key).join(", ") || "none"}; independently verify every claim and resolve disagreements):\n${body}`;
 		} finally { finishActivity(signal.aborted || groupEpoch !== generation ? 'cancelled' : activityOutcome); }
 	};
@@ -704,7 +703,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
   const assistanceDeadline = AbortSignal.timeout(AUTOMATIC_HELPER_LIMITS.deadlineMs + AUTOMATIC_HELPER_LIMITS.cleanupGraceMs);
   const signal = AbortSignal.any([controller.signal, assistanceDeadline, ...(ctx.signal ? [ctx.signal] : [])]);
   void group(ctx, signal).then(content => {
-   if (content && epoch === generation && !signal.aborted) {try{publishReviewerNote(reviewerSessionKey(ctx),"assist",automaticHelpersDigest(content),[],Date.now());}catch{}return pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});}
+   if (content && epoch === generation && !signal.aborted) {try{publishReviewerNote(reviewerSessionKey(ctx),"assist",automaticHelpersDigest(content),[],Date.now());}catch{}return pi.sendMessage({customType:"autonomous-free-fanout",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});}
   }).catch(error => {if(epoch===generation && !signal.aborted) console.warn("[autonomous-recovery] free assistance failed:",error);})
   .finally(()=>{controller.abort();if(assistance===controller)assistance=undefined;if(epoch===generation && !groupUsed)usedAssist=false;});
  };
@@ -719,7 +718,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		if (pi.getActiveTools && !pi.getActiveTools().includes("subagent")) return;
 		// Rank all applicable routes, then cap the available references. A missing
 		// high-priority skill must not displace a lower-ranked installed skill.
-		const wanted = new Set([...routeSkills(prompt).sort((a,b)=>b.priority-a.priority).map(r=>r.name), "evidence-first-engineering"]);
+		const wanted = new Set([...routeSkills(prompt).sort((a,b)=>b.priority-a.priority).map(r=>r.name), "engineering"]);
 		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
 			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
 		// An unavailable skill cannot be surfaced. Filter it before spending a
@@ -978,7 +977,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				visited.add(route(alternate));
 				const target = preferredCompat ? { ...alternate, compat: preferredCompat } as typeof alternate : alternate;
 				// Mark the automatic route BEFORE the switch: model_select fires
-				// inside setModel, and last-model.ts must see this marker at that
+				// inside setModel, and model-config.ts must see this marker at that
 				// moment — otherwise the recovery route is persisted as the
 				// user's default model. Rolled back when the switch fails.
 				automaticRoute = route(alternate);
@@ -1005,7 +1004,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				void group(ctx, helperSignal, event.message.errorMessage).then(content => {
 					if (content && epoch === generation && !helperSignal.aborted) {
 						try { publishReviewerNote(reviewerSessionKey(ctx), "assist", automaticHelpersDigest(content), [], Date.now()); } catch { /* the board is best-effort */ }
-						pi.sendMessage({customType:"autonomous-free-fusion",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});
+						pi.sendMessage({customType:"autonomous-free-fanout",content,display:true},{deliverAs:"nextTurn",triggerTurn:false});
 					}
 				}).catch(() => {}).finally(() => {helper.abort();if(assistance===helper)assistance=undefined;});
 			}

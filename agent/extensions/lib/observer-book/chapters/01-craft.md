@@ -4,8 +4,8 @@ part: process
 title: The observer's craft
 summary: How to review another agent's live session: evidence discipline, timing, questions, silence, loops, drift and completion claims.
 terms: observer review reviewer advice advise remind question assumption evidence progress loop stuck repeat thrash drift scope claim done complete finished verify
-tools: todo quality_review claim_check
-skills: evidence-first-engineering behavioral-contracts
+tools: todo quality_review
+skills: engineering
 ---
 
 # The observer's craft

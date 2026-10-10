@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
-import { QUICK_TESTS, testConcurrency, testPlan } from '../scripts/test.mjs';
+import { QUICK_TESTS, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const files = fs.readdirSync(path.join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).map(name => `tests/${name}`).sort();
@@ -75,12 +75,29 @@ test('failed tests reach the shell and disposable fixture roots are cleaned on f
   assert.equal(fs.existsSync(tempRoot), false, 'failure must not leave a fixture directory behind');
 });
 
-test('CI separates short checks from full evidence and keeps recurring/manual/release verification', () => {
+test('shards partition the selected tests exactly once and stay balanced by size', () => {
+  const sizes = new Map(files.map((file, index) => [file, 100 + (index * 37) % 900]));
+  const sizeOf = file => sizes.get(file);
+  const parts = [1, 2, 3, 4].map(index => shardFiles(files, index, 4, sizeOf));
+  assert.deepEqual(parts.flat().sort(), files);
+  const loads = parts.map(part => part.reduce((sum, file) => sum + sizeOf(file), 0));
+  assert.ok(Math.max(...loads) - Math.min(...loads) <= 1000, `unbalanced shards: ${loads}`);
+  for (const bad of [[0, 4], [5, 4], [1, 0], [1, 33], [1.5, 4]]) assert.throws(() => shardFiles(files, ...bad, sizeOf), /--shard/);
+});
+
+test('CI plans first, runs the complete suite as parallel shards and keeps one stable safety job for releases', () => {
   const workflow = parse(fs.readFileSync(path.join(root, '.github/workflows/public-safety.yml'), 'utf8'));
   assert.ok(workflow.on.schedule.length);
   assert.ok('workflow_dispatch' in workflow.on);
+  assert.match(workflow.jobs.plan.steps.map(step => step.run ?? '').join('\n'), /scripts\/test\.mjs --quick --base .* --plan/);
+  assert.deepEqual(workflow.jobs.shard.needs, ['plan']);
+  assert.match(workflow.jobs.shard.if, /outputs.full == 'true'/);
+  const count = workflow.jobs.shard.strategy.matrix.index.length;
+  assert.ok(count >= 4 && workflow.jobs.shard.strategy['fail-fast'] === false);
+  assert.match(workflow.jobs.shard.steps.map(step => step.run ?? '').join('\n'), new RegExp(`scripts/test\\.mjs --shard \\$\\{\\{ matrix.index \\}\\}/${count}`));
+  // Release verification looks for a completed job named exactly "safety".
+  assert.ok(workflow.jobs.safety.needs.includes('shard'));
   assert.match(workflow.jobs.safety.if, /outputs.full == 'true'/);
-  assert.ok(workflow.jobs.safety.needs.includes('minimum-node'));
   const quick = workflow.jobs['minimum-node'].steps.map(step => step.run ?? '').join('\n');
   assert.match(quick, /scripts\/test\.mjs --quick --base/);
   assert.match(quick, /generate-capabilities-doc\.mjs.*--check/);

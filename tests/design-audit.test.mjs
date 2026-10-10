@@ -33,12 +33,6 @@ test('ordinary DOM inspection remains lean and large design scans disclose bound
  assert.equal(result.noise.truncated,true,'an incomplete advisory sample cannot silently imply a clean page');
 });
 
-test('native design_audit uses the existing renderer contract and rejects PDF style claims',async()=>{
- const tools=new Map();registerRender({registerTool:def=>tools.set(def.name,def),on(){}});
- const tool=tools.get('design_audit');assert.ok(tool);assert.deepEqual(tool.parameters,tools.get('render_see').parameters);
- await assert.rejects(tool.execute('pdf',{source:'fixture.pdf'},undefined,undefined,{}),/requires rendered HTML/);
-});
-
 test('complex paint never becomes a confident solid-text contrast measurement',async()=>{
  const complex=path.join(root,'complex.html');
  fs.writeFileSync(complex,`<!doctype html><style>html,body{background:white;color:black;font:16px Arial}p{position:relative}.pseudo{color:white}.pseudo::before{content:"";position:absolute;inset:0;background:black}.inset{color:white;background:white;box-shadow:inset 0 0 0 100px black}.fill{-webkit-text-fill-color:white;color:black}.mask{mask-image:linear-gradient(black,transparent)}</style><p class="pseudo">Pseudo paint</p><p class="inset">Inset shadow</p><p class="fill">Text fill</p><p class="mask">Mask</p><svg width="180" height="30"><text x="0" y="20" fill="white">SVG paint</text></svg><p>Solid control</p>`);

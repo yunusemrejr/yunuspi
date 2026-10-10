@@ -4,7 +4,7 @@
  * One pre-written line of operational guidance the first time a session
  * touches a recurring workflow surface: web research, browser inspection,
  * test runs, linters, mutating git, CI, dependency installs, delegated
- * children, swarms/fusions, and literal searches that found nothing.
+ * children, fan-outs, and literal searches that found nothing.
  *
  * The guidance is deliberately independent of project, language and task:
  * it encodes workflow discipline (read the evidence, keep scopes bounded,
@@ -15,7 +15,6 @@
  * and telemetry; this module stays unit-testable.
  */
 
-import { SEO_SURFACE } from './seo-policy.ts';
 
 export type HookArgs = Record<string, unknown>;
 
@@ -39,22 +38,14 @@ export interface HookRule {
 
 const TEST_RUNNER =
 	/\b(?:npm (?:run )?test\b|npm t\b|npx (?:vitest|jest)\b|pytest\b|python3? -m pytest\b|cargo test\b|go test\b|node --test\b|dotnet test\b|mvn test\b|gradle test\b)/;
-const LINTER =
-	/\b(?:tsc\b|ruff\b|mypy\b|eslint\b|clippy\b|golangci-lint\b|swiftlint\b)/;
 const GIT_WRITE =
 	/\bgit\s+(?:commit|push|merge|rebase|reset|cherry-pick|tag|revert)\b/;
 const CI = /\bgh (?:run|workflow)\b/;
-const INSTALL =
-	/\b(?:npm (?:i|install|add)\b|pnpm (?:add|install)\b|yarn add\b|pip3? install\b|cargo add\b|go get\b|apt-get install\b)/;
 /** Pushes to production-like remotes and hosted deploy commands. */
 const DEPLOY =
 	/\bgit\s+push\s+(?:-\S+\s+)*(?:prod\w*|live|deploy\w*|namecheap|heroku|dokku|server|origin\s+(?:prod\w*|live|deploy\w*))\b|\brsync\b[^\n]*\s[\w.-]+@?[\w.-]+:[^\s]|\bscp\b[^\n]*\s[\w.-]+@?[\w.-]+:|\b(?:vercel(?:\s+--prod)?|netlify\s+deploy|fly\s+deploy|wrangler\s+(?:deploy|publish)|firebase\s+deploy|gcloud\s+app\s+deploy|kubectl\s+apply|helm\s+upgrade|docker\s+push)\b/;
 /** Interface source files whose first write deserves a rendered look. */
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|php|twig|erb|hbs)$/i;
-/** Blender build scripts and HTML motion pages of a video project: where a worked example should come first. */
-const MOTION_FILE = /(?:^|\/)(?:blender\/scripts\/[^/]+\.py|public\/html\/[^/]+\.html)$/i;
-/** Swarm/fusion surfaces inside a subagent workflow script. */
-const FUSION = /\b(?:fuse|fusion|swarm|runs\.(?:all|lanes|fuseFragments))\b/;
 
 const bashCommand = (args: HookArgs): string =>
 	typeof args.command === "string" ? args.command : "";
@@ -67,55 +58,10 @@ const isBrowserMutation = (args: HookArgs) =>
 	(args.action === "wait" && args.kind === "function");
 
 /**
- * Ordered most-specific-first: the fusion rule must win over the generic
+ * Ordered most-specific-first: the fan-out rule must win over the generic
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
-  { key: 'seo-inspection-evidence', tools: ['seo_toolkit'], when: args => ['inspect', 'audit'].includes(String(args.action)),
-    line: 'Fix observed SEO errors in shared route/template/content owners and recheck the current revision. Review unknown content/schema facts and source dates; raw HTML is separate from rendered DOM, mobile interaction and Core Web Vitals. Re-audit production after deployment; submitted, crawled and indexed are different states.' },
-  { key: 'seo-discovery-parity', tools: ['seo_toolkit'], when: args => args.action === 'discovery',
-    line: 'Write the exact generated files through the project owner and preserve custom robots/access rules. Keep public inventory, canonicals, internal links, sitemap, llms/feed/schema and real source dates synchronized. Never expose private routes or fake freshness; inspect served production files after authorized publication.' },
-  { key: 'seo-discovery-source', tools: ['write', 'edit'], when: args => typeof args.path === 'string' && SEO_SURFACE.test(args.path) && !UI_FILE.test(args.path),
-    line: 'Public content/discovery changes include SEO: establish canonical host and public/private page purpose with seo_toolkit plan, inspect built HTML or audit the served site, and regenerate discovery from the same reviewed public inventory. Private/internal software stays excluded. Review original answers, topic links, genuine identity/schema and truthful dates.' },
-  { key: 'ml-data-evaluation', tools: ['ml_lab'],
-    line: 'Inspect coverage and unresolved findings. A prepared recipe/notebook is not an executed model or connected runtime. Keep splits, data/config hashes, finite smoke/save/reload/resume receipts and frozen baseline evaluation; RL time limits preserve bootstrap from the final observation.' },
-  { key: 'research-dossier-evidence', tools: ['research_toolkit'], when: args => args.action === 'dossier',
-    line: 'Exact quote matches establish snapshot provenance only. Inspect full context, source authority, dates/periods/units, copied-source independence and contradictory labels before publishing interpretations. Reuse cached source slices; unknown evidence stays unknown.' },
-
-  { key: 'image-generation-evidence', tools: ['image_generate'], when: args => ['generate', 'edit'].includes(String(args.action)),
-    line: 'Use the exact requested model and supported image parameters. Keep reference/mask provenance and inspect the returned pixels for edit intent, identity, alpha and integration; decoded output does not establish a successful edit. Do not retry paid generation with a different model without a task reason.' },
-  { key: 'image-conversion-evidence', tools: ['image_convert'],
-    line: 'Check conversion.json for source hashes, dimensions, fit and alpha handling. Inspect the output crop/matte at its delivery size; PNG/WebP alpha and JPEG backgrounds have different semantics. Keep the originals.' },
-  { key: 'image-understanding-evidence', tools: ['image_understand'], when: args => args.action === undefined || args.action === 'analyze',
-    line: 'Tie observations to the returned image hashes and original/sent/crop coordinates. Treat model descriptions as inference; verify consequential text/numbers against the source. A frame comparison cannot establish motion between those frames.' },
-  { key: 'svg-export-clock', tools: ['svg_render'],
-    line: 'Inspect the contact sheet and timestamped samples for clipping, ownership collisions and expected motion. Review encoded cadence/loop evidence and actual playback; CSS/SMIL/data keyframes share the export clock, while reduced-motion design and artistic approval remain separate checks.' },
-  { key: 'svg-author-render', tools: ['write', 'edit'], when: args => typeof args.path === 'string' && /\.svg$/i.test(args.path),
-    line: 'Run svg_inspect on this revision and svg_render at the intended sizes and motion timestamps. Fix unresolved IDs, path/keyframe topology, clipped filters and conflicting transform owners; inspect pixels before proceeding.' },
-  {
-    key: 'media-pipeline-evidence', tools: ['media_pipeline'],
-    line: 'Reuse the stage receipts and completed artifacts. Resolve failed technical QA, then inspect playback for edit intent, motion, sync and audible quality; mastering measurements do not establish artistic approval.',
-  },
-  {
-    key: 'host-device-preflight', tools: ['sys_probe'],
-    when: args => args.action === 'host' || args.action === 'devices',
-    line: 'Preserve network, session ancestors and mounted data. Inspect test entrypoints; prefer isolated bounded experiments and compile-only firmware checks. Device metadata does not verify wiring or authorize writes.',
-  },
-  {
-    key: 'svg-source-evidence', tools: ['artifact_check'],
-    when: args => args.operation === 'svg',
-    line: 'Review SVG findings against the complete file, then inspect rendered appearance at intended sizes. No resources were fetched; security sanitization, font rendering and animation correctness remain unverified.',
-  },
-  {
-    key: 'graphics-budget-evidence', tools: ['math_check'],
-    when: args => args.operation === 'frame_budget' || args.operation === 'render_budget',
-    line: 'Keep measurements and render assumptions with the result. Compare the same scene and device before/after optimization; attachment arithmetic excludes other GPU allocations and cannot prove speed or visual fidelity.',
-  },
-  {
-    key: 'ui-source-evidence', tools: ['artifact_check'],
-    when: args => args.operation === 'ui',
-    line: 'Inspect flagged components against project rules and real status data. Verify rendered typography, contrast and interaction states. Source cues cannot certify design; fix demonstrated defects first.',
-  },
 	{
 		// First interface file of the session: judge the design as rendered,
 		// not as source. Open briefs also deserve a deliberate direction.
@@ -125,123 +71,19 @@ export const HOOK_RULES: readonly HookRule[] = [
 		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
 	},
 	{
-		key: "creative-direction-loop",
-		tools: ["creative_direct"],
-		when: (args) => args.action === 'set',
-		line: "This direction now steers review: visual_review, ui_explore, ui_consistency and motion_inspect check conformance against it and blocking verdicts hold completion. Keep one direction per task; revise it instead of stacking briefs. References supply composition/motion principles, not a palette/template to copy. Design mechanics must serve the real content and user task.",
-	},
-	{
 		key: "visual-review-receipt",
 		tools: ["visual_review"],
 		when: (args) => args.action === 'run',
 		line: "Judge every needsVision section from delivered pixels or permitted image_understand on this capture, then record every rubric section with this runId. UNKNOWN stays open. Changed dependencies invalidate the run; measured FAILs require repair or a specific dismissal. Reuse current evidence instead of repeating unchanged captures.",
 	},
 	{
-		key: "art-qa-evidence",
-		tools: ["ui_explore", "ui_consistency", "motion_inspect", "svg_inspect", "creative_compare"],
-		when: (args) => !['status', 'get', 'brief'].includes(String(args.action)),
-		line: "Keep the returned files with the finding: matrix cells, timeline frames, geometry outliers and variant deltas are the evidence. Findings name locations and measurements; re-run after the fix on the same revision instead of asserting it.",
-	},
-	{
-		key: 'creative-recover', tools: ['svg_inspect', 'visual_review', 'ui_explore', 'ui_consistency', 'ui_recipe', 'creative_compare', 'motion_inspect'], onError: true,
-		line: 'Use the reported source, stage and bounds to narrow the failing capture or geometry check. Preserve successful matrix cells and current source evidence; an unavailable render remains unverified. Reuse a healthy server instead of launching it again.',
-	},
-  {
-    key: 'ui-recipe-integrate', tools: ['ui_recipe'], when: args => args.action === 'scaffold',
-    line: 'Adapt the prepared mechanics to the project content and tokens. Check imports/selectors and preserve the static/reduced-motion/mobile path; mount once and dispose on route unmount. Use the real served URL with motion_inspect mode:"scroll", device/breakpoint ui_explore and ui_consistency on shared route roles. A scaffold is not an executed or visually approved UI.',
-  },
-  {
-    key: 'blender-web-import', tools: ['blender_export'], when: args => ['glb', 'gltf'].includes(String(args.format)),
-    line: 'Carry webAsset bundle hashes, loader requirements and mobile budget warnings into the served Three.js path. A blocked preflight preserves the export: repair the gap and inspect the existing artifact before rerendering. Verify model loading, frame cost, fallback and pixels on actual devices/viewports; structure alone does not approve the asset.',
-  },
-	{
-		key: "media-rgb-composite", tools: ["bash"],
-		when: args => /ffmpeg/.test(bashCommand(args)) && /blend=.*(?:screen|addition)|maskedmerge/.test(bashCommand(args)) && !/format=(?:gbrp|rgb)/.test(bashCommand(args)),
-		line: "Screen/additive lighting must blend in RGB, with every input explicitly converted before blending; YUV black contains neutral chroma and screen blending can turn the entire frame magenta. Use video_ambient for a detailed locked-camera plate with masked weather, or a native compositor. Inspect full-size encoded RGB pixels before extending any custom FFmpeg composition.",
-	},
-	{
-		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit", "audio_mix", "music_compose", "media_pipeline", "video_compose", "video_render", "video_ambient", "video_shot", "video_qa", "narration_tts", "audio_synth", "scene_render", "svg_render", "image_generate", "image_convert", "image_understand", "blender_render", "blender_run", "blender_export", "splat_train", "splat_preview"], onError: true,
-		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Keep completed artifacts and use any recovery receipt to repair local registration. A provider timeout can leave a paid outcome unknown: reconcile available receipts/status before another request and preserve the selected model. Narrow local renders or use existing background tools for long jobs.",
-	},
-	{
-		key: "video-sample-evidence", tools: ["video_frames"],
-		line: "Inspect the returned frames and timing manifest. Sample more densely around suspected events; sparse frames cannot prove continuous motion, exact event boundaries or unseen content.",
-	},
-	{
-		key: "audio-measurement-scope", tools: ["audio_analyze"],
-		line: "Keep the measured window and units with findings. LUFS, sample peak and true peak differ; silence thresholds do not identify speech, and numbers alone do not verify audible quality.",
-	},
-	{
-		key: "media-export-review", tools: ["media_edit"],
-		line: "Review the output streams, duration and normalization report, then inspect representative playback for sync and quality. A clean decode does not establish correct edits or intelligibility.",
-	},
-	{
-		key: "music-score-review", tools: ["music_compose"],
-		line: "Review the MIDI and audition the WAV for rhythm, harmony and endings. The preview uses simple oscillators; MIDI program changes need a soundfont or DAW for instrument-quality rendering.",
-	},
-	{
-		key: "video-timeline-check", tools: ["video_project"],
-		when: (args) => args.action === undefined || ['init', 'compose', 'check', 'look', 'cta', 'feature', 'direction', 'upgrade'].includes(String(args.action)),
-		line: "Keep timing in video.json and adopt the full creative_direct brief with video_project direction. Choose specific hero assets: authored code/Blender, licensed models, or image_generate artwork and textures. Combine via native layers or Blender image-plane cards; mark unfinished assets blockout/draft. Review silhouette, light/materials, hierarchy and reference fit in actual pixels before extending the animation.",
-	},
-	{
 		key: "video-render-review", tools: ["video_render"],
 		line: "Stills return measured text-fit evidence; open full-size hero/detail frames and compare silhouette, material/light, spacing and typography to the brief and references. Previews judge continuous pacing, easing and transitions. Finals need video_qa analyze then explicit art-direction/composition/typography/playback/listening verdicts. A successful render never approves itself.",
-	},
-	{
-		key: "motion-example-first", tools: ["write"],
-		when: (args) => typeof args.path === "string" && (MOTION_FILE.test(args.path) || (/\.py$/i.test(args.path) && /\b(?:import bpy|from bpy)\b/.test(String(args.content ?? '')))),
-		line: "A hand-written first draft of advanced motion is the generic version of the effect. Before building this Blender script or HTML motion page from scratch, run motion_examples action:\"search\" for the effect and adapt the closest verified example (action:\"copy\" places it in the project), in the film's own palette and fonts.",
-	},
-	{
-		key: "video-shot-review", tools: ["video_shot"],
-		line: "Inspect the shot's contact sheet and full-size details for specific silhouette, coherent light/shadow, finished material and intentional framing. Samples cannot turn a crude stand-in into a detailed subject. Build complex assets with authored Blender code/models and generated textures/cutouts; image-plane combines artwork at real depth. Keep images/model settings explicit. Render delivery fps/pixels once the look is locked; verified native cache hits retain their own review requirement.",
-	},
-	{
-		key: "motion-example-adapt", tools: ["motion_examples"],
-		when: (args) => ['get', 'copy'].includes(String(args.action)),
-		line: "An example is a technique, not the design: replace its placeholder colours and type with the film's theme and fonts, keep every frame a pure function of time, then render a few frames and view them before building further. Combine approaches only through a documented merge (HtmlScene, ShotScene notes, shot-overlay, html-as-texture, composite).",
-	},
-	{
-		key: "blender-render-review", tools: ["blender_render"],
-		line: "Open the returned frames or contact sheet with read and judge framing, clipping, lighting, materials and motion continuity; fix the scene with blender_run and re-render before any longer range. A finished render never approves itself.",
-	},
-	{
-		key: "blender-dataset-next", tools: ["blender_export"],
-		when: (args) => String(args.format) === "dataset",
-		line: "Validate with splat_train action:\"check\" (views, seed points, image sizes), then train with evalSplitEvery so held-out views are tiled beside their ground truth.",
-	},
-	{
-		key: "splat-train-review", tools: ["splat_train"],
-		when: (args) => args.action !== "check",
-		line: "Open fidelity-sheet.png with read: each held-out truth sits beside its splat render. Judge sharpness, missing parts, floaters and colour; few surviving splats means the seed points or views miss the subject, not that bitrate is low. Then splat_preview for a turntable.",
-	},
-	{
-		key: "splat-preview-review", tools: ["splat_preview"],
-		line: "The turntable is an opaque point-cloud preview: judge shape, coverage and floaters from the contact sheet or video_frames, and state that view-dependent shading was not reviewed.",
 	},
 	{
 		key: "video-qa-review", tools: ["video_qa"],
 		when: (args) => args.action === undefined || args.action === 'analyze',
 		line: "Fix technical errors, then inspect full-size hero/detail pixels against the stored brief and references, inspect continuous playback and listen to the final encoding. Record separate art-direction, composition, typography, motion, sync and audio verdicts with concrete observations and comparedReferences. Missing vision/playback/listening remains unreviewed; technical passes do not approve design.",
-	},
-	{
-		key: "narration-fit", tools: ["narration_tts"],
-		when: (args) => ['synthesize', 'speak'].includes(String(args.action)),
-		line: "After synthesis, re-time scene cues to the spoken words, resolve overruns and fast pacing, and keep a pronunciation lexicon for names and acronyms instead of respelling narration text.",
-	},
-	{
-		key: "audio-synth-balance", tools: ["audio_synth"],
-		line: "Place one sound accent per visual event in video.json audio.sfx, keep music 15-20 LU under narration, and verify the balance with video_qa. If no visual event owns a sound, delete it.",
-	},
-	{
-		key: "timeline-compose-review", tools: ["video_compose", "audio_mix"],
-		line: "Inspect representative playback for framing, timing and audible quality, and measure loudness with audio_analyze. Clean decodes and peak limiting do not establish sync or intelligibility.",
-	},
-	{
-		key: "ffmpeg-source-review", tools: ["bash"],
-		when: (args) => /^(?:(?:\/[\w.-]+)+\/)?ffmpeg\s/.test(bashCommand(args).trim()),
-		line: "Probe source streams and preserve originals. Set mappings and timing explicitly; use media_edit for bounded presets and inspect decoded output plus representative playback before delivery.",
 	},
 	{
 		key: "browser-session-recovery", tools: ["browser_session"], onError: true,
@@ -253,29 +95,10 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: "Use the reported stage and nextStep. For navigation failures check the server task and URL; for inspection failures check current selectors and state before retrying.",
 	},
 	{
-		key: "browser-session-workflow", tools: ["browser_session"],
-		line: "Verify exact draft and account before submitting. Use fresh targets after changes and wait for an observed condition. On a humanHelp block call request_help once; renew before lease expiry and reacquire after restart.",
-		when: isBrowserMutation,
-	},
-	{
-		key: 'source-check-recovery', tools: ['syntax_check'], onError: true,
-		line: 'Fix reported syntax errors; use project checks for missing parsers and narrow incomplete batches. Rerun changed files. Syntax alone does not establish type or runtime correctness.',
-	},
-	{
-		key: 'source-check-scope', tools: ['syntax_check'],
-		line: 'These receipts cover syntax of the returned source digests. Keep required project types, tests and configuration schema checks. Later edits invalidate this evidence.',
-	},
-	{
 		key: "subagent-recover-evidence",
 		tools: ["subagent"],
 		onError: true,
 		line: "Inspect each child's structured outcome; preserve successful siblings and retry only the failed scope after correcting its cause. Status and retained artifacts can resolve uncertainty without relaunching.",
-	},
-	{
-		key: "browser-recover-state",
-		tools: ["render_see"],
-		onError: true,
-		line: "Use the reported failure stage to check the server, URL or selector before another capture; an unavailable renderer supplies no visual evidence. Reuse the existing server task when it is healthy.",
 	},
 	{
 		key: "background-completion",
@@ -283,36 +106,10 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: "Keep the returned task ID and continue independent work. Completion normally notifies; inspect that task's status or output if needed instead of repeated shell polling or duplicate launches.",
 	},
 	{
-		key: "form-reconnaissance",
-		tools: ["web_probe"],
-		line: "Form fields are read-only reconnaissance, not a logged-in browser. Use an available interactive browser for authorized submissions, then verify the resulting page before retrying.",
-	},
-	{
-		key: "task-dependencies",
-		tools: ["todo"],
-		line: "Plan outcomes and child steps here; batch related edits, reuse IDs after follow-ups, and record evidence before completion. Native tools dispatch runs; active plan files feed session coordination.",
-	},
-	{
-		key: "web-verify",
-		tools: ["web_search"],
-		line: "Read the primary sources with fetch_content before concluding; cite only pages that were actually opened.",
-	},
-	{
-		key: "browser-evidence",
-		tools: ["render_see"],
-		line: "Prefer output:'text' for DOM and labels; for pixel or motion questions capture the specific selector or timestamp instead of inferring from text.",
-	},
-	{
 		key: "tests-first-failure",
 		tools: ["bash"],
 		line: "Read the first failure verbatim before editing; re-run the narrowed test after the change and never report a failing check as passed.",
 		when: contains(TEST_RUNNER),
-	},
-	{
-		key: "lint-first-diagnostic",
-		tools: ["bash"],
-		line: "Fix the first reported diagnostic and re-run the same linter; do not suppress a rule to silence it.",
-		when: contains(LINTER),
 	},
 	{
 		// Production deploys (live session 2026-09-24 pushed to a production
@@ -333,19 +130,6 @@ export const HOOK_RULES: readonly HookRule[] = [
 		tools: ["bash"],
 		line: "Inspect the failing job log before re-running (gh run view --log-failed); a re-run alone is not a fix.",
 		when: contains(CI),
-	},
-	{
-		key: "deps-pin",
-		tools: ["bash"],
-		line: "Prefer exact pins and the existing lockfile; widening a version range is a decision to surface, not a default.",
-		when: contains(INSTALL),
-	},
-	{
-		key: "subagent-fusion-budget",
-		tools: ["subagent"],
-		line: "Swarms and fusions stay advisory and cheap: free or low-cost low-thinking models, bounded scopes, and the parent reads disagreements before acting.",
-		when: (args) => isExecution(args) && (Array.isArray(args.tasks) && args.tasks.length > 1
-			|| typeof args.workflowScript === "string" && FUSION.test(args.workflowScript)),
 	},
 	{
 		key: "subagent-contract",

@@ -1,26 +1,27 @@
-# Static audits: `code_audit` and `svg_inspect review`
+# Static audits and SVG review
 
-Two read-only checks inspect source text: `code_audit` for source files and the `review` action of `svg_inspect` for SVG. No project code runs and nothing is installed. Local audit rules also run automatically after `write` and `edit`. The explicit audit can add bounded semantic context to ambiguous design cues; automated edit checks remain local.
+Source text is inspected without running project code or installing anything. Local audit rules run automatically after every `write` and `edit`. The goal completion check adds a code audit of high-severity findings on files changed since `HEAD` (see [goals](GOAL.md)). SVG files are reviewed explicitly with the `review` action of `svg_inspect`.
 
-## `code_audit`
-
-Domains (default all):
+## Automatic audit rules
 
 | Domain | Looks for |
 | --- | --- |
 | `security` | Provider-format credentials and secret-named literals, `eval`/`new Function`, shell commands built from values, SQL built from values (JS, Python, Go), HTML sinks (`innerHTML`, `document.write`, `dangerouslySetInnerHTML`, `v-html`), unsafe deserialization (`pickle`, `yaml.load`), disabled TLS verification, `Math.random`/`random` for tokens, MD5/SHA-1/`createCipher`, CORS with credentials, cookie flags, JWT `none` and ignored expiry, path traversal, open redirects, SSRF, `curl \| sh` |
 | `backend` | Whole request body written to a model, stack traces sent to clients, credentials in log calls, outbound HTTP without timeouts, unbounded Go request bodies, async Express 4 handlers without `try`/`next`, synchronous I/O in request handlers, blocking calls inside `async def`, a database client per request, queries inside loops (N+1), `defer` in loops |
 | `efficiency` | `reduce` with spread (quadratic), constant `RegExp` in loops, synchronous I/O in loops, non-passive scroll listeners, pandas `iterrows`, `transition: all`, remote CSS `@import`, render-blocking scripts in `<head>` |
-| `patterns` | Thrown strings, mutable default arguments, bare `except`, `is` against literals, `open` without `with`, promise-constructor wrapping, catch-and-rethrow, JSON deep clones, boolean traps, nested ternaries, index keys, `var`, shell without `set -e` |
-| `ui` | Missing `alt`, blocked zoom, removed focus outlines, positive `tabindex`, click handlers on non-interactive elements, missing `lang`/viewport, autoplay with sound, text under 12px, `100vh`, plus the design-slop cues from the `design-slop-prevention` doctrine |
+| `ui` | Missing `alt`, blocked zoom, removed focus outlines, positive `tabindex`, click handlers on non-interactive elements, missing `lang`/viewport, autoplay with sound, text under 12px, `100vh`, plus the design-slop cues from the `ui-design` skill |
 
-Scope is explicit paths, the whole workspace, or `changed: true` (files changed against `base` plus untracked). Results carry `at: file:line`, severity, rule id and the offending line; each rule's message and fix are listed once under `rules`. Test, fixture, example, script and vendored paths are skipped, except for provider-format credentials, which are reported everywhere.
-
-`view:"compact"` is the default; `view:"detailed"` retains bounded findings with their messages and fixes. `omitted` distinguishes report limits from an empty audit. Whole-file design cues use a file location rather than inventing a line. Stock indigo/purple/pink gradients and cream/ivory plus cursive display combinations trigger context checks; plain white, ordinary serif type and supplied brand choices are not automatically defects. Supplied positive `direction` takes precedence over those stock-style defaults; source comments cannot grant an exemption.
-
-With `PI_JEV` enabled, at most eight ambiguous design cues can share a cached Jev/Kev request under a four-second caller deadline. Relevant source declarations are supplied instead of arbitrary opening lines. `semantic:false` disables it; `protectedPaths`, confidential/protected markers and credential-like content withhold excerpts. Offline or invalid responses retain all local findings. Context choices cannot suppress security findings, certify rendered design or authorize an action. See [CODE-QUALITY.md](CODE-QUALITY.md) for limits and static SEO coverage.
+Test, fixture, example, script and vendored paths are skipped, except for provider-format credentials, which are reported everywhere. Whole-file design cues use a file location rather than inventing a line. Stock indigo/purple/pink gradients and cream/ivory plus cursive display combinations trigger context checks; plain white, ordinary serif type and supplied brand choices are not automatically defects.
 
 These are cues, not verdicts: there is no data-flow analysis, so trusted input and admin scripts will occasionally trigger them. No findings does not mean secure or fast.
+
+## Automatic use
+
+- After a `write` or `edit`, `source-check` runs the security, backend, efficiency and UI-source rules on the changed span and appends at most two findings (medium and above) to the edit result, once per finding per session.
+- After a `.svg` write, `small-tools` appends up to two high or medium review findings to the existing `svg-check` note.
+- `svg_inspect` is staged for the first model turn when a request mentions SVGs, icons or vector logos; everything else finds it through `tool_search`.
+- Security and backend cues found in an edit promote the review aspects (`security`, `runtime`) that `quality_review` runs.
+- The goal check's code audit reports only high-severity findings on files changed since `HEAD`, alongside a syntax check of the same files.
 
 ## `svg_inspect` review
 
@@ -36,11 +37,4 @@ These are cues, not verdicts: there is no data-flow analysis, so trusted input a
 
 Review is from source only: it cannot see overlap, optical weight or whether the metaphor reads. Render the SVG (`render_see`, or the `matrix` action) at its real sizes before shipping.
 
-## Automatic use
-
-- After a `write` or `edit`, `source-check` runs the security, backend, efficiency and UI-source rules on the changed span and appends at most two findings (medium and above) to the edit result, once per finding per session. A high-severity cue also suggests `code_audit({changed: true})`.
-- After a `.svg` write, `small-tools` appends up to two high or medium review findings to the existing `svg-check` note.
-- `code_audit` is staged for the first model turn when a request mentions security, vulnerabilities, backends, APIs, endpoints, authentication, N+1, performance audits or coding patterns, and `svg_inspect` when it mentions SVGs, icons or vector logos; everything else finds them through `tool_search`.
-- Security and backend cues found in an edit promote the review aspects (`security`, `runtime`) that `quality_review` runs.
-
-See [CODE-QUALITY.md](CODE-QUALITY.md) for duplication, slop, prose, complexity and import-graph measurements, and the `svg-assessment` skill for the human checklist behind the SVG rules.
+See [code quality tools](CODE-QUALITY.md) for the git review, commit guard and static SEO checks, and the `svg-images` skill for the human checklist behind the SVG rules.

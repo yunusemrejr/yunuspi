@@ -1,16 +1,15 @@
 # Anti-slop checklist for AI website agents
 
 Standing design and implementation rules. The Observer Book's `anti-slop`
-chapter distills this list into reviewable passages; the `anti-ai-slop`
-skill's website necessity catalog names the harness mechanism behind each
-failure mode. When they disagree about a specific page, this checklist wins
+chapter distills this list into reviewable passages; the `ui-design`
+skill covers the same failure modes. When they disagree about a specific page, this checklist wins
 for websites: it is the most specific rule set.
 
 Standing UI constraints also reject generic lightbulb branding, muddy orange/brass/brown default palettes, decorative colored dots before labels, and boxed icon badges. Necessary state and explicitly requested branding are contextual exceptions with evidence. A generated source comment asserting brand ownership is insufficient. Visual/3D/motion upgrades require baseline-versus-final inspection of the relevant states, not merely a new asset or passing tests.
 
 ## Embedded design doctrine
 
-The `design-slop-prevention` skill (`agent/skills/design-slop-prevention/SKILL.md`)
+The `ui-design` skill (`agent/skills/ui-design/SKILL.md`)
 explains why an unconstrained model converges on the same two looks
 (indigo/purple SaaS, then the cream/terracotta editorial reaction to it),
 lists the tells of both generations and gives the nine-step procedure that

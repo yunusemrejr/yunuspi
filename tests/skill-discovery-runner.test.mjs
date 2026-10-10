@@ -50,7 +50,7 @@ function fixture(options = {}) {
 test('adaptive direct skill discovery performs no remote judge, launch, budget claim or lifecycle work',async()=>{
   let judges=0;
   const f=fixture({judge:async()=>{judges++;return {ok:false,skipped:'unavailable'};}});
-  const request={task:'Correct teh to the in README.md and stop',brief:'Installed skills and observed tools',candidates:[{name:'coding-practices',description:'Maintain code'}]};
+  const request={task:'Correct teh to the in README.md and stop',brief:'Installed skills and observed tools',candidates:[{name:'engineering',description:'Maintain code'}]};
   assert.equal(await f.runner(request,f.ctx),undefined);
   assert.equal(judges,0);assert.equal(f.calls.length,0);assert.equal(f.entries.length,0);
   const controller=createAdaptiveExecutionController();controller.begin({task:request.task});
@@ -73,18 +73,18 @@ test('adaptive skill scout preserves inherited delegation constraints and rollba
 
 test('typed skill selection avoids a full child and cannot invent catalog identifiers', async () => {
   const {microMetrics,resetMicroMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/micro-intelligence/metrics.ts')));
-  const request={brief:'Investigate database query plans using the supplied sql skill.',task:'Investigate database query plans',candidates:[{name:'sql-query-engineering',description:'Database query execution plans'}]};
+  const request={brief:'Investigate database query plans using the supplied sql skill.',task:'Investigate database query plans',candidates:[{name:'data-science',description:'Database query execution plans'}]};
   const judged=(name,exists=.95)=>({ok:true,answers:{skill:{type:'choice',choice:name,probabilities:{[name]:1}},exists:{type:'noul',noul:exists}},usage:{model:'mock',inputTokens:20,costUsd:0,ms:1,cached:false}});
   resetMicroMetrics();
-  const f=fixture({judge:async()=>judged('sql-query-engineering')});
-  assert.equal(JSON.parse(await f.runner(request,f.ctx)).suggestions[0].name,'sql-query-engineering');
+  const f=fixture({judge:async()=>judged('data-science')});
+  assert.equal(JSON.parse(await f.runner(request,f.ctx)).suggestions[0].name,'data-science');
   assert.equal(f.calls.length,0);
   assert.equal(microMetrics().snapshot().llm.avoided,1);
   assert.equal(microMetrics().snapshot().llm.estimatedTokensAvoided,0,'no invented token savings');
   const unknown=fixture({judge:async()=>judged('invented')});
   await unknown.runner(request,unknown.ctx);
   assert.equal(unknown.calls.length,1,'invalid IDs retain the existing bounded fallback');
-  const none=fixture({judge:async()=>judged('sql-query-engineering',.05)});
+  const none=fixture({judge:async()=>judged('data-science',.05)});
   assert.deepEqual(JSON.parse(await none.runner(request,none.ctx)),{suggestions:[]});
   assert.equal(none.calls.length,0);
 });
@@ -93,19 +93,19 @@ test('a large skill catalog is shortlisted to fit the Jev input budget instead o
   const { buildSkillDiscoveryRequest } = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-discovery.ts')));
   const { JEV_MAX_INPUT_CHARS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/jev-client.ts')));
   const catalog = Array.from({ length: 240 }, (_, i) => ({ name: `domain-skill-${i}`, file: `/skills/domain-skill-${i}/SKILL.md`, description: `Guidance for specialised area number ${i} covering frameworks, tooling and review workflow details`.padEnd(150, '.') }));
-  catalog.push({ name: 'sql-query-engineering', file: '/skills/sql/SKILL.md', description: 'Database query execution plans, indexes and slow postgres statements' });
+  catalog.push({ name: 'data-science', file: '/skills/sql/SKILL.md', description: 'Database query execution plans, indexes and slow postgres statements' });
   const built = buildSkillDiscoveryRequest(catalog, { prompt: 'Investigate slow postgres query execution plans', files: ['db/queries.sql'], tools: ['read'] });
   const request = { brief: built.brief, task: 'Investigate slow postgres query execution plans', candidates: built.catalog.map(skill => ({ name: skill.name, description: skill.description.slice(0, 160) })) };
   const payloads = [];
   const answer = exists => async (_site, state, questions) => {
     payloads.push(JSON.stringify([state, questions]));
-    assert.ok(state.candidates.some(c=>c.name==='sql-query-engineering'&&c.description.includes('Database')),'existence sees the same descriptions as ranking');
+    assert.ok(state.candidates.some(c=>c.name==='data-science'&&c.description.includes('Database')),'existence sees the same descriptions as ranking');
     const names=Object.keys(questions.skill.criteria),p=names.length===1?1:.9;
-    const probabilities=Object.fromEntries(names.map(name=>[name,name==='sql-query-engineering'?p:(1-p)/(names.length-1)]));
-    return { ok: true, answers: { skill: { type: 'choice', choice: 'sql-query-engineering', probabilities }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } };
+    const probabilities=Object.fromEntries(names.map(name=>[name,name==='data-science'?p:(1-p)/(names.length-1)]));
+    return { ok: true, answers: { skill: { type: 'choice', choice: 'data-science', probabilities }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } };
   };
   const f = fixture({ judge: answer(.95) });
-  assert.equal(JSON.parse(await f.runner(request, f.ctx)).suggestions[0].name, 'sql-query-engineering');
+  assert.equal(JSON.parse(await f.runner(request, f.ctx)).suggestions[0].name, 'data-science');
   assert.equal(f.calls.length, 0, 'a confident pick avoids the paid child');
   assert.ok(payloads[0].length <= JEV_MAX_INPUT_CHARS, `payload ${payloads[0].length} fits the Jev budget`);
   assert.ok(!payloads[0].includes('Catalog [name, description]'), 'the LLM brief catalog is not duplicated');
@@ -116,7 +116,7 @@ test('a large skill catalog is shortlisted to fit the Jev input budget instead o
 
 test('skill judge respects delegation policy and rejects stale results', async () => {
   let calls=0,resolve;
-  const request={brief:'Select useful skills.',candidates:[{name:'sql-query-engineering',description:'Database query plans'}]};
+  const request={brief:'Select useful skills.',candidates:[{name:'data-science',description:'Database query plans'}]};
   const blocked=fixture({constraints:{noDelegation:true},judge:async()=>{calls++;return {ok:false,skipped:'unavailable'};}});
   assert.equal(await blocked.runner(request,blocked.ctx),undefined);
   assert.equal(calls,0);

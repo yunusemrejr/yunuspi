@@ -330,7 +330,7 @@ export async function uiExploreRun(
       ...(!consistent ? ["Source changed during capture or its revision is unavailable; re-capture the final revision"] : []),
       ...failed.map((c) => `${c.viewport}/${c.state}: capture failed — ${c.error}`),
     ].slice(0, 24),
-    note: "The contact sheet includes every successful capture in row/column order; open the saved full-size PNGs for small text or long-page details. Viewport/state pixels plus DOM facts are not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or design_audit follow-ups. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
+    note: "The contact sheet includes every successful capture in row/column order; open the saved full-size PNGs for small text or long-page details. Viewport/state pixels plus DOM facts are not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or follow-up inspection. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
   };
   await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report, null, 1) + "\n", { flag: "wx" });
   return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report };

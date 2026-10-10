@@ -93,7 +93,7 @@ test('expert briefs stay bounded and carry exploration, preservation and critic 
 
 test('doctrine packs are complete, bounded and reference real lenses and tools',()=>{
   assert.deepEqual(Object.keys(EXPERT_PACKS).sort(),[...EXPERT_DOMAIN_IDS].sort());
-  const knownTools=new Set(['artifact_check','math_check','code_quality','syntax_check','claim_check','source_check','design_audit','video_qa','video_frames','audio_analyze','media_info','render_see','blender_inspect','blender_render','splat_preview','web_probe','browser_session','project_tests','project_intel','context_slice','symbol_expand','dependency_plan','openapi_probe','contract_diff','http_request','data_query','sqlite_probe','coverage_probe','coverage_select','web_asset_check','env_audit','net_probe','sandbox_run','web_search','web_research','source_check','fetch_content','quality_review','subagent','todo','research_toolkit','video_project','video_render','narration_tts','audio_mix','audio_synth','music_compose','media_edit','scene_create','scene_render','image_ocr','skill_review','tool_search','creative_direct','visual_review','ui_explore','motion_inspect','svg_inspect','asset_register','image_generate','creative_compare']);
+  const knownTools=new Set(['math_check','source_check','video_qa','video_frames','audio_analyze','media_info','render_see','web_probe','browser_session','project_tests','project_intel','context_slice','symbol_expand','http_request','data_query','sqlite_probe','web_asset_check','net_probe','sandbox_run','web_search','web_research','fetch_content','quality_review','subagent','todo','video_project','video_render','narration_tts','audio_mix','audio_synth','music_compose','skill_review','tool_search','creative_direct','visual_review','ui_explore','motion_inspect','svg_inspect','asset_register','image_generate','creative_compare']);
   for(const [id,pack] of Object.entries(EXPERT_PACKS)){
     assert.equal(pack.id,id);
     for(const [key,max] of [['principles',6],['antiPatterns',6],['invariants',5],['dimensions',6],['checks',6],['skills',4],['tools',6],['lenses',6],['evidence',4],['convergeExtra',3]]){
@@ -134,7 +134,7 @@ test('critic plans order cheap lenses first, cap size and disclose drops',()=>{
 test('convergence verdicts require every clause and name the next action',()=>{
   assert.equal(evaluateExpertConvergence(verdictInput({openRequirements:['R1']})).reason,'requirements-open');
   assert.equal(evaluateExpertConvergence(verdictInput({invariantViolations:['brand tokens replaced']})).reason,'invariants-violated');
-  assert.equal(evaluateExpertConvergence(verdictInput({failingChecks:['artifact_check svg: missing-reference']})).reason,'checks-failing');
+  assert.equal(evaluateExpertConvergence(verdictInput({failingChecks:['svg_inspect svg: missing-reference']})).reason,'checks-failing');
   assert.equal(evaluateExpertConvergence(verdictInput({openBlocking:1})).reason,'blocking-open');
   assert.equal(evaluateExpertConvergence(verdictInput({evidenceCurrent:false})).reason,'evidence-stale');
   const open=evaluateExpertConvergence(verdictInput({openImprovements:2,fixedImprovements:1,pass:2}));

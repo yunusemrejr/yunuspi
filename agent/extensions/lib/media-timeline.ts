@@ -1,7 +1,7 @@
 /** Data-only FFmpeg timeline construction. No user filters, shell or remote inputs. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FFMPEG_FLAGS, inputArgs, inputFile, integer, number, outputFolder, probe, produced, requireStream, run, mediaMap } from './media-process.ts';
+import { FFMPEG_FLAGS, inputArgs, inputFile, number, outputFolder, probe, produced, requireStream, run, mediaMap } from './media-process.ts';
 import { masterMedia } from './audio-studio.ts';
 
 function fields(value: any, allowed: string[], name: string) {
@@ -99,11 +99,6 @@ async function renderVoiceBus(tracks: any[], duration: number, dir: string, sign
   await run('ffmpeg', args, signal);
   return output;
 }
-/** Transitions offered by video_compose. `cut` is a plain concat; the rest
- * are FFmpeg xfade names available since FFmpeg 4.4, so the same call
- * renders on Ubuntu LTS and current FFmpeg. One source of truth: the tool
- * schema in media-tools.ts and the tests import this list. */
-export const VIDEO_TRANSITIONS = ['cut', 'fade', 'fadewhite', 'fadeblack', 'wipeleft', 'wiperight', 'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown', 'smoothleft', 'smoothright', 'smoothup', 'smoothdown'] as const;
 async function finish(dir: string, output: string, signal: AbortSignal | undefined, receipt: any) {
   const info = await probe(output, signal);
   const video = info.streams?.find((stream: any) => stream.codec_type === 'video');
@@ -152,93 +147,5 @@ export async function audioMix(params: any, cwd: string, signal?: AbortSignal, i
     if (voiceBus) await fs.rm(voiceBus);
     const loudness = target === undefined ? undefined : await masterMedia(output, target, signal);
     return await finish(dir, output, signal, { operation: 'audio_mix', duration, tracks, ducking: ducking ?? false, ...(loudness ? { loudness } : {}), limiter: 'sample peak 0.95, latency compensated', sampleRate: 48000 });
-  } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
-}
-
-export async function prepareVideoCompose(params: any, cwd: string, signal?: AbortSignal, inspect = cachedProbe(signal)) {
-  const width = integer(params.width, 1280, 64, 1920, 'width'), height = integer(params.height, 720, 64, 1080, 'height'), fps = integer(params.fps, 24, 1, 60, 'fps');
-  if (width % 2 || height % 2) throw Error('width and height must be even');
-  const transition = params.transition ?? 'cut';
-  if (!(VIDEO_TRANSITIONS as readonly string[]).includes(transition)) throw Error(`transition must be one of ${VIDEO_TRANSITIONS.join(', ')}`);
-  const overlap = transition === 'cut' ? 0 : number(params.transitionDuration, 0.5, 1 / fps, 3, 'transitionDuration');
-  if (params.includeClipAudio !== undefined && typeof params.includeClipAudio !== 'boolean') throw Error('includeClipAudio must be boolean');
-  const clips = []; let requestedDuration = 0;
-  for (const raw of array(params.clips, 'clips')) {
-    fields(raw, ['path', 'start', 'duration'], 'clip');
-    const file = await inputFile(raw.path, cwd), info = await inspect(file), stream = requireStream(info, 'video');
-    if (stream.width > 8192 || stream.height > 8192 || stream.width * stream.height > 33_554_432) throw Error('Source video dimensions exceed decoder work budget');
-    if (['smpte2084', 'arib-std-b67'].includes(stream.color_transfer)) throw Error('HDR source requires explicit tone mapping before SDR composition');
-    const start = number(raw.start, 0, 0, 86400, 'clip start'), length = number(raw.duration, undefined as any, 1 / fps, 120, 'clip duration');
-    if (start + length > sourceDuration(info, stream) + 0.02) throw Error('Clip exceeds source duration');
-    if (overlap * 2 > length) throw Error('Transition cannot exceed half any clip duration');
-    const requestedAt = clips.length ? requestedDuration - overlap : 0;
-    requestedDuration = requestedAt + length;
-    // Quantize absolute boundaries, not each duration independently: eight
-    // fractional clips must not accumulate rounding and lose the final clip.
-    const startFrame = Math.round(requestedAt * fps), endFrame = Math.round(requestedDuration * fps);
-    const frames = endFrame - startFrame;
-    const previous = clips.at(-1);
-    const overlapFrames = previous ? previous.endFrame - startFrame : 0;
-    if (frames < 1 || (previous && transition !== 'cut' && (overlapFrames < 1 || overlapFrames * 2 > Math.min(previous.frames, frames)))) {
-      throw Error('Frame-rounded transition cannot exceed half either clip; increase clip duration or reduce transitionDuration');
-    }
-    clips.push({ file, stream: stream.index, start, requestedDuration: length, requestedAt, duration: frames / fps, at: startFrame / fps, frames, endFrame, transitionDuration: overlapFrames / fps, audio: info.streams?.find((s: any) => s.codec_type === 'audio')?.index });
-  }
-  const duration = clips.at(-1)!.endFrame / fps;
-  if (duration > 120 || Math.ceil(duration * fps) * width * height > 1_500_000_000) throw Error('Timeline exceeds duration/pixel work budget; reduce duration, fps or resolution');
-  // User audio is expressed in the requested timeline. Final mixing trims or
-  // pads the sub-frame difference after video boundary quantization.
-  const extraTracks = await mediaMap(array(params.audio ?? [], 'audio', 0), (track, _index, active) => audioTrack(track, cwd, requestedDuration, file => inspect(file, active)), signal);
-  const clipRoles = params.includeClipAudio !== false ? clips.filter(clip => clip.audio !== undefined).map(() => 'voice') : [];
-  const ducking = duckingOptions(params.ducking, [...clipRoles, ...extraTracks.map(t => t.role)]);
-  loopBudget(extraTracks);
-  const target = params.targetLufs === undefined ? undefined : number(params.targetLufs, -16, -36, -8, 'targetLufs');
-  if (target !== undefined && !clipRoles.length && !extraTracks.length) throw Error('Loudness normalization requires audio');
-  signal?.throwIfAborted();
-  return { width, height, fps, transition, overlap, clips, duration, requestedDuration, extraTracks, clipRoles, ducking, target };
-}
-
-export async function videoCompose(params: any, cwd: string, signal?: AbortSignal, inspect?: MediaInspector) {
-  const { width, height, fps, transition, overlap, clips, duration, requestedDuration, extraTracks, ducking, target } = await prepareVideoCompose(params, cwd, signal, inspect);
-  const dir = await outputFolder(params.outputDir, cwd), output = path.join(dir, 'timeline.mp4');
-  try {
-    const clipVoice = params.includeClipAudio !== false ? clips.flatMap((clip, i) => clip.audio === undefined ? [] : [{ ...clip, stream: clip.audio, sourceDuration: clip.requestedDuration, gain: 1, pan: 0, fadeIn: clip.transitionDuration, fadeOut: clips[i + 1]?.transitionDuration ?? 0 }]) : [];
-    const voiceBus = ducking ? await renderVoiceBus([...clipVoice, ...extraTracks.filter(track => track.role === 'voice')], duration, dir, signal) : undefined;
-    const args = [...FFMPEG_FLAGS, '-v', 'error'], filters: string[] = [], audioLabels: Array<{ name: string; role: string; key?: string }> = [];
-    for (const clip of clips) args.push(...inputArgs(clip.file, clip.start));
-    for (const track of extraTracks) args.push(...inputArgs(track.file, track.start));
-    for (let i = 0; i < clips.length; i++) {
-      const clip = clips[i];
-      // Use bounded display-aspect math supported by FFmpeg 6.1 as well as newer
-      // builds; reset_sar was added later. Normalize pixels before letterboxing.
-      filters.push(`[${i}:${clip.stream}]trim=duration=${clip.requestedDuration},setpts=PTS-STARTPTS,scale=w='max(2,trunc(min(${width},${height}*dar)/2)*2)':h='max(2,trunc(min(${height},${width}/dar)/2)*2)',setsar=1,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,fps=${fps},tpad=stop_mode=clone:stop_duration=${clip.duration},trim=end_frame=${clip.frames},format=yuv420p,settb=AVTB[v${i}]`);
-      if (!ducking && params.includeClipAudio !== false && clip.audio !== undefined) {
-        const track = { ...clip, stream: clip.audio, sourceDuration: clip.requestedDuration, gain: 1, pan: 0, fadeIn: clip.transitionDuration, fadeOut: clips[i + 1]?.transitionDuration ?? 0 };
-        audioLabels.push({ name: `ca${i}`, role: 'voice', key: `ck${i}` }); filters.push(audioFilter(track, i, `ca${i}`));
-      }
-    }
-    let video = 'v0';
-    if (clips.length > 1 && transition === 'cut') {
-      filters.push(`${clips.map((_, i) => `[v${i}]`).join('')}concat=n=${clips.length}:v=1:a=0[video]`); video = 'video';
-    } else for (let i = 1; i < clips.length; i++) {
-      filters.push(`[${video}][v${i}]xfade=transition=${transition}:duration=${clips[i].transitionDuration}:offset=${clips[i].at}[x${i}]`); video = `x${i}`;
-    }
-    for (let i = 0; i < extraTracks.length; i++) {
-      if (ducking && extraTracks[i].role === 'voice') continue;
-      audioLabels.push({ name: `a${i}`, role: extraTracks[i].role, key: `ak${i}` }); filters.push(audioFilter(extraTracks[i], clips.length + i, `a${i}`));
-    }
-    if (voiceBus) {
-      args.push(...inputArgs(voiceBus, 0), ...inputArgs(voiceBus, 0));
-      filters.push(`[${clips.length + extraTracks.length}:0]anull[voicedelivery]`, `[${clips.length + extraTracks.length + 1}:0]anull[voicekeysource]`);
-      audioLabels.push({ name: 'voicedelivery', role: 'voice', key: 'voicekeysource' });
-    }
-    if (audioLabels.length) filters.push(mixFilter(audioLabels, duration, ducking));
-    args.push('-filter_complex', filters.join(';'), '-map', `[${video}]`);
-    if (audioLabels.length) args.push('-map', '[audio]', '-c:a', 'aac', '-ar', '48000', '-b:a', '192k');
-    args.push('-t', String(duration), '-c:v', 'libx264', '-threads', '2', '-preset', 'veryfast', '-crf', '19', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-map_metadata', '-1', '-map_chapters', '-1', output);
-    await run('ffmpeg', args, signal);
-    if (voiceBus) await fs.rm(voiceBus);
-    const loudness = target === undefined ? undefined : await masterMedia(output, target, signal);
-    return await finish(dir, output, signal, { operation: 'video_compose', width, height, fps, duration, requestedDuration, transition, transitionDuration: overlap, clips, audio: extraTracks, ducking: ducking ?? false, ...(loudness ? { loudness } : {}), includeClipAudio: params.includeClipAudio !== false, timing: 'Absolute clip boundaries round to the nearest output frame; each clip is trimmed or holds its last frame to fill that allocation. Per-clip at/duration/transitionDuration are the rendered timing; requestedAt/requestedDuration retain input timing.' });
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }

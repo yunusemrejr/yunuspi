@@ -10,7 +10,7 @@ import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 import { adaptiveExecutionEnabled, classifyExecution, creativeWorkDomains, type ExecutionProfile } from "../../../../lib/adaptive-execution.ts";
 
 export interface AssistancePlan {
- mode: "none" | "subagent" | "swarm" | "fusion";
+ mode: "none" | "subagent" | "fanout";
  roles: string[];
  reason: string;
  deadlineMs: number;
@@ -22,14 +22,14 @@ const usefulWork = /\b(?:review|debug|research|compare|implement|investigate|aud
 export function planAssistance(prompt: string, project = false, execution?: ExecutionProfile): AssistancePlan {
  const text = prompt.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
  const none = (reason:string): AssistancePlan => ({mode:"none",roles:[],reason,deadlineMs:0,maxCostUsd:0});
- if (/\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|use\s+(?:sub[- ]?agents?|swarms?|fusion|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i.test(text)) return none("explicit delegation constraint");
+ if (/\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|use\s+(?:sub[- ]?agents?|swarms?|fan-?outs?|fusion|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i.test(text)) return none("explicit delegation constraint");
  const profile = execution ?? classifyExecution({task:prompt});
  if (!adaptiveExecutionEnabled()) {
   if (text.length < 35 || /\b(?:typo|spelling|rename|one.line)\b/i.test(text) && !/\b(?:debug|investigate|audit)\b/i.test(text)) return none("coordination exceeds useful work");
   if (!usefulWork.test(text)) return none("no independent work identified");
   const alternatives = /\b(?:compare|alternatives|trade.?offs|competing|choose between|architecture|design decision)\b/i.test(text);
   const broad = /\b(?:multiple|cross.service|cross.file|end.to.end|migration|subsystems|frontend and backend|independent review)\b/i.test(text) || /\bcorrectness\b/i.test(text) && /\bconcurrency\b/i.test(text) || (text.match(/\b[\w/-]+\.(?:ts|js|py|go|rs|tsx|java)\b/g)?.length ?? 0) >= 2;
-  const legacy = {...profile,features:{...profile.features,assistance:true},assistance:{mode:alternatives?'fusion' as const:broad?'swarm' as const:'subagent' as const,maxAgents:alternatives?2:broad?3:1}};
+  const legacy = {...profile,features:{...profile.features,assistance:true},assistance:{mode:alternatives||broad?'fanout' as const:'subagent' as const,maxAgents:alternatives?2:broad?3:1,...(alternatives?{alternatives:true}:{})}};
   return assistanceForProfile(text,project,legacy);
  }
  if (profile.tier === 'direct' && (text.length < 35 || /\b(?:typo|spelling|rename|one.line)\b/i.test(text) && !/\b(?:debug|investigate|audit)\b/i.test(text))) return none("coordination exceeds useful work");
@@ -38,10 +38,10 @@ export function planAssistance(prompt: string, project = false, execution?: Exec
  return assistanceForProfile(text,project,profile);
 }
 function assistanceForProfile(text: string, project: boolean, profile: ExecutionProfile): AssistancePlan {
- const alternatives = profile.assistance.mode === "fusion";
- const broad = profile.assistance.mode === "swarm";
+ const alternatives = profile.assistance.mode === "fanout" && profile.assistance.alternatives === true;
+ const broad = profile.assistance.mode === "fanout" && !alternatives;
  const critical = taskQuality(text).level === "critical";
- if (alternatives) return {mode:"fusion",roles:["Independently propose the best approach with source evidence, tradeoffs and falsifiable checks","Independently challenge the proposed direction: find alternatives, counterexamples and decisive checks"],reason:"competing approaches benefit from independent answers and synthesis",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.02};
+ if (alternatives) return {mode:"fanout",roles:["Independently propose the best approach with source evidence, tradeoffs and falsifiable checks","Independently challenge the proposed direction: find alternatives, counterexamples and decisive checks"],reason:"competing approaches benefit from independent answers and synthesis",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.02};
  const domains = creativeWorkDomains(text);
  if (domains.length) {
   const roles = domains.map(domain => domain === 'scene'
@@ -51,7 +51,7 @@ function assistanceForProfile(text: string, project: boolean, profile: Execution
    : "Investigate motion code and frame timing; identify a small loop/cut proof, periodic endpoints and which actual pixels and playback must be reviewed").slice(0,profile.assistance.maxAgents);
   return {mode:profile.assistance.mode,roles,reason:"independent creative disciplines with concrete preview checks",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:broad ? .03 : .01};
  }
- if (broad) return {mode:"swarm",roles:["Map the relevant source owners and the first useful implementation slice","Investigate independent failure cases, compatibility and boundary conditions",...(project ? ["Identify affected consumers and the smallest project checks that detect regressions"] : [])].slice(0,profile.assistance.maxAgents),reason:"separable investigations in a broad task",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.03};
+ if (broad) return {mode:"fanout",roles:["Map the relevant source owners and the first useful implementation slice","Investigate independent failure cases, compatibility and boundary conditions",...(project ? ["Identify affected consumers and the smallest project checks that detect regressions"] : [])].slice(0,profile.assistance.maxAgents),reason:"separable investigations in a broad task",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.03};
  return {mode:"subagent",roles:[critical ? "Investigate concrete failure cases and the checks the parent should run" : "Investigate the relevant source and return a useful next step with its verification"],reason:"one bounded independent investigation",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.01};
 }
 
@@ -61,7 +61,7 @@ export function assistanceMemberRouteCandidate(member: AssistanceMember): ModelR
 }
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
- * At most one paid helper; no subscription is silently used for a swarm. */
+ * At most one paid helper; no subscription is silently used for a fan-out. */
 export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean;unreliable?:ReadonlySet<string>} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  // Relaxed economy: no tighter $/M clamp than the global policy. Runaway spend

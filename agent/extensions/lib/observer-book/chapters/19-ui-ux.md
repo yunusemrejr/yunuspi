@@ -5,8 +5,8 @@ title: UI and UX craft
 summary: Interfaces people can use: hierarchy and primary actions, all states, fast feedback, forms, navigation and information scent, cognitive load, affordances, and verifying the rendered result.
 terms: ui ux user interface experience usability layout screen page view component button buttons form forms modal dialog navigation nav menu sidebar header footer card cards dashboard settings onboarding flow state empty loading error toast tooltip click interaction interactive responsive mobile desktop
 files: .css .scss .sass .less .tsx .jsx .vue .svelte .html .astro
-tools: browser_session render_see design_audit
-skills: ui-ux-principles frontend-design product-ui-verification ui-antipattern-review accessible-interaction-design
+tools: browser_session render_see
+skills: ui-design frontend
 ---
 
 # UI and UX craft
@@ -14,7 +14,7 @@ skills: ui-ux-principles frontend-design product-ui-verification ui-antipattern-
 Interfaces succeed when users can tell what to do, do it without friction, and understand what happened. The craft combines perception (what draws the eye), cognition (how much must be remembered) and feedback (what the system tells the user), and it is only verified by looking at the rendered result.
 
 ## Verify what renders, not what was written {#verify-rendered}
-<!-- terms: screenshot render rendered visual look looks broken layout overflow viewport check see browser | watch: edits-without(browser_session render_see design_audit web_probe) -->
+<!-- terms: screenshot render rendered visual look looks broken layout overflow viewport check see browser | watch: edits-without(browser_session render_see render_see web_probe) -->
 
 **Principle.** A UI change is unverified until its rendered result has been looked at, at realistic sizes, in its important states.
 

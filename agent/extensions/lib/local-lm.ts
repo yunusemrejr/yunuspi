@@ -368,7 +368,7 @@ Task: Write a REST API in Go with PostgreSQL.
 Skill kubernetes-operators: Build Kubernetes operators and CRDs.
 Helps: no
 Task: Redesign the landing page of a SaaS product.
-Skill frontend-design: Coherent browser UI: structure, composition, type, color, motion.
+Skill frontend: Coherent browser UI: structure, composition, type, color, motion.
 Helps: yes
 Task: Fix a memory leak in a Rust CLI.
 Skill brand-kit-acme: Acme Corp brand colors and slide templates.

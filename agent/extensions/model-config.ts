@@ -1,6 +1,8 @@
-import type { ExtensionAPI } from '@yunuspi/coding-agent';
+import { SettingsManager, getAgentDir, type ExtensionAPI } from '@yunuspi/coding-agent';
 
-/** Record each selected model's runtime configuration as session evidence.
+/** Selected-model bookkeeping: remember the main interactive model as the default (locked, field-merging
+ * writer; startup resolution still owns availability checks and explicit CLI overrides), and record each
+ * selected model's runtime configuration as session evidence.
  * Assistant messages carry provider/model, but the thinking level and the
  * OpenRouter backend routing are live session state. Without a record,
  * /metrics and /export-json cannot show which thinking or nested provider
@@ -21,6 +23,30 @@ function cleanRouting(value: unknown): Record<string, unknown> | undefined {
 }
 
 export default function modelConfig(pi: ExtensionAPI) {
+  let settings: SettingsManager | undefined;
+  let savedDefault = '';
+  const rememberDefault = async (model: { provider: string; id: string } | undefined, ctx: any) => {
+    if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD === '1' || !model ||
+        typeof model.provider !== 'string' || !model.provider.trim() || typeof model.id !== 'string' || !model.id.trim()) return;
+    const key = JSON.stringify([model.provider, model.id]);
+    if (key === savedDefault) return;
+    // State vs policy: an automatic-recovery route is a fallback, never a user selection.
+    // Persisting it would silently rewrite the default model.
+    try {
+      const automatic = (globalThis as Record<symbol, unknown>)[Symbol.for('yunus-pi.automatic-route.v1')];
+      if (typeof automatic === 'function' && (automatic as () => unknown)() === `${model.provider}/${model.id}`) return;
+    } catch { /* marker unreadable: fall through to normal persistence */ }
+    try {
+      settings ??= SettingsManager.create(ctx.cwd, getAgentDir());
+      savedDefault = key;
+      settings.setDefaultModelAndProvider(model.provider, model.id);
+      await settings.flush();
+      if (settings.drainErrors().length) throw new Error('settings persistence failed');
+    } catch {
+      if (savedDefault === key) savedDefault = '';
+      ctx.ui?.notify?.('Could not save the last-used model. Check agent settings permissions and JSON validity.', 'warning');
+    }
+  };
   let remembered = '';
   const keyOf = (data: { route: string; thinking?: string; openRouterRouting?: unknown; recoveryEndpointName?: string }) =>
     JSON.stringify([data.route, data.thinking ?? null, data.openRouterRouting ?? null, data.recoveryEndpointName ?? null]);
@@ -59,7 +85,12 @@ export default function modelConfig(pi: ExtensionAPI) {
       }
     } catch { /* unreadable history cannot seed the anchor */ }
     record(ctx.model, pi.getThinkingLevel?.(), 'session_start');
+    return rememberDefault(ctx.model, ctx);
   });
-  pi.on('model_select', (event: any, ctx: any) => record(event.model ?? ctx.model, pi.getThinkingLevel?.(), `model_select:${typeof event.source === 'string' ? event.source : 'unknown'}`));
+  pi.on('model_select', (event: any, ctx: any) => {
+    record(event.model ?? ctx.model, pi.getThinkingLevel?.(), `model_select:${typeof event.source === 'string' ? event.source : 'unknown'}`);
+    return rememberDefault(event.model, ctx);
+  });
   pi.on('thinking_level_select', (event: any, ctx: any) => record(ctx.model, event.level, 'thinking_level_select'));
+  pi.on('session_shutdown', async () => { await settings?.flush(); });
 }

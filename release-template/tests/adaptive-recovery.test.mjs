@@ -45,7 +45,7 @@ try {
  // spends a request when the subagent consumer is unavailable.
  const skillPrompt='Audit cross-file compatibility of README documentation and release notes across independent packages';
  const skillCatalog=names=>names.map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
- const availableNames=['github-readme-authoring','github-release-notes','evidence-first-engineering'];
+ const availableNames=['git-github','git-github','engineering'];
  const judgedSkills=[];
  const judge=async(_site,_state,questions)=>{judgedSkills.push(Object.keys(questions.skill.criteria));return {ok:false,skipped:'unavailable'};};
  let prepared=await fixture({prompt:skillPrompt,judge});
@@ -58,10 +58,10 @@ try {
  assert.equal(judgedSkills.length,0,'a bounded direct task needs no remote skill ranking');
  await prepared.emit('session_shutdown');
  prepared=await fixture({prompt:skillPrompt,judge,activeTools:['read','subagent']});
- await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['evidence-first-engineering'])});
+ await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['engineering'])});
  assert.equal(judgedSkills.length,0,'one installed candidate does not need ranking');
- await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['github-readme-authoring','evidence-first-engineering'])});
- assert.deepEqual(judgedSkills,[['github-readme-authoring','evidence-first-engineering']],'uninstalled lexical matches never reach the judge');
+ await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['git-github','engineering'])});
+ assert.deepEqual(judgedSkills,[['git-github','engineering']],'uninstalled lexical matches never reach the judge');
  await prepared.emit('session_shutdown');
  const now=Date.now();
  h.recordFailure({provider:'openrouter',model:base.id,errorMessage:upstream('Host a'),now});
@@ -120,7 +120,7 @@ try {
  assert.equal(fx.selected.length,0);
  await fx.emit('session_shutdown');
  // The automatic-route marker must be visible while model_select fires, or
- // last-model.ts persists the recovery route as the user's default.
+ // model-config.ts persists the recovery route as the user's default.
  fx=await fixture();
  const seenMarkers=[];
  const nativeSetModel=fx.pi.setModel;

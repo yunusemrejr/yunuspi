@@ -272,7 +272,7 @@ test("video_qa measures a real render and produces a contact sheet", { skip: !ha
 test("procedural audio is deterministic and within level bounds", { skip: !hasNumpy }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "synth-"));
   try {
-    const synth = path.join(agent, "skills/procedural-audio/scripts/synth.py");
+    const synth = path.join(agent, "skills/audio/scripts/synth.py");
     const render = (spec, out) => JSON.parse(execFileSync("python3", [synth, (fs.writeFileSync(path.join(root, "s.json"), JSON.stringify(spec)), path.join(root, "s.json")), path.join(root, out)], { encoding: "utf8" }));
     const music = { kind: "music", seconds: 4, bpm: 90, key: "A", mode: "minor", seed: 3 };
     const first = render(music, "a.wav"), second = render(music, "b.wav");
@@ -291,14 +291,14 @@ test("video requests route to the direction skill without catching players or ed
   for (const prompt of ["make a three-minute documentary-style video explaining the history of transformers", "create a short video about attention", "write the storyboard for our launch", "make a 30 second video for the release"]) assert.ok(video.intent.test(prompt), prompt);
   for (const prompt of ["build a video player component", "trim this video to 10 seconds", "render the video thumbnail", "create the video file upload"]) assert.equal(video.intent.test(prompt), false, prompt);
   assert.ok(route("remotion-video").intent.test("fix the Remotion composition"));
-  assert.ok(route("procedural-audio").intent.test("add background music and a whoosh"));
+  assert.ok(route("audio").intent.test("add background music and a whoosh"));
 });
 
 test("video production tools stay lazily discovered with complete runtime support", async () => {
   const tools = [];
   const extension = await import(pathToFileURL(path.join(agent, "extensions/video-studio.ts")).href);
   extension.default({ registerTool: (tool) => tools.push(tool) });
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['audio_generate', "audio_synth", 'media_sync', "motion_examples", 'narration_align', "narration_tts", "video_assets", 'video_browser', 'video_ambient', "video_project", "video_qa", "video_render", "video_shot", "video_generate"].sort());
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['audio_generate', "audio_synth", 'media_sync', "motion_examples", "narration_tts", "video_assets", 'video_browser', "video_project", "video_qa", "video_render", "video_shot"].sort());
   const { CORE_TOOLS } = await import(pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts")).href);
   for (const tool of tools) {
     assert.equal(CORE_TOOLS.has(tool.name), false, `${tool.name} stays off-wire until tool_search enables it`);

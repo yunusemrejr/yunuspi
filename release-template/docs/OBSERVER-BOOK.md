@@ -6,24 +6,19 @@ The book changes what the observer can say, not what it may do. Its only tools a
 
 ## What is in it
 
-59 chapters and about 410 passages, grouped into parts. Design doctrine includes "a mentioned site is context, not a template" and "diverge before you converge on an open brief"; the observer's own craft includes "open requests deserve a thought experiment".
+14 chapters and 106 passages, grouped into three parts. Design doctrine includes "a mentioned site is context, not a template" and "diverge before you converge on an open brief"; the observer's own craft includes "open requests deserve a thought experiment".
 
 | Part | Chapters |
 | --- | --- |
-| process | the observer's own craft, agent workflow in this harness, working with the user, cost discipline |
-| engineering | engineering patterns, separation of concerns and placement, coding craft, algorithms, debugging, testing and verification, architecture, APIs, databases, concurrency and distributed systems, performance, security, systems programming, code quality and static analysis, embedded systems |
-| design | UI and UX, visual fundamentals, color theory, typography and font theory, minimalism, modern web design patterns, accessibility, data visualization, brand, design to code |
-| web | frontend engineering and web performance, CSS and layout, mobile and desktop apps |
-| media | motion design principles, motion graphics and video production, audio and sound, 3D graphics and games, game design |
-| operations | Linux and the shell, DevOps and infrastructure, CI/CD and release, Git and code review, DataOps |
-| science | mathematics, scientific reasoning, statistics, machine learning, LLM applications, research methodology |
-| business | product thinking, marketing strategy and positioning, growth and SEO, product promotion and launches, copywriting, communication and language, documentation, licensing and privacy, pricing, teaching and explanation |
+| process | the observer's craft, agent workflow in this harness, working with the user, cost discipline |
+| engineering | engineering patterns, coding craft, debugging, testing and verification, security, code quality and static analysis |
+| design | UI and UX craft, modern web design patterns, design to code, the anti-slop checklist |
 
 Chapters are Markdown files in `agent/extensions/lib/observer-book/chapters/`. Each passage looks like this:
 
 ```markdown
 ## Verify what renders, not what was written {#verify-rendered}
-<!-- terms: screenshot render visual layout | watch: edits-without(browser_session render_see design_audit web_probe) -->
+<!-- terms: screenshot render visual layout | watch: edits-without(browser_session render_see web_probe) -->
 
 **Principle.** A UI change is unverified until its rendered result has been looked at…
 **Why.** CSS is non-local: …

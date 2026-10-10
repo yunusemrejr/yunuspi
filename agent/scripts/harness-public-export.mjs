@@ -209,7 +209,7 @@ function copyTree(dir, prefix) {
    !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel) &&
    !/^core\/coding-agent\/src\/core\/export-html\/template\.(?:html|css)$/.test(rel) &&
    !publicSvgFixture.test(rel) &&
-   rel !== "agent/skills/motion-graphics-production/assets/timeline-starter.html"
+   rel !== "agent/skills/video-editing/assets/timeline-starter.html"
   )
    continue;
   let bytes = fs.readFileSync(p);

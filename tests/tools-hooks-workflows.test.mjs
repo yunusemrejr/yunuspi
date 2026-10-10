@@ -25,7 +25,7 @@ test('creative tasks select relevant pipelines and require playback, listening o
     const selection = selectTaskPipelines({ prompt });
     assert.ok(selection.ids.includes(id), prompt);
     assert.deepEqual(selection.stages.find(row => row.id === stage).evidenceKinds, [kind]);
-    assert.ok(!automaticPipelineTools(selection, { prompt }).includes('code_quality'), 'media work should not stage an unrelated code audit');
+    assert.ok(!automaticPipelineTools(selection, { prompt }).includes('project_tests'), 'media work should not stage unrelated project tests');
     const ledger = createPipelineLedger(), coordinate = { scope: 'fixture', revision: 'content:1', status: 'passed', source: 'native:fixture' };
     for (const row of selection.stages.slice(0, selection.stages.findIndex(row => row.id === stage)))
       recordPipelineEvidence(ledger, { ...coordinate, stageId: row.id, evidenceKind: row.evidenceKinds[0] }, selection);
@@ -48,11 +48,8 @@ test('debugging keeps reproduction before repair and exposes source navigation t
 
 test('audio intents stage tools that can perform the requested operation', () => {
   assert.ok(intentBundleTools('Denoise the audio track').includes('audio_mix'));
-  assert.ok(!intentBundleTools('Denoise the audio track').includes('media_edit'), 'media_edit has no denoise operation');
   assert.ok(intentBundleTools('Time-stretch the music track').includes('audio_mix'));
   assert.ok(intentBundleTools('Create a sound effect for the transition').includes('audio_synth'));
-  assert.ok(intentBundleTools('Normalize the audio').includes('media_edit'));
-  assert.ok(!intentBundleTools('Do not normalize audio; inspect the source instead').includes('media_edit'));
 });
 
 test('web-answer, mailbox, marketing, API and browser-action intents stage their tools on turn one', () => {
@@ -60,11 +57,11 @@ test('web-answer, mailbox, marketing, API and browser-action intents stage their
   staged('Research the top five competitors of this product and compare their pricing pages.', 'web_search', 'fetch_content');
   staged('Find out what the latest Node.js LTS version is and what changed.', 'web_search', 'fetch_content');
   staged('Make this site more SEO-optimized with topic clusters for long-tail queries.', 'web_probe', 'web_search', 'fetch_content');
-  staged('Check my inbox for replies and draft follow-up emails to the ones who have not answered.', 'agentmail_messages', 'agentmail_send');
+  staged('Check my inbox for replies and draft follow-up emails to the ones who have not answered.', 'agentmail');
   staged('Promote the new release on Reddit and Hacker News and write the posts.', 'web_search', 'browser_session');
   staged('Call the GitHub REST API to list the open issues of this repository.', 'http_request');
   staged('Log in to the admin panel and fill out the settings form.', 'browser_session');
-  const quiet = /^(?:web_search|fetch_content|agentmail_\w+|http_request|browser_session)$/;
+  const quiet = /^(?:web_search|fetch_content|agentmail|http_request|browser_session)$/;
   for (const prompt of ['Fix the null pointer in the login handler.', 'Research the codebase structure and explain how auth works.', 'Fix the login form validation.', 'Refactor the email parser module.', 'Add a unit test for the newsletter formatter.', 'Do not search the web; use the files provided.'])
     assert.deepEqual(intentBundleTools(prompt).filter(name => quiet.test(name)), [], prompt);
 });
@@ -80,30 +77,26 @@ test('diagnostics preserve the first actual failure in the middle of long runner
   }
 });
 
-test('UI edits receive render guidance, read-only creative actions stay quiet, and all media failures recover', () => {
+test('UI edits receive render guidance and read-only creative actions stay quiet', () => {
   assert.equal(matchHook('edit', { path: 'src/Screen.tsx' })?.key, 'ui-first-render');
   for (const action of ['get', 'brief', 'status', 'clear']) assert.equal(matchHook('creative_direct', { action }), null);
-  assert.equal(matchHook('creative_direct', { action: 'set' })?.key, 'creative-direction-loop');
   assert.equal(matchHook('video_project', { action: 'install' }), null);
   assert.equal(matchHook('narration_tts', { action: 'status' }), null);
   assert.equal(matchHook('visual_review', { action: 'status' }), null);
-  assert.equal(matchHook('svg_inspect', {}, true)?.key, 'creative-recover');
-  for (const name of ['audio_mix', 'music_compose', 'media_pipeline', 'video_compose', 'video_render', 'narration_tts', 'audio_synth'])
-    assert.equal(matchHook(name, {}, true)?.key, 'media-recover', name);
 });
 
 test('hook result ownership prevents an unrelated result from consuming queued guidance', () => {
   const handlers = new Map();
   registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
   const call = handlers.get('tool_call'), result = handlers.get('tool_result');
-  call({ toolCallId: 'same-id', toolName: 'audio_mix', input: {} });
+  call({ toolCallId: 'same-id', toolName: 'edit', input: { path: 'src/Screen.tsx' } });
   assert.equal(result({ toolCallId: 'same-id', toolName: 'read', content: [], isError: false }, {}), undefined);
-  const owned = result({ toolCallId: 'same-id', toolName: 'audio_mix', content: [], isError: false }, {});
+  const owned = result({ toolCallId: 'same-id', toolName: 'edit', content: [], isError: false }, {});
   assert.ok(owned?.content.some(row => row.text?.startsWith('[session-hooks]')));
-  assert.equal(result({ toolCallId: 'same-id', toolName: 'audio_mix', content: [], isError: false }, {}), undefined);
-  call({ toolCallId: 'late', toolName: 'media_pipeline', input: {} });
+  assert.equal(result({ toolCallId: 'same-id', toolName: 'edit', content: [], isError: false }, {}), undefined);
+  call({ toolCallId: 'late', toolName: 'edit', input: { path: 'src/Screen.tsx' } });
   handlers.get('session_switch')();
-  assert.equal(result({ toolCallId: 'late', toolName: 'media_pipeline', content: [], isError: false }, {}), undefined);
+  assert.equal(result({ toolCallId: 'late', toolName: 'edit', content: [], isError: false }, {}), undefined);
 });
 
 test('a missing path reported by an extension tool or bash gets the nearest-folder hint core tools give', () => {
@@ -115,7 +108,7 @@ test('a missing path reported by an extension tool or bash gets the nearest-fold
   assert.equal(missingPathFromError('cat: notes/todo.md: No such file or directory'), 'notes/todo.md');
   assert.equal(missingPathFromError('Nearest existing directory: /tmp\n/tmp/a/b does not exist'), undefined, 'an annotated error is left alone');
   assert.equal(missingPathFromError('the session does not exist'), undefined, 'prose is not a path');
-  assert.ok(CORE_PATH_HINT_TOOLS.has('read') && !CORE_PATH_HINT_TOOLS.has('blender_run'));
+  assert.ok(CORE_PATH_HINT_TOOLS.has('read') && !CORE_PATH_HINT_TOOLS.has('browser_session'));
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-path-hint-'));
   try {
@@ -125,7 +118,7 @@ test('a missing path reported by an extension tool or bash gets the nearest-fold
     registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
     const call = handlers.get('tool_call'), result = handlers.get('tool_result');
     const missing = path.join(dir, 'blender', 'scripts', 'tide-gauge.py');
-    const event = { toolCallId: 'b1', toolName: 'blender_run', input: {}, isError: true, content: [{ type: 'text', text: `${missing} does not exist` }] };
+    const event = { toolCallId: 'b1', toolName: 'browser_session', input: {}, isError: true, content: [{ type: 'text', text: `${missing} does not exist` }] };
     call(event);
     const out = result(event, { cwd: dir });
     const texts = out.content.map(row => row.text);

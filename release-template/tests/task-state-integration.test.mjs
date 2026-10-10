@@ -7,7 +7,7 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const tsLib = path.join(root, 'agent', 'extensions', 'lib', 'task-state');
 
-// Isolated harness env (mirrors the observer/watchmaker fixtures).
+// Isolated harness env (mirrors the observer fixtures).
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-state-int-'));
 process.env.PI_CODING_AGENT_DIR = fixtureRoot;
 process.env.PI_LLM_PREFERENCES_FILE = path.join(fixtureRoot, 'preferences.json');
@@ -17,19 +17,17 @@ process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(fixtureRoot, 'economy.json')
 process.env.PI_TASK_STATE_DIR = path.join(fixtureRoot, 'task-state');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 process.env.PI_OBSERVER_BOOK_DIR = 'off';
-for (const key of ['PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_WATCHMAKER']) delete process.env[key];
+for (const key of ['PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD']) delete process.env[key];
 
 const { getTaskStateService, clearTaskStateServices, currentTaskStateService } = await import(path.join(tsLib, 'service.ts'));
 const ingest = await import(path.join(tsLib, 'ingest.ts'));
 const { buildObserverPacket } = await import(path.join(root, 'agent', 'extensions', 'lib', 'session-observer.ts'));
-const { buildWatchmakerPacket } = await import(path.join(root, 'agent', 'extensions', 'lib', 'session-watchmaker.ts'));
 const { buildSessionReport } = await import(path.join(root, 'agent', 'extensions', 'lib', 'session-report.ts'));
 const { completionGate } = await import(path.join(root, 'agent', 'extensions', 'lib', 'completion-gate.ts'));
 const { attachTaskStateSlice, attachTaskStateSliceDeep, taskSliceFocus } = await import(path.join(root, 'agent', 'extensions', 'pi-subagents', 'src', 'runs', 'shared', 'common-task.ts'));
 const { default: taskStateExtension } = await import(path.join(root, 'agent', 'extensions', 'task-state.ts'));
 const { tagGuardianRequestMessage } = await import(path.join(root, 'core', 'coding-agent', 'src', 'core', 'guardian', 'guardian-supervisor.js'));
 const { default: observerExtension } = await import(path.join(root, 'agent', 'extensions', 'session-observer.ts'));
-const { default: watchmakerExtension } = await import(path.join(root, 'agent', 'extensions', 'session-watchmaker.ts'));
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 function clock() {
@@ -300,53 +298,6 @@ test('observer review consumes the live graph projection (extension-driven)', as
   assert.match(row.text, /R1/, 'projection names the live requirement');
   assert.match(row.text, /implemented/, 'projection carries implementation state');
   emit('session_shutdown');
-});
-
-// ── watchmaker consumes the graph ────────────────────────────────────────
-
-test('watchmaker packet builder preserves a bounded task-progress row', () => {
-  const p = buildWatchmakerPacket({ request: 'Fix it.', rows: [{ id: 'task-progress', kind: 'task progress graph', text: 'Active work: search box [active]'.padEnd(400, '.') }], tools: [], skills: [], memos: [] });
-  const row = p.evidence.find((r) => r.id === 'task-progress');
-  assert.ok(row, 'task-progress row survives packet assembly');
-  assert.ok(row.text.length > 300, 'task-progress row keeps time-kind budget, not the 220 default');
-});
-
-test('watchmaker review consumes the live graph projection (extension-driven)', async () => {
-  seedGraph('watchmaker-fixture');
-  const time = clock();
-  const handlers = new Map();
-  const packets = [];
-  const ctx = {
-    cwd: fixtureRoot,
-    sessionManager: { getSessionId: () => 'watchmaker-fixture', getSessionFile: () => path.join(fixtureRoot, 's.jsonl'), getBranch: () => [] },
-    modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false, ui: { setStatus: () => {} },
-  };
-  const pi = {
-    on: (event, fn) => handlers.set(event, fn),
-    events: { on: () => () => {} },
-    registerMessageRenderer: () => {},
-    registerCommand: () => {},
-    getActiveTools: () => [],
-    getAllTools: () => [],
-    sendMessage: () => {},
-    appendEntry: () => {},
-  };
-  watchmakerExtension(pi, { ...time, dispatch: async (_r, p) => { packets.push(p); return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Graph shows one active item; keep going.', evidence: ['request'], tools: [], skills: [] }) }] }; } });
-  const fire = (event, payload) => handlers.get(event)?.(payload, ctx);
-  fire('session_start', {});
-  fire('input', { source: 'interactive', requestId: 'req-1', originalText: 'Add a search box.' });
-  fire('before_agent_start', { systemPromptOptions: {} });
-  fire('message_start', { message: tagGuardianRequestMessage({ role: 'user', content: 'Add a search box.' }, { requestId: 'req-1', sessionId: 'watchmaker-fixture' }) });
-  fire('message_start', { message: { role: 'assistant', content: [] } });
-  fire('tool_execution_start', { toolCallId: 'read-0', toolName: 'read', args: { path: 'src/a.ts' } });
-  await time.advance(1000);
-  fire('tool_result', { toolCallId: 'read-0', toolName: 'read', input: { path: 'src/a.ts' }, isError: false, content: [{ type: 'text', text: 'seen' }], details: {} });
-  await time.advance(120000);
-  assert.ok(packets.length >= 1, 'watchmaker dispatched');
-  const row = packets[0].evidence.find((r) => r.id === 'task-progress');
-  assert.ok(row, 'watchmaker packet carries the shared task-progress projection');
-  assert.match(row.text, /Active work/, 'projection names active work');
-  fire('session_shutdown', {});
 });
 
 // ── subagents consume slices ─────────────────────────────────────────────

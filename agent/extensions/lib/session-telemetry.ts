@@ -38,7 +38,7 @@ export function registerSessionTelemetry(pi:any) {
     if(Number.isSafeInteger(data.changedAt)&&data.changedAt>=0&&data.changedAt<=20000&&(h.changedAt===undefined||data.changedAt<h.changedAt))h.changedAt=data.changedAt;
     if(Number.isSafeInteger(data.revision)&&data.revision>=0)h.revision=data.revision;
     if(Number.isFinite(data.at)&&data.at>=current.data.startedAt)h.cacheAgeMs=Math.max(h.cacheAgeMs??0,data.at-current.data.startedAt);
-   }else if(['swarms','fusions','recoveries','aborted'].includes(kind))current.data.events[kind]=(current.data.events[kind]||0)+1;
+   }else if(['fanouts','recoveries','aborted'].includes(kind))current.data.events[kind]=(current.data.events[kind]||0)+1;
    else return;
    dirty=true;
   };
@@ -55,7 +55,7 @@ export function registerSessionTelemetry(pi:any) {
     if(sessionObservability()[key]===value)delete sessionObservability()[key];
   }
  });
- pi.registerCommand('metrics',{description:'Session tools, errors, agents, swarms, fusions, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{
+ pi.registerCommand('metrics',{description:'Session tools, errors, agents, fan-outs, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{
   const entries=ctx.sessionManager.getEntries();
   const model=ctx?.model;
   let current;

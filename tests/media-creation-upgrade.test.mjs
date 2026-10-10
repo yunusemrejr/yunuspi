@@ -14,12 +14,10 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => syn
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const design = await load('extensions/lib/design-studio.ts');
 const image = await load('extensions/lib/image-generate.ts');
-const convert = await load('extensions/lib/image-convert.ts');
 const vision = await load('extensions/lib/image-understand.ts');
 const svg = await load('extensions/lib/svg-render.ts');
 const blender = await load('extensions/lib/blender-studio.ts');
 const video = await load('extensions/lib/video-studio.ts');
-const pipeline = await load('extensions/lib/media-pipeline.ts');
 const workspace = async t => { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-creation-')); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; };
 const picture = async (width = 16, height = 8, alpha = 255, color = [240, 20, 20]) => {
   const data = new Uint8Array(width * height * 4);
@@ -95,35 +93,6 @@ test('masked edits validate alpha and dimensions before upload; GPT multipart ex
   await fs.writeFile(path.join(cwd, 'mask.png'), await picture(16, 8, 0));
   await image.imageEditRun({ references: ['ref.png', 'ref.png'], mask: 'mask.png', inputFidelity: 'high', prompt: 'Keep identity' }, cwd, undefined, undefined, env);
   assert.equal(calls, 1);
-});
-
-test('conversion preserves originals, transparent framing, rotation and explicit JPEG matte', async t => {
-  const cwd = await workspace(t), bytes = await picture(16, 8, 128);
-  await fs.writeFile(path.join(cwd, 'ref.png'), bytes);
-  const result = await convert.imageConvert({ path: 'ref.png', width: 16, height: 16 }, cwd);
-  const decoded = await design.decodeImage(await fs.readFile(result.files[0].path));
-  assert.equal(decoded.data[3], 0, 'contain padding preserves alpha');
-  assert.equal(decoded.data[(8 * 16 + 8) * 4 + 3], 128);
-  const jpeg = await convert.imageConvert({ path: 'ref.png', format: 'jpg', rotate: 90, background: '#000000' }, cwd);
-  assert.equal(jpeg.files[0].width, 8); assert.equal(jpeg.files[0].height, 16); assert.equal(jpeg.files[0].alpha, false);
-  const rgb = await design.decodeImage(await fs.readFile(jpeg.files[0].path));
-  assert.ok(rgb.data[0] > 105 && rgb.data[0] < 135); assert.equal(rgb.data[3], 255);
-  assert.deepEqual(await fs.readFile(path.join(cwd, 'ref.png')), bytes);
-  const stretched = await convert.imageConvert({ path: 'ref.png', width: 8, height: 16, fit: 'stretch' }, cwd);
-  assert.equal(stretched.files[0].width, 8); assert.equal(stretched.files[0].height, 16);
-});
-
-test('conversion preflights whole batches and distinguishes chunk metadata from compressed pixel strings', async t => {
-  const cwd = await workspace(t); await fs.writeFile(path.join(cwd, 'ref.png'), await picture());
-  await assert.rejects(convert.imageConvert({ paths: ['ref.png', 'missing.png'] }, cwd));
-  assert.equal(syncFs.existsSync(path.join(cwd, '.pi')), false);
-  assert.throws(() => convert.conversionPlan({ width: 4096, height: 4096 }, { width: 1, height: 1 }), /16M/);
-  const png = Buffer.alloc(28); png.writeUInt32BE(8, 8); png.write('IDAT', 12); png.write('acTL', 16);
-  assert.equal(convert.animatedRaster(png, 'png'), false);
-  png.write('acTL', 12); assert.equal(convert.animatedRaster(png, 'png'), true);
-  const pixels = { width: 2, height: 1, data: new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]) };
-  assert.deepEqual([...convert.orientPixels(pixels, 90).data], [...pixels.data]);
-  assert.deepEqual([...convert.orientPixels(pixels, 0, true).data].slice(0, 4), [0, 0, 255, 255]);
 });
 
 test('EXIF orientation cannot change crop axes or reported attachment dimensions', async t => {
@@ -221,25 +190,9 @@ test('Blender layered actions expose keyframe channels and evaluated world motio
   assert.equal(result.animationSamples[1].objects.find(o => o.name === 'MovingCube').worldMatrix[0][3], 4);
 });
 
-test('standalone local narration creates captions and combines SVG, voice and music; overruns reject', { timeout: 120000 }, async t => {
+test('standalone local narration creates speech and caption tracks', { timeout: 120000 }, async t => {
   try { video.planNarration({ text: 'We move.' }); } catch (e) { if (/not installed/.test(e.message)) { t.skip(e.message); return; } throw e; }
   const cwd = await workspace(t), speech = await video.narrationSpeak({ text: 'We move.' }, cwd);
   assert.ok(speech.seconds > 0); assert.match(await fs.readFile(speech.captions.srt, 'utf8'), /-->/);
   assert.match(await fs.readFile(speech.captions.vtt, 'utf8'), /^WEBVTT/);
-  await fs.writeFile(path.join(cwd, 'scene.svg'), source);
-  const result = await pipeline.mediaPipeline({ animation: 'scene.svg', duration: 3, width: 64, height: 64, fps: 6, narration: { text: 'We move.' }, score: { bpm: 120, beats: 2, tracks: [{ notes: [{ pitch: 57, start: 0, duration: 2 }] }] }, targetLufs: -16 }, cwd);
-  assert.equal(result.decodeVerified, true); assert.ok(result.narration); assert.ok(result.audio);
-  assert.equal(result.ducking.ratio, 6); assert.ok(result.stages.some(s => s.name === 'synthesize_narration'));
-  await assert.rejects(pipeline.mediaPipeline({ animation: 'scene.svg', duration: .1, width: 64, height: 64, fps: 6, narration: { text: 'This speech cannot fit in a fraction of a second.' } }, cwd), /exceeds.*timeline/);
-});
-
-test('media tools are discovered for concrete tasks and hooks require appropriate evidence', async () => {
-  const { selectTaskPipelines, automaticPipelineTools } = await load('extensions/lib/task-pipelines.ts');
-  const selected = selectTaskPipelines({ prompt: 'Generate an image and convert it to WebP' });
-  assert.ok(selected.ids.includes('image-media'));
-  const tools = automaticPipelineTools(selected, { prompt: 'Generate an image and convert it to WebP' });
-  assert.ok(tools.includes('image_generate')); assert.ok(tools.includes('image_convert')); assert.equal(tools.includes('project_tests'), false);
-  const { matchHook } = await load('extensions/lib/session-hooks.ts');
-  assert.match(matchHook('image_convert', {}, false)?.line ?? '', /alpha|crop/);
-  assert.match(matchHook('svg_render', {}, false)?.line ?? '', /clock|playback/);
 });

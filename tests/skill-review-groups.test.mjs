@@ -15,7 +15,7 @@ const {createRelevantGuidance} = await import(pathToFileURL(path.join(agent, "ex
 const {CAPABILITY_GROUPS, capabilityGroup, groupOverview} = await import(pathToFileURL(path.join(agent, "extensions/lib/capability-groups.ts")));
 
 const names = [
-  "database-migration", "browser-task-recovery", "ml-engineering",
+  "database-migration", "browser", "ml",
   "product-photoshoot", "google-sheets", "investment-banking",
   "research-notes", "misc-thing", "video-editing",
 ];
@@ -131,17 +131,18 @@ test("fallback catalogue search remains complete with ambient guidance disabled"
 
 test("explicit discovery keeps short domain names ahead of incidental description matches", async () => {
   const skills = [
-    {name:'vanilla-web-libs',description:'Web libraries for server-side templating static site generators',filePath:'/fixture/skills/web/SKILL.md'},
-    {name:'php-application-engineering',description:'Build PHP applications across development and shared hosting.',filePath:'/fixture/skills/php/SKILL.md'},
-    {name:'api-design',description:'Design request contracts and HTTP responses.',filePath:'/fixture/skills/api/SKILL.md'},
+    {name:'frontend',description:'Web libraries for server-side templating static site generators',filePath:'/fixture/skills/web/SKILL.md'},
+    {name:'systems-languages',description:'Build PHP applications across development and shared hosting.',filePath:'/fixture/skills/php/SKILL.md'},
+    {name:'api-security',description:'Design request contracts and HTTP responses.',filePath:'/fixture/skills/api/SKILL.md'},
     {name:'capital-planning',description:'Capital investments and financing.',filePath:'/fixture/skills/capital/SKILL.md'},
   ];
   const f = fixture([], {skills});
   const before = f.entries.length;
-  const php = await f.review.execute('search',{action:'search',query:'php server-side templating static site generator'});
-  assert.equal(php.details.results[0].name,'php-application-engineering');
+  // The consolidated name carries the domain term; PHP alone now lives only in its description.
+  const php = await f.review.execute('search',{action:'search',query:'systems languages server-side templating static site generator'});
+  assert.equal(php.details.results[0].name,'systems-languages');
   const api = await f.review.execute('search',{action:'search',query:'API',limit:8});
-  assert.deepEqual(api.details.results.map(skill=>skill.name),['api-design']);
+  assert.deepEqual(api.details.results.map(skill=>skill.name),['api-security']);
   assert.equal(f.entries.length,before,'search does not create review obligations or delivery receipts');
 });
 
@@ -172,10 +173,12 @@ test('skill discovery uses shared Jev with local IDs while preserving exact name
     assert.deepEqual(f.entries.slice(before).map(entry => entry.customType), ['jev-usage-v1'], 'ranking usage does not become a review or read receipt');
     const exact = await f.review.execute('search', {action:'search',query:'layout-check-2'});
     assert.equal(exact.details.results[0].name, 'layout-check-2'); assert.equal(calls, 1, 'exact names bypass inference');
-    const family = ['copywriting','resourceful-market-strategy','organic-growth-engineering','community-promotion','natural-editorial-writing','unrelated-layout','unrelated-images'].map(name => ({name,description:'Marketing conversion workflow',filePath:`/fixture/private/skills/${name}/SKILL.md`}));
+    // Only three consolidated skills form the marketing family; they lead even when the model's top pick is outside it.
+    const familyNames = ['growth-finance','research-writing','ui-design'];
+    const family = [...familyNames,'unrelated-layout','unrelated-images'].map(name => ({name,description:'Marketing conversion workflow',filePath:`/fixture/private/skills/${name}/SKILL.md`}));
     target = 'unrelated-layout';
     const familyResult = await fixture([], {skills:family}).review.execute('family', {action:'search',query:'marketing conversion workflows',limit:8});
-    assert.deepEqual(new Set(familyResult.details.results.slice(0,5).map(row => row.name)), new Set(family.slice(0,5).map(row => row.name)));
+    assert.deepEqual(new Set(familyResult.details.results.slice(0,familyNames.length).map(row => row.name)), new Set(familyNames));
     resetJevClient(); unavailable = true;
     const fallback = await f.review.execute('fallback', {action:'search',query:'browser interface screenshot workflow',limit:8});
     assert.equal(fallback.isError, undefined); assert.equal(fallback.details.results.length, skills.length);

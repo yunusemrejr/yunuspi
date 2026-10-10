@@ -334,7 +334,6 @@ test('context projection bounds hold under a large graph', () => {
   for (const text of [
     projections.projectMain(graph),
     projections.projectObserver(graph),
-    projections.projectWatchmaker(graph),
     projections.projectSubagentSlice(graph),
   ]) {
     assert.ok(text.length <= 2000, `projection exceeded budget: ${text.length}`);

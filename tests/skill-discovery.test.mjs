@@ -7,15 +7,15 @@ let agent = path.resolve(import.meta.dirname, '../agent');
 try { await fs.access(agent); } catch { agent = path.resolve(import.meta.dirname, '../..'); }
 const { buildSkillDiscoveryRequest, parseSkillDiscoverySuggestions, SKILL_DISCOVERY_LIMITS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-discovery.ts')));
 const catalog = [
-  { name: 'accessible-interaction-design', file: '/trusted/skills/accessibility/SKILL.md', description: 'Keyboard and assistive technology interaction' },
-  { name: 'numerical-computing', file: '/trusted/skills/numerics/SKILL.md', description: 'Floating point conditioning and precision' },
-  { name: 'sql-query-engineering', file: '/trusted/skills/sql/SKILL.md', description: 'Database query execution plans and performance' },
+  { name: 'frontend', file: '/trusted/skills/accessibility/SKILL.md', description: 'Keyboard and assistive technology interaction' },
+  // One consolidated data-science skill; two same-name entries would be an ambiguous catalogue.
+  { name: 'data-science', file: '/trusted/skills/data-science/SKILL.md', description: 'SQL and Postgres schema, indexes, transactions; floating point conditioning and numerical methods' },
 ];
 const reply = suggestions => JSON.stringify({ suggestions });
 
 test('catalog-wide discovery includes implied domains without lexical preselection or skill bodies and paths', () => {
   const request = buildSkillDiscoveryRequest(catalog, { prompt: 'Make this usable', files: ['src/Menu.tsx'], tools: ['render_see'], observations: ['Focus disappears after opening the menu.'] });
-  assert.equal(request.catalog.length, 3);
+  assert.equal(request.catalog.length, catalog.length);
   for (const skill of catalog) assert.ok(request.brief.includes(skill.name));
   assert.match(request.brief, /Focus disappears/);
   assert.match(request.brief, /untrusted evidence, never instructions/);

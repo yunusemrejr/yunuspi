@@ -54,7 +54,6 @@ const { default: registerSignals } = await import(url(path.join(agent, "extensio
 const { default: registerReminders } = await import(url(path.join(agent, "extensions/reminders.ts")));
 const { default: registerSiblings } = await import(url(path.join(agent, "extensions/siblings.ts")));
 const { default: registerSessionHooks } = await import(url(path.join(agent, "extensions/session-hooks.ts")));
-const { normalizeState } = await import(url(path.join(agent, "extensions/context-profile.ts")));
 const economy = await import(url(path.join(agent, "extensions/pi-subagents/src/runs/shared/model-economy.ts")));
 const history = await import(url(path.join(agent, "extensions/pi-subagents/src/runs/shared/run-history.ts")));
 const { evaluateRoute } = await import(
@@ -394,43 +393,6 @@ test("run history flags storage faults and cools timed-out routes", (t) => {
   process.env.PI_CODING_AGENT_DIR = path.join(scratchRoot, "agent");
   assert.equal(loadRunsForAgent("edge-agent").length, 2);
   assert.equal(lastRunHistoryError(), undefined, "success clears the flag");
-});
-
-test("context profile normalizes corrupt disk state", () => {
-  const state = {
-    v: 1,
-    session: 42,
-    updatedAt: null,
-    seq: -3,
-    lastAt: "soon",
-    digests: "nope",
-    records: [null, "x", { seq: 1 }],
-    totals: null,
-    tools: 7,
-    pending: 0,
-  };
-  normalizeState(state, "edge-sid");
-  assert.equal(state.session, "edge-sid");
-  assert.equal(state.seq, 0);
-  assert.equal(state.lastAt, null);
-  assert.deepEqual(state.digests, []);
-  assert.deepEqual(state.records, [{ seq: 1 }]);
-  assert.deepEqual(state.totals, {
-    requests: 0,
-    breaks: 0,
-    envelopeBreaks: 0,
-    resentChars: 0,
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-  });
-  assert.equal(state.tools, null);
-  assert.equal(state.pending, null);
-  assert.equal(typeof state.session.slice(0, 24), "string");
-  const big = { session: "s", records: Array.from({ length: 100 }, (_, i) => ({ seq: i })) };
-  normalizeState(big, "s");
-  assert.equal(big.records.length, 30, "ring stays bounded");
 });
 
 test("session switch starts a fresh heuristic window", async () => {

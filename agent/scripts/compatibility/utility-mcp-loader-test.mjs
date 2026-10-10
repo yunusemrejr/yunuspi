@@ -18,7 +18,7 @@ try {
   const loader = new sdk.DefaultResourceLoader({ cwd: workspace, agentDir: workspace, settingsManager: sdk.SettingsManager.inMemory({ extensions: [] }), additionalExtensionPaths: [path.join(agent, 'extensions/utility-tools.ts')], noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
   await loader.reload();
   const result = loader.getExtensions(); assert.deepEqual(result.errors, []);
-  [extension] = result.extensions; assert.equal(extension.tools.size, 8);
+  [extension] = result.extensions; assert.equal(extension.tools.size, 7);
   const {buildSystemPrompt} = await import(pathToFileURL(path.join(core, 'dist/core/system-prompt.js')));
   const definitions = [...extension.tools.values()].map(t => t.definition);
   const guidelines = definitions.flatMap(t => t.promptGuidelines);
@@ -34,9 +34,7 @@ try {
   for (const hook of extension.handlers.get('session_start') ?? []) await hook({}, ctx);
   const samples = {
     sqlite_probe: { path: 'db.sqlite', action: 'query', sql: 'SELECT ?', params: [null, 'x', 1, true] },
-    package_probe: { package: 'missing' }, openapi_probe: { path: 'api.yaml', action: 'list_endpoints' },
-    coverage_probe: { artifacts: ['coverage.info'], files: ['app.js'] }, contract_diff: { before_value: {}, after_value: { x: 1 } },
-    env_audit: { sources: ['app.js'], configs: ['.env.example'] }, net_probe: { action: 'tcp', host: 'localhost', port: 1234 },
+    package_probe: { package: 'missing' }, net_probe: { action: 'tcp', host: 'localhost', port: 1234 },
     archive_probe: { path: 'build.zip', action: 'list' },
   };
   for (const [name, args] of Object.entries(samples)) validateToolArguments(extension.tools.get(name).definition, { name, arguments: args });
@@ -44,9 +42,7 @@ try {
   const response = await tool.execute('fixture', { package: 'missing' }, undefined, undefined, ctx);
   assert.equal(response.isError, false, JSON.stringify(response));
   assert.equal(JSON.parse(response.content[0].text).installed, false);
-  const diff = await extension.tools.get('contract_diff').definition.execute('fixture2', { before_value: { n: 1 }, after_value: { n: 2 } }, undefined, undefined, ctx);
-  assert.equal(JSON.parse(diff.content[0].text).identical_shape, true);
-  console.log('PASS SDK utility MCP startup, eight validated schemas, live bridge calls and shutdown; no inference');
+  console.log('PASS SDK utility MCP startup, validated schemas, live bridge calls and shutdown; no inference');
 } finally {
   for (const hook of extension?.handlers.get('session_shutdown') ?? []) await hook({}, { cwd: workspace });
   fs.rmSync(workspace, { recursive: true, force: true });

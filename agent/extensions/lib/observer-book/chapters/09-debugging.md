@@ -5,7 +5,7 @@ title: Debugging
 summary: Systematic diagnosis: reproduce, read the first error, one falsifiable hypothesis at a time, bisect, environment differences, causes over symptoms.
 terms: bug debug debugging error exception crash fail failing failure broken stack trace traceback reproduce repro regression flaky intermittent investigate diagnose root cause why wrong unexpected
 tools: bash obs_read git_info workspace_search
-skills: debugging evidence-first-engineering
+skills: engineering
 ---
 
 # Debugging

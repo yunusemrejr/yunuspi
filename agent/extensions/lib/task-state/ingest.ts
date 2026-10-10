@@ -451,7 +451,7 @@ export function findingEvents(
 	ctx: IngestContext,
 	input: {
 		reviewId: string;
-		kind: "observer" | "watchmaker" | "review-council" | "guardian" | "expert-director";
+		kind: "observer" | "review-council" | "guardian" | "expert-director";
 		blocker: boolean;
 		note: string;
 		targets?: string[];
@@ -459,7 +459,6 @@ export function findingEvents(
 ): TaskEvent[] {
 	const provenance: TaskProvenance =
 		input.kind === "observer" ? "observer"
-		: input.kind === "watchmaker" ? "watchmaker"
 		: input.kind === "guardian" ? "guardian"
 		: input.kind === "expert-director" ? "expert-director"
 		: "review-council";

@@ -41,7 +41,6 @@ export type TaskProvenance =
 	| "render-inspection"
 	| "subagent"
 	| "observer"
-	| "watchmaker"
 	| "expert-director"
 	| "guardian"
 	| "review-council"
@@ -272,7 +271,7 @@ export const TASK_ENTITY_KINDS: readonly TaskEntityKind[] = [
 export const TASK_PROVENANCE: readonly TaskProvenance[] = [
 	"literal-user", "prompt-analysis", "main-agent", "tool-output",
 	"source-inspection", "test-result", "render-inspection", "subagent",
-	"observer", "watchmaker", "expert-director", "guardian", "review-council",
+	"observer", "expert-director", "guardian", "review-council",
 	"project-memory", "project-intelligence", "sibling-session", "session-history",
 ];
 

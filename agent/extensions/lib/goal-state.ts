@@ -159,8 +159,8 @@ export interface CompletionContext {
 	verification?: readonly GateReceipt[];
 }
 
-/** Completion is refused once per distinct set of gaps; the same call repeated is a recorded waiver so the user is never deadlocked. */
-export function goalCompletionGate(goal: GoalState, context: CompletionContext): GateDecision {
+/** Receipts for what is still open on a goal: unmet criteria and file changes nobody has verified since. */
+export function goalCompletionReceipts(goal: GoalState, context: Pick<CompletionContext, "unverifiedWrites" | "writeRevision">): GateReceipt[] {
 	const receipts: GateReceipt[] = open(goal).map((criterion) => ({
 		source: "goal", id: criterion.id, state: "open", line: `${criterion.id} open: ${criterion.text}`,
 	}));
@@ -170,7 +170,12 @@ export function goalCompletionGate(goal: GoalState, context: CompletionContext):
 			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`,
 		});
 	}
-	return completionGateReceipts("plan-complete", [...receipts, ...(context.verification ?? [])], context.refused);
+	return receipts;
+}
+
+/** Completion is refused once per distinct set of gaps; the same call repeated is a recorded waiver so the user is never deadlocked. */
+export function goalCompletionGate(goal: GoalState, context: CompletionContext): GateDecision {
+	return completionGateReceipts("plan-complete", [...goalCompletionReceipts(goal, context), ...(context.verification ?? [])], context.refused);
 }
 
 export function complete(goal: GoalState, waived: boolean, now = Date.now()): GoalState {

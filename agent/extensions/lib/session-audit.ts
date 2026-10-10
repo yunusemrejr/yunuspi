@@ -75,8 +75,7 @@ interface ScanState {
 		workflowFailures: number;
 		skillsOpened: number;
 		skillsSuggested: number;
-		swarms: number;
-		fusions: number;
+		fanouts: number;
 	};
 }
 
@@ -167,8 +166,7 @@ function emptyState(): ScanState {
 			workflowFailures: 0,
 			skillsOpened: 0,
 			skillsSuggested: 0,
-			swarms: 0,
-			fusions: 0,
+			fanouts: 0,
 		},
 	};
 }

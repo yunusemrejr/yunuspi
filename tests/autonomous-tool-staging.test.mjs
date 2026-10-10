@@ -97,7 +97,7 @@ async function firstTurnTools(prompt, scriptedCalls = []) {
   try {
     const settingsManager = SettingsManager.inMemory({compaction: {enabled: false}, retry: {enabled: false}});
     const loader = new DefaultResourceLoader({cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-      additionalExtensionPaths: ['art-direction.ts', 'design-studio.ts', 'video-studio.ts', 'code-quality.ts', 'git-tools.ts', 'desktop-session.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck, registerSeoToolkit]});
+      additionalExtensionPaths: ['art-direction.ts', 'design-studio.ts', 'video-studio.ts', 'git-tools.ts', 'render-and-wait.ts'].map(file => path.join(root, 'agent/extensions', file)), extensionFactories: [registerToolDiscovery, registerSourceCheck, registerSeoToolkit]});
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
     const model = {id: 'fixture', name: 'Fixture', api: 'openai-completions', provider: 'fixture', baseUrl: 'https://invalid.example', reasoning: false, input: ['text'], cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 131072, maxTokens: 8192};
@@ -120,19 +120,17 @@ async function firstTurnTools(prompt, scriptedCalls = []) {
   }
 }
 
-test('image-to-code, video, quality and desktop prompts put their tools on the first model turn; plain prompts stay lean', {timeout: 120_000}, async () => {
+test('image-to-code, video and quality prompts put their tools on the first model turn; plain prompts stay lean', {timeout: 120_000}, async () => {
   const design = await firstTurnTools('Turn this mockup into a website: https://example.com/landing.png');
-  for (const name of ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see']) assert.ok(design.includes(name), `${name} staged for image-to-code`);
+  for (const name of ['image_crop', 'render_see']) assert.ok(design.includes(name), `${name} staged for image-to-code`);
   const ui = await firstTurnTools('Build a responsive dashboard with a customer form');
   for (const name of ['ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct']) assert.ok(ui.includes(name), `${name} staged without skills on a text-only model`);
   const video = await firstTurnTools('Make a 60 second explainer video about how attention works');
   assert.ok(video.includes('video_project') && video.includes('narration_tts'));
   const quality = await firstTurnTools('Refactor the billing module and remove duplicated logic, then commit it');
-  assert.ok(quality.includes('code_quality') && quality.includes('git_info'));
-  const desktop = await firstTurnTools('Test the Electron app: click through the settings window');
-  assert.ok(desktop.includes('desktop_session'));
+  assert.ok(quality.includes('git_info'));
   const plain = await firstTurnTools('Fix the off-by-one error in the pagination helper');
-  for (const name of ['image_analyze', 'video_project', 'code_quality', 'desktop_session']) assert.ok(!plain.includes(name), `${name} stays off the wire`);
+  for (const name of ['video_project']) assert.ok(!plain.includes(name), `${name} stays off the wire`);
 });
 
 test('a named specialized tool reaches the real SDK first turn without a skill catalog', async () => {
@@ -163,17 +161,18 @@ test('public-site requests automatically expose SEO and real SDK execution inspe
 });
 
 test('real SDK discovery enables and executes a native tool, preserves failure evidence, and verifies a repair', {timeout:120_000}, async () => {
-  const workflow=await firstTurnTools('Inspect and repair sample.js. No skills.',[
-    {name:'tool_search',arguments:{names:['syntax_check'],detail:true}},
-    {name:'syntax_check',arguments:{paths:['sample.js']}},
-    {name:'write',arguments:{path:'sample.js',content:'export const value = 42;\n'}},
-    {name:'syntax_check',arguments:{paths:['sample.js']}},
+  const repaired = '<html lang="en"><head><title>Sensor calibration guide</title><meta name="description" content="Measured two-point calibration."><link rel="canonical" href="https://example.com/guide"></head><body><main><h1>Calibration</h1><p>Use two measured references.</p></main></body></html>';
+  const workflow=await firstTurnTools('Inspect and repair sample.html. No skills.',[
+    {name:'tool_search',arguments:{names:['seo_toolkit'],detail:true}},
+    {name:'seo_toolkit',arguments:{action:'inspect',url:'https://example.com/guide',path:'missing.html'}},
+    {name:'write',arguments:{path:'sample.html',content:repaired}},
+    {name:'seo_toolkit',arguments:{action:'inspect',url:'https://example.com/guide',path:'sample.html'}},
   ]);
-  assert.ok(!workflow.contexts[0].includes('syntax_check'));
-  assert.ok(workflow.contexts[1].includes('syntax_check'),'activation reaches the same request');
+  assert.ok(!workflow.contexts[0].includes('seo_toolkit'));
+  assert.ok(workflow.contexts[1].includes('seo_toolkit'),'activation reaches the same request');
   assert.equal(workflow.results[0].toolName,'tool_search');
-  assert.ok(workflow.results[0].content[0].text.includes('paths'),'discovery explains required native inputs');
-  const checks=workflow.results.filter(result=>result.toolName==='syntax_check');
+  assert.ok(workflow.results[0].content[0].text.includes('path'),'discovery explains required native inputs');
+  const checks=workflow.results.filter(result=>result.toolName==='seo_toolkit');
   assert.equal(checks.length,2);assert.equal(checks[0].isError,true);assert.equal(checks[1].isError,false);
-  assert.ok(checks[0].content[0].text.includes('sample.js'));
+  assert.ok(checks[0].content[0].text.includes('missing.html'));
 });

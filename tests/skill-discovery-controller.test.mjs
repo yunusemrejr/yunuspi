@@ -71,7 +71,7 @@ test('native browser actions discover workflows without copying page content or 
 test('path-scoped observations contribute bounded workspace file evidence',async()=>{
  const f=fixture();try {
   f.controller.observe({toolName:'lsp_diagnostics',input:{paths:['src/app.ts','src/view.ts']},content:[{type:'text',text:'PRIVATE DIAGNOSTIC BODY'}]});
-  f.controller.observe({toolName:'syntax_check',input:{paths:['src/routes.ts']},content:[{type:'text',text:'PRIVATE SYNTAX BODY'}]});
+  f.controller.observe({toolName:'context_slice',input:{task:'check',paths:['src/routes.ts']},content:[{type:'text',text:'PRIVATE SYNTAX BODY'}]});
   await tick();assert.equal(f.calls.length,1);
   assert.match(f.calls[0].request.brief,/app\.ts/);assert.match(f.calls[0].request.brief,/view\.ts/);assert.match(f.calls[0].request.brief,/routes\.ts/);
   assert.doesNotMatch(f.calls[0].request.brief,/PRIVATE (?:DIAGNOSTIC|SYNTAX) BODY/);

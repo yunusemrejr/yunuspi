@@ -16,15 +16,15 @@ assert.ok(fs.existsSync(inventoryModule), "source inventory helper is present");
 const { collectToolSourceInventory } = await import(pathToFileURL(inventoryModule));
 
 const EXPECTED_STABLE_NAMES = [
-	"scene_create", "scene_render", "video_compose", "audio_mix", "design_audit", "workflow_probe", "web_asset_check",
-	"archive_probe", "artifact_check", "ast_diff", "audio_analyze", "bash", "bg_kill", "bg_logs", "bg_run", "bg_status", "bg_wait",
-	"browser_session", "bulk_edit", "checkpoint_read", "contact_supervisor", "context_score", "context_slice", "contract_diff", "coverage_probe",
-	"coverage_select", "data_query", "decision_frontier", "dependency_plan", "env_audit", "evidence_cache", "fetch_content", "get_search_content",
-	"git_info", "handoff_capsule", "http_request", "math_check", "media_edit", "media_info", "memory_forget", "memory_read", "memory_restore",
-	"memory_search", "memory_status", "memory_write", "music_compose", "net_probe", "obs_read", "openapi_probe", "package_probe", "process",
-	"project_intel", "quality_review", "render_see", "sandbox_run", "scratchpad", "session_audit", "session_coordinate", "session_self",
-	"skill_review", "source_check", "sqlite_probe", "structured_output", "subagent", "subagent_supervisor", "symbol_expand", "syntax_check",
-	"sys_probe", "todo", "tool_search", "value_convert", "video_frames", "wait_for", "web_probe", "web_research", "web_search", "workdir_snapshot",
+	"audio_mix", "web_asset_check",
+	"archive_probe", "ast_diff", "audio_analyze", "bash", "bg_kill", "bg_logs", "bg_run", "bg_status", "bg_wait",
+	"browser_session", "bulk_edit", "checkpoint_read", "contact_supervisor", "context_slice",
+	"data_query", "fetch_content", "get_search_content",
+	"git_info", "handoff_capsule", "http_request", "math_check", "media_info", "memory_forget", "memory_read", "memory_restore",
+	"memory_search", "memory_status", "memory_write", "music_compose", "net_probe", "obs_read", "package_probe", "process",
+	"project_intel", "quality_review", "render_see", "sandbox_run", "scratchpad", "session_coordinate", "session_self",
+	"skill_review", "source_check", "sqlite_probe", "structured_output", "subagent", "subagent_supervisor", "symbol_expand",
+	"sys_probe", "todo", "tool_search", "value_convert", "video_frames", "web_probe", "web_research", "web_search", "workdir_snapshot",
 ];
 
 test("inventory enumerates source-backed registrations, factories, catalogs, and defaults", () => {

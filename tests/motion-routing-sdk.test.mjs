@@ -11,7 +11,7 @@ import {emitSessionShutdownEvent} from '../core/coding-agent/src/core/extensions
 import {registerToolDiscovery} from '../agent/extensions/lib/tool-discovery.ts';
 import {createGoal} from '../agent/extensions/lib/goal-state.ts';
 
-test('a resumed goal preserves discovery ownership and text models can reach native ambient tools', {timeout:60000}, async () => {
+test('a resumed goal preserves discovery ownership and text models can activate deferred tools', {timeout:60000}, async () => {
  const root=path.resolve(import.meta.dirname,'..'),cwd=fs.mkdtempSync(path.join(os.tmpdir(),'motion-routing-sdk-'));
  const names=['PI_CODING_AGENT_DIR','PI_JEV','PI_NEEDLE','PI_TOOL_DISCOVERY','PI_SUBAGENT_CHILD','PI_LOCAL_LM','PI_GOAL'];
  const prior=Object.fromEntries(names.map(key=>[key,process.env[key]]));
@@ -35,7 +35,7 @@ test('a resumed goal preserves discovery ownership and text models can reach nat
   await session.bindExtensions({onError:error=>errors.push(error)});
   await session.prompt('Create a fixed camera ambient motion video using the approved image plate.',{source:'rpc'});
   assert.deepEqual(errors,[]);assert.equal(contexts.length,2);
-  assert.ok(contexts[0].tools.includes('goal'),JSON.stringify({branch:manager.getBranch(),contexts}));assert.ok(contexts[0].tools.includes('video_ambient'));
+  assert.ok(contexts[0].tools.includes('goal'),JSON.stringify({branch:manager.getBranch(),contexts}));
   const result=session.messages.find(message=>message.role==='toolResult' && message.toolCallId==='activate');
   assert.equal(result.isError,false,JSON.stringify(result.content));
   assert.ok(contexts[1].tools.includes('deliverable_check'),'activation is available in the next turn of the same request');

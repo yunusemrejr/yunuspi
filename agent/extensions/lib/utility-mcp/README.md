@@ -19,13 +19,8 @@ explicitly load the extension and router and permit these read-only tools.
 | --- | --- |
 | `sqlite_probe` | `tables`, `schema`, `describe`, `query`, `explain` |
 | `package_probe` | Installed Node metadata, declaration and lock resolution |
-| `openapi_probe` | `list_endpoints`, `operation`, `schema`, `request_shape`, `response_shape`, `auth` |
-| `coverage_probe` | Existing artifacts, uncovered evidence and Git line intersections |
-| `contract_diff` | JSON/YAML file or inline payload structural changes; schema mode |
-| `env_audit` | Names referenced in explicit sources versus example/deployment configs |
 | `net_probe` | One-call `diagnose` ladder, `dns`, one `tcp` connection, one `tls` handshake, passive `ssh` banner |
 | `workspace_search` | Literal file/folder or UTF-8 content search under an explicit root |
-| `local_mail_search` / `local_mail_read` | Explicit Maildir/mbox search and exact message reading |
 | `ssh_plan` | Safe explicit-target argv plan, without connecting or reading SSH config |
 | `archive_probe` | `list`, `stat`, `find`, one bounded UTF-8 `read` |
 
@@ -86,13 +81,6 @@ explicitly load the extension and router and permit these read-only tools.
   option. Skipped paths and incomplete scans are reported; no match is not proof
   of absence outside that scope. Continuation requires the prior `snapshot`;
   changed directory metadata or scanned bytes reject stale pages.
-- Local mail uses an explicit workspace-contained Maildir (`cur`/`new`) or mbox.
-  It never discovers credentials or accounts. The existing AgentMail tools own
-  hosted inbox access. MIME/charset decoding uses Python's standard library;
-  attachments are omitted, HTML becomes inert text, and malformed/lossy decoding
-  stays visible. Search caps are 1,000 messages, 16 MiB total, 1 MiB per message
-  and 65,536 decoded body characters. `local_mail_read` requires the exact
-  `message_hash`, rejecting stale results, and returns 1,600-character pages.
 - SSH banner checks send no application bytes, cap received data at 4 KiB and
   close after 3.5 seconds. A banner does not verify the host key or authenticate.
   `ssh_plan` returns argv only, bypassing SSH configuration, proxies, local

@@ -10,9 +10,8 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { getAgentDir } from "@yunuspi/coding-agent";
-import { runManagedCommand } from "./managed-bash.ts";
+
 const scripts = fileURLToPath(new URL("../scripts/", import.meta.url));
-const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
 const encode = (p: any) => Buffer.from(JSON.stringify(p)).toString("base64url");
 /** Trusted renderer entrypoint only: no shell or caller-supplied executable.
  * Chromium owns the page sandbox. Nesting its sandbox in the generic command
@@ -102,33 +101,6 @@ export async function captureToFile(params: CaptureParams, destination: string, 
 export default function (pi: any) {
   registerBrowserSession(pi);
   const acquireRender = createRenderQueue();
-  pi.registerTool({
-    name: "wait_for",
-    label: "Wait for",
-    description:
-      "Finite HTTP status, file existence or literal match wait. Reopens files, reads last 64 KiB; after 4s returns existing process handle (output yields terminal JSON). Cancel with process kill. No regex execution.",
-    parameters: Type.Object({
-      kind: StringEnum(["http", "exists", "literal"]),
-      target: Type.String(),
-      timeout: Type.Number({ minimum: 0.01, maximum: 600 }),
-      status: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
-      text: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    }),
-    async execute(_id: any, p: any, signal: any, _update: any, ctx: any) {
-      if (p.kind !== "http")
-        p = { ...p, target: path.resolve(ctx.cwd, p.target.replace(/^@/, "")) };
-      const r = await runManagedCommand(
-        `${quote(process.execPath)} ${quote(path.join(scripts, "wait-condition.mjs"))} ${quote(encode(p))}`,
-        ctx.cwd,
-        p.timeout + 2,
-        signal,
-      );
-      return {
-        content: [{ type: "text", text: r.output }],
-        details: { exitCode: r.exitCode },
-      };
-    },
-  });
   const renderTool = {
     name: "render_see",
     label: "Render and see",
@@ -268,15 +240,4 @@ export default function (pi: any) {
     },
   };
   pi.registerTool({ ...renderTool, name: "render_see", parameters: renderTool.parameters, execute: renderTool.execute });
-  pi.registerTool({
-    ...renderTool,
-    name: "design_audit",
-    parameters: renderTool.parameters,
-    label: "Rendered design audit",
-    description: "Inspect a rendered web page for typography/spacing distributions, repeated surface effects, AI-slop signature counts (pill clusters, glow halos, gradient text, glass, text glow, oversized type, heavy radius), overflow, running motion and solid-color text contrast. Includes bounded advice about placeholders, equivalent repeated labels/links, animated status pills, decorative dot markers, icon tiles, dense interface copy, font-family variation, accent rails (left borders or pseudo-element bars), missing image alt, unnamed controls, emoji in chrome, hype badge clusters, fake terminal decoration and quantified marketing claims requiring source evidence. Findings give locations and measurements, never establish hallucination or require automatic changes. Semantic live/status regions, articles, code, quotes and marked user content are exempt from decorative-pattern checks. Uses the existing isolated browser, with screenshot pixels for vision models. Numeric evidence for accessible and anti-slop design review, not a style score or certification. Complex paint is indeterminate. Compare mobile/desktop and reduced-motion calls; use design skills and actual screenshots to judge hierarchy and originality.",
-    async execute(id: any, params: any, signal: any, update: any, ctx: any) {
-      if (/\.pdf$/i.test(params.source)) throw new Error("design_audit requires rendered HTML; PDF has no computed web styles");
-      return renderTool.execute(id, { ...params, output: params.output === "text" ? "text" : "both", designAudit: true }, signal, update, ctx);
-    },
-  });
 }

@@ -85,7 +85,7 @@ test("the directive names the workflow tools, stays bounded and treats outside t
     assert.match(text, /license/);
   }
   assert.match(priorArtDirective({ mode: "improve", reason: "x" }), /project_intel/);
-  assert.match(priorArtDirective({ mode: "compare", reason: "x" }), /research_toolkit profile/);
+  assert.match(priorArtDirective({ mode: "compare", reason: "x" }), /project_intel/);
 });
 
 test("the Expert Director adds the directive even when no excellence domain qualifies, and not otherwise", () => {

@@ -2,12 +2,12 @@ import { sessionObservability } from '../../../../lib/session-observability.ts';
 /** Tiny sparse nearest-prototype classifier. Curated examples, not learned user data.
  * Scores are cosine similarities, not calibrated probabilities. No I/O or dependencies. */
 const examples = [
- ['web-component-patterns','keyboard focus tab order screen reader accessible dialog modal navigation'],
- ['linux-host-defense','server intrusion firewall ssh hardening exposed ports untrusted host'],
- ['classical-ml-modeling','tabular classifier validation leakage train split features baseline prediction'],
- ['ui-antipattern-review','visual hierarchy spacing typography contrast clutter generic interface'],
- ['llm-systems-engineering','tokenizer attention quantization inference transformer memory kernels'],
- ['natural-editorial-writing','prose paragraphs wording editorial voice repetitive filler clarity'],
+ ['frontend','keyboard focus tab order screen reader accessible dialog modal navigation'],
+ ['api-security','server intrusion firewall ssh hardening exposed ports untrusted host'],
+ ['ml','tabular classifier validation leakage train split features baseline prediction'],
+ ['ui-design','visual hierarchy spacing typography contrast clutter generic interface'],
+ ['ml','tokenizer attention quantization inference transformer memory kernels'],
+ ['research-writing','prose paragraphs wording editorial voice repetitive filler clarity'],
 ] as const;
 const stop=new Set('a an the and or for of to in on with this that it is be please can could would my our your implement build make improve review fix inspect check'.split(' '));
 function terms(text:string) {

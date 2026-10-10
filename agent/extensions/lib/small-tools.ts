@@ -4,10 +4,10 @@ import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {numericCheck} from './numeric-checks.ts';
-import {inspectText, inspectImage, convertValue} from './artifact-checks.ts';
+import { convertValue } from './artifact-checks.ts';
 import {inspectSvg} from './svg-check.ts';
 import {reviewSvg} from './svg-analysis.ts';
-import {inspectUiSource} from './slop-guidance-signals.ts';
+
 import {parseData, executeDataQuery} from './data-query.ts';
 
 const disabled = () => process.env.PI_SMALL_TOOLS === 'off' || process.env.PI_REASONING_AIDS === 'off';
@@ -112,24 +112,6 @@ export default function registerSmallTools(pi: any) {
       samples:Type.Optional(Type.Integer({minimum:1,maximum:16})),buffers:Type.Optional(Type.Integer({minimum:1,maximum:8})),
     }),p=>numericCheck(p),
     ['Use math_check for numeric summaries, metrics, vectors, split overlap, measured frame times and render attachment budgets. Compare evidence under the same scene/device/settings before reducing visual detail.']);
-  register('artifact_check',
-    'Inspect Unicode metadata (text), image header dimensions (image), SVG IDs/references/viewBox and resource/motion cues (svg), or UI source cues (ui). SVG accepts text or workspace path up to 64 KiB; ui requires a path and <=24000 characters. Source checks return advisory cues and a hash; no rendering, sanitization or design certification.',
-    object({operation:Type.Union(['text','image','ui','svg'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
-      if (!p || typeof p !== 'object' || Array.isArray(p) || !['text','image','ui','svg'].includes(p.operation)) throw Error('Unsupported artifact operation');
-      const keys=Object.keys(p);
-      if (keys.some(k=>!['operation','text','path'].includes(k)) || ('text' in p) === ('path' in p) || 'text' in p && typeof p.text !== 'string' || 'path' in p && typeof p.path !== 'string') throw Error('Supply exactly one of text or path');
-      if (p.operation==='text' && typeof p.text==='string') return inspectText(p.text);
-      if (p.operation==='svg' && typeof p.text==='string') return inspectSvg(p.text);
-      if (p.operation==='image' && 'text' in p) throw Error('Image inspection requires a path');
-      if (p.operation==='ui' && 'text' in p) throw Error('UI inspection requires a path');
-      const data=await readArtifact(p.path,ctx?.cwd,p.operation==='image'?IMAGE_LIMIT:p.operation==='ui'?UI_LIMIT:TEXT_LIMIT,p.operation==='image',signal);
-      if(p.operation==='image') return {...inspectImage(data.bytes),fileBytes:data.fileBytes,headerPrefixOnly:data.headerOnly};
-      let text: string;
-      try { text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes); }
-      catch { throw Error('Text file is not valid UTF-8'); }
-      return p.operation==='svg' ? inspectSvg(text) : p.operation==='ui' ? inspectUiSource(p.path,text) : inspectText(text);
-    },
-    ['Use artifact_check for text/image metadata, operation:"svg" for standalone SVG source, or operation:"ui" on a changed component. Source cues locate review work; verify artwork/UI with rendered and interaction evidence.']);
   register('value_convert',
     'Convert supplied text: strict UTF-8 Base64, URI component encoding, or JSON format/compact. Returns bounded converted text; never evaluates code or writes a file. Use when exact encoding or formatting is needed.',
     object({operation:Type.Union(['json_format','json_compact','base64_encode','base64_decode','url_encode','url_decode'].map(operation)),text:str(TEXT_LIMIT)}),p=>convertValue(p),

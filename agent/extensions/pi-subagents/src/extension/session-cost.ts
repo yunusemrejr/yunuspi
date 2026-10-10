@@ -35,7 +35,7 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     usage: hasUsage(r) ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
     totalCost: hasUsage(r) ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
   });});
-  pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['swarms','fusions','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
+  pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['fanouts','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
   try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}
 }
 
@@ -68,7 +68,7 @@ export function persistSubagentActivity(pi: any, state: any, payload: any): void
     status:['queued','running','complete','completed','failed','stopped','paused','detached','unknown'].includes(r.status)?r.status:'unknown',
   }));
   const data={runId:payload.runId,mode:payload.mode,state:payload.state,results,
-    ...(payload.events?{events:Object.fromEntries(['swarms','fusions','recoveries'].filter(k=>Number.isSafeInteger(payload.events[k])&&payload.events[k]>=0).map(k=>[k,payload.events[k]]))}:{}),
+    ...(payload.events?{events:Object.fromEntries(['fanouts','recoveries'].filter(k=>Number.isSafeInteger(payload.events[k])&&payload.events[k]>=0).map(k=>[k,payload.events[k]]))}:{}),
     ...(Array.isArray(payload.parallelGroups)?{parallelGroups:payload.parallelGroups.map((g:any)=>({start:g.start,count:g.count}))}:{})};
   pi.appendEntry('subagent-lifecycle-v1',data);
 }

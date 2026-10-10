@@ -12,7 +12,6 @@ assert.ok(agentRoot, "code quality ships with the distribution");
 const cq = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/code-quality.ts")));
 const { parserFor } = await import(pathToFileURL(path.join(agentRoot, "extensions/pi-lens/semantic-radar/extract.mjs")));
 const registerSourceCheck = (await import(pathToFileURL(path.join(agentRoot, "extensions/lib/source-check.ts")))).default;
-const registerTool = (await import(pathToFileURL(path.join(agentRoot, "extensions/code-quality.ts")))).default;
 
 const workspace = () => fs.mkdtempSync(path.join(os.tmpdir(), "code-quality-"));
 const write = (dir, file, text) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); };
@@ -193,7 +192,7 @@ test("complexity ranks functions with tree-sitter and flags async without await"
   assert.ok(!findings.some(m => m.startsWith("fine")));
 });
 
-test("code_quality runs over trees and changed files, bounded and inside the workspace", async () => {
+test("codeQuality runs over trees and changed files, bounded and inside the workspace", async () => {
   const dir = workspace();
   try {
     write(dir, "src/cart.js", ORIGINAL);
@@ -215,10 +214,6 @@ test("code_quality runs over trees and changed files, bounded and inside the wor
     assert.equal(complexity.scope.functions, 2);
     await assert.rejects(cq.codeQuality({ operation: "slop", paths: ["../"] }, dir), /escapes the workspace/);
     await assert.rejects(cq.codeQuality({ operation: "duplicates", changed: true, base: "--output=/tmp/x" }, dir), /not a valid revision/);
-    const tools = [];
-    registerTool({ registerTool: tool => tools.push(tool) });
-    const result = await tools[0].execute("q", { operation: "slop", paths: ["src"] }, undefined, undefined, { cwd: dir });
-    assert.equal(result.details.operation, "slop");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -310,25 +305,6 @@ test("git_info outside a repository reports no Git state instead of failing", as
       assert.match(result.content[0].text, /No Git repository/);
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("bash router points once at an installed specialist that is off the wire", async () => {
-  const registerRouter = (await import(pathToFileURL(path.join(agentRoot, "extensions/bash-router.ts")))).default;
-  const hooks = new Map();
-  let active = ["bash", "read"];
-  registerRouter({ on: (name, handler) => hooks.set(name, handler), registerCommand() {}, getActiveTools: () => active, getAllTools: () => [{ name: "bash" }, { name: "read" }, { name: "git_info" }] });
-  const call = id => hooks.get("tool_call")({ toolName: "bash", toolCallId: id, input: { command: "git status" } });
-  const result = id => hooks.get("tool_result")({ toolName: "bash", toolCallId: id, content: [{ type: "text", text: "clean" }], isError: false });
-  assert.equal(call("a"), undefined, "never blocks an inactive route");
-  const first = result("a");
-  assert.match(first.content.at(-1).text, /git_info is installed but not active; tool_search\(\{names:\["git_info"\]\}\)/);
-  call("b");
-  assert.equal(result("b"), undefined, "said once per session");
-  hooks.get("session_start")();
-  const uninstalled = new Map();
-  registerRouter({ on: (name, handler) => uninstalled.set(name, handler), registerCommand() {}, getActiveTools: () => ["bash"], getAllTools: () => [{ name: "bash" }] });
-  uninstalled.get("tool_call")({ toolName: "bash", toolCallId: "c", input: { command: "git status" } });
-  assert.equal(uninstalled.get("tool_result")({ toolName: "bash", toolCallId: "c", content: [], isError: false }), undefined, "no hint for tools that are not installed");
 });
 
 test("a bash commit with a staged secret or conflict marker is stopped, asked about, or allowed when clean", async () => {

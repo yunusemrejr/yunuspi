@@ -305,6 +305,6 @@ test('the ambition level follows the goal: a minimalist brief is told to stay re
   await f.session.sendUserMessage(kickoffFor(words), { authored: true, userText: words });
   const modelContext = JSON.stringify(f.calls.at(-1).context.messages);
   assert.match(modelContext, /Ambition: restrained/);
-  assert.doesNotMatch(modelContext, /count caps in frontend-design and web-effects stop applying/);
+  assert.doesNotMatch(modelContext, /count caps in frontend and web-motion stop applying/);
   assert.deepEqual(f.errors, []);
 });

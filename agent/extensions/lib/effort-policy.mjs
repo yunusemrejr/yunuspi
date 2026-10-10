@@ -46,7 +46,6 @@ export const MECHANICAL_TOOLS = Object.freeze(new Set([
 	"bg_status", "bg_logs", "bg_kill", "bg_wait", "bg_run",
 	"module_report", "project_report", "symbol_search", "checkpoint_read",
 	"session_self", "tool_search", "context_slice",
-	"evidence_cache", "context_score",
 ]));
 
 /** Tools whose *use* implies a judgment the policy must not cheapen. */

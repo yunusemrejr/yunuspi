@@ -200,30 +200,6 @@ export function projectObserver(graph: TaskGraph, budgets: ProjectionBudgets = D
 	return fit(lines, budgets);
 }
 
-/** Progress projection: what Watchmaker needs to spot wasted effort. */
-export function projectWatchmaker(graph: TaskGraph, budgets: ProjectionBudgets = DEFAULT_BUDGETS): string {
-	const work = ofKind(graph, "work").sort(byUpdatedDesc);
-	const active = work.find((entry) => entry.status === "active") ?? work.find((entry) => entry.status === "proposed");
-	const attempts = ofKind(graph, "attempt").length;
-	const failures = failureFamilies(graph);
-	const top = failures[0];
-	const blocked = ofKind(graph, "work").filter((entry) => entry.status === "blocked");
-	const done = ofKind(graph, "work").filter((entry) => entry.status === "implemented");
-	const children = ofKind(graph, "child");
-	const lines: string[] = [
-		"Task progress (shared graph):",
-		`Active work: ${active ? `${clip(active.title, 140)} [${active.status}]` : "none"}`,
-		`Attempts: ${attempts} · failures: ${ofKind(graph, "failure").length} · repeated families: ${failures.filter((entry) => entry.count > 1).length}`,
-		...(top && top.count > 1 ? [`Top repeat: ${top.family} ×${top.count} · ${top.latest}`] : []),
-		...section("Blocked dependencies", blocked.slice(0, 6).map((entry) => clip(entry.title, 120)), "none"),
-		...section("Completed investigations",
-			done.slice(0, 6).map((entry) => clip(entry.title, 120)),
-			"none yet"),
-		`Child runs: ${children.length} (${children.filter((entry) => entry.status === "failed").length} failed)`,
-	];
-	return fit(lines, budgets);
-}
-
 export interface SubagentSliceInput {
 	/** Focus hints: requirement ids, file paths, or keywords. */
 	focus?: string[];

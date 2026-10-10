@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import observerExtension from '../agent/extensions/session-observer.ts';
-import watchmakerExtension from '../agent/extensions/session-watchmaker.ts';
 import { publishReviewerNote, registerPlannerStatus, reviewerSessionKey } from '../agent/extensions/lib/reviewer-board.ts';
 
 const GUARDIAN_META = Symbol.for('yunuspi.guardian.request-meta.v1');
@@ -29,10 +28,10 @@ function clock() {
 /** Runs one real reviewer extension to its first review and returns the packet it sent. */
 async function firstPacket(t, extension, beforeReview) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'reviewer-coordination-'));
-  const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_TOOLS', 'PI_WATCHMAKER'];
+  const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_TOOLS'];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   Object.assign(process.env, { PI_CODING_AGENT_DIR: cwd, PI_LLM_PREFERENCES_FILE: path.join(cwd, 'prefs.json'), PI_SUBAGENTS_ECONOMY_CONFIG: path.join(cwd, 'economy.json'), PI_PROVIDER_STATE_FILE: path.join(cwd, 'health.json'), PI_MODEL_EXCLUSIONS_PATH: path.join(cwd, 'exclusions.json'), PI_OBSERVER_BOOK_DIR: 'off' });
-  for (const key of ['PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_TOOLS', 'PI_WATCHMAKER']) delete process.env[key];
+  for (const key of ['PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_TOOLS']) delete process.env[key];
   fs.writeFileSync(path.join(cwd, 'economy.json'), '{}');
   t.after(() => { for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value; fs.rmSync(cwd, { recursive: true, force: true }); });
   const time = clock();
@@ -70,27 +69,22 @@ async function firstPacket(t, extension, beforeReview) {
   return packets[0];
 }
 
-for (const [name, extension, planners] of [
-  ['observer', observerExtension, /planner-state|Double mode: ON/],
-  ['watchmaker', watchmakerExtension, /time-planners|Double mode: ON/],
-]) {
-  test(`the ${name} sees Double's mode and what its directive told the agent`, async (t) => {
-    const dispose = registerPlannerStatus('double', () => 'ON (custom pair A deepseek/deepseek-flash ∥ B zai/glm-5.3-flash): every user prompt is analyzed by two independent streams and reconciled into one planning directive before the agent starts. Do not advise repeating that deliberation.');
-    t.after(dispose);
-    const packet = await firstPacket(t, extension, (ctx) => {
-      publishReviewerNote(reviewerSessionKey(ctx), 'double', 'Double mode directive: read src/login.ts first, then fix the redirect and run the tests.', [], 0);
-      publishReviewerNote(reviewerSessionKey(ctx), 'council', 'Scope council (complete, advisory): keep the existing login copy; change only the redirect target.', [], 0);
-    });
-    assert.match(packet, planners);
-    assert.match(packet, /Double mode: ON \(custom pair A deepseek\/deepseek-flash ∥ B zai\/glm-5\.3-flash\)/);
-    assert.match(packet, /Do not advise repeating that deliberation/);
-    assert.match(packet, /Double mode already told the agent \d+s ago: Double mode directive: read src\/login\.ts first/);
-    assert.match(packet, /Scope council already told the agent \d+s ago: Scope council \(complete, advisory\): keep the existing login copy/);
+test("the observer sees Double's mode and what its directive told the agent", async (t) => {
+  const dispose = registerPlannerStatus('double', () => 'ON (custom pair A deepseek/deepseek-flash ∥ B zai/glm-5.3-flash): every user prompt is analyzed by two independent streams and reconciled into one planning directive before the agent starts. Do not advise repeating that deliberation.');
+  t.after(dispose);
+  const packet = await firstPacket(t, observerExtension, (ctx) => {
+    publishReviewerNote(reviewerSessionKey(ctx), 'double', 'Double mode directive: read src/login.ts first, then fix the redirect and run the tests.', [], 0);
+    publishReviewerNote(reviewerSessionKey(ctx), 'council', 'Scope council (complete, advisory): keep the existing login copy; change only the redirect target.', [], 0);
   });
+  assert.match(packet, /planner-state|Double mode: ON/);
+  assert.match(packet, /Double mode: ON \(custom pair A deepseek\/deepseek-flash ∥ B zai\/glm-5\.3-flash\)/);
+  assert.match(packet, /Do not advise repeating that deliberation/);
+  assert.match(packet, /Double mode already told the agent \d+s ago: Double mode directive: read src\/login\.ts first/);
+  assert.match(packet, /Scope council already told the agent \d+s ago: Scope council \(complete, advisory\): keep the existing login copy/);
+});
 
-  test(`the ${name} adds nothing about planners that are not running`, async (t) => {
-    const packet = await firstPacket(t, extension, () => {});
-    assert.doesNotMatch(packet, /Double mode/);
-    assert.doesNotMatch(packet, /already told the agent \d+s ago/);
-  });
-}
+test('the observer adds nothing about planners that are not running', async (t) => {
+  const packet = await firstPacket(t, observerExtension, () => {});
+  assert.doesNotMatch(packet, /Double mode/);
+  assert.doesNotMatch(packet, /already told the agent \d+s ago/);
+});

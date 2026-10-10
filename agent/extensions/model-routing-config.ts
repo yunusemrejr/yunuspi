@@ -1,27 +1,25 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { builtinMediaModels, fetchMediaModels, normalizeMediaModels, type MediaModelOption, type ExtensionAPI, type ExtensionContext } from "@yunuspi/coding-agent";
+import { builtinMediaModels, fetchMediaModels, normalizeMediaModels, type ExtensionAPI, type ExtensionContext } from "@yunuspi/coding-agent";
 import { selectedMediaParams } from "./lib/media-model-routing.ts";
 import { openExternal } from "./lib/project-intelligence/viewer.mjs";
 import { scoreModelRoutingSearch, compareModelRoutingSearch, modelRoutingProviderHints, readModelRoutingSnapshot, saveModelRoutingSnapshot } from "./lib/model-routing-store.ts";
 import { fetchEndpoints, type Endpoint } from "./pi-subagents/src/runs/shared/openrouter-endpoints.ts";
-import { resolveLlmPreferenceChain, resolvePromptAnalysisPreferenceChain, resolveSessionObserverPreferenceChain, resolveWatchmakerPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
+import { resolveLlmPreferenceChain, resolvePromptAnalysisPreferenceChain, resolveSessionObserverPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
 import { llmPreferencesPath, normalizePreferenceRole, providerOptionsToRouting } from "./pi-subagents/src/runs/shared/llm-preferences.ts";
 import { toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
 import { getModelRoutingMetrics, recordModelRoutingLatency } from "./lib/model-routing-metrics.ts";
 
 const BUILTIN_ROLES = [
 	{ id: "subagents", label: "Subagents", detail: "Default child-agent model priority." },
-	{ id: "swarm", label: "Swarm", detail: "Models used by swarm workers." },
-	{ id: "fusion", label: "Fusion", detail: "Models used for independent branches and synthesis." },
+	{ id: "fanout", label: "Fan-out", detail: "Models used by parallel investigators and competing-approach branches." },
 	{ id: "council", label: "Councils", detail: "Models used for council members." },
 	{ id: "quality_review", label: "Quality Reviews", detail: "Models used for quality-review rounds." },
 	{ id: "project_review", label: "Project Reviews", detail: "Models used for project reviews." },
 	{ id: "error_review", label: "Bug / Error Reviews", detail: "Models used for bug and error analysis." },
 	{ id: "prompt_analysis", label: "Prompt Analysis", detail: "Low-cost routes for initial and follow-up intent analysis." },
 	{ id: "session_observer", label: "Session Observer", detail: "Brief periodic observations about tool use, skills and coordination." },
-	{ id: "watchmaker", label: "Mr. Watchmaker", detail: "Timekeeper: periodic time-vs-progress notes about waste and faster paths." },
 	{ id: "main_session_fallback", label: "Main Session Fallback", detail: "Used when the saved main-session model is unavailable." },
 ];
 
@@ -100,10 +98,6 @@ function resolutionFor(ctx: ExtensionContext, role: string, configPath = llmPref
 		const result = resolveSessionObserverPreferenceChain(available, options);
 		return { ...result, skipped };
 	}
-	if (role === "watchmaker") {
-		const result = resolveWatchmakerPreferenceChain(available, options);
-		return { ...result, skipped };
-	}
 	if (role === "prompt_analysis") {
 		const result = resolvePromptAnalysisPreferenceChain(available, { requirements: { inputModalities: ["text"], minContextWindow: 4096 }, ...options });
 		return { source: result.source, skipped, routes: result.routes.map(route => ({ route: route.route, providerRouting: route.providerRouting, explanation: route.explanation })) };
@@ -155,10 +149,10 @@ function escAttr(x){return escapeText(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 function currentDoc(){return state.data.document||{version:1,models:{},preferences:{}}}
 function configRoleKey(doc,id){const keys=Object.keys(doc.preferences||{});return keys.find(key=>canonicalRole(key)===id)||id}
 function roleId(x){return String(x).trim().toLowerCase().replace(/[-_\\s]+/g,'')}
-const canonicalRole=x=>({main:'main_session_fallback',mainfallback:'main_session_fallback',mainsessionfallback:'main_session_fallback',subagent:'subagents',swarms:'swarm',councils:'council',qualityreview:'quality_review',qualityreviews:'quality_review',projectreview:'project_review',projectreviews:'project_review',errorreview:'error_review',errorreviews:'error_review',bugreview:'error_review',bugreviews:'error_review',promptanalysis:'prompt_analysis',initialintentanalysis:'prompt_analysis',followupintentanalysis:'prompt_analysis',sessionobserver:'session_observer',mrwatchmaker:'watchmaker'}[roleId(x)]||roleId(x));
-const FIXED_DEFAULT_ROLES=new Set(['session_observer','watchmaker']);
+const canonicalRole=x=>({main:'main_session_fallback',mainfallback:'main_session_fallback',mainsessionfallback:'main_session_fallback',subagent:'subagents',swarm:'fanout',swarms:'fanout',fusion:'fanout',fanouts:'fanout',councils:'council',qualityreview:'quality_review',qualityreviews:'quality_review',projectreview:'project_review',projectreviews:'project_review',errorreview:'error_review',errorreviews:'error_review',bugreview:'error_review',bugreviews:'error_review',promptanalysis:'prompt_analysis',initialintentanalysis:'prompt_analysis',followupintentanalysis:'prompt_analysis',sessionobserver:'session_observer'}[roleId(x)]||roleId(x));
+const FIXED_DEFAULT_ROLES=new Set(['session_observer']);
 const isFixedDefault=role=>FIXED_DEFAULT_ROLES.has(role);
-const shortRoleName=role=>role==='session_observer'?'Observer':role==='watchmaker'?'Watchmaker':roleLabel(role);
+const shortRoleName=role=>role==='session_observer'?'Observer':roleLabel(role);
 function listFor(doc,role){const key=configRoleKey(doc,role);const spec=doc.preferences?.[key];return Array.isArray(spec)?spec.slice():Array.isArray(spec?.models)?spec.models.slice():[]}
 function routeEntry(doc,item){if(typeof item==='string')return {alias:item,entry:doc.models?.[item.trim()],raw:item};return {entry:item&&typeof item==='object'?item:{},raw:item}}
 function rowRoute(doc,item){const x=routeEntry(doc,item),e=x.entry||{};return {raw:x.raw,entry:e,alias:x.alias,provider:String(e.provider||''),model:String(e.model||''),fullId:e.provider&&e.model?e.provider+'/'+e.model:(x.alias?'Unknown alias: '+x.alias:'Invalid route')}}

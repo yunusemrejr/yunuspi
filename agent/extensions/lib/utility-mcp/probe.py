@@ -262,7 +262,7 @@ def main():
     try:
         request = json.loads(sys.stdin.buffer.read(512 * 1024 + 1))
         root = Path(request['root']).resolve(strict=True)
-        if request['name'] in ('workspace_search', 'local_mail_search', 'local_mail_read'):
+        if request['name'] == 'workspace_search':
             sys.dont_write_bytecode = True
             spec = importlib.util.spec_from_file_location('yunuspi_local_operations', Path(__file__).with_name('local_operations.py'))
             operations = importlib.util.module_from_spec(spec)

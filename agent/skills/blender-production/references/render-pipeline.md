@@ -1,9 +1,0 @@
-# Render pipeline
-
-Run a small preview before committing to a sequence: `blender_render mode:"preview"` renders at a quarter of the resolution with 16 samples. Choose engine, resolution, samples and denoising from the scene's required look and the CPU budget the tool reports in `blender_setup`. Measure seconds per frame on representative difficult frames (the tool returns per-frame seconds); extrapolate duration with headroom. More samples do not fix bad lights or broken geometry.
-
-Engines: EEVEE renders headless through software GL and is the default for look development and most deliveries; Cycles runs on the CPU (set `samples` and `denoise:true`); Workbench gives flat, fast shape checks. Overrides passed to `blender_render` (engine, width/height, scale, samples, transparent, format, camera, scene) apply to that render only and never modify the `.blend`; bake decisions you want to keep into the file with `blender_run`.
-
-Animations: `mode:"animation" from:1 to:N` writes a PNG sequence (resumable: re-render a missing range into the same workflow), assembles `animation.mp4` with the scene's fps (or `fps`) and a labelled contact sheet of up to 12 frames. Keep long jobs bounded: render ranges of a few hundred frames per call, test first, middle and last frames plus the hardest motion or lighting moment, and verify constant dimensions and no missing frame numbers. For HDR compositing use `format:"OPEN_EXR"`; PNG is display-ready. Do not apply a display transform twice when assembling video elsewhere.
-
-Scripts run with `--factory-startup` and `--python-exit-code 1`, so a Python exception fails the job with its traceback in the tool error; pass `factoryStartup:false` only when a user add-on is required. Avoid auto-run scripts from untrusted blend files. Pack or collect required assets, re-run `blender_inspect` to confirm no missing textures or libraries, and report which engine and CPU/GPU actually performed the render.

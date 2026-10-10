@@ -7,8 +7,7 @@ import { DEFAULT_GLOBAL_CONCURRENCY_LIMIT, Semaphore } from "../runs/shared/para
 import { HOST_STEP_MAX_COUNT } from "../runs/shared/host-step-status.ts";
 import { classifyTaskMutationIntent } from "../runs/shared/task-intent.ts";
 import { fuseChildOutputs, fuseFragments, planChildRespawn } from "./recovery-seam.ts";
-import type { FusionConfig } from "../runs/shared/fusion.ts";
-import type { SwarmRecoveryConfig } from "../runs/shared/swarm-recovery.ts";
+import type { MergeConfig, RecoveryConfig } from "../runs/shared/fanout.ts";
 import type { AcceptanceRecoveryMetadata, HostStepNodeV1, SingleResult } from "../shared/types.ts";
 import { normalizeWorkflowHostCommandParams, type WorkflowHostCommandParams, type WorkflowHostCommandResult } from "./host-command.ts";
 
@@ -1133,7 +1132,7 @@ export interface RunWorkflowScriptOptions {
 	onLanePlan?: (lanes: WorkflowLanePlan[]) => void;
 	onEmit?: (emits: unknown[]) => void;
 	/** Host-only durable accounting; suppresses the process-local sink when provided. */
-	onMetric?: (kind: "swarms" | "fusions" | "recoveries") => void;
+	onMetric?: (kind: "fanouts" | "recoveries") => void;
 }
 
 export function combinedAbortSignal(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
@@ -1708,7 +1707,7 @@ function setupAbortResumeParams(params: Record<string, unknown>, result: Workflo
 
 export async function runWorkflowScript(options: RunWorkflowScriptOptions): Promise<WorkflowScriptResult> {
 	const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
-	const recordMetric = (kind: "swarms" | "fusions" | "recoveries") => { try { if(options.onMetric)options.onMetric(kind);else metrics?.(kind); } catch {} };
+	const recordMetric = (kind: "fanouts" | "recoveries") => { try { if(options.onMetric)options.onMetric(kind);else metrics?.(kind); } catch {} };
 	// node:vm and worker_threads are not a filesystem security boundary.
 	if (!SELF_MUTATION_ALLOWED) throw new Error("Scripted JavaScript workflows are unavailable outside a human-started harness maintenance session: their worker shares Pi filesystem authority. Use declarative subagent chains, parallel tasks, swarm or fusion instead.");
 	if (!options.script.trim()) throw new Error("workflowScript must not be empty.");
@@ -2007,13 +2006,13 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 			}
 
 			if (message.method === "recover" || message.method === "fuse" || message.method === "fuseFragments") {
-				// Deterministic swarm/fusion planners (recovery-seam.ts) run here in
+				// Deterministic fan-out planners (recovery-seam.ts) run here in
 				// the host; the worker only ships plain projected data. Pure logic —
 				// no trace entry, no launch, no acceptance-recovery barrier.
-				const config = message.args.config as Partial<SwarmRecoveryConfig & FusionConfig> | undefined;
+				const config = message.args.config as Partial<RecoveryConfig & MergeConfig> | undefined;
 				if (message.method === "recover") return respond(Promise.resolve().then(() => { const result = planChildRespawn(message.args.results, config); recordMetric("recoveries"); return result; }));
-				if (message.method === "fuse") return respond(Promise.resolve().then(() => { const result = fuseChildOutputs(message.args.results, config); if(new Set(result.provenance.map(p=>p.owner)).size>1)recordMetric("fusions"); return result; }));
-				return respond(Promise.resolve().then(() => { const result = fuseFragments(message.args.fragments, config); if(new Set(result.provenance.map(p=>p.owner)).size>1)recordMetric("fusions"); return result; }));
+				if (message.method === "fuse") return respond(Promise.resolve().then(() => { const result = fuseChildOutputs(message.args.results, config); return result; }));
+				return respond(Promise.resolve().then(() => { const result = fuseFragments(message.args.fragments, config); return result; }));
 			}
 
 			if (message.method === "status") {
@@ -2259,7 +2258,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 					if (batch) {
 						const launched=batchLaunches.get(batch.id)??new Set<string>();
 						launched.add(key);batchLaunches.set(batch.id,launched);
-						if(launched.size===2)recordMetric('swarms');
+						if(launched.size===2)recordMetric('fanouts');
 					}
 					const result = await options.launch(key, launchParams, childSignal, { admitted: true, batch: batch !== undefined });
 					const autoResumeParams = setupAbortResumeParams(params, result, childSignal);

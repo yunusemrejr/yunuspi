@@ -127,9 +127,9 @@ export const UI_PREFLIGHT_TELLS: readonly string[] = [
 /** What each expression level permits. The immersive line is the one the count caps elsewhere in the UI doctrine
  * would otherwise veto, so it says outright that they stop applying and what replaces them. */
 const AMBITION_GUIDANCE: Record<Ambition, string> = {
-	restrained: "- Ambition: restrained. Quiet craft: one clear idea, exact type and spacing, motion only where it explains state; keep the finite-set budget in frontend-design.",
+	restrained: "- Ambition: restrained. Quiet craft: one clear idea, exact type and spacing, motion only where it explains state; keep the finite-set budget in frontend.",
 	balanced: "- Ambition: balanced. One signature element carries the identity (a distinctive illustration, a live model of the product, a hero motion); everything around it stays quiet, finite and fast.",
-	immersive: "- Ambition: immersive. The brief asks for an experience, so aim at a signature world, not a themed template (read signature-experience): derive it from the subject's own world, not from a trend; ship a static baseline first, then layer ambient life, interaction and scroll choreography; give every layer a fallback (reduced motion, no WebGL, phone) and keep performance and accessibility as the budgets. The count caps in frontend-design and web-effects stop applying here; coherence replaces them.",
+	immersive: "- Ambition: immersive. The brief asks for an experience, so aim at a signature world, not a themed template (read signature-experience): derive it from the subject's own world, not from a trend; ship a static baseline first, then layer ambient life, interaction and scroll choreography; give every layer a fallback (reduced motion, no WebGL, phone) and keep performance and accessibility as the budgets. The count caps in frontend and web-motion stop applying here; coherence replaces them.",
 };
 
 /** Bounded guidance for the main agent. Returns "" when nothing applies. */
@@ -143,7 +143,7 @@ export function designDirectionGuidance(brief: DesignBrief | undefined): string 
 	}
 	if (brief.visualDesign && brief.ambition) lines.push(AMBITION_GUIDANCE[brief.ambition]);
 	if (brief.contextReferences.length) lines.push(`- Context-only references: ${brief.contextReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Use them for what the user named (links, credit, deployment, conventions); they are not design sources — do not borrow their fonts, palette, layout or copy${brief.visualDesign ? "; the new work needs its own identity" : ""}.`);
-	if (brief.visualDesign) lines.push(`- Decide against these generated-UI tells while choosing the direction, not after building it (the design-slop-prevention skill explains why and gives the swap test): ${UI_PREFLIGHT_TELLS.join("; ")}.`);
+	if (brief.visualDesign) lines.push(`- Decide against these generated-UI tells while choosing the direction, not after building it (the ui-design skill explains why and gives the swap test): ${UI_PREFLIGHT_TELLS.join("; ")}.`);
 	if (brief.styleReferences.length) lines.push(`- Explicit style references: ${brief.styleReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Learn their principles; do not copy them wholesale.`);
 	return lines.join("\n").slice(0, DESIGN_GUIDANCE_CAP);
 }

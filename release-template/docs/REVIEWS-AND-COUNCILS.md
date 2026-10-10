@@ -1,4 +1,4 @@
-# Reviews, councils, swarms and fusion
+# Reviews, councils, fan-out
 
 Each mechanism has a distinct purpose and reuses an existing launcher. No
 parallel review engine exists: the table below is the complete formalization,
@@ -10,8 +10,7 @@ and the main agent remains responsible for the session in every case.
 | Project review | Architecture, goals, consistency, debt, direction | One bounded advisory helper via the native subagent executor | `subagent` worker with a project-review brief |
 | Error review | Likely faults, root causes, failed assumptions, debugging leads | One bounded advisory helper via the native subagent executor | `subagent` worker with an error-review brief |
 | Council | Multi-perspective reasoning for genuinely hard questions | Automatic scope council, or the supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
-| Swarm | Separable parallel investigations in one broad task | Assistance-plan swarm mode with bounded respawns | `subagent({tasks:[...],async:true})` |
-| Fusion | Competing approaches merged with provenance | Fusion-mode workers plus the deterministic fusion planner | Fusion workers plus `runs.fuse` |
+| Fan-out | Separable parallel investigations in one broad task, or competing approaches merged with provenance | Assistance-plan fan-out mode with bounded respawns; merged fragments keep their provenance | `subagent({tasks:[...],async:true})`, then `runs.fuse` to merge competing results |
 | Double | Two independent streams (the current model twice, or two models you pick) reconciled into one decision | Double runner with the native subagent executor | `/double` or `/custom-double`, then work normally |
 
 Findings come back concise: bounded reports with evidence and explicit gaps,
@@ -142,9 +141,9 @@ What differs from the twin mode, and what does not:
 ### One board for every planner and reviewer
 
 Double, the scope council and the automatic helper team (the single helper,
-swarm or fusion that planning starts on its own) now say what they told the agent
+fan-out that planning starts on its own) now say what they told the agent
 on the same in-process board the Guardian, the session observer and
-Mr. Watchmaker already used, and read it back. The reviewers see "Double mode
+the observer already used, and read it back. The reviewers see "Double mode
 already told the agent …", "Scope council already told the agent …" and
 "Automatic helpers already told the agent …" beside each other's notes, so a
 note that merely restates a directive is suppressed instead of delivered twice.
@@ -155,7 +154,7 @@ receive the reviewers' most recent notes (identically, so the shared prefix stay
 byte-identical) as evidence the forked transcript does not carry. Double's own
 streams and reconciliation are counted as harness-owned runs, never as children
 the agent launched. While Double is on, the automatic assistance team
-(the proactive helper, swarm or fusion that planning would otherwise start for the
+(the proactive helper, fan-out that planning would otherwise start for the
 same prompt) stands down, as it already does for the scope council: Double is the
 independent analysis of that prompt, and a third team would repeat it. Failure-driven
 assistance after repeated tool errors is unchanged.
@@ -163,8 +162,7 @@ assistance after repeated tool errors is unchanged.
 ## Session-start disclosure
 
 The first prompt of a session carries one short orientation line naming
-native-tool preference and the availability of reviews, councils, swarms and
-fusion. It appears once per session, costs negligible context and never
+native-tool preference and the availability of reviews, councils and fan-out. It appears once per session, costs negligible context and never
 repeats. The main agent invokes these workflows deliberately when they fit.
 When an automatic scope council runs, its transcript shows each phase and
 member starting and finishing, including the selected model/thinking and elapsed

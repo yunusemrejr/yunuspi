@@ -14,21 +14,21 @@ const custom=(customType,data,id)=>({type:'custom',customType,data,id});
 const notice=(customType,details,content='',id)=>({type:'custom_message',customType,details,content,id,timestamp:'2026-09-24T12:00:00.000Z'});
 const component=(summary,name)=>summary.components.find(row=>row.name===name);
 
-test('shared reviewer usage keeps Watchmaker attribution and delivery receipts',()=>{
+test('shared reviewer usage keeps observer attribution and delivery receipts',()=>{
   const entries=[
-    custom('auxiliary-model-usage-v1',{id:'watch-request',owner:'session-watchmaker',provider:'fixture',model:'timekeeper',status:'completed',usage:{input:12,output:3}}),
-    notice('session-watchmaker',{status:'completed',adviceId:'watch-note',note:'Review the slow build stage.',evidence:['time-ledger']}),
-    custom('watchmaker-delivery-v1',{adviceId:'watch-note',status:'prepared-context'}),
-    custom('watchmaker-delivery-v1',{adviceId:'watch-note',status:'provider-received',at:1000,provider:'fixture',model:'main'}),
+    custom('auxiliary-model-usage-v1',{id:'observer-request',owner:'session-observer',provider:'fixture',model:'reviewer',status:'completed',usage:{input:12,output:3}}),
+    notice('session-observer',{status:'completed',adviceId:'observer-note',note:'Review the slow build stage.',evidence:['time-ledger']}),
+    custom('session-observer-delivery-v1',{adviceId:'observer-note',status:'prepared-context'}),
+    custom('session-observer-delivery-v1',{adviceId:'observer-note',status:'provider-received',at:1000,provider:'fixture',model:'main'}),
   ];
   const data=collectHarnessUsage(entries);
-  assert.equal(data.observer.requests[0].owner,'session-watchmaker');
+  assert.equal(data.observer.requests[0].owner,'session-observer');
   assert.equal(data.observer.noteTotal,1);
   assert.equal(data.observer.received,1);
-  assert.equal(data.observer.notes[0].reviewer,'Watchmaker');
+  assert.equal(data.observer.notes[0].reviewer,'Observer');
   const html=harnessUsageHtml(data);
-  assert.match(html,/Session observer & Watchmaker/);
-  assert.match(html,/Reviewer<\/dt><dd>Watchmaker/);
+  assert.match(html,/Session observer/);
+  assert.match(html,/Reviewer<\/dt><dd>Observer/);
 });
 
 test('helper ledger separates execution, cache, abstention, application and delivery without summing cumulative snapshots',()=>{

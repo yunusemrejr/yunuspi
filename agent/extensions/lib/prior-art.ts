@@ -23,7 +23,7 @@ export interface PriorArtIntent {
 }
 
 /** Tools that carry the scouting workflow; staged with the first turn. */
-export const PRIOR_ART_TOOLS: readonly string[] = ["github_search", "web_research", "fetch_content", "research_toolkit"];
+export const PRIOR_ART_TOOLS: readonly string[] = ["github_search", "web_research", "fetch_content"];
 
 const FOCUS_LIMIT = 4000;
 
@@ -85,7 +85,7 @@ export function priorArtDirective(intent: PriorArtIntent): string {
   const how = intent.mode === "build"
     ? "Before choosing an approach, see what already exists: github_search repos with 2-3 query angles, then repo for the best 2-4; start web_research in the background for closed-source products; adopt, adapt or reject with source and license."
     : intent.mode === "improve"
-      ? "Ground the work in this codebase first (project_intel, research_toolkit profile), then look at comparable products: github_search repos, issues sorted by reactions for what their users ask for, web_research for closed-source ones. Rank candidate improvements by user value against effort with evidence, implement the best, name what you rejected."
-      : "Profile this project (research_toolkit profile), find candidates (github_search, web_research), pull same-shaped facts for 2-4 of them (github_search repo), then report per candidate what they do that we do not and the reverse, with sources, license and a verdict.";
-  return `Prior art (advisory; the user's words win; method in skill prior-art-scouting): ${how} Keep it bounded (about ten sources, one pass) and skip it if the design is already fixed. ${SAFETY}`;
+      ? "Ground the work in this codebase first (project_intel), then look at comparable products: github_search repos, issues sorted by reactions for what their users ask for, web_research for closed-source ones. Rank candidate improvements by user value against effort with evidence, implement the best, name what you rejected."
+      : "Profile this project (project_intel), find candidates (github_search, web_research), pull same-shaped facts for 2-4 of them (github_search repo), then report per candidate what they do that we do not and the reverse, with sources, license and a verdict.";
+  return `Prior art (advisory; the user's words win; method in skill research-writing): ${how} Keep it bounded (about ten sources, one pass) and skip it if the design is already fixed. ${SAFETY}`;
 }

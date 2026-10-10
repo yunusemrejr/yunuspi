@@ -477,16 +477,16 @@ test("real resolver traces the edited document and browser role edits preserve s
   assert.equal(edited.preferences["Quality-Review"].models[0], "first");
   assert.deepEqual(edited.preferences.subagents.models[0].provider_options, { routing: "custom", order: ["friendli"], allow_fallbacks: true });
   assert.deepEqual(edited.preferences.subagents.models[0].manualExtension, { keep: true });
-  await page.getByRole("button", { name: "Swarm", exact: true }).click();
+  await page.getByRole("button", { name: "Fan-out", exact: true }).click();
   await page.locator('.route-row').first().getByRole('button', { name: /Move .* down/ }).click();
   await page.getByRole("status").filter({ hasText: "Priority order updated" }).waitFor();
   snapshot = await (await post(handle.url, token, "snapshot", {})).json();
-  assert.deepEqual(snapshot.resolvedByRole.swarm.routes.map(route => route.route), ["deepseek/deepseek-flash", "openrouter/z-ai/glm-5.3-flash"]);
+  assert.deepEqual(snapshot.resolvedByRole.fanout.routes.map(route => route.route), ["deepseek/deepseek-flash", "openrouter/z-ai/glm-5.3-flash"]);
   await handle.close();
   const restarted = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath });
   t.after(() => restarted.close());
   const reopened = await openPage(t, restarted.url);
-  await reopened.getByRole("button", { name: "Swarm", exact: true }).click();
+  await reopened.getByRole("button", { name: "Fan-out", exact: true }).click();
   assert.equal(await reopened.locator(".route-row").first().getAttribute("data-route"), "deepseek/deepseek-flash", "restart and reopen retain the saved priority");
 });
 

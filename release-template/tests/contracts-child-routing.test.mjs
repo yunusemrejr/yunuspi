@@ -21,7 +21,6 @@ const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/
 const { selectAffordableModel, describeSelectionRejections } = await import(shared + 'model-selection.ts');
 const { loadModelEconomyConfig } = await import(shared + 'model-economy.ts');
 const req = await import(shared + 'child-route-requirements.ts');
-const { confidentValue, checkCapabilityProvenance } = await import(shared + 'catalog-confidence.ts');
 const { formatCandidateRejection, recoveryHintForDimension, recordRouteDecision } = await import(shared + 'route-decision-record.ts');
 
 const cfg = loadModelEconomyConfig();
@@ -112,20 +111,6 @@ test('auth-bound routes reject as authorization, not cooldown', async () => {
   assert.ok(verdict.dimensions.includes('authorization'));
   assert.ok(!verdict.dimensions.includes('provider-cooling'));
   assert.ok(verdict.detail.authorization.includes('dead credentials'));
-});
-
-test('catalog confidence gates high-stakes evidence selectively', () => {
-  const facts = {
-    contextWindow: confidentValue(32000, 'stored-cache', Date.now()),
-    maxOutput: confidentValue(8192, 'inferred-fallback', Date.now()),
-  };
-  const loose = checkCapabilityProvenance(facts, { floors: { contextWindow: 'stored-cache' } });
-  assert.equal(loose.ok, true);
-  const strict = checkCapabilityProvenance(facts, { floors: { maxOutput: 'official-pricing' } });
-  assert.equal(strict.ok, false);
-  assert.ok(strict.misses[0].includes('maxOutput'));
-  const unknown = checkCapabilityProvenance({}, { requireKnown: ['toolCalling'] });
-  assert.equal(unknown.ok, false);
 });
 
 test('decision records bound required capabilities', () => {

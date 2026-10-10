@@ -9,7 +9,6 @@ import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
-import { sourceCheckSupported } from "./source-check.ts";
 import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
@@ -437,7 +436,7 @@ export function createRelevantGuidance(pi: any) {
       const terms = ranked.matched.map(term => term.split('~').at(-1)!);
       // One naming token is decisive only while no other workflow's explicit
       // route already owns that token. "python" routes to the language
-      // workflow, so a specialized pack such as wasm-python must not claim
+      // workflow, so a specialized pack such as wasm must not claim
       // generic Python work through the one-term shortcut; a real two-term
       // match still qualifies it.
       if (ranked.matched.length === 1 && !ranked.matched[0].includes('~')
@@ -445,7 +444,7 @@ export function createRelevantGuidance(pi: any) {
         continue;
       // A lone term that names an already-read or under-review skill is
       // claimed signal, not a second workflow: "network" matching
-      // network-traffic-analysis after local-network-analysis was read is the
+      // networking after networking was read is the
       // same domain, not a new one. Multi-term matches still surface.
       if (ranked.matched.length === 1 && !ranked.matched[0].includes('~')
         && skillIndex.docs.some(doc => doc.skill.file !== ranked.skill.file && doc.name.has(terms[0]) && (read.has(doc.skill.file) || reviewTargets.has(doc.skill.file))))
@@ -522,8 +521,6 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('micro_task','Bounded analysis: batch supplied evidence as micro_task({action:"analyze",input:criterion,items:[{id,text,source}],categories:[...]}) for ranked IDs and category groups. Use run with a supported kind for error hypotheses, finding consolidation, extraction or patch comparison. Prefer one packet over repeated main-model analysis or a full child when no tools are needed; inspect retained sources for the final decision.');
       if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
         utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
-      if (/\b(syntax|parse errors?|syntax errors?|configuration files?|config files?)\b/i.test(part))
-        utilityHint('syntax_check','Syntax checks: syntax_check({paths:[...]}) batches installed language/configuration parsers with compact per-file results. Use explicit changed paths; unavailable or incomplete checks are not passes. Keep project type checks, tests and configuration schema validation.');
       if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
         utilityHint('git_info','Git evidence: git_info({action:"scope"}) identifies project/worktree ownership; session history branches and checkpoints are not commits. git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
       if (/\b(browser|website|web page)\b/i.test(part) && /\b(navigate|fill|submit|inspect|use)\b/i.test(part))
@@ -531,9 +528,7 @@ export function createRelevantGuidance(pi: any) {
       if (/\b(research|search)\b/i.test(part) && /\b(background|multiple|several|thorough|comprehensive)\b/i.test(part))
         utilityHint('web_research','Research discovery: web_research runs 2–12 distinct supplied queries in background with shared provider pacing. Read the retained query receipts after completion; unavailable/empty results do not prove absence. Respect cooldowns and verify primary sources before concluding.');
       if (/\b(agentmail|agent.?mail)\b/i.test(part) || (/\b(emails?|mail|mailbox(?:es)?|inbox(?:es)?)\b/i.test(part) && /\b(send|search|find|connect|read|list|triage|outreach|reply|forward)\b/i.test(part) && !/\b(thunderbird|imap|smtp|mbox|maildir)\b/i.test(part)))
-        utilityHint('agentmail_send','Email via AgentMail (explicitly named capability): use agentmail_status to confirm the configured inbox, agentmail_search to find mail by topic, agentmail_messages to list compact inbox rows, agentmail_message for one full read, and agentmail_send for a bounded send with a required subject. Bypass generic repeated discovery: one tool_search({kind:"capabilities",id:"agentmail-email",enable:true}) stages the complete email bundle. For Thunderbird, local mailbox files, or other IMAP servers, consult the email guide when useful. Keep the API key in the environment; never persist, log, or echo it.');
-      if (/\b(lead|leads|prospect|prospects|company|companies|contact|contacts)\b/i.test(part) && /\b(research|find|discover|lookup|enrich|qualify|outreach|list)\b/i.test(part))
-        utilityHint('research_toolkit','Lead/company/contact research (composable, provenance-aware): research_toolkit plans query angles, records lead/company candidates with source URLs and retrieved-at evidence, and gathers source notes with hashes. Compose it with web_search/fetch_content/web_research for retrieval, then verify primary sources before outreach. One tool_search({kind:"capabilities",id:"research-toolkit",enable:true}) stages the bundle.');
+        utilityHint('agentmail','Email via AgentMail (explicitly named capability): use the agentmail tool with action status to confirm the configured inbox, action search to find mail by topic, action messages to list compact inbox rows, action message for one full read, and action send for a bounded send with a required subject. Bypass generic repeated discovery: one tool_search({kind:"capabilities",id:"agentmail-email",enable:true}) stages the complete email bundle. For Thunderbird, local mailbox files, or other IMAP servers, consult the email guide when useful. Keep the API key in the environment; never persist, log, or echo it.');
       if (/\b(sandbox(?:es)?|isolated? (?:experiment|test|reproduction)s?|disposable|scratch environment|without (?:affecting|changing|touching) (?:the )?(?:project|workspace))\b/i.test(part))
         utilityHint('sandbox_run','Disposable experiments: sandbox_run runs a bounded script in a fresh environment with explicit copied files or fixtures, no project/home mounts or network, and automatic cleanup. Combine related steps in one call. If isolation cannot start, report it; never silently run the experiment on the host.');
       if (/\b(http|api endpoint|response headers?|status code)\b/i.test(part))
@@ -546,14 +541,6 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('sqlite_probe','SQLite evidence: sqlite_probe inspects an explicit workspace database using tables/schema/describe/query/explain. Use its bounded read-only results instead of Python or sqlite3 shell snippets.');
       if (/\b(installed (?:package|version|dependency)|package exports|peer dependencies|lockfile|node_modules)\b/i.test(part))
         utilityHint('package_probe','Dependency evidence: package_probe returns the physically installed Node package and lock resolution. Check this version and exports before reasoning from remembered APIs.');
-      if (/\b(openapi|swagger|request shape|response shape)\b/i.test(part))
-        utilityHint('openapi_probe','API specification: openapi_probe selects endpoints, operations, schemas, request/response shapes and auth from an explicit spec without loading the whole document.');
-      if (/\b(coverage|lcov|cobertura|uncovered lines?)\b/i.test(part))
-        utilityHint('coverage_probe','Coverage evidence: coverage_probe reads existing artifacts for explicit files and can intersect changed Git lines. It never runs tests and does not assume artifacts are fresh.');
-      if (/\b(contract diff|schema changes?|payload changes?)\b/i.test(part))
-        utilityHint('contract_diff','Structural changes: contract_diff compares two explicit JSON/YAML files or payloads. Use mode schema for required/optional schema contracts; sample payloads only establish observed shapes.');
-      if (/\b(environment variables?|env audit|\.env\.example|missing configuration)\b/i.test(part))
-        utilityHint('env_audit','Environment contract: env_audit compares explicit source/config paths and reports variable names only. It never reads live environment values or follows external env files.');
       if (/\b(dns|tcp connectivity|tls certificate|certificate expir|connection refused)\b/i.test(part) || /\bconnect(?:ing|ion)? to\b/i.test(part) || /\b(unreachable|refused|timed?\s?out)\b/i.test(part))
         utilityHint('net_probe','Connection diagnostics: net_probe checks DNS, one TCP host:port or TLS certificate validation. Use one explicit endpoint; no network scanning.');
       if (/\b(archive contents?|zip contents?|tar contents?|inspect (?:an? )?archive)\b/i.test(part))
@@ -564,8 +551,6 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('web_probe','Web forms: web_probe gives read-only page reconnaissance, including visible form field names and browser handoff hints. Use an available interactive browser for filling/submitting and verify the postcondition. The probe has no cookies, login state or submission ability.');
       if (/\b(run|start|launch)\b/i.test(part) && /\b(full test suite|integration tests|build|benchmark|dev server|long.running|background (?:job|task)|queued jobs)\b/i.test(part))
         utilityHint('bg_run','Long-running work: bg_run owns process execution, output and completion notifications. Retain its task ID, continue independent work and inspect that task when needed; do not create a shell polling loop or duplicate queue.');
-      if (/\b(wait|check|verify)\b/i.test(part) && /\b(readiness|ready|file appears|url available)\b/i.test(part))
-        utilityHint('wait_for','Readiness: wait_for checks HTTP readiness, file existence or a literal in a file with a finite timeout. Prefer an observable ready condition to a guessed sleep; preserve an existing task ID and use its owner for process completion.');
       if (/\b(track|plan)\b/i.test(part) && /\b(tasks|milestones|multi.step|dependencies|work queue)\b/i.test(part))
         utilityHint('todo','Task tracking: use todo for the existing task list, dependencies and completion state. Update the current owner as evidence arrives instead of maintaining a second checklist or queue.');
       if (!/\b(no subagents|no delegation|without delegation|do not delegate|don't delegate)\b/i.test(prompt) && /\b(subagents?|workers|reviewers|swarm|fusion)\b/i.test(part)) {
@@ -575,25 +560,17 @@ export function createRelevantGuidance(pi: any) {
           add({key:'delegation-contract',tool:'subagent',priority:79,text:'Independent work: inspect subagent({action:"list",capabilities:true}) to select an executable agent with the needed tools. Use native tasks/chain and commonTask for bounded shared briefs, or the supported workflow helpers for dependencies and recovery. Pass task-relevant skills and acceptance checks to each child, retain successful outputs, and consume completion notifications. Delegate only within the user’s scope and keep one writer per file.'});
       }
       if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
-        if (/\b(svg|viewbox|vector artwork)\b/i.test(part))
-          utilityHint('artifact_check','SVG preflight: artifact_check({operation:"svg",path:...}) inspects bounded structure, IDs/references and resource cues without rendering or fetching assets. Fix demonstrated findings, then inspect rendered sizes, clipping, typography and contrast with render_see; source checks do not prove appearance or sanitize active content.');
         if (/\b(frame time|frame budget|frame pacing|gpu memory|render budget|webgpu|webgl|three\.?js)\b/i.test(part))
           utilityHint('math_check','Graphics budgets: math_check operation:"frame_budget" summarizes observed frame milliseconds against target_fps; operation:"render_budget" estimates attachment bytes from width/height/pixel_ratio/bytes_per_pixel/samples/buffers. Measure representative hardware and compare visual detail before lowering quality; estimates exclude textures, geometry and driver overhead.');
         if (/\b(median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part)
           || /\b(?:calculate|compute|measure|compare|check|verify|estimate)\b[^;.!?]{0,80}\b(?:the |an? )?(?:arithmetic |geometric |harmonic |weighted )?mean\b/i.test(part.replace(/\bI mean\b/gi, ' ')))
           utilityHint('math_check','Numerical evidence: math_check computes summaries, regression/classification metrics, vector comparisons and exact split-ID overlap. Supply actual observations; undefined metrics remain null and exact-ID checks cannot rule out all leakage.');
-        if (/\b(unicode|charset|mojibake|bidi|zero.width|line endings|nfc|(?:image|png|jpeg|gif|webp) (?:dimensions|size))\b/i.test(part))
-          utilityHint('artifact_check','Artifact checks: artifact_check inspects Unicode controls/normalization or local image header dimensions. Use a specific workspace path or text. It does not verify font rendering, full image decoding or visual quality.');
         if (/\b(base64|URL (?:encod|decod)\w*|percent.encod\w*|(?:format|compact|pretty.print) (?:the )?JSON|JSON (?:format|compact)\w*)\b/i.test(part))
           utilityHint('value_convert','Exact conversion: value_convert handles bounded JSON formatting, strict UTF-8 Base64 and URI components without executing code or writing files. Pass only the value to convert; inspect the returned result before saving it.');
       }
       if (process.env.PI_CONTEXT_MEMORY!=='off') {
         if (/\b(handoff|hand.off|working state|agent context|compact context)\b/i.test(part))
           utilityHint('handoff_capsule','Small handoff: handoff_capsule packages the goal, constraints, findings, decisions, files, failures and next action. Preserve critical state explicitly; budget overflow means use more space or full context. Pass the capsule to a fresh subagent.');
-        if (/\b(cache|reuse|retrieve)\b/i.test(part) && /\b(evidence|observations?|research|claims?)\b/i.test(part))
-          utilityHint('evidence_cache','Reusable evidence: evidence_cache stores short verbatim local-source observations with hashes and branch provenance. Query rechecks source freshness; inferred conclusions still require validation.');
-        if (/\b(rank|relevance|salience|prioriti[sz]e)\b/i.test(part) && /\b(memory|context|notes|items)\b/i.test(part))
-          utilityHint('context_score','Retention priorities: context_score ranks supplied context items locally. Label goals, constraints and unresolved work explicitly; scores are priorities, not proof or calibrated probabilities.');
       }
       if (process.env.PI_CONTEXT_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
         if (/\b(code|functions?|symbols?|imports?|codebase|implementation)\b/i.test(part))
@@ -609,16 +586,15 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('lens_diagnostics','Code review evidence: lens_diagnostics({mode:"delta",paths:[...]}) retrieves scoped cached lint, complexity, security and duplication findings. A cold cache is not a clean result. Preserve existing project checks; avoid broad full-project runner refresh unless the task needs it.');
     }
   };
-  const engineering = (priority?: number) => practice("engineering", "Engineering", ["evidence-first-engineering"],
+  const engineering = (priority?: number) => practice("engineering", "Engineering", ["engineering"],
     "Locate the existing owner and a concrete success check before changing code. Reuse its state/contracts; avoid parallel implementations and unrelated abstractions. Resolve the uncertainty that changes the next action, then implement and verify; expand investigation only on new evidence or risk. Stop when the requested behavior and relevant checks pass.", priority);
-  const precision = () => practice("evidence", "Precision work", ["evidence-first-engineering"],
+  const precision = () => practice("evidence", "Precision work", ["engineering"],
     "Inspect actual schema, units, nulls and installed API/version contracts. Compute consequential numbers with executable code and validate counts/joins. Separate measured facts, assumptions and unverified claims; a mock proves local behavior, not a live service. Never fabricate records, endpoints, citations or successful checks.");
   const orient = () => add({ key: "workspace", tool: "project_report",
     text: 'Environment-sensitive work: project_report({view:"workspace"}) gives local/Git facts and bounded folder relationships (workspace members, local dependencies, module candidates). Inspect relevant shared contracts/tests before choosing edit scope; related folders are not automatically edit targets. Read relevant existing deployment/database instructions; establish local versus remote targets and protected data. A remote URL is not production identity or authorization.' });
   const uiHints = () => {
-    skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
+    skillHint("UI work", ["ui-design", "frontend"], /\b(?:ui|frontend|interface)\b/i, false, 85);
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
-    utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
   // The embedded design reference is offered when the agent is doing
   // interface work (Jev-settled for requests, deterministic for UI files).
@@ -649,7 +625,7 @@ export function createRelevantGuidance(pi: any) {
   }));
   const FILLER = new Set(['use','using','please','find','get','show','list','skill','skills','workflow','workflows','relevant','appropriate','best','good','right','proper','some','any','help','helpful','needed','need','needs','for','with','about','related']);
   const normalizeSkillQuery = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s+#._-]+/g,' ').split(/\s+/).filter(term => term && !FILLER.has(term)).join(' ').slice(0,256);
-  const MARKETING_FAMILY = new Set(['resourceful-market-strategy','community-promotion','organic-growth-engineering','copywriting','natural-editorial-writing']);
+  const MARKETING_FAMILY = new Set(['growth-finance','ui-design','research-writing']);
   const searchSkills = async (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown, signal: AbortSignal) => {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
     // Explicit family requests such as "use marketing skills" reliably
@@ -971,9 +947,6 @@ export function createRelevantGuidance(pi: any) {
         add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
       if (process.env.PI_REASONING_AIDS !== "off" && !/\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(prompt)) {
         const aides = [
-          ['dependency_plan', /\b(plan|order|schedule|untangle|resolve)\b.*\b(dependenc(?:y|ies)|prerequisites|blocked tasks|task graph)\b|\b(dependency cycle|circular dependencies)\b/i, 'Known task dependencies: dependency_plan computes layers and cycle witnesses. Supply only known IDs/edges; preserve the current goal and todo owner. It does not establish resource-safe parallelism.'],
-          ['decision_frontier', /\b(compare|choose|select|trade.?offs?|prioritize)\b.*\b(latency|cost|memory|throughput|accuracy|quality metrics)\b/i, 'Numerical tradeoffs: decision_frontier removes dominated options from supplied measurements without arbitrary weights. Gather unknown values first; skip it for a simple choice or subjective preference.'],
-          ['coverage_select', /\b(select|choose|minimi[sz]e|reduce|prioritize|plan)\b.*\b(test suite|tests|checks|verification)\b.*\b(coverage|requirements|cost|redundan|overlap)\w*/i, 'Overlapping checks: coverage_select proposes a small set from explicit requirement/check coverage and costs. Preserve mandatory tests; claimed coverage is not evidence that a check passed.'],
         ] as const;
         for (const [tool,pattern,text] of aides) if(pattern.test(prompt)) add({key:`aid:${tool}`,tool,priority:65,text});
       }
@@ -1007,26 +980,26 @@ export function createRelevantGuidance(pi: any) {
       codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
       // Match narrow task intent against skills actually present in this run's catalog.
       const specialized = [
-        ['algorithm-design', /\b(algorithm|data structure|time complexity|amortized|shortest path|dynamic programming)\b/i, 'State input assumptions and complexity; compare a tiny optimized case against an independent baseline.'],
-        ['concurrency-memory-models', /\b(atomics?|memory ordering|lock.free|linearizability|deadlock|shared.memory|multithreaded)\b/i, 'Identify synchronization and lifetime ownership; verify relevant schedules and ordering assumptions.'],
-        ['memory-resource-ownership', /\b(memory leak|use.after.free|double.free|resource lifetime|ffi|buffer ownership)\b/i, 'Trace acquire, borrow, transfer and release through success, failure and cancellation.'],
-        ['type-driven-design', /\b(typestate|algebraic data type|discriminated union|invalid states|type.driven|exhaustive matching)\b/i, 'Encode the actual domain states and validate external inputs; static types do not validate runtime data.'],
-        ['formal-model-checking', /\b(model check(?:ing|er)?|formal verification|tla|prove.*(?:safety|liveness))\b/i, 'State assumptions, properties and exploration bounds; verify the model can detect a known defect.'],
-        ['compiler-construction', /\b(compiler|parser|interpreter|ast rewrite|ir transformation|dsl)\b/i, 'Specify grammar and semantics; preserve effects and evaluation order through transformations.'],
-        ['incremental-computation', /\b(incremental computation|incremental build|dependency graph|cache invalidation|memoization)\b/i, 'Compare incremental results to clean recomputation across edit and configuration sequences.'],
-        ['property-based-testing', /\b(property.based|metamorphic|differential testing|fuzz(?:ing|er)?|generative testing)\b/i, 'Use independent properties, meaningful generators and shrinking; confirm a known defect is rejected.'],
-        ['behavioral-contracts', /\b(state machine|invariant|idempotenc[ey]|race condition|lifecycle|transition)\b/i, 'Write one failing event sequence and verify the invariant through the real owner.'],
-        ['numerical-computing', /\b(numerical|floating.point|linear algebra|matrix|jacobian|gradient check|integration tolerance)\b/i, 'Check shapes, units and an independent small answer; measure residuals and convergence.'],
-        ['optimization-modeling', /\b(constrained optimization|convex|linear program|integer program|optimality|objective function)\b/i, 'Write variables, domains and constraints, then independently verify feasibility.'],
-        ['statistical-experiments', /\b(a\/b test|causal|confidence interval|hypothesis test|statistical significance)\b/i, 'Identify the independent unit, effect and uncertainty before claiming improvement.'],
-        ['data-lineage-validation', /\b(data lineage|reconcile|join cardinality|source records|denominator|audit.*dataset)\b/i, 'Trace the claim to actual records and validate joins and denominators.'],
-        ['browser-task-recovery', /\b(browser|web page|website)\b.*\b(click|fill|submit|navigate|upload|automate|control)|\b(click|fill|submit|navigate|upload|automate|control)\b.*\b(browser|web page|website)\b/i, 'Observe current state, act, then verify the postcondition; reconcile uncertain mutations before retrying.'],
-        ['accessible-interaction-design', /\b(accessibility|accessible|keyboard navigation|focus management|screen reader|aria)\b/i, 'Verify the actual keyboard task, focus transitions and error recovery.'],
-        ['simulation-engineering', /\b(simulation|simulator|agent.based|monte carlo|physics engine)\b/i, 'Separate simulation time from rendering; validate invariants and convergence before visual polish.'],
-        ['reinforcement-learning', /\b(reinforcement learning|rl|reward function|policy gradient|rollout buffer|bandit)\b/i, 'Validate the environment and tiny trajectory targets before scaling training.'],
-        ['model-evaluation', /\b(llm eval|model eval|hallucination eval|tool.use eval|prompt comparison|evaluate.*(?:llm|grounding))\b/i, 'Score observable task outcomes and grounding; do not substitute fluent claims for evidence.'],
-        ['inference-serving', /\b(inference serving|kv.cache|quantization|continuous batching|model serving)\b/i, 'Measure latency, memory and quality on matched cached and uncached workloads.'],
-        ['performance-experiments', /\b(profile|profiling|benchmark|bottleneck|performance regression)\b/i, 'Measure completed work under matched conditions and preserve correctness.'],
+        ['engineering', /\b(algorithm|data structure|time complexity|amortized|shortest path|dynamic programming)\b/i, 'State input assumptions and complexity; compare a tiny optimized case against an independent baseline.'],
+        ['systems-languages', /\b(atomics?|memory ordering|lock.free|linearizability|deadlock|shared.memory|multithreaded)\b/i, 'Identify synchronization and lifetime ownership; verify relevant schedules and ordering assumptions.'],
+        ['systems-languages', /\b(memory leak|use.after.free|double.free|resource lifetime|ffi|buffer ownership)\b/i, 'Trace acquire, borrow, transfer and release through success, failure and cancellation.'],
+        ['engineering', /\b(typestate|algebraic data type|discriminated union|invalid states|type.driven|exhaustive matching)\b/i, 'Encode the actual domain states and validate external inputs; static types do not validate runtime data.'],
+        ['systems-languages', /\b(model check(?:ing|er)?|formal verification|tla|prove.*(?:safety|liveness))\b/i, 'State assumptions, properties and exploration bounds; verify the model can detect a known defect.'],
+        ['systems-languages', /\b(compiler|parser|interpreter|ast rewrite|ir transformation|dsl)\b/i, 'Specify grammar and semantics; preserve effects and evaluation order through transformations.'],
+        ['engineering', /\b(incremental computation|incremental build|dependency graph|cache invalidation|memoization)\b/i, 'Compare incremental results to clean recomputation across edit and configuration sequences.'],
+        ['engineering', /\b(property.based|metamorphic|differential testing|fuzz(?:ing|er)?|generative testing)\b/i, 'Use independent properties, meaningful generators and shrinking; confirm a known defect is rejected.'],
+        ['engineering', /\b(state machine|invariant|idempotenc[ey]|race condition|lifecycle|transition)\b/i, 'Write one failing event sequence and verify the invariant through the real owner.'],
+        ['data-science', /\b(numerical|floating.point|linear algebra|matrix|jacobian|gradient check|integration tolerance)\b/i, 'Check shapes, units and an independent small answer; measure residuals and convergence.'],
+        ['data-science', /\b(constrained optimization|convex|linear program|integer program|optimality|objective function)\b/i, 'Write variables, domains and constraints, then independently verify feasibility.'],
+        ['data-science', /\b(a\/b test|causal|confidence interval|hypothesis test|statistical significance)\b/i, 'Identify the independent unit, effect and uncertainty before claiming improvement.'],
+        ['data-science', /\b(data lineage|reconcile|join cardinality|source records|denominator|audit.*dataset)\b/i, 'Trace the claim to actual records and validate joins and denominators.'],
+        ['browser', /\b(browser|web page|website)\b.*\b(click|fill|submit|navigate|upload|automate|control)|\b(click|fill|submit|navigate|upload|automate|control)\b.*\b(browser|web page|website)\b/i, 'Observe current state, act, then verify the postcondition; reconcile uncertain mutations before retrying.'],
+        ['frontend', /\b(accessibility|accessible|keyboard navigation|focus management|screen reader|aria)\b/i, 'Verify the actual keyboard task, focus transitions and error recovery.'],
+        ['data-science', /\b(simulation|simulator|agent.based|monte carlo|physics engine)\b/i, 'Separate simulation time from rendering; validate invariants and convergence before visual polish.'],
+        ['ml', /\b(reinforcement learning|rl|reward function|policy gradient|rollout buffer|bandit)\b/i, 'Validate the environment and tiny trajectory targets before scaling training.'],
+        ['ml', /\b(llm eval|model eval|hallucination eval|tool.use eval|prompt comparison|evaluate.*(?:llm|grounding))\b/i, 'Score observable task outcomes and grounding; do not substitute fluent claims for evidence.'],
+        ['ml', /\b(inference serving|kv.cache|quantization|continuous batching|model serving)\b/i, 'Measure latency, memory and quality on matched cached and uncached workloads.'],
+        ['engineering', /\b(profile|profiling|benchmark|bottleneck|performance regression)\b/i, 'Measure completed work under matched conditions and preserve correctness.'],
       ] as const;
       if (/\b(build|make|create|implement|fix|review|write|analy[sz]e|train|evaluate|calculate|audit|debug|compare|inspect|solve|derive|optimize|profile|navigate|automate|control|test|design|prove|verify)\b/i.test(prompt)) {
         for (const [name, pattern, check] of specialized) {
@@ -1038,8 +1011,8 @@ export function createRelevantGuidance(pi: any) {
         if (ui.test(prompt)) uiHints();
         if (env.test(prompt)) {
           orient();
-          skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i);
-          if (/\b(database|migration|postgres|mysql|sqlite)\b/i.test(prompt)) skillHint("Database work", ["databases"], /\bdatabase/i);
+          skillHint("Environment/data changes", ["engineering"], /deployment|infrastructure/i);
+          if (/\b(database|migration|postgres|mysql|sqlite)\b/i.test(prompt)) skillHint("Database work", ["data-science"], /\bdatabase/i);
         }
         // Language guidance only when the loaded catalogue actually offers it.
         const language = /\b(php|rust|python|golang)\b/i.exec(prompt)?.[1];
@@ -1052,7 +1025,7 @@ export function createRelevantGuidance(pi: any) {
         practice("motion", "Motion work", ["motion"],
           "Define the intended sequence, duration and key moments. Use one timeline owner and inspect start/middle/end plus interruption and reduced motion where relevant. UI interaction timing is not a limit on narrative animation; a still image cannot verify motion.");
       if (doing && /\b(machine learning|model training|train(?:ing)? (?:a |the )?model|classifier|regression model|feature engineering|ml|neural network|fine-tuning)\b/i.test(prompt))
-        practice("ml", "ML work", ["ml-engineering"],
+        practice("ml", "ML work", ["ml"],
           "Define target, prediction time, baseline and held-out metric before tuning. Split by time/entity where needed before fitting preprocessing; exclude future or unavailable features. Record data version and executed evaluation; never invent scores or treat training metrics as generalization.");
       if (doing && /\b(dataset|csv|parquet|statistics|benchmark|apis?|openapi|schema|precision|measurements?)\b/i.test(prompt))
         precision();
@@ -1075,13 +1048,13 @@ export function createRelevantGuidance(pi: any) {
         if (name === 'edit') {
           const message = (event.content ?? []).filter((item: any) => item.type === 'text').map((item: any) => String(item.text ?? '').slice(0,8000)).slice(0,4).join('\n');
           if (/Edit without read|No verified read-tool coverage|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[|edits\[\d+\].*\boverlap\b/i.test(message))
-            signalHint('edit-recovery','coding-practices','The edit was rejected or only partly applied. Read the current target region before rebuilding exact oldText. Follow the actual tool result: if nothing applied, retry the corrected complete batch; if some edits applied, retry only the failed edits. Preserve concurrent changes. Do not repeat stale text or bypass the guard with a whole-file overwrite.');
+            signalHint('edit-recovery','engineering','The edit was rejected or only partly applied. Read the current target region before rebuilding exact oldText. Follow the actual tool result: if nothing applied, retry the corrected complete batch; if some edits applied, retry only the failed edits. Preserve concurrent changes. Do not repeat stale text or bypass the guard with a whole-file overwrite.');
         }
         if (['read','edit','write','bash'].includes(name)) {
           const identity = String(input.path ?? input.command ?? '').slice(0,24000);
           const key = name + ':' + createHash('sha256').update(identity).digest('hex');
           failures = key === lastFailure ? failures + 1 : 1; lastFailure = key;
-          if (failures >= 3) signalHint('repeated-failure','debugging',
+          if (failures >= 3) signalHint('repeated-failure','engineering',
             'The same tool operation failed repeatedly. Reinspect its preconditions and the latest error, form a changed hypothesis, and make one discriminating check before repeating it. A failed operation is not verified progress.');
         }
         // Stuck-pattern escalation (suggestion only, never a launch): several
@@ -1146,8 +1119,6 @@ export function createRelevantGuidance(pi: any) {
         // entire authored batch, not just each snippet, before doing review work.
         const bounded = authoredReviewSnippets(name,input);
         for (const text of bounded) topicHints({file:changedFile, text});
-        if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off' && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|generated|backups)(?:\/|$)/i.test(changedFile) && bounded.some(text=>/[\uFFFD\u200B\u202A-\u202E\u2066-\u2069]/.test(text)))
-          utilityHint('artifact_check','Unusual Unicode appeared in the authored edit. artifact_check({operation:"text",path:...}) can locate replacement characters, invisible controls and normalization differences. These may be intentional; inspect their role before changing them.');
         const signals = authoredReviewSignals(changedFile,bounded);
         // Only a bounded whole-file write can clear cues from earlier snippets.
         // An edit of a different region is not evidence that the old issue disappeared.
@@ -1156,11 +1127,6 @@ export function createRelevantGuidance(pi: any) {
           for (const hint of pending.values()) if (hint.key.startsWith("signal:") && hint.sourceFile === changedFile && !remaining.has(hint.key)) { pending.delete(hint.key); releaseHint(hint.key); }
         }
         for (const signal of signals) signalHint(signal.key,signal.skill,signal.check,changedFile);
-        if (/\.svg$/i.test(changedFile) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|generated|backups)(?:\/|$)/i.test(changedFile) && process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off' && tools().has('artifact_check'))
-          add({key:'signal:svg-source-evidence',requiredTool:'artifact_check',priority:80,sourceFile:changedFile,text:'SVG changed: review any automatic source findings and verify actual rendering. Use artifact_check({operation:"svg",path:...}) if a full report is needed or the automatic check was unavailable. A partial snippet is not a complete SVG document.'});
-      }
-      if (name === 'artifact_check' && input.operation === 'svg' && typeof input.path === 'string' && pending.get('signal:svg-source-evidence')?.sourceFile === checkpointPath(input.path,cwd)) {
-        pending.delete('signal:svg-source-evidence'); releaseHint('signal:svg-source-evidence');
       }
       // Discovery/status is not execution: listing agents must not suppress
       // subsequent workflow guidance for the actual delegated work.
@@ -1192,9 +1158,6 @@ export function createRelevantGuidance(pi: any) {
         add({key:'utility:lsp_diagnostics',tool:'lsp_diagnostics',priority:68,sourceFile:file,
           text:`Changed source: lsp_diagnostics with paths:[${JSON.stringify(file)}] and serverScope:"primary" can check current syntax/type diagnostics. Keep project tests; missing servers or incomplete results do not establish a clean check.`});
       }
-      if (['edit','write'].includes(name) && sourceCheckSupported(file))
-        add({key:'utility:syntax_check',tool:'syntax_check',priority:72,sourceFile:file,
-          text:`Changed source/configuration: syntax_check({paths:[${JSON.stringify(file)}]}) runs bounded syntax checks. Batch related changed files in one call; a syntax pass does not replace project types, tests or configuration schema checks.`});
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (codeFile.test(file)) codeSeen = true;
         routedSkills("", file);
@@ -1218,7 +1181,7 @@ export function createRelevantGuidance(pi: any) {
           const label = ({php:"PHP",py:"Python",rs:"Rust",go:"Golang"} as Record<string,string>)[language];
           skillHint(`${label} work`, [], new RegExp(`^${label}(?:$|[-_ ])`, "i"), true);
         }
-        if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i); }
+        if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["engineering"], /deployment|infrastructure/i); }
         if (name === 'read' && /\.(?:json|ya?ml)$/i.test(file))
           add({key:'utility:data_query',tool:'data_query',priority:68,sourceFile:file,
             text:`Structured file: data_query can query keys, counts, selected fields or filtered rows from ${JSON.stringify(file)} without a parsing script. Use ordinary reads when exact source text matters.`});

@@ -1,7 +1,7 @@
 ---
 name: automatic-skill-discovery
 description: Select installed skills from a supplied evidence packet without tools
-tools:
+tools: 
 thinking: off
 systemPromptMode: replace
 inheritProjectContext: false

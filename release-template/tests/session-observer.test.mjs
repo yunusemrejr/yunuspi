@@ -325,13 +325,13 @@ test('peer reviewers learn advice only after its provider receipt', async () => 
   const h = harness();
   h.input('Fix parser validation.'); await h.advance(30000);
   const key = reviewerSessionKey(h.ctx);
-  assert.deepEqual(peerReviewerNotes(key, 'watchmaker', h.now()), [], 'a returned note is not yet advice the agent received');
+  assert.deepEqual(peerReviewerNotes(key, 'guardian', h.now()), [], 'a returned note is not yet advice the agent received');
   const capsule = h.emit('context', { messages: [] }).messages.find(message => message.customType === 'session-observer-context');
-  assert.deepEqual(peerReviewerNotes(key, 'watchmaker', h.now()), [], 'context preparation alone cannot suppress peer advice');
+  assert.deepEqual(peerReviewerNotes(key, 'guardian', h.now()), [], 'context preparation alone cannot suppress peer advice');
   const adviceId = h.sent.find(([message]) => message.details?.status === 'completed')[0].details.adviceId;
   h.emit('after_provider_response', { status: 200, provider: model.provider, model: model.id,
     observerAdviceReceipts: [{ id: adviceId, sha256: createHash('sha256').update(capsule.content).digest('hex') }] });
-  const peers = peerReviewerNotes(key, 'watchmaker', h.now());
+  const peers = peerReviewerNotes(key, 'guardian', h.now());
   assert.equal(peers.length, 1);
   assert.match(peers[0].note, /parser source/);
   assert.deepEqual(peers[0].picks, ['read']);
@@ -453,11 +453,11 @@ test('observer source-backed harness map explains orchestration and preserves ac
     {name:'subagent',description:'Run parallel child tasks and review results',availability:'active'},
     {name:'todo',description:'Update completion evidence',availability:'active'},
     {name:'parser_check',description:'Check parser validation',availability:'discoverable'},
-  ],[{name:'behavioral-contracts',description:'Verify child lifecycle transitions and completion evidence'}]);
+  ],[{name:'engineering',description:'Verify child lifecycle transitions and completion evidence'}]);
   const encoded=JSON.parse(p.text.split('Evidence packet:\n')[1]);
-  for(const id of ['subagent-dispatch','scope-council','swarm-execution','fusion-review','quality-review','todo-planning','background-tasks']) assert.ok(encoded.harness.some(row=>row.id===id),id);
+  for(const id of ['subagent-dispatch','scope-council','fanout-execution','quality-review','todo-planning','background-tasks']) assert.ok(encoded.harness.some(row=>row.id===id),id);
   assert.match(encoded.harness.find(row=>row.id==='scope-council').summary,/no opt-in user tool/);
-  assert.match(encoded.harness.find(row=>row.id==='fusion-review').summary,/provenance/);
+  assert.match(encoded.harness.find(row=>row.id==='fanout-execution').summary,/provenance/);
   const advice=parseObserverAdvice(JSON.stringify({note:'Could discovering parser_check help validate the remaining parser case?',evidence:['request'],tools:['parser_check'],skills:[]}),p);
   assert.deepEqual(advice.discoverableTools,['parser_check']);
   const {discoverableTools,...rest}=advice;assert.equal(rest.tools[0],'parser_check');

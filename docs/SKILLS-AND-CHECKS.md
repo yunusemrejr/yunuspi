@@ -14,7 +14,7 @@ do not consume the queue. Suggestions are not evidence that a skill was read.
 
 ## Your own skill folders win over the shipped skills
 
-A folder listed under `skills` in `settings.json` (for example `~/skills`) is loaded before the shipped catalogue, and when a skill has the same name in both, your copy wins without a warning. That is deliberate, so a customized skill is never overwritten. The cost is that a copy made earlier keeps hiding every later improvement to the shipped skill, including tool names that changed: on one machine 37 copies of an older library told the model to run raw `ffmpeg` and `libreoffice` while the shipped skills named `media_edit`, `audio_analyze` and `office_doc`. `node scripts/skill-mirrors.mjs` lists the skills whose copy under your own paths differs from the shipped one and what differs, `--json` prints the same as data, and `--apply` brings them in step: the original directories are copied to `backups/skill-mirrors-<time>/` first, shipped files overwrite files of the same name, and files only you have and skills the harness does not ship are left alone. `verify-harness` prints the same finding as an informational line, so it is not a failure when a difference is intended.
+A folder listed under `skills` in `settings.json` (for example `~/skills`) is loaded before the shipped catalogue, and when a skill has the same name in both, your copy wins without a warning. That is deliberate, so a customized skill is never overwritten. The cost is that a copy made earlier keeps hiding every later improvement to the shipped skill, including tool names that changed: on one machine 37 copies of an older library told the model to run raw `ffmpeg` and `libreoffice` while the shipped skills named `audio_analyze` and `office_doc`. `node scripts/skill-mirrors.mjs` lists the skills whose copy under your own paths differs from the shipped one and what differs, `--json` prints the same as data, and `--apply` brings them in step: the original directories are copied to `backups/skill-mirrors-<time>/` first, shipped files overwrite files of the same name, and files only you have and skills the harness does not ship are left alone. `verify-harness` prints the same finding as an informational line, so it is not a failure when a difference is intended.
 
 ## Consult skill guides when useful
 
@@ -63,27 +63,11 @@ operations in shell snippets. No fixed tool count or discovery sequence is requi
 
 ## GitHub workflow skills
 
-Four skills cover repository-facing work that is not part of ordinary Git
-operations (that stays with `git-github`):
+Repository-facing work (READMEs, repository health files, changelogs and release notes, and GitHub Actions workflows) belongs to the `git-github` skill, which also covers ordinary Git operations. Task routes require a matching action verb, so "explain the changelog format" or "improve the readme parser" do not select a skill.
 
-| Skill | Selected for | File route |
-| --- | --- | --- |
-| `github-readme-authoring` | writing, rewriting or polishing a README, front-page structure, badges, screenshots | `README.md` |
-| `github-repo-presentation` | description/topics, license choice, CONTRIBUTING, SECURITY, code of conduct, issue/PR templates, CODEOWNERS, social preview | the health-file paths themselves |
-| `github-release-notes` | changelog entries, release notes, version and prerelease decisions, migration notes | `CHANGELOG.md`, `.github/release.yml` |
-| `github-actions-workflows` | authoring, reviewing or hardening workflow YAML: permissions, pinned actions, caching, matrix, secrets/OIDC, required checks | `.github/workflows/*.yml` |
+## Syntax checks
 
-Task routes require a matching action verb, so "explain the changelog format" or
-"improve the readme parser" do not select a skill. Each skill keeps its detailed
-checklists in a `references/` file that is read only when the task needs it.
-
-## Batch syntax checks
-
-Call `syntax_check` with explicit workspace-relative paths:
-
-```json
-{"paths":["src/handler.ts","scripts/import.py","config/service.yaml"]}
-```
+The syntax check runs as a step of the goal completion check on files changed since `HEAD`. Each file is parsed by the parser for its type:
 
 | Files | Parser | Coverage |
 | --- | --- | --- |
@@ -98,28 +82,11 @@ Call `syntax_check` with explicit workspace-relative paths:
 | YAML, YML | Bundled YAML parser | Multi-document syntax and duplicate keys |
 | TOML | Installed Python 3.11+ tomllib | TOML parsing |
 
-No parser is installed automatically. Native parsers receive bounded source on
-stdin with startup variables removed; executable lookup excludes project PATH
-entries. The tool never executes project code, package scripts or build hooks.
-It reuses the structural tools' workspace-contained, stable-file reader.
+No parser is installed automatically. Native parsers receive bounded source on stdin with startup variables removed; executable lookup excludes project PATH entries. The check never executes project code, package scripts or build hooks. It reuses the structural tools' workspace-contained, stable-file reader.
 
-Each batch accepts up to 20 paths, 256 KiB per file and 1 MiB in total. Native
-checks have a three-second timeout within a ten-second batch scheduling budget.
-In-process parser initialization/parsing can overrun that scheduling budget;
-it is not a hard process isolation limit. Results include file digests, compact
-diagnostics and separate passed, failed, unavailable and incomplete counts.
-Missing parsers, unsupported files, unsafe paths and truncated work never yield
-an overall pass. No results are reused across calls; edits require fresh checks.
+Results separate passed, failed, unavailable and incomplete files, with file digests and compact diagnostics. Missing parsers, unsupported files, unsafe paths and truncated work never yield an overall pass, and no result is reused across checks; edits require fresh checks.
 
-Post-edit hints suggest batching related paths. Success and failure hooks have
-separate once-per-session receipts. `syntax_check` is also available within the
-existing read-only child capability ceiling and tool budgets.
-
-Syntax checks complement language-server types, behavior tests and environment
-configuration/schema validation. A YAML syntax pass does not validate a Compose
-or Kubernetes configuration, and TypeScript syntax does not prove type safety.
-These changes reduce repeated command assembly and output volume; they do not
-claim a measured cost reduction or guarantee every model's task quality.
+Syntax checks complement language-server types, behavior tests and environment configuration/schema validation. A YAML syntax pass does not validate a Compose or Kubernetes configuration, and TypeScript syntax does not prove type safety.
 
 ## Component quality and shared review evidence
 
@@ -176,18 +143,16 @@ embedded-language reformatting, and skips HTML containing inline SVG to preserve
 project-owned bytes. Explicit manual formatting remains available. This avoids
 automatic polish breaking embedded-widget or SVG equality checks after an edit.
 
-`artifact_check({operation:"ui",path:"src/Status.tsx"})` checks a complete workspace source file up to 24,000 characters. It reports a source hash and bounded advisory cues: decorative blinking live/status pills, competing primary font families, tiny tracked text, explicit opaque text/background pairs below 3:1, repeated absolute positioning, effect/motion clusters, placeholder links, clickable containers and removed focus outlines. Unsupported paths and oversized files do not receive a clean verdict.
+The UI source policy runs on successful native writes and independent batch replacements. Edit hooks route relevant skills; `quality_review` receives code, UI and content cues. Partial edits retain earlier cues until a complete replacement or fresh source discovery invalidates them. A source cue cannot resolve the CSS cascade, prove a status is fake, or certify usability. Review against project rules and user requirements, then verify rendered appearance and interaction states. Font/color names alone are not a ban list. Decorative blinking LIVE pills are discouraged by default.
 
-The same source policy runs on successful native writes and independent batch replacements. Edit hooks route relevant skills; `quality_review` receives code, UI and content cues. Partial edits retain earlier cues until a complete replacement or fresh source discovery invalidates them. A source cue cannot resolve the CSS cascade, prove a status is fake, or certify usability. Review against project rules and user requirements, then verify rendered appearance and interaction states. Font/color names alone are not a ban list. Decorative blinking LIVE pills are discouraged by default.
-
-Parent and child skill guidance names the available source and render tools, encourages batched syntax checks, and asks workers to retain file/revision/check evidence. Swarm/fusion consumers can reuse current receipts while preserving disagreements and unavailable evidence; merged edits require fresh verification of affected behavior. Tool and skill availability still constrain each worker. Guidance remains bounded and deduplicated.
+Parent and child skill guidance names the available source and render tools, encourages syntax checks, and asks workers to retain file/revision/check evidence. Fan-out consumers can reuse current receipts while preserving disagreements and unavailable evidence; merged edits require fresh verification of affected behavior. Tool and skill availability still constrain each worker. Guidance remains bounded and deduplicated.
 
 Semantic radar also records a digest of JSX tags, attributes and text. A changed contract adds a divergence cue and prevents learned reordering within the affected similarity tier. Candidates remain available in baseline order. The neural model estimates code reuse affinity; it is not a visual design classifier and has not been retrained on these UI checks. Older fingerprint caches rebuild automatically.
 
 ## SVG, graphics and hardware evidence
 
-`artifact_check({operation:"svg",path:"art/logo.svg"})` inspects a complete workspace SVG up to 64 KiB without executing content or fetching references. It returns a source hash, bounded counts and review findings for duplicate IDs, missing local references, malformed structure where observable, viewBox, active/external content and compositing/motion cues. It is not an XML validator, sanitizer or proof of geometry, accessibility or visual quality. Inspect rendered output at the intended sizes as a separate acceptance check. Successful SVG edits/writes automatically inspect the complete saved workspace file within the same limits, retaining a source-hash receipt and adding at most one compact error line. Unavailable checks are labeled in the receipt and do not claim success. The optional full-report cue remains usable even if an earlier image inspection used the same tool.
+Successful SVG edits and writes are inspected automatically; see [static audits and SVG review](CODE-AUDIT.md) for the findings and their limits. SVG review is not an XML validator, sanitizer or proof of geometry, accessibility or visual quality, so inspect rendered output at the intended sizes as a separate acceptance check.
 
 `math_check({operation:"frame_budget",values:[12,16,22],target_fps:60})` computes observed p50/p95/p99 frame times and the fraction above budget. `math_check({operation:"render_budget",width:1920,height:1080,pixel_ratio:2,bytes_per_pixel:8,samples:4,buffers:1})` estimates attachment allocation from explicit assumptions. The estimate excludes textures, geometry, alignment, driver overhead and other allocations; it does not measure GPU capacity or predict speed. Compare the same scene, workload and hardware before reducing detail.
 
-Contextual guidance covers GPU allocation lifetime/readback, frame clocks, SVG references, embedded target identity and physics invariants. Existing hooks deduplicate these cues and cap delivery; they add no model calls. Existing Lens diagnostics continue to own duplication, complexity and entropy evidence. `sys_probe` host/device facts and workspace deployment/embedded markers help select the actual target; a configuration marker is neither a live deployment nor verified hardware. The embedded-device-engineering skill joins these facts to compile-only checks, exact board/electrical identity, port ownership, watchdog/interrupt contracts and scoped hardware verification.
+Contextual guidance covers GPU allocation lifetime/readback, frame clocks, SVG references, embedded target identity and physics invariants. Existing hooks deduplicate these cues and cap delivery; they add no model calls. Existing Lens diagnostics continue to own language-server and linter evidence. `sys_probe` host/device facts and workspace deployment/embedded markers help select the actual target; a configuration marker is neither a live deployment nor verified hardware. The `systems-languages` skill joins these facts to compile-only checks, exact board/electrical identity, port ownership, watchdog/interrupt contracts and scoped hardware verification.

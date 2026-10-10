@@ -16,7 +16,7 @@ Searching reads metadata only and does not activate or execute a capability.
 
 Task-level suggestions remain pending until the next prompt; file-related cues expire after four tool steps and new edits can refresh them. The pending queue holds at most 32 candidates. A bounded history of 96 delivery receipts prevents repeated suggestions without permanently disabling guidance in long sessions. Active tools are checked again at delivery; successful execution suppresses tool hints, while agent discovery and status calls do not count as execution. Manual reminders preserve their configured content and cadence.
 
-Routes cover disposable sandbox experiments, structured data, Git inspection, HTTP diagnostics, system probes, repeated edits, background execution, readiness, task dependencies, child discovery and supported fusion. Web form guidance uses `web_probe` for read-only reconnaissance; it does not submit forms or provide browser login state. Children receive the same principle of matching each phase to their own tools and supplied skills, without inheriting the parent's permissions. Native tasks, chains, shared briefs, completion notifications and fusion helpers remain the owners of orchestration. Automatic-assistance planning also recognizes deployment, release/publication and migration work as potentially useful independent work, subject to the same capability, route and cost gates. Hooks distinguish management from execution and attach short guidance to native parallel runs, form probes and task tracking.
+Routes cover disposable sandbox experiments, structured data, Git inspection, HTTP diagnostics, system probes, repeated edits, background execution, readiness, task dependencies, child discovery and supported fan-out. Web form guidance uses `web_probe` for read-only reconnaissance; it does not submit forms or provide browser login state. Children receive the same principle of matching each phase to their own tools and supplied skills, without inheriting the parent's permissions. Native tasks, chains, shared briefs, completion notifications and fan-out workers remain the owners of orchestration. Automatic-assistance planning also recognizes deployment, release/publication and migration work as potentially useful independent work, subject to the same capability, route and cost gates. Hooks distinguish management from execution and attach short guidance to native parallel runs, form probes and task tracking.
 
 Use the tools and skills needed to complete and verify the task. Existing descriptions and `session_self {view:"runtime"}` provide current availability; do not create another script, queue or capability registry when a supported owner already fits. Code edits can surface scoped diagnostics and structured-file reads can surface `data_query` even when the original prompt did not name those tools. Simple tasks need no catalog tour.
 
@@ -46,10 +46,8 @@ returns up to 12 model, tool, child or workflow diagnostics with recovery clues.
 Cancellation and failed work are distinct. Child/controller reports are
 reconciled so replayed receipts do not create extra failures; missing historical
 evidence remains unknown. The same collector backs the zero-inference
-`session_audit` tool and `agent/scripts/session-audit.mjs` command for historical
-audits. The tool defaults to exact canonical workspace matching; `scope:"all"`
-explicitly requests a harness-wide aggregate. It returns counts without prompt
-bodies, error excerpts or paths. Discovery, file size and retained entries are
+`agent/scripts/session-audit.mjs` command for historical audits. It returns
+counts without prompt bodies, error excerpts or paths. Discovery, file size and retained entries are
 bounded, and cancellation stops further work. The CLI retains its explicit
 operator-oriented all-session default and accepts `--scope workspace`.
 
@@ -57,11 +55,6 @@ Session hooks are bounded and advisory. They avoid duplicate concurrent hints,
 discard abandoned calls on lifecycle changes, and cannot fail a tool because a
 telemetry sink is unavailable. Delegation recovery preserves successful siblings;
 background guidance encourages completion notifications and owned task IDs.
-
-Bash routing defaults to advisory annotations for simple commands. Hints are
-bounded, stop after successful use of the suggested native tool, and abstain
-when the active tool catalogue fails. Explicit `PI_BASH_ROUTER=soft|hard`
-settings retain enforcement. Compound shell workflows remain available.
 
 Native tools stay the default posture: a shell-heavy stretch with no native
 inspection tool in the window earns one tiny once-per-session nudge through
@@ -94,7 +87,7 @@ retryable timeout. A successful browser-launch handoff is not visual evidence.
 
 Economy settings refresh when the settings file changes; authorization updates
 share Pi's bundled settings lock and replace the document atomically. Automatic
-helper admission consumes its attempt only after a route is admitted. Fusion
+helper admission consumes its attempt only after a route is admitted. Fan-out
 provenance uses indexed lookups, background diagnostics preserve the original
 failure cause within their output cap, and sibling cleanup reaches stale
 heartbeats beyond the discovery display limit. Existing capability checks,
@@ -140,7 +133,7 @@ Memory append receipts no longer echo existing memory into model context. Native
 
 Recognized development and HTTP servers do not keep automatic continuation pending or inject completion messages into model context by default. Finite background jobs retain completion wakes. Explicit `triggerOnCompletion: true` opts a newly launched service into waking; legacy service records use the non-waking default. Restart existing Pi processes to load the updated callbacks and native read patch.
 
-The user-facing `bash` tool keeps ordinary blocking and sequential shell semantics and waits for its terminal result within `timeout`. Bounded `wait_for` or render captures may return a pending helper handle for the managed `process` tool; explicit background work belongs to `bg_run` and its `bg_status`, `bg_logs` and `bg_kill` tools. A pending helper has no terminal exit code until a later process status or wait confirms it.
+The user-facing `bash` tool keeps ordinary blocking and sequential shell semantics and waits for its terminal result within `timeout`. Bounded render captures may return a pending helper handle for the managed `process` tool; explicit background work belongs to `bg_run` and its `bg_status`, `bg_logs` and `bg_kill` tools. A pending helper has no terminal exit code until a later process status or wait confirms it.
 
 ## Cost and lifecycle boundaries
 
@@ -156,7 +149,7 @@ Automatic research assistance has a three-minute investigation allowance for sou
 | Skill discovery | Distinct successful observations and an eligible cheap route; shares the automatic-assistance budget | Validated, bounded skill suggestions; no skill bodies or full transcript in the discovery packet |
 | Automatic assistance | Useful work and admitted route/cost/capability limits; one shared group budget | Bounded findings from fresh read-only children |
 | Quality review | Completion checkpoints and changed-source evidence; uses the shared native launcher | Current findings and explicit evidence gaps, not an automatic pass |
-| Swarm and fusion | Existing workflow/planner policies, child budgets and capabilities | Bounded attributed outputs; attempts use one-based suffixes |
+| Fan-out | Existing workflow/planner policies, child budgets and capabilities | Bounded attributed outputs; attempts use one-based suffixes |
 | Provider recovery | Existing retry, cooldown and route constraints; settlement invalidates pending recovery | Existing results are retained; stale cancellation notices are not published after settlement |
 | Utility MCP | Explicit tool calls; two active workers and bounded queued requests | Tool results only; process startup and queue state add no messages |
 

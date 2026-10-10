@@ -76,7 +76,7 @@ function analysisAnswer(requestPrompt, taskLabel = 'Parsed task') {
 		references: ['the named API'],
 		suggestedCapabilities: ['read', 'edit'],
 		expectedTools: ['read', 'test'],
-		expectedSkills: ['typescript-contract-engineering'],
+		expectedSkills: ['engineering'],
 		completionConditions: ['focused tests pass'],
 		ambiguities: ['none'],
 		relation: 'expand',

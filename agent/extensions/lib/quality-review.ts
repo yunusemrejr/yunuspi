@@ -714,10 +714,10 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     },
     result(event: any, ctx: any) {
       if (!enabled() || !active) return;
-      if (['render_see','design_audit','browser_session'].includes(event.toolName) && !event.isError && Array.isArray(event.details?.noise?.findings)) {
+      if (['render_see', 'browser_session'].includes(event.toolName) && !event.isError && Array.isArray(event.details?.noise?.findings)) {
         const keys: Record<string,string> = {'decorative-dot-marker':'ui-dot-marker','icon-tile':'ui-icon-tile','repeated-heavy-left-border':'ui-accent-rail','animated-status-pill':'ui-live-pill','eyebrow-pill':'ui-eyebrow-pill','text-status-dot':'ui-dot-marker','factual-claim-evidence':'prose-metric-theater','missing-image-alt':'ui-missing-alt','unnamed-control':'ui-icon-button-name','emoji-in-chrome':'ui-emoji-ui','hype-badge-cluster':'ui-badge-spam','fake-terminal-decoration':'ui-fake-terminal'};
         const source = `render:${createHash('sha256').update(String(event.input?.source ?? event.details?.url ?? '') + ':' + String(event.input?.selector ?? '')).digest('hex').slice(0,16)}`;
-        const cues = event.details.noise.findings.slice(0,12).filter((f:any)=>Object.hasOwn(keys,f?.kind)).map((f:any)=>({key:keys[f.kind],skill:'anti-ai-slop',check:`Rendered ${f.kind} at ${JSON.stringify(String(f.selector ?? '').slice(0,220))}. Inspect the actual role and repair it; decorative use, missing text equivalents and unnamed controls fail unless a specific evidence-based exception applies.`}));
+        const cues = event.details.noise.findings.slice(0,12).filter((f:any)=>Object.hasOwn(keys,f?.kind)).map((f:any)=>({key:keys[f.kind],skill:'ui-design',check:`Rendered ${f.kind} at ${JSON.stringify(String(f.selector ?? '').slice(0,220))}. Inspect the actual role and repair it; decorative use, missing text equivalents and unnamed controls fail unless a specific evidence-based exception applies.`}));
         if (patterns.size >= 128 && !patterns.has(source)) patterns.delete(patterns.keys().next().value!);
         const previous = patterns.get(source);
         patterns.set(source, cues);

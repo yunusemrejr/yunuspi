@@ -44,12 +44,12 @@ test("concurrent hook results emit once and optional telemetry cannot break tool
   const handlers=new Map();
   sessionHooks({on:(name,fn)=>handlers.set(name,[...(handlers.get(name)??[]),fn])});
   const fire=(name,event)=>{let result;for(const fn of handlers.get(name)??[])result=fn(event)??result;return result;};
-  for(const id of ["a","b"])fire("tool_call",{toolCallId:id,toolName:"web_search"});
+  for(const id of ["a","b"])fire("tool_call",{toolCallId:id,toolName:"grep"});
   const sink=Symbol.for("yunus-pi.health.v1"), before=globalThis[sink];
   globalThis[sink]=()=>{throw Error("fixture sink failure");};
   try {
-    assert.ok(fire("tool_result",{toolCallId:"b",toolName:"web_search",content:[]}));
-    assert.equal(fire("tool_result",{toolCallId:"a",toolName:"web_search",content:[]}),undefined);
+    assert.ok(fire("tool_result",{toolCallId:"b",toolName:"grep",content:[]}));
+    assert.equal(fire("tool_result",{toolCallId:"a",toolName:"grep",content:[]}),undefined);
     fire("tool_call",{toolCallId:"late",toolName:"render_see"});fire("session_switch",{});
     assert.equal(fire("tool_result",{toolCallId:"late",toolName:"render_see",content:[]}),undefined);
     fire("tool_call",{toolCallId:"child",toolName:"subagent"});

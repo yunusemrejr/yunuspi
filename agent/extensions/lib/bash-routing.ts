@@ -192,8 +192,6 @@ function classifySimple(raw: string): BashRoute | null {
   if (head === "cat" && args.length === 1) {
     const pkg = /^(.*?)(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\/package\.json$/.exec(args[0]);
     if (pkg && packageName.test(pkg[2])) return utility("utility-package", "package_probe", "for installed dependency metadata", { package: pkg[2], project: pkg[1].replace(/\/$/, "") || "." });
-    if (/(?:^|\/)(?:openapi|swagger)(?:\.[^/]+)?\.(?:json|ya?ml)$/i.test(args[0]))
-      return utility("utility-openapi", "openapi_probe", "to select endpoints and request/response shapes", { path: args[0], action: "list_endpoints" });
   }
   if (head === "node" && args.length === 2 && ["-p", "--print"].includes(args[0])) {
     const pkg = /^require\(['"]((?:@[^/'"]+\/)?[^/'"]+)\/package\.json['"]\)(?:\.(?:version|exports|types|bin|peerDependencies))?$/.exec(args[1]);
@@ -212,10 +210,6 @@ function classifySimple(raw: string): BashRoute | null {
   }
   if (head === "unzip" && args.length === 2 && args[0] === "-l" || head === "tar" && args.length === 2 && /^-?(?:t[zgJj]?f|[zgJj]tf)$/.test(args[0]))
     return utility("utility-archive", "archive_probe", "to list archive members without extraction", { action: "list", path: args[1] });
-  if (head === "diff" && args.length === 2 && args.every(a => !a.startsWith("-") && /\.(?:json|ya?ml)$/i.test(a)))
-    return utility("utility-contract", "contract_diff", "when comparing data-contract structure instead of scalar or formatting differences", { before: args[0], after: args[1] });
-  if (head === "lcov" && args.length === 2 && args[0] === "--summary")
-    return utility("utility-coverage", "coverage_probe", "with explicit artifact and source-file paths for coverage and changed-line intersections");
 
 	// Read-only system inspection has a structured replacement. Keep these
 	// advisory because flags such as `ps aux` and `ss -ltnp` do not have a
@@ -415,9 +409,9 @@ function classifySimple(raw: string): BashRoute | null {
   if (head === "sleep" && args.length === 1 && /^\d+(?:\.\d+)?$/.test(args[0])) {
     return {
       ruleId: "sleep",
-      tool: "wait_for",
+      tool: "bg_wait",
       severity: "annotate",
-      hint: "For waiting, prefer wait_for with a concrete condition or bg_run/process for long work instead of `sleep`.",
+      hint: "For waiting, prefer bg_wait on a task started with bg_run (or process for long work) instead of `sleep`.",
     };
   }
 

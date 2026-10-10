@@ -29,8 +29,8 @@ function auditSignals(file: string, text: string): CodeSignal[] {
   const named = (security: boolean) => [...new Set(found.filter(f=>(f.domain==='security')===security).map(f=>f.rule))].slice(0,3).join(', ');
   const out: CodeSignal[] = [];
   const sec = named(true), run = named(false);
-  if (sec) out.push({key:'audit-security',skill:'web-security',check:`The static audit flagged ${sec} in this edit. Trace the value from its untrusted source to the sink; fix the boundary (parameterize, allowlist, encode) or record why the input is trusted. code_audit({changed:true}) lists locations.`});
-  if (run) out.push({key:'audit-runtime',skill:'behavioral-contracts',check:`The static audit flagged ${run} in this edit. Check the failure path under load (timeouts, batching, blocking calls, error exposure) and confirm with a measurement or a test, not by inspection alone.`});
+  if (sec) out.push({key:'audit-security',skill:'api-security',check:`The static audit flagged ${sec} in this edit. Trace the value from its untrusted source to the sink; fix the boundary (parameterize, allowlist, encode) or record why the input is trusted. Use the goal tool's check action to rerun the static audit on the changed files.`});
+  if (run) out.push({key:'audit-runtime',skill:'engineering',check:`The static audit flagged ${run} in this edit. Check the failure path under load (timeouts, batching, blocking calls, error exposure) and confirm with a measurement or a test, not by inspection alone.`});
   return out;
 }
 

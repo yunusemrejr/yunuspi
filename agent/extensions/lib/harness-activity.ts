@@ -2,13 +2,13 @@ import { sessionObservability } from './session-observability.ts';
 /** Transient terminal activity only. Never writes messages, model context or
  * session entries, and never inspects tool arguments or result contents. */
 export const HARNESS_ACTIVITY = Symbol.for('yunus-pi.activity.v1');
-export type ActivityLabel = 'skills' | 'browser' | 'project' | 'review' | 'search' | 'model' | 'tool' | 'jev' | 'needle' | 'smol' | 'kompress' | 'council' | 'swarm' | 'fusion' | 'agents' | 'interpretation' | 'span' | 'microworker';
+export type ActivityLabel = 'skills' | 'browser' | 'project' | 'review' | 'search' | 'model' | 'tool' | 'jev' | 'needle' | 'smol' | 'kompress' | 'council' | 'fanout' | 'agents' | 'interpretation' | 'span' | 'microworker';
 export type ActivityOutcome = 'ok' | 'error' | 'cancelled' | 'skipped' | 'cached';
 export type FinishActivity = (outcome?: ActivityOutcome) => void;
 type ActivityRequest = { action: 'start' | 'end'; id: string; label?: ActivityLabel; outcome?: ActivityOutcome };
 type Context = { hasUI?: boolean; signal?: AbortSignal; cwd?: string; sessionManager?: { getSessionId?: () => string }; ui?: { theme?: { fg: (color: any, text: string) => string }; setStatus?: (key: string, text: string | undefined) => void } };
 export type HarnessActivityService = (request: ActivityRequest, ctx?: Context) => FinishActivity | undefined;
-const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', model: 'SLM processing', tool: 'Tool', jev: 'JEV', needle: 'Needle', smol: 'Local LM', kompress: 'Kompress', council: 'Council', swarm: 'Swarm', fusion: 'Fusion', agents: 'Agents', interpretation: 'Interpretation', span: 'Span', microworker: 'Micro worker' };
+const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', model: 'SLM processing', tool: 'Tool', jev: 'JEV', needle: 'Needle', smol: 'Local LM', kompress: 'Kompress', council: 'Council', fanout: 'Fan-out', agents: 'Agents', interpretation: 'Interpretation', span: 'Span', microworker: 'Micro worker' };
 const helpers = new Set(['JEV', 'Needle', 'Local LM', 'Kompress', 'Span', 'Micro worker']);
 let sequence = 0;
 /** No payloads, global status handles or model messages escape this boundary. */
@@ -24,8 +24,8 @@ const toolLabels: Record<string, string> = {
   read_symbol: 'Symbols', symbol_expand: 'Symbols', context_code: 'Code', context_slice: 'Code',
   fetch_content: 'Fetch', http_request: 'HTTP', subagent: 'Agents', subagent_wait: 'Agents',
   memory_write: 'Memory', memory_search: 'Memory',
-  package_probe: 'Package probe', sqlite_probe: 'SQLite probe', openapi_probe: 'API probe',
-  coverage_probe: 'Coverage', json_shape_diff: 'Shape diff', env_audit: 'Environment audit',
+  package_probe: 'Package probe', sqlite_probe: 'SQLite probe',
+  json_shape_diff: 'Shape diff',
   quality_review: 'Review', project_review: 'Review', error_review: 'Review',
   net_probe: 'Network probe', archive_probe: 'Archive probe',
   browser: 'Browser', browser_navigate: 'Browser', browser_snapshot: 'Browser',

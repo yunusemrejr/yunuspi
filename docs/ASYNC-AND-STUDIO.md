@@ -26,67 +26,44 @@ Background sandbox input is limited to 48 KiB; explicit source files are copied 
 
 For independent long-running project commands, use existing `bg_run`; keep dependent steps in their required order. Use bounded `bash` output for short commands whose result is needed immediately. Do not detach unknown commands automatically, poll for completion or start duplicate checks solely because a result is slow. This preserves existing shell authorization and result ordering while allowing useful work to overlap.
 
-## 3D, sound and motion
+## Sound and motion
 
-For complete narrated videos built from code (storyboard, master timeline, Remotion scenes, local narration, procedural audio and a visual QA loop), see [code-first video studio](VIDEO-STUDIO.md). The tools below remain the quick path for standalone 3D shots, clip timelines and mixes.
+For complete narrated videos built from code (storyboard, master timeline, Remotion scenes, local narration, procedural audio and a visual QA loop), see [code-first video studio](VIDEO-STUDIO.md). The `audio_mix` tool below remains the quick path for local audio mixes.
 
 | Tool | Produces |
 | --- | --- |
-| `scene_create` | Editable, validated scene JSON and a self-contained Three.js HTML preview with its MIT license. Start from `orbital`, `kinetic`, `sculpture` or `keyvisual`, or supply a scene. The `luminous` style and per-object `material: glass` give frosted physical glass (transmission, clearcoat, iridescence); `spot` lights, `backgroundGradient`, volumetric `beams`, `softShadows` and a `post` pass (bloom, film grain, vignette) cover premium key visuals. The `key-visual-art-direction` skill owns the art direction. |
-| `scene_render` | An actual WebGL PNG still or H.264 MP4, plus a poster and render metrics. Video includes up to three sample frames and probe/decode evidence; optional local audio becomes AAC. |
-| `video_compose` | A normalized local video timeline with cut or fifteen xfade transitions (fade, fade-white, fade-to-black, wipe/slide/smooth in all four directions), clip sound and optional music/voice/effects tracks. |
 | `audio_mix` | Stereo 48 kHz WAV from local tracks with trims, offsets, gain, balance, fades, filters, echo and a latency-compensated sample-peak limiter. |
 
-Scene styles are `studio`, `clay`, `toon` and `wireframe`. Objects include primitives, a torus knot, and hierarchical groups, with editable materials, lights and camera. Absolute-time keyframes animate position, rotation in radians, scale and camera properties; easing is linear, smooth or hold. Each render starts from the same clock state, making repeat frames stable on the same renderer. Cross-platform bit-identical GPU output is not promised.
-
-```js
-tool_search({ names: ["scene_create", "scene_render", "music_compose", "audio_mix", "video_compose"] })
-scene_create({ preset: "sculpture", style: "clay" })
-// Edit the returned scene JSON to fit the shot. Use the actual returned path.
-scene_render({ path: "./media-<returned-id>/scene.json", mode: "frame", time: 1 })
-// After inspecting the preview, render video and optionally supply a local audio path.
-scene_render({ path: "./media-<returned-id>/scene.json", mode: "video" })
-```
-
-Use existing `music_compose` for score synthesis, `audio_analyze` for signal/loudness evidence and `video_frames` for further frame inspection. Existing animation, Three.js, Blender, audio and composition skills support art direction and more elaborate authored work. A preset is a starting point, not a completed visual brief. Inspect camera framing, materials, representative frames, motion continuity and audible playback before delivering a video.
-
-Scene limits are 64 objects, 512 keys, 30 seconds, 900 frames and 900 million pixel-frames, with a 180-second render deadline. Defaults are 1280×720, six seconds and 24 fps. Timelines accept up to eight clips and eight audio tracks, 120 seconds and 1.5 billion pixel-frames. Fractional clip boundaries are rounded cumulatively to actual output frames, with requested and rendered timings reported. Original inputs are preserved; outputs use fresh workspace directories and cancellation cleans incomplete artifacts.
-
-The renderer uses pinned Three.js 0.180.0 and the existing sandboxed Playwright browser. `ffmpeg`/`ffprobe` must be installed. Scene input is data-only: arbitrary scripts, external textures, URLs, glTF imports and hosted generation are outside this tool's contract. Browser requests are confined to generated content. These tools support procedural 3D and audiovisual finishing, not a replacement for every Blender feature.
+Use existing `music_compose` for score synthesis, `audio_analyze` for signal/loudness evidence and `video_frames` for further frame inspection. Existing motion, 3D, audio and video skills support art direction and more elaborate authored work. Inspect camera framing, materials, representative frames, motion continuity and audible playback before delivering a video.
 
 ## Design and delivery evidence
 
-`design_audit` shares the existing `render_see` browser path. It returns bounded evidence about rendered typography, spacing, surfaces, overflow and motion. `output:"text"` returns measurements without a screenshot; `output:"both"` also saves a screenshot and delivers its pixels only to a vision-capable model. Use local HTML or SVG, or an HTTP(S) page serving HTML, XHTML or SVG. Raster images and PDFs require `render_see` and cannot establish page-style measurements. Solid-color text contrast is measured only where foreground and effective background can be resolved conservatively. Gradients, overlays, masks, alternate text paints and other ambiguous cases are explicitly indeterminate. Use design skills and the actual pixels for visual judgment; this is neither an aesthetic score nor an accessibility certification. It scans the main document, not every iframe or shadow tree.
-
 Each existing HTML capture also checks for literal placeholders, exact adjacent equivalent labels/links, short status capsules with an actually repeating animated dot, dense copy around controls, four or more repeatedly used primary CSS font families, and three or more panels with a heavy left edge. Measurements identify locations and give a reason to inspect; they do not establish that a design choice is wrong. Meaningful live/status regions and state controls are exempt from decorative-motion findings. Density and font counts use wholly visible text elements in the current viewport; font declarations do not prove which font rendered. Article, code, quotation, hidden/transparent and marked user-content regions are excluded. Use `data-user-content` for user-authored content or `data-yunuspi-noise="ignore"` for an intentionally exempt subtree. Inputs count as controls without returning their values.
 
-Narrow quantified marketing patterns, such as performance multipliers, uptime percentages and customer counts, produce `factual-claim-evidence` candidates. This is a request to inspect the source and scope with `claim_check`, not a finding that the statement is false or unsupported. Ordinary UI numbers, tables, figures and article/user content are exempt.
+Narrow quantified marketing patterns, such as performance multipliers, uptime percentages and customer counts, produce `factual-claim-evidence` candidates. These are a request to inspect and scope the claim against its source, not a finding that the statement is false or unsupported. Inspect context, dates and units, and qualify or remove unsupported assertions. Ordinary UI numbers, tables, figures and article/user content are exempt.
 
-Automatic capture receipts return at most six findings; explicit `design_audit` returns up to twelve plus density, font and motion coverage. Both share a 600-element, 40 ms scan budget and inspect at most 100 animations. Clean automatic checks add no response payload. They perform no extra render or model call, do not start repair loops, and never rewrite the page. Compare the actual mobile/desktop and reduced-motion states; nested copy, ambiguous semantics, frames, shadow roots and canvas still need separate review.
+Automatic capture receipts return at most six findings. They share a 600-element, 40 ms scan budget and inspect at most 100 animations. Clean automatic checks add no response payload. They perform no extra render or model call, do not start repair loops, and never rewrite the page. Compare the actual mobile/desktop and reduced-motion states; nested copy, ambiguous semantics, frames, shadow roots and canvas still need separate review.
 
-`syntax_check` also returns advisory AST evidence for comments that exactly restate a following return and undocumented empty catches. Successful native `write`/`edit` tools run the same local WASM parser automatically on at most four source files per turn, up to 64 KiB per file, 20,000 AST nodes, 20 ms of traversal and three findings. Edit advice is restricted to an unambiguous replacement span. Explained catches, JSDoc, reasons and quoted source are exempt. Source revisions are deduplicated within the current session; activity notes report actual parser completions. Findings never fail a syntax check, launch another model or impose a repair loop. These narrow checks do not infer authorship or certify overall code/design quality.
+The WASM syntax check also returns advisory AST evidence for comments that exactly restate a following return and undocumented empty catches. Successful native `write`/`edit` tools run the same local WASM parser automatically on at most four source files per turn, up to 64 KiB per file, 20,000 AST nodes, 20 ms of traversal and three findings. Edit advice is restricted to an unambiguous replacement span. Explained catches, JSDoc, reasons and quoted source are exempt. Source revisions are deduplicated within the current session; activity notes report actual parser completions. Findings never fail a syntax check, launch another model or impose a repair loop. These narrow checks do not infer authorship or certify overall code/design quality.
 
 ```js
-tool_search({ names: ["design_audit", "workflow_probe", "web_asset_check", "sys_probe"] })
-design_audit({ source: "./index.html", width: 1280, height: 800, output: "both" })
-design_audit({ source: "./index.html", width: 390, height: 844, reducedMotion: "reduce", output: "both" })
-workflow_probe({ path: ".github/workflows/checks.yml" })
+tool_search({ names: ["web_asset_check", "sys_probe"] })
 web_asset_check({ files: ["dist/index.html", "dist/app.css"], asset_root: "dist", public_path: "/" })
 sys_probe({ action: "service_detail", unit: "example.service", user: true })
 sys_probe({ action: "journal", unit: "example.service", user: true, limit: 20 })
 ```
 
-`workflow_probe` inspects explicit Actions YAML, job dependencies, cycles, literal matrix cardinality and local action/workflow references. Runtime expressions and `$/` repository-bound references remain unresolved; remote actions are not fetched. Local actions require `action.yml` or `action.yaml`, and reusable workflows must be directly inside `.github/workflows`. It does not run CI or prove that a workflow succeeds. `web_asset_check` checks local references in explicit HTML, CSS and web manifests, including case mismatches and hosting prefixes; it does not crawl, execute scripts or emulate a bundler. Both use the existing read-only utility worker and source evidence hashes.
+`web_asset_check` checks local references in explicit HTML, CSS and web manifests, including case mismatches and hosting prefixes; it does not crawl, execute scripts or emulate a bundler. It uses the existing read-only utility worker and source evidence hashes.
 
 `sys_probe` service and journal actions use fixed read-only systemd commands. Journal responses contain bounded metadata, not arbitrary log message bodies. The first page defaults to the last hour; pass its `next_cursor` as `cursor` to resume after the last returned entry. `lookbackSeconds` selects an explicit window of up to one day. They neither restart services nor invoke sudo. Existing Git, package, environment, source and browser tools remain available for maintenance, deployment and Ubuntu application work.
 
 ## Verification and limits
 
-Regressions exercise real owned SDK dispatch, native tool discovery, persisted-session failure injection, cancellation, exclusive tool barriers, duplicate background launches, UTF-8 truncation, slow output capture, real Chromium pixels and real FFmpeg audio/video decoding. Independent reviews caught and repaired fractional timeline rounding that dropped the last clip, startup cancellation races, capture-file collision cleanup, uncertain contrast measurement, initialized zero counters misreported as known zero usage, and explicit tool error flags discarded before session hooks and transcript recording.
+Regressions exercise real owned SDK dispatch, native tool discovery, persisted-session failure injection, cancellation, exclusive tool barriers, duplicate background launches, UTF-8 truncation, slow output capture, real Chromium pixels and real FFmpeg audio/video decoding. Independent reviews caught and repaired startup cancellation races, capture-file collision cleanup, initialized zero counters misreported as known zero usage, and explicit tool error flags discarded before session hooks and transcript recording.
 
 An aborted launched helper with no usage evidence now stays unknown. Explicit pre-launch no-child evidence, actual provider-reported zero and complete known-free pricing remain distinct. The logical ledger, `/used` and footer agree.
 
-See the [Guardian implementation audit](GUARDIAN-IMPLEMENTATION-AUDIT.md) and [session recovery audit](SESSION-RECOVERY-AUDIT.md) for earlier repairs, measured Guardian overhead and remaining architectural limits. Passing deterministic tests does not establish availability or semantic quality of every external provider. Final published CI checks the release source; installation checks additionally verify the active core and preserved private state.
+Passing deterministic tests does not establish availability or semantic quality of every external provider. Final published CI checks the release source; installation checks additionally verify the active core and preserved private state.
 
 ## Measured release overhead
 
@@ -98,8 +75,6 @@ After first flush, 500 ordinary append operations through the new write lock too
 
 `workspace_search` searches an explicit project root by literal path or content, including directories, with bounded scans and paginated source hashes. Narrow the root when a scan is partial; no matches never establishes absence outside the reported scope. Continuation requires the returned snapshot so changed sources cannot silently mix pages.
 
-`local_mail_search` and `local_mail_read` inspect explicit local Maildir or mbox exports under the workspace. They decode MIME text without opening attachments, fetching remote content or connecting to mail accounts. Reading a hit requires its exact message hash; mail content is untrusted correspondence. Existing AgentMail tools remain the owner for authorized account operations.
+Mail is handled by the `agentmail` tool, which remains the owner for authorized account operations.
 
 `ssh_plan` prepares inert SSH argv with explicit host/user/port and strict host-key checking. It does not read credentials or run connection configuration. Use `net_probe` with `action: "ssh"` to inspect one explicitly authorized server's identification banner; a banner proves neither identity nor authentication. Execute approved remote operations through the existing shell policy.
-
-`claim_check` checks up to 12 claims against exact excerpts in current project files. It returns reference indexes, SHA256 hashes, source line positions and missing/stale evidence. Quotations must match exactly; interpretations always require review. A source match establishes provenance only, never factual truth or the source's authority. Save attributable research locally before checking it, inspect context/dates/units, and qualify or remove unsupported assertions. The rendered UI audit flags narrow quantified marketing phrases as evidence candidates, without labelling them false or launching extra model calls.

@@ -5,7 +5,7 @@ title: Cost discipline
 summary: Spending tokens, models, compute and cloud money deliberately: cheapest adequate route, caching, avoiding duplicate work and measuring before optimizing.
 terms: cost costs expensive cheap cheaper budget spend spending money price pricing token tokens usage bill billing quota rate limit cache caching duplicate redundant waste model models route cloud compute gpu
 tools: session_self subagent bg_run
-skills: llm-systems-engineering inference-serving
+skills: ml
 ---
 
 # Cost discipline

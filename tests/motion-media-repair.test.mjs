@@ -4,10 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ambientPlan, createAmbientFrames, skylineMask } from '../agent/extensions/lib/ambient-frames.ts';
-import { videoAmbient } from '../agent/extensions/lib/video-ambient.ts';
 import { videoQa } from '../agent/extensions/lib/video-studio.ts';
 import { blenderWorker } from '../agent/extensions/lib/blender-studio.ts';
-import { encodeImage, decodeImage } from '../agent/extensions/lib/design-studio.ts';
+import { run } from '../agent/extensions/lib/media-process.ts';
 import { measureFrameColor } from '../agent/extensions/lib/video-color-evidence.ts';
 import { installVideoReviewEvidence, mediaReviewReceipt, mediaReviewWaiverIntent } from '../agent/extensions/lib/video-review-evidence.ts';
 import { collectVerificationReceipts } from '../agent/extensions/lib/continuation-notice.ts';
@@ -34,19 +33,12 @@ test('RGB atmosphere preserves stationary detail and neutral pixels; absolute-ti
   assert.throws(()=>ambientPlan({skyline:[[0,.2],[.8,.5]]}),/skyline/);
 });
 
-test('an encoded RGB plate remains neutral instead of becoming magenta', {timeout:60000}, async t => {
-  const cwd=await workspace(t), data=new Uint8Array(64*64*4).fill(255);
-  for(let i=0;i<data.length;i+=4){data[i]=90;data[i+1]=100;data[i+2]=110;}
-  await fs.writeFile(path.join(cwd,'plate.png'),await encodeImage({width:64,height:64,data},'png'));
-  const result=await videoAmbient({action:'render',plate:'plate.png',width:64,height:64,seconds:1,fps:6,clouds:0,rain:0,stage:'final'},cwd);
-  const decoded=await decodeImage(await fs.readFile(result.detailFrame));
-  const color=measureFrameColor(decoded.data);
-  assert.equal(color.magentaFraction,0); assert.ok(color.meanRgb.every((v,i)=>Math.abs(v-[90,100,110][i])<5),JSON.stringify(color));
-  assert.equal(result.decodeVerified,true); assert.equal(result.deliveryReady,false);
-  assert.equal(result.plan.frames,6); assert.equal(result.direction.camera,'locked');
-  const qa=await videoQa({path:result.output},cwd);
+test('raw QA metadata edits and superseded takes cannot approve delivery', {timeout:60000}, async t => {
+  const cwd=await workspace(t), output=path.join(cwd,'take.mp4');
+  await run('ffmpeg',['-v','error','-f','lavfi','-i','color=c=0x5a646e:s=64x64:r=6:d=1','-c:v','libx264','-pix_fmt','yuv420p',output]);
+  const qa=await videoQa({path:output},cwd);
   assert.equal(qa.reviewStatus,'unreviewed'); assert.equal(qa.colorEvidence.samples.length,12);
-  const status=await videoQa({action:'status',path:result.output,report:qa.report},cwd);
+  const status=await videoQa({action:'status',path:output,report:qa.report},cwd);
   assert.equal(status.stale,false);
   const hooks=new Map(), manager={getSessionId:()=> 'waiver-fixture',getBranch:()=>[]},ctx={cwd,sessionManager:manager};
   const ledger=installVideoReviewEvidence({on:(name,fn)=>hooks.set(name,fn),appendEntry(){}});
@@ -59,21 +51,17 @@ test('an encoded RGB plate remains neutral instead of becoming magenta', {timeou
   const originalReport=await fs.readFile(qa.report),edited=JSON.parse(originalReport);edited.reviewStatus='passed';
   await fs.writeFile(qa.report,JSON.stringify(edited));await ledger.refresh(ctx);
   assert.equal(collectVerificationReceipts(32,manager)[0].state,'stale','raw QA metadata edits cannot approve delivery');
-  await assert.rejects(ledger.assertVisualReviews({action:'record',path:result.output,report:qa.report,reviews:[]},ctx),/changed outside/);
+  await assert.rejects(ledger.assertVisualReviews({action:'record',path:output,report:qa.report,reviews:[]},ctx),/changed outside/);
   await fs.writeFile(qa.report,originalReport);await ledger.refresh(ctx);
-  const recipe=JSON.parse(await fs.readFile(result.request,'utf8'));recipe.plan.rain=.5;
-  await fs.writeFile(result.request,JSON.stringify(recipe));
-  assert.equal((await videoQa({action:'status',path:result.output,report:qa.report},cwd)).stale,true,'editing the native recipe invalidates a review');
+  await fs.appendFile(output,Buffer.from([0]));
+  assert.equal((await videoQa({action:'status',path:output,report:qa.report},cwd)).stale,true,'edited delivery bytes make the review stale');
   await hooks.get('tool_call')({toolName:'goal',input:{action:'complete'}},ctx);
   assert.equal(collectVerificationReceipts(32,manager)[0].requiresUserWaiver,true,'edited bytes revoke the human waiver');
   hooks.get('session_shutdown')();
-  const replacement=path.join(cwd,'replacement.mp4');await fs.copyFile(result.output,replacement);
-  await videoQa({action:'supersede',path:result.output,report:qa.report,replacement,reason:'The earlier take was rejected for its color and detail.'},cwd);
-  assert.equal((await videoQa({action:'status',path:result.output,report:qa.report},cwd)).deliveryReady,false);
-  await assert.rejects(videoQa({action:'record',path:result.output,report:qa.report,reviews:[{criterion:'composition',verdict:'pass',evidence:'frames',note:'Intentional composition'}]},cwd),/superseded/);
-  const preview=await videoAmbient({action:'preview',plate:'plate.png',width:64,height:64,seconds:.25,fps:1,clouds:0,rain:0},cwd);
-  assert.equal(preview.plan.frames,1);
-  assert.equal((await videoQa({path:preview.output},cwd)).passedAutomatedChecks,false,'a preview cannot become delivery-approved');
+  const replacement=path.join(cwd,'replacement.mp4');await fs.copyFile(output,replacement);
+  await videoQa({action:'supersede',path:output,report:qa.report,replacement,reason:'The earlier take was rejected for its color and detail.'},cwd);
+  assert.equal((await videoQa({action:'status',path:output,report:qa.report},cwd)).deliveryReady,false);
+  await assert.rejects(videoQa({action:'record',path:output,report:qa.report,reviews:[{criterion:'composition',verdict:'pass',evidence:'frames',note:'Intentional composition'}]},cwd),/superseded/);
 });
 
 test('measured RGB evidence flags the color defect without pretending to judge intentional art', () => {

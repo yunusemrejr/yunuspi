@@ -5,7 +5,7 @@
 import type { ControlLevel } from './model-competence.ts';
 export type ExecutionScope = 'task' | 'subtask' | 'todo';
 export type ExecutionTier = 'direct' | 'standard' | 'complex' | 'critical';
-export type AutomaticCapability = 'assistance' | 'council' | 'qualityReview' | 'observer' | 'watchmaker' | 'localLm' | 'jev';
+export type AutomaticCapability = 'assistance' | 'council' | 'qualityReview' | 'observer' | 'localLm' | 'jev';
 /** Measured reliability of the executing route (see model-competence.ts). Absent
  * evidence is `standard`; the control can only move optional coordination. */
 export interface ExecutionControl {
@@ -38,15 +38,15 @@ export interface ExecutionProfile {
   constraints: { noDelegation: boolean };
   /** The reliability control that shaped this profile (`standard` when no evidence exists). */
   control: ExecutionControl;
-  assistance: { mode: 'none' | 'subagent' | 'swarm' | 'fusion'; maxAgents: number };
+  assistance: { mode: 'none' | 'subagent' | 'fanout'; maxAgents: number; /** Independent competing proposals (reconciled with provenance) rather than separable investigations. */ alternatives?: boolean };
   features: Record<AutomaticCapability, boolean>;
-  cadence: { observerMs: number; watchmakerMs: number };
+  cadence: { observerMs: number };
   review: { rounds: number; reviewers: number };
 }
 
 const count = (value: unknown, max = 1000) => typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : 0;
 const prose = (value: unknown) => typeof value === 'string' ? value.slice(0, 32768).replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/^\s*>.*$/gm, ' ').trim() : '';
-const noDelegationCue = /\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|use\s+(?:sub[- ]?agents?|swarms?|fusion|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i;
+const noDelegationCue = /\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|use\s+(?:sub[- ]?agents?|swarms?|fan-?outs?|fusion|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i;
 // Exclusive technology choices ("only use HTML, CSS and PHP") are not model
 // pins. Keep cost-only free restrictions eligible for permitted free helpers.
 const restrictedRouteCue = /\b(?:only use|use only|stick to|stay on)\s+(?!(?:the\s+)?free\b)[^.!?\n;]{0,100}\b(?:models?|providers?|routes?|llms?|openrouter|anthropic|claude|openai|gpt[\w.-]*|gemini|deepseek|qwen[\w.-]*|ollama)\b/i;
@@ -117,8 +117,7 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
   const help = !constrained && (tier === 'critical' || diagnostic || stuck || uncertainty >= .6 || tier === 'complex' && (!earned || broad || alternatives));
   let mode: ExecutionProfile['assistance']['mode'] = help ? 'subagent' : 'none';
   let maxAgents = help ? 1 : 0;
-  if (help && alternatives) { mode = 'fusion'; maxAgents = 2; }
-  else if (help && broad) { mode = 'swarm'; maxAgents = Math.min(3, Math.max(2, independent || 3)); }
+  if (help && (alternatives || broad)) { mode = 'fanout'; maxAgents = alternatives ? 2 : Math.min(3, Math.max(2, independent || 3)); }
   if (constrained) reasons.push('automatic delegation constrained');
   const substantial = tier === 'complex' || tier === 'critical';
   const observerBase = tier === 'critical' ? 30000 : tier === 'complex' ? 60000 : 120000;
@@ -126,10 +125,10 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
     scope: input?.scope ?? 'task', tier, reasons, failures, constraints: {noDelegation:constrained}, control,
     reasoning: substantial ? 'high' : tier === 'standard' ? 'low' : 'minimal',
     contextChars: tier === 'critical' ? 16000 : tier === 'complex' ? 12000 : tier === 'standard' ? 6000 : 2400,
-    assistance: { mode, maxAgents },
+    assistance: { mode, maxAgents, ...(mode === 'fanout' && alternatives ? { alternatives: true } : {}) },
     features: {
       assistance: help, council: !constrained && substantial && (alternatives || deliberation),
-      qualityReview: tier !== 'direct' || guarded, observer: tier !== 'direct' || guarded, watchmaker: substantial && !earned || stuck,
+      qualityReview: tier !== 'direct' || guarded, observer: tier !== 'direct' || guarded,
       // Cheap stages are useful only for a genuine choice. Deterministic
       // routing goes first; failing helpers never suppress mandatory guards.
       localLm: substantial || diagnostic || uncertainty >= .5,
@@ -137,7 +136,6 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
     },
     cadence: {
       observerMs: earned ? Math.min(240000, observerBase * 2) : guarded ? Math.max(30000, observerBase / 2) : observerBase,
-      watchmakerMs: substantial && !earned || stuck ? guarded ? 90000 : 120000 : 0,
     },
     review: { rounds: tier === 'direct' ? 0 : 2, reviewers: substantial ? earned ? 2 : 3 : guarded && tier === 'standard' ? 2 : 1 },
   };

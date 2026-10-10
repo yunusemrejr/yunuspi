@@ -1,6 +1,6 @@
 """A rendered HTML/Remotion sequence as the screen of a 3D device: UI on glass in a Blender shot.
 
-    1. render the motion page:   node motion-graphics-production/scripts/render.mjs ui.html OUTDIR 4 30 1280 720
+    1. render the motion page:   node video-editing/scripts/render.mjs ui.html OUTDIR 4 30 1280 720
     2. build the scene:          blender_run script:"html-as-texture.py" args:["frames=OUTDIR/motion-XXXX","out=blender/device.blend","fps=30"]
     3. render the shot:          video_shot dir:"my-film" name:"device" blend:"blender/device.blend" rig:"push-in" seconds:4 fps:30
 

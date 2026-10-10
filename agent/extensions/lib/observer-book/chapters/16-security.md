@@ -5,8 +5,8 @@ title: Security
 summary: Secure by default: untrusted input and injection, secrets hygiene, authorization, supply chain, web security, cryptography, and agent-specific threats like prompt injection.
 terms: security secure vulnerability vulnerabilities exploit attack attacker injection sql injection xss csrf cors csp secret secrets credential credentials password token api key encryption crypto hash auth permission sandbox untrusted prompt injection supply chain dependency cve
 files: .env .pem .key /auth/ /security/
-tools: env_audit source_check sandbox_run
-skills: systems-security web-security linux-host-defense
+tools: source_check sandbox_run
+skills: api-security
 ---
 
 # Security

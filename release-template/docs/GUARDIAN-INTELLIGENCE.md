@@ -15,8 +15,7 @@ block a tool call.
 - `/guardian debug` — toggles diagnostics: request and instance IDs, verified-constraint count,
   analysis confidence, observed file types/skills/tool count, and recent arbitration decisions.
 
-Guardians are on by default in every session, including subagents, swarm workers, fusion
-branches, council members and review agents, because each of those runs as a normal YunusPi
+Guardians are on by default in every session, including subagents, fan-out workers, council members and review agents, because each of those runs as a normal YunusPi
 session. Turning them off in one session never affects another.
 
 ## What it observes
@@ -98,7 +97,7 @@ A job from another request cannot satisfy the current request. Detached managed-
 launches remain unverified here; their richer receipts belong to `project_tests`.
 
 Delivered Guardian intervention messages join the existing reviewer note board. The
-observer and Watchmaker see an attributed Guardian peer note and suppress restatements
+observer see an attributed Guardian peer note and suppress restatements
 through their normal advice deduplication. Status/debug messages do not become advice.
 The board is scoped to the live session manager, so two runtimes reopening the same
 transcript cannot consume each other's notes. This is coordination of optional guidance,
@@ -148,7 +147,7 @@ constraint.
 
 JEV uses its configured remote judgment service; Needle3, the native Guardian kernels, and
 fuzzy recovery run locally. Guardian never invokes JEV or another remote model for scoring.
-See the [independent implementation audit](GUARDIAN-IMPLEMENTATION-AUDIT.md) for repairs,
+See the independent implementation audit for repairs,
 measurements, exercised paths and remaining implementation gaps.
 
 ## Boundaries and measured overhead

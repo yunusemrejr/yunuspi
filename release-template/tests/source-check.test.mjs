@@ -7,7 +7,6 @@ import {pathToFileURL} from 'node:url';
 const repository=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(repository,'agent'),path.resolve(repository,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/source-check.ts')));
 const {sourceCheck,checkSourceText}=await import(pathToFileURL(path.join(agent,'extensions/lib/source-check.ts')));
-const {matchHook}=await import(pathToFileURL(path.join(agent,'extensions/lib/session-hooks.ts')));
 const workspace=fs.mkdtempSync(path.join(os.tmpdir(),'source-check-'));
 const write=(name,text)=>{fs.mkdirSync(path.dirname(path.join(workspace,name)),{recursive:true});fs.writeFileSync(path.join(workspace,name),text);return name;};
 process.on('exit',()=>fs.rmSync(workspace,{recursive:true,force:true}));
@@ -91,9 +90,4 @@ test('workspace escapes, unsupported files and bounded reads remain explicit',as
     const controller=new AbortController();controller.abort();
     await assert.rejects(sourceCheck({cwd:workspace,paths:['ok.json'],signal:controller.signal}),/Cancelled/);
   } finally {fs.rmSync(external,{recursive:true,force:true});}
-});
-
-test('failure and success hooks use different bounded receipts',()=>{
-  assert.equal(matchHook('syntax_check',{},true)?.key,'source-check-recovery');
-  assert.equal(matchHook('syntax_check',{})?.key,'source-check-scope');
 });

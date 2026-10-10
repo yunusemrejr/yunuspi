@@ -35,8 +35,8 @@ const FIELD_MAX = { principle: 240, ask: 240, why: 1_400, signals: 520, traps: 5
 const RESCAN_MS = 60_000;
 
 export const WATCH_NAMES = ['edits-without', 'edits-unverified', 'claimed-done-unverified', 'todos-open-at-claim', 'repeated-failure', 'errors',
-  'reads-no-edits', 'long-foreground', 'child-failed', 'many-children', 'no-plan', 'sensitive-paths', 'deps-changed', 'migrations-touched',
-  'ci-touched', 'container-touched', 'tests-touched-unrun', 'large-output'] as const;
+  'long-foreground', 'child-failed', 'many-children', 'no-plan', 'sensitive-paths', 'deps-changed',
+  'tests-touched-unrun', 'large-output'] as const;
 export type WatchName = typeof WATCH_NAMES[number];
 export interface BookWatch { name: WatchName; args: string[]; }
 export interface BookPassage {
@@ -130,8 +130,8 @@ export function parseWatch(value: string, file: string): BookWatch[] {
     const args = words(match[2]);
     if (args.some(arg => !/^[a-z0-9_.-]{1,64}$/.test(arg))) throw Error(`${file}: invalid ${name} arguments`);
     if (name === 'edits-without' && (!args.length || args.some(arg => !TOOL_NAME.test(arg)))) throw Error(`${file}: edits-without needs tool names`);
-    if (['edits-unverified', 'errors', 'reads-no-edits', 'long-foreground', 'many-children', 'no-plan', 'large-output'].includes(name) && args.length > 1) throw Error(`${file}: ${name} takes at most one number`);
-    if (['edits-unverified', 'errors', 'reads-no-edits', 'long-foreground', 'many-children', 'no-plan', 'large-output'].includes(name) && args.length === 1 && !/^[1-9][0-9]{0,4}$/.test(args[0])) throw Error(`${file}: ${name} needs a positive integer`);
+    if (['edits-unverified', 'errors', 'long-foreground', 'many-children', 'no-plan', 'large-output'].includes(name) && args.length > 1) throw Error(`${file}: ${name} takes at most one number`);
+    if (['edits-unverified', 'errors', 'long-foreground', 'many-children', 'no-plan', 'large-output'].includes(name) && args.length === 1 && !/^[1-9][0-9]{0,4}$/.test(args[0])) throw Error(`${file}: ${name} needs a positive integer`);
     watches.push({ name, args });
     consumed += match[0];
   }
@@ -281,12 +281,12 @@ export function loadObserverBook(options: { shippedDir?: string; userDir?: strin
 // ───────────────────────────── session profile ──────────────────────────────
 
 const EDIT_TOOLS = new Set(['edit', 'write', 'bulk_edit', 'multi_edit', 'apply_patch', 'notebook_edit']);
-const READ_TOOLS = new Set(['read', 'obs_read', 'context_slice', 'symbol_expand', 'checkpoint_read', 'memory_read', 'local_mail_read']);
-const SEARCH_TOOLS = new Set(['grep', 'find', 'ls', 'workspace_search', 'context_score', 'project_intel', 'tool_search', 'skill_review', 'web_search',
-  'web_research', 'fetch_content', 'get_search_content', 'memory_search', 'local_mail_search', 'git_info']);
-const RENDER_TOOLS = new Set(['browser_session', 'render_see', 'design_audit', 'web_probe', 'video_render', 'video_frames', 'video_qa', 'scene_render', 'blender_render', 'splat_preview',
-  'image_ocr', 'artifact_check', 'web_asset_check', 'audio_analyze', 'media_info']);
-const VERIFY_TOOLS = new Set(['project_tests', 'quality_review', 'syntax_check', 'source_check', 'claim_check', 'math_check', 'video_qa', 'design_audit', 'artifact_check', 'web_asset_check']);
+const READ_TOOLS = new Set(['read', 'obs_read', 'context_slice', 'symbol_expand', 'checkpoint_read', 'memory_read']);
+const SEARCH_TOOLS = new Set(['grep', 'find', 'ls', 'workspace_search', 'project_intel', 'tool_search', 'skill_review', 'web_search',
+  'web_research', 'fetch_content', 'get_search_content', 'memory_search', 'git_info']);
+const RENDER_TOOLS = new Set(['browser_session', 'render_see', 'web_probe', 'video_render', 'video_frames', 'video_qa',
+  'web_asset_check', 'audio_analyze', 'media_info']);
+const VERIFY_TOOLS = new Set(['project_tests', 'quality_review', 'source_check', 'math_check', 'video_qa', 'web_asset_check']);
 const SHELL_TOOLS = new Set(['bash', 'powershell', 'bg_run', 'sandbox_run']);
 export const VERIFY_COMMAND = /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|lint|typecheck|type-check|check|verify|ci)\b|\bnode\s+--test\b|\b(?:pytest|jest|vitest|mocha|phpunit|rspec|ctest|tox|nox|pyright|mypy|ruff|eslint|tsc|shellcheck)\b|\bcargo\s+(?:test|build|check|clippy|nextest)\b|\bgo\s+(?:test|build|vet)\b|\bmake\s+(?:test|check|build|lint)\b|\bgradlew?\s+(?:test|build|check)\b|\bmvn\s+(?:test|verify|package)\b|\bdotnet\s+(?:test|build)\b|\bplaywright\s+test\b|\bdeno\s+(?:test|check|lint)\b|\bpython3?\s+-m\s+(?:pytest|unittest|compileall|py_compile)\b|\b(?:javac|gcc|g\+\+|clang(?:\+\+)?|rustc|swiftc|kotlinc)\s|\bcmake\s+--build\b|\bswift\s+(?:build|test)\b|\bnode\s+--check\b|\bphp\s+-l\b|\bbash\s+-n\b|\s--(?:self-?test|run-tests|test|verify)\b|(?:^|[\s/])(?:self-?test|tests?|check|verify|ci)(?:[-_.][\w-]+)?\.(?:sh|py|mjs|js)\b/i;
 const CLAIM = /\b(?:all (?:tests|checks) (?:now )?pass(?:ed|es)?|tests? (?:now )?pass(?:es|ed)?|(?:is|are|now) (?:fixed|working|complete|done|resolved)|(?:fixed|implemented|completed|resolved) (?:the|it|this|all)\b|should (?:now )?work|works now|task (?:is )?complete|everything (?:is )?(?:done|working)|ready (?:to|for) (?:merge|ship|review))/i;
@@ -358,7 +358,7 @@ export function createSessionProfile(now: () => number = Date.now) {
       const verify = !outcome.error && VERIFY_TOOLS.has(name) || SHELL_TOOLS.has(name) && VERIFY_COMMAND.test(command);
       if (READ_TOOLS.has(name)) { reads++; for (const file of files) bump(readExt, extOf(file)); }
       if (SEARCH_TOOLS.has(name)) searches++;
-      if (RENDER_TOOLS.has(name) && !outcome.error) renders++;
+      if ((RENDER_TOOLS.has(name) || name === 'blender' && args?.action === 'render') && !outcome.error) renders++;
       for (const file of files) {
         const skill = /(?:^|\/)skills\/([a-z0-9][a-z0-9-]{0,63})\/SKILL\.md$/i.exec(file)?.[1];
         if (skill && skills.size < 32) skills.add(skill.toLowerCase());
@@ -475,16 +475,12 @@ export function watchFired(passage: BookPassage, chapter: BookChapter | undefine
       case 'todos-open-at-claim': if (snapshot.claim && snapshot.openTodos > 0) return `completion claimed with ${snapshot.openTodos} open todos`; break;
       case 'repeated-failure': if (snapshot.repeatedFailure) return `the same ${snapshot.repeatedFailure} call failed repeatedly`; break;
       case 'errors': if (snapshot.recentErrors >= n(watch, 3)) return `${snapshot.recentErrors} errors in the last 10 calls`; break;
-      case 'reads-no-edits': if (snapshot.actionRequest && !snapshot.edits && snapshot.reads + snapshot.searches >= n(watch, 15) && snapshot.elapsedMs >= 240_000) return `${snapshot.reads + snapshot.searches} reads/searches and no edits yet`; break;
       case 'long-foreground': if (snapshot.longestForegroundMs >= n(watch, 90) * 1000) return `a foreground command has run ${Math.round(snapshot.longestForegroundMs / 1000)}s`; break;
       case 'child-failed': if (snapshot.childFailed) return `${snapshot.childFailed} child task(s) failed`; break;
       case 'many-children': if (snapshot.children >= n(watch, 4)) return `${snapshot.children} child tasks`; break;
       case 'no-plan': if (snapshot.actionRequest && !snapshot.hasPlan && snapshot.calls >= n(watch, 20)) return `${snapshot.calls} calls without a todo plan`; break;
       case 'sensitive-paths': if (snapshot.sensitive) return `sensitive material touched (${snapshot.sensitive})`; break;
       case 'deps-changed': if (snapshot.deps) return `dependencies changed (${snapshot.deps})`; break;
-      case 'migrations-touched': if (snapshot.migrations) return `schema/migration touched (${snapshot.migrations})`; break;
-      case 'ci-touched': if (snapshot.ci) return `CI workflow touched (${snapshot.ci})`; break;
-      case 'container-touched': if (snapshot.container) return `container or deployment config touched (${snapshot.container})`; break;
       case 'tests-touched-unrun': if (snapshot.testsUnrun) return `test file ${snapshot.testsUnrun} edited and not run since`; break;
       case 'large-output': if (snapshot.outputsOver20k >= n(watch, 3)) return `${snapshot.outputsOver20k} tool outputs over 20k characters`; break;
     }

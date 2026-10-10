@@ -22,7 +22,7 @@ For official OpenRouter routes, the returned account charge takes precedence ove
 
 ## Delegated work
 
-Child runners include billed failed attempts, compactions and usage-bearing tool responses. Compact reported/estimated/unknown/subscription facts and per-model subtotals survive attempt aggregation, detached completion and replay. Swarms and fusion do not receive invented flat surcharges: their actual model calls contribute usage.
+Child runners include billed failed attempts, compactions and usage-bearing tool responses. Compact reported/estimated/unknown/subscription facts and per-model subtotals survive attempt aggregation, detached completion and replay. Fan-out does not receive invented flat surcharges: their actual model calls contribute usage.
 
 Nested run identities are retained in accounting receipts. Repeated status, workflow, step and completion snapshots count a physical child once. Inclusive parent totals do not add descendants twice. Later provider billing can correct an estimate for the same recorded turn, including a correction to zero; stale estimates cannot replace that billing evidence.
 

@@ -26,7 +26,7 @@ import { evaluateQuotaHealth, type QuotaEvent } from "./quota-health.ts";
 import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
 import { modelIdentity } from "./model-quality.ts";
-import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting, normalizePreferenceRole, readLlmPreferencesDocument, validateLlmPreferencesDocumentForWrite, SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_ROLE, WATCHMAKER_DEFAULT, WATCHMAKER_ROLE, type LlmModelEntry } from "./llm-preferences.ts";
+import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting, normalizePreferenceRole, readLlmPreferencesDocument, validateLlmPreferencesDocumentForWrite, SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_ROLE, type LlmModelEntry } from "./llm-preferences.ts";
 import { modelRouteCandidateKey, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { childRequirementsFromTask, type ChildRouteRequirements } from "./child-route-requirements.ts";
 import { extractTaskIntent } from "./task-intent-model.ts";
@@ -607,21 +607,9 @@ export const SESSION_OBSERVER_REQUIREMENTS: Readonly<LlmPreferenceRequirements> 
 	inputModalities: ["text"], minContextWindow: 12288, minOutputTokens: 4096,
 });
 
-/** Watchmaker admission floor for its smaller time packet and short notes. */
-export const WATCHMAKER_REQUIREMENTS: Readonly<LlmPreferenceRequirements> = Object.freeze({
-	inputModalities: ["text"], minContextWindow: 8192, minOutputTokens: 2048,
-});
-
-export interface WatchmakerPreferenceSelection {
-	source: "default" | "watchmaker";
-	status: "ready" | "disabled" | "unavailable";
-	routes: LlmPreferenceRoute[];
-	reason?: string;
-}
-
 type FixedDefaultSelection = { source: string; status: "ready" | "disabled" | "unavailable"; routes: LlmPreferenceRoute[]; reason?: string };
 
-/** Fixed-default roles (observer, watchmaker) share one resolver: a fixed
+/** The fixed-default observer role uses one resolver: a fixed
  * default, not autonomous routing. Callers supply authenticated available
  * models and attempt at most one selected route. An explicit empty role opts
  * out; corrupt config never enables the default. */
@@ -722,12 +710,6 @@ function resolveFixedDefaultChain(
  * An explicit empty role opts out; corrupt config never enables the default. */
 export function resolveSessionObserverPreferenceChain(availableModels: AvailableModelInfo[] | undefined, options?: LlmPreferenceOptions): SessionObserverPreferenceSelection {
 	return resolveFixedDefaultChain(SESSION_OBSERVER_ROLE, "Observer", SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_REQUIREMENTS, availableModels, options) as SessionObserverPreferenceSelection;
-}
-
-/** Mr. Watchmaker resolves exactly like the session observer: a fixed
- * default, an explicit ordered list, or an explicit empty list to disable. */
-export function resolveWatchmakerPreferenceChain(availableModels: AvailableModelInfo[] | undefined, options?: LlmPreferenceOptions): WatchmakerPreferenceSelection {
-	return resolveFixedDefaultChain(WATCHMAKER_ROLE, "Watchmaker", WATCHMAKER_DEFAULT, WATCHMAKER_REQUIREMENTS, availableModels, options) as WatchmakerPreferenceSelection;
 }
 
 function stableRouteJson(value: unknown): string {

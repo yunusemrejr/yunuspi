@@ -4,8 +4,8 @@ part: design
 title: The anti-slop checklist
 summary: Every element must earn its place. The condensed doctrine behind the 200-rule website checklist: necessity testing, visual cliches, fake state, copy honesty, structure at the right scale, honest motion and agent scope discipline.
 terms: slop checklist necessity template generic saas cliche badge pill glow gradient glass bento card testimonial hero faq footer newsletter chatbot scope emoji terminal alt heading carousel cursor oversized radius
-tools: design_audit render_see code_quality artifact_check
-skills: anti-ai-slop frontend-design ui-ux-principles ui-antipattern-review copywriting
+tools: render_see
+skills: ui-design frontend
 ---
 
 # The anti-slop checklist
@@ -32,7 +32,7 @@ AI website work fails one underlying way: it optimizes for visible completeness 
 
 **Principle.** Build hierarchy from typography, spacing, alignment and contrast first; reach for glow, gradients, glass, particles and texture only when the brand demands them.
 
-**Why.** Purple-cyan gradients, aurora blobs, glass cards and glowing grids are the fastest way to make unrelated sites look related: they signal "AI made this" louder than any content signals what the site is about. These effects also cost readability — text over gradients, washed-out low-contrast palettes — and performance, while adding zero information. A restrained system in the project's own colors survives longer than any fashionable effect, and when an effect is truly part of the identity it stands out precisely because everything else is quiet. design_audit counts the rendered signatures; the eye judges whether the remainder coheres.
+**Why.** Purple-cyan gradients, aurora blobs, glass cards and glowing grids are the fastest way to make unrelated sites look related: they signal "AI made this" louder than any content signals what the site is about. These effects also cost readability — text over gradients, washed-out low-contrast palettes — and performance, while adding zero information. A restrained system in the project's own colors survives longer than any fashionable effect, and when an effect is truly part of the identity it stands out precisely because everything else is quiet. render_see counts the rendered signatures; the eye judges whether the remainder coheres.
 
 **Signals.** Glows, gradient text, glass panels, particle fields, cyberpunk terminals, sparkle icons, mesh-gradient backgrounds on ordinary content pages.
 
@@ -71,7 +71,7 @@ AI website work fails one underlying way: it optimizes for visible completeness 
 
 **Principle.** Copy must say something concrete: cut unearned adjectives, boilerplate openers, mission-statement philosophy and rhetorical tics.
 
-**Why.** "Seamless, intuitive, cutting-edge platform" fits ten thousand products because it describes none of them; each vague adjective spends reader attention without buying understanding. Boilerplate intros, "in conclusion" summaries, rhetorical questions and triad chains ("fast, flexible, powerful") are the verbal equivalent of decorative gradients — recognizable AI texture that delays the point. code_quality prose flags the stock phrases; the deeper fix is structural: start with the substance, name the reader, state the concrete capability, then stop. Preserved human copy that is specific beats smoother generated replacement every time.
+**Why.** "Seamless, intuitive, cutting-edge platform" fits ten thousand products because it describes none of them; each vague adjective spends reader attention without buying understanding. Boilerplate intros, "in conclusion" summaries, rhetorical questions and triad chains ("fast, flexible, powerful") are the verbal equivalent of decorative gradients — recognizable AI texture that delays the point. the static audit (goal check) prose flags the stock phrases; the deeper fix is structural: start with the substance, name the reader, state the concrete capability, then stop. Preserved human copy that is specific beats smoother generated replacement every time.
 
 **Signals.** Adjective stacks without evidence; "unlock/elevate/supercharge" verbs; mission statements on practical sites; em-dash and triad rhythms in every paragraph; vague Discover/Explore headings.
 

@@ -38,12 +38,6 @@ role restores the default. The `/models` editor exposes these controls under
 **Session Observer**, including the route's thinking level. Saving changes
 affects subsequent observations, not a request already in flight.
 
-`watchmaker` (Mr. Watchmaker, the timekeeper) follows the same rules with a
-smaller budget: an absent role uses only `deepseek/deepseek-flash` through the
-official DeepSeek API with `low` thinking, routes require at least 8,192
-context tokens and 2,048 output tokens, and `"watchmaker": { "models": [] }`
-disables it. Configure it under **Mr. Watchmaker** in `/models`.
-
 A viable preference keeps its place across repeated requests and sessions.
 Usage frequency and random rotation do not move free alternatives ahead of it.
 Context, output, modality, tool-support and quota failures explain why an entry
@@ -126,8 +120,7 @@ normal main-session model:
     "main_session_fallback": { "models": ["cheap_auto"] },
     "subagents": { "models": ["cheap_auto", "strong_pinned"] },
     "council": { "models": ["strong_pinned", "cheap_auto"] },
-    "swarm": { "models": ["cheap_auto"] },
-    "fusion": { "models": ["cheap_auto"] },
+    "fanout": { "models": ["cheap_auto"] },
     "quality_review": { "models": ["cheap_auto"] },
     "project_review": { "models": ["cheap_auto"] },
     "error_review": { "models": ["cheap_auto"] },
@@ -145,7 +138,7 @@ normal main-session model:
   even if that namespace also names another registered provider. Case and
   supported separator differences resolve against the live registry.
 - `preferences.<role>.models` is an ordered list of aliases (or inline
-  entries). Role names accept `subagents`, `council`, `swarm`, `fusion`,
+  entries). Role names accept `subagents`, `council`, `fanout` (`swarm` and `fusion` are accepted aliases),
   `quality_review`, `project_review`, `error_review` and
   `main_session_fallback`, `prompt_analysis`, and `session_observer` (dashes, case and
   singular/plural variants are accepted). Unknown roles pass through for

@@ -27,7 +27,7 @@ test('installed observer renderer shows advice and request states at narrow and 
     const renderer = extensions[0].messageRenderers.get(OBSERVER_MESSAGE);
     assert.equal(typeof renderer, 'function');
     initTheme('dark');
-    const advice = observerAdviceText({ note: 'Consider inspecting the parser before changing the field mapping.', evidence: ['read-1'], tools: ['read'], skills: ['type-driven-design'] });
+    const advice = observerAdviceText({ note: 'Consider inspecting the parser before changing the field mapping.', evidence: ['read-1'], tools: ['read'], skills: ['engineering'] });
     const fixtures = [
       'Observer started: deepseek/deepseek-flash · high thinking',
       `Observer returned a note\n${advice}`,

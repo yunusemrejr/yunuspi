@@ -1824,7 +1824,7 @@ export interface ExternalProcessStatus {
 
 export interface AsyncStatus {
 	/** Cumulative executed workflow operations; replay replaces by run ID. */
-	activityMetrics?: Partial<Record<"swarms" | "fusions" | "recoveries", number>>;
+	activityMetrics?: Partial<Record<"fanouts" | "recoveries", number>>;
 	lifecycleArtifactVersion?: SubagentLifecycleArtifactVersion;
 	runId: string;
 	/** Monotonic revision for guarded status.json writes; newer writers win. */

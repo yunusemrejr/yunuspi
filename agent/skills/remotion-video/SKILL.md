@@ -1,32 +1,28 @@
 ---
 name: remotion-video
-description: Implement programmatic video in Remotion (React/TypeScript) inside a YunusPi video project; deterministic frame-pure animation, scene components driven by a master video.json timeline, reusable SVG/Canvas primitives, optional Three.js, audio layering, and rendering stills, previews and finals through video_render. Use when writing or debugging Remotion compositions, scenes, primitives or render failures.
+description: "Implement programmatic video in Remotion (React/TypeScript) inside a YunusPi video project: frame-pure scenes driven by the master video.json timeline, SVG/Canvas primitives, captions, transitions, audio layers, optional three.js, and stills, previews and finals through video_render; use when writing or debugging Remotion compositions, scenes, primitives or render failures."
 ---
 
 # Remotion video implementation
 
-Start from `video_project action:"init"`. The template's contract:
-
-- `video_project action:"compose"` authors native `StudioScene` layers: fitted typography, reserved hero regions, deterministic spring/line reveals, camera crops and `ShotScreen` projection onto tracked device corners. Native `startFrom` is seconds; legacy `Clip startFrom` is Remotion frames. Read code-first-video [native production](../code-first-video/references/native-production.md).
-- `video.json` owns timing and content. `src/timeline.ts` derives frames from it (`timeline()`, `cue(scene, name)`, `toFrames()`); scene components never hard-code seconds that narration depends on.
-- `src/scenes/index.ts` registers component names used by `video.json`. Each scene receives `scene` (with `durationInFrames`, cues) plus its `props`.
-- `src/primitives/` holds reusable visuals: `Stage`, `Backdrop`, `ParticleField`, `Heading`, `KineticText`, `LowerThird`, `Counter`, `ProgressBar`, `Callout`, `TokenRow`, `NeuralNet`, `Matrix`, `Graph`, `BarChart`, `TimelineAxis` and `CodeBlock`. They take data and 0..1 progress values and contain no timing.
-- Finishing and sound-driven layers: `Captions` (narration captions, `chunks` or `karaoke`), `AudioSpectrum` (bars driven by a public/ audio file through `@remotion/media-utils`), `FilmGrain`, `LightLeak`, `CameraMove` (push-in, pull-out, pans, drift over `scene.durationInFrames`) and `Glitch` (a brief channel-split at a cue). One texture per scene; motion must explain, not decorate.
-- Blender and vanilla HTML in the timeline: `BlenderShot` plays a `video_shot` RGBA sequence without frame blending by default (delivery shots use the film fps; blending creates ghosted edges) and `ShotNote`/`ShotAnchor` pin 2D annotations to named 3D anchors; `ShotScene` is the whole scene. `HtmlMotion`/`HtmlScene` embed a vanilla HTML page from `public/html/` that exposes `window.renderFrame(t)`, passing it the film's theme and fonts; `Grade` applies one colour treatment over the composited layers. `motion_examples` supplies worked pages and Blender scripts to copy and adapt; the motion-approaches skill covers choosing and merging them.
-- `video.json` `captions: {enabled, style, maxWords, position}` burns captions in from the narration text and measured `narrationSeconds` (timing comes from `src/captions.ts`: syllable-weighted words with punctuation pauses, the fallback when measured narrationWords are absent or stale; provider/aligned word spans take precedence); `video_render mode:"final"` also writes `captions.srt` and `captions.vtt` with the same timing. Per-scene `transition: {type: fade|slide|slideup|slidedown|wipe|zoom|blur|none, seconds}` animates the scene's entry.
-- `src/motion.ts` (`progress`, `sweep`, `groupItem`, `stagger`, `enter`, `settle`, `exitFade`) and `src/timing.ts` (`beat`, `pulse`, `beatCount`, `loopProgress`, `pingpong`, `hold`) plus `src/theme.tsx` (`useTheme`, `type`, `space`, `SAFE`, `useCanvas`, seeded `rng`, color `mix`) define the shared vocabulary. Drive beat-synced motion from `pulse(frame, fps, bpm)` with the same bpm as the `audio_synth` bed.
-- Every size is in layout units whose short side is 1080, whatever the output resolution: `Canvas` (mounted by `Main`) scales the laid-out frame, so a 1280x720 or 4K render keeps the 1080p layout. Read frame dimensions from `useCanvas()`, never from `useVideoConfig().width/height`.
+## Project contract
+- Start with `video_project action:"init"`. `action:"compose"` authors native `StudioScene` layers: fitted type, reserved hero regions, camera crops, `ShotScreen` on tracked device corners. Native `startFrom` is seconds; legacy `Clip startFrom` is frames.
+- `video.json` owns timing and content. `src/timeline.ts` derives frames (`timeline()`, `cue(scene, name)`, `toFrames()`); scenes never hard-code seconds that narration depends on.
+- `src/scenes/index.ts` registers the component names used in `video.json`. Each scene receives `scene` (durationInFrames, cues) and `props`.
+- `src/primitives/` (Stage, Backdrop, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField) take data and 0..1 progress; no timing inside.
+- Finishing layers: `Captions` (chunks or karaoke), `AudioSpectrum` (public audio via @remotion/media-utils), `FilmGrain`, `LightLeak`, `CameraMove`, `Glitch`. One texture per scene; motion must explain.
+- Embeds: `BlenderShot` plays a `video_shot` RGBA sequence without frame blending (blending ghosts edges); `ShotNote`/`ShotAnchor` pin notes to 3D anchors; `ShotScene` is a whole scene. `HtmlMotion`/`HtmlScene` embed a page from `public/html/` exposing `window.renderFrame(t)`, which receives theme and fonts. `Grade` applies one color treatment. Optional three.js `Model3D`: `video_project action:"feature" feature:"3d"`.
+- Captions come from `video.json` `captions:{enabled, style, maxWords, position}`; provider word spans beat the syllable-weighted fallback in `src/captions.ts`. Final renders also write `captions.srt` and `captions.vtt`. Scene `transition:{type, seconds}` animates entry (fade, slide, slideup, slidedown, wipe, zoom, blur, none).
+- Shared vocabulary: `src/motion.ts` (progress, sweep, stagger, enter, settle, exitFade), `src/timing.ts` (beat, pulse, loopProgress, pingpong, hold), `src/theme.tsx` (useTheme, type, space, SAFE, useCanvas, seeded rng). Beat-synced motion uses `pulse(frame, fps, bpm)` at the audio bed's bpm.
+- Layout units: the short side is 1080 at any output size. Read dimensions from `useCanvas()`, never `useVideoConfig().width/height`.
 - `Main.tsx` sequences scenes and layers narration, music (auto-ducked under narration) and sfx. `scene-<id>` compositions exist for isolated previews.
 
-Rules that keep renders correct:
+## Render rules
+1. Every visual value is a pure function of `useCurrentFrame()`: no `Date.now()`, no `Math.random()` (use `rng(seed)`), no state that accumulates between frames.
+2. Draw canvas in `useLayoutEffect` keyed on the frame, clearing first; size it from `useVideoConfig()`.
+3. Fonts come from pinned `@fontsource` imports in `src/fonts.ts`; never system or network fonts.
+4. Assets live in `public/` and load via `staticFile()`; no remote URLs.
+5. Parameterize scenes through props and cue-derived progress; extract a primitive rather than duplicating a scene.
+6. Keep trees light: move dense fields (particles, grids over about 2,000 cells) from SVG to canvas.
 
-1. Every visual value is a pure function of `useCurrentFrame()`. No `Date.now()`, no `Math.random()` (use `rng(seed)`), and no state that accumulates between frames.
-2. Canvas drawing happens in `useLayoutEffect` keyed on the frame, clearing first. Size canvases from `useVideoConfig()`.
-3. Fonts come from the pinned `@fontsource` imports in `src/fonts.ts`, which delay rendering until loaded. Never rely on system or network fonts.
-4. Assets live in `public/` and load with `staticFile()`. No remote URLs.
-5. Parameterise: a scene takes data through props and computes progress from cues. Duplicate-then-tweak scenes become inconsistent; extract a primitive instead.
-6. Keep React trees light. Thousands of SVG nodes render slowly; switch dense fields (particles, grids > ~2,000 cells) to canvas.
-
-Read [Remotion patterns](references/remotion-patterns.md) for animation recipes, SVG/Canvas/Three.js integration, audio, render settings and troubleshooting.
-
-Rendering goes through `video_render` (stills and contact sheet, scene or range previews, final). Do not install Remotion globally or run the Remotion CLI by hand unless diagnosing the tool. The code-first-video skill owns the review loop: after every meaningful change, render stills and actually look at them.
+Render only through `video_render` (stills and contact sheet, scene or range previews, final). Do not install Remotion globally or run its CLI by hand except to diagnose the tool. The code-first-video skill owns the review loop: render stills after each meaningful change and look at them.

@@ -168,7 +168,7 @@ const renderLedgerBrief = (ledger: RequirementLedger, maxChars: number, packetLo
 };
 
 /** Compact requirements brief for reviewer packets (quality review legs,
- * scope councils, Observer/Watchmaker, prompt analysis). The session ledger
+ * scope councils, Observer, prompt analysis). The session ledger
  * wins when one exists; otherwise the current prompt is extracted ad hoc and
  * labeled packet-local so its numbers are never confused with session R#.
  * Empty string when nothing requirements-shaped is available. */

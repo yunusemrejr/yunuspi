@@ -22,9 +22,9 @@ test('direct tasks use no automatic coordination while required and deliberate c
 
 test('breadth, alternatives, risk and uncertainty determine independent work and review width', () => {
   const broad = classifyExecution({task:'Implement cross-file changes in frontend and backend with tests',independentWorkItems:2});
-  assert.equal(broad.tier,'complex');assert.equal(broad.assistance.mode,'swarm');assert.equal(broad.assistance.maxAgents,2);
+  assert.equal(broad.tier,'complex');assert.equal(broad.assistance.mode,'fanout');assert.equal(broad.assistance.maxAgents,2);
   assert.equal(broad.review.reviewers,3);
-  assert.equal(classifyExecution({task:'Compare architectural alternatives for the API cache'}).assistance.mode,'fusion');
+  assert.equal(classifyExecution({task:'Compare architectural alternatives for the API cache'}).assistance.mode,'fanout');
   assert.equal(classifyExecution({task:'Fix authentication token validation'}).tier,'critical');
   assert.equal(classifyExecution({task:'Fix parser',uncertainty:.9}).tier,'complex');
   const diagnosis=classifyExecution({task:'Investigate why the parser check fails'});
@@ -104,12 +104,11 @@ test('measured control lightens optional coordination for earned routes, tighten
   assert.equal(base.tier, 'complex');assert.equal(base.control.level, 'standard');
   const earned = classifyExecution({task: open, control: {level: 'earned'}});
   assert.equal(earned.cadence.observerMs, base.cadence.observerMs * 2);
-  assert.equal(earned.cadence.watchmakerMs, 0, 'periodic watchmaker review waits for a signal');
   assert.equal(earned.review.reviewers, 2);assert.equal(earned.features.assistance, false, 'open-ended work alone no longer starts a helper');
   assert.ok(earned.reasons.some(reason => /earned autonomy/.test(reason)));
   const broad = classifyExecution({task: 'Implement cross-file changes in frontend and backend with tests', independentWorkItems: 2, control: {level: 'earned'}});
   assert.equal(broad.features.assistance, true, 'explicit breadth still earns a helper');
-  assert.equal(classifyExecution({task: 'Compare architectural alternatives for the API cache', control: {level: 'earned'}}).assistance.mode, 'fusion');
+  assert.equal(classifyExecution({task: 'Compare architectural alternatives for the API cache', control: {level: 'earned'}}).assistance.mode, 'fanout');
   const diagnosis = classifyExecution({task: 'Investigate why the parser check fails', control: {level: 'earned'}});
   assert.equal(diagnosis.features.assistance, true, 'diagnosis still gets its investigator');
   const critical = classifyExecution({task: 'Fix authentication token validation', control: {level: 'earned'}});

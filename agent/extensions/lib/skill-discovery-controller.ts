@@ -10,9 +10,7 @@ const OBSERVED_TOOLS = new Set([
   // evidence for skill discovery when they replace broad shell searches.
   'symbol_search','module_report','read_symbol','symbol_references',
   'lsp_navigation','ast_grep_search','context_slice','symbol_expand','context_code',
-  'lsp_diagnostics','project_report','package_probe','openapi_probe','sqlite_probe','render_see','fetch_content','web_search','data_query','syntax_check',
-  'browser','browser_navigate','browser_snapshot','browser_click','browser_screenshot','http_request','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','artifact_check',
-  'agentmail_status','agentmail_send','agentmail_messages','agentmail_search','agentmail_message',
+  'lsp_diagnostics','project_report','package_probe','sqlite_probe','render_see','fetch_content','web_search','data_query','browser','browser_navigate','browser_snapshot','browser_click','browser_screenshot','http_request','net_probe','archive_probe','agentmail','blender','project_memory',
 ]);
 
 /** Advisory discovery piggybacks on successful native observations. No timers

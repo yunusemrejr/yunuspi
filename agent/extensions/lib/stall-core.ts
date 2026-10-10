@@ -14,7 +14,7 @@ const OBSERVATION_TOOLS = new Set([
 	"read_symbol", "read_enclosing", "project_report", "lsp_diagnostics",
 	"lens_diagnostics", "ast_grep_search", "ast_grep_outline", "ast_grep_dump",
 	"checkpoint_read", "obs_read", "session_self", "web_probe",
-	"context_slice", "symbol_expand", "ast_diff", "context_score", "handoff_capsule",
+	"context_slice", "symbol_expand", "ast_diff", "handoff_capsule",
 ]);
 
 // Incomplete evidence must never generate a nudge. Bound serialization too:

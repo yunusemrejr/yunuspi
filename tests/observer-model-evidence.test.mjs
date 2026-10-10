@@ -40,12 +40,12 @@ test('incomplete model identity remains unknown instead of generating a fictitio
 });
 
 
-test('relevant configured swarm and fusion roles are sampled explicitly without inventing unset roles', () => {
- const configured={...preferences,preferences:{...preferences.preferences,swarm:{models:['chosen']},fusion:{models:['chosen']}}};
- const evidence=JSON.parse(observerModelEvidence({models:[model],entries:[],preferences:configured,preferredRoles:['swarm','fusion','unrelated']}));
- assert.deepEqual(evidence.preferences.map(row=>row.role),['subagents','swarm','fusion','council','quality_review']);
- assert.equal(evidence.preferences.find(row=>row.role==='fusion').routes[0].route,'fixture/preferred');
+test('relevant configured fanout role is sampled explicitly without inventing unset roles', () => {
+ const configured={...preferences,preferences:{...preferences.preferences,fanout:{models:['chosen']}}};
+ const evidence=JSON.parse(observerModelEvidence({models:[model],entries:[],preferences:configured,preferredRoles:['fanout','unrelated']}));
+ assert.deepEqual(evidence.preferences.map(row=>row.role),['subagents','fanout','council','quality_review']);
+ assert.equal(evidence.preferences.find(row=>row.role==='fanout').routes[0].route,'fixture/preferred');
  assert.match(evidence.preferenceScope,/omitted for budget/);
- const absent=JSON.parse(observerModelEvidence({models:[model],entries:[],preferences,preferredRoles:['swarm','fusion']}));
- assert.ok(!absent.preferences.some(row=>row.role==='swarm'||row.role==='fusion'));
+ const absent=JSON.parse(observerModelEvidence({models:[model],entries:[],preferences,preferredRoles:['fanout']}));
+ assert.ok(!absent.preferences.some(row=>row.role==='fanout'));
 });

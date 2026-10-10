@@ -17,6 +17,7 @@
  * recipients, a required subject, CR/LF rejection (header injection) and a
  * request size the API accepts.
  */
+import { actionTool } from "./lib/tool-schema.ts";
 import { Type } from "typebox";
 import { performHttp } from "./http-tools.ts";
 
@@ -722,7 +723,8 @@ const SEND_SCHEMA = Type.Object({
 });
 
 export default function agentMailTools(pi: any) {
-  pi.registerTool({
+  const parts: any[] = [];
+  parts.push({
     name: "agentmail_status",
     label: "AgentMail Status",
     description: `Report AgentMail email configuration (key from ${API_KEY_ENV}, default sender inbox from ${INBOX_ENV}) and, when configured, list the inboxes the key can use. Read-only; never prints the key.`,
@@ -799,7 +801,7 @@ export default function agentMailTools(pi: any) {
     },
   });
 
-  pi.registerTool({
+  parts.push({
     name: "agentmail_send",
     label: "AgentMail Send",
     description: `Send one email through AgentMail (outreach, replies or notices) via POST /v0/inboxes/{inboxId}/messages/send, defaulting to the configured sender inbox. Body text and/or html required; up to ${MAX_RECIPIENTS} recipients; subject required; CR/LF rejected. Sends immediately — verify the recipient, the sender identity and any opt-out requirement first.`,
@@ -850,7 +852,7 @@ export default function agentMailTools(pi: any) {
     },
   });
 
-  pi.registerTool({
+  parts.push({
     name: "agentmail_messages",
     label: "AgentMail Messages",
     description:
@@ -962,7 +964,7 @@ export default function agentMailTools(pi: any) {
     },
   });
 
-  pi.registerTool({
+  parts.push({
     name: "agentmail_search",
     label: "AgentMail Search",
     description:
@@ -1058,7 +1060,7 @@ export default function agentMailTools(pi: any) {
     },
   });
 
-  pi.registerTool({
+  parts.push({
     name: "agentmail_message",
     label: "AgentMail Message",
     description:
@@ -1111,4 +1113,10 @@ export default function agentMailTools(pi: any) {
       }
     },
   });
+  pi.registerTool(actionTool({
+    name: "agentmail", label: "AgentMail", prefix: "agentmail_",
+    description: `AgentMail email (key from ${API_KEY_ENV}, default sender inbox from ${INBOX_ENV}). action status: configuration and usable inboxes; messages: compact inbox listing; search: full-text search; message: read one message; send: send one email (subject required, body text and/or html, verified recipients only, honest sender identity and an opt-out line in outreach). Read actions never print the key.`,
+    promptSnippet: "Send and read email through AgentMail",
+    promptGuidelines: [GUIDELINE],
+  }, parts));
 }

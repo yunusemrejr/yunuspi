@@ -96,7 +96,7 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
     `Partial skill reads: ${metrics.skillsPartial.slice(0, 12).join(', ') || 'none recorded'}. Read coverage is not proof that checks were applied.`);
   for (const [label, names] of [
     ['Source exploration', ['project_report', 'module_report', 'symbol_search', 'context_slice']],
-    ['Context and local processing', ['context_score', 'handoff_capsule', 'evidence_cache', 'output_distill', 'mini_preprocess']],
+    ['Context and local processing', ['handoff_capsule', 'output_distill', 'mini_preprocess']],
     ['Verification', ['quality_review', 'quality_check', 'test_run', 'render_see', 'math_check']],
   ] as const) {
     const enabled = activeTools ? names.filter(name => activeTools.includes(name)) : undefined;

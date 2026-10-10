@@ -37,9 +37,6 @@ test('public website work stages SEO without asking; private apps, questions, ex
   assert.ok(!selectTaskPipelines({ prompt: 'Fix a one-line PHP comment typo', files: ['index.php'] }).ids.includes('seo'));
   assert.ok(!selectTaskPipelines({ prompt: 'Fix the login form validation', files: ['index.html'] }).ids.includes('seo'));
   assert.ok(selectTaskPipelines({ prompt: 'Improve the page metadata', files: ['templates/article.html'] }).ids.includes('seo'));
-  assert.equal(matchHook('edit', { path: 'content/guide.md' }).key, 'seo-discovery-source');
-  assert.equal(matchHook('seo_toolkit', { action: 'audit' }).key, 'seo-inspection-evidence');
-  assert.equal(matchHook('seo_toolkit', { action: 'discovery' }).key, 'seo-discovery-parity');
 });
 
 test('SEO stage evidence retires after a source change and cannot certify editorial checks from raw HTML', () => {

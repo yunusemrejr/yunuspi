@@ -9,12 +9,8 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')]
   .find(p => fs.existsSync(path.join(p, 'extensions/lib/skill-routing.ts')));
 const {routeSkills} = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-routing.ts')));
 
-const names = [
-  'github-readme-authoring',
-  'github-repo-presentation',
-  'github-release-notes',
-  'github-actions-workflows',
-];
+// The README, release-notes, CI and repo-presentation skills were consolidated into git-github.
+const names = ['git-github'];
 
 test('github workflow skills ship with descriptions and resolvable references', () => {
   for (const name of names) {
@@ -34,37 +30,36 @@ test('github workflow skills ship with descriptions and resolvable references', 
 
 test('deterministic routing selects the intended github skill', () => {
   const positives = [
-    ['github-readme-authoring','Write a README for the new library'],
-    ['github-readme-authoring','Improve the project README badges'],
-    ['github-readme-authoring','Rewrite the README quickstart section'],
-    ['github-repo-presentation','Add a CONTRIBUTING guide and issue templates'],
-    ['github-repo-presentation','Prepare the repository for outside contributors with a security policy and code of conduct'],
-    ['github-release-notes','Write release notes for v1.2.0'],
-    ['github-release-notes','Draft the 2.0 pre-release notes'],
-    ['github-release-notes','Update the changelog before the release'],
-    ['github-actions-workflows','Add a GitHub Actions workflow that runs the tests'],
-    ['github-actions-workflows','Harden our CI pipeline against fork pull requests'],
-    ['github-actions-workflows','Fix the failing GitHub Actions job'],
+    ['git-github','Write a README for the new library'],
+    ['git-github','Improve the project README badges'],
+    ['git-github','Rewrite the README quickstart section'],
+    ['git-github','Add a CONTRIBUTING guide and issue templates'],
+    ['git-github','Prepare the repository for outside contributors with a security policy and code of conduct'],
+    ['git-github','Write release notes for v1.2.0'],
+    ['git-github','Draft the 2.0 pre-release notes'],
+    ['git-github','Update the changelog before the release'],
+    ['git-github','Add a GitHub Actions workflow that runs the tests'],
+    ['git-github','Harden our CI pipeline against fork pull requests'],
+    ['git-github','Fix the failing GitHub Actions job'],
   ];
   for (const [name, prompt] of positives) {
     assert.ok(routeSkills(prompt).some(route => route.name === name), prompt);
   }
-  assert.ok(routeSkills('', 'docs/README.md').some(route => route.name === 'github-readme-authoring'));
-  assert.ok(routeSkills('', '.github/workflows/ci.yml').some(route => route.name === 'github-actions-workflows'));
+  assert.ok(routeSkills('', 'docs/README.md').some(route => route.name === 'git-github'));
+  assert.ok(routeSkills('', '.github/workflows/ci.yml').some(route => route.name === 'git-github'));
 });
 
 test('routing ignores unrelated, negated and source-code readme mentions', () => {
   const negatives = [
-    ['github-readme-authoring','Improve the readme parser performance'],
-    ['github-readme-authoring','Explain how to write a README'],
-    ['github-readme-authoring','Fix the readme renderer'],
-    ['github-repo-presentation','Fix the license header check in CI'],
-    ['github-repo-presentation','Implement security policy enforcement in the gateway'],
-    ['github-actions-workflows','Improve autonomous browser workflows'],
-    ['github-actions-workflows','Refactor the build pipeline of the transpiler'],
-    ['github-release-notes','Explain the changelog format'],
-    ['github-release-notes','Fix a bug in the version parser'],
-    ['github-release-notes','Do not write release notes; fix the API'],
+    ['git-github','Improve the readme parser performance'],
+    ['git-github','Explain how to write a README'],
+    ['git-github','Fix the readme renderer'],
+    ['git-github','Implement security policy enforcement in the gateway'],
+    ['git-github','Improve autonomous browser workflows'],
+    ['git-github','Refactor the build pipeline of the transpiler'],
+    ['git-github','Explain the changelog format'],
+    ['git-github','Fix a bug in the version parser'],
+    ['git-github','Do not write release notes; fix the API'],
   ];
   for (const [name, prompt] of negatives) {
     assert.ok(!routeSkills(prompt).some(route => route.name === name), prompt);

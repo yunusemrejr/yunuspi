@@ -12,9 +12,9 @@ const baseline = await import(pathToFileURL(resolve(process.argv[baselineArg + 1
 const runtime = await candidate.loadLocalLmRuntime();
 if (!runtime) throw Error('The installed local Qwen runtime is unavailable or disabled.');
 const tasks = [
- ['Review a Rust CLI for memory leaks', {name:'rust-systems-engineering', description:'Rust lifetimes, safe ownership and memory correctness'}],
- ['Build a Python command line parser', {name:'python-software-engineering', description:'Python applications, typing and test design'}],
- ['Fix focus navigation in a dialog', {name:'accessible-interaction-design', description:'Keyboard navigation, focus and assistive technology'}],
+ ['Review a Rust CLI for memory leaks', {name:'systems-languages', description:'Rust lifetimes, safe ownership and memory correctness'}],
+ ['Build a Python command line parser', {name:'engineering', description:'Python applications, typing and test design'}],
+ ['Fix focus navigation in a dialog', {name:'frontend', description:'Keyboard navigation, focus and assistive technology'}],
 ];
 const clients = Object.fromEntries([['baseline', baseline], ['candidate', candidate]].map(([name, module]) =>
  [name, module.createLocalLm({runtime, fetch:(...args)=>fetch(...args)})]));

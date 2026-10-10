@@ -2,7 +2,7 @@
  *
  * WHY: models asked for an interface with no constraints converge on the same
  * two looks (indigo/purple SaaS, cream/terracotta editorial). The harness
- * embeds `design-slop-prevention` as a skill; this module decides WHEN an agent
+ * embeds `ui-design` as a skill; this module decides WHEN an agent
  * is doing interface work and offers that reference when useful.
  *
  * Who decides: deterministic cues frame the question (a UI file being written,
@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { askTypedDecision, type TypedVerdict } from "./micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./micro-intelligence/review.ts";
 
-export const UI_DOCTRINE_SKILL = "design-slop-prevention";
+export const UI_DOCTRINE_SKILL = "ui-design";
 export const UI_DOCTRINE_CONTEXT = "ui-doctrine-context";
 
 const STRONG_PROMPT = /\b(?:ui|ux|gui|user interfaces?|front-?end|web ?sites?|landing ?pages?|home ?pages?|web ?apps?|dashboards?|mock-?ups?|wireframes?|css|tailwind|style ?sheets?|design systems?|hero sections?|nav ?bars?|side ?bars?|modals?|re-?design|re-?style|figma|storefronts?|portfolio sites?|responsive (?:design|layout)|color palettes?|typography|onboarding flow|checkout flow|sign-?up (?:page|flow|form)|login (?:page|screen|form))\b/i;

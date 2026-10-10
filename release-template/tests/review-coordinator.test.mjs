@@ -13,7 +13,7 @@ const lib = pathToFileURL(path.join(agent, "extensions/lib/")).href;
 const coordinator = await import(lib + "review-coordinator.ts");
 
 test("every review kind has a distinct purpose, owner and workflow", () => {
-	for (const kind of ["quality", "project", "error", "council", "swarm", "fusion"]) {
+	for (const kind of ["quality", "project", "error", "council", "fanout"]) {
 		const spec = coordinator.REVIEW_KINDS[kind];
 		assert.ok(spec.purpose.length > 20, kind);
 		assert.ok(spec.owner.length > 10, kind);

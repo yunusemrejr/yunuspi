@@ -15,15 +15,15 @@ const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/
 const { routeSkillsPrecise, routeSkills } = await import(shared + 'skill-routing.ts');
 
 test('overbroad keyword matches demote without evidence', () => {
-  const bare = precisionRankSkill({ skill: 'github-repo-presentation', requestedAction: 'review', text: 'Audit the GitHub client code for bugs.', keywordScore: 0.77 });
+  const bare = precisionRankSkill({ skill: 'git-github', requestedAction: 'review', text: 'Audit the GitHub client code for bugs.', keywordScore: 0.77 });
   assert.equal(bare.evidenceMatch, false);
   assert.ok(bare.score < 0.77 * 0.5, 'keyword-only repo-presentation match demoted');
 
-  const evidenced = precisionRankSkill({ skill: 'github-repo-presentation', requestedAction: 'plan', text: 'Add a license file and contributing guide.', keywordScore: 0.77 });
+  const evidenced = precisionRankSkill({ skill: 'git-github', requestedAction: 'plan', text: 'Add a license file and contributing guide.', keywordScore: 0.77 });
   assert.equal(evidenced.evidenceMatch, true);
   assert.ok(evidenced.score >= 0.77);
 
-  const slides = precisionRankSkill({ skill: 'presentation-authoring', requestedAction: 'review', text: 'Review the presentation layer components for state bugs.', keywordScore: 0.77 });
+  const slides = precisionRankSkill({ skill: 'office-documents', requestedAction: 'review', text: 'Review the presentation layer components for state bugs.', keywordScore: 0.77 });
   assert.equal(slides.evidenceMatch, false, 'UI presentation layer is not a slide deck');
 });
 
@@ -40,10 +40,10 @@ test('suggestion lifecycle distinguishes inspected, deferred, and applied', () =
   ledger = recordSkillSuggestion(ledger, 'debugging', 'suggested', 'keyword + intent');
   ledger = recordSkillSuggestion(ledger, 'debugging', 'inspected-preview');
   ledger = recordSkillSuggestion(ledger, 'debugging', 'not-relevant', 'frontend-only task');
-  ledger = recordSkillSuggestion(ledger, 'web-security', 'suggested');
-  ledger = recordSkillSuggestion(ledger, 'web-security', 'applied');
+  ledger = recordSkillSuggestion(ledger, 'api-security', 'suggested');
+  ledger = recordSkillSuggestion(ledger, 'api-security', 'applied');
   const debug = ledger.suggestions.find((s) => s.skill === 'debugging');
-  const sec = ledger.suggestions.find((s) => s.skill === 'web-security');
+  const sec = ledger.suggestions.find((s) => s.skill === 'api-security');
   assert.equal(debug.state, 'not-relevant');
   assert.equal(sec.state, 'applied');
 });

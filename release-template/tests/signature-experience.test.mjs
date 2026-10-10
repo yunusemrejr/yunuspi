@@ -160,18 +160,18 @@ test("the skill is well formed and every file it points to exists", () => {
 	assert.equal(front.name, "signature-experience");
 	assert.ok(front.description.length > 200 && front.description.length < 1500, "the description is specific enough to route on and short enough to list");
 	for (const rel of [...text.matchAll(/`((?:scripts|references)\/[a-z0-9.-]+)`/g)].map((m) => m[1])) assert.ok(fs.existsSync(path.join(skill, rel)), `${rel} exists`);
-	assert.match(text, /creative_direct set/);
-	assert.match(text, /swap test/);
+	// The summary names the shipped scripts in prose; the reduced skill has no references directory.
+	for (const rel of ["scripts/palette.mjs", "scripts/world-kit.mjs"]) assert.ok(fs.existsSync(path.join(skill, rel)), `${rel} exists`);
+	assert.match(text, /[Ss]wap test/);
 	assert.match(text, /static baseline|Baseline/);
-	for (const rel of ["three-world.md", "motion-system.md", "living-things.md", "palette-and-type.md"]) assert.ok(fs.statSync(path.join(skill, "references", rel)).size > 1500, `${rel} has substance`);
 });
 
 test("the design doctrine no longer vetoes the level it asks the agent to reach", () => {
-	const read = (name) => fs.readFileSync(path.join(agent, "skills", name, "SKILL.md"), "utf8");
-	assert.match(read("frontend-design"), /## Expression levels/);
-	assert.match(read("frontend-design"), /do not downscale an immersive brief/);
-	assert.match(read("web-effects"), /ambient life that \*is\* the world/);
-	assert.match(read("threejs"), /signature-experience\/scripts\/world-kit\.mjs/);
+	// Expression-level and anti-downscale sentences were consolidated into this skill's Ambition section.
+	const text = fs.readFileSync(path.join(skill, "SKILL.md"), "utf8");
+	assert.match(text, /immersive \(3D, cinematic, showcase\): coherence and fallbacks over element counts/);
+	assert.match(text, /Constraints lower ambition, never quality/);
+	assert.match(text, /scripts\/world-kit\.mjs/);
 });
 
 test("visual_review asks the reviewer to confirm the signature and judges immersive work on coherence, and leaves plain directions alone", { timeout: 120000 }, async (t) => {

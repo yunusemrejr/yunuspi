@@ -14,10 +14,9 @@
  *   council  structured multi-perspective reasoning -> the automatic
  *            scope-council runner, or the supervisor-mediated council prompt
  *            (`prompt-workflow` council) for deliberate use.
- *   swarm    separable parallel investigations -> assistance-plan swarm mode
- *            with the native executor and swarm-recovery respawns.
- *   fusion   competing approaches -> fusion-mode workers merged by the
- *            deterministic fusion planner.
+ *   fanout   separable parallel investigations or competing approaches ->
+ *            assistance-plan fanout mode with the native executor, bounded
+ *            respawns and the deterministic provenance-preserving merge.
  *
  * The main agent always remains the coordinator: it can invoke any of these
  * deliberately, and automatic intervention is reserved for strong signals
@@ -25,7 +24,7 @@
  * launcher or model fan-out lives here.
  */
 
-export type ReviewKind = "quality" | "project" | "error" | "council" | "swarm" | "fusion";
+export type ReviewKind = "quality" | "project" | "error" | "council" | "fanout";
 
 export interface ReviewKindSpec {
 	kind: ReviewKind;
@@ -64,19 +63,12 @@ export const REVIEW_KINDS: Record<ReviewKind, ReviewKindSpec> = {
 		invoke: "Deliberate: `prompt-workflow` council with a question, or subagent supervisors per prompts/council.md. Automatic only for qualifying change-scope requests.",
 		workflow: "Two independent perspectives plus a critique under a shared deadline and budget; advisory brief, never authorization.",
 	},
-	swarm: {
-		kind: "swarm",
-		purpose: "Separable parallel investigations within one broad task.",
-		owner: "Assistance-plan swarm mode with the native executor; bounded respawns via swarm-recovery.",
-		invoke: "Deliberate: subagent({tasks:[...],async:true}) with a common brief. Automatic only for broad tasks with separable work.",
-		workflow: "At most three model identities; bounded attributed outputs; parent resolves disagreements.",
-	},
-	fusion: {
-		kind: "fusion",
-		purpose: "Compare competing approaches or alternatives, then synthesize with provenance.",
-		owner: "Fusion-mode workers merged by the deterministic fusion planner (runs/shared/fusion.ts).",
-		invoke: "Deliberate: fusion workers plus runs.fuse. Automatic only when alternatives are explicitly in play.",
-		workflow: "Duplicate/complementary/conflict fragments; conflicts stay visible for parent review.",
+	fanout: {
+		kind: "fanout",
+		purpose: "Separable parallel investigations or competing approaches within one task, merged with provenance.",
+		owner: "Assistance-plan fanout mode with the native executor; bounded respawns and the deterministic merge in runs/shared/fanout.ts.",
+		invoke: "Deliberate: subagent({tasks:[...],async:true}) with a common brief, or fanout workers plus runs.fuse. Automatic only for broad tasks with separable work or explicit alternatives.",
+		workflow: "At most three model identities; bounded attributed outputs; duplicate/complementary/conflict fragments; conflicts stay visible for parent review.",
 	},
 };
 

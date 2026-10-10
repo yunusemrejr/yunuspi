@@ -91,12 +91,9 @@ export function skillEvidenceContext(evidence: { files?: readonly string[]; tool
     if (/^(?:dockerfile|compose\.ya?ml|docker-compose\.ya?ml)$/.test(basename)) terms.add('containers deployment');
   }
   const operations: Record<string,string> = {
-    sqlite_probe:'database queries', sql_query:'database queries', coverage_probe:'testing coverage',
-    openapi_probe:'api contracts schema', contract_diff:'api contract compatibility',
+    sqlite_probe:'database queries', sql_query:'database queries',
     lsp_diagnostics:'compiler diagnostics', render_see:'visual browser verification',
-    browser:'browser interaction', dependency_plan:'dependency architecture',
-    agentmail_status:'email inbox', agentmail_messages:'email inbox', agentmail_search:'email inbox',
-    agentmail_message:'email inbox', agentmail_send:'email outreach',
+    browser:'browser interaction', agentmail:'email inbox outreach',
   };
   for (const name of (evidence.tools ?? []).slice(-32)) if (typeof name === 'string' && Object.hasOwn(operations, name)) terms.add(operations[name]);
   return [...terms].join(' ').slice(0,1600);

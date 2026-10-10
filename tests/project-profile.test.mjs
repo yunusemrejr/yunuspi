@@ -6,10 +6,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((dir) => fs.existsSync(path.join(dir, "extensions/research-toolkit.ts")));
+const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((dir) => fs.existsSync(path.join(dir, "extensions/lib/project-profile.ts")));
 const load = (relative) => import(pathToFileURL(path.join(agent, relative)));
 const { profileProject } = await load("extensions/lib/project-profile.ts");
-const toolkit = await load("extensions/research-toolkit.ts");
 
 function project(t, files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-profile-"));
@@ -20,15 +19,6 @@ function project(t, files) {
   }
   return dir;
 }
-function tool() {
-  let registered;
-  toolkit.default({ registerTool(definition) { registered = definition; } });
-  return async (input) => {
-    const result = await registered.execute("id", input);
-    return { ...JSON.parse(result.content[0].text), isError: result.isError === true };
-  };
-}
-
 test("a project profile reports languages, declared surface, license, layout signals and README claims without reading secrets", (t) => {
   const dir = project(t, {
     "package.json": JSON.stringify({ name: "notes-cli", description: "Fast terminal notes", license: "MIT", bin: { notes: "bin/notes.js" }, scripts: { test: "node --test", build: "tsc" }, dependencies: { chalk: "^5" }, devDependencies: { typescript: "^5", tsx: "^4" } }),
@@ -64,28 +54,6 @@ test("a license is recognised from its text when no manifest declares one, and a
   assert.deepEqual(profile.languages, []);
   assert.equal(profile.license, undefined);
   assert.throws(() => profileProject(path.join(bare, "notes.txt")), /directory/);
-});
-
-test("research_toolkit plans prior-art angles, keeps the lead plan unchanged and profiles on demand", async (t) => {
-  const run = tool();
-  const plan = await run({ action: "plan", goal: "Build a terminal note taking app with sync", mode: "prior-art" });
-  assert.ok(plan.angles.some((angle) => /alternatives$/.test(angle)));
-  assert.ok(plan.angles.some((angle) => /limitations complaints$/.test(angle)), "what users complain about is a standing angle");
-  assert.deepEqual(plan.githubQueries, ["terminal note taking sync", "terminal note"]);
-  assert.deepEqual(plan.fallbackProviders, ["hackernews", "stackexchange", "npm"], "keyless indexes keep the web angles useful while general search cools down");
-  assert.ok(plan.sequence.length >= 4 && /profile/.test(plan.sequence[0]));
-  assert.match(plan.template, /adopt\|adapt\|reject\|watch/);
-  assert.ok(!plan.angles.some((angle) => /contact leadership|pricing customers/.test(angle)), "prior-art planning is not lead generation");
-  const leads = await run({ action: "plan", goal: "acme robotics buyers" });
-  assert.ok(leads.angles.some((angle) => /contact leadership/.test(angle)), "the default plan is still the market plan");
-  assert.equal(leads.githubQueries, undefined);
-  const dir = project(t, { "package.json": JSON.stringify({ name: "demo" }), "a.py": "" });
-  const profile = await run({ action: "profile", path: dir });
-  assert.equal(profile.profile.name, "demo");
-  assert.match(profile.next, /github_search/);
-  const missing = await run({ action: "profile", path: path.join(dir, "nope") });
-  assert.equal(missing.isError, true);
-  assert.match(missing.error, /Cannot profile/);
 });
 
 test('profile metadata reads a bounded prefix even when the README is a huge sparse file', t => {

@@ -33,7 +33,7 @@ export const VIDEO_PATHS = {
   template: path.join(AGENT_ROOT, "skills/remotion-video/assets/template"),
   runner: path.join(AGENT_ROOT, "scripts/video-render.mjs"),
   optional: path.join(AGENT_ROOT, "skills/remotion-video/assets/optional"),
-  synth: path.join(AGENT_ROOT, "skills/procedural-audio/scripts/synth.py"),
+  synth: path.join(AGENT_ROOT, "skills/audio/scripts/synth.py"),
   narrate: path.join(AGENT_ROOT, "skills/code-first-video/scripts/narrate.py"),
 };
 const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");

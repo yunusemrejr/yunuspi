@@ -133,7 +133,7 @@ evidence into child handoffs. The viewer is an optional inspection surface.
 - Git, shell, memory and child completion events schedule a debounced refresh.
   A 30-second heartbeat catches external edits and changes from other sessions.
 - Built-in scout, worker, reviewer, researcher, delegate, oracle and automatic
-  helper profiles load the capability. Swarm/fusion workers using those profiles
+  helper profiles load the capability. Fan-out workers using those profiles
   share the same project domain. Explicit custom extension/tool restrictions
   continue to apply. Automatic read-only helpers can query; they return proposed
   manual knowledge changes to their parent.

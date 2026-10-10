@@ -27,7 +27,7 @@ test('popup html escapes untrusted branch content', () => {
   const html = signals.usedSummaryHtml({
     tools: [{ name: '<img src=x>', count: 5 }],
     skillsRead: [], skillsPartial: [], skillsSuggested: [],
-    routes: [], runs: [], swarms: 0, fusions: 0, recoveries: 0, councils: [], reviews: null, inspected: 1,
+    routes: [], runs: [], fanouts: 0, recoveries: 0, councils: [], reviews: null, inspected: 1,
   });
   assert.ok(html.includes('&lt;img src=x&gt;'));
   assert.ok(!html.includes('<img src=x>'));
@@ -141,13 +141,13 @@ test('used summary counts tools and skill reads from call pairing', () => {
 test('used summary includes ledger-backed skill reads and separates suggestions', () => {
   const branch = [{
     type: 'custom', customType: 'relevant-guidance', data: {
-      read: ['/skills/coding-practices/SKILL.md'],
-      shown: ['skill:/skills/coding-practices/SKILL.md', 'skill:/skills/debugging/SKILL.md'],
+      read: ['/skills/engineering/SKILL.md'],
+      shown: ['skill:/skills/engineering/SKILL.md', 'skill:/skills/debugging/SKILL.md'],
     },
   }];
   const summary = signals.buildUsedSummary(branch);
-  assert.deepEqual(summary.skillsRead, [{ name: 'coding-practices', count: 0 }]);
-  assert.deepEqual(summary.skillsSuggested, ['coding-practices', 'debugging']);
+  assert.deepEqual(summary.skillsRead, [{ name: 'engineering', count: 0 }]);
+  assert.deepEqual(summary.skillsSuggested, ['debugging', 'engineering']);
   assert.deepEqual(summary.skillTotals, { read: 1, partial: 0, suggested: 2, suggestedOnly: 1, omitted: 0 });
   const html = signals.usedSummaryHtml(summary);
   assert.ok(html.includes('1 fully opened · 0 partial only · 1 suggested only'));
@@ -205,7 +205,7 @@ test('used model identities join measured scopes while excluding selection and p
     custom('model-config-v1', { route: 'fixture/selected-only' }),
     custom('auxiliary-model-usage-v1', { id: 'review', owner: 'session-observer', provider: 'fixture', model: 'shared', status: 'pending' }),
     custom('auxiliary-model-usage-v1', { id: 'review', owner: 'session-observer', provider: 'fixture', model: 'shared', status: 'completed', usage: { input: 5, output: 1 } }),
-    custom('auxiliary-model-usage-v1', { id: 'pending', owner: 'session-watchmaker', provider: 'fixture', model: 'pending-only', status: 'pending' }),
+    custom('auxiliary-model-usage-v1', { id: 'pending', owner: 'session-observer', provider: 'fixture', model: 'pending-only', status: 'pending' }),
     custom('auxiliary-model-usage-v1', { id: 'embedding', owner: 'project-memory', provider: 'fixture', model: 'embedding', status: 'completed', usage: { input: 4 } }),
     custom('subagent-cost-v1', { runId: 'child', results: [{ index: 0, model: 'fixture/child', status: 'completed', usage: { input: 4, output: 1 } }] }),
     custom('subagent-cost-v1', { runId: 'child', results: [{ index: 0, model: 'fixture/child', status: 'completed', usage: { input: 4, output: 1 } }] }),

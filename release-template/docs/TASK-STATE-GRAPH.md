@@ -25,8 +25,8 @@ raw events / evidence
 Task State Graph
         ↓
 ┌────────────┬────────────┬────────────┬────────────┐
-Main Agent   Observer     Watchmaker   Subagents
-Reviews      Guardian     Expert       Completion
+Main Agent   Observer     Expert       Subagents
+Reviews      Guardian     Council      Completion
 ```
 
 Pipeline:
@@ -48,9 +48,9 @@ bounded projections (per-consumer budgets)
   assumption, question, work, attempt, failure (with stable family keys),
   artifact, tool-exec, child, peer, review, finding, verification, evidence,
   completion-claim, gap.
-- **Provenance** (~17 sources): literal-user, prompt-analysis, main-agent,
+- **Provenance** (~16 sources): literal-user, prompt-analysis, main-agent,
   tool-output, source-inspection, test-result, render-inspection, subagent,
-  observer, watchmaker, expert-director, guardian, review-council,
+  observer, expert-director, guardian, review-council,
   project-memory, project-intelligence, sibling-session, session-history.
   A model claim is not test evidence; a subagent statement is not verified;
   history is not instruction.
@@ -90,7 +90,6 @@ bounded projections (per-consumer budgets)
 | Main Agent | `task_state`: status, requirements, unresolved, evidence, work, entity, blockers, failures, decisions, diagnostics, assess | bounded reads; explicit evidence assessment |
 | Operator | `/task-state` summary + entity drill-down | TUI command |
 | Observer | reviewer projection: requirements × verification, decisions, assumptions, failures, child findings, claims, contradictions, stale evidence | `task-state` packet row (1500 chars) |
-| Watchmaker | progress projection: active work, attempts, repeat families, blocked deps, completed investigations | `task-progress` packet row (time-kind budget) |
 | Subagents | per-child slice: goal, relevant requirements/decisions/files/failures/evidence + required output/verification | appended to native briefs at dispatch; results return with subagent provenance, never auto-verified |
 | Completion gate | requirement-level blockers (`task state: R2 implemented but unverified`) | additive to existing receipts; claims recorded as `completion-claim` entities |
 | `/metrics` | entity/link/requirement/stale/failure counts + degraded flags | session-report line |
@@ -190,7 +189,7 @@ commands may still execute normally; only the evidence claim is conservative.
   window after the ID cap. Snapshot cursors preserve replay correctness
   beyond that window; full rebuilds also deduplicate the complete log.
 - Projections carry hard char budgets (default 2000; observer 1500;
-  watchmaker 420; child slice 1500) with item caps. The whole graph is never
+  child slice 1500) with item caps. The whole graph is never
   injected into context.
 - The graph is deterministic: no model calls, no background LLM. Cheap
   intelligence (Needle/local-LM/Jev) is never required for correctness.
@@ -227,7 +226,7 @@ requirement coverage.
 - `tests/task-state-graph.test.mjs` — reducer/ingest/projection/store
   behavioral contracts (19 tests).
 - `tests/task-state-integration.test.mjs` — live consumption by main agent,
-  Observer, Watchmaker, subagents, reviews, completion gate, metrics (15
+  Observer, subagents, reviews, completion gate, metrics (15
   tests).
 - `tests/task-state-recovery.test.mjs` — long-log replay, interrupted writes,
   foreign/malformed snapshots, replaced logs, native session scopes and

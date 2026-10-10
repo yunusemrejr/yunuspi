@@ -45,7 +45,7 @@ test('routine background work updates one live pulse; verdicts, hooks and gating
   for (let i = 1; i <= 5; i++) activity.note('guardian.observing', { count: i, evaluations: 0, decision: 'ready' });
   for (let i = 0; i < 4; i++) activity.note('ml.fuzzy.used', { count: 2 });
   activity.note('ml.needle.call', { op: 'rank', count: 3 });
-  activity.note('skill.route', { route: 'java-platform-engineering' });
+  activity.note('skill.route', { route: 'systems-languages' });
   activity.note('guardian.decision', { check: 'repeated-identical-failure', decision: 'abstained', score: 0.62, threshold: 0.95, evaluations: 1 });
   activity.note('hook.fired', { hook: 'deploy-verify-live', tool: 'bash', decision: 'guidance' });
   activity.note('skill.gate', { skill: 'all-about-odoo', decision: 'filtered', score: 0.21 });

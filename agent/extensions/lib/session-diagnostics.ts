@@ -240,7 +240,7 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     activity: { tools: metrics.tools, parentToolErrors:metrics.errors, parentModelErrors:metrics.modelErrors,
       children:metrics.agents, childFailures:metrics.agentFailures, workflowFailures:metrics.workflowFailures,
       skillsOpened:metrics.skillsRead.length + metrics.skillsPartial.length, skillsSuggested:metrics.skillsRouted.length,
-      cacheRate:metrics.cacheRate, swarms:metrics.swarms, fusions:metrics.fusions },
+      cacheRate:metrics.cacheRate, fanouts:metrics.fanouts },
     scope: "Newest evidence within the last 2000 branch entries; at most 12 diagnostics. diagnosticRecords counts every sighting; uniqueIncidents counts stable incident ids (same cause + same call/run linkage). Parent/child/workflow/budget records for one incident share one incident id. Model aborts are not failures. Unmatched subagent tool receipts cannot establish child ownership. Activity counts apply only to this window; missing earlier evidence remains unknown.",
   };
 }

@@ -31,10 +31,10 @@ test('scope cadence runs the actual scheduler at 120s for diagnosis and 60s for 
   }
 });
 
-test('Watchmaker waits for substantial work and quiet standard work spends no judge calls',async()=>{
-  const time=clock();let snapshots=0,judges=0;
-  const observer=createSessionObserver({...time,usageOwner:'session-watchmaker',execution:()=>classifyExecution({task:'Investigate a parser failure'}),judge:async()=>{judges++;throw Error('unexpected');},snapshot:()=>{snapshots++;return {route,packet:buildObserverPacket('Parser',[],[],[])};},notice(){},receipt(){},dispatch:async()=>response()});
-  observer.begin('owner');observer.start();await time.advance(300000);assert.equal(snapshots,0);assert.equal(judges,0);observer.close();
+test('quiet standard diagnosis spends no judge calls',async()=>{
+  const time=clock();let judges=0;
+  const observer=createSessionObserver({...time,execution:()=>classifyExecution({task:'Investigate a parser failure'}),judge:async()=>{judges++;throw Error('unexpected');},snapshot:()=>({route,packet:buildObserverPacket('Parser',[],[],[])}),notice(){},receipt(){},dispatch:async()=>response()});
+  observer.begin('owner');observer.start();await time.advance(300000);assert.equal(judges,0);observer.close();
 });
 
 test('missing policy retains existing observer lifecycle and cadence',async()=>{

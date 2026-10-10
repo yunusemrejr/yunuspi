@@ -4,9 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {ambientPlan,createAmbientFrames,skylineMask,featherMask} from '../agent/extensions/lib/ambient-frames.ts';
-import {videoAmbient} from '../agent/extensions/lib/video-ambient.ts';
 import {videoQa} from '../agent/extensions/lib/video-studio.ts';
-import {encodeImage} from '../agent/extensions/lib/design-studio.ts';
 import {run,FFMPEG_FLAGS} from '../agent/extensions/lib/media-process.ts';
 
 test('evolving clouds change uniform sky, preserve the protected subject and remain neutral',()=>{
@@ -60,19 +58,4 @@ test('matte edges fade inward without creating halos over protected pixels',()=>
  const result=featherMask(input,16,8,4);
  for(let y=0;y<8;y++){assert.deepEqual(result.subarray(y*16*3,(y*16+8)*3),input.subarray(y*16*3,(y*16+8)*3));assert.ok(result[(y*16+8)*3]<result[(y*16+10)*3]);assert.equal(result[(y*16+12)*3],255);}
  assert.equal(input[(2*16+8)*3],255,'feathering does not mutate the authored matte');
-});
-
-test('native delivery exposes comparison frames, real decoded cadence and its actual loop boundary',{timeout:60000},async t=>{
- const cwd=await fs.mkdtemp(path.join(os.tmpdir(),'ambient-production-'));t.after(()=>fs.rm(cwd,{recursive:true,force:true}));
- const w=128,h=72,data=new Uint8Array(w*h*4);
- for(let i=0;i<data.length;i+=4){const x=(i/4)%w;data[i]=90+x/4;data[i+1]=100+x/4;data[i+2]=110+x/4;data[i+3]=255;}
- await fs.writeFile(path.join(cwd,'plate.png'),await encodeImage({width:w,height:h,data},'png'));
- const delivery=await videoAmbient({action:'render',plate:'plate.png',width:w,height:h,seconds:2,fps:12,skyline:[[0,.5],[1,.5]],clouds:1,rain:.7,loop:true,stage:'final'},cwd);
- assert.equal(delivery.loopClosed,true);assert.equal(delivery.reviewFrames[0].seconds,0);assert.equal(delivery.reviewFrames.at(-1).seconds,23/12);assert.ok((await fs.stat(delivery.contactSheet)).size>0);
- const qa=await videoQa({path:delivery.output},cwd);
- assert.equal(qa.motionEvidence.frames,24);assert.equal(qa.motionEvidence.timing.irregularIntervals,0);assert.equal(qa.motionEvidence.coverage.complete,true);assert.equal(qa.motionEvidence.deliveryLoop.findings.length,0);
- assert.equal(qa.reviewStatus,'unreviewed','decoded motion never confers artistic approval');assert.equal(qa.passedAutomatedChecks,true,JSON.stringify(qa.findings));
- const bad=path.join(cwd,'wrong-mask.png');await fs.writeFile(bad,await encodeImage({width:1,height:1,data:new Uint8Array([255,255,255,255])},'png'));
- await assert.rejects(videoAmbient({action:'plan',plate:'plate.png',width:w,height:h,clouds:0,fog:1,fogMask:bad},cwd),/pixel canvas/);
- await assert.rejects(videoAmbient({action:'render',plate:'plate.png',width:w,height:h,seconds:2,fps:12,clouds:0,rain:0,stage:'final',maxFramePixels:4096},cwd),/Render work/);
 });

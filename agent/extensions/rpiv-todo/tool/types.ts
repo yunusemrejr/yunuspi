@@ -44,7 +44,7 @@ export interface Task {
 	owner?: string;
 	metadata?: Record<string, unknown>;
 	parentId?: number | null;
-	execution?: "self" | "subagent" | "swarm" | "fusion";
+	execution?: "self" | "subagent" | "fanout";
 	files?: string[];
 	acceptance?: string;
 	evidence?: string;
@@ -84,7 +84,7 @@ export interface TaskMutationParams {
 	owner?: string;
 	metadata?: Record<string, unknown>;
 	parentId?: number | null;
-	execution?: "self" | "subagent" | "swarm" | "fusion";
+	execution?: "self" | "subagent" | "fanout";
 	files?: string[];
 	acceptance?: string;
 	evidence?: string;
@@ -113,12 +113,12 @@ const MutationSchema = Type.Object({
 		"clear",
 	] as const),
 	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent outcome id; null detaches. Negative ids must be declared as \"id\" on an earlier create in the same batch."})),
-	execution: Type.Optional(StringEnum(["self", "subagent", "swarm", "fusion"] as const)),
+	execution: Type.Optional(StringEnum(["self", "subagent", "fanout"] as const)),
 	files: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32})),
 	acceptance: Type.Optional(Type.String({maxLength:2000,description:"Concrete completion check"})),
 	evidence: Type.Optional(Type.String({maxLength:2000,description:"Observed verification and limitations; required to complete a task with acceptance"})),
 	refs: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32,description:"Project fact ids, observation ids or source references; no copied project map"})),
-	runId: Type.Optional(Type.String({maxLength:2000,description:"Native subagent/swarm/fusion run id; results still require review"})),
+	runId: Type.Optional(Type.String({maxLength:2000,description:"Native subagent/fanout run id; results still require review"})),
 	subject: Type.Optional(
 		Type.String({ description: "Task subject line (required for create)" }),
 	),

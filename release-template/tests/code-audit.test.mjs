@@ -7,7 +7,6 @@ import {createJiti} from 'jiti';
 
 const jiti=createJiti(import.meta.dirname);
 const {auditSource,codeAudit,auditable}=await jiti.import('../agent/extensions/lib/code-audit.ts');
-const {default:registerAuditTools}=await jiti.import('../agent/extensions/code-audit.ts');
 const {default:registerSourceCheck}=await jiti.import('../agent/extensions/lib/source-check.ts');
 const {authoredReviewSignals}=await jiti.import('../agent/extensions/lib/authored-review.ts');
 const {reviewAspects}=await jiti.import('../agent/extensions/lib/quality-review.ts');
@@ -173,20 +172,6 @@ test('codeAudit walks a workspace, honours changed scope and keeps results bound
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 
-test('code_audit tool returns each rule message once and compact locations',async()=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'code-audit-tool-'));
-  const tools=new Map();registerAuditTools({registerTool:t=>tools.set(t.name,t)});
-  try {
-    fs.writeFileSync(path.join(dir,'a.js'),'db.query(`SELECT * FROM t WHERE a = ${x}`);\ndb.query(`SELECT * FROM t WHERE b = ${y}`);\n');
-    assert.deepEqual([...tools.keys()],['code_audit']);
-    const result=await tools.get('code_audit').execute('1',{domains:['security']},undefined,undefined,{cwd:dir});
-    const body=JSON.parse(result.content[0].text);
-    assert.equal(Object.keys(body.rules).length,1);
-    assert.deepEqual(body.findings.map(f=>f.at),['a.js:1','a.js:2']);
-    assert.ok(body.rules['sql-injection'].fix);
-  } finally {fs.rmSync(dir,{recursive:true,force:true});}
-});
-
 test('edits get audit advisories once per finding, and audit cues route review aspects',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'code-audit-hook-'));
   const hooks=new Map();
@@ -197,7 +182,7 @@ test('edits get audit advisories once per finding, and audit cues route review a
     const event={toolName:'write',input:{path:'handler.js'},content:[{type:'text',text:'wrote'}],details:{},isError:false};
     const first=await hooks.get('tool_result')(event,ctx);
     assert.match(first.content[1].text,/security\/sql-injection \(high\)/);
-    assert.match(first.content[1].text,/code_audit\(\{changed: ?true\}\)/);
+    assert.match(first.content[1].text,/goal\(\{action: ?"check"\}\)/);
     assert.equal(first.details.codeAudit[0].rule,'sql-injection');
     fs.appendFileSync(path.join(dir,'handler.js'),'export const other = 1;\n');
     const second=await hooks.get('tool_result')({...event,toolName:'write'},ctx);

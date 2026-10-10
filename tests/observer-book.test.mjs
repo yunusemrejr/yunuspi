@@ -43,8 +43,8 @@ const select = (request, tools, said, state = B.createBookSelectionState()) => {
 
 test('the shipped book is complete, bounded and well formed', () => {
   assert.deepEqual(book.diagnostics, []);
-  assert.ok(book.chapters.length >= 55, `${book.chapters.length} chapters`);
-  assert.ok(book.passages.size >= 380, `${book.passages.size} passages`);
+  assert.equal(book.chapters.length, 14, `${book.chapters.length} chapters`);
+  assert.ok(book.passages.size >= 100, `${book.passages.size} passages`);
   const ids = new Set();
   for (const chapter of book.chapters) {
     assert.ok(B.BOOK_PARTS.includes(chapter.part), chapter.id);
@@ -58,8 +58,8 @@ test('the shipped book is complete, bounded and well formed', () => {
       assert.ok(passage.terms.length >= 3, `${passage.id} has ranking terms`);
     }
   }
-  for (const topic of ['marketing', 'promotion', 'copywriting', 'communication', 'color', 'typography', 'separation', 'minimalism', 'web-design', 'motion', 'video', 'linux', 'devops', 'dataops', 'math', 'science', 'coding', 'design-to-code', 'anti-slop'])
-    assert.ok(book.chapterById.has(topic), topic);
+  const chapterIds = ['craft', 'agent-workflow', 'collaboration', 'cost', 'engineering', 'coding', 'debugging', 'testing', 'security', 'code-quality', 'ui-ux', 'web-design', 'design-to-code', 'anti-slop'];
+  assert.deepEqual([...book.chapterById.keys()].sort(), [...chapterIds].sort(), 'the shipped chapter list');
   assert.ok(Buffer.byteLength(book.toc, 'utf8') < 900, 'contents stay compact enough for every packet');
 });
 
@@ -143,25 +143,13 @@ test('the session profile measures working patterns and fires deterministic trig
   assert.ok(claim.profile.snapshot().claimAfterEdits);
   claim.profile.tool('bash', { command: 'npm test' }, { error: false });
   assert.equal(claim.profile.snapshot().claimAfterEdits, false, 'verification after the claim clears the flag');
-
-  let now = 0;
-  const idle = B.createSessionProfile(() => now); idle.reset('Explain the parser');
-  for (let i = 0; i < 20; i++) idle.tool('read', { path: `src/${i}.ts` }, { error: false });
-  now = 600_000;
-  assert.equal(B.watchFired(book.passages.get('research.timebox'), undefined, idle, idle.snapshot()), undefined, 'explanations need no edits');
-  idle.request('Fix the parser crash');
-  assert.match(B.watchFired(book.passages.get('research.timebox'), undefined, idle, idle.snapshot()), /20 reads\/searches and no edits/);
 });
 
 test('selection routes sessions to the doctrine they need', () => {
   const ids = selection => selection.passages.map(row => row.passage.id);
   assert.equal(ids(select('Improve the settings page layout and make the buttons consistent', [['edit', { path: 'src/Settings.tsx' }], ['edit', { path: 'src/buttons.css' }], ['edit', { path: 'src/buttons.css' }]]))[0], 'ui-ux.verify-rendered');
-  assert.deepEqual(ids(select('Set up a Dockerfile and GitHub Actions CI for this Node service', [['write', { path: 'Dockerfile' }], ['write', { path: '.github/workflows/ci.yml' }]])).sort(), ['devops.containers', 'release.ci-green']);
   assert.ok(ids(select('Fix the date formatting bug', [['edit', { path: 'src/report.ts' }]], 'I fixed the bug and all tests pass now.')).includes('craft.claims'));
-  assert.ok(ids(select('Write a bash script to back up the database nightly with cron', [['write', { path: 'backup.sh' }]])).includes('databases.backups'));
-  assert.ok(ids(select('Plan a Product Hunt launch for our invoicing app', [])).some(id => id.startsWith('promotion.')));
   assert.ok(ids(select('Here are two screenshots; apply this new look to the whole site', [['read', { path: 'ref1.png' }]])).includes('design-to-code.generalize'));
-  assert.ok(ids(select('Pick a color palette and fonts for our brand refresh', [])).some(id => id.startsWith('color.')));
   assert.ok(ids(select('Review this landing page for generic SaaS cliches: glow badges bento grid fake testimonials and chatbot', [])).some(id => id.startsWith('anti-slop.')), 'website slop vocabulary promotes the checklist');
   const quiet = select('Rename a variable', []);
   assert.ok(quiet.passages.length <= 2, 'unrelated sessions do not pull in the whole book');
@@ -181,10 +169,10 @@ test('selection is sticky, rotates unused passages, rests cited doctrine and hon
   assert.notDeepEqual(tired, first.passages.map(row => row.passage.id), 'passages shown many times without use rotate out');
   B.noteBookCitations(state, ['ui-ux.verify-rendered']);
   assert.ok(!select(request, [], '', state).passages.some(row => row.passage.id === 'ui-ux.verify-rendered'), 'just-cited untriggered doctrine rests');
-  B.noteBookmarks(state, ['marketing']);
+  B.noteBookmarks(state, ['testing']);
   const reading = select(request, tools, '', state);
   const deep = reading.passages.find(row => row.deep);
-  assert.equal(deep?.passage.chapter, 'marketing', 'a requested chapter is read in depth at the next review');
+  assert.equal(deep?.passage.chapter, 'testing', 'a requested chapter is read in depth at the next review');
   const rendered = B.renderBookSection(book, reading, []);
   assert.ok(rendered.deep.length === 1 && rendered.text.includes('Why:'), 'deep reading includes the reasoning');
   B.noteBookReview(state, rendered.passages);
@@ -214,8 +202,8 @@ test('rendered sections are bounded, static-first and byte-identical for identic
   assert.ok(a.text.indexOf('Contents by part') < a.text.indexOf('[craft.'), 'static contents precede sticky passages');
   assert.match(a.text, /\[m1 ×3\] The full test suite/);
   assert.match(a.text, /⚑ completion claimed while edits are unverified/);
-  const tight = B.renderBookSection(book, selection, margins, 900);
-  assert.ok(tight && Buffer.byteLength(tight.text, 'utf8') <= 900 && tight.passages.length >= 1, 'reduction keeps at least one passage');
+  const tight = B.renderBookSection(book, selection, margins, 500);
+  assert.ok(tight && Buffer.byteLength(tight.text, 'utf8') <= 500 && tight.passages.length >= 1, 'reduction keeps at least one passage');
   assert.match(tight.text, /Contents omitted for budget/, 'doctrine outranks the contents under extreme budgets');
   const packet = O.buildObserverPacket('Fix the date formatting bug', [{ id: 'event-1', kind: 'tool result', text: 'edit src/report.ts completed.' }], [], [], { book: a });
   assert.ok(packet.text.startsWith(packet.text.slice(0, packet.text.indexOf('Observer book'))));
@@ -386,7 +374,7 @@ test('the observer extension reads its book, applies doctrine and keeps margin n
   await h.advance(30000);
   const packet = h.packets[0];
   assert.ok(packet.book.passages.includes('ui-ux.verify-rendered'));
-  assert.match(packet.text, /⚑ 3 UI and UX craft edits with no browser_session\/render_see\/design_audit check since/);
+  assert.match(packet.text, /⚑ 3 UI and UX craft edits with no browser_session\/render_see\/[a-z_]+ check since/);
   assert.ok(packet.evidence.some(row => row.id === 'session-profile' && /edits 3/.test(row.text)));
   assert.ok(packet.tools.slice(0, 2).some(tool => ['render_see', 'browser_session'].includes(tool.name)), 'chapter tools lead the shortlist');
   assert.match(h.sent.find(([message]) => message.details?.status === 'started')[0].content, /book: ui-ux\.verify-rendered/);
@@ -409,8 +397,8 @@ test('the observer extension reads its book, applies doctrine and keeps margin n
   // The command lets the user read the book and manage margin notes.
   const command = h.commands.get('observer-book');
   await command.handler('', h.ctx); assert.match(h.notified.at(-1)[0], /Observer Book [0-9a-f]{8}: \d+ chapters, \d+ passages[\s\S]*Last review read:[\s\S]*Margin notes for this project: 1/);
-  await command.handler('toc', h.ctx); assert.match(h.notified.at(-1)[0], /business: .*marketing \(Marketing strategy and positioning, \d+\)/);
-  await command.handler('read color.sixty-thirty-ten', h.ctx); assert.match(h.notified.at(-1)[0], /Color theory › Distribute color 60-30-10[\s\S]*Why:/);
+  await command.handler('toc', h.ctx); assert.match(h.notified.at(-1)[0], /design: .*ui-ux \(UI and UX craft, \d+\)/);
+  await command.handler('read ui-ux.verify-rendered', h.ctx); assert.match(h.notified.at(-1)[0], /UI and UX craft › Verify what renders[\s\S]*Why:/);
   await command.handler('read nothing-here', h.ctx); assert.equal(h.notified.at(-1)[1], 'warning');
   await command.handler('margins', h.ctx); assert.match(h.notified.at(-1)[0], /^m1 \(\d+h ago\): Settings UI lives/);
   await command.handler('margins clear', h.ctx); assert.match(h.notified.at(-1)[0], /Struck 1 margin note/);
@@ -430,15 +418,15 @@ test('the observer requests a chapter, then reviews the same chunk with that cha
   h.input('Write the landing page copy for our invoicing app');
   h.emit('tool_result', { toolCallId: 'a', toolName: 'read', input: { path: 'docs/brief.md' }, content: [{ type: 'text', text: 'Brief: invoicing for small agencies.' }] });
   let calls = 0;
-  h.setReply(packet => (++calls === 1 ? { note: '', evidence: [], read: ['copywriting'] } : { note: 'Does the headline state a specific outcome for agencies rather than a generic benefit?', evidence: [packet.evidence.find(row => /^event-/.test(row.id)).id], book: packet.book.deep.slice(0, 1) }));
+  h.setReply(packet => (++calls === 1 ? { note: '', evidence: [], read: ['web-design'] } : { note: 'Does the headline state a specific outcome for agencies rather than a generic benefit?', evidence: [packet.evidence.find(row => /^event-/.test(row.id)).id], book: packet.book.deep.slice(0, 1) }));
   await h.advance(30000);
-  assert.match(h.sent.at(-1)[0].content, /Consulting the book \(copywriting\)/);
+  assert.match(h.sent.at(-1)[0].content, /Consulting the book \(web-design\)/);
   await h.advance(30000);
   const second = h.packets[1];
   assert.deepEqual(second.evidence.filter(row => /^event-/.test(row.id)).map(row => row.id), h.packets[0].evidence.filter(row => /^event-/.test(row.id)).map(row => row.id), 'the same chunk is reviewed again');
-  assert.equal(second.book.deep.length, 1); assert.ok(second.book.deep[0].startsWith('copywriting.'));
+  assert.equal(second.book.deep.length, 1); assert.ok(second.book.deep[0].startsWith('web-design.'));
   assert.match(second.text, /Why: /);
-  assert.match(h.sent.at(-1)[0].content, /Observer book: Copywriting ›/);
+  assert.match(h.sent.at(-1)[0].content, /Observer book: Modern web design patterns ›/);
   h.close();
 });
 

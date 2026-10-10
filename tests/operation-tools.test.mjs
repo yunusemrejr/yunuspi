@@ -19,7 +19,6 @@ async function call(name, args, isError = false) {
   assert.ok(Buffer.byteLength(response.content[0].text) <= 24576);
   return JSON.parse(response.content[0].text);
 }
-const message = (subject, body) => `From: Sender <sender@example.test>\r\nTo: reader@example.test\r\nSubject: ${subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`;
 before(async () => {
   write('project/source/a.txt', 'one\nneedle in exact line\nthree\n');
   write('project/source/b.txt', 'needle again\n');
@@ -29,9 +28,6 @@ before(async () => {
   write('project/large.txt', 'x'.repeat(1024 * 1024 + 1));
   fs.symlinkSync('/etc', path.join(root, 'project/outside'));
   fs.symlinkSync(path.join(root, 'project/source'), path.join(root, 'project/inside-link'));
-  write('mail/cur/one', message('=?UTF-8?B?Q2Fmw6kgcGxhbg==?=', 'A useful needle in email.'));
-  write('mail/new/two', 'From: Other <other@example.test>\nSubject: Plain plan\nContent-Type: text/plain; charset=iso-8859-1\nContent-Transfer-Encoding: quoted-printable\n\nA caf=E9 plan with needle.');
-  write('archive.mbox', `From sender@example.test Thu Jan  1 00:00:00 2026\n${message('First plan', 'needle alpha')}\nFrom sender@example.test Thu Jan  1 00:01:00 2026\n${message('Second plan', 'needle beta')}\n`);
   await client.start();
 });
 after(() => { client.close(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -58,56 +54,6 @@ test('folder, hidden opt-in, no-match and depth searches expose their actual sco
   assert.equal(none.total, 0); assert.equal(none.scan_complete, true);
   const shallow = await call('workspace_search', { root: 'project', query: 'a.txt', max_depth: 0 });
   assert.equal(shallow.scan_complete, false); assert.equal(shallow.scope.excluded.depth, 1);
-});
-
-test('Maildir search decodes RFC encoded headers and MIME charset then reads exact hash', async () => {
-  const first = await call('local_mail_search', { path: 'mail', format: 'maildir', query: 'plan', limit: 1 });
-  assert.equal(first.items[0].subject, 'Café plan');
-  const second = await call('local_mail_search', { path: 'mail', format: 'maildir', query: 'plan', limit: 1, offset: first.next_offset, snapshot: first.snapshot });
-  assert.match(second.items[0].preview, /café/);
-  const row = second.items[0];
-  const readArgs = { path: 'mail', format: 'maildir', key: row.key, message_hash: row.message_hash, limit: 7 };
-  const page = await call('local_mail_read', readArgs);
-  assert.equal(page.body, 'A café '); assert.equal(page.next_offset, 7);
-  assert.equal((await call('local_mail_read', { ...readArgs, offset: page.next_offset })).body, 'plan wi');
-  write('mail/new/two', message('Changed', 'changed body'));
-  assert.match((await call('local_mail_read', readArgs, true)).error, /Stale message hash/);
-  await call('local_mail_search', { path: 'mail', format: 'maildir', query: 'plan', offset: 1, snapshot: first.snapshot }, true);
-  await call('local_mail_read', { ...readArgs, key: '../project/source/a.txt' }, true);
-});
-
-test('mbox search and read retain exact byte provenance and reject stale source messages', async () => {
-  const search = await call('local_mail_search', { path: 'archive.mbox', format: 'mbox', query: 'beta', field: 'body' });
-  assert.equal(search.total, 1);
-  const row = search.items[0]; assert.equal(row.key, '1');
-  const read = await call('local_mail_read', { path: 'archive.mbox', format: 'mbox', key: row.key, message_hash: row.message_hash });
-  assert.match(read.body, /needle beta/);
-  assert.equal(read.provenance.message_index, 1);
-  assert.ok(read.provenance.byte_end > read.provenance.byte_start);
-  write('invalid.mbox', 'not a mailbox');
-  await call('local_mail_search', { path: 'invalid.mbox', format: 'mbox', query: 'mail' }, true);
-});
-
-test('MIME body reading omits attachment content, converts HTML inertly and reports lossy decoding', async () => {
-  write('mime/cur/multipart', 'From: a@example.test\nSubject: mixed\nContent-Type: multipart/mixed; boundary=boundary\n\n--boundary\nContent-Type: text/html; charset=utf-8\n\n<head><title>not body</title></head><p>Visible message</p><script>not script</script><img src="https://example.test/trap">\n--boundary\nContent-Type: text/plain\nContent-Disposition: attachment; filename=secret.txt\n\nATTACHMENT_SENTINEL\n--boundary--\n');
-  fs.mkdirSync(path.join(root, 'mime/new'));
-  const search = await call('local_mail_search', { path: 'mime', format: 'maildir', query: 'visible' });
-  assert.equal(search.total, 1); assert.doesNotMatch(JSON.stringify(search), /ATTACHMENT_SENTINEL|not script|not body|example.test\/trap/);
-  const read = await call('local_mail_read', { path: 'mime', format: 'maildir', key: search.items[0].key, message_hash: search.items[0].message_hash });
-  assert.match(read.body_basis, /converted to text/); assert.match(read.body, /Visible message/);
-  assert.equal((await call('local_mail_search', { path: 'mime', format: 'maildir', query: 'ATTACHMENT_SENTINEL' })).total, 0);
-  write('mime/new/lossy', 'Subject: invalid\nContent-Type: text/plain; charset=nonexistent\n\nneedle');
-  const lossy = await call('local_mail_search', { path: 'mime', format: 'maildir', query: 'needle' });
-  assert.equal(lossy.scan_complete, false); assert.ok(lossy.items[0].warnings.includes('decoding_replacement'));
-});
-
-test('local mail rejects links, oversized messages and outside roots without account discovery', async () => {
-  fs.symlinkSync('/etc/passwd', path.join(root, 'mail/cur/linked'));
-  write('mail/new/large', 'x'.repeat(1024 * 1024 + 1));
-  const search = await call('local_mail_search', { path: 'mail', format: 'maildir', query: 'needle' });
-  assert.equal(search.scope.excluded.symlink, 1); assert.equal(search.scope.excluded.oversized, 1); assert.equal(search.scan_complete, false);
-  await call('local_mail_read', { path: 'mail', format: 'maildir', key: 'cur/linked', message_hash: '0'.repeat(64) }, true);
-  await call('local_mail_search', { path: '/etc', format: 'maildir', query: 'needle' }, true);
 });
 
 test('SSH plans return safe argv without evaluating config, authenticating or connecting', async () => {
@@ -146,7 +92,7 @@ test('native utility tool adapter executes new tools through its real MCP proces
   try {
     const result = await tools.get('workspace_search').execute('native-fixture', { root: 'project/source', query: 'txt' }, undefined, undefined, { cwd: root });
     assert.equal(result.isError, false); assert.equal(JSON.parse(result.content[0].text).total, 2);
-    for (const name of ['workspace_search', 'local_mail_search', 'local_mail_read', 'ssh_plan']) assert.ok(tools.has(name));
+    for (const name of ['workspace_search', 'ssh_plan', 'net_probe', 'sqlite_probe']) assert.ok(tools.has(name));
   } finally { handlers.get('session_shutdown')(); }
 });
 

@@ -109,7 +109,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
   const text = value.replace(/```[\s\S]*?```|<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g,'').replace(/^\s*>.*$/gm,'').replace(/^\s*\/\/.*$/gm,'');
   const out: CodeSignal[] = [];
   if (ui || script) {
-    const add = (key: string, check: string) => out.push({key, skill:'ui-antipattern-review', check});
+    const add = (key: string, check: string) => out.push({key, skill:'ui-design', check});
     // Require a short markup region containing the label, enclosure and motion.
     // aria-live, a stock ticker, or a plain status label alone is not this pattern.
     const statusRe = new RegExp(`\\b(?:${STATUS_WORD})\\b`, 'i');
@@ -163,50 +163,50 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     // backend scripts and comments. Thresholds favor precision over recall.
     const classAttrs = text.match(/class(?:Name)?\s*=\s*"[^"]*"/gi) ?? [];
     if (classAttrs.filter(a=>/\bcard\b/i.test(a)).length >= 6)
-      out.push({key:'ui-card-cluster',skill:'ui-antipattern-review',check:'Six or more card-class enclosures occur in this source. Verify each card earns its container; plain sections, lists or definition rows are often clearer than a grid of lookalike cards. Repeated identical card shapes with thin content are the tell.'});
+      out.push({key:'ui-card-cluster',skill:'ui-design',check:'Six or more card-class enclosures occur in this source. Verify each card earns its container; plain sections, lists or definition rows are often clearer than a grid of lookalike cards. Repeated identical card shapes with thin content are the tell.'});
     const sectionCount = (text.match(/<section\b/gi) ?? []).length;
     if (sectionCount >= 6) {
       const words = text.replace(/<[^>]+>/g,' ').split(/\s+/).filter(Boolean).length;
       if (words / sectionCount < 120)
-        out.push({key:'ui-section-sprawl',skill:'ui-antipattern-review',check:`${sectionCount} sections average under ~120 words of visible copy each. Verify every section earns its headline and chrome; merge thin sections into plain flow instead of splitting a small page into visually impressive slices.`});
+        out.push({key:'ui-section-sprawl',skill:'ui-design',check:`${sectionCount} sections average under ~120 words of visible copy each. Verify every section earns its headline and chrome; merge thin sections into plain flow instead of splitting a small page into visually impressive slices.`});
     }
     const footer = /<footer[\s\S]{0,12000}?<\/footer>/i.exec(text);
     if (footer && (footer[0].match(/<a\b/gi) ?? []).length >= 15)
-      out.push({key:'ui-footer-bloat',skill:'ui-antipattern-review',check:'The footer carries 15 or more links. Verify each link earns its place on a site this size; overbuilt footers on tiny sites are decoration, not navigation.'});
+      out.push({key:'ui-footer-bloat',skill:'ui-design',check:'The footer carries 15 or more links. Verify each link earns its place on a site this size; overbuilt footers on tiny sites are decoration, not navigation.'});
     if ((text.match(/<svg\b|<Icon\b|from ['"]lucide|class(?:Name)?\s*=\s*"[^"]*\bicon[-_]/gi) ?? []).length >= 12)
-      out.push({key:'ui-icon-density',skill:'ui-antipattern-review',check:'Twelve or more icon markers occur in this source. Verify each icon earns its place beside its heading or sentence; an icon beside everything is decoration that weakens scanning.'});
+      out.push({key:'ui-icon-density',skill:'ui-design',check:'Twelve or more icon markers occur in this source. Verify each icon earns its place beside its heading or sentence; an icon beside everything is decoration that weakens scanning.'});
     if (TOUR.test(text))
-      out.push({key:'ui-onboarding-nudge',skill:'ui-ux-principles',check:'A tour, walkthrough or welcome-modal surface is present. Verify the site is not self-explanatory without it; onboarding for obvious interfaces is interruption, not help. If it stays, verify dismiss, resume and reduced-motion behavior.'});
+      out.push({key:'ui-onboarding-nudge',skill:'ui-design',check:'A tour, walkthrough or welcome-modal surface is present. Verify the site is not self-explanatory without it; onboarding for obvious interfaces is interruption, not help. If it stays, verify dismiss, resume and reduced-motion behavior.'});
     if (AI_WIDGET.test(text))
-      out.push({key:'ui-ai-widget',skill:'product-ui-verification',check:'An AI chat or assistant surface is present. Verify it answers a demonstrated user need rather than riding on availability; a chatbot on a page whose questions a paragraph could answer is insertion, not a feature. If it stays, verify empty, error, rate-limit and keyboard states like any other feature.'});
+      out.push({key:'ui-ai-widget',skill:'ui-design',check:'An AI chat or assistant surface is present. Verify it answers a demonstrated user need rather than riding on availability; a chatbot on a page whose questions a paragraph could answer is insertion, not a feature. If it stays, verify empty, error, rate-limit and keyboard states like any other feature.'});
     // Pill-everything: capsules as the default container. Tiny dot markers are
     // counted by ui-dot-marker instead and are filtered out here.
     const pillAttrs = classAttrs.filter(a=>/\brounded-full\b/i.test(a) && !/\b(?:size|[wh])-(?:1\.5|2|2\.5|3)\b/.test(a)).length
       + (text.match(/\bstyle\s*=\s*"[^"]*border-radius\s*:\s*999px[^"]*"/gi) ?? []).length;
     if (pillAttrs >= 6)
-      out.push({key:'ui-pill-cluster',skill:'ui-antipattern-review',check:`${pillAttrs} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
+      out.push({key:'ui-pill-cluster',skill:'ui-design',check:`${pillAttrs} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
     const badges = [...text.matchAll(/<(?:span|div|em|strong|small|label)\b[^>]{0,300}(?:rounded-full|\bbadge\b|\bpill\b|\bchip\b|\btag\b)[^>]*>([^<]{1,24})<\//gi)]
       .filter(m=>/^(?:new|live|beta|ai|fast|secure|private|modern|smart|pro|featured|verified|trending|popular)$/i.test(m[1].trim()));
     if (badges.length >= 3)
-      out.push({key:'ui-badge-spam',skill:'anti-ai-slop',check:`${badges.length} hype badges (${[...new Set(badges.map(m=>m[1].trim().toUpperCase()))].slice(0,5).join(', ')}) occur in pill/badge markup. A badge must represent meaningful state or taxonomy, not decoration; keep at most the one or two the reader acts on and cut the rest.`});
+      out.push({key:'ui-badge-spam',skill:'ui-design',check:`${badges.length} hype badges (${[...new Set(badges.map(m=>m[1].trim().toUpperCase()))].slice(0,5).join(', ')}) occur in pill/badge markup. A badge must represent meaningful state or taxonomy, not decoration; keep at most the one or two the reader acts on and cut the rest.`});
     if (classAttrs.some(a=>/\bbg-clip-text\b/.test(a) && /\b(?:bg-gradient-to-[a-z]+|from-[a-z])/i.test(a)))
-      out.push({key:'ui-gradient-text',skill:'anti-ai-slop',check:'Gradient-filled headline text occurs (clipped gradient classes). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
+      out.push({key:'ui-gradient-text',skill:'ui-design',check:'Gradient-filled headline text occurs (clipped gradient classes). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
     if (classAttrs.filter(a=>/\bbackdrop-blur\b/.test(a) && /\bbg-(?:white|black|slate|gray|zinc|neutral|stone)(?:-\d+)?\/\d+/i.test(a)).length >= 2)
-      out.push({key:'ui-glass-panel',skill:'ui-antipattern-review',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
+      out.push({key:'ui-glass-panel',skill:'ui-design',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
     if (classAttrs.some(a=>/\btext-(?:8xl|9xl)\b/.test(a) || (/\btext-\[(\d+)px\]/.test(a) && Number(/\btext-\[(\d+)px\]/.exec(a)![1]) >= 80)))
-      out.push({key:'ui-oversized-type',skill:'ui-antipattern-review',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
+      out.push({key:'ui-oversized-type',skill:'ui-design',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
     if (classAttrs.filter(a=>/\brounded-(?:2xl|3xl)\b/.test(a)).length >= 6)
-      out.push({key:'ui-rounded-excess',skill:'ui-antipattern-review',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
+      out.push({key:'ui-rounded-excess',skill:'ui-design',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
     if ([...text.matchAll(/<(h[1-6]|button|a)\b[^>]{0,400}>([^<]{1,120})<\//gi)].some(m=>/\p{Extended_Pictographic}/u.test(m[2])))
-      out.push({key:'ui-emoji-ui',skill:'ui-antipattern-review',check:'An emoji occurs in a heading, button or link label. Emoji is not an icon system and never substitutes for visual design; keep it only when the brand explicitly owns playful chrome.'});
+      out.push({key:'ui-emoji-ui',skill:'ui-design',check:'An emoji occurs in a heading, button or link label. Emoji is not an icon system and never substitutes for visual design; keep it only when the brand explicitly owns playful chrome.'});
     // Terminal cosplay outside real code samples (pre/code are stripped, so a
     // documented install command there stays quiet).
     if (/(?:^|>)\s*(?:>\s*(?:initializing|initialising|connected|connecting|system ready|loading|deploying|compiling|building)|[$›]\s*(?:npm|yarn|pnpm|bun|git|docker|pip|npx)\s+[\w.-]+|\bSYS_\d{3}\b|\[STATUS:\s*ACTIVE\])(?![\w-])/im.test(text.replace(/<(pre|code)\b[\s\S]{0,4000}?<\/\1>/gi,' ')))
-      out.push({key:'ui-fake-terminal',skill:'anti-ai-slop',check:'Decorative terminal output (prompt lines, fake status codes, pseudo-telemetry) occurs outside code samples. Keep terminal chrome only when the terminal itself is meaningful to the product; prose and real UI states explain better than fake console output.'});
+      out.push({key:'ui-fake-terminal',skill:'ui-design',check:'Decorative terminal output (prompt lines, fake status codes, pseudo-telemetry) occurs outside code samples. Keep terminal chrome only when the terminal itself is meaningful to the product; prose and real UI states explain better than fake console output.'});
     const images = [...text.matchAll(/<(img|Image)\b[^>]{0,500}>/gi)]
       .filter(m=>!/\balt\s*=/i.test(m[0]) && !/aria-hidden\s*=\s*["']true["']/i.test(m[0]));
     if (images.length)
-      out.push({key:'ui-missing-alt',skill:'ui-antipattern-review',check:`${images.length} image${images.length>1?'s':''} lack an alt attribute. Give informative images a concise text equivalent and decorative images an empty alt=""; a missing attribute is neither.`});
+      out.push({key:'ui-missing-alt',skill:'ui-design',check:`${images.length} image${images.length>1?'s':''} lack an alt attribute. Give informative images a concise text equivalent and decorative images an empty alt=""; a missing attribute is neither.`});
     let iconButton = false;
     for (const m of text.matchAll(/<button\b([^>]*)>([\s\S]{0,600}?)<\/button>/gi)) {
       const attrs = m[1], inner = m[2];
@@ -217,14 +217,14 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       iconButton = true; break;
     }
     if (iconButton)
-      out.push({key:'ui-icon-button-name',skill:'ui-antipattern-review',check:'A button contains only an icon with no accessible name. Add an aria-label or visible text; icon-only controls are silent to assistive technology and unclear to many sighted users.'});
+      out.push({key:'ui-icon-button-name',skill:'ui-design',check:'A button contains only an icon with no accessible name. Add an aria-label or visible text; icon-only controls are silent to assistive technology and unclear to many sighted users.'});
     const headingLevels = [...text.matchAll(/<h([1-6])\b/gi)].map(m=>Number(m[1]));
     if (headingLevels.some((level,i)=>i>0 && level > headingLevels[i-1]+1))
-      out.push({key:'ui-heading-skip',skill:'ui-antipattern-review',check:'A heading level is skipped (for example h1 straight to h3). Keep a continuous outline — one h1, then h2, then h3; skipped levels break assistive-technology navigation.'});
+      out.push({key:'ui-heading-skip',skill:'ui-design',check:'A heading level is skipped (for example h1 straight to h3). Keep a continuous outline — one h1, then h2, then h3; skipped levels break assistive-technology navigation.'});
     if (/<marquee\b/i.test(text) || /auto ?play[\s\S]{0,300}(?:carousel|slider|slideshow)|(?:carousel|slider|slideshow)[\s\S]{0,300}auto ?play/i.test(text))
-      out.push({key:'ui-auto-carousel',skill:'ui-ux-principles',check:'Auto-moving content (a marquee or an autoplaying carousel/slider) occurs. Autoplay fights the reader for control; keep motion user-initiated with visible controls, or remove it.'});
+      out.push({key:'ui-auto-carousel',skill:'ui-design',check:'Auto-moving content (a marquee or an autoplaying carousel/slider) occurs. Autoplay fights the reader for control; keep motion user-initiated with visible controls, or remove it.'});
     if (/\bcursor\s*:\s*none\b/i.test(text) && /\b(?:mousemove|pointermove|touchmove)\b/i.test(text))
-      out.push({key:'ui-custom-cursor',skill:'ui-ux-principles',check:'The system cursor is hidden while pointer movement is tracked: a custom-cursor treatment. Keep the native cursor unless the replacement is central to the experience; custom cursors cost accessibility and user control.'});
+      out.push({key:'ui-custom-cursor',skill:'ui-design',check:'The system cursor is hidden while pointer movement is tracked: a custom-cursor treatment. Keep the native cursor unless the replacement is central to the experience; custom cursors cost accessibility and user control.'});
     // Stylesheet cues need an authorial stylesheet; a script embedding a few
     // declarations (inline styles, CSSOM) cannot establish these patterns.
     if (!ui && !/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text)) return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
@@ -256,37 +256,37 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       /(?:box|text)-shadow\s*:/i, /animation(?:-iteration-count)?\s*:[^;}\n]{0,240}\binfinite\b/i,
       /parallax/i, /particles?\b/i, /\bglow\b/i, /mesh-gradient|\borbs?\b|aurora/i];
     if (decorations.filter(re=>re.test(text)).length >= 3)
-      out.push({key:'ui-decoration-cluster',skill:'ui-antipattern-review',check:'Several decorative CSS treatments occur together. Inspect the rendered hierarchy against the existing design system and real content; retain effects with a clear purpose and simplify competing emphasis. A branded treatment alone is not a defect.'});
+      out.push({key:'ui-decoration-cluster',skill:'ui-design',check:'Several decorative CSS treatments occur together. Inspect the rendered hierarchy against the existing design system and real content; retain effects with a clear purpose and simplify competing emphasis. A branded treatment alone is not a defect.'});
     if ((text.match(/animation(?:-iteration-count)?\s*:[^;}\n]{0,240}\binfinite\b/gi)||[]).length >= 2)
-      out.push({key:'ui-continuous-motion',skill:'ui-antipattern-review',check:'Multiple continuous animations were observed. Check attention, interruption and reduced-motion behavior in the complete component; this partial change cannot establish whether safeguards are missing.'});
+      out.push({key:'ui-continuous-motion',skill:'ui-design',check:'Multiple continuous animations were observed. Check attention, interruption and reduced-motion behavior in the complete component; this partial change cannot establish whether safeguards are missing.'});
     // Stylesheet-declared display type at 80px/5rem or larger (the class-based
     // form is checked with the markup cues above).
     if (!out.some(s=>s.key==='ui-oversized-type') && [...text.matchAll(/\bfont-size\s*:\s*(\d+(?:\.\d+)?)(px|r?em)\b/gi)]
       .some(m=>m[2]==='px' ? Number(m[1]) >= 80 : Number(m[1]) >= 5))
-      out.push({key:'ui-oversized-type',skill:'ui-antipattern-review',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
+      out.push({key:'ui-oversized-type',skill:'ui-design',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
   }
   if (ui || script) {
     if (/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text))
-      out.push({key:'ui-bulb-brand',skill:'anti-ai-slop',check:'A lightbulb motif occurs in branding. Generic bulb logos are forbidden by the UI policy; use product-specific identity. A lighting control, teaching diagram or explicit user-supplied brand is a different context: verify it rather than removing useful subject matter.'});
+      out.push({key:'ui-bulb-brand',skill:'ui-design',check:'A lightbulb motif occurs in branding. Generic bulb logos are forbidden by the UI policy; use product-specific identity. A lighting control, teaching diagram or explicit user-supplied brand is a different context: verify it rather than removing useful subject matter.'});
   }
   if (ui) {
     // Accent tokens, not arbitrary photograph/material colors or warning states.
     if ([...text.matchAll(/--(?:[\w-]*-)?(?:accent|brand|primary)(?:-[\w-]+)?\s*:\s*#([\da-f]{6}|[\da-f]{3})\b/gi)].some(m=>mutedWarmAccent(m[1])))
-      out.push({key:'ui-stock-warm-palette',skill:'colors',check:'A muted orange/brass/brown accent token matches the rejected default palette. Derive the palette from the actual product and user preferences; do not call a stock brass treatment bespoke. Real subject colors and explicitly requested branding remain valid.'});
+      out.push({key:'ui-stock-warm-palette',skill:'ui-design',check:'A muted orange/brass/brown accent token matches the rejected default palette. Derive the palette from the actual product and user preferences; do not call a stock brass treatment bespoke. Real subject colors and explicitly requested branding remain valid.'});
     // Color: stock palette and unsystematic hue sprawl (explicit hex outside
     // custom-property definitions; a token system reuses a few values).
     if (STOCK_PALETTE.test(text))
-      out.push({key:'ui-stock-palette',skill:'colors',check:'A stock indigo/violet into purple/pink gradient occurs. Verify the supplied brand and user direction before revising it; a requested gradient remains valid. Avoid selecting this generic SaaS palette as an unrequested default.'});
+      out.push({key:'ui-stock-palette',skill:'ui-design',check:'A stock indigo/violet into purple/pink gradient occurs. Verify the supplied brand and user direction before revising it; a requested gradient remains valid. Avoid selecting this generic SaaS palette as an unrequested default.'});
     if (hasCreamGround(text) && CURSIVE_DISPLAY.test(text))
-      out.push({key:'ui-stock-editorial',skill:'fonts',check:'A cream/ivory ground combines with cursive display type, a stock editorial default. Derive type and color from the product and supplied direction; a requested editorial brand remains valid. Compare actual rendered hierarchy and readability before replacing it.'});
+      out.push({key:'ui-stock-editorial',skill:'ui-design',check:'A cream/ivory ground combines with cursive display type, a stock editorial default. Derive type and color from the product and supplied direction; a requested editorial brand remains valid. Compare actual rendered hierarchy and readability before replacing it.'});
     const hexes = new Set((text.replace(/--[\w-]+\s*:[^;}\n]*/g,' ').match(/#(?:[\da-f]{6}|[\da-f]{3})\b/gi) ?? []).map(h=>h.toLowerCase()));
     if (hexes.size >= 12 && (text.match(/var\(--/g) ?? []).length < 3)
-      out.push({key:'ui-hue-sprawl',skill:'color-theory',check:`${hexes.size} distinct hard-coded colors occur without custom properties. Define a small token set (ground, surface, text, muted text, accent, states) and reuse it; ad hoc near-duplicates read as unplanned.`});
+      out.push({key:'ui-hue-sprawl',skill:'ui-design',check:`${hexes.size} distinct hard-coded colors occur without custom properties. Define a small token set (ground, surface, text, muted text, accent, states) and reuse it; ad hoc near-duplicates read as unplanned.`});
     // Placement: centered everything loses the reading axis.
     const centered = (text.match(/text-align\s*:\s*center|\btext-center\b/gi) ?? []).length;
     const leftAligned = (text.match(/text-align\s*:\s*(?:left|start)|\btext-(?:left|start)\b/gi) ?? []).length;
     if (centered >= 8 && leftAligned <= 1)
-      out.push({key:'ui-centered-everything',skill:'visual-composition',check:`${centered} centered text rules and almost no left-aligned ones. Center only short display lines; body copy, lists, cards and forms read faster on a strong left axis. Check the rendered page for a clear reading line.`});
+      out.push({key:'ui-centered-everything',skill:'ui-design',check:`${centered} centered text rules and almost no left-aligned ones. Center only short display lines; body copy, lists, cards and forms read faster on a strong left axis. Check the rendered page for a clear reading line.`});
   }
   if (ui) {
     // Generated-UI ornaments (user-banned): accent rails, dot markers, icon tiles.
@@ -300,35 +300,35 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       || /::?(?:before|after)/.test(b.selector) && /position\s*:\s*absolute/i.test(b.body) && (px(b.body, 'width') ?? 99) <= 6 && /(?:top\s*:\s*0[^;]*;[^}]*bottom\s*:\s*0|height\s*:\s*100%)/i.test(b.body))).length
       + classLists.filter(list => has(list, /\sborder-l-(?:2|4|8|\[\dpx\])\s/) && has(list, /\sborder-(?:[a-z]+-)?\d{2,3}(?:\/\d+)?\s/)).length;
     if (rails)
-      out.push({key:'ui-accent-rail',skill:'anti-ai-slop',check:'A colored left rail (border-left or a pseudo-element bar) accents a card or panel. This is a stock generated-UI ornament; remove it and group with spacing, headings or a real surface change. Keep a rail only where it encodes a distinct state the user needs (and then pair it with text).'});
+      out.push({key:'ui-accent-rail',skill:'ui-design',check:'A colored left rail (border-left or a pseudo-element bar) accents a card or panel. This is a stock generated-UI ornament; remove it and group with spacing, headings or a real surface change. Keep a rail only where it encodes a distinct state the user needs (and then pair it with text).'});
     const dots = blocks.filter(b => { const w = px(b.body, 'width'), h = px(b.body, 'height'); return w !== undefined && h !== undefined && w >= 4 && w <= 16 && Math.abs(w - h) <= 2 && /border-radius\s*:\s*(?:50%|100%|9{3,}px|\d{2,}px)/i.test(b.body) && /background(?:-color)?\s*:/i.test(b.body); }).length
       + classLists.filter(list => has(list, /\s(?:size|[wh])-(?:1|1\.5|2|2\.5|3|3\.5|4)\s/) && has(list, /\srounded-(?:full|\[50%\]|\[9999px\])\s/) && has(list, /\sbg-[a-z]/)).length
       + classLists.filter(list => has(list, /\s[wh]-\[(?:[4-9]|1[0-6])px\]\s/) && has(list, /\srounded-(?:full|\[50%\]|\[9999px\])\s/) && has(list, /\sbg-[a-z]/)).length;
     if (dots)
-      out.push({key:'ui-dot-marker',skill:'anti-ai-slop',check:'A small colored dot (often glowing) is styled as a marker before labels, chips or list items. This is a stock generated-UI tell; remove it. Keep a dot only for a real, changing state with an accessible text equivalent.'});
+      out.push({key:'ui-dot-marker',skill:'ui-design',check:'A small colored dot (often glowing) is styled as a marker before labels, chips or list items. This is a stock generated-UI tell; remove it. Keep a dot only for a real, changing state with an accessible text equivalent.'});
     const tiles = blocks.filter(b => { const w = px(b.body, 'width'), h = px(b.body, 'height'), r = px(b.body, 'border-radius'); return w !== undefined && h !== undefined && w >= 24 && w <= 72 && Math.abs(w - h) <= 2 && r !== undefined && r >= 4 && /(?:display\s*:\s*(?:inline-)?(?:flex|grid))/i.test(b.body) && /(?:place-items|align-items|justify-content)\s*:\s*center/i.test(b.body) && /(?:background|border)\s*:/i.test(b.body); }).length
       + classLists.filter(list => has(list, /\s(?:size|h)-(?:8|9|10|11|12|14)\s/) && has(list, /\srounded-(?:md|lg|xl|2xl)\s/) && has(list, /\s(?:items-center|place-items-center|justify-center)\s/) && has(list, /\s(?:bg|border)-[a-z]/)).length;
     if (tiles)
-      out.push({key:'ui-icon-tile',skill:'anti-ai-slop',check:'An icon is wrapped in a tinted or bordered rounded tile (icon badge). This is a stock generated-UI ornament; show the icon plainly at text size, or drop it when the label already carries the meaning.'});
+      out.push({key:'ui-icon-tile',skill:'ui-design',check:'An icon is wrapped in a tinted or bordered rounded tile (icon badge). This is a stock generated-UI ornament; show the icon plainly at text size, or drop it when the label already carries the meaning.'});
     // Stylesheet forms of the class-based ornaments above; each key reports
     // once no matter which form matched.
     if (!out.some(s=>s.key==='ui-gradient-text') && blocks.some(b=>/background-clip\s*:\s*text/i.test(b.body) && /gradient\s*\(/i.test(b.body)))
-      out.push({key:'ui-gradient-text',skill:'anti-ai-slop',check:'Gradient-filled headline text occurs (a clipped gradient declaration). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
+      out.push({key:'ui-gradient-text',skill:'ui-design',check:'Gradient-filled headline text occurs (a clipped gradient declaration). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
     if (!out.some(s=>s.key==='ui-glass-panel')) {
       const glassBlocks = blocks.filter(b=>/backdrop-filter\s*:[^;}]{0,200}blur\s*\(/i.test(b.body) && /background(?:-color)?\s*:[^;}]{0,200}rgba?\([^;}]*,\s*0?\.\d+\s*\)/i.test(b.body)).length;
       const glassClasses = classLists.filter(list=>has(list,/\sbackdrop-blur[-\w]*\s/) && has(list,/\sbg-(?:white|black|slate|gray|zinc|neutral|stone)(?:-\d+)?\/\d+\s/i)).length;
       if (glassBlocks + glassClasses >= 2)
-        out.push({key:'ui-glass-panel',skill:'ui-antipattern-review',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
+        out.push({key:'ui-glass-panel',skill:'ui-design',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
     }
     // Ambient colour washes: a large blurred, rounded, absolutely placed shape behind the content. It carries no
     // information, adds paint cost, and is a stock generated-landing atmosphere layer.
     const blobBlocks = blocks.filter(b => Number(/filter\s*:\s*blur\(\s*(\d+)px/i.exec(b.body)?.[1]) >= 40 && /border-radius\s*:\s*(?:50%|100%|9{3,}px)/i.test(b.body) && /position\s*:\s*(?:absolute|fixed)/i.test(b.body)).length;
     const blobClasses = classLists.filter(list => has(list,/\s(?:absolute|fixed)\s/) && has(list,/\srounded-full\s/) && has(list,/\s(?:blur-(?:2xl|3xl)|blur-\[(?:[4-9]\d|\d{3,})px\])\s/)).length;
     if (blobBlocks + blobClasses)
-      out.push({key:'ui-ambient-blob',skill:'anti-ai-slop',check:'A large blurred, rounded, absolutely placed colour shape (an ambient blob or aurora wash) sits behind content. It carries no information and is a stock generated-landing atmosphere layer; drop it and build depth from spacing, one real surface change or the product\'s own imagery. Keep it only when the brand owns that treatment.'});
+      out.push({key:'ui-ambient-blob',skill:'ui-design',check:'A large blurred, rounded, absolutely placed colour shape (an ambient blob or aurora wash) sits behind content. It carries no information and is a stock generated-landing atmosphere layer; drop it and build depth from spacing, one real surface change or the product\'s own imagery. Keep it only when the brand owns that treatment.'});
     // Placeholder image hosts ship as random or broken pictures.
     if (/(?:src|srcset|href|url)\s*[=(]\s*["']?(?:https?:)?\/\/(?:via\.placeholder\.com|placehold\.(?:co|it)|placekitten\.com|placebear\.com|picsum\.photos|dummyimage\.com|lorempixel\.com|loremflickr\.com|fakeimg\.pl|source\.unsplash\.com\/random)/i.test(text))
-      out.push({key:'ui-placeholder-media',skill:'anti-ai-slop',check:'An image points at a placeholder host (placehold.co, picsum, placekitten, dummyimage, source.unsplash random). It ships as a random or broken picture: use the real asset, an honest empty state, or a drawn or generated one, and say plainly when media is missing.'});
+      out.push({key:'ui-placeholder-media',skill:'ui-design',check:'An image points at a placeholder host (placehold.co, picsum, placekitten, dummyimage, source.unsplash random). It ships as a random or broken picture: use the real asset, an honest empty state, or a drawn or generated one, and say plainly when media is missing.'});
     // Coloured glow halos around headlines and cards: a zero-offset, wide, chromatic shadow. Neutral drop shadows,
     // offset shadows and zero-blur focus rings are ordinary depth and stay quiet.
     const chromatic = (color: string): boolean => {
@@ -343,22 +343,22 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     }));
     const glowClasses = classLists.some(list => has(list, /\s(?:drop-)?shadow-\[0_0_(?:2[4-9]|[3-9]\d|\d{3,})px_(?:#[\da-f]{3,8}|rgba?\([^)]*\)|[a-z]+-\d{2,3})/i) || has(list, /\sshadow-(?:2xl|xl|lg)\s/) && has(list, /\sshadow-(?:indigo|purple|violet|fuchsia|pink|cyan|sky|blue|emerald|teal)-[3-6]00\/(?:[2-9]\d|\d)\s/));
     if (glowDeclared || glowClasses)
-      out.push({key:'ui-glow-halo',skill:'anti-ai-slop',check:'A coloured glow halo (a zero-offset, wide, chromatic box/text/drop shadow) surrounds a card, button or headline. Glow carries no information and is a stock generated-UI ornament; show depth with a real surface change, spacing or a neutral offset shadow. Keep it only when the brand owns a glow system and it encodes state.'});
+      out.push({key:'ui-glow-halo',skill:'ui-design',check:'A coloured glow halo (a zero-offset, wide, chromatic box/text/drop shadow) surrounds a card, button or headline. Glow carries no information and is a stock generated-UI ornament; show depth with a real surface change, spacing or a neutral offset shadow. Keep it only when the brand owns a glow system and it encodes state.'});
     // The default generated font rotation: two or more of its members together.
     const rotation = new Set([...text.matchAll(/\b(Inter|Space Grotesk|Geist|Instrument Serif)\b/g)].map(m => m[1]));
     if (rotation.size >= 2)
-      out.push({key:'ui-stock-fonts',skill:'fonts',check:`${[...rotation].join(' + ')} occur together: the default generated type rotation, which signals that no typographic decision was made. Pick faces for this product's own voice and content (a pairing you would not reuse on an unrelated project), or document why this pairing fits.`});
+      out.push({key:'ui-stock-fonts',skill:'ui-design',check:`${[...rotation].join(' + ')} occur together: the default generated type rotation, which signals that no typographic decision was made. Pick faces for this product's own voice and content (a pairing you would not reuse on an unrelated project), or document why this pairing fits.`});
     if (!out.some(s=>s.key==='ui-pill-cluster')) {
       const blockPills = blocks.filter(b=>/border-radius\s*:\s*999px/i.test(b.body) && /padding\s*:/i.test(b.body)).length;
       const classPills = classLists.filter(list=>has(list,/\srounded-full\s/) && !has(list,/\s(?:size|[wh])-(?:1\.5|2|2\.5|3)\s/)).length;
       if (blockPills + classPills >= 6)
-        out.push({key:'ui-pill-cluster',skill:'ui-antipattern-review',check:`${blockPills + classPills} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
+        out.push({key:'ui-pill-cluster',skill:'ui-design',check:`${blockPills + classPills} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
     }
     if (!out.some(s=>s.key==='ui-rounded-excess')) {
       const blockRounded = blocks.filter(b=>{ const r = px(b.body, 'border-radius'); return r !== undefined && r >= 20; }).length;
       const classRounded = classLists.filter(list=>has(list,/\srounded-(?:2xl|3xl)\s/)).length;
       if (blockRounded + classRounded >= 6)
-        out.push({key:'ui-rounded-excess',skill:'ui-antipattern-review',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
+        out.push({key:'ui-rounded-excess',skill:'ui-design',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
     }
   }
   if (ui || prose) {
@@ -366,7 +366,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     const headings = [...text.matchAll(/<h[1-3]\b[^>]*>([\s\S]{0,160}?)<\/h[1-3]>|^#{1,3}\s+(.{1,160})$/gim)].map(m=>(m[1] ?? m[2] ?? '').replace(/<[^>]+>/g,' '));
     const families = TEMPLATE_SECTIONS.filter(re=>headings.some(h=>re.test(h))).length;
     if (families >= 4)
-      out.push({key:'ui-template-sequence',skill:'anti-ai-slop',check:`Section headings follow the stock landing template (${families} of trusted-by, features, how-it-works, testimonials, pricing, FAQ, final CTA). Order sections by this product's own argument: the one thing it does, proof specific to it, the action. Drop sections that exist only because templates have them.`});
+      out.push({key:'ui-template-sequence',skill:'ui-design',check:`Section headings follow the stock landing template (${families} of trusted-by, features, how-it-works, testimonials, pricing, FAQ, final CTA). Order sections by this product's own argument: the one thing it does, proof specific to it, the action. Drop sections that exist only because templates have them.`});
   }
   if (prose) {
     // Reader-visible text only: front matter, inline code, link targets and
@@ -383,12 +383,12 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     const buzzHits = new Set(BUZZWORDS.filter(w=>wordRe(w).test(visible))).size;
     const stock = [/\bin today.s (?:fast.paced|rapidly evolving|digital)\b/i,/\bunlock (?:the |your )?(?:full |true )?potential\b/i,/\bseamless(?:ly)?\b/i,/\brevolutionary\b/i,/\bcutting.edge\b/i,/\ball.in.one (?:solution|platform)\b/i];
     if (buzzHits < 4 && stock.filter(re=>re.test(text)).length >= 3)
-      out.push({key:'prose-stock-cluster',skill:'natural-editorial-writing',check:'Several stock promotional phrases occur together. Replace unsupported generalities with specific behavior and reader value, preserving the requested voice and required wording. This is not evidence of AI authorship.'});
+      out.push({key:'prose-stock-cluster',skill:'research-writing',check:'Several stock promotional phrases occur together. Replace unsupported generalities with specific behavior and reader value, preserving the requested voice and required wording. This is not evidence of AI authorship.'});
     // Placeholder people, companies, contacts and fill-in labels. Docs use
     // example names legitimately; lorem ipsum is placeholder anywhere.
     const placeholderExamples = /\b(?:john|jane) doe\b|\bacme(?: corp(?:oration)?)?\b|\bexample@example\.com\b|\(?555\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b(?:your (?:name|headline|title|description) here|insert (?:title|description|content) here|placeholder (?:title|text|content))\b/i;
     if (/\blorem ipsum\b/i.test(text) || (!inDocs && placeholderExamples.test(visible)))
-      out.push({key:'placeholder-copy',skill:'anti-ai-slop',check:'Placeholder copy was observed. Before delivery, confirm whether a mockup was requested; otherwise use supplied content or clearly disclose missing facts. Never invent testimonials, customers or performance numbers to fill space.'});
+      out.push({key:'placeholder-copy',skill:'ui-design',check:'Placeholder copy was observed. Before delivery, confirm whether a mockup was requested; otherwise use supplied content or clearly disclose missing facts. Never invent testimonials, customers or performance numbers to fill space.'});
     if (/\b(?:unlock|supercharge|elevate)\b[^\n]{0,40}\b(?:your|the)\s+(?:(?:full|true|real)\s+)?(?:potential|productivity|workflow|experience|insights?|possibilities|power|performance)\b/i.test(visible) || /\btake your [\w ]{2,24} to the next level\b/i.test(visible))
       push('prose-unlock-cta','copywriting','An unlock/supercharge/elevate call to action (or take-it-to-the-next-level) occurs. Say exactly what the feature does and what the reader gets; transformation verbs without specifics read as template hype.');
     const vagueHeadings = [...visible.matchAll(/<h[1-3]\b[^>]*>([\s\S]{0,80}?)<\/h[1-3]>|^#{1,3}\s+(.{1,80})$/gim)]
@@ -399,7 +399,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if (!inDocs) {
       const weakHits = new Set(LEAK_WEAK.filter(w=>wordRe(w).test(visible))).size;
       if (LEAK_STRONG.test(visible) || DESIGN_LEAK.test(visible) || weakHits >= 2)
-        push('prose-implementation-leak','copywriting','Implementation names (frameworks, hosting, repositories, pipelines, schemas, design-system internals) occur in reader-facing copy. Keep such names only on pages that document those subjects (docs, changelog, status); cut stack badges and backstage names from marketing and product pages. Verify each remaining name serves the reader\u2019s purpose in that context.');
+        push('prose-implementation-leak','ui-design','Implementation names (frameworks, hosting, repositories, pipelines, schemas, design-system internals) occur in reader-facing copy. Keep such names only on pages that document those subjects (docs, changelog, status); cut stack badges and backstage names from marketing and product pages. Verify each remaining name serves the reader\u2019s purpose in that context.');
       if (TRANSPARENCY_HEADING.test(visible))
         push('prose-transparency-section','copywriting','A section heading narrates the site itself (how it works, its process, its architecture). Cut it unless this page exists to document those subjects; readers came for the outcome, not the backstage tour. Link to the docs instead of inlining the tour.');
       if (AI_PROVENANCE.test(visible))
@@ -408,7 +408,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
         push('prose-work-thought-leak','copywriting','Agent work-thought leaks into reader copy (first-person build narration, "this section showcases", "as an AI"). Readers came for the outcome, not the making-of commentary. Cut the narration; keep only the fact it was wrapping.');
     }
     if (buzzHits >= 4)
-      push('prose-buzzword-stack','natural-editorial-writing','Four or more promotional buzzwords occur together. Replace stacked adjectives with one specific, verifiable claim each; buzzword density reads as generated even when every word is true.');
+      push('prose-buzzword-stack','research-writing','Four or more promotional buzzwords occur together. Replace stacked adjectives with one specific, verifiable claim each; buzzword density reads as generated even when every word is true.');
     if (SELF_PRAISE.test(visible))
       push('prose-self-praise','copywriting','Self-congratulatory copy occurs (careful, thoughtful, elegant or beautiful craft claims). Cut praise of the work itself; demonstrate the quality in the content and let the reader conclude it.');
     if (!inDocs && !policyPage && THEATER.test(visible))
@@ -429,7 +429,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       // the hype-density cues above, so this cue needs two distinct tell
       // kinds before it reports generated-sounding patterns.
       if (tells.length >= 3 && new Set(tells.map(f=>f.rule)).size >= 2)
-        push('prose-ai-tells','natural-editorial-writing',`Generated-sounding prose patterns: ${[...new Set(tells.map(f=>f.message))].slice(0,4).join(' · ').slice(0,420)}. Rewrite in the product's own voice with concrete specifics.`);
+        push('prose-ai-tells','research-writing',`Generated-sounding prose patterns: ${[...new Set(tells.map(f=>f.message))].slice(0,4).join(' · ').slice(0,420)}. Rewrite in the product's own voice with concrete specifics.`);
     }
     if (metricBare)
       push('prose-metric-theater','copywriting','A performance multiple or percentage claim occurs without a nearby basis (measured where, on what, against what). Add the basis or cut the number; unsupported precision reads as invented even when it is real.');

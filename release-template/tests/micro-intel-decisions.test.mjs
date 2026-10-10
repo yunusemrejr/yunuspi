@@ -24,14 +24,14 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
     return { ok: true, answers, usage };
   };
 
-test("registry names all fifteen decision types with owners", () => {
+test("registry names all fourteen decision types with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
     "claim-verification", "delegation-topology", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "requirement-closure", "review-aspects",
     "scope-council-need", "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
-    "verification-method", "watchmaker-admission",
+    "verification-method",
   ]);
   for (const spec of Object.values(TYPED_DECISIONS)) {
     assert.ok(spec.site && spec.owner && spec.maxStateChars > 0);
@@ -68,23 +68,23 @@ test("choice decisions validate the winner and its distribution", async () => {
   try {
     const good = await askTypedDecision("delegation-topology",
       { state: { task: "t" } },
-      { judge: judgeWith({ topology: { choice: "swarm", probabilities: { single: 0.1, swarm: 0.7, fusion: 0.2 } } }) });
+      { judge: judgeWith({ topology: { choice: "fanout", probabilities: { single: 0.2, fanout: 0.8 } } }) });
     assert.equal(good.ok, true);
-    assert.deepEqual(good.verdict, { topology: "swarm" });
-    assert.deepEqual(good.probabilities,{single:.1,swarm:.7,fusion:.2});
-    assert.equal(good.margin,.7-.2);
+    assert.deepEqual(good.verdict, { topology: "fanout" });
+    assert.deepEqual(good.probabilities,{single:.2,fanout:.8});
+    assert.equal(good.margin,.8-.2);
 
-    for(const probabilities of [{swarm:.99},{single:.8,swarm:.9,fusion:.1},{single:.8,swarm:.1,fusion:.1}]){
+    for(const probabilities of [{fanout:.99},{single:.8,fanout:.9},{single:.8,fanout:.1}]){
       const malformed=await askTypedDecision('delegation-topology',{state:{task:'t'}},
-        {judge:judgeWith({topology:{choice:'swarm',probabilities}})});
+        {judge:judgeWith({topology:{choice:'fanout',probabilities}})});
       assert.equal(malformed.ok,false);
       assert.equal(malformed.reason,'invalid-distribution');
     }
     const tied=await askTypedDecision('delegation-topology',{state:{task:'t'}},
-      {judge:judgeWith({topology:{choice:'swarm',probabilities:{single:.5,swarm:.5,fusion:0}}})});
+      {judge:judgeWith({topology:{choice:'fanout',probabilities:{single:.5,fanout:.5}}})});
     assert.equal(tied.ok,false,'an exact tie does not justify replacing the existing choice');
     assert.equal(tied.margin,0);
-    assert.deepEqual(tied.probabilities,{single:.5,swarm:.5,fusion:0},'abstention retains soft evidence');
+    assert.deepEqual(tied.probabilities,{single:.5,fanout:.5},'abstention retains soft evidence');
 
     const weak = await askTypedDecision("recovery-strategy",
       { state: { failure: "f" } },
@@ -185,7 +185,7 @@ test("tool-intent reports alignment and risk separately", async () => {
 test('review admission needs both novelty and progress evidence; cancelled or unused verdicts are not applied', async () => {
   metricsMod.resetMicroMetrics();
   try {
-    for (const id of ['observer-admission', 'watchmaker-admission']) {
+    for (const id of ['observer-admission']) {
       for (const [worthwhile, routine, deferred] of [[.1, .9, true], [.19, .75, true], [.3, .7, true], [.1, .5, false], [.33, .9, false], [.25, .69, false], [.63, .39, false], [.1, undefined, false], [-1, 1, false]]) {
         const result = await askTypedDecision(id, { state: { previous: [], current: [] } }, {
           judge: judgeWith({ worthwhile: { noul: worthwhile }, routine: { noul: routine } }), recordAcceptance: false,

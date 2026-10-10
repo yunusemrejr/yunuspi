@@ -1,6 +1,6 @@
 /** SVG review and optimization on top of `svg-inspect.ts`, which owns the
  * measurements (geometry, bounds, strokes, ids, active content, set
- * comparison): a verdict with fixes for the file side of the `svg-assessment`
+ * comparison): a verdict with fixes for the file side of the `svg-images`
  * checklist, and a lossless optimizer verified against those measurements.
  * Source text only: nothing is rendered, so appearance still needs a look. */
 import fs from "node:fs/promises";
@@ -182,7 +182,7 @@ function paints(source: string): { colors: Map<string, number>; current: boolean
   return { colors, current: colors.has("currentColor"), declared };
 }
 
-/** Review one SVG document against the file side of the svg-assessment checklist. Geometry comes from
+/** Review one SVG document against the file side of the svg-images checklist. Geometry comes from
  * `measureSvg`; this adds theming, weight, structure and safety verdicts with fixes and the size potential. */
 export function reviewSvg(source: string, options: { kind?: SvgReview["kind"]; name?: string; measure?: SvgMeasure } = {}): SvgReview {
   if (typeof source !== "string" || Buffer.byteLength(source) > MAX_BYTES) throw new Error("SVG source must be a string of at most 2 MiB");
