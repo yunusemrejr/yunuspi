@@ -439,7 +439,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     const need = projectTestNeed(state);
     if (!need || need === 'running') return '';
     const message = need === 'assessment'
-      ? 'Choose verification proportional to the changed behavior with project_tests({action:"inspect"}). Reuse focused existing checks and their current receipts; add or update regression coverage when it tests a changed contract or demonstrated defect. Avoid redundant runs and tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
+      ? 'Run the known focused check directly: current test-runner receipts are adopted automatically, so inspect/assess is not a prerequisite. Use project_tests({action:"inspect"}) only when the test setup or remaining evidence is unclear. Add regression coverage for changed contracts or demonstrated defects; avoid redundant runs and tests that mirror implementation. Use assess only to declare a different verification scope or record not_needed/blocked with a concrete reason.'
       : need === 'failed'
         ? 'A planned check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
         : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect plannedChecks in project_tests; rerun only missing, failed or stale checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.'
@@ -583,7 +583,6 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     async start(ctx: any) { await scan(ctx); },
     async call(event: any, ctx: any) {
       if (!enabled() || !['bash', 'bg_run'].includes(event.toolName) || event.input?.isAgent === true) return;
-      await scan(ctx);
       lastCtx = ctx;
       let candidate = projectCheckCommand(event.input?.command, ctx.cwd, true);
       // `check 2>&1 | tail -60` or `check > build/verify/out.txt 2>&1` is the
@@ -599,6 +598,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
       const check = candidate && (state.assessment?.checks.some(c => c.key === candidate!.key) ? candidate : projectCheckCommand(shaped && candidate ? shaped.body : event.input?.command, ctx.cwd));
       if (candidate && (check || !reconCommand(candidate.label))) {
+        // Only checks need a pre-command source identity. Other shell calls are still scanned on their result
+        // to observe mutations; scanning both sides of every rg/git/read-only probe added no verification.
+        await scan(ctx);
         if (starts.size >= 64) starts.delete(starts.keys().next().value!);
         starts.set(event.toolCallId, { revision: state.revision, tree: state.tree, check: candidate, epoch, observeOnly: !check });
       } else if (state.assessment?.revision === state.revision && state.assessment.disposition === 'required' && typeof event.input?.command === 'string') {

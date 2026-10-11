@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { completionReport, staticAdvisories, staticCompletionSteps } from '../agent/extensions/lib/completion-check.ts';
+import { completionReport, createStaticCompletionCheck, staticAdvisories, staticCompletionSteps } from '../agent/extensions/lib/completion-check.ts';
+import { checkSourceText } from '../agent/extensions/lib/source-check.ts';
 import { createGoal, goalCompletionGate, goalCompletionReceipts } from '../agent/extensions/lib/goal-state.ts';
 
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd, encoding: 'utf8' });
@@ -91,4 +92,46 @@ test('source-quality advisories name duplicated blocks in changed files and stay
   t.after(() => fs.rmSync(bare, { recursive: true, force: true }));
   fs.writeFileSync(path.join(bare, 'ok.js'), `${block('a')}\n${block('b')}`);
   assert.deepEqual(await staticAdvisories(bare), [], 'no Git baseline, no advisories');
+});
+
+test('completion reuses current parse results but catches same-size same-mtime edits and cached failures', async t => {
+  const dir=repo(t), parsed=[];
+  const check=createStaticCompletionCheck((...args)=>{parsed.push(args[0]);return checkSourceText(...args);});
+  const file=path.join(dir,'ok.js');
+  fs.writeFileSync(file,'export const ok = 2;\n');
+  assert.deepEqual(await check(dir),[]);
+  assert.deepEqual(await check(dir),[]);
+  assert.deepEqual(parsed,['ok.js'],'check followed by complete parses identical source once');
+  const stat=fs.statSync(file);
+  fs.writeFileSync(file,'export const == 2;\n  ');
+  fs.utimesSync(file,stat.atime,stat.mtime);
+  assert.equal(fs.statSync(file).size,stat.size);
+  const broken=(await check(dir)).find(r=>r.source==='syntax');
+  assert.equal(broken?.state,'unresolved');
+  assert.deepEqual((await check(dir)).find(r=>r.source==='syntax'),broken,'a repeated call retains the content-bound failure');
+  assert.equal(parsed.length,2);
+  fs.writeFileSync(file,'export const === 2;\n ');
+  assert.notEqual((await check(dir)).find(r=>r.source==='syntax')?.revision,broken.revision,'a new defect cannot inherit the old refusal/waiver identity');
+  fs.writeFileSync(file,'export const ok = 3;\n');
+  assert.deepEqual(await check(dir),[]);
+  assert.equal(parsed.length,4,'a repair is parsed again');
+});
+
+test('unavailable parsers are explicit gaps and are retried instead of cached as success', async t => {
+  const dir=repo(t);fs.writeFileSync(path.join(dir,'ok.js'),'export const ok = 2;\n');
+  let calls=0;
+  const check=createStaticCompletionCheck(async()=>++calls===1?{status:'unavailable',checker:'fixture',diagnostics:['missing']}:{status:'passed',checker:'fixture',diagnostics:[]});
+  assert.equal((await check(dir)).find(r=>r.source==='static-check')?.state,'unknown');
+  assert.deepEqual(await check(dir),[]);
+  assert.equal(calls,2);
+});
+
+test('bounded syntax coverage is disclosed and caller cancellation does not become a passing receipt', async t => {
+  const dir=repo(t);
+  for(let i=0;i<21;i++)fs.writeFileSync(path.join(dir,`extra-${i}.js`),`export const x=${i};\n`);
+  assert.equal((await staticCompletionSteps(dir)).find(r=>r.source==='static-check')?.state,'unknown');
+  const abort=new AbortController();
+  const check=createStaticCompletionCheck(async()=>{abort.abort();abort.signal.throwIfAborted();});
+  await assert.rejects(check(dir,abort.signal),/abort/i);
+  await assert.rejects(staticCompletionSteps(dir,abort.signal),/abort/i);
 });

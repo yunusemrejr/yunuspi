@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Goals finish with fewer bookkeeping turns.** `goal complete` accepts a batch of observed criterion results, including individual waivers, and validates the whole batch before recording it. Existing single-criterion calls keep working. A settled goal with all evidence and clear current verification closes without waking the model just to call `complete`; unresolved checks still use the existing bounded continuation. Final Markdown/reStructuredText documentation edits no longer force another test run.
+
+**Completion checks reuse exact file contents.** Audit and syntax steps share one bounded source snapshot and reuse per-file results when bytes match. External edits invalidate the cache even when size and timestamps match. The static deadline is ten seconds; incomplete coverage stays explicit. Optional `goal check` quality notes inspect changed files instead of rebuilding a whole-project duplicate index.
+
+**Shell probes stop scanning twice.** Non-check shell calls retain their source observation on result, without a redundant pre-command scan. Verification commands still capture current source identity before running. Guidance tells the model to run known focused checks directly and reuse their automatically adopted receipts, without preliminary inspect/assess calls.
+
 ## 0.36.2 — 2026-10-10
 
 **Subagents start again.** 0.36.0 and 0.36.1 deleted the `bash-router` and `reasoning-aids` extensions but left the built-in agent definitions (`scout`, `worker`, `reviewer`, `oracle`, `researcher`, `delegate`, `automatic-free-assistant`) listing them, so a child failed at launch with "Extension path does not exist" and the native reviewer behind `quality_review` always reported itself unavailable. The dead paths are gone.

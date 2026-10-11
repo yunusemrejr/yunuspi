@@ -786,7 +786,7 @@ Maintain a durable hierarchical plan with dependencies, execution annotations, f
 
 #### goal-tracking
 
-Set a /goal for work that matters: the demand becomes numbered acceptance criteria that only count with observed evidence, stay in context every turn, survive resume and compaction, and keep the session working while any remain open. Completion is refused while criteria lack evidence or files changed since the last passing check; continuations are bounded and stop at the first one that records no new evidence, and an interrupt pauses the goal instead of fighting the user.
+Set a /goal with numbered criteria backed by observed evidence. Finish in one complete call with a results batch; check is optional diagnostics. A fully verified settled goal closes without a bookkeeping model turn. Content-bound static checks reuse identical files; plain documentation updates do not create test debt. Criteria and verification survive resume and compaction. Open work uses bounded, stall-aware continuations; an interrupt pauses the goal.
 
 **Entrypoints:** `goal`, `goal-anchor`
 
@@ -1233,7 +1233,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 211; literal)
+- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 233; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 32; factory)
@@ -1338,7 +1338,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1810)
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 164)
+- /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 185)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3446)
 - /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 907)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)

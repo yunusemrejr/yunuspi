@@ -13,11 +13,11 @@ import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
 import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
 import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
-import { collectVerificationReceipts } from './lib/continuation-notice.ts';
-import { completionReport, staticAdvisories, staticCompletionSteps } from "./lib/completion-check.ts";
+import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
+import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
-	parseGoalArgs, recordEvidence, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
+	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
 
 const ENTRY = "goal-state-v1";
@@ -30,6 +30,7 @@ const VERIFY_TOOLS = new Set(["render_see", "video_qa", "video_render"]);
 export default function goalExtension(pi: ExtensionAPI): void {
 	if (process.env.PI_GOAL === "0") return;
 	let goal: GoalState | undefined;
+	let checkStatic = createStaticCompletionCheck();
 	type CheckStart = { goalId: string; revision: number; command: string; tool: string };
 	const checkStarts = new Map<string, CheckStart>();
 	const backgroundChecks = new Map<string, CheckStart>();
@@ -56,6 +57,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 	const restore = (ctx: ExtensionContext) => {
 		try { goal = restoreGoal(ctx.sessionManager.getBranch()); } catch { goal = undefined; }
+		checkStatic = createStaticCompletionCheck();
 		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 		refused.clear();
 		show(ctx);
@@ -126,7 +128,12 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		if (!goalIsLive(goal) || event.isError || start && start.goalId !== goal.id) return;
 		const name = event.toolName ?? "";
 		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
-		if (WRITE_TOOLS.has(name)) persist({ ...goal, verification: { revision: (goal.verification?.revision ?? 0) + 1, checked: goal.verification?.checked ?? 0 } }, ctx);
+		if (WRITE_TOOLS.has(name)) {
+			const file = event.details?.fileMutation?.resolved ?? event.input?.path;
+			// Reading the final documentation diff satisfies V; appending release notes after a green check
+			// must not manufacture another test run. Executable MDX and unknown/batched paths stay conservative.
+			if (typeof file !== "string" || !/\.(?:md|markdown|rst)$/i.test(file)) persist({ ...goal, verification: { revision: (goal.verification?.revision ?? 0) + 1, checked: goal.verification?.checked ?? 0 } }, ctx);
+		}
 		else if (name === "bg_run" && isTestLikeCommand(observed.command)) {
 			if (event.toolCallId && !start) return;
 			const id = event.details?.task?.id ?? event.details?.taskId;
@@ -142,10 +149,24 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	// One continuation per settled run; bounded and stall-aware inside stopGate.
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", async (_event, ctx) => {
 		try {
 			const stop = lastStop;
 			lastStop = undefined;
+			// Recording the last criterion used to wake a model just to call complete. Close that exact checked goal
+			// here instead; unresolved receipts still take the normal bounded continuation path, never an auto-waiver.
+			if (stop === "stop" && goal?.status === "active" && !ctx.hasPendingMessages() && !debt() && goal.criteria.every(c => c.status !== "open")) {
+				if (resumesElsewhere(ctx.sessionManager)) return;
+				const closing = goal;
+				const verification = await checkStatic(ctx.cwd, ctx.signal);
+				if (goal !== closing || ctx.signal?.aborted || ctx.hasPendingMessages() || resumesElsewhere(ctx.sessionManager)) return;
+				const checked = goalCompletionGate(goal, { unverifiedWrites: 0, refused: new Set(), verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...verification] });
+				if (!checked.block) {
+					persist(complete(goal, false), ctx);
+					ctx.ui?.notify?.(`Goal ${goal.id} achieved.`, "info");
+					return;
+				}
+			}
 			const decision = stopGate(goal, { lastStop: stop, hasPendingMessages: ctx.hasPendingMessages() });
 			if (!decision) return;
 			persist(decision.goal, ctx);
@@ -179,6 +200,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					case "status": return notify(goalSummary(goal));
 					case "set": {
 						const next = createGoal(command.text);
+						checkStatic = createStaticCompletionCheck();
 						checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 						refused.clear();
 						persist(next, ctx);
@@ -211,13 +233,18 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "goal",
 		label: "goal",
-		description: "Track the user's /goal definition of done. check runs the whole completion check (criteria, tests, review, deliverables, rendered/media review, static audit, syntax, plus non-blocking source-quality advisories) and lists what is still open; met records evidence for one criterion (what you ran or saw and its result); waive drops an unnecessary or impossible criterion with the reason; criteria replaces the open criteria with a sharper list; blocked reports that only the user can unblock the work; complete closes the goal after every criterion has evidence and nothing changed since the last verification; status prints progress.",
+		description: "Track the user's /goal. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker; status shows progress.",
 		parameters: Type.Object({
 			action: StringEnum(["status", "check", "met", "waive", "criteria", "blocked", "complete"] as const),
 			id: Type.Optional(Type.String({ maxLength: 8, description: "Criterion id such as C1 or V" })),
 			// The owner clips each text and keeps at most MAX_CRITERIA - 1 items; a
 			// schema refusal of longer input only cost a retry turn per call.
 			evidence: Type.Optional(Type.String({ maxLength: 500 * RATIONALE_INTAKE, description: "What was observed: command and result, file and line, screenshot finding" })),
+			results: Type.Optional(Type.Array(Type.Object({
+				id: Type.String({ maxLength: 8 }),
+				evidence: Type.String({ maxLength: 500 * RATIONALE_INTAKE }),
+				status: Type.Optional(StringEnum(["met", "waived"] as const)),
+			}), { maxItems: MAX_CRITERIA, description: "Batch criterion evidence, including V, with met/waive or complete. Each result needs its own observed evidence or waiver reason; the batch validates before any state changes." })),
 			items: Type.Optional(Type.Array(Type.String({ maxLength: 240 * RATIONALE_INTAKE }), { maxItems: (MAX_CRITERIA - 1) * 2 })),
 			reason: Type.Optional(Type.String({ maxLength: 400 * RATIONALE_INTAKE })),
 			summary: Type.Optional(Type.String({ maxLength: 800 * RATIONALE_INTAKE })),
@@ -228,7 +255,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				case "status": return text(goalSummary(goal));
 				case "check": {
 					// The one completion check: criteria plus every test, review, delivery, media, audit and syntax step.
-					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await staticCompletionSteps(ctx.cwd, signal)];
+					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await checkStatic(ctx.cwd, signal)];
 					const report = completionReport(goal.criteria, receipts);
 					const advisories = await staticAdvisories(ctx.cwd, signal);
 					return text(`${report.lines.join("\n")}${advisories.length ? `\nAdvisory (never blocks): ${advisories.join(" ")}` : ""}\n${report.clear ? "Every step is settled; call goal complete." : "Open steps above: do the work, then record evidence with met/waive or check again."}`);
@@ -239,7 +266,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				}
 				case "met":
 				case "waive": {
-					const outcome = recordEvidence(goal, params.id ?? "", params.action === "met" ? "met" : "waived", params.evidence ?? params.reason ?? "");
+					const outcome = params.results !== undefined
+						? recordEvidenceBatch(goal, params.results, params.action === "met" ? "met" : "waived")
+						: recordEvidence(goal, params.id ?? "", params.action === "met" ? "met" : "waived", params.evidence ?? params.reason ?? "");
 					if (outcome.error) return text(outcome.error);
 					persist(outcome.goal, ctx);
 					const left = outcome.goal.criteria.filter((criterion) => criterion.status === "open");
@@ -253,7 +282,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					return text("Goal marked blocked and shown to the user. Stop and wait for their answer; /goal resume continues afterwards.");
 				}
 				case "complete": {
-					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...await staticCompletionSteps(ctx.cwd, signal)] });
+					if (params.results !== undefined) {
+						const outcome = recordEvidenceBatch(goal, params.results);
+						if (outcome.error) return text(outcome.error);
+						persist(outcome.goal, ctx);
+					}
+					const closing = goal;
+					const verification = await checkStatic(ctx.cwd, signal);
+					signal?.throwIfAborted();
+					if (goal !== closing) return text("Goal changed during completion; use its current criteria and verification.");
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...verification] });
 					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");

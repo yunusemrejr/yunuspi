@@ -11,6 +11,26 @@ const schema='data:text/javascript,'+encodeURIComponent('export const Type=new P
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){return n==='typebox'?{url:${JSON.stringify(schema)},shortCircuit:true}:next(n,c);}`),import.meta.url);
 const {projectCheckCommand,createProjectTestLifecycle}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
 
+test('non-check shell calls scan on result only; real checks still bind the current tree before execution',async t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-scan-count-')),tools={};let scans=0;
+ const ctx={cwd};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}},{discover:async()=>{scans++;return {root:cwd,sources:{'value.js':String(fs.statSync(path.join(cwd,'value.js')).mtimeMs)},tests:[],manifests:[],scripts:[]};}});
+ fs.writeFileSync(path.join(cwd,'value.js'),'export const value=1;');
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the value and verify its regression'});
+ const before=scans;
+ const read={toolName:'bash',toolCallId:'read',input:{command:'git status --short'}};
+ await api.call(read,ctx);assert.equal(scans,before,'no duplicate pre-probe project scan');
+ fs.writeFileSync(path.join(cwd,'value.js'),'export const value=2;');
+ await api.result({...read,isError:false,details:{exitCode:0},content:[]},ctx);
+ assert.equal(scans,before+1);assert.ok(api.snapshot().changed.includes('value.js'),'external mutations are still observed on result');
+ const run={toolName:'bash',toolCallId:'test',input:{command:'node --test'}};
+ await api.call(run,ctx);assert.equal(scans,before+2,'verification still captures a fresh source identity');
+ fs.writeFileSync(path.join(cwd,'value.js'),'export const value=3;');
+ await api.result({...run,isError:false,details:{exitCode:0},content:[{type:'text',text:'1 test passed'}]},ctx);
+ assert.notEqual(api.snapshot().need,null,'an edit during a passing check still invalidates that receipt');
+});
+
 test('a later failed receipt retires an older pass for the identical tree across scopes', async t => {
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-latest-receipt-')),tools={};
  const ctx={cwd};

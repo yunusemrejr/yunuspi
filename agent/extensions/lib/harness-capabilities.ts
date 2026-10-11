@@ -636,7 +636,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "goal-tracking",
 		group: "planning",
-		summary: "Set a /goal for work that matters: the demand becomes numbered acceptance criteria that only count with observed evidence, stay in context every turn, survive resume and compaction, and keep the session working while any remain open. Completion is refused while criteria lack evidence or files changed since the last passing check; continuations are bounded and stop at the first one that records no new evidence, and an interrupt pauses the goal instead of fighting the user.",
+		summary: "Set a /goal with numbered criteria backed by observed evidence. Finish in one complete call with a results batch; check is optional diagnostics. A fully verified settled goal closes without a bookkeeping model turn. Content-bound static checks reuse identical files; plain documentation updates do not create test debt. Criteria and verification survive resume and compaction. Open work uses bounded, stall-aware continuations; an interrupt pauses the goal.",
 		entrypoints: ["goal", "goal-anchor"],
 		tools: ["goal"],
 		commands: ["goal"],

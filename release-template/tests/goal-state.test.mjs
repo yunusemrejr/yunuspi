@@ -20,6 +20,7 @@ const jiti=createJiti(import.meta.dirname);
 const gs=await jiti.import('../agent/extensions/lib/goal-state.ts');
 const {intentBundleTools}=await jiti.import('../agent/extensions/lib/tool-discovery.ts');
 const {default:goalExtension}=await jiti.import('../agent/extensions/goal.ts');
+const {registerContinuationSource}=await jiti.import('../agent/extensions/lib/continuation-notice.ts');
 
 const met=(goal,id,evidence='npm test: 12 passed, exit 0')=>{
  const out=gs.recordEvidence(goal,id,'met',evidence);
@@ -376,4 +377,82 @@ test('goal check lists criteria and unverified edits, then reports every step se
  const settled=await h.call({action:'check'});
  assert.match(settled,/Every step is settled; call goal complete\./);
  assert.match(await h.call({action:'complete'}),/Goal achieved/);
+});
+
+test('one completion call records criterion results atomically and still refuses unverified edits',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ const state=()=>h.entries.at(-1).data;
+ const results=state().criteria.map(c=>({id:c.id,evidence:'Exporter unicode regression: 9 tests passed, exit 0'}));
+ const before=state();
+ assert.match(await h.call({action:'complete',results:[results[0],{id:'V',evidence:'done'}]}),/must state what was observed/);
+ assert.equal(state(),before,'an invalid batch leaves every criterion unchanged');
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ assert.match(await h.call({action:'complete',results}),/1 file change/);
+ assert.ok(state().criteria.every(c=>c.status==='met'),'valid evidence is retained while native verification remains open');
+ await h.emit('tool_result',{toolName:'bash',input:{command:'npm test'},details:{exitCode:0}});
+ assert.match(await h.call({action:'complete'}),/Goal achieved/);
+ const direct=harness();
+ await direct.commands.goal.handler('Ship the exporter',direct.ctx);
+ assert.match(await direct.call({action:'complete',results:direct.entries.at(-1).data.criteria.map(c=>({id:c.id,evidence:'Exporter regression: 9 tests passed, exit 0'}))}),/Goal achieved/);
+ assert.equal(direct.entries.at(-1).data.status,'achieved','no separate met, status or check calls are needed');
+});
+
+test('batch evidence keeps individual waivers and rejects duplicate or unknown criteria without partial writes',()=>{
+ const goal=gs.createGoal('Ship the exporter');
+ for(const results of [
+  [{id:'C1',evidence:'test passed: 1/1'},{id:'c1',evidence:'test passed: 1/1'}],
+  [{id:'C1',evidence:'test passed: 1/1'},{id:'missing',evidence:'test passed: 1/1'}],
+  [],
+ ]) {
+  const outcome=gs.recordEvidenceBatch(goal,results);
+  assert.ok(outcome.error);assert.equal(outcome.goal,goal);
+ }
+ const recorded=gs.recordEvidenceBatch(goal,[{id:'C1',status:'waived',evidence:'Superseded by the existing exporter; no new artifact requested.'},{id:'V',evidence:'Existing output inspected: unicode filenames preserved.'}]);
+ assert.equal(recorded.error,undefined);
+ assert.deepEqual(recorded.goal.criteria.map(c=>c.status),['waived','met']);
+});
+
+test('settled closes a fully verified goal without a bookkeeping continuation, but never waives verification debt',async()=>{
+ for(const edited of [false,true]) {
+  const h=harness();
+  await h.commands.goal.handler('Ship the exporter',h.ctx);
+  await h.call({action:'met',results:h.entries.at(-1).data.criteria.map(c=>({id:c.id,evidence:'Exporter tests: 9 passed, exit 0'}))});
+  if(edited) await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+  await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});
+  await h.emit('agent_settled');
+  await h.emit('agent_settled');
+  assert.equal(h.entries.at(-1).data.status,edited?'active':'achieved');
+  assert.equal(h.sent.length,edited?2:1,'only unresolved work wakes the model');
+ }
+});
+
+test('documentation after a passing check does not force another test run; executable MDX and unknown writes do',async()=>{
+ for(const file of ['CHANGELOG.md','docs/guide.rst','component.mdx',undefined]) {
+  const h=harness();await h.commands.goal.handler('Ship the exporter and update its docs',h.ctx);
+  await h.emit('tool_result',{toolName:'edit',input:{path:'exporter.ts'}});
+  await h.emit('tool_result',{toolName:'bash',input:{command:'npm test'},details:{exitCode:0}});
+  await h.emit('tool_result',{toolName:'write',input:{path:file}});
+  const result=await h.call({action:'complete',results:h.entries.at(-1).data.criteria.map(c=>({id:c.id,evidence:'Exporter tests: 9 passed, exit 0; final documentation diff inspected.'}))});
+  assert.match(result,file?.endsWith('.md')||file?.endsWith('.rst')?/Goal achieved/:/1 file change/);
+ }
+});
+
+test('automatic goal closure respects another owner\'s verification gaps and pending background work',async()=>{
+ for(const background of [false,true]) {
+  const h=harness();await h.commands.goal.handler('Ship the exporter',h.ctx);
+  let pending=true;
+  const dispose=registerContinuationSource({name:'goal fixture',session:h.ctx.sessionManager,
+   pending:()=>background&&pending?['existing job will resume this session']:[],
+   verificationReceipts:()=>!background&&pending?[{source:'tests',id:'failed',state:'unresolved',line:'Current exporter regression failed.'}]:[]});
+  try {
+   await h.call({action:'met',results:h.entries.at(-1).data.criteria.map(c=>({id:c.id,evidence:'Exporter diff inspected: expected unicode output present.'}))});
+   await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});await h.emit('agent_settled');
+   assert.equal(h.entries.at(-1).data.status,'active');
+   assert.equal(h.sent.length,background?1:2,'pending background work resumes itself; unresolved verification gets a bounded continuation');
+   pending=false;
+   await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});await h.emit('agent_settled');
+   assert.equal(h.entries.at(-1).data.status,'achieved');
+  } finally {dispose();}
+ }
 });

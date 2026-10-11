@@ -149,6 +149,25 @@ export function recordEvidence(goal: GoalState, id: string, status: "met" | "wai
 	return { goal: { ...goal, criteria, updatedAt: now } };
 }
 
+export interface CriterionResult { id: string; evidence: string; status?: "met" | "waived" }
+
+/** One observed result per criterion, applied atomically so a bad item cannot leave half a batch recorded. */
+export function recordEvidenceBatch(goal: GoalState, results: readonly CriterionResult[], status: "met" | "waived" = "met", now = Date.now()): EvidenceOutcome {
+	if (!Array.isArray(results) || !results.length || results.length > MAX_CRITERIA) return { goal, error: `Provide 1–${MAX_CRITERIA} criterion results.` };
+	let next = goal;
+	const seen = new Set<string>();
+	for (const result of results) {
+		const id = String(result?.id ?? "").trim().toLowerCase();
+		if (seen.has(id)) return { goal, error: `Duplicate criterion ${JSON.stringify(result.id)} in results.` };
+		seen.add(id);
+		if (result?.status !== undefined && !["met", "waived"].includes(result.status)) return { goal, error: "Criterion status must be met or waived." };
+		const outcome = recordEvidence(next, id, result?.status ?? status, result?.evidence ?? "", now);
+		if (outcome.error) return { goal, error: outcome.error };
+		next = outcome.goal;
+	}
+	return { goal: next };
+}
+
 export interface CompletionContext {
 	/** Files were written or edited after the last passing verification command. */
 	unverifiedWrites: number;
@@ -248,7 +267,7 @@ function continuationPrompt(goal: GoalState): string {
 export function goalAnchor(goal: GoalState | undefined): string | undefined {
 	if (!goal || goal.status !== "active") return undefined;
 	const rows = goal.criteria.map((criterion) => `${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}`);
-	return `[Goal ${goal.id} — set by the user; the session continues until every criterion has evidence]\n${clip(goal.text, 400)}\n${rows.join("\n")}\nRecord evidence with the goal tool as each criterion is verified; do not stop or claim completion before then.`;
+	return `[Goal ${goal.id} — set by the user; the session continues until every criterion has evidence]\n${clip(goal.text, 400)}\n${rows.join("\n")}\nWork directly on the request. When finished, record all criterion evidence and close in one goal({action:"complete", results:[{id,evidence},…]}) call. check is optional diagnostics; do not add a check/status turn just to finish.`;
 }
 
 /** The message that starts work on a freshly set goal; the marker stages the goal tool. */

@@ -503,7 +503,7 @@ test('native complete unchanged source observation avoids unnecessary validation
   const after = await f.status();
   assert.equal(after.revision, before.revision);
   assert.ok(after.evidence.some(row => row.stageId === 'validation' && row.status === 'passed'));
-  assert.equal(observations.length, 2, 'native call and result observations are reused; the indexer never scans');
+  assert.equal(observations.length, 1, 'a non-check shell call scans once on result; the indexer reuses that observation');
 });
 
 test('a native test that changes sources remains stale and cannot erase failures', async t => {
