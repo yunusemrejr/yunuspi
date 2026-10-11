@@ -13,6 +13,7 @@ import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, routeSkillsPrecise, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
+import { resolveSkills } from "../pi-subagents/src/agents/skills.ts";
 import { buildSkillIndex, rankSkills, skillCatalogFingerprint, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest, shouldSuggestReview } from "./review-coordinator.ts";
@@ -918,6 +919,18 @@ export function createRelevantGuidance(pi: any) {
         ? configured.filter(s => !s.disableModelInvocation).map(s => ({name:s.name, description:s.description ?? '', file:s.filePath}))
         : [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)]
           .map(m => ({name:decode(m[1]),description:decode(m[2]),file:decode(m[3])}));
+      // Builtin workers deliberately inherit no ambient skill catalogue. Offer
+      // this one bundled task reference when it fits, without enabling global
+      // inheritance, loading bodies into the prompt or changing child tools.
+      if (process.env.PI_SUBAGENT_CHILD === '1' && !metadata.some(s => s.name === 'anatomy')
+        && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(skillTaskText(event.prompt ?? ''))
+        && routeSkills(event.prompt ?? '').some(route => route.name === 'anatomy')) {
+        const bundled = path.resolve(import.meta.dirname, '../../skills/anatomy');
+        if (fs.existsSync(path.join(bundled, 'SKILL.md'))) {
+          const skill = resolveSkills(['anatomy'], ctx.cwd, [bundled]).resolved[0];
+          if (skill) metadata.push({name:skill.name, description:skill.description ?? '', file:skill.path});
+        }
+      }
       const seenFiles = new Set<string>();
       skills = metadata.filter(s => {
         if (typeof s.name !== 'string' || !s.name || typeof s.description !== 'string'
@@ -957,8 +970,10 @@ export function createRelevantGuidance(pi: any) {
       topicHints({prompt: prompt.length > 24000 ? prompt.slice(0,12000) + "\n" + prompt.slice(-12000) : prompt});
       // One routing evaluation per pass: routeSkills is pure for (prompt,
       // file), and re-evaluating also triple-emits skill.route telemetry.
-      const promptRoutes = routeSkills(prompt);
-      routedSkills(prompt, "", promptRoutes);
+      // Let the routing owner handle explanation/negation rules. The filtered
+      // general-purpose prompt would erase explicit visual explainer requests.
+      const promptRoutes = routeSkills(taskPrompt);
+      routedSkills(taskPrompt, "", promptRoutes);
       const currentIntent = skillIntentSegments(prompt).join(' ');
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
@@ -970,7 +985,7 @@ export function createRelevantGuidance(pi: any) {
       // Precision order (action intent + file/domain evidence) picks the
       // surfaced three; .sort() by raw priority would undo it. Advisory:
       // routedSkills() above still sees every candidate.
-      const preciseRoutes = routeSkillsPrecise(prompt).filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).slice(0,3);
+      const preciseRoutes = routeSkillsPrecise(taskPrompt).filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).slice(0,3);
       for (const route of preciseRoutes) {
         const skill = skills.find(s => s.name === route.name);
         if (skill) trackReview(skill,route.check,'task');

@@ -9,6 +9,7 @@ YunusPi includes locally modified extensions. Their original notices remain in t
 - rpiv-todo — retain `agent/extensions/rpiv-todo/LICENSE`.
 - pi-web-access — retain `agent/extensions/pi-web-access/LICENSE`.
 - Cytoscape.js 3.33.3 — MIT; graph viewer library, retained verbatim with `agent/extensions/lib/project-intelligence/viewer-assets/CYTOSCAPE-LICENSE` and upstream provenance in that directory's README.
+- Anatomy by Ryan — MIT, copyright 2026 Ryan; the isometric illustration and 3D mechanism skill, kit, scripts, references and eight examples are bundled in `agent/skills/anatomy`. `LICENSE` retains the original notice and `UPSTREAM.json` pins the source commit and file hashes. Only `SKILL.md` adds YunusPi discovery and tool guidance.
 
 Parser WASM assets are retained from the existing pi-lens package and fingerprinted by the public checker. Preserve upstream notices when modifying or redistributing them. npm dependencies are downloaded separately from the exact lockfile and retain their respective package licenses. The Pi-derived runtime is owned source under `core/`; each package retains the upstream MIT license.
 

@@ -539,6 +539,16 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		});
 		pi.on("before_agent_start", (event, ctx) => {
 			guidance.start(event, ctx);
+			const hints = guidance.candidates();
+			if (!hints.length) return;
+			// A child has no parent reminder loop to deliver its pending hints.
+			// Offer the same bounded references without manual timers or nudges.
+			guidance.commit(hints);
+			return { message: {
+				customType: "reminders",
+				content: hints.map(hint => `[capability hint] ${hint.text}`).join("\n"),
+				display: false,
+			} };
 		});
 		pi.on("tool_call", (event, ctx) => {
 			if (!ctx.signal?.aborted) return guidance.beforeToolCall(event);

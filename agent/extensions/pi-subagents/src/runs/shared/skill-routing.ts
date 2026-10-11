@@ -4,7 +4,7 @@ import {extractTaskIntent} from "./task-intent-model.ts";
 import {precisionRankSkill} from "../../../../lib/skill-telemetry.ts";
 /** Narrow advisory routing. No skill-body loading, I/O or tool-output scanning.
  * The reminder owner applies catalog availability, delivery and lifecycle limits. */
-export type Route = { name: string; intent: RegExp; file?: RegExp; check: string; priority?: number; scopedIntent?: boolean; pathIntent?: boolean };
+export type Route = { name: string; intent: RegExp; file?: RegExp; check: string; priority?: number; scopedIntent?: boolean; pathIntent?: boolean; explanatoryIntent?: boolean };
 // Image-to-code: a verb that builds, a reference picture and a web target, or a
 // page asked to look like / match / follow a reference. Taking or comparing a
 // screenshot of a page is verification, not this route.
@@ -19,6 +19,7 @@ export const MOCKUP_INTENT = new RegExp([
   String.raw`${IMAGE_URL}[^\n]{0,160}\b${MOCKUP_TARGET}\b`,
 ].join('|'), 'i');
 export const skillRoutes: readonly Route[] = [
+  {name:"anatomy",priority:87,scopedIntent:true,pathIntent:true,explanatoryIntent:true,intent:/(?:^|\s)\/(?:skill:)?anatomy\b|\b(?:use|read|load|apply)\s+(?:the\s+)?anatomy(?:\s+skill)?\b|\banatomy skill\b|\bisometric\s+(?:illustrations?|drawings?|figures?|diagrams?|animations?|explainers?|scenes?|mechanisms?)\b|\b(?:interactive|animated|visual|mechanical|scientific)\s+(?:explainers?|explanations?)\b|\b(?:cutaways?|exploded[- ]views?)\b|\b(?:explanatory|technical)\s+(?:illustrations?|drawings?|figures?|diagrams?)\b|\b(?:3d|three[ -]dimensional)\s+(?:animations?|mechanisms?|explainers?|diagrams?|figures?)\b|\b(?:explain|illustrate|visuali[sz]e|show how)\b[^\n]{0,160}\b(?:interactive|isometric|3d|svg|webgl)\b|\b(?:svg|webgl)\b[^\n]{0,100}\b(?:explainer|mechanism|how (?:a|an|the|this) .{0,50}works)\b/i,check:"For a crafted isometric explanation or relevant 3D mechanism animation, use Anatomy’s local kit and closest example; derive motion and readouts from one model, inspect rendered frames and interaction, and use references/3d.md for parts that turn in depth. Keep the native Blender/video workflow for general 3D production and adapt the guide to the user's requested scope."},
   {name:"frontend",priority:88,scopedIntent:true,pathIntent:true,intent:MOCKUP_INTENT,check:"Look at the reference first (image_understand: bands, palette, type, spacing); build structure from its bands and repeated components; write text as text, flat shapes in CSS, icons as SVG (the icon set or hand-drawn paths), photographs as cropped placeholders (image_crop); render at the reference width, compare with render_see, and iterate, fixing height and spacing drift first; extend the extracted system to pages that have no reference."},
   {name:"code-first-video",priority:82,scopedIntent:true,intent:/\b(?:explainer|documentary|narrated|animated|educational|promo(?:tional)?|motion.design)\s+videos?\b|\bvideo\s+(?:essay|explainer|documentary|about|explaining|on the history)\b|\bstoryboard\w*\b|\b(?:make|create|produce|direct|generate|build|script|animate|narrate)\b[^\n]{0,60}\b(?:a|an|the|short|\d+[- ](?:second|minute))\b[^\n]{0,40}\bvideo\b(?!\s*(?:player|component|element|tag|embed|upload|stream\w*|call|codec|file|thumbnail)s?\b)/i,file:/(?:^|\/)storyboard\.md$/i,check:"Storyboard before code, keep narration/timing in the master video.json timeline, build visual systems from reusable primitives, and review rendered frames, motion, narration and loudness before delivery; a successful render is not visual approval."},
   {name:"signature-experience",priority:80,scopedIntent:true,intent:/\b(?:stunning|breathtaking|immersive|cinematic|awwwards?|sota|state[- ]of[- ]the[- ]art|next[- ]level|world[- ]class|jaw[- ]?dropping)\b[^\n]{0,80}\b(?:web ?sites?|landing ?pages?|home ?pages?|portfolios?|web ?apps?|experiences?|storefronts?|hero)\b|\b(?:web ?sites?|landing ?pages?|home ?pages?|portfolios?|web ?apps?|hero)\b[^\n]{0,80}\b(?:3d|webgl|three\.?js|shaders?|parallax|scroll[- ]?(?:driven|telling|animat\w*)|motion graphics|mascot|particles?|kinetic|cinematic|immersive|interactive (?:world|scene|hero))\b|\b(?:3d|webgl|three\.?js|shaders?|parallax|motion graphics|mascot|kinetic (?:type|typography)|scroll[- ]?(?:driven|telling))\b[^\n]{0,80}\b(?:web ?sites?|landing ?pages?|home ?pages?|portfolios?|web ?apps?|hero)\b/i,check:"Set the ambition level and one signature from the subject's own world before building (swap test); ship a static baseline first, then layer ambient life, interaction and scroll choreography with fallbacks for reduced motion, no WebGL and phone; palette from scripts/palette.mjs, a generated world from scripts/world-kit.mjs when it fits; verify rendered at 390, 768 and 1440 wide (render_see captures WebGL in software)."},
@@ -153,10 +154,11 @@ export function skillTaskText(prompt = '') {
 }
 /** Clause-local intent keeps excluded languages and quoted examples out of
  * suggestions. Contrast clauses retain the positive request after an exclusion. */
-export function skillIntentSegments(prompt = '') {
+export function skillIntentSegments(prompt = '', includeExplanation = false) {
   return skillTaskText(prompt).replace(/\brather than\b[^;\n.!?]*/gi,' ')
     .split(/\n|[.!?](?:\s|$)|;|\b(?:but|instead)\b/i)
-    .filter(part => !/\b(?:do not|don't|never|without animation|static svg|explain|what is|how does)\b/i.test(part));
+    .filter(part => !/\b(?:do not|don't|never)\b/i.test(part)
+      && (includeExplanation || !/\b(?:without animation|static svg|explain|what is|how does)\b/i.test(part)));
 }
 export function skillActionSegments(prompt = '') {
   return skillIntentSegments(prompt).filter(part => task.test(part));
@@ -166,13 +168,18 @@ export function routeSkills(prompt = '', file = '') {
   const normalized = file.length <= 4096 ? file.replaceAll('\\','/') : '';
   const doing = task.test(bounded);
   const actionSegments = skillActionSegments(bounded);
+  // Only an opted-in visual route can treat "explain how ... interactive"
+  // or "draw ..." as creation intent. Ordinary text questions stay unrouted.
+  const explanationSegments = skillIntentSegments(bounded, true).filter(part => task.test(part)
+    || /\b(?:draw|illustrate|visuali[sz]e|explain|show|how (?:do|does))\b|(?:^|\s)\/(?:skill:)?anatomy\b/i.test(part));
   const matches = skillRoutes.flatMap(route => {
     const fileMatch = !!normalized && !!route.file?.test(normalized);
-    return fileMatch || doing && (route.scopedIntent
+    const segments = route.explanatoryIntent ? explanationSegments : actionSegments;
+    return fileMatch || segments.length > 0 && (route.scopedIntent
       // Slash-shaped tokens are stripped from scoped intent tests so pasted paths do not
       // dominate routing; a route whose intent genuinely declares path evidence opts in.
-      ? actionSegments.some(part=>{const stripped=part.replace(/(?:\S*\/)+\S*/g,' ');return route.intent.test(stripped)||!!route.pathIntent&&route.intent.test(part);})
-      : actionSegments.some(part => route.intent.test(part)))
+      ? segments.some(part=>{const stripped=part.replace(/(?:\S*\/)+\S*/g,' ');return route.intent.test(stripped)||!!route.pathIntent&&route.intent.test(part);})
+      : segments.some(part => route.intent.test(part)))
       ? [{name:route.name, check:route.check, priority:Math.max(fileMatch ? 70 : 60, route.priority ?? 0)}] : [];
   });
   // Statistical fallback never displaces explicit language/file matches.

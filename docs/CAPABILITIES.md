@@ -1268,7 +1268,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 816; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1873; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 722; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 723; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
@@ -1366,7 +1366,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 476)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1201)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1211)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3494)
 - /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1734)
@@ -1882,9 +1882,10 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 25 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 26 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
+- `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
 - `api-security` — [`agent/skills/api-security/SKILL.md`](../agent/skills/api-security/SKILL.md)
 - `audio` — [`agent/skills/audio/SKILL.md`](../agent/skills/audio/SKILL.md)
 - `browser` — [`agent/skills/browser/SKILL.md`](../agent/skills/browser/SKILL.md)
@@ -1921,6 +1922,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/3D-STUDIO.md`](3D-STUDIO.md)
 - [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
 - [`docs/ADAPTIVE-EXECUTION.md`](ADAPTIVE-EXECUTION.md)
+- [`docs/ANATOMY.md`](ANATOMY.md)
 - [`docs/ANTI-SLOP-CHECKLIST.md`](ANTI-SLOP-CHECKLIST.md)
 - [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 - [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)

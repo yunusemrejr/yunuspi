@@ -3425,7 +3425,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1201
+        "line": 1211
       },
       {
         "name": "run",
@@ -3980,7 +3980,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 722,
+        "line": 723,
         "kind": "literal"
       },
       {
@@ -4386,7 +4386,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 722,
+        "line": 723,
         "kind": "literal"
       },
       {
@@ -6955,6 +6955,10 @@
         "path": "agent/skills/3d-cad/SKILL.md"
       },
       {
+        "name": "anatomy",
+        "path": "agent/skills/anatomy/SKILL.md"
+      },
+      {
         "name": "api-security",
         "path": "agent/skills/api-security/SKILL.md"
       },
@@ -7063,6 +7067,10 @@
       {
         "name": "ADAPTIVE-EXECUTION.md",
         "path": "docs/ADAPTIVE-EXECUTION.md"
+      },
+      {
+        "name": "ANATOMY.md",
+        "path": "docs/ANATOMY.md"
       },
       {
         "name": "ANTI-SLOP-CHECKLIST.md",
