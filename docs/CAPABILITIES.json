@@ -3219,22 +3219,22 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 528
+        "line": 568
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 570
+        "line": 610
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 562
+        "line": 602
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 578
+        "line": 618
       },
       {
         "name": "catalog-status",
@@ -3249,12 +3249,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1844
+        "line": 1846
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1397
+        "line": 1398
       },
       {
         "name": "curator",
@@ -3264,12 +3264,12 @@
       {
         "name": "custom-double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 458
+        "line": 488
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 438
+        "line": 468
       },
       {
         "name": "effort",
@@ -3279,7 +3279,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1810
+        "line": 1812
       },
       {
         "name": "export-json",
@@ -3309,17 +3309,17 @@
       {
         "name": "hook-audit",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 76
+        "line": 78
       },
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 608
+        "line": 648
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 655
+        "line": 695
       },
       {
         "name": "lens-allow-edit",
@@ -3374,7 +3374,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 623
+        "line": 663
       },
       {
         "name": "memory-prime",
@@ -3384,7 +3384,7 @@
       {
         "name": "metrics",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 58
+        "line": 59
       },
       {
         "name": "models",
@@ -3444,7 +3444,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1734
+        "line": 1736
       },
       {
         "name": "subagent-cost",
@@ -3529,7 +3529,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1759
+        "line": 1761
       },
       {
         "name": "task-state",
@@ -3539,12 +3539,12 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 554
+        "line": 594
       },
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1778
+        "line": 1780
       },
       {
         "name": "websearch",
@@ -3634,25 +3634,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 827,
+        "line": 867,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 781,
+        "line": 821,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 691,
+        "line": 731,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 750,
+        "line": 790,
         "kind": "literal"
       },
       {
@@ -3972,7 +3972,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1873,
+        "line": 1875,
         "kind": "literal"
       },
       {
@@ -4186,25 +4186,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 827,
+        "line": 867,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 781,
+        "line": 821,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 691,
+        "line": 731,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 750,
+        "line": 790,
         "kind": "literal"
       },
       {
@@ -4378,7 +4378,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1873,
+        "line": 1875,
         "kind": "literal"
       },
       {
@@ -4689,7 +4689,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 706,
+      "sourceFiles": 707,
       "registrationSites": 64,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 99,

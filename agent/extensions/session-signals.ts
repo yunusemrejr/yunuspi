@@ -25,6 +25,7 @@ import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs";
+import { showRpcReport } from "./lib/rpc-report.ts";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -1716,6 +1717,7 @@ export default function (pi: any) {
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   async function showReport(ctx: any, title: string, lines: string[]) {
     lines = lines.map(reportText);
+    if (ctx.mode === "rpc") { showRpcReport(pi, title, lines); return; }
     if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
       ctx.ui?.notify?.(lines.join("\n"), "info");
       return;

@@ -1,4 +1,6 @@
 import { defaultCompletionTrigger, serviceNotificationOnly, taskTriggersCompletion } from "./core/service-policy.ts";
+import * as path from "node:path";
+import { showRpcReport } from "../../lib/rpc-report.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -337,7 +339,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         parts.push(`${String(unseenDone.length)} done`);
       const entryHint = dockOpen
         ? "focused"
-        : `Shift↓${unseenFinishedCount > 0 ? " · /bg-clear" : ""}`;
+        : `${ctx.mode === "rpc" ? "/tasks" : "Shift↓"}${unseenFinishedCount > 0 ? " · /bg-clear" : ""}`;
       const segments = [...parts, entryHint];
       if (updateSegment) segments.push(updateSegment);
       const label = ` bg ${segments.join(" · ")} `;
@@ -364,6 +366,44 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     initialTaskId?: string,
   ): Promise<void> {
     currentCtx = ctx;
+    if (ctx.mode === "rpc") {
+      try {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const runtime = await registry.ensureRuntimeDir(ctx);
+        const owned = () => registry.allTasks().filter(task => path.dirname(task.outputAbsPath) === runtime.abs);
+        const tasks = owned();
+        if (tasks.length === 0) { showRpcReport(pi, "Background tasks", ["No background tasks in this session."]); return; }
+        const choices = new Map(tasks.map(task => [`${taskDisplayName(task)} · ${task.status} (${task.id})`, task]));
+        const selected = initialTaskId ? registry.resolveTask(initialTaskId)
+          : choices.get(await ctx.ui.select("Background tasks", [...choices.keys()]) ?? "");
+        if (!selected) return;
+        if (ctx.sessionManager.getSessionId() !== sessionId) return;
+        if (!owned().includes(selected)) throw new Error("This task belongs to another session.");
+        const actions = ["Show output", "Show command and output path", ...(selected.status === "running" ? ["Stop task"] : ["Run again"])];
+        const action = await ctx.ui.select(taskDisplayName(selected), actions);
+        if (!action || !actions.includes(action)) return;
+        if (ctx.sessionManager.getSessionId() !== sessionId) return;
+        if (!owned().includes(selected) || registry.isShuttingDown()) return;
+        if (action === "Stop task") {
+          if (selected.status !== "running") throw new Error(`Task is already ${selected.status}.`);
+          await registry.stopTask(selected, "user");
+          showRpcReport(pi, "Background task stopped", [`${taskDisplayName(selected)} (${selected.id})`, `Output: ${selected.outputPath}`]);
+        } else if (action === "Run again") {
+          const rerun = await startTask(ctx, selected.command, { name: taskDisplayName(selected), isAgent: selected.isAgent,
+            description: selected.description, timeoutSeconds: selected.timeoutSeconds, notifyOnCompletion: true, triggerOnCompletion: false });
+          showRpcReport(pi, "Background task started", [`${taskDisplayName(rerun)} (${rerun.id})`, `Output: ${rerun.outputPath}`]);
+        } else if (action === "Show command and output path") {
+          showRpcReport(pi, taskDisplayName(selected), [`${selected.id} · ${selected.status}`, `Command: ${selected.command}`, `Output: ${selected.outputPath}`]);
+        } else if (action === "Show output") {
+          const logs = await registry.getTaskLogs(selected, DEFAULT_LOG_BYTES, true);
+          showRpcReport(pi, taskDisplayName(selected), logs.text.split("\n"));
+        } else return;
+        seenTaskIds.add(selected.id);
+      } catch (error) {
+        ctx.ui.notify(`Background tasks: ${error instanceof Error ? error.message : String(error)}`, "error");
+      } finally { updateUi(ctx); }
+      return;
+    }
     if (!ctx.hasUI) {
       ctx.ui.notify(
         "Background task manager requires an interactive Pi UI. Use /jobs, /logs, or the bg_status/bg_logs tools in non-interactive mode.",

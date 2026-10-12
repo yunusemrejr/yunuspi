@@ -72,6 +72,10 @@ Terminal-only components and shortcuts stay in TUI mode. `/run` and single
 prompt workflows launch native children directly, retaining the requested
 model, skills and context without an extra script VM. Multi-stage prompt
 workflows retain their per-stage context and output substitution.
+Session reports and hook ledgers use bounded visible RPC messages excluded
+from model context, and background-task dialogs stop only a selected task from
+the current session. Custom Double uses native model, thinking and reconciler
+dialogs with an explicit final selection; cancelling preserves its saved pair.
 
 Automatic project-memory ingestion retains raw text, lexical indexes and source
 provenance for direct scopes, while deferring semantic embedding and backlog

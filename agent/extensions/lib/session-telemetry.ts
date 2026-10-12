@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {buildSessionReport} from './session-report.ts';
 import {createMetricsPanel} from './metrics-panel.ts';
 import {createHookLedger} from './hook-ledger.ts';
+import {showRpcReport} from './rpc-report.ts';
 export const METRICS_SINK=Symbol.for('yunus-pi.metrics.v1');
 export const METRICS_VIEW=Symbol.for('yunus-pi.metrics-view.v1');
 /** Read-only ledger view; diagnostics only, never model-visible. */
@@ -68,6 +69,7 @@ export function registerSessionTelemetry(pi:any) {
     ...(typeof model.compat?.recoveryEndpointName==='string'&&model.compat.recoveryEndpointName?{endpoint:model.compat.recoveryEndpointName.slice(0,160)}:{})};
   }
   const report=buildSessionReport(entries,ctx.sessionManager.getBranch?.()??entries,snapshot(),pi.getActiveTools?.(),current);
+  if(ctx.mode==='rpc'){showRpcReport(pi,'Session metrics',report.lines);return;}
   if(!ctx.hasUI){ctx.ui?.notify?.(report.lines.slice(0,80).join('\n'),'info');return;}
   await ctx.ui.custom((tui:any,theme:any,_keys:any,done:any)=>{
    return createMetricsPanel(report.lines,tui,theme,done);
@@ -89,6 +91,7 @@ export function registerSessionTelemetry(pi:any) {
    ...s.firstMutators.slice(0,10).map(f=>`  ${f.hook} | ${f.owner} | ${f.dispatches} dispatch(es)`),
    'A once-only count is not proof of useful work; duplicates and missing pairs are the actionable signals.',
   ];
+  if(ctx.mode==='rpc'){showRpcReport(pi,'Hook execution ledger',lines);return;}
   if(ctx.hasUI){ctx.ui.notify(lines.join('\n'),'info');return;}
   ctx.ui?.notify?.(lines.join('\n'),'info');
  }});

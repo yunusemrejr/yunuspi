@@ -32,7 +32,8 @@ import {
 import { extractRequirements } from "../../../lib/requirement-ledger.ts";
 import { peerReviewerNotes, publishReviewerNote, registerPlannerStatus, reviewerLabel, reviewerSessionKey } from "../../../lib/reviewer-board.ts";
 import { recentUnreliableRoutes } from "../runs/shared/run-history.ts";
-import { doubleEconomyBlock, loadLastPair, pairKey, parseStoredPair, resolveDoubleModel, saveLastPair, serializePair, type DoubleRegistryModel } from "./double-pair.ts";
+import { defaultDoubleThinking, doubleEconomyBlock, loadLastPair, pairKey, parseStoredPair, resolveDoubleModel, saveLastPair, serializePair, type DoubleRegistryModel } from "./double-pair.ts";
+import { getSupportedThinkingLevels, toModelInfo } from "../shared/model-info.ts";
 import type { DoublePairPickerOptions } from "../slash/double-pair-picker.ts";
 
 /**
@@ -127,6 +128,35 @@ async function pickPairInTui(ctx: ExtensionContext, options: Omit<DoublePairPick
 		{ overlay: false },
 	);
 	return result?.confirmed ? result.pair : undefined;
+}
+
+async function pickPairInRpc(ctx: ExtensionContext, options: Omit<DoublePairPickerOptions, "done">): Promise<DoublePair | undefined> {
+	const choices = new Map(options.models.map(model => {
+		const route = `${model.provider}/${model.id}`;
+		const warnings = [options.economyBlock?.(model), options.unreliable?.has(route) ? "failed to finish lately" : undefined,
+			!doubleContextFits(model.contextWindow, options.sessionTokens) ? "context window smaller than session" : undefined].filter(Boolean);
+		return [`${route}${warnings.length ? ` · ${warnings.join("; ")}` : ""}`, model] as const;
+	}));
+	const pick = async (slot: "a" | "b"): Promise<DoubleModelRef | undefined> => {
+		const choice = await ctx.ui.select(`Double stream ${slot.toUpperCase()}: model`, [...choices.keys()]);
+		const model = choice === undefined ? undefined : choices.get(choice);
+		if (!model) return undefined;
+		const levels = getSupportedThinkingLevels(toModelInfo(model));
+		const initial = options.initial?.[slot];
+		const preferred = initial?.provider === model.provider && initial.id === model.id ? initial.thinking : defaultDoubleThinking(model, options.sessionThinking);
+		const ordered = [...levels].sort((a, b) => Number(b === preferred) - Number(a === preferred));
+		const thinking = await ctx.ui.select(`Double stream ${slot.toUpperCase()}: thinking`, ordered);
+		if (!thinking || !levels.includes(thinking as typeof levels[number])) return undefined;
+		return { provider: model.provider, id: model.id, thinking };
+	};
+	const a = await pick("a"); if (!a) return undefined;
+	const b = await pick("b"); if (!b) return undefined;
+	const reconcilers = new Map([["A", "a"], ["B", "b"], ["Session model", "session"]] as const);
+	const choice = await ctx.ui.select("Double: reconcile on", [...reconcilers.keys()]);
+	const reconcile = reconcilers.get(choice as "A" | "B" | "Session model");
+	if (!reconcile) return undefined;
+	const pair = { a, b, reconcile };
+	return await ctx.ui.confirm("Enable Custom Double?", `${doublePairLabel(pair)}\nA thinking: ${a.thinking}; B thinking: ${b.thinking}\nReconcile: ${choice}\nApplies to subsequent prompts.`) ? pair : undefined;
 }
 
 /** Other reviewers' recent notes, as evidence both streams see identically (cache order is kept). */
@@ -525,7 +555,7 @@ export function registerDoubleMode(pi: any, deps: DoubleRunnerDeps): void {
 				adopt(usable);
 				return;
 			}
-			const pickPair = deps.pickPair ?? (ctx?.hasUI !== false && typeof ctx?.ui?.custom === "function" ? pickPairInTui : undefined);
+			const pickPair = deps.pickPair ?? (ctx?.mode === "rpc" ? pickPairInRpc : ctx?.hasUI !== false && typeof ctx?.ui?.custom === "function" ? pickPairInTui : undefined);
 			if (!pickPair) {
 				notify("The model popup needs an interactive session. Name both models instead: /custom-double provider/model provider/model", "warning");
 				return;

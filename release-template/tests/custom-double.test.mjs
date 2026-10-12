@@ -73,6 +73,48 @@ const kindOf = (params) => {
 const tmpAgentDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'custom-double-'));
 const lastNotice = (pi) => pi.notifies.at(-1);
 
+test('RPC custom-double picks exact routes and thinking through native dialogs without changing the main model', async t => {
+  const dir = tmpAgentDir(); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pi = makePi(), selected = [];
+  let launches = 0;
+  registerDoubleMode(pi, { launch: async () => { launches++; }, agentDir: () => dir, economyBlock: () => undefined });
+  const ctx = makeCtx(pi, { mode: 'rpc', hasUI: true });
+  const mainModel = structuredClone(ctx.model);
+  ctx.ui.custom = async () => { throw Error('RPC custom UI is unavailable'); };
+  ctx.ui.select = async (title, options) => {
+    selected.push(title);
+    if (title.endsWith('A: model')) return options.find(value => value.startsWith('deepseek/deepseek-flash'));
+    if (title.endsWith('B: model')) return options.find(value => value.startsWith('zai/glm-5.3-flash'));
+    if (title.endsWith('A: thinking')) return 'low';
+    if (title.endsWith('B: thinking')) return 'high';
+    return 'Session model';
+  };
+  ctx.ui.confirm = async (_title, text) => { assert.match(text, /A thinking: low; B thinking: high/); return true; };
+  await fire(pi, 'session_start', {}, ctx);
+  await pi.commands.get('custom-double').handler('', ctx);
+  assert.equal(selected.length, 5);
+  assert.deepEqual(pi.entries.at(-1).data.pair, { a: { provider: 'deepseek', id: 'deepseek-flash', thinking: 'low' },
+    b: { provider: 'zai', id: 'glm-5.3-flash', thinking: 'high' }, reconcile: 'session' });
+  assert.deepEqual(ctx.model, mainModel); assert.equal(pi.thinkingLevel, 'high'); assert.equal(launches, 0);
+});
+
+test('RPC custom-double cancellation leaves pair state and remembered settings unchanged', async t => {
+  const dir = tmpAgentDir(); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pi = makePi(); registerDoubleMode(pi, { launch: async () => assert.fail('No inference while choosing a pair'), agentDir: () => dir });
+  const ctx = makeCtx(pi, { mode: 'rpc', hasUI: true });
+  ctx.ui.select = async () => undefined;
+  await fire(pi, 'session_start', {}, ctx);
+  const before = structuredClone(pi.entries);
+  await pi.commands.get('custom-double').handler('', ctx);
+  assert.deepEqual(pi.entries, before);
+  assert.equal(fs.existsSync(path.join(dir, 'double-pair.json')), false);
+  ctx.ui.select = async (title, options) => title.includes(': model') ? options[0] : title.includes(': thinking') ? 'off' : 'A';
+  ctx.ui.confirm = async () => false;
+  await pi.commands.get('custom-double').handler('', ctx);
+  assert.deepEqual(pi.entries, before);
+  assert.equal(fs.existsSync(path.join(dir, 'double-pair.json')), false);
+});
+
 test('arguments: no args opens the picker; two models set a pair; junk is an error', () => {
   assert.deepEqual(lib.parseCustomDoubleArgs(''), { kind: 'picker' });
   assert.deepEqual(lib.parseCustomDoubleArgs('on'), { kind: 'resume' });
@@ -533,4 +575,3 @@ test('the live economy policy classification drives the block reason', async () 
   assert.match(pairLib.doubleEconomyBlock(model({ input: 500, output: 900, cacheRead: 0, cacheWrite: 0 })) ?? '', /above the subagent budget/);
   assert.equal(pairLib.doubleEconomyBlock({ provider: 'x', id: 'unpriced', reasoning: true }), undefined, 'an unpriced route is not refused by the executor');
 });
-
