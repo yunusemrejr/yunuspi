@@ -209,6 +209,10 @@ function workflowParams(workflow: PromptWorkflow, args: string[], runtime: Retur
 }
 
 function promptWorkflowExecutionParams(workflows: PromptWorkflow[], args: string[], runtime: ReturnType<typeof parseRuntimeOptions>): SubagentParamsLike {
+	if (workflows.length === 1) {
+		const params = workflowParams(workflows[0]!, args, runtime);
+		return { ...params, task: params.task?.replaceAll("{previous}", ""), async: runtime.bg ? true : false };
+	}
 	return {
 		workflowScript: promptWorkflowScript(workflows, args, runtime),
 		agentScope: "both",

@@ -318,7 +318,8 @@ test("the registered /run command retains multiline task text and accepts whites
     assert.deepEqual(notices, []);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].async, true);
-    const child = new Function("runs", requests[0].workflowScript)({ run: (_key, value) => value });
+    assert.equal(requests[0].workflowScript, undefined, 'single children do not need a workflow VM or maintenance authority');
+    const child = requests[0];
     assert.equal(child.agent, "command-fixture");
     assert.equal(child.task, "First task line\nSecond task line");
     assert.equal(child.context, "fork");

@@ -631,8 +631,8 @@ async function requestSlashRun(
 				if (!ctx.hasUI) return;
 				const tool = update.currentTool ? ` ${update.currentTool}` : "";
 				const count = update.toolCount ?? 0;
-				const liveDetailKey = keyText("app.tools.expand");
-				ctx.ui.setStatus("subagent-slash", `${count} tools${tool} | ${liveDetailKey} live detail`);
+				const detail = ctx.mode === "rpc" ? "" : ` | ${keyText("app.tools.expand")} live detail`;
+				ctx.ui.setStatus("subagent-slash", `${count} tools${tool}${detail}`);
 			} catch (error) {
 				if (isStaleExtensionContextError(error)) {
 					finish(() => reject(error));
@@ -642,7 +642,7 @@ async function requestSlashRun(
 			}
 		};
 
-		const onTerminalInput = ctx.hasUI
+		const onTerminalInput = ctx.hasUI && ctx.mode !== "rpc"
 			? ctx.ui.onTerminalInput((input) => {
 				if (!matchesKey(input, Key.escape)) return undefined;
 				pi.events.emit(SLASH_SUBAGENT_CANCEL_EVENT, { requestId });
@@ -763,7 +763,7 @@ async function runSlashSubagent(
 	const initialHasUI = slashHasUI(ctx);
 	if (initialHasUI === undefined) return;
 	try {
-		if (initialHasUI) ctx.ui.setToolsExpanded(false);
+		if (initialHasUI && ctx.mode !== "rpc") ctx.ui.setToolsExpanded(false);
 	} catch (error) {
 		if (isStaleExtensionContextError(error)) return;
 		throw error;
@@ -793,7 +793,7 @@ async function runSlashSubagent(
 		pi.sendMessage({
 			customType: SLASH_RESULT_TYPE,
 			content: buildSlashExportText(response),
-			display: !hasUI,
+			display: !hasUI || ctx.mode === "rpc",
 			details: finalDetails,
 		});
 		persistSlashSessionSnapshot(ctx);
@@ -812,7 +812,7 @@ async function runSlashSubagent(
 		pi.sendMessage({
 			customType: SLASH_RESULT_TYPE,
 			content: `## Subagent result\n\n${message}`,
-			display: !hasUI,
+			display: !hasUI || ctx.mode === "rpc",
 			details: failedDetails,
 		});
 		persistSlashSessionSnapshot(ctx);
@@ -825,10 +825,6 @@ async function runSlashSubagent(
 		}
 		if (hasUI) ctx.ui.notify(message, "error");
 	}
-}
-
-function slashRunWorkflowScript(key: string, child: Record<string, unknown>): string {
-	return `return runs.run(${JSON.stringify(key)}, ${JSON.stringify(child)})`;
 }
 
 export function registerSlashCommands(
@@ -850,7 +846,7 @@ export function registerSlashCommands(
 	};
 	const showFleet = async (ctx: ExtensionContext) => {
 		state.lastUiContext = ctx;
-		if (!ctx.hasUI) {
+		if (!ctx.hasUI || ctx.mode === "rpc") {
 			await runCommand(ctx, { action: "status", view: "fleet" });
 			return;
 		}
@@ -909,7 +905,7 @@ export function registerSlashCommands(
 			if (inline.skill !== undefined) child.skill = inline.skill;
 			if (inline.model) child.model = inline.model;
 			if (fork) child.context = "fork";
-			launchCommand(ctx, { workflowScript: slashRunWorkflowScript("run", child), async: bg ? true : false });
+			launchCommand(ctx, { ...child, async: bg ? true : false });
 		},
 	});
 
@@ -1038,16 +1034,24 @@ export function registerSlashCommands(
 				return;
 			}
 
-			const result = await ctx.ui.custom<StopSelectorResult>(
-				(tui, theme, _kb, done) => new SubagentsStopSelector(tui, theme, targets, done),
-				{ overlay: true, overlayOptions: { anchor: "center", width: 88, maxHeight: "80%" } },
-			);
-			if (!result?.confirmed || !result.target) return;
-			if (result.target.kind === "scheduled") {
-				await runCommand(ctx, { action: "schedule.pause", id: result.target.id });
+			let target: StopSelectorTarget | undefined;
+			if (ctx.mode === "rpc") {
+				const choices = new Map(targets.map(item => [`${item.actionLabel}: ${item.label}`, item]));
+				const choice = await ctx.ui.select("Stop a subagent or pause a schedule", [...choices.keys()]);
+				target = choice === undefined ? undefined : choices.get(choice);
+			} else {
+				const result = await ctx.ui.custom<StopSelectorResult>(
+					(tui, theme, _kb, done) => new SubagentsStopSelector(tui, theme, targets, done),
+					{ overlay: true, overlayOptions: { anchor: "center", width: 88, maxHeight: "80%" } },
+				);
+				if (result?.confirmed) target = result.target;
+			}
+			if (!target) return;
+			if (target.kind === "scheduled") {
+				await runCommand(ctx, { action: "schedule.pause", id: target.id });
 				return;
 			}
-			await runCommand(ctx, { action: "stop", id: result.target.id });
+			await runCommand(ctx, { action: "stop", id: target.id });
 		},
 	});
 

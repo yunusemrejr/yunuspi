@@ -207,7 +207,7 @@ function metadataFor(agent: AgentConfig): string {
 }
 
 async function selectFromList(ctx: ExtensionContext, title: string, subtitle: string | undefined, items: SelectorItem[]): Promise<string | undefined> {
-	if (typeof ctx.ui.custom === "function") {
+	if (ctx.mode !== "rpc" && typeof ctx.ui.custom === "function") {
 		const result = await ctx.ui.custom<SelectorResult>(
 			(tui, theme, kb, done) => new SelectorComponent(tui, theme, kb, { title, subtitle, items, done }),
 			{ overlay: false },

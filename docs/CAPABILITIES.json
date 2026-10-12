@@ -3414,7 +3414,7 @@
       {
         "name": "prompt-workflow",
         "source": "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts",
-        "line": 254
+        "line": 258
       },
       {
         "name": "provider",
@@ -3434,7 +3434,7 @@
       {
         "name": "run",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 876
+        "line": 872
       },
       {
         "name": "search",
@@ -3449,77 +3449,77 @@
       {
         "name": "subagent-cost",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 916
+        "line": 912
       },
       {
         "name": "subagents",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 869
+        "line": 865
       },
       {
         "name": "subagents-check-profile",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1280
+        "line": 1284
       },
       {
         "name": "subagents-detach",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 994
+        "line": 990
       },
       {
         "name": "subagents-doctor",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 923
+        "line": 919
       },
       {
         "name": "subagents-fleet",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 960
+        "line": 956
       },
       {
         "name": "subagents-generate-profiles",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1242
+        "line": 1246
       },
       {
         "name": "subagents-inspect-rpc",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 930
+        "line": 926
       },
       {
         "name": "subagents-load-profile",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1155
+        "line": 1159
       },
       {
         "name": "subagents-models",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1125
+        "line": 1129
       },
       {
         "name": "subagents-profiles",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1143
+        "line": 1147
       },
       {
         "name": "subagents-refine",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 947
+        "line": 943
       },
       {
         "name": "subagents-refresh-provider-models",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1208
+        "line": 1212
       },
       {
         "name": "subagents-steer",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1054
+        "line": 1058
       },
       {
         "name": "subagents-stop",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1006
+        "line": 1002
       },
       {
         "name": "subagents-watchdog",

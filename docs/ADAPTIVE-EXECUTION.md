@@ -66,6 +66,13 @@ reuse their exact current annotations from native tool results on the active
 branch after restart, fork or resume. Branches before delivery still receive
 guidance. These annotations record advice, never a completed check.
 
+RPC clients use native dialogs for subagent discovery, model/thinking selection
+and targeted stop controls, and receive visible fleet and command results.
+Terminal-only components and shortcuts stay in TUI mode. `/run` and single
+prompt workflows launch native children directly, retaining the requested
+model, skills and context without an extra script VM. Multi-stage prompt
+workflows retain their per-stage context and output substitution.
+
 Automatic project-memory ingestion retains raw text, lexical indexes and source
 provenance for direct scopes, while deferring semantic embedding and backlog
 recovery. Explicit memory tools remain available. Complex work and unresolved
