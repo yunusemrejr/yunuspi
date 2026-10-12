@@ -18,6 +18,8 @@
 
 ## Unreleased
 
+**Dock icon launches again.** Two launch blockers are fixed: an install that copied source without `--install-deps` left the core unbuilt (the launcher now gets a built core from the documented install path), and Chromium's sandbox aborted every GUI start on Ubuntu 24.04+ — the `chrome-sandbox` helper in a home install is not setuid-root and AppArmor blocks the user-namespace fallback, so clicking the icon appeared to do nothing. `desktop/launch.mjs` now detects exactly that case and launches with `--no-sandbox` plus a printed remedy, restoring the real sandbox automatically once the helper is fixed system-wide (`YUNUSPI_ELECTRON_SANDBOX=on|off` overrides). Renderer isolation stays enabled.
+
 **Lean harness: the picked model runs everything.** Sub-agents now inherit the main session model exactly (Jev adjusts thinking for main and children alike); there are no automatic model-selection chains, observer/council/quality helper roles, or silent fallbacks. If a task needs a capability the current model lacks (for example images), the harness says so and the user switches with `/model` — it never switches models itself. Mid-session switches keep history and the prompt-prefix cache, remap thinking, and report the detected per-provider cache strategy (Anthropic breakpoints, OpenAI/DeepSeek automatic prefix, Gemini context, OpenRouter upstream, stable-prefix otherwise).
 
 **Verification moved into the goal.** The session observer, watchmaker-style reviewers, project-integrity and quality gates are retired by default (`PI_LEAN_GATES=on` restores them for debugging). `/goal check` now ends with same-model self-verification: the model that did the work compares every open criterion against the goal text and its own session evidence.
