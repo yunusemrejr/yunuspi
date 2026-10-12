@@ -45,6 +45,7 @@
  * loopback/mock endpoints.
  */
 
+import { cacheProfileFor } from "./lib/lean-policy.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -367,6 +368,14 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			return undefined;
 		} // fail-open: unattributable requests are never blocked unless a known candidate is cooling
 		if (isLoopback(route)) return undefined; // mocks/loopback are not fleet traffic
+		// Lean cache policy: detect the per-architecture prompt-cache strategy for
+		// this route and expose it for /metrics. Requests already carry a stable,
+		// append-only prefix (system + tools first), which every strategy rewards.
+		try {
+			const profile = cacheProfileFor(route.provider, route.model);
+			const bridge = ((globalThis as any)[Symbol.for("yunus-pi.cache-profile.v1")] ??= {}) as Record<string, unknown>;
+			bridge[`${route.provider}/${route.model}`] = { strategy: profile.strategy, ttlSeconds: profile.ttlSeconds, at: Date.now() };
+		} catch { /* cache telemetry must never block a request */ }
 		const session = sessionLabel(ctx as AnyCtx);
 		const endpointInfo = requestEndpoint(payload, route, ctx as AnyCtx);
 		const attempt: PendingAttempt = {

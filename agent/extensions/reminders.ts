@@ -109,6 +109,11 @@ import {
 	skillCatalogProjectionMiss,
 } from "./lib/tool-discovery.ts";
 import { createRelevantGuidance } from "./lib/relevant-guidance.ts";
+import { SuggestionBudget } from "./lib/lean-policy.ts";
+// Lean harness: soft capability hints are budgeted to at most two per session,
+// with rising relevance thresholds and growing gaps (see SuggestionBudget).
+const hintBudget = new SuggestionBudget(2);
+let hintTurn = 0;
 import {
 	createLoopTracker,
 	repeatedReasoningNotice,
@@ -541,6 +546,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			guidance.start(event, ctx);
 			const hints = guidance.candidates();
 			if (!hints.length) return;
+			hintTurn += 1;
+			if (!hintBudget.shouldShow(hintTurn, 0.9)) return;
+			hintBudget.record(hintTurn);
 			// A child has no parent reminder loop to deliver its pending hints.
 			// Offer the same bounded references without manual timers or nudges.
 			guidance.commit(hints);
@@ -824,8 +832,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const sid = sidOf(ctx);
 			if (!sid) return undefined;
 			guidance.start(_event, ctx);
-			const hints = guidance.candidates();
+			const rawHints = guidance.candidates();
 			const st = load(sid);
+			// Budget soft hints: at most two deliveries per session, spaced by prompts.
+			const hints = rawHints.length && hintBudget.shouldShow(st.promptCount, 0.9)
+				? (hintBudget.record(st.promptCount), rawHints)
+				: [];
 			st.promptCount += 1;
 			const now = Date.now();
 			// A single fixed orientation belongs beside the human's first prompt.
