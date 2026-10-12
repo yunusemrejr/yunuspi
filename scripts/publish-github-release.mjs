@@ -2,40 +2,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MAIN_TEST_EVENTS, fullSafetyPassed } from './release-tag.mjs';
+import { mainReleaseEvidence } from './release-tag.mjs';
 
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const commitSha = /^[a-f0-9]{40}$/;
 const repositoryName = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;
-const workflowPath = '.github/workflows/public-safety.yml';
 const githubRequest = (token, request) => (url, options = {}) => request(url, {
   ...options, redirect: 'error', signal: AbortSignal.timeout(30000),
   headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
 });
 
-/** Reuse only this repository's completed full main check, never a PR or tag run.
- * A tag pushed before main finishes must be rerun after the safety check passes. */
+/** Reuse this repository's completed full safety and Electron main checks.
+ * A tag pushed early must be rerun after both exact-commit checks pass. */
 export async function verifiedMainRun(repository, sha, token, request = fetch) {
   if (!repositoryName.test(repository ?? '') || !commitSha.test(sha ?? '') || !token) throw Error('Expected a repository, exact commit SHA and GITHUB_TOKEN');
-  const base = `https://api.github.com/repos/${repository}`, send = githubRequest(token, request);
+  const send = githubRequest(token, request);
   const read = async url => {
     const response = await send(url);
-    if (response.status !== 200) throw Error(`Main safety evidence lookup failed (${response.status})`);
+    if (response.status !== 200) throw Error(`Main release evidence lookup failed (${response.status})`);
     return response.json();
   };
-  const workflow = await read(`${base}/actions/workflows/public-safety.yml`);
-  if (workflow.path !== workflowPath || !Number.isSafeInteger(workflow.id) || workflow.id <= 0) throw Error('Unexpected safety workflow identity');
-  const query = new URLSearchParams({ branch: 'main', head_sha: sha, per_page: '100' });
-  const runs = await read(`${base}/actions/workflows/${workflow.id}/runs?${query}`);
-  if (!Array.isArray(runs.workflow_runs) || !Number.isSafeInteger(runs.total_count) || runs.total_count > 100) throw Error('Missing or ambiguous main safety evidence');
-  const run = runs.workflow_runs.filter(row => row?.head_sha === sha && row.head_branch === 'main' && MAIN_TEST_EVENTS.includes(row.event)
-    && row.workflow_id === workflow.id && row.path?.split('@')[0] === workflowPath
-    && row.repository?.full_name === repository && row.head_repository?.full_name === repository
-    && Number.isSafeInteger(row.id) && row.id > 0).sort((a, b) => b.id - a.id)[0];
-  if (!run || run.status !== 'completed' || run.conclusion !== 'success') throw Error('The exact release commit has no successful main safety run; wait for main and rerun this release job');
-  const jobs = await read(`${base}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`);
-  if (!fullSafetyPassed(jobs.jobs)) throw Error('The main run did not complete its required safety job');
-  return { id: run.id, url: `https://github.com/${repository}/actions/runs/${run.id}` };
+  const evidence = await mainReleaseEvidence(repository, sha, read);
+  if (evidence.state !== 'passed') throw Error(`The exact release commit has no successful main ${evidence.check} run; wait for main and rerun this release job`);
+  return { ...evidence.safety, desktop: evidence.desktop };
 }
 
 export function releasePlan({ version, ref, sha, repository, changelog }) {
@@ -123,5 +112,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     repository: process.env.GITHUB_REPOSITORY, changelog: fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') });
   const evidence = await verifiedMainRun(process.env.GITHUB_REPOSITORY, plan.target_commitish, process.env.GITHUB_TOKEN);
   console.log(`Reusing successful main safety run: ${evidence.url}`);
+  console.log(`Reusing successful main desktop run: ${evidence.desktop.url}`);
   console.log(JSON.stringify(await publishRelease(plan, process.env.GITHUB_REPOSITORY, process.env.GITHUB_TOKEN)));
 }

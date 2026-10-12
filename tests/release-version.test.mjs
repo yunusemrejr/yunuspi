@@ -48,28 +48,37 @@ test('release metadata check detects lock drift and repairs only owned versions'
 
 const releaseInput = { version: '0.2.0', ref: 'refs/tags/v0.2.0', sha: 'a'.repeat(40), repository: 'example/project', changelog: '# Changelog\n\n## 0.2.0 — 2026-09-23\n\nRead [details](docs/ASYNC-AND-STUDIO.md) and [changelog](CHANGELOG.md).\n\n## 0.1.0 — old\nOld notes.' };
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
-test('release reuse requires the latest exact full main check and its successful safety job', async () => {
+test('release reuse requires the latest exact full safety and Electron main checks', async () => {
   const valid = { id: 20, workflow_id: 10, path: '.github/workflows/public-safety.yml', head_sha: releaseInput.sha,
     head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success',
     repository: { full_name: releaseInput.repository }, head_repository: { full_name: releaseInput.repository } };
-  const service = ({ rows = [valid], job = { name: 'safety', status: 'completed', conclusion: 'success' }, status = 200 } = {}) => async (url, options) => {
+  const desktop = { ...valid, id: 40, workflow_id: 30, path: '.github/workflows/desktop.yml' };
+  const service = ({ rows = [valid], job = { name: 'safety', status: 'completed', conclusion: 'success' }, status = 200,
+    desktopRows = [desktop], desktopJob = { name: 'desktop', status: 'completed', conclusion: 'success' },
+    desktopWorkflow = { id: 30, path: desktop.path }, desktopTotal = desktopRows.length } = {}) => async (url, options) => {
     assert.equal(new URL(url).origin, 'https://api.github.com'); assert.equal(options.redirect, 'error');
     assert.ok(options.signal instanceof AbortSignal); assert.equal(options.headers.Authorization, 'Bearer fixture');
     const parsed = new URL(url);
     if (parsed.pathname.endsWith('/workflows/public-safety.yml')) return response({ id: 10, path: valid.path }, status);
-    if (parsed.pathname.endsWith('/workflows/10/runs')) {
+    if (parsed.pathname.endsWith('/workflows/desktop.yml')) return response(desktopWorkflow);
+    if (parsed.pathname.endsWith('/workflows/10/runs') || parsed.pathname.endsWith('/workflows/30/runs')) {
       assert.equal(parsed.searchParams.get('head_sha'), releaseInput.sha);
       assert.equal(parsed.searchParams.get('branch'), 'main'); assert.equal(parsed.searchParams.has('event'), false);
       assert.equal(parsed.searchParams.has('status'), false, 'a newer failed attempt must not be hidden');
-      return response({ total_count: rows.length, workflow_runs: rows });
+      return parsed.pathname.endsWith('/workflows/10/runs')
+        ? response({ total_count: rows.length, workflow_runs: rows })
+        : response({ total_count: desktopTotal, workflow_runs: desktopRows });
     }
-    assert.equal(parsed.pathname, '/repos/example/project/actions/runs/20/jobs');
+    assert.ok(['/repos/example/project/actions/runs/20/jobs', '/repos/example/project/actions/runs/40/jobs'].includes(parsed.pathname));
     assert.equal(parsed.searchParams.get('filter'), 'latest');
-    return response({ jobs: [job] });
+    return response({ jobs: [parsed.pathname.endsWith('/runs/20/jobs') ? job : desktopJob] });
   };
   const verify = options => verifiedMainRun(releaseInput.repository, releaseInput.sha, 'fixture', service(options));
-  assert.deepEqual(await verify(), { id: 20, url: 'https://github.com/example/project/actions/runs/20' });
-  for (const event of ['workflow_dispatch', 'schedule']) assert.equal((await verify({ rows: [{ ...valid, event }] })).id, 20);
+  assert.deepEqual(await verify(), { id: 20, url: 'https://github.com/example/project/actions/runs/20', desktop: { id: 40, url: 'https://github.com/example/project/actions/runs/40' } });
+  for (const event of ['workflow_dispatch', 'schedule']) {
+    assert.equal((await verify({ rows: [{ ...valid, event }] })).id, 20);
+    assert.equal((await verify({ desktopRows: [{ ...desktop, event }] })).desktop.id, 40);
+  }
   for (const patch of [{ head_sha: 'b'.repeat(40) }, { head_branch: 'v0.2.0' }, { event: 'pull_request' }, { workflow_id: 11 },
     { path: '.github/workflows/other.yml' }, { repository: { full_name: 'other/project' } }, { head_repository: { full_name: 'fork/project' } },
     { status: 'in_progress', conclusion: null }, { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: 'cancelled' }])
@@ -78,6 +87,20 @@ test('release reuse requires the latest exact full main check and its successful
   await assert.rejects(verify({ rows: [valid, { ...valid, id: 21, conclusion: 'failure' }] }), /no successful main safety run/);
   await assert.rejects(verify({ job: { name: 'safety', status: 'completed', conclusion: 'skipped' } }), /required safety job/);
   await assert.rejects(verify({ status: 403 }), /lookup failed/);
+  for (const patch of [{ head_sha: 'b'.repeat(40) }, { head_branch: 'v0.2.0' }, { event: 'pull_request' }, { workflow_id: 31 },
+    { path: '.github/workflows/other.yml' }, { path: 123 }, { repository: { full_name: 'other/project' } }, { head_repository: { full_name: 'fork/project' } },
+    { id: -1 }, { status: 'queued', conclusion: null }, { status: 'in_progress', conclusion: null },
+    { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: 'cancelled' }])
+    await assert.rejects(verify({ desktopRows: [{ ...desktop, ...patch }] }), /no successful main desktop run/);
+  await assert.rejects(verify({ desktopRows: [] }), /no successful main desktop run/);
+  await assert.rejects(verify({ desktopRows: [desktop, { ...desktop, id: 41, conclusion: 'failure' }] }), /no successful main desktop run/);
+  for (const desktopJob of [{ name: 'minimum-node', status: 'completed', conclusion: 'success' },
+    { name: 'desktop', status: 'completed', conclusion: 'skipped' }, { name: 'desktop', status: 'completed', conclusion: 'failure' },
+    { name: 'desktop', status: 'in_progress', conclusion: null }])
+    await assert.rejects(verify({ desktopJob }), /required desktop job/);
+  for (const desktopWorkflow of [{ id: 0, path: desktop.path }, { id: 30, path: '.github/workflows/other.yml' }, null])
+    await assert.rejects(verify({ desktopWorkflow }), /desktop workflow identity/);
+  for (const desktopTotal of [0, 2, 101]) await assert.rejects(verify({ desktopTotal }), /ambiguous main desktop evidence/);
 });
 
 function releaseService(plan, { annotated = false, existing, moveDuringLookup = false, moveAfterCreate = false } = {}) {
