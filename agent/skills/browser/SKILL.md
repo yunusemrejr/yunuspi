@@ -1,6 +1,7 @@
 ---
 name: browser
 description: "Live browser automation and page verification with the browser_session tool (snapshot refs, waits, dialogs, tabs, leases, reconciling uncertain submits) and render_see (isolated DOM, layout, WebGL screenshots); covers postconditions, downloads, stale UI recovery and CAPTCHA or account boundaries."
+disable-model-invocation: true
 ---
 
 # Merged

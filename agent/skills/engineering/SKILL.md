@@ -1,6 +1,7 @@
 ---
 name: engineering
 description: "Use when writing, refactoring, reviewing, debugging, testing or profiling code or weighing design tradeoffs, incl. TypeScript, Node, Python, invariants, property tests, bisection, performance, algorithms."
+disable-model-invocation: true
 ---
 
 # Merged

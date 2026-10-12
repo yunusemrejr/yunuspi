@@ -1,6 +1,7 @@
 ---
 name: git-github
 description: "Git and GitHub: history recovery, rebase and force-push rules, gh CLI and CI triage, GitHub Actions hardening, READMEs, repo health files, changelogs, releases, and multi-developer branching, promotion and rollback."
+disable-model-invocation: true
 ---
 
 # Merged

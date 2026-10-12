@@ -1,6 +1,7 @@
 ---
 name: growth-finance
 description: "Build and check financial models (unit economics, runway, DCF), analyze filings, measure portfolio risk and backtests, run marketing experiments, improve SEO and search discoverability, and govern authorized community posting; use for CAC, LTV, valuation, 10-K, VaR, drawdown, SEO, sitemaps and forum promotion."
+disable-model-invocation: true
 ---
 
 # Merged

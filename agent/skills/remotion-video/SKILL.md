@@ -1,6 +1,7 @@
 ---
 name: remotion-video
 description: "Implement programmatic video in Remotion (React/TypeScript) in a YunusPi project: frame-pure scenes driven by video.json timing, SVG/Canvas primitives, captions, transitions, audio layers, optional three.js, and stills, previews and finals via video_render; use for Remotion compositions, scenes, primitives or render failures."
+disable-model-invocation: true
 ---
 
 # Merged

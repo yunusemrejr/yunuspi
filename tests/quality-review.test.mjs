@@ -36,7 +36,10 @@ const {
 const { projectTestFacts, isProjectReviewSource } = await import(
  pathToFileURL(path.join(agent, "scripts/workspace-facts.mjs"))
 );
-const { registerContinuationSource, CONTINUATION_SOURCES } = await import(pathToFileURL(path.join(agent, "extensions/lib/continuation-notice.ts")));
+const { registerContinuationSource, collectVerificationReceipts, CONTINUATION_SOURCES } = await import(pathToFileURL(path.join(agent, "extensions/lib/continuation-notice.ts")));
+// Most cases here exercise the automatic-review machinery itself, which the
+// lean harness keeps opt-in; the lean-default cases below opt back out.
+process.env.PI_LEAN_GATES ??= "on";
 const { classifyExecution, registerAdaptiveExecution } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const storePath = path.join(
  agent,
@@ -184,6 +187,33 @@ test('direct adaptive work finishes without independent fan-out, pending-review 
  assert.equal(f.calls.length,1,'deliberate review remains available');assert.equal(f.state().status,'awaiting_assessment');
 });
 
+test('lean default: no automatic review, no follow-up turn, no verification debt', async t => {
+ const previous = process.env.PI_LEAN_GATES;
+ delete process.env.PI_LEAN_GATES;
+ t.after(() => { if (previous === undefined) delete process.env.PI_LEAN_GATES; else process.env.PI_LEAN_GATES = previous; });
+ const f = await fixture(t);
+ f.api.input({source:'interactive',text:'Implement the parser change and ship it'});
+ await f.mutate('src/value.js');
+ await f.settle();
+ assert.equal(f.calls.length, 0, 'no reviewer is dispatched without opt-in');
+ assert.equal(f.sent.length, 0, 'no follow-up model turn is manufactured');
+ assert.equal(f.api.notice(), '', 'no review requirement is advertised');
+ assert.deepEqual(collectVerificationReceipts(3, f.ctx.sessionManager), [], 'no "Verification open" debt is registered');
+});
+
+test('executor off by configuration is reported once, never as verification debt', async t => {
+ const disabled = (req) => req.aspects.map((a) => ({ aspect: a.id, ok: false, unattempted: true, gap: 'Automatic review is disabled or the native subagent capability is unavailable.' }));
+ const f = await fixture(t, { runner: disabled });
+ f.api.input({source:'interactive',text:'Implement the parser change and ship it'});
+ await f.mutate('src/value.js');
+ await f.tool({action:'review'});
+ assert.equal(f.state().status, 'unavailable', 'the tool result stays honest about the disabled executor');
+ assert.match(f.state().reason, /Automatic review is disabled/);
+ await f.settle();
+ assert.deepEqual(collectVerificationReceipts(3, f.ctx.sessionManager), [], 'a settings state never becomes "Verification open" debt');
+ assert.equal(f.api.notice(), '', 'no assess demand follows an undispatched review');
+});
+
 test('route control moves only optional review: guarded routes get code reviewed, earned routes with resolved checks may skip a copy review',async t=>{
  const run=async(task,control,file,tests)=>{
   const f=await fixture(t);f.api.input({source:'interactive',text:task});
@@ -314,7 +344,7 @@ test('review guidance distinguishes active dispatch from completed reports needi
  assert.match(f.api.notice(),/already running/);
  finish();await pending;
  assert.equal(f.state().status,'awaiting_assessment');
- const guidance=f.api.notice();assert.match(guidance,/action:"assess"/);assert.match(guidance,/Reuse/);
+ const guidance=f.api.notice();assert.match(guidance,/action:"assess"/);assert.match(guidance,/reports complete/);assert.match(guidance,/once/);
  assert.equal(f.calls.length,1);
  await f.api.run(f.ctx);assert.equal(f.calls.length,1,'completed reports are reused');
  assert.equal(f.state().status,'awaiting_assessment','guidance never manufactures acceptance');

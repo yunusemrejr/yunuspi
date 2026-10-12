@@ -1,6 +1,7 @@
 ---
 name: data-science
 description: "Data and scientific computing: Postgres schema, transactions and migrations; data analysis and lineage; honest charts; numerical methods; simulation and physics; optimization; A/B and statistical experiments."
+disable-model-invocation: true
 ---
 
 # Merged

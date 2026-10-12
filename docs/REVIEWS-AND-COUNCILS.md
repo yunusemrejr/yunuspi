@@ -176,8 +176,11 @@ context or wake the agent. They expose returned advice, never hidden thinking.
 Automatic intervention complements deliberate invocation; it never replaces
 it:
 
-- Quality reviews run at completion checkpoints with changed-source evidence
-  (two rounds, bounded aspects, strict evidence parsing). A repair round
+- Quality reviews are opt-in: automatic rounds at completion checkpoints run
+  only with `PI_LEAN_GATES=on` (two rounds, bounded aspects, strict evidence
+  parsing); a deliberate `quality_review` call always works. A review that
+  was never dispatched because the executor is off is reported in the tool
+  result only — it never becomes open verification debt. A repair round
   re-reviews only the aspects the files changed since the last review would
   select, plus any that did not pass cleanly; a clean pass whose files did not
   change carries forward with a note naming the revision it came from.

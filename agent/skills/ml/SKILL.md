@@ -1,6 +1,7 @@
 ---
 name: ml
 description: "Machine learning and LLM engineering: leakage-safe data and splits, classical models, LLM fine-tuning (LoRA, QLoRA, DPO, dataset audits, Colab), evaluation, RAG, reinforcement learning, serving and quantization, edge deployment, small models and model registry rollout."
+disable-model-invocation: true
 ---
 
 # Merged

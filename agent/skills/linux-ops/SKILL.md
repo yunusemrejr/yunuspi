@@ -1,6 +1,7 @@
 ---
 name: linux-ops
 description: "Linux and Ubuntu administration and debugging (/proc, strace, perf, journalctl, systemd, permissions, disk, DNS, safe shell), running Windows apps through Wine and WineCharm, and safe file organization (inventory, plan, journal, undo)."
+disable-model-invocation: true
 ---
 
 # Merged
