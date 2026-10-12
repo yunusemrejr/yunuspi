@@ -32,6 +32,7 @@ import path from "node:path";
 import { sensitiveMemoryPath } from "./memory-redaction.ts";
 
 export const PROJECT_STORE_SCHEMA_VERSION = 3;
+const BUSY_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
 export interface EmbeddingSpace { id: string; backend: string; model: string; version: number; dim: number }
 export function legacyEmbeddingSpace(id: string, dim: number): EmbeddingSpace {
@@ -401,26 +402,39 @@ export class ProjectVectorStore {
     }
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec("PRAGMA synchronous = NORMAL;");
-    // Concurrent sessions share one DB file; writers wait instead of failing.
-    db.exec("PRAGMA busy_timeout = 10000;");
-    db.exec(SCHEMA);
-    const version = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
-    if (!version) {
-      db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(PROJECT_STORE_SCHEMA_VERSION));
-      db.prepare("INSERT INTO meta (key, value) VALUES ('project_id', ?)").run(opts.projectId);
-      db.prepare("INSERT INTO meta (key, value) VALUES ('created_at', ?)").run(new Date().toISOString());
-    } else if (![1, 2, PROJECT_STORE_SCHEMA_VERSION].includes(Number(version.value))) {
-      db.close();
-      throw new Error(`Unsupported project memory schema ${version.value} (want ${PROJECT_STORE_SCHEMA_VERSION}): ${dbPath}`);
-    }
-    // Additive, transactional migration: existing chunk IDs, FTS rows and
-    // provenance stay intact. v3 adds the atoms table; legacy chunk vectors
-    // stay searchable and converge to atoms when backfill touches the chunk.
-    // No bulk rewrite: opening an old database never re-embeds anything.
-    db.exec("BEGIN IMMEDIATE");
+    let transaction = false;
     try {
+      // Apply the wait policy before WAL/schema work, including cold opens.
+      db.exec("PRAGMA busy_timeout = 2000;");
+      // WAL transitions can return BUSY before SQLite honors busy_timeout.
+      // Retry these idempotent initialization pragmas only, as the project
+      // intelligence store does; never replay a memory write transaction.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+          break;
+        } catch (error) {
+          const code = Number((error as { errcode?: number }).errcode) & 255;
+          if (attempt >= 4 || (code !== 5 && code !== 6)) throw error;
+          Atomics.wait(BUSY_WAIT, 0, 0, 20 * (attempt + 1));
+        }
+      }
+      db.exec("PRAGMA busy_timeout = 10000;");
+      // Serialize first creation, metadata and additive migrations together.
+      // A failed or killed opener leaves a retryable schema; another session
+      // cannot observe missing metadata or race its unique-key inserts.
+      db.exec("BEGIN IMMEDIATE");
+      transaction = true;
+      db.exec(SCHEMA);
+      const version = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
+      if (!version) {
+        db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(PROJECT_STORE_SCHEMA_VERSION));
+        db.prepare("INSERT INTO meta (key, value) VALUES ('project_id', ?)").run(opts.projectId);
+        db.prepare("INSERT INTO meta (key, value) VALUES ('created_at', ?)").run(new Date().toISOString());
+      } else if (![1, 2, PROJECT_STORE_SCHEMA_VERSION].includes(Number(version.value))) {
+        throw new Error(`Unsupported project memory schema ${version.value} (want ${PROJECT_STORE_SCHEMA_VERSION}): ${dbPath}`);
+      }
+      // Legacy vectors stay searchable; opening never re-embeds anything.
       if (!(db.prepare("PRAGMA table_info(chunks)").all() as Array<{ name: string }>).some(c => c.name === 'embedded_at')) {
         db.exec("ALTER TABLE chunks ADD COLUMN embedded_at TEXT NOT NULL DEFAULT ''");
         db.exec("UPDATE chunks SET embedded_at = updated_at WHERE embedding IS NOT NULL");
@@ -459,7 +473,12 @@ export class ProjectVectorStore {
       }
       db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(PROJECT_STORE_SCHEMA_VERSION));
       db.exec("COMMIT");
-    } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
+      transaction = false;
+    } catch (error) {
+      if (transaction) try { db.exec("ROLLBACK"); } catch { /* preserve the initialization error */ }
+      try { db.close(); } catch { /* preserve the initialization error */ }
+      throw error;
+    }
     return new ProjectVectorStore(dbPath, opts.projectId, db);
   }
 
@@ -483,9 +502,6 @@ export class ProjectVectorStore {
     let vec = input.embedding && input.embedding.length ? toBuffer(input.embedding) : null;
     if (vec && ((input.embeddingSpace && input.embeddingSpace.dim !== vec.dim)
       || !this.registerSpace(input.embeddingSpace ?? legacyEmbeddingSpace(input.embedder ?? '', vec.dim), at))) vec = null;
-    const existing = this.db.prepare("SELECT id, content_hash FROM chunks WHERE id = ?").get(input.id) as { id: string; content_hash: string } | undefined;
-    const dup = this.db.prepare("SELECT id FROM chunks WHERE content_hash = ? AND id != ?").get(input.content_hash, input.id) as { id: string } | undefined;
-    if (dup) return "duplicate";
     const row = {
       id: input.id,
       project_id: input.project_id,
@@ -515,6 +531,11 @@ export class ProjectVectorStore {
     };
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      // Read identity and deduplication after acquiring the writer lease;
+      // other sessions may have inserted the same memory while we waited.
+      const existing = this.db.prepare("SELECT id, content_hash FROM chunks WHERE id = ?").get(input.id) as { id: string; content_hash: string } | undefined;
+      const dup = this.db.prepare("SELECT id FROM chunks WHERE content_hash = ? AND id != ?").get(input.content_hash, input.id) as { id: string } | undefined;
+      if (dup) { this.db.exec("COMMIT"); return "duplicate"; }
       if (existing) {
         this.db.prepare("DELETE FROM chunks_fts WHERE rowid = (SELECT rowid FROM chunks WHERE id = ?)").run(input.id);
         this.db.prepare(`UPDATE chunks SET project_id=?, session_id=?, source_type=?, source_path=?, source_start=?, source_end=?, title=?, text=?, timestamp=?, valid_from=?, valid_until=?, commit_sha=?, concepts=?, importance=?, confidence=?, authority=?, supersedes=?, superseded_by=?, content_hash=?, embedder=?, dim=?, embedding=?, updated_at=? WHERE id=?`).run(
@@ -530,6 +551,7 @@ export class ProjectVectorStore {
       );
       this.db.prepare("UPDATE chunks SET embedded_at = ? WHERE id = ?").run(vec ? at : '', input.id);
       this.db.exec("COMMIT");
+      return existing ? "replaced" : "inserted";
     } catch (error) {
       try {
         this.db.exec("ROLLBACK");
@@ -538,7 +560,6 @@ export class ProjectVectorStore {
       }
       throw error;
     }
-    return existing ? "replaced" : "inserted";
   }
 
   getChunk(id: string): StoredChunk | undefined {
@@ -673,18 +694,19 @@ export class ProjectVectorStore {
    * anything changed.
    */
   refreshSource(id: string, loc: { start: number; end: number; commit?: string }, now?: string): boolean {
-    const row = this.db.prepare("SELECT source_path, source_start, source_end, commit_sha, valid_until, superseded_by FROM chunks WHERE id = ?").get(id) as { source_path: string; source_start: number; source_end: number; commit_sha: string; valid_until: string | null; superseded_by: string } | undefined;
-    if (!row) return false;
-    const retired = row.valid_until !== null;
-    if (retired) {
-      const replacement = row.superseded_by ? this.db.prepare("SELECT source_path FROM chunks WHERE id = ?").get(row.superseded_by) as { source_path: string } | undefined : undefined;
-      if (replacement?.source_path !== row.source_path) return false;
-    }
-    const commit = loc.commit ?? row.commit_sha;
-    if (!retired && row.source_start === loc.start && row.source_end === loc.end && row.commit_sha === commit) return false;
     const at = now ?? new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      // Another session may already have moved this source and its atoms.
+      const row = this.db.prepare("SELECT source_path, source_start, source_end, commit_sha, valid_until, superseded_by FROM chunks WHERE id = ?").get(id) as { source_path: string; source_start: number; source_end: number; commit_sha: string; valid_until: string | null; superseded_by: string } | undefined;
+      if (!row) { this.db.exec("COMMIT"); return false; }
+      const retired = row.valid_until !== null;
+      if (retired) {
+        const replacement = row.superseded_by ? this.db.prepare("SELECT source_path FROM chunks WHERE id = ?").get(row.superseded_by) as { source_path: string } | undefined : undefined;
+        if (replacement?.source_path !== row.source_path) { this.db.exec("COMMIT"); return false; }
+      }
+      const commit = loc.commit ?? row.commit_sha;
+      if (!retired && row.source_start === loc.start && row.source_end === loc.end && row.commit_sha === commit) { this.db.exec("COMMIT"); return false; }
       this.db.prepare("UPDATE chunks SET source_start = ?, source_end = ?, commit_sha = ?, valid_until = NULL, superseded_by = '', updated_at = ? WHERE id = ?").run(loc.start, loc.end, commit, at, id);
       // Atom ranges are offsets from the parent start; keep them in step.
       if (row.source_start > 0 && loc.start > 0 && row.source_start !== loc.start) {
@@ -731,12 +753,19 @@ export class ProjectVectorStore {
   }
 
   addSupersedes(id: string, memberIds: string[], now?: string): boolean {
-    const chunk = this.getChunk(id);
-    if (!chunk) return false;
-    const merged = [...new Set([...chunk.supersedes, ...memberIds])];
     const at = now ?? new Date().toISOString();
-    const result = this.db.prepare("UPDATE chunks SET supersedes = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(merged), at, id);
-    return (result.changes as number) > 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const chunk = this.getChunk(id);
+      if (!chunk) { this.db.exec("COMMIT"); return false; }
+      const merged = [...new Set([...chunk.supersedes, ...memberIds])];
+      const result = this.db.prepare("UPDATE chunks SET supersedes = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(merged), at, id);
+      this.db.exec("COMMIT");
+      return (result.changes as number) > 0;
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* preserve the write error */ }
+      throw error;
+    }
   }
 
   embeddingSpaces(): Array<EmbeddingSpace & { created_at: string; count: number }> {

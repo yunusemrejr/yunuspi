@@ -7,7 +7,7 @@
 - History browsing reads the core transcript directly without starting a worker. Task/restored runtimes stay alive to protect background jobs and schedules. All started workers stay resident until explicitly closed; up to eight run concurrently.
 - Made long history paginated and byte bounded, kept pre-compaction messages visible, merged tool calls across page boundaries, and fenced live snapshots against streaming races.
 - Added atomic session metadata, recoverable deletion, coalesced draft saves, failed-save recovery, prompt/dialog cancellation, and managed GUI source receipts and update ownership guards.
-- Preserved selected models, extended thinking levels, tool ceilings, credentials and project memory ownership. Verified concurrent project-vector writers.
+- Preserved selected models, extended thinking levels, tool ceilings, credentials and project memory ownership. Serialized concurrent vector-store creation, deduplication, source positions and supersession merges; failed initialization rolls back and closes its connection.
 - Removed eager frontend loading from metadata commands, shortened default subagent instructions by 46%, removed duplicate startup ranking, retained hook guidance across resume, and made reports/subagent/background/Double controls RPC-aware.
 - Added real Electron/core checks with a local provider, worker/storage/projection/update regressions, and Linux desktop CI.
 
