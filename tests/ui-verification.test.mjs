@@ -63,8 +63,21 @@ test('native tools enforce current visual provenance and actual keyboard/state c
   assert.equal(f.messages.length, 2, 'automatic verification follows up without an endless loop');
   const matrix = await f.run('ui_explore', { source: f.url, entrypoint: 'index.html', states: ['default', 'reduced-motion'] });
   assert.equal(matrix.details.status, 'measured'); assert.ok(matrix.details.cells.every(c => c.design.motion.reducedMotion === (c.state === 'reduced-motion')));
+  const matrixSummary = JSON.parse(matrix.content.find(part => part.type === 'text').text);
+  assert.deepEqual(matrixSummary.coverage, matrix.details.coverage);
+  assert.deepEqual(matrixSummary.findings, matrix.details.findings);
+  assert.deepEqual(matrixSummary.cells[0].errors, matrix.details.cells[0].errors);
+  assert.equal(matrixSummary.cells[0].typography, undefined);
+  assert.equal(matrixSummary.cells[0].design.typography, undefined);
+  const savedMatrix = JSON.parse(await fs.readFile(path.resolve(f.cwd, matrix.details.report), 'utf8'));
+  assert.deepEqual(savedMatrix.cells, matrix.details.cells, 'the saved report retains full measurements');
   const rendered = await f.run('visual_review', { action: 'run', source: f.url, entrypoint: 'index.html' });
   const review = rendered.details;
+  const summary = JSON.parse(rendered.content.find(part => part.type === 'text').text);
+  assert.ok(summary.report.endsWith('review.json'));
+  assert.deepEqual(summary.sections, review.sections, 'all rubric sections and their evidence remain on the wire');
+  assert.equal(summary.design.typography, undefined);
+  assert.ok(review.design.typography.length > 0, 'native consumers retain the full measurements');
   assert.ok(review.runId); assert.ok(review.dom.controls >= 2);
   assert.equal(rendered.content.some(c => c.type === 'image'), false);
   const verdict = review.sections.map(section => ({ id: section.id, verdict: 'PASS', evidence: [`${section.id}: inspected the current contact form, responsive captures and keyboard task.`] }));
@@ -95,12 +108,19 @@ test('native tools enforce current visual provenance and actual keyboard/state c
     const checked = await f.run('browser_session', { action: 'verify', session, selector: '#result', text: 'Contact saved' });
     assert.equal(checked.details.verification.matches, true);
   } finally { await f.run('browser_session', { action: 'close', session }); }
-  await f.run('visual_review', { action: 'record', source: f.url, runId: review.runId, verdict });
+  await assert.rejects(f.run('visual_review', { action: 'record', runId: 'unknown-run', verdict }), /matching visual_review run/);
+  await assert.rejects(f.run('visual_review', { action: 'record', source: f.url + 'wrong', runId: review.runId, verdict }), /matching/);
+  const recorded = await f.run('visual_review', { action: 'record', runId: review.runId, verdict });
+  assert.equal(recorded.details.recorded.source, f.url, 'runId alone recovers the exact reviewed source');
   assert.deepEqual((await f.run('visual_review', { action: 'status' })).details.gaps, []);
   assert.deepEqual(collectVerificationReceipts(10, f.ctx.sessionManager), []);
   await f.change('style.css', 'body{color:#aaa}');
   await assert.rejects(f.run('visual_review', { action: 'record', source: f.url, runId: review.runId, verdict }), /dependencies changed/);
   assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.length > 0);
+  const detailed = await f.run('ui_explore', { source: f.url, viewports: ['mobile'], detail: true });
+  const full = JSON.parse(detailed.content.find(part => part.type === 'text').text);
+  assert.deepEqual(full.cells, detailed.details.cells, 'detail:true exposes the saved measurements inline');
+  assert.ok(full.cells[0].design.typography.length > 0);
 });
 
 test('saved SVG gets automatic structural review and session switches cannot consume old tool results', async t => {

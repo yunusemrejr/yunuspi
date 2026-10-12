@@ -16,6 +16,28 @@ const load = (p) => import(pathToFileURL(path.join(agent, p)).href);
 const qa = await load("extensions/lib/creative-qa.ts");
 const hooks = await load("extensions/lib/session-hooks.ts");
 
+test('compact UI reports retain failures, coverage, truncation and provenance without mutating the full report', () => {
+  const design = { typography: [{ family: 'serif' }], spacing: [4, 8], limitations: ['sampled geometry'], truncated: true, contrast: { belowThreshold: 2 }, findings: ['small type'] };
+  const report = { source: 'page.html', revision: 'current', status: 'fail', report: '.pi/review/report.json', coverage: { complete: false }, plan: { omitted: ['desktop'] }, findings: ['capture failed'], cells: [
+    { ok: true, file: 'mobile.png', documentSha256: 'hash', typography: design.typography, design, errors: ['runtime error'], inspectionIncomplete: true },
+    { ok: false, file: 'desktop.png', error: 'capture timed out' },
+  ] };
+  const original = structuredClone(report), compact = qa.compactQAResult('ui_explore', report);
+  assert.deepEqual(report, original);
+  for (const key of ['source', 'revision', 'status', 'report', 'coverage', 'plan', 'findings']) assert.deepEqual(compact[key], report[key]);
+  assert.deepEqual(compact.cells[1], report.cells[1]);
+  assert.deepEqual(compact.cells[0].errors, report.cells[0].errors);
+  assert.equal(compact.cells[0].inspectionIncomplete, true);
+  assert.equal(compact.cells[0].documentSha256, 'hash');
+  assert.equal(compact.cells[0].design.truncated, true);
+  assert.deepEqual(compact.cells[0].design.contrast, design.contrast);
+  assert.deepEqual(compact.cells[0].design.findings, design.findings);
+  assert.deepEqual(compact.measurementLimitations, design.limitations);
+  assert.equal(compact.cells[0].design.typography, undefined);
+  assert.equal(qa.compactQAResult('visual_review', { receipts: [] }).receipts.length, 0);
+  assert.equal(qa.compactQAResult('other', report), report);
+});
+
 test("planUiMatrix expands viewports × states and caps at 12 captures", () => {
   const minimal = qa.planUiMatrix({});
   assert.equal(minimal.cells.length, 4);

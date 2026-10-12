@@ -2369,7 +2369,7 @@
         },
         {
           "name": "kind|state|timeoutMs",
-          "summary": "Browser wait condition: element, text, URL, load or JavaScript predicate."
+          "summary": "Browser waits or verification: exact text, element state or a boolean page predicate. verify executes predicates once and charges the script action budget."
         },
         {
           "name": "query|offset|maxChars",
@@ -2885,8 +2885,12 @@
           "summary": "Narrow 320px/mobile/tablet/desktop plus touch/DPR/orientation profiles and breakpoint neighbors. The 12-capture bound covers widths before variants and reports omitted cells."
         },
         {
+          "name": "detail",
+          "summary": "ui_explore and visual_review run return compact text with full measurements in report; true includes typography/spacing inline. Findings and coverage remain inline either way."
+        },
+        {
           "name": "runId|entrypoint",
-          "summary": "Record a matching current visual capture by runId; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required."
+          "summary": "Record a matching current visual capture by runId, which can recover its source in this session; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required."
         },
         {
           "name": "PI_UI_VERIFICATION",
@@ -3587,7 +3591,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 492,
+        "line": 498,
         "kind": "factory"
       },
       {
@@ -3714,13 +3718,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 596,
+        "line": 602,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 301,
+        "line": 302,
         "kind": "factory"
       },
       {
@@ -3794,7 +3798,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 538,
+        "line": 544,
         "kind": "factory"
       },
       {
@@ -3878,7 +3882,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 426,
+        "line": 432,
         "kind": "factory"
       },
       {
@@ -3932,7 +3936,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 813,
+        "line": 798,
         "kind": "literal"
       },
       {
@@ -4029,13 +4033,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 457,
+        "line": 463,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 452,
+        "line": 458,
         "kind": "factory"
       },
       {
@@ -4071,19 +4075,19 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 491,
+        "line": 489,
         "kind": "literal"
       },
       {
         "name": "ui_consistency",
         "source": "agent/extensions/art-direction.ts",
-        "line": 415,
+        "line": 421,
         "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 389,
+        "line": 394,
         "kind": "factory"
       },
       {
@@ -4137,7 +4141,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 343,
+        "line": 344,
         "kind": "factory"
       },
       {
@@ -4338,7 +4342,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 813,
+        "line": 798,
         "kind": "literal"
       },
       {
@@ -4416,7 +4420,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 491,
+        "line": 489,
         "kind": "literal"
       },
       {

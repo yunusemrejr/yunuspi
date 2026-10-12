@@ -578,7 +578,7 @@ test('the total retrieval budget stops later stages even when helpers ignore can
 test('Span session changes cancel old work and stale completions cannot clear the new session flight', async () => {
   const extension = (await load('extensions/micro-intelligence.ts')).default;
   const handlers = new Map(), requests = [];
-  const prior = process.env.PI_SPAN; delete process.env.PI_SPAN;
+  const prior = process.env.PI_SPAN; process.env.PI_SPAN = 'on';
   const pi = { registerTool() {}, registerMessageRenderer() {}, on(name, fn) { handlers.set(name, [...handlers.get(name) ?? [], fn]); } };
   const fire = async (name, event = {}, ctx = {}) => { for (const handler of handlers.get(name) ?? []) await handler(event, ctx); };
   const ctx = id => ({ sessionManager: { getSessionId: () => id, getBranch: () => [] } });

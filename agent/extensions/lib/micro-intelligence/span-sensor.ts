@@ -10,8 +10,8 @@
  *   only through `spanAdvisory`, which requires a calibrated present
  *   probability AND deterministic corroborating evidence for anything
  *   stronger than a shadow record.
- * - It starts in shadow mode (PI_SPAN_SHADOW=1 default): evaluations are
- *   recorded, measured and benchmarked, but no consumer may act on them.
+ * - Scoring is opt-in (PI_SPAN=on) and starts in shadow mode:
+ *   evaluations are recorded, but no consumer may act on them.
  *
  * Transport is an injected scorer. The default OpenRouter scorer sends the
  * bounded trace to the decisions endpoint (Span is a decisions model and is
@@ -145,7 +145,7 @@ export type SpanScorer = (prompt: string, opts: {
 
 export function spanEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
-    && !["off", "0"].includes((env.PI_SPAN ?? "on").toLowerCase());
+    && ["on", "1", "true", "yes"].includes((env.PI_SPAN ?? "off").toLowerCase());
 }
 
 /** Shadow (record-only) unless explicitly disabled with PI_SPAN_SHADOW=0. */

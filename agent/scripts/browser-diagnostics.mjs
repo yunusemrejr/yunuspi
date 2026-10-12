@@ -122,7 +122,7 @@ export function renderNavigationFailure(error) {
     network: "HTTP(S) uses the harness host network, including localhost. Browser isolation does not imply network isolation.",
     nextStep: kind === "tls" ? "Correct the server certificate or URL; keep certificate verification enabled."
       : kind === "response-limit" ? "Reduce the response size before retrying."
-      : "Inspect the server task/logs and listening address/port; confirm the URL with wait_for kind:http before retrying. A failed request alone does not justify deployment, a tunnel, asset rewrites or switching browsers.",
+      : "Inspect the server task/logs and listening address/port; confirm the URL with http_request before retrying. A failed request alone does not justify deployment, a tunnel, asset rewrites or switching browsers.",
   };
 }
 
@@ -149,7 +149,7 @@ export function browserFailure(error, stage, action, waitKind) {
               : "action-failed";
   const mutation = stage !== "validation" && (
     ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate", "back", "forward", "reload", "navigate", "new_tab"].includes(action) ||
-    (action === "wait" && waitKind === "function")
+    (["wait", "verify"].includes(action) && waitKind === "function")
   );
   return {
     stage,
@@ -166,6 +166,8 @@ export function browserFailure(error, stage, action, waitKind) {
           ? "Open a new session and reconcile any previous mutation."
           : kind === "ambiguous-target"
             ? "Inspect current state and choose one exact target."
+            : action === 'verify' && kind === 'invalid-request'
+              ? "Use verify with one observed target and text for exact text comparison, state:visible|hidden|attached|detached for an element, or kind:function and script returning a boolean. Inspect current state before retrying a function because its effects may have occurred."
             : /Stale browser reference/.test(text)
               ? "Capture snapshot or markers again; the old reference no longer identifies a live node in this tab."
             : mutation

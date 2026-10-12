@@ -47,6 +47,10 @@ test("stale node references request a fresh observation without echoing page con
   const expired = browserFailure(Error("Browser session lease expired; open a new session"), "validation", "snapshot");
   assert.equal(expired.kind, "expired");
   assert.match(expired.nextStep, /cannot be renewed.*Open a new session.*reconcile/i);
+  const predicate = browserFailure(Error('Evaluation timeout; script may still be running'), 'verify', 'verify', 'function');
+  assert.match(predicate.outcome, /effects may have occurred/);
+  const request = browserFailure(Error('verify requires text'), 'verify', 'verify');
+  assert.match(request.nextStep, /state:visible.*kind:function/);
 });
 
 test("lease keeps new reads free and budgets new mutations", () => {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeVerdict } from './creative-qa.ts';
 
-type Capture = { runId: string; source: string; surface?: string; revision: string; consistent?: boolean; file: string; sections: any[]; dom?: any; errors?: any[]; responsiveHash?: string };
+type Capture = { runId: string; source: string; originalSource?: string; surface?: string; revision: string; consistent?: boolean; file: string; sections: any[]; dom?: any; errors?: any[]; responsiveHash?: string };
 type Run = { capture: Capture; stamp: string; imageHash: string; seen: boolean };
 type Obligation = { id: string; revision: string; state: string; line: string };
 
@@ -71,6 +71,12 @@ export function createCreativeEvidence() {
       if (!capture.consistent || capturedStamp !== stamp() || !imageHash) throw Error('Capture revision changed or is unavailable; run visual_review again on the final source.');
       runs.set(capture.runId, { capture, stamp: capturedStamp, imageHash, seen });
       while (runs.size > 24) runs.delete(runs.keys().next().value!);
+    },
+    // An opaque run id already binds the source inside this session. Reusing
+    // that identity still goes through record's revision and vision checks.
+    sourceForRun(runId: string | undefined) {
+      const capture = runs.get(runId ?? '')?.capture;
+      return capture?.originalSource ?? capture?.source;
     },
     vision(imageHash: string) {
       for (const run of [...runs.values(), ...matrices.values()]) if (current(run) && run.imageHash === imageHash) run.seen = true;

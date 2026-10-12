@@ -343,7 +343,7 @@ earlier version waited up to 2 s on every pass; its removal left paid
 selections unused). A raw first exposure remains sealed. A clipped Needle prefix cannot rescue a mutation request as read-only;
 Jev receives the complete bounded task before that judgment.
 
-## Span — soft behavior sensor (shadow-first)
+## Span — opt-in behavior sensor
 
 Span scores a fixed twelve-signal behavior catalog (repeated-failure
 loops, scope drift, ignored requirements, premature completion,
@@ -360,7 +360,8 @@ reach the remote scorer through the trace. Scoring runs at most once
 per turn end and at most every 30 seconds; unchanged traces reuse the
 fingerprint-cached score instead of rescoring.
 
-Production scores are record-only: measured in metrics, ledgered for cost,
+Scoring is disabled by default because production scores are record-only.
+Set `PI_SPAN=on` to collect calibration measurements. Enabled scores are measured in metrics, ledgered for cost,
 and available for comparison with deterministic outcomes. The benchmark
 helper `spanAdvisory` tests P(present) ≥ 0.80 with deterministic corroboration;
 it is not a production intervention path. Changing the shadow flag alone
@@ -377,7 +378,8 @@ an unlisted slug degrades to `route-unavailable`, never to an invented
 model. Every paid call is ledgered as `span-usage-v1` (same contract
 as `jev-usage-v1`) and surfaces in `micro_status`, `/metrics`,
 `/used`, export analytics, and concise TUI activity. `PI_SPAN=off`
-disables the sensor.
+disables the sensor. Quality-review aspect selection uses its deterministic
+selector directly; it no longer buys a discarded shadow suggestion.
 
 ## Typed Jev decisions
 

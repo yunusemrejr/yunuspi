@@ -15,7 +15,6 @@ export { parseReviewReport } from '../pi-subagents/src/shared/quality-review-rep
 export type { ReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 import { noteQualityReviewCompleted, registerSharedQualityReview } from './quality-review-owner.ts';
 import { consolidateFindings, type ConsolidatedGroup, type JudgeFn } from './micro-intelligence/review.ts';
-import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
@@ -507,20 +506,6 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           carried.set(report.aspect, { ...report, evidence: [`Carried forward from revision ${reviewed}: no file this aspect covers changed since that review.`, ...report.evidence].slice(0, 6) });
       }
       const aspects = reviewAspects(changed,task,history,patternReport());
-      // Shadow calibration for the typed review-aspects decision: measured,
-      // never applied. The deterministic set above stays authoritative.
-      if (options.dedup?.ask && aspects.length) {
-        const shadowAspects = aspects.map((aspect) => aspect.id);
-        void (async () => {
-          try {
-            const shadow = await askTypedDecision('review-aspects', {
-              state: { files: changed.slice(0, 32).join('\n').slice(0, 3000), task: task.slice(0, 2000) },
-            }, { judge: options.dedup!.ask, shadow: true });
-            const suggested = Array.isArray((shadow.verdict as any)?.add) ? (shadow.verdict as any).add.filter((id: unknown) => typeof id === 'string') : [];
-            noteHealth('ml.jev.shadow', { site: 'review-aspects', count: 1, suggested: suggested.length, agreed: suggested.filter((id: string) => shadowAspects.includes(id)).length });
-          } catch { /* shadow never affects review */ }
-        })();
-      }
       const pendingAspects = aspects.filter(aspect => !carried.has(aspect.id));
       roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, carried.has(aspect.id) ? 'carried' : 'pending'])); emitProgress();
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];

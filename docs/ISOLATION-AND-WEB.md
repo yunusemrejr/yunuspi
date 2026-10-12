@@ -89,13 +89,15 @@ Snapshots report `humanHelp` when visible widget or page-text clues suggest a CA
 
 For verification that requires direct human interaction, `open` with `visible:true` creates a window on the local desktop with the same isolated, temporary browser context. The user can complete an image challenge, login or device check in that window and reply when done. `switch_tab` brings the chosen tab forward. Display connection variables are passed only for visible sessions; provider credentials and personal browser profiles are still not imported. A headless session cannot be converted to visible in place: choose visible at open for account/verification workflows. After a human reply, inspect the current state and verify success; do not enter an acknowledgement such as “done” as a CAPTCHA answer.
 
-Native form controls support `select` with an exact unique `option` label and `check` with a desired `checked` boolean. `inspect` on a select returns up to 30 option labels and disabled flags, without option values; duplicate labels are rejected by `select`. `fill` also supports native contenteditable editors. `verify` compares caller-supplied `text` with a visible field or preview and returns `verification.matches`, without returning existing text. It rejects password, hidden and unsupported input types. `ok:true` means the comparison ran, and a matching draft is not evidence of publication. These controls use [Playwright's native input actions](https://playwright.dev/docs/input).
+Native form controls support `select` with an exact unique `option` label and `check` with a desired `checked` boolean. `inspect` on a select returns up to 30 option labels and disabled flags, without option values; duplicate labels are rejected by `select`. `fill` also supports native contenteditable editors. `verify` compares caller-supplied `text` with a visible field or preview and returns `verification.matches`, without returning existing text. It rejects password, hidden and unsupported input types. Alternatively, `state` asserts visible/hidden/attached/detached for one exact target; `kind:"function"` evaluates a boolean `script` once. False returns `matches:false`; a truthy string or number is rejected. Predicates consume the script action budget and can have page effects, so inspect before retrying a failed or timed-out predicate. `ok:true` means the comparison ran, and a matching draft is not evidence of publication. These controls use [Playwright's native input actions](https://playwright.dev/docs/input).
 
 ```js
 browser_session({action:"inspect",session,role:"combobox",name:"Category"})
 browser_session({action:"select",session,role:"combobox",name:"Category",option:"Questions"})
 browser_session({action:"check",session,role:"checkbox",name:"Disclose affiliation",checked:true})
 browser_session({action:"verify",session,role:"textbox",name:"Answer",text:exactDraft})
+browser_session({action:"verify",session,role:"button",name:"Continue",state:"visible"})
+browser_session({action:"verify",session,kind:"function",script:"document.querySelectorAll('main').length === 1"})
 browser_session({action:"renew",session})
 ```
 

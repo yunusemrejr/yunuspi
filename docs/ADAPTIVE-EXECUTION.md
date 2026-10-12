@@ -132,7 +132,8 @@ PI_LOCAL_LM=off node --test tests/adaptive-execution.test.mjs tests/adaptive-obs
 
 Direct work stages a smaller core schema set while keeping file tools, discovery,
 project verification, quality assessment and the complete bash background handle
-family. Observed escalation restores the standard set at the next tool boundary.
+family. `todo` stays available for first-turn planning even in direct scopes.
+Observed escalation restores the standard set at the next tool boundary.
 Explicit discoveries, named core tools and core tools already used in the current
 task survive simplification; caller tool restrictions and explicit CLI selections
 remain authoritative. `PI_ADAPTIVE_EXECUTION=off` retains the standard set.

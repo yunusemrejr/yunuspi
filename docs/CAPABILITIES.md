@@ -1019,7 +1019,7 @@ Search and read web sources, operate browser tabs with DOM refs, screenshots, co
 - `github_search.action`: GitHub operation: ranked repository search over several angles, a project's user requests by reactions, code search (token), or one repository's fact sheet. Values: `repos`, `issues`, `code`, `repo`.
 - `action`: Browser or media operation selected by the tool schema.
 - `session|tab|ref|frame`: Reuse owned browser handles and fresh DOM targets, including popup tabs and iframe ids.
-- `kind|state|timeoutMs`: Browser wait condition: element, text, URL, load or JavaScript predicate.
+- `kind|state|timeoutMs`: Browser waits or verification: exact text, element state or a boolean page predicate. verify executes predicates once and charges the script action budget.
 - `query|offset|maxChars`: Search and paginate rendered page text with browser_session read.
 - `reason`: request_help asks the user about a blocking verification challenge with a screenshot.
 - `path|times|count|width|height`: Local media and frame bounds.
@@ -1179,7 +1179,8 @@ Close the creative loop around one shared direction. creative_direct owns the st
 - `direction`: Structured brief object: intent, hierarchy.primary, visual, avoid, motion, audio, references.
 - `source|sources`: Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width.
 - `viewports|states|devices|breakpoints`: Narrow 320px/mobile/tablet/desktop plus touch/DPR/orientation profiles and breakpoint neighbors. The 12-capture bound covers widths before variants and reports omitted cells.
-- `runId|entrypoint`: Record a matching current visual capture by runId; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required.
+- `detail`: ui_explore and visual_review run return compact text with full measurements in report; true includes typography/spacing inline. Findings and coverage remain inline either way.
+- `runId|entrypoint`: Record a matching current visual capture by runId, which can recover its source in this session; entrypoint binds served/compiled URL evidence to its workspace HTML. Every rubric section and delivered vision evidence are required.
 - `PI_UI_VERIFICATION`: Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out.
 - `mode|positions|backtrack`: Time inventory or live scroll-mode observations, forward/backtracking and reduced-motion frames; continuous smoothness and GPU cost remain unknown.
 - `verdict`: Recorded rubric sections with PASS/WARN/FAIL/UNKNOWN plus evidence lines; UNKNOWN stays open, FAIL blocks completion.
@@ -1203,7 +1204,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 ### Stable extension tools
 
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 492; factory)
+- `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 498; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 161; factory)
 - `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 132; factory)
@@ -1224,8 +1225,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
-- `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 596; factory)
-- `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 301; factory)
+- `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 602; factory)
+- `creative_direct` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 302; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 119; factory)
 - `deliverable_check` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 135; literal)
 - `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
@@ -1237,7 +1238,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 32; factory)
-- `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 538; factory)
+- `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 544; factory)
 - `image_understand` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 29; factory)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 102; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 159; factory)
@@ -1251,7 +1252,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 499; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 156; factory)
-- `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 426; factory)
+- `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 432; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 166; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 128; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
@@ -1260,7 +1261,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 791; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 813; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 798; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2240; literal)
@@ -1276,16 +1277,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 783; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
-- `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 457; factory)
-- `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 452; factory)
+- `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 463; factory)
+- `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 458; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 258; literal)
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 547; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 491; literal)
-- `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 415; factory)
-- `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 389; factory)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 489; literal)
+- `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 421; factory)
+- `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 394; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
 - `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 122; factory)
 - `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 142; factory)
@@ -1294,7 +1295,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 118; factory)
 - `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 114; factory)
 - `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 91; factory)
-- `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 343; factory)
+- `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 344; factory)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 73; literal)

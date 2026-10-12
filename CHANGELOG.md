@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.36.3 — 2026-10-12
+
+**Fewer avoidable tool retries.** Short tasks keep `todo` available from the first turn. `visual_review record` can recover the exact reviewed source from its session-owned `runId`, with the same revision, pixel and rubric checks. Browser verification accepts exact text, visible/hidden/attached/detached state, or a boolean page predicate; predicates execute once, consume the script budget and keep uncertain effects explicit. Recovery hints no longer point to the removed `wait_for` tool.
+
+**Compact visual reports retain their evidence.** `ui_explore` and `visual_review run` return defects, rubric sections, errors, source identity and incomplete coverage, while repeated typography/spacing tables stay in the saved report. `detail:true` returns the full measurements inline; native receipt consumers retain them too.
+
+**Background work earns its model calls.** Quality reviews stop purchasing a discarded aspect-calibration judgment. Record-only Span scoring is opt-in with `PI_SPAN=on`. Child context prioritizes current evidence, scopes failure history to the assignment, and labels old errors as historical rather than unresolved defects. Model choices, actual independent reviews and verification requirements retain their existing owners.
+
 **Goals finish with fewer bookkeeping turns.** `goal complete` accepts a batch of observed criterion results, including individual waivers, and validates the whole batch before recording it. Existing single-criterion calls keep working. A settled goal with all evidence and clear current verification closes without waking the model just to call `complete`; unresolved checks still use the existing bounded continuation. Final Markdown/reStructuredText documentation edits no longer force another test run.
 
 **Completion checks reuse exact file contents.** Audit and syntax steps share one bounded source snapshot and reuse per-file results when bytes match. External edits invalidate the cache even when size and timestamps match. The static deadline is ten seconds; incomplete coverage stays explicit. Optional `goal check` quality notes inspect changed files instead of rebuilding a whole-project duplicate index.

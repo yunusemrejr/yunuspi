@@ -243,6 +243,29 @@ export function summarizeNoise(noise: any): Array<{ key: string; detail: string 
   }));
 }
 
+/** Keep decisions, failures and provenance on the wire; repeated typography
+ * and spacing tables stay in the already-written report. Details remain full
+ * for native receipt consumers and detail:true is an explicit inspection path. */
+export function compactQAResult(tool: string, result: any): any {
+  if (!result || (tool !== 'ui_explore' && tool !== 'visual_review')) return result;
+  if (tool === 'visual_review' && !result.runId) return result;
+  const limitations = new Set<string>();
+  const designFacts = (design: any) => {
+    if (!design || typeof design !== 'object') return design;
+    const { typography, spacing, limitations: bounds, ...facts } = design;
+    for (const bound of bounds ?? []) limitations.add(bound);
+    return facts;
+  };
+  const compact = tool === 'ui_explore'
+    ? { ...result, cells: (result.cells ?? []).map((cell: any) => {
+      const { typography, ...facts } = cell;
+      return { ...facts, ...(cell.design ? { design: designFacts(cell.design) } : {}) };
+    }) }
+    : { ...result, design: designFacts(result.design) };
+  return { ...compact, ...(limitations.size ? { measurementLimitations: [...limitations] } : {}),
+    detail: 'Typography and spacing tables remain in report; use read or detail:true. Defects, rubric sections and incomplete coverage are retained here.' };
+}
+
 export async function uiExploreRun(
   params: { source: string; viewports?: unknown; states?: unknown; widths?: unknown; devices?: unknown; breakpoints?: unknown; colorScheme?: unknown; reducedMotion?: unknown; fullPage?: unknown; outputDir?: unknown },
   cwd: string, signal: AbortSignal | undefined, capture: QACapture,
@@ -552,7 +575,7 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
   };
   Object.assign(run, { consistent: before === run.revision && run.revision !== "missing" && !run.revision.startsWith("unhashed-") });
   await fs.writeFile(path.join(dir, "review.json"), JSON.stringify(run, null, 1) + "\n", { flag: "wx" });
-  return run;
+  return { ...run, report: relative(cwd, path.join(dir, "review.json")) };
 }
 
 // ─────────────────────────── receipts ────────────────────────────────────

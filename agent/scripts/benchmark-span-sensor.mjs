@@ -46,7 +46,7 @@ const keywordScorer = async (prompt) => {
 
 const report = { at: new Date().toISOString(), mode: live ? 'live-span-route' : 'offline-pipeline', traces: [] };
 const scorer = live ? openRouterSpanScorer() : keywordScorer;
-const env = live ? { ...process.env, PI_SPAN_SHADOW: '1' } : { PI_SPAN_SHADOW: '0' };
+const env = live ? { ...process.env, PI_SPAN: 'on', PI_SPAN_SHADOW: '1' } : { PI_SPAN: 'on', PI_SPAN_SHADOW: '0' };
 
 for (const trace of fixture.traces) {
   if (only && trace.id !== only) continue;

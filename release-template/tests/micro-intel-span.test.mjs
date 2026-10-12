@@ -18,9 +18,15 @@ const fixtures = JSON.parse(fs.readFileSync(path.join(root, "tests/fixtures/micr
 
 const {
   SPAN_CATALOG, SPAN_ADVISE_THRESHOLD, createSpanTrace, spanTraceFingerprint,
-  parseSpanScores, scoreSpanTrace, spanAdvisory, openRouterSpanScorer,
+  parseSpanScores, scoreSpanTrace: rawScoreSpanTrace, spanAdvisory, openRouterSpanScorer,
   clearSpanCache, spanEnabled, spanShadow,
 } = spanMod;
+
+// Scoring fixtures explicitly opt in; production no longer spends on
+// record-only calibration unless the operator enables it.
+const scoreSpanTrace = (trace, scorer, options = {}) => rawScoreSpanTrace(trace, scorer, {
+  ...options, env: { PI_SPAN: 'on', ...options.env },
+});
 
 const scoresFor = (presentIds) => {
   const out = {};
@@ -203,11 +209,25 @@ test("paid fallback runs only for a missing Lite route", async () => {
 });
 
 test("env gates behave", () => {
-  assert.equal(spanEnabled({}), true);
+  assert.equal(spanEnabled({}), false);
+  assert.equal(spanEnabled({ PI_SPAN: "on" }), true);
+  assert.equal(spanEnabled({ PI_SPAN: "true" }), true);
+  assert.equal(spanEnabled({ PI_SPAN: "typo" }), false);
   assert.equal(spanEnabled({ PI_SPAN: "off" }), false);
   assert.equal(spanEnabled({ PI_OFFLINE: "1" }), false);
   assert.equal(spanShadow({}), true);
   assert.equal(spanShadow({ PI_SPAN_SHADOW: "0" }), false);
+});
+
+test('default Span scoring never invokes the scorer or bills calibration', async () => {
+  let calls = 0;
+  const entries = [];
+  const result = await rawScoreSpanTrace(traceFrom(fixtures.traces[0].events), async () => {
+    calls++; throw Error('default scoring must stay idle');
+  }, { env: {}, pi: { appendEntry: (...entry) => entries.push(entry) } });
+  assert.equal(result.skipped, 'disabled');
+  assert.equal(calls, 0);
+  assert.deepEqual(entries, []);
 });
 
 test("paid calls are ledgered for cost/metrics", async () => {

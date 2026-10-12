@@ -108,9 +108,10 @@ export interface FailureFamilyRow {
 	latest: string;
 }
 
-export function failureFamilies(graph: TaskGraph): FailureFamilyRow[] {
+export function failureFamilies(graph: TaskGraph, relevant: (entity: TaskEntity) => boolean = () => true): FailureFamilyRow[] {
 	const groups = new Map<string, TaskEntity[]>();
 	for (const entity of ofKind(graph, "failure")) {
+		if (!relevant(entity)) continue;
 		const family = entity.family ?? "fam-unknown";
 		const list = groups.get(family) ?? [];
 		list.push(entity);
@@ -219,8 +220,8 @@ export function projectSubagentSlice(graph: TaskGraph, input: SubagentSliceInput
 	const reqs = ofKind(graph, "requirement").filter((entry) => entry.status !== "superseded" && relevant(entry)).slice(0, 6);
 	const decisions = ofKind(graph, "decision").sort(byUpdatedDesc).filter(relevant).slice(0, 5);
 	const files = [...new Set(ofKind(graph, "artifact").filter(relevant).map((entry) => entry.refs?.file ?? entry.title))].slice(0, 10);
-	const failures = failureFamilies(graph).slice(0, 3);
-	const evidence = ofKind(graph, "evidence").sort(byUpdatedDesc).filter((entry) => !entry.stale && relevant(entry)).slice(0, 4);
+	const failures = failureFamilies(graph, relevant).slice(0, 3);
+	const evidence = ofKind(graph, "evidence").sort(byUpdatedDesc).filter((entry) => !entry.stale && entry.status !== "invalidated" && relevant(entry)).slice(0, 4);
 	const lines: string[] = [
 		`Goal: ${clip(graph.objective || graph.label || "(no stated objective)", 300)}`,
 		...section("Relevant requirements",
@@ -228,10 +229,10 @@ export function projectSubagentSlice(graph: TaskGraph, input: SubagentSliceInput
 				const state = requirementState(graph, entry.id);
 				return `${entry.refs?.requirementId ?? entry.id} [${entry.status}] impl ${state.implemented ? "✓" : "✗"} ver ${state.verified ? "✓" : "✗"} · ${clip(entry.title, 100)}`;
 			}), "none in focus"),
+		...section("Existing evidence (bounded slice)", evidence.map((entry) => `${clip(entry.title, 100)} [${entry.provenance}]`), "none in focus; not a complete history"),
 		...section("Known decisions", decisions.map((entry) => `${clip(entry.title, 100)} [${entry.provenance}]`), "none"),
 		...section("Relevant files", files, "none listed"),
-		...section("Known failures (do not repeat blindly)", failures.map((entry) => `${entry.family} ×${entry.count} · ${entry.latest}`), "none"),
-		...section("Existing evidence", evidence.map((entry) => `${clip(entry.title, 100)} [${entry.provenance}]`), "none"),
+		...section("Historical failures (recheck current state; may be recovered)", failures.map((entry) => `${entry.family} ×${entry.count} · ${entry.latest}`), "none in focus"),
 		"Required output: bounded findings with file/line references. Required verification: state what you actually checked; unverified claims stay unverified.",
 	];
 	return fit(lines, budgets);

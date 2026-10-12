@@ -34,6 +34,18 @@ export function expressionBody(script, Ctor) {
   try { new Ctor(`return (${text}\n);`); return `return (${text}\n);`; } catch { return script; }
 }
 
+async function evaluateScript(surface, script, timeout, maxChars) {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const evaluator = new AsyncFunction("element", "args", `const cap = ${capEvaluateResult.toString()}; return cap(await (async () => {${expressionBody(script, AsyncFunction)}\n})(), args.maxChars);`);
+  let deadline;
+  try {
+    return await Promise.race([
+      surface.locator(":root").evaluate(evaluator, { maxChars }),
+      new Promise((_, reject) => { deadline = setTimeout(() => reject(Error("Evaluation timeout; script may still be running; inspect before retrying")), timeout); }),
+    ]);
+  } finally { clearTimeout(deadline); }
+}
+
 /** Listen before creating any page: a popup can log before its page event. */
 export function createBrowserPageLogs(context) {
   const byPage = new WeakMap();
@@ -149,7 +161,8 @@ export async function runBrowserSession(input, output) {
         id = request.id;
         ({ action, kind: waitKind } = request);
         const p = request;
-        lease.consume(action);
+        // A caller-supplied predicate can have effects just like evaluate.
+        lease.consume(action === 'verify' && p.kind === 'function' ? 'evaluate' : action);
         const timeout = p.timeoutMs ?? 5000;
         if (!Number.isInteger(timeout) || timeout < 100 || timeout > 15000)
           throw Error("Invalid timeoutMs: use 100–15000");
@@ -481,9 +494,27 @@ export async function runBrowserSession(input, output) {
           await (await locate()).setChecked(p.checked, { timeout });
           record("check");
         } else if (action === "verify") {
-          if (typeof p.text !== "string" || p.text.length > 8000)
-            throw Error("verify requires text of at most 8000 characters");
-          result = { verification: await (await locate()).evaluate(verifyBrowserText, { text: p.text }, { timeout }) };
+          if (p.kind === 'function') {
+            if (typeof p.script !== 'string' || !p.script || p.script.length > 8000 || p.text !== undefined || p.state !== undefined)
+              throw Error('Function verification requires script returning a boolean; omit text and state');
+            const observed = await evaluateScript(surface, p.script, timeout, 100);
+            if (!['true', 'false'].includes(observed.text) || observed.truncated)
+              throw Error('Function verification must return a boolean; truthy values are not proof');
+            result = { verification: { matches: observed.text === 'true', comparison: 'boolean', evidence: 'Caller predicate observed on the current page; not proof of submission or publication' } };
+          } else if (p.state !== undefined && p.text === undefined) {
+            if (!['attached', 'detached', 'visible', 'hidden'].includes(p.state) || p.script !== undefined || p.kind && p.kind !== 'element')
+              throw Error('Element verification state must be attached, detached, visible or hidden');
+            const target = await locate();
+            const count = typeof target.count === 'function' ? await target.count() : 1;
+            if (count > 1) throw Error(`Verification resolved to ${count} elements; choose one exact target`);
+            const visible = count === 1 && await target.isVisible();
+            const matches = p.state === 'attached' ? count === 1 : p.state === 'detached' ? count === 0 : p.state === 'visible' ? visible : !visible;
+            result = { verification: { matches, comparison: 'state', expected: p.state, observed: count === 0 ? 'detached' : visible ? 'visible' : 'hidden', evidence: 'Current target state only; not proof of submission or publication' } };
+          } else {
+            if (typeof p.text !== "string" || p.text.length > 8000 || p.script !== undefined || p.state !== undefined || p.kind && !['element', 'text'].includes(p.kind))
+              throw Error("verify requires text, an element state, or kind:function with script returning a boolean");
+            result = { verification: await (await locate()).evaluate(verifyBrowserText, { text: p.text }, { timeout }) };
+          }
         } else if (action === "wait") {
           const kind = p.kind ?? "element";
           if (kind === "url") {
@@ -529,16 +560,7 @@ export async function runBrowserSession(input, output) {
           const maxChars = p.maxChars ?? 8000;
           if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
             throw Error("Invalid maxChars: use 100–64000");
-          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-          const evaluator = new AsyncFunction("element", "args", `const cap = ${capEvaluateResult.toString()}; return cap(await (async () => {${expressionBody(p.script, AsyncFunction)}\n})(), args.maxChars);`);
-          let deadline;
-          try {
-            const evaluation = await Promise.race([
-              surface.locator(":root").evaluate(evaluator, { maxChars }),
-              new Promise((_, reject) => { deadline = setTimeout(() => reject(Error("Evaluation timeout; script may still be running; inspect before retrying")), timeout); }),
-            ]);
-            result = { evaluation };
-          } finally { clearTimeout(deadline); }
+          result = { evaluation: await evaluateScript(surface, p.script, timeout, maxChars) };
           record("evaluate");
         } else if (action === "html") {
           const maxChars = p.maxChars ?? 8000;
@@ -673,7 +695,7 @@ export async function runBrowserSession(input, output) {
           stage === "observation" &&
           (["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "navigate", "new_tab", "back", "forward", "reload"].includes(
             action,
-          ) || (action === "wait" && waitKind === "function"))
+          ) || (["wait", "verify"].includes(action) && waitKind === "function"))
         )
           failure.outcome = "action completed; subsequent observation failed";
         record("action-error", { failure });

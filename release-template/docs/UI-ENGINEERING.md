@@ -15,6 +15,8 @@ UI work starts from its real audience, content, existing component owners and de
 
 `creative_direct` remains the shared direction owner. `render_see`, `visual_review` and the interactive browser supply distinct kinds of evidence. A capture is not a completed user interaction, and a measured effect count is not a reason to redesign a valid interface. Use the normal served application, real content and project rules.
 
+Visual reports keep findings and coverage inline and save full typography/spacing tables at `report`; use `detail:true` when those measurements are needed in context. For browser assertions, `verify` accepts exact text, an element state or `kind:"function"` with a script returning a boolean. A false predicate returns `matches:false` after one execution; it does not poll or certify a submission. Use `wait` separately when a bounded wait is needed.
+
 UI verification uses current native run IDs and source revisions. Responsive measurements and inspected matrix pixels, every visual-review rubric section, and the representative keyboard/input task remain separate requirements. Generic technical receipts cannot replace them. The default-on verifier provides bounded follow-ups for missing evidence; `PI_UI_VERIFICATION=off` is an explicit user opt-out.
 
 Inspect the real scroll sequence after integration, including reverse scrolling, focus, resize and reduced motion. Static frames demonstrate sampled output; they do not establish continuous smoothness, FPS or physical GPU cost.

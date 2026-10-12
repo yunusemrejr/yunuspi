@@ -222,6 +222,25 @@ test('subagent results keep subagent provenance and are never auto-verified', ()
   assert.ok(slice.length <= 1500);
 });
 
+test('child context prioritizes current evidence and scopes historical failures', () => {
+  const graph = reduce([
+    opened(),
+    ingest.upsertEvent(ctx(), { id: 'old-error', kind: 'failure', status: 'failed', family: 'network', title: 'parser.ts download failed', provenance: 'tool-output', refs: { file: 'parser.ts' } }, 'old'),
+    ingest.upsertEvent(ctx(), { id: 'unrelated-error', kind: 'failure', status: 'failed', family: 'network', title: 'other.ts upload failed', provenance: 'tool-output', refs: { file: 'other.ts' } }, 'other'),
+    ingest.upsertEvent(ctx(), { id: 'current-check', kind: 'evidence', status: 'active', title: 'parser.ts download succeeded and content checked', provenance: 'test-result', refs: { file: 'parser.ts' } }, 'check'),
+    ingest.upsertEvent(ctx(), { id: 'invalid-check', kind: 'evidence', status: 'invalidated', title: 'parser.ts outdated success', provenance: 'test-result', refs: { file: 'parser.ts' } }, 'invalid'),
+  ]);
+  const slice = projections.projectSubagentSlice(graph, { focus: ['parser.ts'] });
+  assert.ok(slice.includes('parser.ts download succeeded'));
+  assert.ok(slice.includes('Historical failures (recheck current state; may be recovered)'));
+  assert.ok(slice.indexOf('download succeeded') < slice.indexOf('download failed'));
+  assert.equal(slice.includes('other.ts'), false);
+  assert.equal(slice.includes('outdated success'), false);
+  assert.equal(projections.failureFamilies(graph)[0].count, 2, 'full diagnostic history is retained');
+  assert.ok(slice.length <= 1500);
+  assert.match(projections.projectSubagentSlice(graph, { focus: ['missing.ts'] }), /not a complete history/);
+});
+
 test('observer and review findings attach to entities; disagreement stays representable', () => {
   const graph = reduce([
     opened(),

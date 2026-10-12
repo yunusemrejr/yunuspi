@@ -56,7 +56,8 @@ test("renderer classifies nested transport causes without inventing network rest
   assert.equal(unknown.kind, "navigation-failed");
   assert.deepEqual(unknown.codes, []);
   assert.match(unknown.reason, /cause unavailable/);
-  assert.match(unknown.nextStep, /wait_for/);
+  assert.match(unknown.nextStep, /http_request/);
+  assert.doesNotMatch(unknown.nextStep, /wait_for/);
   assert.equal(renderNavigationFailure(Object.assign(Error("deadline"), {name:"TimeoutError"})).kind, "timeout");
   assert.equal(renderNavigationFailure(Error("Response exceeds 5 MiB")).kind, "response-limit");
 });

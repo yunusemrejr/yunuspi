@@ -105,7 +105,9 @@ export const CORE_TOOLS = new Set([
  * All other capabilities remain discoverable under the same host ceiling. */
 export const DIRECT_CORE_TOOLS = new Set([
   'read','bash','edit','write','grep','find','ls','tool_search',
-  'quality_review','project_tests','checkpoint_read','skill_review',
+  // Planning is an established prompt dependency even for short tasks. Hiding
+  // it caused a guaranteed failed first call before discovery could recover.
+  'todo','quality_review','project_tests','checkpoint_read','skill_review',
   'bg_run','bg_status','bg_logs','bg_kill','bg_wait',
 ]);
 /** Prompts that unmistakably need a specialized studio stage its tools for
@@ -117,13 +119,9 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: 'frontend', tools: ['image_understand', 'image_crop', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'blender'] },
   { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
-  { skill: '3d-cad', tools: ['blender', 'video_shot'] },
-  { skill: '3d-cad', tools: ['blender', 'video_frames'] },
+  { skill: '3d-cad', tools: ['blender', 'video_shot', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
-  { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
-  { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
-  // Sorting, renaming and cleaning up folders goes through one journaled, no-overwrite tool instead of mv and rm loops.
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.

@@ -694,6 +694,7 @@ test('direct schemas shrink without dropping checks, explicit choices or host re
  f.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, f.ctx);
  assert.ok(f.active().length < CORE_TOOLS.size);
  for(const name of DIRECT_CORE_TOOLS)assert.ok(f.active().includes(name),name);
+ assert.ok(f.active().includes('todo'),'a short task can create its plan without a not-found retry');
  assert.ok(!f.active().includes('subagent'));
  await f.call({names:['subagent'],enable:true});f.hooks.turn_end();
  f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});

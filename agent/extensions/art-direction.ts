@@ -21,7 +21,7 @@ import {
   directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
   type CreativeDirection,
 } from "./lib/creative-direction.ts";
-import { creativeCompareRun, creativeVerificationLines, planCompare, sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
+import { creativeCompareRun, creativeVerificationLines, planCompare, sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun, compactQAResult, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
@@ -291,7 +291,8 @@ export default function artDirection(pi: any) {
           }
           else result.pixels = `${pixels} (open with read/vision: this model was not served pixels inline)`;
         }
-        content.unshift({ type: 'text', text: JSON.stringify(result) });
+        const textResult = params.detail === true ? result : compactQAResult(name, result);
+        content.unshift({ type: 'text', text: JSON.stringify(textResult) });
         return { content, details: result };
       },
     });
@@ -341,7 +342,7 @@ export default function artDirection(pi: any) {
 
   // ── visual_review ──
   register("visual_review",
-    "Review actual rendered output. run captures HTML/SVG or a URL and returns runId, rubric sections, measured defects and needsVision gaps. record requires that current runId, every rubric section and delivered pixels or matching image_understand evidence for visual judgments. Repair measured FAILs or supply specific dismissals. UNKNOWN and stale evidence keep completion open. status shows current gaps. Use ui_explore for responsive states and browser_session for actual interaction.",
+    "Review rendered output. run requires source (HTML/SVG path or URL) and returns runId, all rubric sections, defects and needsVision gaps; full measurements are saved in report. record requires runId and every rubric verdict; source is recovered from that session-owned run unless supplied. Visual judgments require delivered pixels or matching image_understand evidence. Repair measured FAILs or supply specific dismissals. UNKNOWN and stale evidence keep completion open. status shows gaps. Use ui_explore for responsive states and browser_session for interaction. detail:true returns full measurements inline.",
     Type.Object({
       action: choices(["run", "record", "status"]),
       source: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
@@ -350,6 +351,7 @@ export default function artDirection(pi: any) {
       colorScheme: Type.Optional(choices(["light", "dark"])),
       entrypoint: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: 'Workspace UI entry file represented by this served URL; binds compiled/served captures to changed HTML when source is a URL' })),
       runId: Type.Optional(Type.String({ maxLength: 64 })),
+      detail: Type.Optional(Type.Boolean({ description: 'Include full saved design measurements inline (default false); all rubric sections, defects and coverage remain in the compact reply' })),
       dismissals: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), reason: Type.String({ minLength: 20, maxLength: 600 }) }), { maxItems: 16 })),
       verdict: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), verdict: Type.String({ maxLength: 16 }), evidence: Type.Array(Type.String({ maxLength: 300 })) }), { minItems: 1, maxItems: 16 })),
       note: Type.Optional(Type.String({ maxLength: 1000 })),
@@ -367,14 +369,17 @@ export default function artDirection(pi: any) {
         const responsive = state.evidence.responsive(surface ?? (state.evidence.changed().some(row => row.file === sourceKey(params.source, cwd)) ? sourceKey(params.source, cwd) : 'application'));
         const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction, responsive }, cwd, signal, capture);
         await refresh(ctx);
-        state.evidence.run({ ...run, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, 20 * 1024 * 1024)).hash, false, stamp);
+        state.evidence.run({ ...run, originalSource: run.source, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, 20 * 1024 * 1024)).hash, false, stamp);
         return { result: run, pixels: run.file };
       }
       if (params.action === "record") {
-        if (typeof params.source !== "string" || !params.source) throw new Error("visual_review record needs the reviewed source");
-        const verdict = state.evidence.record({ runId: params.runId, source: sourceKey(params.source, cwd), revision: await sourceRevision(params.source, cwd), verdict: params.verdict, dismissals: params.dismissals });
+        const recordedSource = params.source ?? state.evidence.sourceForRun(params.runId);
+        if (typeof recordedSource !== "string" || !recordedSource) throw new Error("Record needs runId from a matching visual_review run in this session.");
+        const source = sourceKey(recordedSource, cwd);
+        const revision = await sourceRevision(recordedSource, cwd);
+        const verdict = state.evidence.record({ runId: params.runId, source, revision, verdict: params.verdict, dismissals: params.dismissals });
         const receipt: VisualReceipt = {
-          source: params.source, revision: await sourceRevision(params.source, cwd), at: Date.now(),
+          source, revision, at: Date.now(),
           sections: verdict.sections, blocking: verdict.blocking, improvements: verdict.improvements,
           ...(typeof params.note === "string" && params.note ? { note: params.note.slice(0, 1000) } : {}),
         };
@@ -387,7 +392,7 @@ export default function artDirection(pi: any) {
 
   // ── ui_explore ──
   register("ui_explore",
-    "Render a responsive device/state matrix: defaults to narrow 320px, mobile 390px, tablet and desktop. Optional devices add touch/DPR phone portrait/landscape, tablet and desktop profiles; breakpoints probe b-1/b/b+1 widths. Default, dark, reduced-motion and full-page states share 12 captures, requested widths before variants, with every omitted combination disclosed. Returns a pixel contact sheet, document hashes, actual device/media behavior, DOM geometry, controls/names, alt/load status, measured contrast, design patterns, errors and incomplete coverage. Inspect the contact sheet; keyboard, menus and loading/error tasks require browser_session.",
+    "Render a responsive device/state matrix: defaults to narrow 320px, mobile 390px, tablet and desktop. Optional devices add touch/DPR profiles; breakpoints probe b-1/b/b+1 widths. Default, dark, reduced-motion and full-page states share 12 captures, requested widths before variants, with every omission disclosed. Returns a contact sheet, per-cell DOM facts, defects, device behavior, errors and coverage. Full typography/spacing measurements are saved in report; detail:true includes them inline. Inspect the contact sheet; keyboard, menus and loading/error tasks require browser_session.",
     Type.Object({
       source: Type.String({ minLength: 1, maxLength: 4096 }),
       entrypoint: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: 'Workspace UI entry file represented by the served URL' })),
@@ -397,6 +402,7 @@ export default function artDirection(pi: any) {
       devices: Type.Optional(Type.Array(choices(["phone-portrait","phone-landscape","tablet-portrait","desktop"]),{minItems:1,maxItems:4})),
       breakpoints: Type.Optional(Type.Array(Type.Integer({minimum:201,maximum:2047}),{minItems:1,maxItems:4,description:'CSS breakpoints; capture the immediate width on either side as well as the breakpoint'})),
       outputDir: Type.Optional(localPath),
+      detail: Type.Optional(Type.Boolean({ description: 'Include full saved design measurements inline (default false)' })),
     }),
     async (params, ctx, signal) => {
       const state = await refresh(ctx);

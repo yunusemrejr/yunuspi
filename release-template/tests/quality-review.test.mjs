@@ -159,6 +159,17 @@ async function fixture(t, { runner, context, beforeRefresh, dedup } = {}) {
  };
 }
 
+test('review selection makes no calibration-only model request', async t => {
+ let judgments = 0;
+ const f = await fixture(t, { dedup: { ask: async () => { judgments++; throw Error('no shadow request'); } } });
+ await f.mutate('src/value.js');
+ await f.tool({ action: 'review' });
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(f.calls.length, 1, 'the actual source review still runs');
+ assert.equal(judgments, 0, 'no discarded aspect suggestion is purchased');
+ assert.equal(f.state().status, 'awaiting_assessment');
+});
+
 test('direct adaptive work finishes without independent fan-out, pending-review clutter or a synthetic acceptance', async t => {
  const f=await fixture(t);
  f.api.input({source:'interactive',text:'Correct the one-line typo in README.md'});

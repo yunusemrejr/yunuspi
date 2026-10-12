@@ -5,6 +5,20 @@ import { normalizeVerdict, summarizePageState, summarizeNoise, planUiMatrix } fr
 
 const capture = (overrides = {}) => ({ runId: 'run-1', source: 'index.html', revision: 'rev-1', consistent: true, file: 'capture.png', sections: [{ id: 'hierarchy', verdict: 'UNKNOWN', needsVision: true }], ...overrides });
 const verdict = value => [{ id: 'hierarchy', verdict: value, evidence: ['Primary form owns the left column; secondary help is below it.'] }];
+
+test('run identity recovers only this session source and does not bypass stale or mismatched evidence', () => {
+  const evidence = createCreativeEvidence();
+  evidence.run(capture(), 'png', true);
+  assert.equal(evidence.sourceForRun('run-1'), 'index.html');
+  assert.equal(evidence.sourceForRun('unknown'), undefined);
+  assert.equal(createCreativeEvidence().sourceForRun('run-1'), undefined);
+  evidence.run(capture({ runId: 'alias', originalSource: './index.html?view=preview#contact' }), 'png', true);
+  assert.equal(evidence.sourceForRun('alias'), './index.html?view=preview#contact', 'revision lookup retains the original local path/URL spelling');
+  assert.equal(evidence.record({ runId: 'alias', source: 'index.html', revision: 'rev-1', verdict: verdict('PASS') }).blocking, 0, 'evidence still compares the canonical identity');
+  assert.throws(() => evidence.record({ runId: 'run-1', source: 'other.html', revision: 'rev-1', verdict: verdict('PASS') }), /matching/);
+  evidence.workspace('changed');
+  assert.throws(() => evidence.record({ runId: 'run-1', source: evidence.sourceForRun('run-1'), revision: 'rev-1', verdict: verdict('PASS') }), /changed/);
+});
 const matrix = (status = 'measured') => ({ consistent: true, status, cells: [320, 390, 834, 1440].map(width => ({ ok: true, width, dom: { available: true } })) });
 
 test('real DOM schema preserves native controls, names, broken images and page overflow', () => {
