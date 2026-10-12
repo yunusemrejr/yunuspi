@@ -23,6 +23,8 @@ const burstNote = (family: string) => {
 };
 
 export default function adaptiveWorkflows(pi: any) {
+  // Lean harness: adaptive workflow/council layer retired by default. Set PI_LEAN_GATES=on to re-enable.
+  if (process.env.PI_LEAN_GATES !== 'on') return;
   const execution = createAdaptiveExecutionController();
   const thinking = createAdaptiveThinkingController(pi);
   let dispose: (() => void) | undefined, owner: any, ownerFile = '', ownerCwd = '', ownerId = '', epoch = 0;

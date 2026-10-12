@@ -423,6 +423,8 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
 }
 
 export default function (pi: any, deps: MicroDependencies = { warmup: needleWarmup }) {
+  // Lean harness: micro-intelligence (local-LM/needle helpers) retired by default. Set PI_LEAN_GATES=on to re-enable.
+  if (process.env.PI_LEAN_GATES !== 'on') return;
   if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD === "1") return;
   let lastRequest: MicroRequestState | undefined;
   let generation = 0;

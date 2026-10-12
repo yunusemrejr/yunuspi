@@ -10,7 +10,7 @@ import { activePiProcesses } from '../agent/scripts/lib/active-core-processes.mj
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
-let apply = false, backupExisting = false, preserveState = false, deps = false, needle = true, localLm = process.platform === 'linux' && process.arch === 'x64', offline = false, target = path.join(os.homedir(), '.pi', 'agent');
+let apply = false, backupExisting = false, preserveState = false, deps = false, needle = false, localLm = false, offline = false, target = path.join(os.homedir(), '.pi', 'agent');
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '--apply') apply = true;
@@ -21,9 +21,10 @@ for (let i = 0; i < args.length; i++) {
   else if (arg === '--with-needle') needle = true;
   else if (arg === '--skip-needle') needle = false;
   else if (arg === '--skip-local-lm') localLm = false;
+  else if (arg === '--with-local-lm') localLm = true;
   else if (arg === '--target' && args[i + 1] && !args[i + 1].startsWith('--')) target = path.resolve(args[++i]);
   else if (arg === '--help') {
-    console.log('node scripts/install.mjs [--apply] [--install-deps|--offline] [--backup-existing] [--preserve-state] [--with-needle|--skip-needle] [--skip-local-lm] [--target PATH]\nDefault is a read-only dry run. --install-deps builds the repository-owned YunusPi core. --offline uses cached npm dependencies and skips optional asset downloads. --target is for staging; full harness runtime expects ~/.pi/agent.\nNeedle3 local-semantic assets (~36MB, pinned official build) download during --apply unless --skip-needle; a failed download warns and never fails the install (repair later with: node <agent>/extensions/lib/needle-assets.mjs repair).\nOn Linux x86-64 the local language model (Qwen3.5-0.8B, ~580MB, pinned llama.cpp runtime) installs as a loopback user service unless --skip-local-lm; failures warn and never fail the install (repair later with: node <agent>/extensions/lib/local-lm-assets.mjs repair).');
+    console.log('node scripts/install.mjs [--apply] [--install-deps|--offline] [--backup-existing] [--preserve-state] [--with-needle|--skip-needle] [--with-local-lm|--skip-local-lm] [--target PATH]\nDefault is a read-only dry run. --install-deps builds the repository-owned YunusPi core. --offline uses cached npm dependencies and skips optional asset downloads. --target is for staging; full harness runtime expects ~/.pi/agent.\nNeedle3 local-semantic assets are OFF by default in the lean harness; pass --with-needle to download (~36MB, pinned official build); a failed download warns and never fails the install (repair later with: node <agent>/extensions/lib/needle-assets.mjs repair).\nThe local language model is OFF by default in the lean harness; pass --with-local-lm to install it (Qwen3.5-0.8B, ~580MB, pinned llama.cpp runtime, loopback user service); failures warn and never fail the install (repair later with: node <agent>/extensions/lib/local-lm-assets.mjs repair).');
     process.exit(0);
   } else throw Error(`Unknown or incomplete argument: ${arg}`);
 }

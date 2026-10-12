@@ -29,6 +29,8 @@ const strList = (maxItems: number, maxLength: number) =>
   Type.Optional(Type.Array(Type.String({ maxLength }), { maxItems }));
 
 export default function expertDirector(pi: any) {
+  // Lean harness: expert/council layer retired by default. Set PI_LEAN_GATES=on to re-enable.
+  if (process.env.PI_LEAN_GATES !== 'on') return;
   const runs: Array<{ at: number; action: string; domains: string[]; converged?: boolean; reason?: string }> = [];
   const record = (entry: (typeof runs)[number]) => {
     runs.push(entry);

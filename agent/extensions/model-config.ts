@@ -1,4 +1,5 @@
 import { SettingsManager, getAgentDir, type ExtensionAPI } from '@yunuspi/coding-agent';
+import { cacheProfileFor, imageRefusal, modelSupportsImages, planModelSwitch } from './lib/lean-policy.ts';
 
 /** Selected-model bookkeeping: remember the main interactive model as the default (locked, field-merging
  * writer; startup resolution still owns availability checks and explicit CLI overrides), and record each
@@ -85,11 +86,35 @@ export default function modelConfig(pi: ExtensionAPI) {
       }
     } catch { /* unreadable history cannot seed the anchor */ }
     record(ctx.model, pi.getThinkingLevel?.(), 'session_start');
+    if (ctx.model) previousModel = ctx.model;
     return rememberDefault(ctx.model, ctx);
   });
+  let previousModel: any;
   pi.on('model_select', (event: any, ctx: any) => {
-    record(event.model ?? ctx.model, pi.getThinkingLevel?.(), `model_select:${typeof event.source === 'string' ? event.source : 'unknown'}`);
+    const next = event.model ?? ctx.model;
+    record(next, pi.getThinkingLevel?.(), `model_select:${typeof event.source === 'string' ? event.source : 'unknown'}`);
+    // Smooth mid-session switch: history and the stable prompt prefix are kept,
+    // thinking is remapped to the new model, only stale provider state drops.
+    try {
+      if (previousModel && next && (previousModel.provider !== next.provider || previousModel.id !== next.id)) {
+        const plan = planModelSwitch(previousModel, next, pi.getThinkingLevel?.());
+        const cache = cacheProfileFor(String(next.provider ?? ''), String(next.id ?? ''));
+        ctx.ui?.notify?.(`Model: ${next.provider}/${next.id} — history kept, thinking ${plan.thinking}, cache: ${cache.strategy}. ${plan.costNote}`, 'info');
+      }
+    } catch { /* switch bookkeeping must never block the switch itself */ }
+    if (next) previousModel = next;
     return rememberDefault(event.model, ctx);
+  });
+  // Honest capability boundary: never auto-switch to an image-capable model.
+  pi.on('input', (event: any, ctx: any) => {
+    try {
+      const images = event?.images ?? event?.attachments;
+      if (Array.isArray(images) && images.length && ctx?.model && !modelSupportsImages(ctx.model)) {
+        ctx.ui?.notify?.(imageRefusal(ctx.model), 'warning');
+        return { action: 'handled' };
+      }
+    } catch { /* capability notice is best-effort; input continues untouched */ }
+    return undefined;
   });
   pi.on('thinking_level_select', (event: any, ctx: any) => record(ctx.model, event.level, 'thinking_level_select'));
   pi.on('session_shutdown', async () => { await settings?.flush(); });

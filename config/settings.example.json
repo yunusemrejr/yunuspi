@@ -3,8 +3,25 @@
   "skills": [],
   "theme": "dark",
   "enableSkillCommands": true,
-  "defaultTools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
-  "subagents": { "defaultThinking": "low" },
-  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000 },
-  "retry": { "enabled": true }
+  "defaultTools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "subagents": {
+    "defaultModel": "inherit",
+    "defaultThinking": "inherit"
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  },
+  "retry": {
+    "enabled": true
+  }
 }

@@ -40,6 +40,8 @@ function taskStateObserverRows(): ObserverEvidence[] {
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
 export default function sessionObserver(pi: any, testing: any = {}) {
+  // Lean harness: observer retired by default; goal self-verification (same model) replaces it. Set PI_LEAN_GATES=on to re-enable for debugging.
+  if (process.env.PI_LEAN_GATES !== 'on') return;
   if (process.env.PI_SUBAGENT_CHILD === '1') return;
   let ctx: any, manager: any, owner = '', ownerIdentity = '', epoch = 0, taskEpoch = 0, request = '', userRequest = false, recent: ObserverEvidence[] = [], sequence = 0;
   let skills: ObserverCapability[] = [], streaming: ObserverEvidence[] = [], closed = false, revision = 0, dropped = 0, reportedDropped = 0;

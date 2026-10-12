@@ -18,6 +18,13 @@
 
 ## Unreleased
 
+**Lean harness: the picked model runs everything.** Sub-agents now inherit the main session model exactly (Jev adjusts thinking for main and children alike); there are no automatic model-selection chains, observer/council/quality helper roles, or silent fallbacks. If a task needs a capability the current model lacks (for example images), the harness says so and the user switches with `/model` — it never switches models itself. Mid-session switches keep history and the prompt-prefix cache, remap thinking, and report the detected per-provider cache strategy (Anthropic breakpoints, OpenAI/DeepSeek automatic prefix, Gemini context, OpenRouter upstream, stable-prefix otherwise).
+
+**Verification moved into the goal.** The session observer, watchmaker-style reviewers, project-integrity and quality gates are retired by default (`PI_LEAN_GATES=on` restores them for debugging). `/goal check` now ends with same-model self-verification: the model that did the work compares every open criterion against the goal text and its own session evidence.
+
+**Fewer, smaller skills and tools.** Twenty-six skills (1359 lines) collapse into five short hubs — `build`, `create`, `media`, `research`, `operate` (259 lines total); legacy names remain as one-paragraph pointers. The `wasm` skill is removed. Media work starts from one `studio` hub tool (probe/frames/analyze/mix/compose sub-actions); granular tools and plain `bash` remain as overrides. Needle and the local language model are now opt-in at install (`--with-needle`, `--with-local-lm`). Soft tool/skill suggestions are budgeted to at most two per session with rising relevance thresholds (`SuggestionBudget` in `lib/lean-policy.ts`).
+
+
 **Every session shows one total cost.** The desktop usage line and `/session` read the main model's responses only, so delegated runs, Jev, Span, observer and other helper calls were missing from the number. `getSessionStats()` now returns the footer's transcript-backed total (`cost`, with `costLabel` carrying the partial/estimate/subscription markers, plus `costParts` main/delegated/helpers and per-route `costRoutes`). The desktop caption reads "… total", the workbench gains a "Total cost" card, and a reopened session loads its total immediately instead of after the next turn. `/session` lists the split and per-model amounts that now reconcile with that total.
 
 ## 0.36.3 — 2026-10-12

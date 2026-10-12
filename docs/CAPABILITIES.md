@@ -1910,7 +1910,6 @@ The exporter includes 26 public skill directories. This list is a path inventory
 - `systems-languages` — [`agent/skills/systems-languages/SKILL.md`](../agent/skills/systems-languages/SKILL.md)
 - `ui-design` — [`agent/skills/ui-design/SKILL.md`](../agent/skills/ui-design/SKILL.md)
 - `video-editing` — [`agent/skills/video-editing/SKILL.md`](../agent/skills/video-editing/SKILL.md)
-- `wasm` — [`agent/skills/wasm/SKILL.md`](../agent/skills/wasm/SKILL.md)
 - `web-motion` — [`agent/skills/web-motion/SKILL.md`](../agent/skills/web-motion/SKILL.md)
 
 ## Migration test fixtures

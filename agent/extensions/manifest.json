@@ -95,6 +95,7 @@
     "expert-taste.ts",
     "git-authority.ts",
     "goal-state.ts",
+    "lean-policy.ts",
     "guidance-topics-domains.ts",
     "guidance-topics-systems.ts",
     "guidance-topics.ts",

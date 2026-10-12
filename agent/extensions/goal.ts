@@ -15,6 +15,7 @@ import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
 import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
 import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
+import { selfVerificationPrompt } from "./lib/lean-policy.ts";
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
@@ -144,7 +145,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		else if (name === "bash" && isTestLikeCommand(observed.command) && (event.details?.exitCode === undefined || event.details.exitCode === 0)) cover(observed, ctx);
 		else if (name === "project_tests" && event.details?.need === null && event.details?.projectTests?.plannedChecks?.length
 			&& event.details.projectTests.plannedChecks.every((check: any) => check.outcome === "passed")) cover(observed, ctx);
-		else if (name === "quality_review" && event.details?.status === "accepted" && !event.details.staleReports) cover(observed, ctx);
 		else if (VERIFY_TOOLS.has(name) && !["plan", "status", "inspect", "list"].includes(String(event.input?.action ?? ""))) cover(observed, ctx);
 	});
 
@@ -258,7 +258,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await checkStatic(ctx.cwd, signal)];
 					const report = completionReport(goal.criteria, receipts);
 					const advisories = await staticAdvisories(ctx.cwd, signal);
-					return text(`${report.lines.join("\n")}${advisories.length ? `\nAdvisory (never blocks): ${advisories.join(" ")}` : ""}\n${report.clear ? "Every step is settled; call goal complete." : "Open steps above: do the work, then record evidence with met/waive or check again."}`);
+					// Same-model self-verification replaces external quality/observer gates:
+					// the model that did the work checks it against the goal and its own session journey.
+					const verify = selfVerificationPrompt(goal.text, goal.criteria.filter((c) => c.status === "open"));
+					return text(`${report.lines.join("\n")}${advisories.length ? `\nAdvisory (never blocks): ${advisories.join(" ")}` : ""}\n${report.clear ? "Every step is settled; call goal complete." : `Open steps above: do the work, then record evidence with met/waive or check again.\n\n${verify}`}`);
 				}
 				case "criteria": {
 					persist(setCriteria(goal, params.items ?? []), ctx);

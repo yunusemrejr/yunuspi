@@ -86,6 +86,8 @@ function bounded(value: any, max = 1800) {
     : text.slice(0, max - 32) + " [additional evidence omitted]";
 }
 export default function projectIntelligence(pi: any) {
+  // Lean harness: project integrity/intelligence checker retired by default. Set PI_LEAN_GATES=on to re-enable.
+  if (process.env.PI_LEAN_GATES !== 'on') return;
   const scope = createScopeDeliberation(pi, {
     history: (request: any) =>
       collectScopeHistory({

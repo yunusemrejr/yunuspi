@@ -11,16 +11,13 @@ import { llmPreferencesPath, normalizePreferenceRole, providerOptionsToRouting }
 import { toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
 import { getModelRoutingMetrics, recordModelRoutingLatency } from "./lib/model-routing-metrics.ts";
 
+/* Lean routing: the picked model runs everything. Only two user-visible roles
+ * remain — sub-agents (inherit by default) and an explicit main-session
+ * fallback the user may pin. Observer/council/quality/prompt-analysis role
+ * chains were removed: no automatic model selection, no silent fallback. */
 const BUILTIN_ROLES = [
-	{ id: "subagents", label: "Subagents", detail: "Default child-agent model priority." },
-	{ id: "fanout", label: "Fan-out", detail: "Models used by parallel investigators and competing-approach branches." },
-	{ id: "council", label: "Councils", detail: "Models used for council members." },
-	{ id: "quality_review", label: "Quality Reviews", detail: "Models used for quality-review rounds." },
-	{ id: "project_review", label: "Project Reviews", detail: "Models used for project reviews." },
-	{ id: "error_review", label: "Bug / Error Reviews", detail: "Models used for bug and error analysis." },
-	{ id: "prompt_analysis", label: "Prompt Analysis", detail: "Low-cost routes for initial and follow-up intent analysis." },
-	{ id: "session_observer", label: "Session Observer", detail: "Brief periodic observations about tool use, skills and coordination." },
-	{ id: "main_session_fallback", label: "Main Session Fallback", detail: "Used when the saved main-session model is unavailable." },
+	{ id: "subagents", label: "Subagents", detail: "Default: inherit the main session model exactly. Pin routes only as an explicit override." },
+	{ id: "main_session_fallback", label: "Main Session Fallback", detail: "Optional user-pinned route used only when the saved main-session model is unavailable." },
 ];
 
 const MAX_REQUEST_BYTES = 320 * 1024;
