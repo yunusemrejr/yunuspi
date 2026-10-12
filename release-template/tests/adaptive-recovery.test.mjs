@@ -41,8 +41,8 @@ async function fixture({model=base,models=[base,{...base,provider:'direct',baseU
  return {pi,ctx,selected,entries,emit,fail,lookups:()=>lookups};
 }
 try {
- // Optional semantic preparation only sees usable skill references and never
- // spends a request when the subagent consumer is unavailable.
+ // Startup skill references are local advice. No catalog size or available
+ // subagent consumer can reintroduce the redundant remote ranking request.
  const skillPrompt='Audit cross-file compatibility of README documentation and release notes across independent packages';
  const skillCatalog=names=>names.map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
  const availableNames=['git-github','git-github','engineering'];
@@ -61,7 +61,7 @@ try {
  await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['engineering'])});
  assert.equal(judgedSkills.length,0,'one installed candidate does not need ranking');
  await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['git-github','engineering'])});
- assert.deepEqual(judgedSkills,[['git-github','engineering']],'uninstalled lexical matches never reach the judge');
+ assert.deepEqual(judgedSkills,[],'multiple installed references still need no startup ranking request');
  await prepared.emit('session_shutdown');
  const now=Date.now();
  h.recordFailure({provider:'openrouter',model:base.id,errorMessage:upstream('Host a'),now});
