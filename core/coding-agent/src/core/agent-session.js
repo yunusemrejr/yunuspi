@@ -40,6 +40,7 @@ import { createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.js";
+import { collectSessionCost } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
 /**
@@ -3006,8 +3007,25 @@ export class AgentSession {
                 cacheWrite: usageTotals.cacheWrite,
                 total: usageTotals.input + usageTotals.output + usageTotals.cacheRead + usageTotals.cacheWrite,
             },
-            cost: usageTotals.cost,
+            // One session total: main responses, delegated runs, Jev/Span and
+            // every other helper model call. `cost` is the number, `costLabel`
+            // carries the partial/estimate/subscription markers.
+            ...this._sessionCostSummary(),
             contextUsage: this.getContextUsage(),
+        };
+    }
+    _sessionCostSummary() {
+        const model = this.model;
+        const subscription = model ? isFlatPlanProvider(model.provider) || this.modelRuntime.isUsingSubscription(model.provider) : false;
+        const accounting = collectSessionCost(this.sessionManager.getEntries(), subscription);
+        const spent = row => row.reported + row.estimated;
+        const byRoute = new Map();
+        for (const row of accounting.rows) byRoute.set(row.route, (byRoute.get(row.route) ?? 0) + spent(row));
+        return {
+            cost: accounting.total,
+            costLabel: accounting.formatted,
+            costParts: { main: spent(accounting.main), delegated: spent(accounting.children), helpers: spent(accounting.auxiliary) },
+            costRoutes: [...byRoute].filter(([, cost]) => cost > 0).sort((a, b) => b[1] - a[1]).map(([route, cost]) => ({ route, cost })),
         };
     }
     getContextUsage(){/* PI_CONTEXT_SETTINGS */const usage=this._getContextUsageBeforeTelemetry();return usage?{...usage,compactionSettings:this.settingsManager.getCompactionSettings()}:usage;} _getContextUsageBeforeTelemetry(){

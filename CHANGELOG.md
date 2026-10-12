@@ -18,6 +18,8 @@
 
 ## Unreleased
 
+**Every session shows one total cost.** The desktop usage line and `/session` read the main model's responses only, so delegated runs, Jev, Span, observer and other helper calls were missing from the number. `getSessionStats()` now returns the footer's transcript-backed total (`cost`, with `costLabel` carrying the partial/estimate/subscription markers, plus `costParts` main/delegated/helpers and per-route `costRoutes`). The desktop caption reads "… total", the workbench gains a "Total cost" card, and a reopened session loads its total immediately instead of after the next turn. `/session` lists the split and per-model amounts that now reconcile with that total.
+
 ## 0.36.3 — 2026-10-12
 
 **Fewer avoidable tool retries.** Short tasks keep `todo` available from the first turn. `visual_review record` can recover the exact reviewed source from its session-owned `runId`, with the same revision, pixel and rubric checks. Browser verification accepts exact text, visible/hidden/attached/detached state, or a boolean page predicate; predicates execute once, consume the script budget and keep uncertain effects explicit. Recovery hints no longer point to the removed `wait_for` tool.

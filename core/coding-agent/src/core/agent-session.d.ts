@@ -190,7 +190,12 @@ export interface SessionStats {
         cacheWrite: number;
         total: number;
     };
+    /** Session total across main, delegated and helper model calls (USD). */
     cost: number;
+    /** `cost` formatted with partial (`+?`), estimate (`~`) and subscription markers. */
+    costLabel: string;
+    costParts: { main: number; delegated: number; helpers: number };
+    costRoutes: Array<{ route: string; cost: number }>;
     contextUsage?: ContextUsage;
 }
 export declare class AgentSession {

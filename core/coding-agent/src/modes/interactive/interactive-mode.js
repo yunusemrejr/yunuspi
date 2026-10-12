@@ -29,7 +29,6 @@ import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../core/slash-comm
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.js";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.js";
-import { getUsageCostBreakdown } from "../../core/usage-totals.js";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
@@ -5305,10 +5304,6 @@ export class InteractiveMode {
         const sessionName = this.sessionManager.getSessionName();
         const entries = this.sessionManager.getEntries();
         const cacheWaste = computeCacheWaste(entries, this.session.modelRuntime);
-        // Cost/token totals per provider/model actually used (e.g. OpenRouter `auto`
-        // resolves to a concrete responseModel). Usage without model attribution is
-        // grouped separately so the breakdown reconciles with the session total.
-        const usageBreakdown = getUsageCostBreakdown(entries);
         let info = `${theme.bold("Session Info")}\n\n`;
         if (sessionName) {
             info += `${theme.fg("dim", "Name:")} ${sessionName}\n`;
@@ -5336,13 +5331,15 @@ export class InteractiveMode {
         }
         info += `${theme.fg("dim", "Output:")} ${stats.tokens.output.toLocaleString()}\n`;
         info += `${theme.fg("dim", "Total:")} ${stats.tokens.total.toLocaleString()}\n`;
-        if (stats.cost > 0 || cacheWaste.missedTokens > 0) {
+        if (stats.costLabel !== "$?" || cacheWaste.missedTokens > 0) {
             info += `\n${theme.bold("Cost")}\n`;
-            info += `${theme.fg("dim", "Total:")} $${stats.cost.toFixed(3)}`;
-            if (usageBreakdown.length > 1) {
-                for (const entry of usageBreakdown) {
-                    info += `\n  ${theme.fg("dim", `${entry.key}:`)} $${entry.cost.toFixed(3)} ${theme.fg("dim", `(${formatTokens(entry.tokens)} tokens)`)}`;
-                }
+            info += `${theme.fg("dim", "Total:")} ${stats.costLabel}`;
+            const parts = [["Main", stats.costParts.main], ["Delegated", stats.costParts.delegated], ["Helpers (Jev, summaries…)", stats.costParts.helpers]];
+            if (parts.filter(([, cost]) => cost > 0).length > 1) {
+                for (const [label, cost] of parts) info += `\n  ${theme.fg("dim", `${label}:`)} $${cost.toFixed(3)}`;
+            }
+            if (stats.costRoutes.length > 1) {
+                for (const { route, cost } of stats.costRoutes) info += `\n  ${theme.fg("dim", `${route}:`)} $${cost.toFixed(3)}`;
             }
             if (cacheWaste.missedTokens > 0) {
                 const missLabel = cacheWaste.missCount === 1 ? "1 miss" : `${cacheWaste.missCount} misses`;

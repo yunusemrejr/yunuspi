@@ -109,7 +109,7 @@ function renderChrome() {
   $('peer-indicator').title = 'Same-project sessions share coordination notices and project memory.';
   $('session-caption').textContent = state?.sending ? 'Sending…' : busy ? 'Enter to queue a follow-up · Esc to stop' : session ? 'Enter to send · Shift Enter for a new line' : 'Local files · persistent project memory';
   const stats = state?.stats;
-  $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · $${Number(stats.cost || 0).toFixed(3)}` : '';
+  $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · ${stats.costLabel || `$${Number(stats.cost || 0).toFixed(3)}`} total` : '';
   $('welcome-project').hidden = Boolean(session);
   $('welcome').hidden = Boolean(state?.messages.length);
   $('welcome').querySelector('h1').textContent = archived ? 'A little room to think.' : 'What are we building?';
@@ -154,6 +154,8 @@ async function openSession(id) {
     const other = [...conversations.keys()].filter(key => key !== id);
     while (other.length >= 8) { const oldest = other.shift(); conversations.delete(oldest); views.get(oldest)?.nodes.clear(); }
     opening = false; renderMessages(true); renderChrome(); renderActivity(); renderContext(); $('prompt').focus();
+    // Totals come from the transcript, so a reopened session shows its cost before the next turn ends.
+    api.stats(id).then(stats => { if (conversations.get(id) === state) { state.stats = stats; if (activeId === id) { renderChrome(); renderContext(); } } }).catch(() => {});
     showNextExtension();
   } catch (error) {
     if (version !== switchVersion || activeId !== id) return;
@@ -281,6 +283,10 @@ function renderContext() {
     const resources = contextCard('Skills & tools', 'compass', 'Available through the harness’s on-demand discovery. Tool schemas enter context when needed.');
     const browse = element('button', 'quiet-button', 'Browse commands'); browse.onclick = () => tryAction(showCommands); resources.append(browse); fragment.append(resources);
     if (state.stats) fragment.append(contextCard('This session', 'chat', `${state.stats.userMessages} requests · ${state.stats.toolCalls} tool calls · ${state.stats.totalMessages} messages`));
+    if (state.stats?.costLabel) {
+      const parts = Object.entries({ Main: state.stats.costParts?.main, Delegated: state.stats.costParts?.delegated, Helpers: state.stats.costParts?.helpers }).filter(([, cost]) => cost > 0);
+      fragment.append(contextCard('Total cost', 'chat', `${state.stats.costLabel}${parts.length > 1 ? ` · ${parts.map(([name, cost]) => `${name} $${cost.toFixed(3)}`).join(' · ')}` : ''}`));
+    }
     for (const [key, value] of viewOf(activeId).widgets) {
       if (!value) continue;
       fragment.append(contextCard(strip(key).slice(0, 70), 'file', strip(value).slice(0, 1500)));
