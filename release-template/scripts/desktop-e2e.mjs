@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { _electron } from 'playwright';
 import { SessionStore } from '../desktop/session-store.mjs';
 import { SessionManager } from '../core/coding-agent/dist/core/session-manager.js';
+import { activePiProcesses } from '../agent/scripts/lib/active-core-processes.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-desktop-e2e-'));
@@ -84,6 +85,9 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('#welcome h1'); report.bootMs = Math.round(performance.now() - started);
   await page.waitForFunction(() => !document.getElementById('prompt').disabled, { timeout: 60_000 }); report.readyMs = Math.round(performance.now() - started);
+  const nativePid = await electron.evaluate(() => process.pid);
+  assert.ok(activePiProcesses(path.join(repo, 'core/coding-agent')).includes(nativePid), 'the running Electron executable remains an owner without a core CLI parent');
+  check('live Electron blocks updates without a CLI launch owner');
   const open = async id => { await page.locator(`[data-session-id="${id}"] .session-select`).click(); await page.waitForFunction(() => !document.getElementById('prompt').disabled); };
   const send = async message => { await page.locator('#prompt').fill(message); await page.locator('#send').click(); };
   const done = async () => page.waitForFunction(() => document.getElementById('stop').hidden, { timeout: 30_000 });

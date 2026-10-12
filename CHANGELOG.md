@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.1 — Surviving desktop update protection
+
+- Detect the exact installed Electron executable during updates, including helpers and windows that survive a crashed launcher. Electron's rewritten process title no longer hides the active runtime. Added a real Electron regression without a core CLI parent.
+
 ## 0.37.0 — Electron workspace
 
 - Replaced default interactive terminal launches with a rat-led Electron GUI, native application menus, fixed composer, searchable project/session sidebar, and an optional workbench.

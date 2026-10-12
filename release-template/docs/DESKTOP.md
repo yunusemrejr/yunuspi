@@ -37,7 +37,7 @@ The desktop workspace lives in Electron’s user-data folder (normally `~/.confi
 
 Global harness credentials, tools, skills and existing state remain in `~/.pi/agent`. Project notes and source-linked vector indexes keep their existing owners and SQLite transaction/WAL behavior. The desktop does not create a competing memory database. Rebuildable vector indexes are retrieval aids, not authoritative session history.
 
-Quit the desktop before a state-preserving harness update. The installer rejects active desktop/core owners, backs up the prior installation, and records managed GUI source hashes alongside agent/core hashes. GUI data lives outside the runtime and survives replacement. See [publishing](PUBLISHING.md) for release identity and rollback.
+Quit the desktop before a state-preserving harness update. The installer rejects active desktop/core owners, backs up the prior installation, and records managed GUI source hashes alongside agent/core hashes. Updates remain blocked while a process uses the installed Electron runtime, including after a launcher crash. GUI data lives outside the runtime and survives replacement. See [publishing](PUBLISHING.md) for release identity and rollback.
 
 ## Verification
 
