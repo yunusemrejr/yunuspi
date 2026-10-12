@@ -3424,12 +3424,12 @@
       {
         "name": "provider-health",
         "source": "agent/extensions/provider-gate.ts",
-        "line": 476
+        "line": 485
       },
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1211
+        "line": 1223
       },
       {
         "name": "run",
