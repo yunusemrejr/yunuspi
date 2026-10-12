@@ -1,6 +1,7 @@
 ---
 name: motion-approaches
 description: "Choose and combine ways to make advanced motion graphics for video (vanilla HTML/CSS/JS or WebGL pages, Blender shots, HTML-Blender merges, FFmpeg/libass, numpy frames, native compose layers) and find verified worked examples with motion_examples."
+disable-model-invocation: true
 ---
 
 # Merged

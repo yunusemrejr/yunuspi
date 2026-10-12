@@ -1,6 +1,7 @@
 ---
 name: research-writing
 description: "Research questions from primary sources, papers (arXiv, PubMed, Crossref, OpenAlex), prior art and competitors with evidence grading, then write sourced findings, editorial copy, product stories and outreach emails; use for literature review, reproduction, competitor comparison, copywriting and email drafting."
+disable-model-invocation: true
 ---
 
 # Merged

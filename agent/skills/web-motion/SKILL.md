@@ -1,6 +1,7 @@
 ---
 name: web-motion
 description: "Web and browser motion: CSS, Motion, GSAP, anime.js, Lottie, Rive, Lenis choice; choreography; scroll storytelling; Three.js and SVG animation; procedural and physics math; visual FX (glass, shaders, WebGL); pixel-art scenes."
+disable-model-invocation: true
 ---
 
 # Merged

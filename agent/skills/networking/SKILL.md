@@ -1,6 +1,7 @@
 ---
 name: networking
 description: "Network diagnosis, pcap/trace analysis, LAN inventory, proxy, PAC and SSH-tunnel setup and leak checks, Wi-Fi/Bluetooth RSSI, and ISO 27001/27033 evidence mapping, within authorized scope (ip, ss, nft, tshark, nmap)."
+disable-model-invocation: true
 ---
 
 # Merged

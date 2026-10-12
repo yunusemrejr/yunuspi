@@ -1,6 +1,7 @@
 ---
 name: harness-self-maintenance
 description: "Maintain the running YunusPi harness itself (extensions, patches, tools, routing, skills, tests, public release) under launch-scoped authority, with ownership discovery and focused regression checks."
+disable-model-invocation: true
 ---
 
 # Merged

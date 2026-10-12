@@ -257,6 +257,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     for (const listener of progressListeners) try { listener({ content: [{type:'text', text}], details: {reviewProgress:data} }); } catch { /* UI observers do not own the review */ }
   };
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
+  // Lean harness: automatic reviews are retired by default like the other
+  // automatic gates (observer, micro-intelligence, councils). Local checks
+  // plus same-model goal self-verification are the completion path; a
+  // deliberate quality_review call always works. PI_LEAN_GATES=on restores
+  // automatic rounds. Read per call so a session can opt in live.
+  const automaticReviewsOn = () => process.env.PI_LEAN_GATES === 'on';
   const capable = () => pi.getActiveTools?.().includes('quality_review');
   // Control session (per-subsystem envelope per D-011).
   const shadowPlane = createInterventionSession();
@@ -300,6 +306,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   /** One unresolved-verification item shared by the rendered warning line and
    * the structured gate receipt, so prose and identity cannot diverge. */
   const qualityVerification = (): { id: string; state: string; text: string; brief: string } | undefined => {
+    // No debt without an opted-in review: an automatic round nobody asked
+    // for, or an executor that is off by configuration (dispatchGap: no
+    // reviewer was ever dispatched), is a settings state, not unfinished
+    // verification. It must never surface as "Verification open" or force
+    // an assess turn; the tool result reports it once when asked.
+    if (dispatchGap || (!explicitReview && !automaticReviewsOn())) return undefined;
     if (!(enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted') || automaticReviewExempt()) return undefined;
     const current = status();
     const guidance = current === 'awaiting_assessment'
@@ -366,12 +378,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted when current reports and required checks support it (an aspect whose reviewer did not return is a disclosed verification limit, not a blocker, once another aspect passed and no blocking finding remains), otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. An aspect whose reviewer did not return does not prevent accepted once another aspect passed and required checks are green; it is disclosed automatically. Record blocked only for an actual blocker. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
     scope: 'Duplicate prose references its representative; action=inspect retains full original reports. Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => {
-    if (!changed.length || disposition || automaticReviewExempt()) return '';
+    if (!changed.length || disposition || automaticReviewExempt() || (!explicitReview && !automaticReviewsOn())) return '';
     if (busy && reviewed !== revision) return `[quality review] Revision ${revision}: reviewing. The native review is already running. Reuse its result; do not launch a duplicate review.`;
-    if (reviewed === revision) return `[quality review] Revision ${revision}: awaiting_assessment. Current reviewer reports are complete. Reuse them and call quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) once, citing current reports and required checks. Fix actual blocking findings; defer optional improvements. Another review requires a concrete repair or newly supplied missing evidence, never merely remaining budget. Report unavailable review separately; do not claim missing evidence was verified.`;
-    return `[quality review] Revision ${revision}: ${status()}. ${rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. Native test receipts include bounded captured diagnostics: reuse them without temporary log files. For UI/behavior work attach actual outcome captures via evidence paths.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
+    if (reviewed === revision) return `[quality review] Revision ${revision}: reports complete. Call quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) once from the current reports and checks. Fix blocking findings only; another round needs a concrete repair or new evidence.`;
+    return `[quality review] Revision ${revision}: ${status()}. ${rounds >= REVIEW_LIMITS.rounds ? 'Rounds exhausted; assess the retained evidence now.' : 'Run quality_review({action:"review"}), then assess once. Attach outcome captures via evidence for UI/behavior work; native test diagnostics are already included.'} Fix blocking findings, defer optional polish, never claim unverified evidence. Max two rounds.`;
   };
-  const automaticAdvice = () => testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
+  const automaticAdvice = () => !automaticReviewsOn() || testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
   /** Every aspect reviewer returned cited evidence, none found a blocker, nothing is dismissed or limited, and the
    * required project checks are resolved: exactly the state in which `assess accepted` succeeds with nothing left to
    * adjudicate. A model turn spent only on calling assess adds latency and cost, not assurance (12 of 23 measured
@@ -415,6 +427,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     const entryGeneration = generation;
     await refresh(ctx);
     if (entryGeneration !== generation || signal?.aborted || ctx.signal?.aborted) return summary();
+    if (automatic && !automaticReviewsOn()) return summary();
     if (automatic && automaticReviewExempt()) return summary();
     // Test assessment/execution owns the next automatic step while unresolved.
     // An explicit source review still works, but parallel automatic reviews
@@ -759,7 +772,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       // Pending tests gate the follow-up only when no round just ran: an
       // escalated round's results must still reach the agent as guidance.
       if (testsPending() && rounds === roundsBefore) return;
-      if (dispatchGap || reviewUnavailable || disposition === 'blocked' && reason.startsWith('Independent review unavailable:')) {
+      if ((explicitReview || automaticReviewsOn()) && (dispatchGap || reviewUnavailable || disposition === 'blocked' && reason.startsWith('Independent review unavailable:'))) {
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
         const blockedKey = `blocked:${revision}`;
@@ -795,7 +808,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     shutdown() { disposeContinuationNotice(); releaseShared(); cancel(); active = false; paused = true; }, snapshot: summary, run,
   };
   pi.on?.('session_compact', () => { noted = ''; });
-  pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
+  pi.registerTool({name:'quality_review',label:'Quality Review',description:'Opt-in independent aspect review of observed changes (inspect/review/assess). Nothing runs automatically; local checks plus goal self-verification are the default completion path. When called: read-only, max two rounds, missing evidence blocks acceptance.',
     parameters:Type.Object({action:choices(['inspect','review','assess']),view:Type.Optional(choices(['compact','detailed'])),disposition:Type.Optional(choices(['accepted', 'blocked'])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200 * RATIONALE_INTAKE,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them. Longer text is kept head and tail."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome captures for reviewers (renders or behavior evidence); native test diagnostics are already supplied: existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
     async execute(_id: string, params: any, signal: any, update: any, ctx: any) {
       const ticket = generation;
@@ -816,6 +829,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         checkCurrent();
       }
       if (params.action === 'assess') {
+        explicitReview = true; // a deliberate assessment opts this review in
         let acceptedLimit = '';
         if (!['accepted','blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 20) throw Error('Assessment requires a concrete rationale of at least 20 characters.');
         if (params.disposition === 'accepted') {
