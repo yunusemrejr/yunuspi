@@ -1261,7 +1261,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 793; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 798; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 811; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2240; literal)

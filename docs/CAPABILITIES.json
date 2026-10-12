@@ -3936,7 +3936,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 798,
+        "line": 811,
         "kind": "literal"
       },
       {
@@ -4348,7 +4348,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 798,
+        "line": 811,
         "kind": "literal"
       },
       {
