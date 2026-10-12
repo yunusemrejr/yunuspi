@@ -125,7 +125,7 @@ async function chooseProject() {
   const project = store.addProject(result.filePaths[0]);
   const trust = await projectTrustStore(), known = trust.get(project.path);
   // Choosing a folder alone does not execute its local extensions or hooks.
-  if (known !== undefined) store.commit(() => { store.project(project.id).trusted = known; });
+  if (typeof known === 'boolean') store.commit(() => { store.project(project.id).trusted = known; });
   else if (fs.existsSync(path.join(project.path, '.pi'))) {
     const consent = await dialog.showMessageBox(window, { type: 'question', title: 'Project extensions', message: `Trust ${project.name}?`, detail: 'Trusted projects can load their local .pi extensions, hooks and settings. Open safely to use only your global harness.', buttons: ['Open safely', 'Trust project'], defaultId: 0, cancelId: 0 });
     trust.set(project.path, consent.response === 1);
