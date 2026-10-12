@@ -57,6 +57,15 @@ textual artifacts remain covered. Completed review reports ask for one parent
 assessment with `quality_review`, while an active review is identified as
 running. Neither state creates acceptance automatically.
 
+Automatic assistance carries at most two locally selected optional skill
+references; startup does not wait for a second remote ranking of those links.
+The subagent tool describes native execution and essential contracts briefly,
+leaving detailed fields in its schema. Models choose useful orchestration and
+may consult skills without a required read sequence. First-use session hooks
+reuse their exact current annotations from native tool results on the active
+branch after restart, fork or resume. Branches before delivery still receive
+guidance. These annotations record advice, never a completed check.
+
 Automatic project-memory ingestion retains raw text, lexical indexes and source
 provenance for direct scopes, while deferring semantic embedding and backlog
 recovery. Explicit memory tools remain available. Complex work and unresolved

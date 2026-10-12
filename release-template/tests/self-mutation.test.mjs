@@ -175,6 +175,8 @@ test("project tool guidance advertises executable native orchestration", () => {
   const project = inspect(f.project);
   assert.equal(project.status, 0, project.stderr);
   const [description, metadata] = JSON.parse(project.stdout);
+  assert.ok(description.length < 4000, 'project orchestration guidance stays bounded');
+  assert.doesNotMatch(description, /Read the pi-subagents skill/, 'delegation does not require a skill-read step');
   assert.match(
    description,
    /workflowScript is unavailable in this project session/,
@@ -194,6 +196,7 @@ test("project tool guidance advertises executable native orchestration", () => {
   );
   const maintenance = inspect(harness);
   assert.equal(maintenance.status, 0, maintenance.stderr);
+  assert.ok(JSON.parse(maintenance.stdout)[0].length < 4600, 'maintenance orchestration guidance stays bounded');
   assert.match(JSON.parse(maintenance.stdout)[0], /runs\.all/);
   assert.ok(
    JSON.parse(maintenance.stdout)[0].includes(

@@ -35,8 +35,7 @@ import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, read
 import { normalizeReviewPath, parseReviewReport, REVIEW_REPORT_INSTRUCTIONS } from '../shared/quality-review-report.ts';
 import { asReviewsEnvelope, extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
-import { askJev, tooShort } from "../../../lib/jev-client.ts";
-import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
+import { askJev } from "../../../lib/jev-client.ts";
 import { askTypedDecision } from "../../../lib/micro-intelligence/jev-decisions.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
@@ -707,7 +706,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
   }).catch(error => {if(epoch===generation && !signal.aborted) console.warn("[autonomous-recovery] free assistance failed:",error);})
   .finally(()=>{controller.abort();if(assistance===controller)assistance=undefined;if(epoch===generation && !groupUsed)usedAssist=false;});
  };
-	on("before_agent_start", async (event, ctx) => {
+	on("before_agent_start", (event, ctx) => {
 		const startEpoch = generation, startSession = ctx.sessionManager.getSessionFile();
 		const ownsStart = () => startEpoch === generation && !ctx.signal?.aborted && ctx.sessionManager.getSessionFile() === startSession;
 		if (!ownsStart()) return;
@@ -721,50 +720,11 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		const wanted = new Set([...routeSkills(prompt).sort((a,b)=>b.priority-a.priority).map(r=>r.name), "engineering"]);
 		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
 			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
-		// An unavailable skill cannot be surfaced. Filter it before spending a
-		// remote judgment, while retaining lexical order for installed routes.
+		// Surface only installed references, retaining local route priority.
 		for (const name of wanted) if (!catalog.has(name)) wanted.delete(name);
-		// Jev re-ranks the lexical shortlist by meaning so the surfaced
-		// references best match the task. Trivial prompts, single
-		// candidates and low-confidence distributions keep lexical order.
-		// Ledgered like any route; no result surface exists here, so the
-		// judgment shows in metrics and cost, not inline.
-		try {
-			const names = [...wanted].slice(0, 15);
-			if ((!adaptiveExecutionEnabled() || (currentExecutionProfile(ctx) ?? classifyExecution({task:prompt})).features.jev) && !tooShort(prompt, 20) && names.length >= 2) {
-				const metrics = microMetrics();
-				metrics.offer("jev");
-				const judged = await (deps.judge ?? askJev)("route", { task: prompt.slice(0, 2000) }, {
-					skill: {
-						type: "choice",
-						instructions: "Which skill best matches this task?",
-						criteria: Object.fromEntries(names.map((name) => [name, null])),
-					},
-				}, { pi, signal: ctx.signal });
-				if (!ownsStart()) return;
-				if (!judged.ok) {
-					metrics.skip("jev", judged.skipped);
-				} else {
-					metrics.run("jev");
-					metrics.jevUsage("route", 1, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
-					if (judged.usage.cached) metrics.cacheHit("jev");
-					const order = judged.answers.skill?.probabilities ?? {};
-					const top = judged.answers.skill?.choice;
-					if (top && names.includes(top) && Number.isFinite(order[top]) && order[top] >= 0.35 && order[top] <= 1
-						&& names.every(name => order[name] === undefined || Number.isFinite(order[name]) && order[name] >= 0 && order[name] <= 1)) {
-						const remainder = [...wanted].filter(name => !names.includes(name));
-						wanted.clear();
-						for (const name of [...names].sort((a, b) => (order[b] ?? 0) - (order[a] ?? 0)).concat(remainder)) wanted.add(name);
-						metrics.accept("jev");
-					} else {
-						metrics.skip("jev", "low-confidence");
-					}
-				}
-			}
-		} catch {
-			microMetrics().skip("jev", "unavailable");
-			// Lexical order stands.
-		}
+		// These are at most two optional references, not a model-routing
+		// decision. Relevant guidance owns semantic discovery; ranking them
+		// again delayed the parent even when helpers were disabled or skipped.
 		if (!ownsStart()) return;
 		const paths = [...wanted].flatMap(name=>catalog.has(name)?[catalog.get(name)!]:[]).slice(0,2);
 		skillBrief = paths.length ? `Optional skill references; read only if essential to a specific uncertainty: ${paths.map(p=>JSON.stringify(p)).join(", ")}.` : "";

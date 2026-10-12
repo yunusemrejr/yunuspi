@@ -145,6 +145,24 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 ];
 
+/** Reuse guidance already delivered on this branch after a worker restart.
+ * Exact current lines only: edited rules are offered again. This is advisory
+ * suppression, never evidence that a check ran or a requirement passed. */
+export function restoredHookKeys(entries: readonly any[]): Set<string> {
+	const lines = new Map(HOOK_RULES.map(rule => [`[session-hooks] ${rule.line}`, rule]));
+	const shown = new Set<string>();
+	for (const entry of entries) {
+		const message = entry?.type === "message" ? entry.message : undefined;
+		if (message?.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		for (const part of message.content) {
+			const rule = part?.type === "text" && lines.get(part.text);
+			if (rule && rule.tools.includes(message.toolName)) shown.add(rule.key);
+		}
+		if (shown.size === lines.size) break;
+	}
+	return shown;
+}
+
 /** First matching rule for a tool call, or null when no hook applies. */
 export function matchHook(
 	toolName: string,

@@ -88,21 +88,38 @@ test('scene, audio and motion advisers run concurrently with the existing read-o
  await fx.emit('session_shutdown');
 });
 
-test('a delayed preparation cannot launch helpers for a newer request, session, or aborted turn',async()=>{
+test('startup uses local skill references and stale helper results cannot cross request/session boundaries',async()=>{
  for(const transition of ['input','session','abort']) {
-  let release;
-  const fx=fixture({judge:()=>new Promise(resolve=>{release=resolve;})});
+  let release, judges=0;
+  const fx=fixture({judge:()=>{judges++;return new Promise(()=>{});},launch:()=>new Promise(resolve=>{release=resolve;})});
   const prompt='Audit cross-file compatibility for the README documentation and release notes for this repository';
   await fx.input(prompt);
   const systemPrompt=['git-github','engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
-  const pending=fx.emit('before_agent_start',{prompt,systemPrompt});
+  await fx.emit('before_agent_start',{prompt,systemPrompt});await tick();
+  assert.equal(judges,0,'optional references do not block startup on a second remote rank');
+  assert.equal(fx.calls.length,1);
   assert.equal(typeof release,'function');
+  assert.match(fx.calls[0][1].task,/Optional skill references/);
   if(transition==='input')await fx.input('Audit the other package and its independent compatibility boundaries');
   if(transition==='session')fx.switch();
   if(transition==='abort')fx.abort.abort();
-  release({ok:false,skipped:'unavailable'});
-  await pending;await tick();
-  assert.equal(fx.calls.length,0,transition);
+  release(result('Late advisory evidence'));await tick();
+  assert.equal(fx.messages.some(({message})=>message.customType==='autonomous-free-fanout'),false,transition);
+  await fx.emit('session_shutdown');
+ }
+});
+
+test('disabled or explicitly managed assistance performs no startup skill-ranking inference',async t=>{
+ const prior=process.env.PI_AUTONOMOUS_FREE_ASSIST;
+ t.after(()=>{if(prior===undefined)delete process.env.PI_AUTONOMOUS_FREE_ASSIST;else process.env.PI_AUTONOMOUS_FREE_ASSIST=prior;});
+ const systemPrompt=['git-github','engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
+ for(const mode of ['disabled','manual','constrained']) {
+  process.env.PI_AUTONOMOUS_FREE_ASSIST=mode==='disabled'?'off':'on';
+  let judges=0;
+  const fx=fixture({judge:async()=>{judges++;return {ok:false,skipped:'unavailable'};}});
+  const prompt='Audit cross-file compatibility for the README documentation and release notes.'+(mode==='manual'?' Use subagents for the investigation.':mode==='constrained'?' No subagents.':'');
+  await fx.input(prompt);await fx.emit('before_agent_start',{prompt,systemPrompt});await tick();
+  assert.equal(judges,0,mode);assert.equal(fx.calls.length,0,mode);
   await fx.emit('session_shutdown');
  }
 });

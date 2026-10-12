@@ -99,6 +99,35 @@ test('hook result ownership prevents an unrelated result from consuming queued g
   assert.equal(result({ toolCallId: 'late', toolName: 'edit', content: [], isError: false }, {}), undefined);
 });
 
+test('resumed workers restore delivered guidance from the active native branch only', () => {
+  const entries = [], ctx = { cwd: '/workspace', sessionManager: { getBranch: () => entries } };
+  const worker = () => {
+    const handlers = new Map();
+    registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
+    return { handlers, run(id, toolName = 'edit', input = { path: 'src/Screen.tsx' }) {
+      const event = { toolCallId: id, toolName, input, content: [{ type: 'text', text: 'Native result' }] };
+      handlers.get('tool_call')(event);
+      return handlers.get('tool_result')(event, ctx);
+    } };
+  };
+  const first = worker(); first.handlers.get('session_start')({}, ctx);
+  const delivered = first.run('first'); assert.ok(delivered);
+  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'edit', content: delivered.content } });
+  const resumed = worker(); resumed.handlers.get('session_start')({}, ctx);
+  assert.equal(resumed.run('resumed'), undefined, 'reopening a session does not append the same instruction');
+  assert.ok(resumed.run('other', 'bg_run', { command: 'build' }), 'unseen workflow guidance remains available');
+  resumed.handlers.get('session_fork')({}, ctx);
+  assert.equal(resumed.run('fork'), undefined, 'forks retain guidance in their shared branch prefix');
+  entries.length = 0;
+  resumed.handlers.get('session_tree')({}, ctx);
+  assert.ok(resumed.run('rewound'), 'a branch before delivery gets its own first-use guidance');
+  entries.push({ type: 'message', message: { role: 'assistant', content: delivered.content } });
+  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'read', content: delivered.content } });
+  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'edit', content: [{ type: 'text', text: delivered.content.at(-1).text + ' outdated' }] } });
+  resumed.handlers.get('session_switch')({}, ctx);
+  assert.ok(resumed.run('untrusted'), 'assistant claims, other tools and stale lines do not suppress native guidance');
+});
+
 test('a missing path reported by an extension tool or bash gets the nearest-folder hint core tools give', () => {
   const { missingPathFromError, CORE_PATH_HINT_TOOLS } = hooksLib;
   assert.equal(missingPathFromError('/tmp/x/blender/scripts/tide.py does not exist'), '/tmp/x/blender/scripts/tide.py');

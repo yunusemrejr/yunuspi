@@ -24,6 +24,7 @@ import {
 	isEmptySearchResult,
 	isLiveByteVerification,
 	matchHook,
+	restoredHookKeys,
 	missingPathFromError,
 } from "./lib/session-hooks.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
@@ -70,10 +71,16 @@ export default function (pi: any) {
 		disposeDeployNotice = undefined;
 	};
 
-	pi.on("session_start", reset);
-	pi.on("session_switch", reset);
-	pi.on("session_tree", reset);
-	pi.on("session_fork", reset);
+	const restore = (_event: any, ctx: any) => {
+		reset();
+		try {
+			for (const key of restoredHookKeys(ctx?.sessionManager?.getBranch?.() ?? [])) shown.add(key);
+		} catch { /* Missing history leaves ordinary first-use guidance intact. */ }
+	};
+	pi.on("session_start", restore);
+	pi.on("session_switch", restore);
+	pi.on("session_tree", restore);
+	pi.on("session_fork", restore);
 	pi.on("session_shutdown", reset);
 	pi.on("agent_end", () => { pending.clear(); deployCalls.clear(); });
 
