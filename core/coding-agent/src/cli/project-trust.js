@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { showStartupInput, showStartupSelector } from "./startup-ui.js";
 export function createProjectTrustContext(options) {
     return {
         cwd: options.cwd,
@@ -13,6 +12,7 @@ export function createProjectTrustContext(options) {
                 if (options.mode !== "interactive") {
                     return undefined;
                 }
+                const { showStartupSelector } = await import('./startup-ui.js');
                 return showStartupSelector(options.settingsManager, title, selectOptions.map((option) => ({ label: option, value: option })));
             },
             confirm: async (title, message) => {
@@ -22,6 +22,7 @@ export function createProjectTrustContext(options) {
                 if (options.mode !== "interactive") {
                     return false;
                 }
+                const { showStartupSelector } = await import('./startup-ui.js');
                 return ((await showStartupSelector(options.settingsManager, `${title}\n${message}`, [
                     { label: "Yes", value: true },
                     { label: "No", value: false },
@@ -34,6 +35,7 @@ export function createProjectTrustContext(options) {
                 if (options.mode !== "interactive") {
                     return undefined;
                 }
+                const { showStartupInput } = await import('./startup-ui.js');
                 return showStartupInput(options.settingsManager, title, placeholder);
             },
             notify: (message, type = "info") => {

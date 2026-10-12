@@ -3966,7 +3966,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 816,
+        "line": 824,
         "kind": "literal"
       },
       {
@@ -4372,7 +4372,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 816,
+        "line": 824,
         "kind": "literal"
       },
       {
@@ -5444,6 +5444,10 @@
       },
       {
         "path": "agent/extensions/lib/reviewer-board.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/rpc-report.ts",
         "exists": true
       },
       {
@@ -7123,6 +7127,10 @@
       {
         "name": "DESIGN-STUDIO.md",
         "path": "docs/DESIGN-STUDIO.md"
+      },
+      {
+        "name": "DESKTOP.md",
+        "path": "docs/DESKTOP.md"
       },
       {
         "name": "EMAIL.md",

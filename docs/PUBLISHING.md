@@ -79,3 +79,5 @@ curated `scripts/test-harness.mjs` also support `--match <literal-path-text>
 selection. The private runner and historical benches are not exported. Follow
 component imports when choosing integration coverage: name matching alone
 cannot establish affected behavior.
+
+The Electron release also requires the exact main commit’s successful `desktop.yml` workflow and its `desktop` job. Both the tag helper and release publisher verify this alongside the complete `public-safety.yml` run and `safety` job; a failed, skipped, unfinished, foreign or different-commit check cannot authorize publication.

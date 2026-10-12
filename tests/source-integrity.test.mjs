@@ -15,7 +15,7 @@ function* files(directory) {
 }
 
 test('release templates retain current tests, installer, and public safeguards', () => {
-  for (const directory of ['tests', 'scripts', 'config', '.github', '.githooks']) {
+  for (const directory of ['tests', 'scripts', 'desktop', 'config', '.github', '.githooks']) {
     const source = path.join(root, directory), template = path.join(root, 'release-template', directory);
     const names = [...files(source)].map(file => path.relative(source, file)).sort();
     assert.deepEqual([...files(template)].map(file => path.relative(template, file)).sort(), names, directory);

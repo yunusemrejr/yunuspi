@@ -1,14 +1,16 @@
 # YunusPi
 
 <p align="center">
-  <img src="docs/assets/rat.gif" alt="Animated ASCII rat mascot from the YunusPi startup header" width="434">
+  <img src="desktop/renderer/assets/rat.svg" alt="YunusPi rat mascot" width="200">
 </p>
 
-**An independently maintained coding agent: one session, one decision stream, with a layered intelligence stack behind it.**
+**An independent coding agent, now in a desktop workspace.**
 
-YunusPi is a full agent harness built on its own owned core, an independent lineage historically derived from Pi 0.85.1. You bring your own model provider and credentials; the harness supplies everything around the model: a compact tool set and 25 consolidated skills that stay out of context until discovered, persistent project memory, bounded subagents for parallel work, and an advisory layer — a session observer that also keeps a time ledger, expert-domain guidance, scope councils, and an optional Double mode that reconciles two independent streams of your model into one decision. Safety hooks, quality reviews and unified cost accounting watch every turn, and every helper's findings return as evidence with explicit gaps: the main agent verifies, decides and owns the changes.
+Open a project, start a conversation, and give the rat something to work on. YunusPi runs your selected model with coding, browser, research and media tools, persistent project memory, and optional subagents. Its Electron interface keeps the conversation clear, tool activity compact, and details available when useful.
 
-The aim is practical: spend context on the task instead of on instructions, reuse what the harness already proved, and keep one agent clearly responsible for the outcome.
+Run multiple sessions across projects, or work together in the same checkout with automatic peer awareness and overlapping-edit safeguards. Sessions keep separate histories, drafts, models and goals. Close, archive, restore, export or delete them from the session menu.
+
+[Desktop guide](docs/DESKTOP.md) · [Install](docs/INSTALL.md) · `yunuspi --gui`
 
 Research, code and ML · [Media creation](docs/MEDIA-CREATION.md) · [Public-site SEO](docs/SITE-SEO.md) · [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
@@ -30,7 +32,7 @@ Enabled tools become available at the next model turn within the same request; d
 
 Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every five minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
 
-The footer shows your model and thinking level, context, cache reuse, recorded cost and active work. `Ctrl+O` expands tool output and the full footer ledger; `/metrics`, `/cost` and `/self` open scrollable reports. [Terminal interface](docs/TERMINAL-INTERFACE.md)
+The composer shows the selected model and thinking level. Expand a tool row for its output, or open the Workbench for activity and session context. Usage comes from the existing core accounting. [Desktop interface](docs/DESKTOP.md)
 
 ### Discovery in practice
 

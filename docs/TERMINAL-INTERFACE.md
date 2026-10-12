@@ -1,4 +1,6 @@
-# Terminal interface
+# Legacy terminal rendering
+
+YunusPi now uses the [Electron desktop](DESKTOP.md) for interactive work. This page documents retained internal rendering compatibility. Automation uses print or RPC mode.
 
 The default footer uses a stable order: working directory and session name; selected model and thinking level; context, main-model cache reuse and recorded total cost; tool activity, active agents/jobs and failures when present. Up to two extension status previews follow, with warnings first. Idle agent/failure counts and cumulative helper counters stay in expanded details.
 

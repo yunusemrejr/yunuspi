@@ -130,6 +130,10 @@ export type RpcCommand = {
 } | {
     id?: string;
     type: "get_messages";
+    /** Bounded desktop previews; omitted fields retain their existing full-history behavior. */
+    projection?: "desktop";
+    limit?: number;
+    before?: number;
 } | {
     id?: string;
     type: "get_commands";
@@ -377,6 +381,11 @@ export type RpcResponse = {
     success: true;
     data: {
         messages: AgentMessage[];
+        before?: number;
+        hasMore?: boolean;
+        total?: number;
+        isStreaming?: boolean;
+        streamingMessage?: AgentMessage | null;
     };
 } | {
     id?: string;

@@ -80,7 +80,7 @@ function sourceInventory(directory, core = false) {
 }
 // Carry private local state only between installations. This inventory never
 // enters the public source tree and stores paths/digests, never file contents.
-function carryState(previous, stage, incoming, incomingCore) {
+function carryState(previous, stage, incoming, incomingCore, incomingDesktop) {
   const receiptFile = path.join(previous, 'installation.json');
   if (!fs.existsSync(receiptFile) || !fs.lstatSync(receiptFile).isFile() || fs.lstatSync(receiptFile).isSymbolicLink())
     throw Error('State-preserving update requires an installation receipt; review a manual migration or use the explicit fresh backup installation.');
@@ -90,6 +90,7 @@ function carryState(previous, stage, incoming, incomingCore) {
     throw Error('State-preserving update requires managed-file hashes; review a manual migration or use the explicit fresh backup installation.');
   const tracked = Object.assign(Object.create(null), receipt.managedFiles);
   const trackedCore = Object.assign(Object.create(null), receipt.managedCoreFiles);
+  const trackedDesktop = Object.assign(Object.create(null), receipt.managedDesktopFiles ?? {});
   const excluded = relative => ['runtime', 'bin', 'installation.json'].includes(relative.split(path.sep)[0])
     || ['extensions/node_modules', 'npm/node_modules'].includes(relative);
   for (const [relative, hash] of Object.entries(tracked)) {
@@ -106,6 +107,19 @@ function carryState(previous, stage, incoming, incomingCore) {
   for (const relative of new Set([...Object.keys(trackedCore), ...Object.keys(actualCore)])) {
     if (actualCore[relative] === trackedCore[relative] || actualCore[relative] === incomingCore[relative]) continue;
     throw Error(`Local owned-core source conflicts with the incoming release: ${relative}. Port the local change into the reviewed source checkout before updating; the current installation is retained.`);
+  }
+  const previousDesktop = path.join(previous, 'runtime/desktop');
+  assertAncestors(previousDesktop);
+  if (fs.existsSync(previousDesktop)) {
+    if (!validMap(receipt.managedDesktopFiles)) throw Error('Installed desktop source has no managed inventory. Review local GUI changes before updating.');
+    for (const [relative, hash] of Object.entries(trackedDesktop)) {
+      if (path.isAbsolute(relative) || relative.includes('\\') || relative.split('/').some(part => !part || part === '..' || part === '.') || relative.includes('\0') || !/^[a-f0-9]{64}$/.test(hash)) throw Error('Invalid managed desktop inventory.');
+    }
+    const actualDesktop = sourceInventory(previousDesktop);
+    for (const relative of new Set([...Object.keys(trackedDesktop), ...Object.keys(actualDesktop)])) {
+      if (actualDesktop[relative] === trackedDesktop[relative] || actualDesktop[relative] === incomingDesktop[relative]) continue;
+      throw Error(`Local desktop source conflicts with the incoming release: ${relative}. Port or review the local change before updating; the current installation is retained.`);
+    }
   }
   const conflict = relative => { throw Error(`Local source conflicts with the incoming release: ${relative}. Port or review the local change before updating; the current installation is retained.`); };
   const deferred = [];
@@ -224,6 +238,7 @@ let backup, deferredState = [], movedState = [], retainStage = false;
 try {
   const managedFiles = sourceInventory(source);
   const managedCoreFiles = sourceInventory(path.join(repo, 'core'), true);
+  const managedDesktopFiles = fs.existsSync(path.join(repo, 'desktop')) ? sourceInventory(path.join(repo, 'desktop')) : {};
   fs.cpSync(source, stage, { recursive: true, force: false, errorOnExist: true, filter: file => !path.relative(source, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
   fs.chmodSync(stage, 0o700);
   for (const name of ['settings', 'models']) {
@@ -234,7 +249,7 @@ try {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error(`Invalid public ${name} example`);
     fs.writeFileSync(path.join(stage, `${name}.json`), content, { flag: 'wx', mode: 0o600 });
   }
-  if (preserveState) deferredState = carryState(target, stage, managedFiles, managedCoreFiles);
+  if (preserveState) deferredState = carryState(target, stage, managedFiles, managedCoreFiles, managedDesktopFiles);
   const runtime = path.join(stage, 'runtime');
   fs.mkdirSync(path.join(runtime, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(runtime, '.npmrc'), 'ignore-scripts=true\naudit=false\nfund=false\n');
@@ -250,6 +265,11 @@ try {
     const docsRoot = path.join(repo, 'docs');
     fs.cpSync(docsRoot, path.join(runtime, 'docs'), { recursive: true, filter: file => !path.relative(docsRoot, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
   }
+  if (fs.existsSync(path.join(repo, 'desktop'))) {
+    assertTree(path.join(repo, 'desktop'));
+    fs.cpSync(path.join(repo, 'desktop'), path.join(runtime, 'desktop'), { recursive: true });
+    fs.copyFileSync(path.join(repo, 'scripts/setup-desktop.mjs'), path.join(runtime, 'scripts/setup-desktop.mjs'));
+  }
   // Keep installed export safeguards and documentation on the same revision
   // as the runtime. Older installations may have an unmanaged public-template
   // directory; it must not silently override these maintained release inputs.
@@ -257,7 +277,7 @@ try {
   if (!fs.lstatSync(templateRoot).isDirectory() || fs.lstatSync(templateRoot).isSymbolicLink()) throw Error('Release template root must be a regular directory');
   const templateTarget = path.join(runtime, 'release-template');
   fs.mkdirSync(templateTarget);
-  for (const name of ['.github', '.githooks', '.gitignore', '.npmrc', 'config', 'docs', 'scripts', 'tests', 'package.json', 'package-lock.json', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
+  for (const name of ['.github', '.githooks', '.gitignore', '.npmrc', 'config', 'desktop', 'docs', 'scripts', 'tests', 'package.json', 'package-lock.json', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
     const file = path.join(templateRoot, name);
     if (!fs.existsSync(file)) continue;
     const info = fs.lstatSync(file);
@@ -275,6 +295,10 @@ try {
     if (result.error || result.status !== 0) throw Error(`Dependency install failed: ${result.error?.message ?? result.status}`);
     const build = spawnSync('npm', ['run', 'build:core'], { cwd: runtime, stdio: 'inherit', timeout: 300000, env: { ...process.env, ...(sourceCommit ? { YUNUSPI_SOURCE_COMMIT: sourceCommit } : {}) } });
     if (build.error || build.status !== 0) throw Error(`Owned core build failed: ${build.error?.message ?? build.status}`);
+    if (fs.existsSync(path.join(runtime, 'desktop'))) {
+      const desktop = spawnSync(process.execPath, [path.join(runtime, 'scripts/setup-desktop.mjs'), ...(offline ? ['--offline', '--source-root', repo] : [])], { cwd: runtime, stdio: 'inherit', timeout: 300_000 });
+      if (desktop.error || desktop.status !== 0) throw Error(`Desktop runtime setup failed: ${desktop.error?.message ?? desktop.status}`);
+    }
   }
   fs.symlinkSync('../runtime/node_modules', path.join(stage, 'extensions', 'node_modules'), 'dir');
   fs.symlinkSync('../runtime/node_modules', path.join(stage, 'npm', 'node_modules'), 'dir');
@@ -290,7 +314,7 @@ export YUNUSPI_CORE_ROOT="$AGENT/runtime/core/coding-agent"
 exec /bin/bash "$AGENT/scripts/pi-launch.sh" ${quote(process.execPath)} "$YUNUSPI_CORE_ROOT/dist/cli.js" "$@"
 `, { mode: 0o755 });
   fs.symlinkSync('yunuspi', path.join(stage, 'bin/pi'));
-  fs.writeFileSync(path.join(stage, 'installation.json'), JSON.stringify({ product: 'YunusPi', core: coreManifest.name, coreVersion: coreManifest.version, source: 'repository-owned', sourceCommit, built: deps, managedFiles, managedCoreFiles }, null, 2) + '\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(stage, 'installation.json'), JSON.stringify({ product: 'YunusPi', core: coreManifest.name, coreVersion: coreManifest.version, source: 'repository-owned', sourceCommit, built: deps, managedFiles, managedCoreFiles, managedDesktopFiles }, null, 2) + '\n', { mode: 0o600 });
   // Recheck at the mutation boundary; never follow destination symlinks.
   assertIdleCore();
   assertAncestors(target);
@@ -340,6 +364,10 @@ exec /bin/bash "$AGENT/scripts/pi-launch.sh" ${quote(process.execPath)} "$YUNUSP
   }
   if (backup) pruneAutomaticBackups(target, backup);
   console.log(`Public files installed. ${backup ? `Previous managed installation preserved at ${backup}. ` : ''}${deps ? `Launch ${target}/bin/yunuspi; add ${target}/bin to PATH.` : 'Source copied only. Install dependencies and build before launching; see docs/INSTALL.md.'}`);
+  if (deps && target === path.join(os.homedir(), '.pi/agent') && fs.existsSync(path.join(target, 'runtime/desktop')) && process.platform === 'linux') {
+    const registration = spawnSync(process.execPath, [path.join(target, 'runtime/scripts/setup-desktop.mjs'), '--register-only'], { stdio: 'inherit', timeout: 60_000 });
+    if (registration.status !== 0) console.warn('Desktop entry registration did not complete; the installed launcher remains available.');
+  }
 } finally {
   if (!retainStage) fs.rmSync(stage, { recursive: true, force: true });
   else console.error(`Installer retained staged data for manual recovery: ${stage}`);

@@ -16,6 +16,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { theme } from "../interactive/theme/theme.js";
 import { toJsonEvent } from "../json-event.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
+import { desktopEvent, desktopHistory, desktopMessage, desktopBranchMessages } from "./desktop-projection.js";
 /**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
@@ -26,7 +27,8 @@ export async function runRpcMode(runtimeHost) {
     let unsubscribe;
     let unsubscribeBackpressure;
     const output = (obj) => {
-        writeRawStdout(serializeJsonLine(obj));
+        const value = process.env.PI_DESKTOP_SESSION === '1' ? desktopEvent(obj) : obj;
+        if (value !== undefined) writeRawStdout(serializeJsonLine(value));
     };
     const success = (id, command, data) => {
         if (data === undefined) {
@@ -45,7 +47,7 @@ export async function runRpcMode(runtimeHost) {
     const signalCleanupHandlers = [];
     /** Helper for dialog methods with signal/timeout support */
     function createDialogPromise(opts, defaultValue, request, parseResponse) {
-        if (opts?.signal?.aborted)
+        if (shuttingDown || opts?.signal?.aborted)
             return Promise.resolve(defaultValue);
         const id = crypto.randomUUID();
         return new Promise((resolve, reject) => {
@@ -58,16 +60,19 @@ export async function runRpcMode(runtimeHost) {
             };
             const onAbort = () => {
                 cleanup();
+                if (process.env.PI_DESKTOP_SESSION === '1') output({ type: 'extension_ui_closed', id });
                 resolve(defaultValue);
             };
             opts?.signal?.addEventListener("abort", onAbort, { once: true });
             if (opts?.timeout) {
                 timeoutId = setTimeout(() => {
                     cleanup();
+                    if (process.env.PI_DESKTOP_SESSION === '1') output({ type: 'extension_ui_closed', id });
                     resolve(defaultValue);
                 }, opts.timeout);
             }
             pendingExtensionRequests.set(id, {
+                cancel: onAbort,
                 resolve: (response) => {
                     cleanup();
                     resolve(parseResponse(response));
@@ -172,9 +177,15 @@ export async function runRpcMode(runtimeHost) {
             return "";
         },
         async editor(title, prefill) {
+            if (shuttingDown) return undefined;
             const id = crypto.randomUUID();
             return new Promise((resolve, reject) => {
                 pendingExtensionRequests.set(id, {
+                    cancel: () => {
+                        pendingExtensionRequests.delete(id);
+                        if (process.env.PI_DESKTOP_SESSION === '1') output({ type: 'extension_ui_closed', id });
+                        resolve(undefined);
+                    },
                     resolve: (response) => {
                         if ("cancelled" in response && response.cancelled) {
                             resolve(undefined);
@@ -534,6 +545,11 @@ export async function runRpcMode(runtimeHost) {
             // Messages
             // =================================================================
             case "get_messages": {
+                if (command.projection === 'desktop') return success(id, "get_messages", {
+                    ...desktopHistory(desktopBranchMessages(session.sessionManager.getBranch()), { limit: command.limit, before: command.before }),
+                    isStreaming: session.isStreaming,
+                    streamingMessage: command.before === undefined && session.agent.state.streamingMessage?.role === 'assistant' ? desktopMessage(session.agent.state.streamingMessage) : null,
+                });
                 return success(id, "get_messages", { messages: session.messages });
             }
             // =================================================================
@@ -583,6 +599,10 @@ export async function runRpcMode(runtimeHost) {
             process.exit(exitCode);
         }
         shuttingDown = true;
+        // EOF is the desktop's normal close. Reap tracked detached jobs before
+        // extension disposal can stall or the supervising process escalates.
+        killTrackedDetachedChildren();
+        for (const pending of [...pendingExtensionRequests.values()]) pending.cancel?.();
         for (const cleanup of signalCleanupHandlers) {
             cleanup();
         }

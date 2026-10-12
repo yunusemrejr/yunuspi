@@ -25,3 +25,7 @@ The VM route runs the same Linux commands and process model. It has not been exe
 ## Optional capabilities
 
 Playwright needs a separate browser download and OS libraries. FFmpeg, LibreOffice, Blender, CAD tools, compilers, LSP servers and Python packages are optional; skills describe how to use them but do not install applications. The local mini-model weights and credentials are not distributed or enabled by default. Background update services and Linux desktop notifications are also optional. A missing optional capability must be reported as unavailable, not represented as a successful tool run.
+
+## Electron desktop
+
+The new graphical workspace is verified on Linux. WSL2 requires WSLg or another working graphical display for Electron; headless print/RPC mode remains available without one. Native Windows and macOS Electron packaging has not been verified. The full Linux harness remains the supported target.

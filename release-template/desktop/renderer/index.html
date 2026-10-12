@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <meta name="color-scheme" content="dark light">
+  <title>YunusPi</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5h7l2 2h9v13H3Z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-workbench" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m3-11h0m0 5h0"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><path d="M4 8h16v13H4ZM3 3h18v5H3Zm6 9h6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M4 4v6h6M4 10a8 8 0 1 1 1 9"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m7 6-5 6 5 6m10-12 5 6-5 6M14 3l-4 18"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5Z"/></symbol>
+    <symbol id="i-tune" viewBox="0 0 24 24"><path d="m4 20 8-8m2-8a6 6 0 0 0-6 8l4 4a6 6 0 0 0 8-6l-4 3-5-5Z"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5c-6-6-12 3-7 6-5 3 0 11 6 7l1-1V5Zm0 0c6-6 12 3 7 6 5 3 0 11-6 7l-1-1M7 8l3 2m7-2-3 2m-5 5-2 1m8-1 2 1"/></symbol>
+    <symbol id="i-attach" viewBox="0 0 24 24"><path d="m8 13 7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2m-7 9 7-7"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M5 3h9l5 5v13H5Zm9 0v6h5M8 13h8m-8 4h6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 5 6 6-6 6m9 0h7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="8" cy="7" r="3"/><path d="M2 21v-4a6 6 0 0 1 12 0v4M16 4a3 3 0 0 1 0 6m1 4a5 5 0 0 1 5 5v2"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 16V2m-5 5 5-5 5 5M4 12v9h16v-9"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M3 4h18v13H8l-5 4Z"/></symbol>
+  </svg>
+  <div id="app" class="app">
+    <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
+      <div class="brand"><img src="assets/rat.svg" alt="" width="40" height="30"><span>YunusPi</span><button id="sidebar-close" class="icon-button mobile-only" aria-label="Hide sidebar"><svg><use href="#i-panel"/></svg></button></div>
+      <button id="new-session" class="new-session"><svg><use href="#i-plus"/></svg><span>New session</span><kbd>Ctrl N</kbd></button>
+      <div class="session-search"><svg><use href="#i-search"/></svg><input id="session-search" type="search" placeholder="Find a session" aria-label="Find a session"><kbd>⌘ K</kbd></div>
+      <div id="session-list" class="session-list"></div>
+      <div class="sidebar-footer">
+        <button id="add-project" class="quiet-button"><svg><use href="#i-folder"/></svg><span>Open project</span><svg class="small"><use href="#i-plus"/></svg></button>
+        <div class="footer-row"><button id="archive-view" class="quiet-button" aria-pressed="false"><svg><use href="#i-archive"/></svg><span>Archive</span><span id="archive-count" class="count"></span></button><button id="settings" class="icon-button" aria-label="Settings"><svg><use href="#i-settings"/></svg></button></div>
+      </div>
+    </aside>
+    <button id="sidebar-scrim" class="scrim" aria-label="Close sidebar" hidden></button>
+    <main id="main" class="main">
+      <header class="topbar">
+        <button id="sidebar-toggle" class="icon-button" aria-label="Toggle sidebar" aria-expanded="true"><svg><use href="#i-panel"/></svg></button>
+        <button id="project-button" class="project-button" title="Open a project"><svg><use href="#i-folder"/></svg><span id="project-name">Workspace</span><svg class="small"><use href="#i-down"/></svg></button>
+        <div class="topbar-spacer"></div>
+        <div id="peer-indicator" class="peer-indicator" hidden><svg><use href="#i-people"/></svg><span></span></div>
+        <span id="connection" class="connection" role="status"><i></i><span>Local workspace</span></span>
+        <button id="workbench-toggle" class="icon-button" aria-label="Toggle activity panel" aria-expanded="false"><svg><use href="#i-workbench"/></svg></button>
+        <button id="session-menu" class="icon-button" aria-label="Session actions" disabled><svg><use href="#i-dots"/></svg></button>
+      </header>
+      <div class="conversation-shell">
+        <div id="conversation" class="conversation" tabindex="0" aria-label="Conversation">
+          <div id="welcome" class="welcome"><img class="hero-rat" src="assets/rat.svg" alt="YunusPi rat" width="210" height="133"><h1>What are we building?</h1><p>Your tools. Your models. A little more instinct.</p><div class="suggestions"><button data-suggest="explore"><svg><use href="#i-compass"/></svg><span>Explore</span></button><button data-suggest="build"><svg><use href="#i-code"/></svg><span>Build</span></button><button data-suggest="improve"><svg><use href="#i-tune"/></svg><span>Improve</span></button></div><button id="welcome-project" class="welcome-project"><svg><use href="#i-folder"/></svg><span>Choose a project to begin</span></button></div>
+          <button id="load-earlier" class="load-earlier" hidden>Load earlier messages</button>
+          <div id="messages" class="messages" aria-live="off"></div>
+          <div id="turn-status" class="turn-status" role="status" hidden><span class="working-mark"><i></i><i></i><i></i></span><span>Working</span></div>
+        </div>
+        <button id="jump-bottom" class="jump-bottom" aria-label="Jump to latest message" hidden><svg><use href="#i-down"/></svg><span>Latest</span></button>
+        <div id="session-error" class="session-error" role="alert" hidden><span></span><button id="retry-session" class="quiet-button">Reconnect</button></div>
+        <footer class="composer-zone">
+          <div id="attachment-list" class="attachments"></div>
+          <form id="composer" class="composer">
+            <label class="sr-only" for="prompt">Message YunusPi</label>
+            <textarea id="prompt" rows="1" maxlength="100000" placeholder="Give the rat something to work on…" spellcheck="false"></textarea>
+            <div class="composer-toolbar"><div class="composer-options"><button id="attach" type="button" class="icon-button" aria-label="Attach images"><svg><use href="#i-attach"/></svg></button><button id="model-button" type="button" class="model-button"><span>Choose model</span><svg class="small"><use href="#i-down"/></svg></button><button id="thinking-button" type="button" class="thinking-button" title="Thinking level"><svg><use href="#i-brain"/></svg><span>Thinking</span></button></div><button id="send" class="send-button" type="submit" aria-label="Send message" disabled><svg><use href="#i-arrow"/></svg></button><button id="stop" class="send-button stop-button" type="button" aria-label="Stop current turn" hidden><svg><use href="#i-stop"/></svg></button></div>
+          </form>
+          <div class="composer-caption"><span id="session-caption">Local files · persistent project memory</span><span id="usage-caption"></span></div>
+        </footer>
+      </div>
+    </main>
+    <button id="workbench-scrim" class="scrim workbench-scrim" aria-label="Close activity panel" hidden></button>
+    <aside id="workbench" class="workbench" aria-label="Activity and context" hidden>
+      <header><h2>Workbench</h2><button id="workbench-close" class="icon-button" aria-label="Close activity panel"><svg><use href="#i-close"/></svg></button></header>
+      <div class="workbench-tabs" role="tablist"><button id="activity-tab" role="tab" aria-selected="true" aria-controls="activity-panel">Activity</button><button id="context-tab" role="tab" aria-selected="false" aria-controls="context-panel" tabindex="-1">Context</button></div>
+      <section id="activity-panel" class="workbench-content" role="tabpanel" aria-labelledby="activity-tab"><div id="activity-list"></div></section>
+      <section id="context-panel" class="workbench-content" role="tabpanel" aria-labelledby="context-tab" hidden><div id="context-content"></div></section>
+    </aside>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="dialog" class="dialog"><div class="dialog-heading"><h2 id="dialog-title"></h2><button id="dialog-close" class="icon-button" aria-label="Close dialog"><svg><use href="#i-close"/></svg></button></div><div id="dialog-content"></div></dialog>
+</body>
+</html>

@@ -65,6 +65,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 
 import { choices } from "./lib/tool-schema.ts";
+import { redactSecrets } from "./lib/memory-redaction.ts";
 const DEFAULT_DIR = path.join(os.homedir(), ".pi", "sibling-bridge");
 const PEER_MESSAGE_TTL_MS = 10 * 60_000;
 const peerEpoch = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f-]{36}$/.test(value);
@@ -753,6 +754,13 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		try {
+			// Desktop root sessions publish a small initial objective without a
+			// setup tool call. Existing scopes/notes remain owned by that session.
+			if (process.env.PI_DESKTOP_SESSION === "1" && process.env.PI_SUBAGENT_CHILD !== "1" && selfKind(safeSessionFile(ctx)).kind === "root" && !coordination.objective && typeof _event.prompt === "string") {
+				coordination = cleanCoordination({...coordination, objective:redactSecrets(_event.prompt).replace(/\s+/g," ").trim().slice(0,240)});
+				pi.appendEntry?.("sibling-coordination",{root:coordinationRoot(ctx.cwd),coordination:{...coordination,recentWrites:[]}});
+				publish(ctx);
+			}
 			drainInbox();
 			const sid = ctx.sessionManager.getSessionId();
 			if (!sid) return undefined;

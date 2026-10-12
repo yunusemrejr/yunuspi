@@ -32,3 +32,7 @@ The six packages in `core/` descend from Pi 0.85.1, commit `d981de1229ef899957bb
 Three.js 0.180.0 is an exact-pinned MIT dependency downloaded by npm, with lockfile integrity. Standalone scene HTML includes the full Three.js license and the scene export also writes `THREE-LICENSE.txt`. Chromium/Playwright and FFmpeg remain separately licensed runtime dependencies; FFmpeg is supplied by the host.
 
 Async improvements were informed by an independent source review of [Unreal Agent](https://github.com/unreallabsai/unreal-agent/tree/b7c9bf1c5c2fa4127255c07727a7c8413e23944a), MIT, copyright 2026 Unreal Labs. YunusPi implements these ideas in its existing JavaScript/TypeScript owners; no Unreal source code or Go runtime is bundled. The comparison and limitations are documented in `docs/ASYNC-AND-STUDIO.md`.
+
+## Desktop runtime
+
+Electron is distributed under the MIT license and includes Chromium and Node.js with their bundled notices. The exact runtime is installed separately from the lockfile-pinned Electron npm package; its LICENSE and LICENSES.chromium.html are retained in the installed distribution. Marked (MIT) parses desktop Markdown into tokens; text-node rendering is maintained by YunusPi. The SVG desktop rat is an original hand-drawn interpretation of YunusPi’s existing public ASCII mascot.

@@ -16,8 +16,6 @@ import { processFileArguments } from "./cli/file-processor.js";
 import { buildInitialMessage } from "./cli/initial-message.js";
 import { listModels } from "./cli/list-models.js";
 import { createProjectTrustContext } from "./cli/project-trust.js";
-import { selectSession } from "./cli/session-picker.js";
-import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.js";
 import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.js";
 import { createAgentSessionRuntime } from "./core/agent-session-runtime.js";
 import { createAgentSessionFromServices, createAgentSessionServices, } from "./core/agent-session-services.js";
@@ -37,13 +35,14 @@ import { printTimings, resetTimings, time, watchStartupStall } from "./core/timi
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.js";
 import { builtInExtensions } from "./extensions/index.js";
 import { runMigrations, showDeprecationWarnings } from "./migrations.js";
-import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.js";
 import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/interactive/theme/theme.js";
 import { validateThemeJson } from "./modes/interactive/theme/theme-json.js";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.js";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.js";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.js";
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
+const selectSession = async (...args) => (await import('./cli/session-picker.js')).selectSession(...args);
+const showStartupSelector = async (...args) => (await import('./cli/startup-ui.js')).showStartupSelector(...args);
 /**
  * Read all content from piped stdin.
  * Returns undefined if stdin is a TTY (interactive terminal).
@@ -533,9 +532,12 @@ export async function main(args, options) {
     const startupSettingsDiagnostics = collectSettingsDiagnostics(startupSettingsManager);
     // Experimental first-time setup: theme choice and analytics opt-in.
     // Runs before any runtime services are created so the chosen settings apply everywhere.
-    if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined && shouldRunFirstTimeSetup()) {
-        await showFirstTimeSetup(startupSettingsManager);
-        time("firstTimeSetup");
+    if (appMode === "interactive" && !parsed.help && parsed.listModels === undefined) {
+        const { shouldRunFirstTimeSetup, showFirstTimeSetup } = await import('./cli/startup-ui.js');
+        if (shouldRunFirstTimeSetup()) {
+            await showFirstTimeSetup(startupSettingsManager);
+            time("firstTimeSetup");
+        }
     }
     if (appMode === "interactive" && parsed.useTheme !== undefined) {
         startupSettingsManager.applyOverrides({ theme: parsed.useTheme });
@@ -747,7 +749,7 @@ export async function main(args, options) {
         process.exit(1);
     }
     time("createAgentSession");
-    if (appMode !== "interactive" && !session.model) {
+    if (appMode !== "interactive" && !session.model && !(appMode === "rpc" && process.env.PI_DESKTOP_SESSION === "1")) {
         console.error(chalk.red(formatNoModelsAvailableMessage()));
         process.exit(1);
     }
@@ -768,9 +770,11 @@ export async function main(args, options) {
     stopStartupStallWatch();
     if (appMode === "rpc") {
         printTimings();
+        const { runRpcMode } = await import('./modes/rpc/rpc-mode.js');
         await runRpcMode(runtime);
     }
     else if (appMode === "interactive") {
+        const { InteractiveMode } = await import('./modes/interactive/interactive-mode.js');
         const interactiveMode = new InteractiveMode(runtime, {
             migratedProviders,
             startupDiagnostics,
@@ -805,6 +809,7 @@ export async function main(args, options) {
     }
     else {
         printTimings();
+        const { runPrintMode } = await import('./modes/print-mode.js');
         const exitCode = await runPrintMode(runtime, {
             mode: toPrintOutputMode(appMode),
             messages: parsed.messages,

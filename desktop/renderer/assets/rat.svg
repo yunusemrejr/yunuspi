@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 152" fill="none">
+  <title>YunusPi rat</title>
+  <!-- Hand drawn from YunusPi's public side-profile ASCII mascot. -->
+  <g stroke="#92aaff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M72 42C92 22 139 24 158 51c15 20 17 53 3 72H82c-17 0-31-5-44-15L20 94l22-25c-6-13-4-31 7-36 12-5 25 1 23 19"/>
+    <path d="M74 38c-5-10-1-23 8-25 10-2 17 5 17 15M106 91c-4 9-2 21 7 28M79 123l-8 13H52M151 123l7 13h-25"/>
+    <path d="M28 98H13m20 9-13 6" stroke-width="3"/>
+  </g>
+  <circle cx="51" cy="72" r="4" fill="#92aaff"/>
+  <circle cx="20" cy="93" r="5" fill="#92aaff"/>
+  <path d="M169 106h36c17 0 24-11 24-25" stroke="#c7a163" stroke-width="5" stroke-linecap="round"/>
+</svg>

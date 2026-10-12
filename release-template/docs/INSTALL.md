@@ -1,6 +1,6 @@
 # Install a public release
 
-Use Linux, Windows with WSL2 Ubuntu, or an Ubuntu VM on macOS; see [platform details](PLATFORMS.md). This source distribution owns the YunusPi core and its maintained extensions. Pi 0.85.1 is the historical fork origin; upstream releases never control installation or updates. Do not install over a running Pi session.
+Use Linux, Windows with WSL2 Ubuntu, or an Ubuntu VM on macOS; see [platform details](PLATFORMS.md). This source distribution owns the YunusPi core and its maintained extensions. Pi 0.85.1 is the historical fork origin; upstream releases never control installation or updates. Quit the desktop and stop all workers before replacing an installation.
 
 ## Prerequisites
 
@@ -27,9 +27,9 @@ yunuspi --version
 
 A published release and `main` can report the same version while differing in fixes: `main` may be ahead of the latest tag. Check out the release tag for a stable installation, or stay on a reviewed `main` commit deliberately. Either way, the installation records the exact source commit in `installation.json` (`sourceCommit`); compare it with `git rev-parse HEAD` in the checkout rather than trusting the version string.
 
-The first invocation is a read-only preview. The second copies public `agent/` files and the repository-owned `core/` packages into `~/.pi/agent`, installs the exact root workspace lockfile with npm lifecycle scripts disabled, and runs `build:core`. The core is built from local source; no upstream Pi package or version endpoint is consulted. Third-party dependencies still download from npm. Review their lockfile changes before installing a release.
+The first invocation is a read-only preview. The second copies public `agent/` files and the repository-owned `core/` packages into `~/.pi/agent`, installs the exact root workspace lockfile with npm lifecycle scripts disabled, and runs `build:core`. The core is built from local source; no upstream Pi package or version endpoint is consulted. Third-party dependencies still download from npm. The installer explicitly sets up the lockfile-pinned Electron distribution and registers the Linux application launcher entry for the normal installation target. Review their lockfile changes before installing a release.
 
-The installation contains `runtime/core/`, `runtime/node_modules/`, and `bin/yunuspi` (with `bin/pi` as a compatibility alias). Both extension dependency links select that same workspace, so core imports resolve to the owned packages. Add the `bin` directory to your shell's PATH permanently after validating the installation. An unrelated globally installed `pi` is not modified; invoke `yunuspi` to make selection explicit.
+The installation contains `runtime/core/`, `runtime/desktop/`, `runtime/node_modules/`, and `bin/yunuspi` (with `bin/pi` as a compatibility alias). Both extension dependency links select that same workspace, so core imports resolve to the owned packages. Add the `bin` directory to your shell's PATH permanently after validating the installation. An unrelated globally installed `pi` is not modified; invoke `yunuspi` to make selection explicit.
 
 Private settings/models are initialized from public templates. Keys, sessions, reminders, local models and private state are never copied from a working installation. An existing target is refused by default. After stopping sessions, `--backup-existing` renames the complete old installation into an adjacent private backup and installs a fresh tree. Active maintained-launcher sessions block replacement. Restore your credentials deliberately from that private backup after reviewing the new configuration; never commit the backup.
 
@@ -99,3 +99,7 @@ observer controls (`PI_NEEDLE`, `PI_NEEDLE_SHADOW`,
 ## Updates and recovery
 
 Review the new public release and security changes first. Stop Pi, keep a private backup, then use the explicit backup installation workflow above. Reconfigure your own credentials locally; never merge an old private tree into a release checkout. If installation fails before activation, the previous target remains; if activation fails after its rename, the installer attempts to restore it and reports failure. To roll back an activated install, stop Pi, move the new directory aside and rename the preserved backup to `~/.pi/agent`. The owned core is inside the agent directory and rolls back with it. Upstream Pi releases have no effect. An explicit reviewed-source update preserving private state and compatible local customizations is available as `yunuspi update --source /path/to/reviewed/yunuspi`; normal Pi commands such as `pi update --models` and `pi update --extensions` continue to the owned core. See [the update policy](CORE-UPDATES.md).
+
+## Desktop launch
+
+Open YunusPi from the Linux application launcher, or run `yunuspi --gui`. Normal interactive launches use the desktop. Headless automation uses `--print` or `--mode rpc`. The app reuses the installed harness and existing credentials; its project/session index and desktop transcripts live separately in the user-data folder. See [the desktop guide](DESKTOP.md). Offline desktop setup requires the matching Electron distribution in the source checkout, prepared once with `npm run setup:desktop`.

@@ -175,6 +175,7 @@
     "retry-policy.ts",
     "review-coordinator.ts",
     "reviewer-board.ts",
+    "rpc-report.ts",
     "scope-deliberation.ts",
     "scoped-snapshots.ts",
     "self-mutation-guard.ts",

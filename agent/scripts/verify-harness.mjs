@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as nodeModule from "node:module";
+import { createHash } from 'node:crypto';
 import { activePiProcesses } from "./core-update.mjs";
 import { resolveOwnedCore } from "./lib/owned-core.mjs";
 import { findShadowed } from "./skill-mirrors.mjs";
@@ -550,6 +551,22 @@ async function main() {
       ok("YunusPi launcher selects the installation-owned core");
     else bad("YunusPi launcher missing or drifted; reinstall the reviewed source");
   } else info("source checkout: installer launcher is checked after installation");
+  const desktopRoot = path.join(AGENT_DIR, 'runtime/desktop');
+  if (fs.existsSync(desktopRoot)) {
+    try {
+      const receipt = JSON.parse(fs.readFileSync(path.join(AGENT_DIR, 'installation.json'), 'utf8'));
+      const files = Object.entries(receipt.managedDesktopFiles ?? {});
+      if (!files.length) throw Error('desktop source inventory missing');
+      for (const [relative, hash] of files) {
+        if (path.isAbsolute(relative) || relative.split(/[\\/]/).some(p => p === '..' || p === '.')) throw Error('unsafe desktop source inventory');
+        const file = path.join(desktopRoot, relative);
+        if (fs.lstatSync(file).isSymbolicLink() || createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== hash) throw Error(`desktop source drift: ${relative}`);
+      }
+      ok(`desktop source: ${files.length} files match the installation receipt`);
+      if (!fs.existsSync(path.join(AGENT_DIR, 'runtime/node_modules/electron/path.txt'))) throw Error('Electron distribution missing');
+      ok('Electron runtime is installed');
+    } catch (error) { bad(`Desktop integrity: ${error.message}`); }
+  }
   info("core repair and automatic update watchers are retired; change owned source and rebuild");
 
   // ── 4. Config + memory store parse ───────────────────────────────────
