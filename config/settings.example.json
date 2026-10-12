@@ -13,8 +13,7 @@
     "ls"
   ],
   "subagents": {
-    "defaultModel": "inherit",
-    "defaultThinking": "inherit"
+    "defaultModel": "inherit"
   },
   "compaction": {
     "enabled": true,
