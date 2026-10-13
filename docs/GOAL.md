@@ -34,14 +34,27 @@ Known focused test commands can run directly. The project-test owner adopts curr
 
 It starts the same goal machinery as `/goal` — same persisted state, same `goal` tool, same completion check — with seven fixed fronts as its criteria plus the usual verification criterion: an inventory first, then UI/visual slop (fake live/active state and blinking dots, decorative pills and badges, stock gradients and glass, emoji icons, decorative mono fonts, build and meta narration in the interface), interface density (every screen of any UI keeps only the few things its user comes for — a dashboard with 20 KPIs, 4 charts, a 10-item sidebar and 10 accordions ends near 4 KPIs, 2 charts and 5 nav items — with secondary detail moved to its own page, duplicates removed, the core design approach kept, and before/after element counts as evidence), honest copy and labels (no made-up labels, SaaS boilerplate, stock phrases, invented metrics or text-noise), comments that earn their place, dead and duplicate code and functionality removed, and proof that the cleanup added no slop of its own and broke nothing real. Subtraction comes first: slop is deleted outright unless it was doing a real job, in which case the plainest honest alternative in the project's own style replaces it. Lower density may also mean one crafted visual instead of a wall of text: where the subject or the user calls for it, scroll-driven motion or an isometric/3D figure built with the anatomy skill (or three.js), reduced-motion aware, never decorative and never on utility screens. Genuine state, earned proof, deliberate branding, product behavior and public interfaces are explicitly not slop and stay. Fronts outside a requested focus are waived with that reason through the goal tool rather than silently skipped. `/goal` shows a desloppify run's progress and pauses, resumes or clears it; the brief and fronts live in `agent/extensions/lib/noslop.ts`, and [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md) remains the detailed rule set for websites.
 
+## /nobug
+
+`/nobug` is a goal that hunts and fixes real bugs. Bare, it covers the whole codebase; a focus or assignment narrows it.
+
+```
+/nobug                        # the whole codebase, what users run and see first
+/nobug the checkout flow      # one area, pipeline or output, deeply
+```
+
+It starts from a baseline (the project's own build, type check, lint and tests run and recorded, the in-scope surfaces mapped), then hunts across logic (wrong conditions, off-by-one, null paths, units and time zones, races, swallowed errors), edge cases (empty, huge, malformed and unicode input, boundaries, concurrency, failed network, missing files, first run versus upgrade), broken code, dependency problems (missing, unused, conflicting or deprecated packages, lockfile drift), duplicated rules that can drift, and the interface as it actually renders: UI/UX states, keyboard and focus, layouts from a 360px phone to a wide desktop, the target browsers (Chromium, Firefox and WebKit where available, naming any that could not be run), and for terminal apps narrow or resized terminals, non-TTY output, `NO_COLOR` and Ctrl-C cleanup. Every fix is reproduced first (a failing test where the project has tests), made at the root cause, and proven by the repro passing with the baseline still green. Masking is forbidden (swallowed errors, skipped tests, disabled lints, loosened types), unproven suspicions are reported as suspected, and unchecked environments are named. Its six fronts are baseline, logic and edge cases, broken code and dependencies, drifting duplicates, the interface, and honest fixes.
+
 ## /3d, /video and chaining
 
-Two more presets work the same way, and all three chain:
+Two more presets work the same way, and all four chain:
 
 ```
 /3d make a minecraft clone
 /video make a 60-second explainer about tides, narrated
 /3d /video /noslop please make a video about how a steam engine works
+/nobug /3d /video make sure the video has no problems
+/noslop /nobug             # e.g. in a terminal app: bugs, edge cases and TUI slop
 /3d                       # no assignment: fix this project's 3D work
 /video                    # no assignment: fix this project's video work
 ```
@@ -52,7 +65,7 @@ Two more presets work the same way, and all three chain:
 
 With no assignment, `/3d` and `/video` survey the current project for work of their kind and improve and fix what exists. If there is none, the session says so plainly, waives the fronts with that reason, and stops — a bare preset never invents a project.
 
-Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. The tracked criteria compress to each preset's three core fronts so a three-way chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
+Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. Chained with `/3d` or `/video`, `/nobug` also inspects the media pipeline and the rendered output (audio/picture sync, dropped frames, wrong levels or aspect, z-fighting, missing textures, context loss) and treats weird or low-quality looks as bugs. Chained with `/noslop` in a terminal app, the TUI's output is the interface: banners, chatter, decorative colors and noise are slop there. The tracked criteria compress to each preset's three core fronts (two each in a four-way chain) so every chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
 
 ## Loop safety
 

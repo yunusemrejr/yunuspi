@@ -1,5 +1,5 @@
 /**
- * Preset goals — /noslop, /3d and /video, alone or chained.
+ * Preset goals — /noslop, /nobug, /3d and /video, alone or chained.
  *
  * Each preset is a /goal with its aim already written: a working brief plus
  * the fronts it is judged on. The commands live in goal.ts on the shared
@@ -10,19 +10,19 @@
  * Chaining: `/3d /video /noslop make a film about X` starts ONE goal whose
  * brief stacks every named directive set onto the same assignment. The
  * briefs always run in full; the tracked fronts compress to each preset's
- * core subset so a three-way chain still fits the goal system's criteria
- * budget. Bare invocations survey the current project for work of their
+ * core subset (fewer per preset as the chain grows) so even a four-way chain
+ * fits the goal system's criteria budget. Bare invocations survey the current project for work of their
  * kind, improve what exists, and say so plainly when there is none.
  */
-import { createPresetGoal, type GoalState } from "./goal-state.ts";
+import { createPresetGoal, MAX_CRITERIA, type GoalState } from "./goal-state.ts";
 import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
 
-export type PresetId = "noslop" | "3d" | "video";
-export const PRESET_IDS: readonly PresetId[] = ["noslop", "3d", "video"];
-export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", "3d": "3D", video: "Video" };
+export type PresetId = "noslop" | "nobug" | "3d" | "video";
+export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video"];
+export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video" };
 
 const MAX_TASK = 4000;
-const CHAIN_TOKEN = /^\/(noslop|3d|video)(?=\s|$)/i;
+const CHAIN_TOKEN = /^\/(noslop|nobug|3d|video)(?=\s|$)/i;
 
 export interface PresetChain {
 	/** Invoked preset first, then peeled chain tokens in written order, deduped. */
@@ -57,6 +57,15 @@ export function presetUserText(presets: readonly PresetId[], task: string): stri
 	return `${presets.map((id) => `/${id}`).join(" ")}${flat ? ` ${flat}` : ""}`;
 }
 
+export const NOBUG_CRITERIA: readonly string[] = [
+	"Baseline first: the project's existing checks (build, types, lint, tests) were run and recorded, and the in-scope surfaces (code paths, screens, outputs, pipelines) mapped before hunting.",
+	"Logic and edge cases: every bug fixed was reproduced first (failing test, command or capture) and fixed at its root; empty, huge, malformed, concurrent and failure inputs were exercised.",
+	"Broken code and dependencies: no syntax, type, import or build errors; dependencies declared, used, locked and version-consistent, with no missing, unused, deprecated or conflicting package on the main path.",
+	"Drifting duplicates resolved: copies of one rule that disagree or will drift are unified behind the surviving implementation, callers moved; harmless repetition left alone.",
+	"The interface works wherever it runs: states, keyboard and focus, narrow to wide layouts, and target browsers or terminals checked on the real rendered output; a project without an interface waives this.",
+	"Fixes are honest: nothing masked (swallowed errors, skipped tests, disabled lints, loosened types), no unrelated rewrites; unproven suspicions reported as such and unchecked environments named.",
+];
+
 export const THREE_D_CRITERIA: readonly string[] = [
 	"Grounding first: the subject is researched with real references (proportions, materials, motion) and the harness's 3D skills/tooling for the chosen route (Blender, three.js/WebGL) are actually loaded and used.",
 	"Real assets and geometry: models, materials/textures and lighting are purpose-built or properly sourced for the subject — no placeholder boxes, primitive-only scenes or flat unlit output passed off as finished.",
@@ -73,13 +82,32 @@ export const VIDEO_CRITERIA: readonly string[] = [
 	"Verified master: the final export is watched end to end with audio (video_qa or equivalent) at the intended resolution, frame rate and format, and plays outside the build setup.",
 ];
 
-/** Fronts that stay tracked when presets chain; the briefs themselves never compress. */
+/**
+ * Fronts that stay tracked when presets chain, most important first; a long
+ * chain keeps fewer per preset. The briefs themselves never compress.
+ */
 const CORE_INDEXES: Record<PresetId, readonly number[]> = {
 	noslop: [1, 2, 6],
+	nobug: [1, 4, 2],
 	"3d": [1, 2, 4],
 	video: [1, 2, 4],
 };
-const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA };
+const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA };
+
+function nobugGoalText(task: string): string {
+	const scope = task
+		? `Assignment: ${task}\nHunt bugs in that work and everything it touches, deeply. Fronts it does not touch get waived with that reason through the goal tool — not silently skipped.`
+		: "Scope: the whole codebase of the current project. Start from what its users run and see, then work inward to the code paths behind it.";
+	return [
+		"Debug this work: find the real bugs, prove each one, fix it at its root, and leave proof that it stays fixed.",
+		scope,
+		"Baseline before hunting: learn what the project is and how it runs, run its existing checks (build, type check, lint, tests) and record what already fails, and map the in-scope surfaces — entry points, code paths, screens, outputs, pipelines. A check that is already red is a finding, not background noise.",
+		"Hunt across every front. Logic: wrong conditions and off-by-one, inverted or missing branches, null and undefined paths, unit, time-zone and rounding mistakes, stale or shared state, async races and unawaited promises, errors swallowed or reported wrong. Edge cases: empty, single, huge and malformed input, unicode and whitespace, boundaries, concurrency and retries, slow or failed network, missing files and permissions, first run versus upgrade. Broken code: syntax and type errors, broken imports and references, dead config, scripts that no longer run. Dependencies: missing, unused, duplicated or conflicting packages, lockfile drift, versions that disagree across workspaces, deprecated or vulnerable packages on the main path, code that only works on the author's machine. Duplication that matters: copies of one rule that already disagree or will drift — a DRY violation is a bug when the copies can diverge, and is left alone when it is harmless repetition.",
+		"Where there is an interface, test the real rendered thing, not the code. GUI and web: broken, unreachable or misleading states (loading, empty, error, disabled), keyboard and focus order, forms and validation, layouts from a 360px phone to a wide desktop with no overflow, clipping or horizontal scroll, and the browsers the project targets (Chromium, Firefox and WebKit where available; name any you could not run). Terminal apps: narrow and resized terminals, piped and non-TTY output, NO_COLOR, Ctrl-C and cleanup, long lines and wide characters. Media and 3D, including work from chained boosts: watch and inspect the actual output — for video, audio/picture sync, dropped or duplicated frames, wrong aspect, color or levels, clipping, captions out of time, files that only play in one player; for 3D, z-fighting, inverted normals, missing textures, NaN or exploding transforms, device-pixel-ratio and resize bugs, context loss and frame-rate stalls — and treat weird or low-quality looks as bugs to explain and fix.",
+		"Rules of engagement. Reproduce before fixing: each bug gets a repro first (a failing test where the project has tests, otherwise a recorded command, request or capture), then the smallest root-cause fix, then the repro passes and the surrounding checks still pass. Never mask a bug: no swallowed errors, skipped or deleted tests, disabled lints, loosened types or retry loops around a defect. Do not rewrite working code for taste or add features. A suspicion you could not prove is reported as suspected, with its reasoning, never as fixed; an environment you could not check is named, never implied.",
+		"Order of work: baseline and map; list findings per front with severity and a repro; fix the highest-impact ones first in reviewable steps; rerun the baseline checks after each front and compare. Record each front's evidence through the goal tool as it settles, and finish with what was fixed, what was only suspected, and what could not be checked.",
+	].join("\n\n");
+}
 
 function threeDGoalText(task: string): string {
 	const scope = task
@@ -109,6 +137,7 @@ function videoGoalText(task: string): string {
 
 const BRIEFS: Record<PresetId, (task: string) => string> = {
 	noslop: (task) => noslopGoalText(noslopFocus(task)),
+	nobug: nobugGoalText,
 	"3d": threeDGoalText,
 	video: videoGoalText,
 };
@@ -129,7 +158,8 @@ export function createPresetChainGoal(chain: PresetChain, now = Date.now()): Goa
 		? `Assignment: ${task}\n\nBoosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
 		: `Boosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
 	const text = [header, ...presets.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task)}`)].join("\n\n");
-	const criteria = presets.flatMap((id) => CORE_INDEXES[id].map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`));
+	const perPreset = Math.min(3, Math.floor((MAX_CRITERIA - 1) / presets.length));
+	const criteria = presets.flatMap((id) => CORE_INDEXES[id].slice(0, perPreset).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`));
 	return createPresetGoal(text, criteria, now);
 }
 

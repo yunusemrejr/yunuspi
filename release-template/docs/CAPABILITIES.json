@@ -3219,7 +3219,7 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 270
+        "line": 275
       },
       {
         "name": "bg",
@@ -3397,6 +3397,11 @@
         "line": 494
       },
       {
+        "name": "nobug",
+        "source": "agent/extensions/goal.ts",
+        "line": 270
+      },
+      {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
         "line": 265
@@ -3559,7 +3564,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 275
+        "line": 280
       },
       {
         "name": "websearch",
@@ -3789,7 +3794,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 282,
+        "line": 287,
         "kind": "literal"
       },
       {
@@ -4273,7 +4278,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 282,
+        "line": 287,
         "kind": "literal"
       },
       {

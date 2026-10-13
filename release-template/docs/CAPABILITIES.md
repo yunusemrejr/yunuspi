@@ -1234,7 +1234,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 282; literal)
+- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 287; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 32; factory)
@@ -1326,7 +1326,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Literal slash commands
 
-- /3d — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 270)
+- /3d — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 275)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 568)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
@@ -1362,6 +1362,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts) (line 221)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 59)
 - /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 494)
+- /nobug — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 270)
 - /noslop — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 265)
 - /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 897)
 - /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 577)
@@ -1394,7 +1395,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 594)
 - /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1780)
-- /video — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 275)
+- /video — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 280)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3143)
 
 ### Dynamic command owners

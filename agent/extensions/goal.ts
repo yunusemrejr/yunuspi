@@ -8,7 +8,7 @@
  * resume, fork and compaction all see the same goal. Fail-open: any error here
  * leaves the session running as if no goal existed.
  *
- * This extension also owns the preset goals /noslop, /3d and /video (briefs,
+ * This extension also owns the preset goals /noslop, /nobug, /3d and /video (briefs,
  * fronts and the chaining grammar in lib/presets.ts and lib/noslop.ts) so
  * every command shares the one persisted goal state instead of writing
  * competing snapshots. `/3d /video /noslop <task>` stacks their aims onto
@@ -237,10 +237,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	// Preset goals are /goal with the aim already written: /noslop desloppifies,
-	// /3d boosts 3D work, /video boosts video work. They share this extension's
-	// goal state on purpose — one owner for the persisted snapshots — so /goal
-	// status, pause, resume and clear all work on a preset run, and its fronts
-	// close through the same goal tool. Leading preset tokens chain:
+	// /nobug debugs, /3d boosts 3D work, /video boosts video work. They share
+	// this extension's goal state on purpose — one owner for the persisted
+	// snapshots — so /goal status, pause, resume and clear all work on a
+	// preset run, and its fronts close through the same goal tool. Leading preset tokens chain:
 	// `/3d /video /noslop make X` dispatches here once, as /3d, and the parser
 	// in lib/presets.ts stacks every named aim onto the one goal.
 	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
@@ -263,17 +263,22 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	};
 	pi.registerCommand("noslop", {
-		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /3d and /video.",
+		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /nobug, /3d and /video.",
 		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
 		handler: startPreset("noslop"),
 	});
+	pi.registerCommand("nobug", {
+		description: "Debug the codebase: hunt logic, edge-case, broken-code, dependency, duplication, UI/UX, responsive and cross-browser bugs; reproduce each, fix it at its root, prove it. Runs as a goal. Chains with /noslop, /3d and /video.",
+		argumentHint: "[focus or assignment — an area, pipeline or output; omit for the whole codebase]",
+		handler: startPreset("nobug"),
+	});
 	pi.registerCommand("3d", {
-		description: "3D boost: build or fix 3D work (Blender, three.js/WebGL) with real assets, grounded references and rendered proof. Bare /3d improves this project's existing 3D work, or says there is none. Chains: /3d /video /noslop <task>.",
+		description: "3D boost: build or fix 3D work (Blender, three.js/WebGL) with real assets, grounded references and rendered proof. Bare /3d improves this project's existing 3D work, or says there is none. Chains: /3d /video /noslop /nobug <task>.",
 		argumentHint: "[assignment — what to make; omit to fix this project's 3D work]",
 		handler: startPreset("3d"),
 	});
 	pi.registerCommand("video", {
-		description: "Video boost: make or fix video with finished sound (narration/TTS, music, effects), purposeful visuals and a verified final export. Bare /video improves this project's existing video work, or says there is none. Chains with /3d and /noslop.",
+		description: "Video boost: make or fix video with finished sound (narration/TTS, music, effects), purposeful visuals and a verified final export. Bare /video improves this project's existing video work, or says there is none. Chains with /3d, /noslop and /nobug.",
 		argumentHint: "[assignment — what to make; omit to fix this project's video work]",
 		handler: startPreset("video"),
 	});
