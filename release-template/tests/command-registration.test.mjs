@@ -31,6 +31,7 @@ test("the installed extension graph registers every shipped command without load
     const script = `
       import {DefaultResourceLoader} from ${JSON.stringify(resourceLoader)};
       import {SettingsManager} from ${JSON.stringify(settingsManager)};
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
       const loader = new DefaultResourceLoader({cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR,
         settingsManager: SettingsManager.inMemory({packages: []}), noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true});
       await loader.reload();

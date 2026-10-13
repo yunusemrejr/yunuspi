@@ -84,6 +84,7 @@ test('expert briefs stay bounded and carry exploration, preservation and critic 
   assert.match(refine.text,/Preserve what must survive/);
   const quiet=buildExpertBrief({prompt:'What time is it?'});
   assert.equal(quiet.qualified,false);assert.equal(quiet.text,'');assert.equal(quiet.summary,'');
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
   process.env.PI_EXPERT='off';
   try{assert.equal(buildExpertBrief({prompt:'Design a stunning landing page',force:true}).qualified,false);}
   finally{delete process.env.PI_EXPERT;}

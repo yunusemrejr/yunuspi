@@ -25,6 +25,7 @@ test('every tool a built-in agent allows is registered by the installed extensio
     const script = `
       import {DefaultResourceLoader} from ${JSON.stringify(loaderUrl)};
       import {SettingsManager} from ${JSON.stringify(settingsUrl)};
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
       const loader = new DefaultResourceLoader({cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR,
         settingsManager: SettingsManager.inMemory({packages: []}), noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true});
       await loader.reload();

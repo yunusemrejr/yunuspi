@@ -163,6 +163,18 @@ const portableCodeExt = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "
 // These source-controlled assessment fixtures are public test inputs. Do not
 // admit arbitrary SVG artwork from an installation's skills or template tree.
 const publicSvgFixture = /^(?:release-template\/)?tests\/fixtures\/expert-svg-(?:good|mediocre)\.svg$/;
+// The web-probe-seo distribution tests read these two static pages; without
+// an exception the extension allowlist silently drops them and the suite
+// fails in the exported tree while passing in the checkout.
+const publicSeoFixture = /^(?:release-template\/)?tests\/fixtures\/seo\/(?:clean|conflicting)-page\.html$/;
+// Two skills ship worked static examples/kits as part of their public
+// contract; tests build and inspect them from the exported tree. Keep this
+// scoped to those skills: HTML under any other skill's assets (for example
+// a saved session page) must never enter a public release.
+const publicSkillStaticAsset = /^agent\/skills\/(?:anatomy\/(?:examples|kit)|motion-approaches\/assets)\/.*\.(?:html|css)$/;
+// The desktop shell ships its renderer page, stylesheet and brand mark from
+// the release template; the extension allowlist otherwise drops all three.
+const publicDesktopRenderer = /^(?:release-template\/)?desktop\/renderer\/(?:index\.html|styles\.css|assets\/[^/]+\.svg)$/;
 const omitted = new Set([
  "node_modules",
  ".git",
@@ -209,6 +221,9 @@ function copyTree(dir, prefix) {
    !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel) &&
    !/^core\/coding-agent\/src\/core\/export-html\/template\.(?:html|css)$/.test(rel) &&
    !publicSvgFixture.test(rel) &&
+   !publicSeoFixture.test(rel) &&
+   !publicSkillStaticAsset.test(rel) &&
+   !publicDesktopRenderer.test(rel) &&
    rel !== "agent/skills/video-editing/assets/timeline-starter.html"
   )
    continue;

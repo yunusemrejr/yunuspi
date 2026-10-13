@@ -15,10 +15,12 @@ const {SemanticIndex} = await import(pathToFileURL(path.join(agent,"extensions/p
 const {assertNoStaleCheckoutPaths,distributionBuildStep,releaseCompletion} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
 const {createHookLedger} = await import(pathToFileURL(path.join(agent,"extensions/lib/hook-ledger.ts")));
 
-test("fresh installations expose built-in search and economical child thinking",()=>{
+test("fresh installations expose built-in search and inherited child model and thinking",()=>{
   const settings=JSON.parse(fs.readFileSync(path.join(root,"config/settings.example.json"),"utf8"));
   assert.deepEqual(settings.defaultTools,["read","bash","edit","write","grep","find","ls"]);
-  assert.equal(settings.subagents.defaultThinking,"low");
+  // abb06748: omit thinking so children inherit the session level.
+  assert.equal(settings.subagents.defaultModel,"inherit");
+  assert.equal(settings.subagents.defaultThinking,undefined);
 });
 
 test("publication builds owned core after script-disabled dependency installation",()=>{

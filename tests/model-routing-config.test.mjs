@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
+process.env.PI_LEAN_GATES ??= "on"; // these tests exercise the lean-gated specialized roles explicitly
 const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-routing-test-runtime-"));
 process.env.PI_PROVIDER_STATE_FILE = path.join(runtimeRoot, "health.json");
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(runtimeRoot, "exclusions.json");

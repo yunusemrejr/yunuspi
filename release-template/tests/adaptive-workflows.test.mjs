@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 
 const template = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(template, 'agent'), path.join(template, '..', 'agent'), path.resolve(template, '..'), path.resolve(template, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/adaptive-workflows.ts')));
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_LOCAL_LM = 'off';
 process.env.PI_JEV = 'off';
 process.env.PI_NEEDLE = 'off';

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>

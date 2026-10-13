@@ -162,16 +162,16 @@ test("the skill is well formed and every file it points to exists", () => {
 	for (const rel of [...text.matchAll(/`((?:scripts|references)\/[a-z0-9.-]+)`/g)].map((m) => m[1])) assert.ok(fs.existsSync(path.join(skill, rel)), `${rel} exists`);
 	// The summary names the shipped scripts in prose; the reduced skill has no references directory.
 	for (const rel of ["scripts/palette.mjs", "scripts/world-kit.mjs"]) assert.ok(fs.existsSync(path.join(skill, rel)), `${rel} exists`);
-	assert.match(text, /[Ss]wap test/);
-	assert.match(text, /static baseline|Baseline/);
+	assert.match(text, /consolidated into \*\*create\*\*/);
+	assert.ok(fs.existsSync(path.join(agent, "skills/create/SKILL.md")), "the consolidated hub exists");
 });
 
-test("the design doctrine no longer vetoes the level it asks the agent to reach", () => {
-	// Expression-level and anti-downscale sentences were consolidated into this skill's Ambition section.
+test("the consolidated signature stub forwards to the create hub", () => {
 	const text = fs.readFileSync(path.join(skill, "SKILL.md"), "utf8");
-	assert.match(text, /immersive \(3D, cinematic, showcase\): coherence and fallbacks over element counts/);
-	assert.match(text, /Constraints lower ambition, never quality/);
-	assert.match(text, /scripts\/world-kit\.mjs/);
+	const hub = fs.readFileSync(path.join(agent, "skills/create/SKILL.md"), "utf8");
+	assert.match(text, /consolidated into \*\*create\*\*/);
+	assert.match(hub, /One coherent system per surface/);
+	assert.match(hub, /Inspect rendered output/);
 });
 
 test("visual_review asks the reviewer to confirm the signature and judges immersive work on coherence, and leaves plain directions alone", { timeout: 120000 }, async (t) => {

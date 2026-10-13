@@ -13,6 +13,7 @@ import { OBSERVER_MESSAGE, boundedObserverText, observerAdviceText } from '../ag
 test('installed observer renderer shows advice and request states at narrow and wide TUI widths', async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-tui-'));
   const prior = process.env.PI_SUBAGENT_CHILD;
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
   delete process.env.PI_SUBAGENT_CHILD;
   let extensions = [];
   try {

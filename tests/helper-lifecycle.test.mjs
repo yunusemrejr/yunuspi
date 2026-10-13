@@ -13,6 +13,7 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find((p) =>
 if (!agent) throw new Error('agent extension tree is missing');
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-analysis-lifecycle-'));
 const preferencesFile = path.join(configDir, 'llm_preferences.json');
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = configDir;
 process.env.PI_PROVIDER_STATE_FILE = path.join(configDir, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(configDir, 'exclusions.json');

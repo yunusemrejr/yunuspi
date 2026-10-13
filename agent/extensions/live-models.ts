@@ -75,6 +75,12 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 	deepseek: "https://api.deepseek.com/v1",
 	longcat: "https://api.longcat.chat/openai/v1",
 	runinfra: "https://api.runinfra.ai/v1",
+	meta: "https://api.meta.ai/v1",
+};
+
+/** Non-default wire APIs when models.json does not name one. */
+const DEFAULT_APIS: Record<string, string> = {
+	meta: "openai-responses",
 };
 
 /**
@@ -91,18 +97,18 @@ function wireFor(providerId: string): { api: string; baseUrl: string } {
 		};
 		const p = json.providers?.[providerId];
 		return {
-			api: p?.api ?? "openai-completions",
+			api: p?.api ?? DEFAULT_APIS[providerId] ?? "openai-completions",
 			baseUrl: p?.baseUrl ?? DEFAULT_BASE_URLS[providerId] ?? "",
 		};
 	} catch {
 		return {
-			api: "openai-completions",
+			api: DEFAULT_APIS[providerId] ?? "openai-completions",
 			baseUrl: DEFAULT_BASE_URLS[providerId] ?? "",
 		};
 	}
 }
 
-type PiModel = { liveImageInput?: boolean; liveFields?: string[] } & Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
+type LiveCatalogModel = { liveImageInput?: boolean; liveFields?: string[] } & Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
 type RefreshModelContext = Parameters<
 	NonNullable<ProviderConfig["refreshModels"]>
 >[0];
@@ -111,7 +117,7 @@ type RefreshModelContext = Parameters<
 
 interface CacheEntry {
 	ts: number;
-	models: PiModel[];
+	models: LiveCatalogModel[];
 	/** Raw catalog definitions; current provider config is applied only at publication. */
 	rawCompat?: true;
 	/** together reasoning probes: id -> { r: reasoning, ts } */
@@ -169,10 +175,10 @@ function modelRows<T extends { id: string }>(value: unknown): T[] {
 			].every((key) => row[key] == null || tokenLimit(row[key])),
 	) as T[];
 }
-function validModels(value: unknown): PiModel[] {
+function validModels(value: unknown): LiveCatalogModel[] {
 	if (!Array.isArray(value)) return [];
 	return value.filter(
-		(m): m is PiModel =>
+		(m): m is LiveCatalogModel =>
 			isRecord(m) &&
 			typeof m.id === "string" &&
 			m.id.trim().length > 0 &&
@@ -299,11 +305,11 @@ function mergeProbes(
 }
 
 /** Native catalog overlay (pi.dev, models-store.json) keyed by id. */
-function storeModels(providerId: string): Map<string, PiModel> {
+function storeModels(providerId: string): Map<string, LiveCatalogModel> {
 	try {
 		const store = JSON.parse(
 			readFileSync(join(AGENT_DIR, "models-store.json"), "utf-8"),
-		) as Record<string, { models?: PiModel[] }>;
+		) as Record<string, { models?: LiveCatalogModel[] }>;
 		const models = validModels(store[providerId]?.models);
 		return new Map(models.map((m) => [m.id, m]));
 	} catch {
@@ -412,7 +418,7 @@ function postJson(
 
 // ── OpenRouter ─────────────────────────────────────────────────────────
 
-interface OrLiveModel {
+interface OpenRouterLiveModel {
 	id: string;
 	/** Official API: Unix seconds when added to this catalog, not released. */
 	created?: number;
@@ -432,11 +438,11 @@ interface OrLiveModel {
 }
 
 function openRouterCost(
-	pricing: OrLiveModel["pricing"],
-	fallback: PiModel["cost"] | undefined,
-): PiModel["cost"] {
+	pricing: OpenRouterLiveModel["pricing"],
+	fallback: LiveCatalogModel["cost"] | undefined,
+): LiveCatalogModel["cost"] {
 	if ((!pricing || Object.keys(pricing).length === 0) && fallback) return { ...fallback };
-	const cost: PiModel["cost"] = {
+	const cost: LiveCatalogModel["cost"] = {
 		...(fallback ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
 	};
 	const missing = new Set(fallback?.missing ?? (fallback ? [] : ["input", "output"]));
@@ -470,7 +476,7 @@ function catalogAddedAt(created: unknown): { catalogAddedAt?: number } {
 		? { catalogAddedAt: created * 1000 } : {};
 }
 
-function openRouterCapabilities(m: OrLiveModel): FreeRouteCapabilities {
+function openRouterCapabilities(m: OpenRouterLiveModel): FreeRouteCapabilities {
 	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
 	return {
 		...catalogAddedAt(m.created),
@@ -497,7 +503,7 @@ function openRouterCapabilities(m: OrLiveModel): FreeRouteCapabilities {
 	};
 }
 
-function mapOpenRouterModel(m: OrLiveModel, fallback?: PiModel): PiModel {
+function mapOpenRouterModel(m: OpenRouterLiveModel, fallback?: LiveCatalogModel): LiveCatalogModel {
 	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
 	const liveReasoning =
 		params.includes("reasoning") ||
@@ -530,7 +536,7 @@ function mapOpenRouterModel(m: OrLiveModel, fallback?: PiModel): PiModel {
 }
 
 async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
-	models: OrLiveModel[];
+	models: OpenRouterLiveModel[];
 	effortsById: Map<string, string[] | undefined>;
 	unavailable?: UnavailableMap;
 }> {
@@ -540,10 +546,10 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 		{
 			headers: { Authorization: `Bearer ${resolvedCatalogApiKey("openrouter", context) ?? ""}` },
 		},
-	)) as { data?: OrLiveModel[] };
+	)) as { data?: OpenRouterLiveModel[] };
 	const now = Date.now();
 	const dropped = new Map<string, string>();
-	const models = modelRows<OrLiveModel>(raw.data).filter((m) => {
+	const models = modelRows<OpenRouterLiveModel>(raw.data).filter((m) => {
 		if (m.expiration_date && Date.parse(m.expiration_date) <= now) {
 			noteUnavailable(dropped, m.id, "expired");
 			return false;
@@ -581,7 +587,7 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 
 async function refreshOpenRouter(
 	context: RefreshModelContext,
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	const { models: live, effortsById, unavailable } = await fetchOpenRouterLive(context);
 	const store = storeModels("openrouter");
 	const projected = live.map((raw) => {
@@ -650,7 +656,7 @@ interface OrcaCatalogEntry {
 
 const ORCA_FALLBACK_KEY = process.env.ORCAROUTER_API_KEY ?? "";
 
-const ORCA_FALLBACK_MODELS: PiModel[] = [
+const ORCA_FALLBACK_MODELS: LiveCatalogModel[] = [
 	{
 		id: "orcarouter/auto",
 		name: "OrcaRouter Auto",
@@ -769,7 +775,7 @@ function mapOrcaModel(
 	live: OrcaLiveModel,
 	catalog: OrcaCatalogEntry | undefined,
 	groupRatio: number,
-): PiModel {
+): LiveCatalogModel {
 	const ctx = live.context_length ?? catalog?.context_length ?? 200_000;
 	const maxTokens = clampMaxTokens(
 		ctx,
@@ -790,7 +796,7 @@ function mapOrcaModel(
 			: perToken !== undefined && perToken !== ""
 				? parseFloat(perToken) * 1_000_000
 				: 0;
-	let cost: PiModel["cost"];
+	let cost: LiveCatalogModel["cost"];
 	if (live.pricing?.prompt_per_million !== undefined || live.pricing?.prompt !== undefined) {
 		cost = {
 			input: perM(live.pricing.prompt_per_million, live.pricing.prompt),
@@ -829,7 +835,7 @@ function mapOrcaModel(
 
 async function refreshOrcaRouter(
 	context: RefreshModelContext,
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey("orcarouter", context) || ORCA_FALLBACK_KEY;
 	const raw = (await fetchJson(
 		"https://api.orcarouter.ai/v1/models",
@@ -968,7 +974,7 @@ function scheduleTogetherProbes(
 async function refreshTogether(
 	context: RefreshModelContext,
 	_cached: CacheEntry | undefined,
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey("together", context) ?? "";
 	const raw = await fetchJson(
 		"https://api.together.xyz/v1/models",
@@ -983,7 +989,7 @@ async function refreshTogether(
 		const fromStore = store.get(m.id);
 		const ctx = m.context_length ?? 131_072;
 		const reasoning = fromStore?.reasoning ?? false;
-		const base: PiModel = {
+		const base: LiveCatalogModel = {
 			id: m.id,
 			name: m.display_name ?? fromStore?.name ?? m.id,
 			api: "openai-completions",
@@ -1048,7 +1054,7 @@ const GLM_EFFORT_LEVELS: Record<string, string | null> = {
 	max: "max",
 };
 
-function friendliThinkingWiring(id: string, options?: FriendliLiveModel["reasoning_options"]): Partial<PiModel> {
+function friendliThinkingWiring(id: string, options?: FriendliLiveModel["reasoning_options"]): Partial<LiveCatalogModel> {
     if (options) {
         const efforts = options.find(option => option.type === "effort")?.values;
         const toggle = options.some(option => option.type === "toggle");
@@ -1088,7 +1094,7 @@ function friendliThinkingWiring(id: string, options?: FriendliLiveModel["reasoni
 	return { compat: { supportsReasoningEffort: false } };
 }
 
-function mapFriendliModel(m: FriendliLiveModel, dropped?: Map<string, string>): PiModel | undefined {
+function mapFriendliModel(m: FriendliLiveModel, dropped?: Map<string, string>): LiveCatalogModel | undefined {
 	if (m.deprecation_date && Date.parse(m.deprecation_date) <= Date.now()) {
 		noteUnavailable(dropped, m.id, "deprecated");
 		return undefined;
@@ -1115,7 +1121,7 @@ function mapFriendliModel(m: FriendliLiveModel, dropped?: Map<string, string>): 
 
 async function refreshFriendli(
 	context: RefreshModelContext,
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	const raw = (await fetchJson(
 		"https://api.friendli.ai/serverless/v1/models",
 		context.signal,
@@ -1128,7 +1134,7 @@ async function refreshFriendli(
 	const dropped = new Map<string, string>();
 	const models = modelRows<FriendliLiveModel>(raw.data)
 		.map((m) => mapFriendliModel(m, dropped))
-		.filter((m): m is PiModel => m !== undefined);
+		.filter((m): m is LiveCatalogModel => m !== undefined);
 	return { models, unavailable: unavailableRecord(dropped) };
 }
 
@@ -1175,7 +1181,7 @@ function runinfraThinkingLevels(): Record<string, string | null> {
 	};
 }
 
-function mapRunInfraModel(m: RunInfraLiveModel, dropped?: Map<string, string>): PiModel | undefined {
+function mapRunInfraModel(m: RunInfraLiveModel, dropped?: Map<string, string>): LiveCatalogModel | undefined {
 	if (m.availability && m.availability !== "available") {
 		noteUnavailable(dropped, m.id, `vendor availability "${m.availability}"`);
 		return undefined;
@@ -1193,7 +1199,7 @@ function mapRunInfraModel(m: RunInfraLiveModel, dropped?: Map<string, string>): 
 		api: "openai-completions",
 		reasoning: true,
 		liveImageInput: /vlm/.test(modality),
-		input: /vlm/.test(modality) || currentModelFacts("runinfra")?.imageIds.includes(m.id) ? ["text", "image"] : ["text"],
+		input: /vlm/.test(modality) || currentModelFacts("runinfra")?.imageIds?.includes(m.id) ? ["text", "image"] : ["text"],
 		contextWindow: ctx,
 		maxTokens: clampMaxTokens(ctx, m.max_output_tokens ?? Math.min(131_072, ctx)),
 		cost: {
@@ -1212,7 +1218,7 @@ function mapRunInfraModel(m: RunInfraLiveModel, dropped?: Map<string, string>): 
 
 async function refreshRunInfra(
 	context: RefreshModelContext,
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	// WHY: stored auth.json credential first — resolveConfigValueOrThrow makes
 	// a models.json "$VAR" key THROW when the env var is missing (old shells,
 	// IDE/systemd launches), which is what surfaced as "Could not refresh
@@ -1227,7 +1233,7 @@ async function refreshRunInfra(
 	const dropped = new Map<string, string>();
 	const models = modelRows<RunInfraLiveModel>(raw.data)
 		.map((m) => mapRunInfraModel(m, dropped))
-		.filter((m): m is PiModel => m !== undefined);
+		.filter((m): m is LiveCatalogModel => m !== undefined);
 	return { models, unavailable: unavailableRecord(dropped) };
 }
 
@@ -1239,8 +1245,8 @@ function providerConfigJson(providerId: string):
 			baseUrl?: string;
 			api?: string;
 			apiKey?: string;
-			models?: PiModel[];
-			modelOverrides?: Record<string, Partial<PiModel>>;
+			models?: LiveCatalogModel[];
+			modelOverrides?: Record<string, Partial<LiveCatalogModel>>;
 	  }
 	| undefined {
 	try {
@@ -1251,8 +1257,8 @@ function providerConfigJson(providerId: string):
 					baseUrl?: string;
 					api?: string;
 					apiKey?: string;
-					models?: PiModel[];
-					modelOverrides?: Record<string, Partial<PiModel>>;
+					models?: LiveCatalogModel[];
+					modelOverrides?: Record<string, Partial<LiveCatalogModel>>;
 				}
 			>;
 		};
@@ -1290,6 +1296,20 @@ function resolvedCatalogApiKey(
 	return (context.credential?.type === "api_key" ? context.credential.key : undefined)
 		|| catalogApiKey(providerId)
 		|| (providerId === "orcarouter" ? process.env.ORCA_KEY : undefined);
+}
+
+/** Meta's catalog authorizes with the subscription OAuth access token, not
+ * an api key. Same canonical-origin guard as api keys: the token never
+ * travels to a proxy base URL. */
+function resolvedMetaToken(context: RefreshModelContext): string | undefined {
+	try {
+		if (new URL(wireFor("meta").baseUrl).origin !== new URL(DEFAULT_BASE_URLS.meta).origin)
+			return undefined;
+	} catch {
+		return undefined;
+	}
+	return (context.credential?.type === "oauth" ? context.credential.access : undefined)
+		|| resolvedCatalogApiKey("meta", context);
 }
 
 // Catalog-wide uncertainty is metadata, not a terminal warning per model.
@@ -1337,7 +1357,7 @@ function minimalModel(
 	id: string,
 	provider: string,
 	maxTokens?: number,
-): PiModel {
+): LiveCatalogModel {
 	return {
 		id,
 		name: id,
@@ -1361,7 +1381,7 @@ function minimalModel(
  * store or an explicit probe. Add entries with probe evidence in the comment.
  */
 type IdOnlyFacts = Partial<
-	Pick<PiModel, "name" | "contextWindow" | "maxTokens" | "reasoning" | "input" | "thinkingLevelMap" | "compat">
+	Pick<LiveCatalogModel, "name" | "contextWindow" | "maxTokens" | "reasoning" | "input" | "thinkingLevelMap" | "compat">
 >;
 
 async function refreshIdOnlyCatalog(
@@ -1369,7 +1389,7 @@ async function refreshIdOnlyCatalog(
 	url: string,
 	context: RefreshModelContext,
 	facts: Record<string, IdOnlyFacts> = {},
-): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey(providerId, context);
 	const raw = (await fetchJson(url, context.signal, {
 		headers: key ? { Authorization: `Bearer ${key}` } : undefined,
@@ -1393,7 +1413,7 @@ async function refreshIdOnlyCatalog(
 
 /** LongCat's authenticated catalog supplies live context/output limits. Keep
  * unknown prices unknown; availability is not evidence of a free route. */
-async function refreshLongCat(context: RefreshModelContext): Promise<{ models: PiModel[] }> {
+async function refreshLongCat(context: RefreshModelContext): Promise<{ models: LiveCatalogModel[] }> {
   const key = resolvedCatalogApiKey('longcat', context);
   if (!key) throw new Error('LongCat catalog credential unavailable');
   const raw = await fetchJson(`${DEFAULT_BASE_URLS.longcat}/models`, context.signal, {headers:{Authorization:`Bearer ${key}`}}) as any;
@@ -1409,7 +1429,55 @@ async function refreshLongCat(context: RefreshModelContext): Promise<{ models: P
   })};
 }
 
-async function refreshCerebras(context: RefreshModelContext): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+/** Meta's subscription catalog is id-only and OAuth-gated, and the pi.dev
+ * store lags new releases (the Wonder family shipped with no store entry).
+ * New chat ids are templated from the newest curated store sibling in the
+ * same contributor class so they are usable immediately; price stays
+ * unknown until the store or models.json prices them. Vision, image and
+ * voice ids are withheld with reasons instead of masquerading as chat. */
+const META_NON_CHAT = /^(?:sam-)|-(?:image|voice|transcribe|embed|rerank|tts|asr)(?:-|$)/;
+function metaVersionKey(id: string): number[] {
+	return (id.match(/\d+/g) ?? []).map(Number);
+}
+function compareVersionKeys(a: number[], b: number[]): number {
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		const d = (a[i] ?? 0) - (b[i] ?? 0);
+		if (d) return d;
+	}
+	return 0;
+}
+function metaDisplayName(id: string): string {
+	return id.split("-").map((part) => part.replace(/^[a-z]/, (c) => c.toUpperCase())).join(" ");
+}
+async function refreshMeta(context: RefreshModelContext): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
+	const token = resolvedMetaToken(context);
+	if (!token) throw new Error("Meta catalog credential unavailable");
+	const raw = (await fetchJson(`${DEFAULT_BASE_URLS.meta}/models`, context.signal, {
+		headers: { Authorization: `Bearer ${token}` },
+	})) as { data?: { id: string }[] };
+	const liveIds = modelRows<{ id: string }>(raw.data).map((m) => m.id);
+	const store = storeModels("meta");
+	const byRecency = [...store.values()].sort((a, b) => compareVersionKeys(metaVersionKey(b.id), metaVersionKey(a.id)));
+	const templateFor = (id: string): LiveCatalogModel | undefined => {
+		const contributor = id.endsWith("-contributor");
+		return byRecency.find((m) => m.id.endsWith("-contributor") === contributor) ?? byRecency[0];
+	};
+	const dropped = new Map<string, string>();
+	const models: LiveCatalogModel[] = [];
+	for (const id of [...new Set([...liveIds, ...store.keys()])]) {
+		const stored = store.get(id);
+		if (stored) { models.push(stored); continue; }
+		if (META_NON_CHAT.test(id)) { noteUnavailable(dropped, id, "non-chat modality"); continue; }
+		const template = templateFor(id);
+		models.push(template
+			? { ...template, id, name: metaDisplayName(id),
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output"], knownFree: false } }
+			: minimalModel(id, "meta"));
+	}
+	return { models, unavailable: unavailableRecord(dropped) };
+}
+
+async function refreshCerebras(context: RefreshModelContext): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
     // Default public format has actual prices; /v1/models can be ID-only.
     try {
         const raw = await fetchJson("https://api.cerebras.ai/public/v1/models", context.signal);
@@ -1423,7 +1491,7 @@ async function refreshCerebras(context: RefreshModelContext): Promise<{ models: 
         }).map((m) => {
             const base = store.get(m.id) ?? minimalModel(m.id, "cerebras");
             const liveFields: string[] = [];
-            const live: Partial<PiModel> = {};
+            const live: Partial<LiveCatalogModel> = {};
             const contextWindow = boundedContextLimit(m.limits?.max_context_length, m.context_length);
             const maxTokens = boundedContextLimit(m.limits?.max_completion_tokens, m.max_completion_tokens);
             if (contextWindow) { live.contextWindow = contextWindow; liveFields.push("contextWindow"); }
@@ -1459,12 +1527,13 @@ const REFRESHER_IDS = [
 	"deepseek",
 	"longcat",
 	"runinfra",
+	"meta",
 ] as const;
 
 type Fetcher = (
 	context: RefreshModelContext,
 	cached: CacheEntry | undefined,
-) => Promise<{ models: PiModel[]; unavailable?: UnavailableMap }>;
+) => Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }>;
 
 // Raw cache rows do not embed expiring snapshot overrides. Apply current
 // registry facts at publication so an old cache cannot extend their lifetime.
@@ -1479,9 +1548,9 @@ const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 };
 function publishModels(
 	provider: string,
-	models: PiModel[],
+	models: LiveCatalogModel[],
 	probes?: CacheEntry["probes"],
-): PiModel[] {
+): LiveCatalogModel[] {
 	const idOnly = ["cerebras", "deepseek"].includes(provider);
     const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""));
     // Publish the documented canonical ID even when an old cache predates release.
@@ -1561,12 +1630,13 @@ const REFRESHERS: Record<string, Fetcher> = {
 		refreshIdOnlyCatalog("deepseek", "https://api.deepseek.com/v1/models", ctx, idOnlyFacts("deepseek")),
 	longcat: refreshLongCat,
 	runinfra: refreshRunInfra,
+	meta: refreshMeta,
 };
 
 function refreshFor(
 	providerId: string,
 ): NonNullable<ProviderConfig["refreshModels"]> {
-	return async (context: RefreshModelContext): Promise<PiModel[]> => {
+	return async (context: RefreshModelContext): Promise<LiveCatalogModel[]> => {
 		const cache = loadCache();
 		const cached = cache.providers[providerId];
 		// One fallback owner for offline restore AND failed refreshes. Serving
@@ -1682,6 +1752,7 @@ export default async function registerLiveModels(
 		["deepseek", "DeepSeek"],
 		["longcat", "LongCat"],
 		["runinfra", "RunInfra"],
+		["meta", "Meta"],
 	] as const) {
 		const wire = wireFor(providerId);
 		pi.registerProvider(providerId, {

@@ -12,6 +12,7 @@ import { createEventBus } from '../core/coding-agent/src/core/event-bus.js';
 import { createExtensionRuntime, loadExtensionFromFactory } from '../core/coding-agent/src/core/extensions/loader.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-prompt-path-'));
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = directory;
 process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'llm_preferences.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');

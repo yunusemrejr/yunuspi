@@ -104,10 +104,16 @@ test('bundled SVG and true 3D examples build offline from a project copy', () =>
 test('the SDK offers Anatomy to text and vision models in parent and native child sessions', {timeout: 60000}, async () => {
   const keys = ['PI_CODING_AGENT_DIR', 'PI_JEV', 'PI_NEEDLE', 'PI_LOCAL_LM', 'PI_SUBAGENT_CHILD'];
   const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anatomy-sdk-'));
-  Object.assign(process.env, {PI_CODING_AGENT_DIR: cwd, PI_JEV: 'off', PI_NEEDLE: 'off', PI_LOCAL_LM: 'off'});
+  Object.assign(process.env, {PI_JEV: 'off', PI_NEEDLE: 'off', PI_LOCAL_LM: 'off'});
+  const cwds = [];
   try {
     for (const child of [false, true]) for (const input of [['text'], ['text', 'image']]) {
+      // Each session gets a fresh project directory: guidance delivery
+      // receipts are per-project by design, so reusing one directory would
+      // (correctly) suppress re-offering the same workflow in later sessions.
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anatomy-sdk-'));
+      cwds.push(cwd);
+      process.env.PI_CODING_AGENT_DIR = cwd;
       if (child) process.env.PI_SUBAGENT_CHILD = '1'; else delete process.env.PI_SUBAGENT_CHILD;
       const settingsManager = SettingsManager.inMemory({compaction: {enabled: false}, retry: {enabled: false}});
       const loader = new DefaultResourceLoader({cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
@@ -153,6 +159,6 @@ test('the SDK offers Anatomy to text and vision models in parent and native chil
     }
   } finally {
     for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; }
-    fs.rmSync(cwd, {recursive: true, force: true});
+    for (const dir of cwds) fs.rmSync(dir, {recursive: true, force: true});
   }
 });

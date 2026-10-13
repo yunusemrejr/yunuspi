@@ -3239,7 +3239,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1662
+        "line": 1732
       },
       {
         "name": "claude-cache",
@@ -3389,7 +3389,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 481
+        "line": 494
       },
       {
         "name": "obs",

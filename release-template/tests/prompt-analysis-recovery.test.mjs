@@ -10,6 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.existsSync(path.join(p, 'extensions/micro-intelligence.ts')));
 assert.ok(agent, 'agent extension tree must exist');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-recovery-'));
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = directory;
 process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'preferences.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');

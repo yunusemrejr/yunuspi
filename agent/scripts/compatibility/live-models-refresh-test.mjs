@@ -458,9 +458,11 @@ try {
 				],
 			});
 		const models = await refresh("cerebras", context({ force: true }));
-		assert.equal(models.find((m) => m.id === "qwen-3.8-27b").maxTokens, 65536);
-		assert.equal(models.find((m) => m.id === "qwen3-coder").maxTokens, 65536);
-		assert.equal(models.find((m) => m.id === "gpt-oss-120b").maxTokens, 32768);
+		// Re-verified 2026-10-13 against the public catalog limits; the delisted
+		// qwen3-coder has no current facts and keeps the conservative default.
+		assert.equal(models.find((m) => m.id === "qwen-3.8-27b").maxTokens, 32768);
+		assert.equal(models.find((m) => m.id === "qwen3-coder").maxTokens, 8192);
+		assert.equal(models.find((m) => m.id === "gpt-oss-120b").maxTokens, 40960);
 		assert.equal(warnings.length, 0);
 		assert.equal(models.find((m) => m.id === "future-cerebras").maxTokens, 8192);
 		assert.ok(models.every((m) => m.compat.maxTokensField === "max_tokens"));
@@ -549,6 +551,60 @@ try {
 	} finally {
 		console.warn = oldWarn;
 	}
+	// Meta subscription (OAuth, id-only /v1/models): newly shipped ids appear
+	// without waiting for the pi.dev store; non-chat ids stay withheld.
+	const metaSpark = {
+		id: "muse-spark-1.3", name: "Muse Spark 1.3", reasoning: true,
+		input: ["text", "image"], contextWindow: 1048576, maxTokens: 131072,
+		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+		thinkingLevelMap: { off: null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+	};
+	const metaSparkContrib = { ...metaSpark, id: "muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor", cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 } };
+	fs.writeFileSync(path.join(dir, "models-store.json"), JSON.stringify({
+		deepseek: { models: [oldModel] },
+		meta: { models: [metaSpark, metaSparkContrib] },
+	}));
+	fs.writeFileSync(path.join(dir, "models.json"), '{"providers":{}}');
+	seed();
+	let metaAuth;
+	globalThis.fetch = async (url, init) => {
+		assert.equal(String(url), "https://api.meta.ai/v1/models");
+		metaAuth = new Headers(init?.headers).get("Authorization");
+		return response({ data: [
+			{ id: "muse-wonder-full-1.0" }, { id: "muse-wonder-1.0-contributor" },
+			{ id: "muse-spark-1.3" }, { id: "muse-image-1.0" },
+			{ id: "muse-voice-transcribe-1.0" }, { id: "sam-3.1" },
+		]});
+	};
+	const metaOauth = { credential: { type: "oauth", access: "TEST_meta-access", refresh: "TEST", expires: Date.now() + 60000 } };
+	const metaModels = await refresh("meta", context(metaOauth));
+	assert.equal(metaAuth, "Bearer TEST_meta-access", "OAuth access token authorizes the catalog fetch");
+	const wonder = metaModels.find((m) => m.id === "muse-wonder-full-1.0");
+	assert.ok(wonder, "new Meta model appears without a store update");
+	assert.equal(wonder.reasoning, true);
+	assert.deepEqual(wonder.input, ["text", "image"]);
+	assert.equal(wonder.contextWindow, 1048576);
+	assert.equal(wonder.maxTokens, 131072);
+	assert.equal(wonder.thinkingLevelMap.max, "max");
+	assert.deepEqual(wonder.cost.missing, ["input", "output"], "unknown price stays unknown, never cloned or free");
+	const wonderContrib = metaModels.find((m) => m.id === "muse-wonder-1.0-contributor");
+	assert.ok(wonderContrib?.cost.missing?.includes("input"), "contributor pricing is not cloned either");
+	assert.equal(metaModels.find((m) => m.id === "muse-spark-1.3").cost.input, 1.25, "store models keep curated facts");
+	for (const withheld of ["muse-image-1.0", "muse-voice-transcribe-1.0", "sam-3.1"]) {
+		assert.ok(!metaModels.some((m) => m.id === withheld), `${withheld} is not a chat model`);
+		assert.ok(readCache().providers.meta.unavailable[withheld], `${withheld} withheld with a reason`);
+	}
+	// No credential and proxy origins never fetch: the store list stands and
+	// the OAuth token never travels to a non-canonical base URL.
+	let anonymousCalls = 0;
+	globalThis.fetch = async () => { anonymousCalls++; throw new Error("must not fetch"); };
+	seed();
+	assert.deepEqual((await refresh("meta")).map((m) => m.id).sort(), ["muse-spark-1.3", "muse-spark-1.3-contributor"]);
+	fs.writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { meta: { baseUrl: "https://proxy.invalid/v1" } } }));
+	seed();
+	assert.deepEqual((await refresh("meta", context(metaOauth))).map((m) => m.id).sort(), ["muse-spark-1.3", "muse-spark-1.3-contributor"]);
+	assert.equal(anonymousCalls, 0, "no anonymous or proxied catalog fetch");
+	fs.writeFileSync(path.join(dir, "models.json"), '{"providers":{}}');
 	console.log(
 		"PASS catalog recovery/cache/cancellation, id-only warnings, known caps, and real Cerebras/proxy max_tokens wire",
 	);

@@ -50,7 +50,8 @@ test("skills route 3d prompts to the 3d-cad skill", () => {
   assert.ok(splat.file.test("scene/transforms.json") && splat.file.test("out/splat_1500.ply") && blend.file.test("assets/scene.blend"));
   assert.ok(fs.existsSync(path.join(agent, "skills/3d-cad/SKILL.md")));
   const skill = fs.readFileSync(path.join(agent, "skills/3d-cad/SKILL.md"), "utf8");
-  assert.match(skill, /`blender` tool \(actions run, render, inspect, setup\)/);
+  assert.match(skill, /blender tool \(run, render, inspect, setup\)/);
+  assert.match(skill, /consolidated into \*\*create\*\*/);
 });
 
 test("blender status and workspace write guards", async () => {

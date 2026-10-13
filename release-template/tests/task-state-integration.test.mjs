@@ -9,6 +9,7 @@ const tsLib = path.join(root, 'agent', 'extensions', 'lib', 'task-state');
 
 // Isolated harness env (mirrors the observer fixtures).
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-state-int-'));
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = fixtureRoot;
 process.env.PI_LLM_PREFERENCES_FILE = path.join(fixtureRoot, 'preferences.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(fixtureRoot, 'health.json');

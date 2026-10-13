@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import observerExtension from '../agent/extensions/session-observer.ts';
 import { publishReviewerNote, registerPlannerStatus, reviewerSessionKey } from '../agent/extensions/lib/reviewer-board.ts';
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 
 const GUARDIAN_META = Symbol.for('yunuspi.guardian.request-meta.v1');
 const model = { provider: 'deepseek', id: 'deepseek-flash', name: 'Synthetic reviewer route', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, input: ['text'], cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0 } };

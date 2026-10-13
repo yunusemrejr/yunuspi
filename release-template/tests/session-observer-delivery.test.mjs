@@ -28,6 +28,7 @@ for(const mode of ['success','slow-success','pre-dispatch-failure','http-error',
   const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'observer-delivery-'));
   const previous=Object.fromEntries(['PI_CODING_AGENT_DIR','PI_LLM_PREFERENCES_FILE','PI_SUBAGENTS_ECONOMY_CONFIG','PI_PROVIDER_STATE_FILE','PI_MODEL_EXCLUSIONS_PATH','PI_OFFLINE','PI_SESSION_OBSERVER','PI_SUBAGENT_CHILD'].map(key=>[key,process.env[key]]));
   Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_LLM_PREFERENCES_FILE:path.join(cwd,'prefs.json'),PI_SUBAGENTS_ECONOMY_CONFIG:path.join(cwd,'economy.json'),PI_PROVIDER_STATE_FILE:path.join(cwd,'health.json'),PI_MODEL_EXCLUSIONS_PATH:path.join(cwd,'exclusions.json')});
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
   delete process.env.PI_OFFLINE;delete process.env.PI_SESSION_OBSERVER;delete process.env.PI_SUBAGENT_CHILD;
   fs.writeFileSync(path.join(cwd,'economy.json'),'{}');
   const time=clock(),wire=[],events=[];let observerCalls=0,toolCalls=0,fault=false,authArmed=false,session;

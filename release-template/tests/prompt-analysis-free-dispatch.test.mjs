@@ -6,6 +6,7 @@ import path from 'node:path';
 import { completeSimple } from '@yunuspi/ai/compat';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-analysis-free-wire-'));
+process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = directory;
 process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'llm_preferences.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');

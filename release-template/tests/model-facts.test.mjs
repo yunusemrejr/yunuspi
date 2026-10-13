@@ -16,7 +16,7 @@ test('dated model facts have explicit provenance and expire without becoming fre
   assert.equal(currentModelFacts(provider,Date.parse(row.verifiedAt)-1),undefined);
  }
  assert.equal(currentModelFacts('__proto__'),undefined);
- assert.equal(directDeepseekCost('deepseek-flash',Date.parse('2026-10-10T00:00:00Z')),undefined);
+ assert.equal(directDeepseekCost('deepseek-flash',Date.parse('2026-11-12T00:00:00Z')),undefined);
 });
 test('versioned direct price schedule preserves its original boundary',()=>{
  const cutover=Date.parse('2026-09-14T04:00:00Z');

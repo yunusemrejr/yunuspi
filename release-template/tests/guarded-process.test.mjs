@@ -18,7 +18,7 @@ async function assertOrphanStopped(pid) {
       state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
       // Exit can expose X (dead) before Z (zombie), or disappear once reaped.
       if (state === 'X' || state === 'Z') return;
-    } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    } catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') return; throw error; }
     await new Promise(resolve => setTimeout(resolve, 10));
   } while (Date.now() < deadline);
   assert.fail(`Owned orphan ${pid} remained live in state ${state} after output closed`);

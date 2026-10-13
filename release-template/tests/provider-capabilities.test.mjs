@@ -163,7 +163,7 @@ test('live provider metadata wins over snapshots, survives cache, and drives act
   assert.equal(cached[0].maxTokens,32768);
   const realNow=Date.now;
   try {
-   Date.now=()=>Date.parse('2026-10-11T00:00:00Z');
+   Date.now=()=>Date.parse('2026-11-13T00:00:00Z');
    const expired=await providers.cerebras.refreshModels({allowNetwork:false,signal:new AbortController().signal});
    assert.equal(expired[0].maxTokens,32768,'expiry of a fallback fact cannot discard live metadata');
   } finally { Date.now=realNow; }
