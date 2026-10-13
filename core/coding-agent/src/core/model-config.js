@@ -55,12 +55,15 @@ const ThinkingLevelMapSchema = Type.Object({
 });
 const ChatTemplateKwargScalarSchema = Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]);
 const ChatTemplateKwargVariableSchema = Type.Object({
-    $var: Type.Union([Type.Literal("thinking.enabled"), Type.Literal("thinking.effort")]),
+    $var: Type.Union([Type.Literal("thinking.enabled"), Type.Literal("thinking.effort"), Type.Literal("thinking.budget")]),
     omitWhenOff: Type.Optional(Type.Boolean()),
 });
 const ChatTemplateKwargSchema = Type.Union([ChatTemplateKwargScalarSchema, ChatTemplateKwargVariableSchema]);
 const OpenAICompletionsCompatSchema = Type.Object({
     thinkingTokenBudgetOff: Type.Optional(Type.Number({ minimum: 0 })),
+    thinkingTokenBudgetField: Type.Optional(Type.String({ minLength: 1 })),
+    supportsThinkingTokenBudget: Type.Optional(Type.Boolean()),
+    zaiToolStream: Type.Optional(Type.Boolean()),
     supportsStore: Type.Optional(Type.Boolean()),
     supportsDeveloperRole: Type.Optional(Type.Boolean()),
     supportsReasoningEffort: Type.Optional(Type.Boolean()),
@@ -102,6 +105,7 @@ const OpenAIResponsesCompatSchema = Type.Object({
     supportsDeveloperRole: Type.Optional(Type.Boolean()),
     sessionAffinityFormat: Type.Optional(Type.Union([Type.Literal("openai"), Type.Literal("openai-nosession"), Type.Literal("openrouter")])),
     supportsLongCacheRetention: Type.Optional(Type.Boolean()),
+    supportsExplicitPromptCacheMode: Type.Optional(Type.Boolean()),
     supportsStrictMode: Type.Optional(Type.Boolean()),
     supportsOpenAIGrammarTools: Type.Optional(Type.Boolean()),
     supportsAdditionalTools: Type.Optional(Type.Boolean()),
@@ -120,16 +124,21 @@ const AnthropicMessagesCompatSchema = Type.Object({
     supportsMidConvoEffort: Type.Optional(Type.Boolean()),
     supportsToolReferences: Type.Optional(Type.Boolean()),
 });
+const BedrockCompatSchema = Type.Object({
+    supportsStrictMode: Type.Optional(Type.Boolean()),
+});
 const ProviderCompatSchema = Type.Union([
     OpenAICompletionsCompatSchema,
     OpenAIResponsesCompatSchema,
     AnthropicMessagesCompatSchema,
+    BedrockCompatSchema,
 ]);
 const ModelCostRatesSchema = {
     input: Type.Number(),
     output: Type.Number(),
     cacheRead: Type.Number(),
     cacheWrite: Type.Number(),
+    cacheWrite1h: Type.Optional(Type.Number()),
 };
 const ModelCostTierSchema = Type.Object({
     inputTokensAbove: Type.Number(),
@@ -137,6 +146,7 @@ const ModelCostTierSchema = Type.Object({
 });
 const ModelCostSchema = Type.Object({
     ...ModelCostRatesSchema,
+    knownFree: Type.Optional(Type.Boolean()),
     tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
 });
 const ModelDefinitionSchema = Type.Object({

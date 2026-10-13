@@ -974,7 +974,7 @@ export class ExtensionRunner {
         }
         ctx.getSystemPrompt = () => {
             this.assertActive();
-            return currentSystemPrompt;
+            return systemPromptModified ? currentSystemPrompt : this.getSystemPromptFn();
         };
         const messages = [];
         let systemPromptModified = false;
@@ -984,6 +984,12 @@ export class ExtensionRunner {
                 continue;
             for (const handler of handlers) {
                 try {
+                    if (!systemPromptModified) {
+                        const liveBase = this.getSystemPromptFn();
+                        if (typeof liveBase === "string" && liveBase !== currentSystemPrompt) {
+                            currentSystemPrompt = liveBase;
+                        }
+                    }
                     const event = {
                         type: "before_agent_start",
                         prompt,
@@ -1003,6 +1009,12 @@ export class ExtensionRunner {
                         if (result.systemPrompt !== undefined) {
                             currentSystemPrompt = result.systemPrompt;
                             systemPromptModified = true;
+                        }
+                    }
+                    if (!systemPromptModified) {
+                        const liveBase = this.getSystemPromptFn();
+                        if (typeof liveBase === "string" && liveBase !== currentSystemPrompt) {
+                            currentSystemPrompt = liveBase;
                         }
                     }
                 }

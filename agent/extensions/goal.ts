@@ -33,7 +33,20 @@ const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
 const WRITE_TOOLS = new Set(["edit", "write", "bulk_edit"]);
 /** Tools whose successful run is itself a verification of built output. */
-const VERIFY_TOOLS = new Set(["render_see", "video_qa", "video_render"]);
+const VERIFY_TOOLS = new Set([
+	"render_see", "video_qa", "video_render",
+	"ui_explore", "ui_consistency", "motion_inspect",
+	"deliverable_check", "svg_inspect", "svg_render",
+	"media_sync", "sandbox_run", "lsp_diagnostics", "lens_diagnostics",
+]);
+function isVerificationToolResult(name: string, input?: Record<string, unknown>): boolean {
+	const action = String(input?.action ?? "");
+	if (name === "blender") return ["render", "inspect", "qa", "verify"].includes(action);
+	if (name === "browser_session") return ["verify", "screenshot", "snapshot", "console", "network"].includes(action);
+	if (name === "office_doc") return ["verify", "render", "inspect", "check"].includes(action);
+	if (name === "visual_review") return (action || "record") === "record";
+	return VERIFY_TOOLS.has(name) && !["plan", "status", "list"].includes(action);
+}
 
 export default function goalExtension(pi: ExtensionAPI): void {
 	if (process.env.PI_GOAL === "0") return;
@@ -137,6 +150,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const name = event.toolName ?? "";
 		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
 		if (WRITE_TOOLS.has(name)) {
+			if (name === "bulk_edit" && (event.input?.action === "preview" || event.details?.bulkEdit?.changedFiles === 0 || event.details?.changedFiles === 0)) return;
 			const file = event.details?.fileMutation?.resolved ?? event.input?.path;
 			// Reading the final documentation diff satisfies V; appending release notes after a green check
 			// must not manufacture another test run. Executable MDX and unknown/batched paths stay conservative.
@@ -152,7 +166,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		else if (name === "bash" && isTestLikeCommand(observed.command) && (event.details?.exitCode === undefined || event.details.exitCode === 0)) cover(observed, ctx);
 		else if (name === "project_tests" && event.details?.need === null && event.details?.projectTests?.plannedChecks?.length
 			&& event.details.projectTests.plannedChecks.every((check: any) => check.outcome === "passed")) cover(observed, ctx);
-		else if (VERIFY_TOOLS.has(name) && !["plan", "status", "inspect", "list"].includes(String(event.input?.action ?? ""))) cover(observed, ctx);
+		else if (isVerificationToolResult(name, event.input)) cover(observed, ctx);
 	});
 
 	// One continuation per settled run; bounded and stall-aware inside stopGate.
@@ -189,53 +203,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		} catch { /* a gate failure must never wedge the session */ }
 	});
 
-	pi.registerCommand("goal", {
-		description: "Set a goal with a real definition of done: /goal <what you want>, then /goal to inspect, pause, resume, retry, done or clear.",
-		handler: async (args: string, ctx: ExtensionContext) => {
-			try {
-				const command = parseGoalArgs(args);
-				const notify = (text: string, level: "info" | "warning" = "info") => ctx.ui?.notify?.(text, level);
-				// The kickoff starts a full agent run; the command must return immediately so
-				// the editor and working indicator stay live while that run streams. It carries the
-				// user's own words, so it is authored input: prompt analysis, Guardian constraints,
-				// the requirement ledger and memory must see it (continuations below stay synthetic).
-				// `userText` keeps the user's literal words apart from the criteria the harness adds, so
-				// analysis, the Guardian and memory work from what was asked, not from our wrapper.
-				const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text }))
-					.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
-				switch (command.kind) {
-					case "status": return notify(goalSummary(goal));
-					case "set": {
-						const next = createGoal(command.text);
-						checkStatic = createStaticCompletionCheck();
-						checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-						refused.clear();
-						persist(next, ctx);
-						notify(`Goal ${next.id} set with ${next.criteria.length} criteria. The session keeps working until each has evidence. /goal shows progress.`);
-						kickoff(next);
-						return;
-					}
-					case "criteria":
-						if (!goalIsLive(goal)) return notify("No live goal. Start one with /goal <text>.", "warning");
-						persist(setCriteria(goal!, command.items), ctx);
-						return notify(goalSummary(goal));
-				}
-				if (!goal || goal.status === "cleared") return notify("No goal set. /goal <what you want done> starts one.");
-				const now = Date.now();
-				if (command.kind === "pause") { persist({ ...goal, status: "paused", updatedAt: now }, ctx); return notify("Goal paused. /goal resume continues it."); }
-				if (command.kind === "clear") { persist({ ...goal, status: "cleared", updatedAt: now }, ctx); return notify("Goal cleared."); }
-				if (command.kind === "done") { persist(complete(goal, true, now), ctx); return notify("Goal marked achieved by you."); }
-				// resume and retry both re-arm the continuation budget and fingerprint.
-				const rearmed: GoalState = { ...goal, status: "active", nudges: 0, stalls: 0, progressMark: "", note: undefined, updatedAt: now };
-				persist(rearmed, ctx);
-				notify(`Goal ${rearmed.id} resumed.`);
-				kickoff(rearmed);
-			} catch (error) {
-				ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
-			}
-		},
-	});
-
 	// Preset goals are /goal with the aim already written: /noslop desloppifies,
 	// /nobug debugs, /3d boosts 3D work, /video boosts video work. They share
 	// this extension's goal state on purpose — one owner for the persisted
@@ -243,7 +210,59 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// preset run, and its fronts close through the same goal tool. Leading preset tokens chain:
 	// `/3d /video /noslop make X` dispatches here once, as /3d, and the parser
 	// in lib/presets.ts stacks every named aim onto the one goal.
+	const goalCommandHandler = async (args: string, ctx: ExtensionContext) => {
+		try {
+			const command = parseGoalArgs(args);
+			const notify = (text: string, level: "info" | "warning" = "info") => ctx.ui?.notify?.(text, level);
+			// The kickoff starts a full agent run; the command must return immediately so
+			// the editor and working indicator stay live while that run streams. It carries the
+			// user's own words, so it is authored input: prompt analysis, Guardian constraints,
+			// the requirement ledger and memory must see it (continuations below stay synthetic).
+			// `userText` keeps the user's literal words apart from the criteria the harness adds, so
+			// analysis, the Guardian and memory work from what was asked, not from our wrapper.
+			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text }))
+				.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+			switch (command.kind) {
+				case "status": return notify(goalSummary(goal));
+				case "set": {
+					const presetMatch = /^\/(noslop|nobug|3d|video)(?=\s|$)/i.exec(command.text.trim());
+					if (presetMatch) {
+						return startPreset(presetMatch[1].toLowerCase() as PresetId)(command.text.trim().slice(presetMatch[0].length).trim(), ctx);
+					}
+					const next = createGoal(command.text);
+					checkStatic = createStaticCompletionCheck();
+					checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
+					refused.clear();
+					persist(next, ctx);
+					notify(`Goal ${next.id} set with ${next.criteria.length} criteria. The session keeps working until each has evidence. /goal shows progress.`);
+					kickoff(next);
+					return;
+				}
+				case "criteria":
+					if (!goalIsLive(goal)) return notify("No live goal. Start one with /goal <text>.", "warning");
+					persist(setCriteria(goal!, command.items), ctx);
+					return notify(goalSummary(goal));
+			}
+			if (!goal || goal.status === "cleared") return notify("No goal set. /goal <what you want done> starts one.");
+			const now = Date.now();
+			if (command.kind === "pause") { persist({ ...goal, status: "paused", updatedAt: now }, ctx); return notify("Goal paused. /goal resume continues it."); }
+			if (command.kind === "clear") { persist({ ...goal, status: "cleared", updatedAt: now }, ctx); return notify("Goal cleared."); }
+			if (command.kind === "done") { persist(complete(goal, true, now), ctx); return notify("Goal marked achieved by you."); }
+			// resume and retry both re-arm the continuation budget and fingerprint.
+			const rearmed: GoalState = { ...goal, status: "active", nudges: 0, stalls: 0, progressMark: "", note: undefined, updatedAt: now };
+			persist(rearmed, ctx);
+			notify(`Goal ${rearmed.id} resumed.`);
+			kickoff(rearmed);
+		} catch (error) {
+			ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	};
+
 	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
+		const trimmed = String(args ?? "").trim().toLowerCase();
+		if (goal && goal.status !== "cleared" && ["status", "pause", "resume", "clear", "done", "retry"].includes(trimmed)) {
+			return goalCommandHandler(trimmed, ctx);
+		}
 		const chain = parsePresetChain(invoked, args);
 		const label = chain.presets.map((id) => PRESET_LABELS[id]).join(" + ");
 		try {
@@ -262,6 +281,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			ctx.ui?.notify?.(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
 	};
+
+	pi.registerCommand("goal", {
+		description: "Set a goal with a real definition of done: /goal <what you want>, then /goal to inspect, pause, resume, retry, done or clear.",
+		handler: goalCommandHandler,
+	});
 	pi.registerCommand("noslop", {
 		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /nobug, /3d and /video.",
 		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",

@@ -489,7 +489,12 @@ export async function findInitialModel(options) {
             process.exit(1);
         }
         if (resolved.model) {
-            return { model: resolved.model, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+            const perModel = modelThinkingLevels?.[`${resolved.model.provider}/${resolved.model.id}`];
+            return {
+                model: resolved.model,
+                thinkingLevel: resolved.thinkingLevel ?? perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+                fallbackMessage: undefined,
+            };
         }
     }
     // 2. Use first model from scoped models (skip if continuing/resuming)
@@ -525,11 +530,22 @@ export async function findInitialModel(options) {
             const defaultId = defaultModelPerProvider[provider];
             const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
             if (match) {
-                return { model: match, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+                const perModel = modelThinkingLevels?.[`${match.provider}/${match.id}`];
+                return {
+                    model: match,
+                    thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+                    fallbackMessage: undefined,
+                };
             }
         }
         // If no default found, use first available
-        return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+        const first = availableModels[0];
+        const perModel = modelThinkingLevels?.[`${first.provider}/${first.id}`];
+        return {
+            model: first,
+            thinkingLevel: perModel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+            fallbackMessage: undefined,
+        };
     }
     // 5. No model found
     return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };

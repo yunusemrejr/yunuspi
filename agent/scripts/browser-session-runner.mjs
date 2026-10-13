@@ -93,12 +93,31 @@ export function browserUrl(raw) {
     );
   return url.href;
 }
+
+export function browserRequestAllowed(raw, isNavigation = false) {
+  if (isNavigation) {
+    if (raw === "about:blank") return true;
+    browserUrl(raw);
+    return true;
+  }
+  if (/^(?:data:|blob:|about:blank$)/i.test(raw)) return true;
+  if (/^wss?:/i.test(raw)) {
+    browserUrl(raw.replace(/^ws/i, "http"));
+    return true;
+  }
+  browserUrl(raw);
+  return true;
+}
+
 export async function runBrowserSession(input, output) {
   let browser,
     context,
     page,
     closing = false,
+    attachedOverCdp = false,
+    connectionMode = "isolated",
     requestId = 0;
+  const agentOwnedPages = new WeakSet();
   const lease = createBrowserLease();
   const tabs = new Map(), frameIds = new WeakMap();
   let tabSequence = 0, refSequence = 0, frameSequence = 0;
@@ -116,6 +135,13 @@ export async function runBrowserSession(input, output) {
   const close = async () => {
     if (closing) return;
     closing = true;
+    if (attachedOverCdp) {
+      for (const tab of tabs.values()) {
+        if (agentOwnedPages.has(tab.page)) {
+          await tab.page.close({ runBeforeUnload: false }).catch(() => {});
+        }
+      }
+    }
     await browser?.close().catch(() => {});
   };
   let lifetime;
@@ -176,34 +202,63 @@ export async function runBrowserSession(input, output) {
         if (!browser) {
           if (action !== "open") throw Error("Open the browser session first");
           if (p.url !== undefined) browserUrl(p.url);
-          if (p.visible && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) throw Error("Visible browser requires a desktop display; omit visible for screenshots and text-based human help");
+          const requestedMode = p.connectionMode ?? (p.cdpUrl ? "cdp" : "isolated");
+          if (p.visible && requestedMode === "isolated" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY)
+            throw Error("Visible browser requires a desktop display; omit visible for screenshots and text-based human help");
           stage = "launch";
-          browser = await chromium.launch({
-            channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
-            headless: p.visible !== true,
-            chromiumSandbox: true,
-            timeout: 15_000,
-          });
-          context = await browser.newContext({
-            viewport: { width: 1280, height: 800 },
-            acceptDownloads: false,
-            serviceWorkers: "block",
-            permissions: [],
-          });
-          const pageLogs = createBrowserPageLogs(context);
-          await context.route("**/*", (route) => {
+          const cdpCandidates = p.cdpUrl
+            ? [p.cdpUrl]
+            : (requestedMode === "cdp" || requestedMode === "user") && Array.isArray(p.cdpCandidates)
+              ? p.cdpCandidates
+              : [];
+          for (const candidate of cdpCandidates) {
             try {
-              browserUrl(route.request().url());
-              return route.continue();
-            } catch {
-              record("unsupported-protocol-blocked");
-              return route.abort();
-            }
-          });
-          context.on("page", child => {
+              browser = await chromium.connectOverCDP(candidate, { timeout: 3000 });
+              attachedOverCdp = true;
+              connectionMode = "cdp";
+              break;
+            } catch {}
+          }
+          if (!browser && (requestedMode === "cdp" || p.cdpUrl)) {
+            throw Error("Could not connect to browser CDP endpoint; launch the browser with --remote-debugging-port=9222 or use connectionMode:user");
+          }
+          if (!browser) {
+            browser = await chromium.launch({
+              channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
+              headless: p.visible !== true,
+              chromiumSandbox: true,
+              timeout: 15_000,
+            });
+            connectionMode = Array.isArray(p.initialCookies) && p.initialCookies.length > 0 ? "user-cookies" : "isolated";
+          }
+          context = attachedOverCdp && browser.contexts().length > 0
+            ? browser.contexts()[0]
+            : await browser.newContext({
+                viewport: { width: 1280, height: 800 },
+                acceptDownloads: false,
+                serviceWorkers: "block",
+                permissions: [],
+              });
+          if (Array.isArray(p.initialCookies) && p.initialCookies.length > 0) {
+            await context.addCookies(p.initialCookies).catch(() => {});
+          }
+          const pageLogs = createBrowserPageLogs(context);
+          if (!attachedOverCdp) {
+            await context.route("**/*", (route) => {
+              try {
+                browserRequestAllowed(route.request().url(), route.request().isNavigationRequest());
+                return route.continue();
+              } catch {
+                record("unsupported-protocol-blocked");
+                return route.abort();
+              }
+            });
+          }
+          const attachPage = (child) => {
+            if ([...tabs.values()].some(t => t.page === child)) return;
             if (tabs.size >= 8) {
               record("tab-limit", { limit: 8 });
-              child.close().catch(() => {});
+              if (!attachedOverCdp || agentOwnedPages.has(child)) child.close().catch(() => {});
               return;
             }
             const tab = { id: `tab-${++tabSequence}`, page: child, logs: pageLogs(child), network: createBrowserEvents(), refs: new Map(), retired: new Map(), markers: new Map(), dialog: null };
@@ -278,9 +333,28 @@ export async function runBrowserSession(input, output) {
               network.record("failed", failure);
               record("request-failed", failure);
             });
-          });
-          await context.newPage();
-          selectTab(tabs.values().next().value);
+          };
+          context.on("page", attachPage);
+          if (attachedOverCdp && typeof context.pages === "function") {
+            for (const existingPage of context.pages()) {
+              attachPage(existingPage);
+              existingPage.title().then(title => {
+                const tab = [...tabs.values()].find(t => t.page === existingPage);
+                if (tab) tab.title = diagnosticText(title, 120);
+              }).catch(() => {});
+            }
+          }
+          if (tabs.size === 0 || p.url !== undefined) {
+            const created = await context.newPage();
+            agentOwnedPages.add(created);
+            attachPage(created);
+            selectTab([...tabs.values()].find(tab => tab.page === created) ?? tabs.values().next().value);
+          } else {
+            selectTab(tabs.values().next().value);
+          }
+        }
+        if (Array.isArray(p.seedCookies) && p.seedCookies.length > 0 && context) {
+          await context.addCookies(p.seedCookies).catch(() => {});
         }
         if (p.tab) {
           const selected = tabs.get(p.tab);
@@ -291,6 +365,7 @@ export async function runBrowserSession(input, output) {
           if (tabs.size >= 8) throw Error("Browser tab limit is 8; close a tab first");
           browserUrl(p.url); // Validate before allocating a page.
           const child = await context.newPage();
+          agentOwnedPages.add(child);
           selectTab([...tabs.values()].find(tab => tab.page === child));
         }
         if (!page && action !== "tabs") throw Error("No open tab; use new_tab with an HTTP(S) URL");
@@ -303,10 +378,10 @@ export async function runBrowserSession(input, output) {
           }
           if (!surface) throw Error("Unknown frame; inspect frames before selecting one");
         }
-        const hasLocatorTarget = () =>
-          typeof p.ref === "string" || Number.isInteger(p.marker) ||
-          (typeof p.selector === "string" && p.selector.length > 0) ||
-          typeof p.role === "string";
+        const hasLocatorTarget = (q = p) =>
+          typeof q.ref === "string" || Number.isInteger(q.marker) ||
+          (typeof q.selector === "string" && q.selector.length > 0) ||
+          typeof q.role === "string";
         // Every observation hands out fresh refs, so a model that fills two fields in a row holds one stale ref after the
         // first fill. A retired ref is honoured only when the page URL is unchanged and exactly one live element has the
         // same tag, role and non-empty name: the criterion that already decides whether a ref is still valid.
@@ -319,37 +394,37 @@ export async function runBrowserSession(input, output) {
           remapped = { ...remapped, [ref]: same[0][0] };
           return same[0][1];
         };
-        const locate = async () => {
-          if (p.ref || Number.isInteger(p.marker)) {
+        const locate = async (q = p) => {
+          if (q.ref || Number.isInteger(q.marker)) {
             const tab = activeTab();
-            const target = p.ref ? tab.refs.get(p.ref) ?? remapRetired(tab, p.ref) : tab.markers.get(p.marker);
+            const target = q.ref ? tab.refs.get(q.ref) ?? remapRetired(tab, q.ref) : tab.markers.get(q.marker);
             const validate = new Function("el", "expected", `const collect = ${collectBrowserTargets.toString()}; if (!el.isConnected) return false; const row = collect(el, { limit: 1 }).rows[0]; return !!row && row.tag === expected.tag && row.name === expected.name && row.role === expected.role;`);
             if (!target || !await target.handle.evaluate(validate, target.identity).catch(() => false))
               throw Error("Stale browser reference; capture snapshot or markers again");
-            if (p.frame) throw Error("References already identify their frame; omit frame");
+            if (q.frame ?? p.frame) throw Error("References already identify their frame; omit frame");
             return target.handle;
           }
           if (
-            typeof p.selector === "string" &&
-            p.selector.length > 0 &&
-            p.selector.length <= 256
+            typeof q.selector === "string" &&
+            q.selector.length > 0 &&
+            q.selector.length <= 256
           )
-            return surface.locator(p.selector);
+            return surface.locator(q.selector);
           if (
-            typeof p.role === "string" &&
-            typeof p.name === "string" &&
-            p.name.length <= 256
+            typeof q.role === "string" &&
+            typeof q.name === "string" &&
+            q.name.length <= 256
           )
-            return surface.getByRole(p.role, { name: p.name, exact: true });
+            return surface.getByRole(q.role, { name: q.name, exact: true });
           throw Error(
             "Use a marker id, selector or exact role/name observed in this browser session",
           );
         };
-        const readCoords = () => {
-          if (p.frame) throw Error("Coordinates address the main viewport; omit frame");
-          if (!Number.isInteger(p.x) || !Number.isInteger(p.y) || p.x < 0 || p.y < 0)
+        const readCoords = (q = p) => {
+          if (q.frame ?? p.frame) throw Error("Coordinates address the main viewport; omit frame");
+          if (!Number.isInteger(q.x) || !Number.isInteger(q.y) || q.x < 0 || q.y < 0)
             throw Error("Coordinate actions need integer x/y of at least 0 (CSS pixels)");
-          return { x: p.x, y: p.y };
+          return { x: q.x, y: q.y };
         };
         const snapshot = async () =>
           (hasLocatorTarget() ? await locate() : surface.locator(":root")).evaluate(
@@ -640,6 +715,110 @@ export async function runBrowserSession(input, output) {
           if (png.length > 1_100_000)
             throw Error("Screenshot exceeds attachment limit");
           result = { png: png.toString("base64"), mimeType: "image/png" };
+        } else if (action === "batch") {
+          if (!Array.isArray(p.steps) || p.steps.length < 1 || p.steps.length > 10)
+            throw Error("batch requires steps array of 1–10 browser actions");
+          const stepResults = [];
+          for (let i = 0; i < p.steps.length; i++) {
+            const s = p.steps[i];
+            if (!s || typeof s !== "object" || typeof s.action !== "string")
+              throw Error(`batch step ${i + 1} requires an action`);
+            const stepAction = s.action;
+            if (!["navigate", "click", "fill", "press", "select", "check", "hover", "scroll", "drag", "wait", "verify", "evaluate", "dialog"].includes(stepAction))
+              throw Error(`Unsupported batch step action: ${stepAction}`);
+            lease.consume(stepAction === "verify" && s.kind === "function" ? "evaluate" : stepAction);
+            const stepTimeout = s.timeoutMs ?? timeout;
+            stage = `batch:${stepAction}`;
+            if (stepAction === "navigate") {
+              await page.goto(browserUrl(s.url), { waitUntil: "domcontentloaded", timeout: 15000 });
+              record("navigation", { url: safeBrowserUrl(page.url()) });
+            } else if (stepAction === "dialog") {
+              if (!["accept", "dismiss", "clear"].includes(s.mode)) throw Error("dialog requires mode accept, dismiss or clear");
+              activeTab().dialog = s.mode === "clear" ? null : { mode: s.mode, text: s.text };
+            } else if (stepAction === "click") {
+              if (!hasLocatorTarget(s) && Number.isInteger(s.x) && Number.isInteger(s.y)) {
+                const { x, y } = readCoords(s);
+                await page.mouse.click(x, y, { button: s.button ?? "left", clickCount: s.clickCount ?? 1 });
+              } else {
+                await (await locate(s)).click({ timeout: stepTimeout, button: s.button ?? "left", clickCount: s.clickCount ?? 1 });
+              }
+              record("click");
+            } else if (stepAction === "fill") {
+              if (typeof s.text !== "string" || s.text.length > 8000) throw Error("fill text limit is 8000 characters");
+              await (await locate(s)).fill(s.text, { timeout: stepTimeout });
+              record("fill");
+            } else if (stepAction === "press") {
+              if (typeof s.key !== "string" || s.key.length > 80) throw Error("Invalid key");
+              if (hasLocatorTarget(s)) await (await locate(s)).press(s.key, { timeout: stepTimeout });
+              else await page.keyboard.press(s.key);
+              record("press");
+            } else if (stepAction === "select") {
+              if (typeof s.option !== "string" || s.option.length > 256) throw Error("select requires an observed option label, at most 256 characters");
+              await (await locate(s)).selectOption({ label: s.option }, { timeout: stepTimeout });
+              record("select");
+            } else if (stepAction === "check") {
+              if (typeof s.checked !== "boolean") throw Error("check requires a boolean checked state");
+              await (await locate(s)).setChecked(s.checked, { timeout: stepTimeout });
+              record("check");
+            } else if (stepAction === "hover") {
+              if (hasLocatorTarget(s)) await (await locate(s)).hover({ timeout: stepTimeout });
+              else { const { x, y } = readCoords(s); await page.mouse.move(x, y); }
+              record("hover");
+            } else if (stepAction === "scroll") {
+              if (hasLocatorTarget(s)) await (await locate(s)).scrollIntoViewIfNeeded({ timeout: stepTimeout });
+              else await page.mouse.wheel(s.dx ?? 0, s.dy ?? page.viewportSize()?.height ?? 800);
+              record("scroll");
+            } else if (stepAction === "drag") {
+              if (!Number.isInteger(s.toX) || !Number.isInteger(s.toY) || s.toX < 0 || s.toY < 0)
+                throw Error("drag needs integer toX/toY of at least 0 (CSS pixels)");
+              let from;
+              if (hasLocatorTarget(s)) {
+                const box = await (await locate(s)).boundingBox({ timeout: stepTimeout });
+                if (!box) throw Error("Drag source has no visible bounds");
+                from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+              } else from = readCoords(s);
+              await page.mouse.move(from.x, from.y);
+              await page.mouse.down();
+              try { await page.mouse.move(s.toX, s.toY, { steps: 12 }); } finally { await page.mouse.up(); }
+              record("drag");
+            } else if (stepAction === "wait") {
+              const kind = s.kind ?? "element";
+              if (kind === "url") await surface.waitForURL(s.url, { timeout: stepTimeout, waitUntil: "domcontentloaded" });
+              else if (kind === "load") await surface.waitForLoadState(s.state ?? "load", { timeout: stepTimeout });
+              else if (kind === "text") await surface.getByText(s.text, { exact: false }).first().waitFor({ state: s.state ?? "visible", timeout: stepTimeout });
+              else if (kind === "function") {
+                const handle = await surface.waitForFunction(new Function(expressionBody(s.script, Function)), null, { timeout: stepTimeout, polling: 100 });
+                await handle.dispose();
+              } else {
+                const target = await locate(s);
+                if (s.ref || s.marker) await target.waitForElementState(s.state ?? "visible", { timeout: stepTimeout });
+                else await target.waitFor({ state: s.state ?? "visible", timeout: stepTimeout });
+              }
+            } else if (stepAction === "verify") {
+              if (s.kind === "function") {
+                const observed = await evaluateScript(surface, s.script, stepTimeout, 100);
+                if (!["true", "false"].includes(observed.text) || observed.truncated)
+                  throw Error("Function verification must return a boolean");
+                stepResults.push({ step: i + 1, action: "verify", matches: observed.text === "true" });
+                continue;
+              }
+              const ver = await (await locate(s)).evaluate(verifyBrowserText, { text: s.text }, { timeout: stepTimeout });
+              stepResults.push({ step: i + 1, action: "verify", matches: ver.matches });
+              continue;
+            } else if (stepAction === "evaluate") {
+              const ev = await evaluateScript(surface, s.script, stepTimeout, s.maxChars ?? 2000);
+              record("evaluate");
+              stepResults.push({ step: i + 1, action: "evaluate", evaluation: ev });
+              continue;
+            }
+            stepResults.push({ step: i + 1, action: stepAction, ok: true });
+          }
+          const state = await surface.locator(":root").evaluate(inspectPageState, { summary: true }, { timeout });
+          result = {
+            batch: { stepsCompleted: stepResults.length, stepResults },
+            pageState: state,
+            frames: frameList(),
+          };
         } else if (!["snapshot", "renew"].includes(action))
           throw Error("Unsupported browser action");
         if (!result) {
@@ -679,6 +858,7 @@ export async function runBrowserSession(input, output) {
         }
         result = {
           ok: true,
+          ...(action === "open" ? { connectionMode } : {}),
           tab: activeTab()?.id,
           url: page ? safeBrowserUrl(page.url()) : undefined,
           pageIdentity: page ? createHash('sha256').update(new URL(page.url()).href).digest('hex') : undefined,
@@ -693,7 +873,7 @@ export async function runBrowserSession(input, output) {
         const failure = browserFailure(error, stage, action, waitKind);
         if (
           stage === "observation" &&
-          (["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "navigate", "new_tab", "back", "forward", "reload"].includes(
+          (["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "navigate", "new_tab", "back", "forward", "reload", "batch"].includes(
             action,
           ) || (["wait", "verify"].includes(action) && waitKind === "function"))
         )

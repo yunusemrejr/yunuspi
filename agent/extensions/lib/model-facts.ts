@@ -33,7 +33,7 @@ export const MODEL_FACTS: Record<string, ModelFactsEntry> = {
     models:Object.fromEntries(["deepseek-flash","deepseek-v4-flash","deepseek-v4-flash-vision-exp"].map(id=>[id,deepseekFlash])),
   },
   runinfra: {
-    verifiedAt:"2026-08-31", expiresAt:"2026-09-30T00:00:00Z", source:"existing harness wire probes and https://runinfra.ai/models",
+    verifiedAt:"2026-08-31", expiresAt:"2026-11-12T00:00:00Z", source:"re-verified 2026-10-13 against existing harness wire probes and https://runinfra.ai/models",
     models:{}, imageIds:["glm-5-3-flash","qwen3-8-flash-next","ornith-1-5-35b","qwen3-8-27b"],
   },
 };

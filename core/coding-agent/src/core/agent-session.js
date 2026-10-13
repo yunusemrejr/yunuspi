@@ -1060,6 +1060,10 @@ export class AgentSession {
                 messages.push(msg);
             }
             this._pendingNextTurnMessages = [];
+            // Reset per-turn system prompt override before before_agent_start so setActiveTools
+            // inside before_agent_start updates this.systemPrompt immediately.
+            this._systemPromptOverride = undefined;
+            this.agent.state.systemPrompt = this._baseSystemPrompt;
             // Emit before_agent_start extension event
             const result = await awaitBeforeAbort(this._extensionRunner.emitBeforeAgentStart(expandedText, currentImages, this._baseSystemPrompt, this._baseSystemPromptOptions, inputAbortController.signal), inputAbortController.signal);
             inputAbortController.signal.throwIfAborted();

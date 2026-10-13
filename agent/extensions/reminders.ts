@@ -954,9 +954,15 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	};
 	pi.on("before_agent_start", async (event, ctx) => {
 		const result = await prepareReminderStart(event, ctx);
-		// Local guidance captures the full inventory before its wire projection.
-		const systemPrompt = compactSkillCatalog(event, pi.getActiveTools?.() ?? []);
-		if (systemPrompt === undefined) reportSkillProjectionMiss(event, ctx);
+		// Local guidance captures the full inventory before its wire projection;
+		// re-read ctx.getSystemPrompt() in case prepareReminderStart staged tools.
+		const latestSystemPrompt = typeof ctx?.getSystemPrompt === "function" ? ctx.getSystemPrompt() : undefined;
+		const latestEvent =
+			typeof latestSystemPrompt === "string" && latestSystemPrompt.length > 0
+				? { ...event, systemPrompt: latestSystemPrompt }
+				: event;
+		const systemPrompt = compactSkillCatalog(latestEvent, pi.getActiveTools?.() ?? []);
+		if (systemPrompt === undefined) reportSkillProjectionMiss(latestEvent, ctx);
 		return systemPrompt === undefined
 			? result
 			: { ...(result ?? {}), systemPrompt };

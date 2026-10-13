@@ -269,8 +269,8 @@ export function automaticChildThinking(profile: ExecutionProfile, route: string,
  * generation parameters. Only manual changes may pay the Anthropic price. */
 export function thinkingChangeBreaksPromptCache(model: any): boolean {
   if (!model || model.compat?.supportsMidConvoEffort === true) return false;
-  const provider = String(model.provider ?? ''), id = String(model.id ?? '');
-  return String(model.api ?? '') === 'anthropic-messages' || /anthropic/i.test(provider) || /claude/i.test(`${provider}/${id}`);
+  const provider = String(model.provider ?? ''), id = String(model.id ?? ''), format = String(model.compat?.thinkingFormat ?? '');
+  return String(model.api ?? '') === 'anthropic-messages' || /anthropic/i.test(provider) || /claude/i.test(`${provider}/${id}`) || format === 'qwen-chat-template';
 }
 
 const THINKING_LEVELS = ['off','minimal','low','medium','high','xhigh','max','ultra'] as const;

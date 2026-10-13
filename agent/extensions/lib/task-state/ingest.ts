@@ -319,28 +319,12 @@ export function fileWriteEvents(
  *   Pipelines, status masking and non-verifying flags produce no passing
  *   receipt, while execution itself remains under the native tool's control.
  */
-const RUNNER = /^(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|phpunit)$/;
-const CHECK_TASK = /^(?:test|tests|check|lint|typecheck|build)(?::[\w.-]+)?$/;
+const RUNNER = /^(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|phpunit|ctest|rspec|rubocop)$/;
+const CHECK_TASK = /^(?:test|tests|check|lint|typecheck|build|verify)(?::[\w.-]+)?$/;
 const NON_VERIFY_FLAG = /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|--if-present|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/;
 
-export function isTestLikeCommand(command: string): boolean {
-	const raw = String(command ?? "").trim();
-	if (!raw || raw.length > 2000) return false;
-	// Align with project check receipts: one literal command, optionally after
-	// `cd <dir> &&`. Quoted/escaped operators are arguments, never separators.
-	const parts: string[] = [];
-	let start = 0;
-	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
-		if (match[0] !== "&&") continue;
-		parts.push(raw.slice(start, match.index)); start = match.index! + 2;
-	}
-	parts.push(raw.slice(start));
-	if (parts.length > 2) return false;
-	if (parts.length === 2) {
-		const prefix = tokenizeSimple(parts[0].trim());
-		if (prefix?.length !== 2 || prefix[0] !== "cd") return false;
-	}
-	const argv = tokenizeSimple(parts.at(-1)!.trim());
+function isSingleTestStep(step: string): boolean {
+	const argv = tokenizeSimple(step.trim());
 	if (!argv?.length) return false;
 	const index = argv.findIndex(token => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
 	if (index < 0) return false;
@@ -354,10 +338,36 @@ export function isTestLikeCommand(command: string): boolean {
 		return CHECK_TASK.test(task ?? "") || task === "t" || (args[0] === "dlx" && RUNNER.test(args[1] ?? ""));
 	}
 	if (executable === "npx" || executable === "bunx") return RUNNER.test(args[args[0] === "--no-install" ? 1 : 0] ?? "");
+	if ((executable === "uv" || executable === "poetry") && args[0] === "run") return RUNNER.test(args[1] ?? "");
+	if (executable === "bundle" && args[0] === "exec") return RUNNER.test(args[1] ?? "") || (args[1] === "rake" && CHECK_TASK.test(args[2] ?? "test"));
 	if (/^(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)$/.test(executable)) return CHECK_TASK.test(args[0] ?? "");
 	if (executable === "deno") return /^(?:test|check|lint|fmt)$/.test(args[0] ?? "");
 	if (/^python3?(?:\.\d+)?$/.test(executable)) return args[0] === "-m" && /^(?:pytest|unittest|tox|ruff|mypy)$/.test(args[1] ?? "");
-	return executable === "node" && args[0] === "--test";
+	if (executable === "node") {
+		if (args[0] === "--test") return true;
+		const script = args.find(arg => !arg.startsWith("-")) ?? "";
+		return /(?:^|\/)(?:[\w.-]+\.(?:test|spec)\.(?:[cm]?js|tsx?)|(?:verify-harness|check-public)\.m?js)$/.test(script);
+	}
+	return false;
+}
+
+export function isTestLikeCommand(command: string): boolean {
+	const raw = String(command ?? "").trim();
+	if (!raw || raw.length > 2000) return false;
+	const parts: string[] = [];
+	let start = 0;
+	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
+		if (match[0] !== "&&") continue;
+		parts.push(raw.slice(start, match.index)); start = match.index! + 2;
+	}
+	parts.push(raw.slice(start));
+	if (parts.length > 4) return false;
+	for (let i = 0; i < parts.length - 1; i++) {
+		const prefix = tokenizeSimple(parts[i].trim());
+		const isCd = prefix?.length === 2 && prefix[0] === "cd";
+		if (!isCd && !isSingleTestStep(parts[i])) return false;
+	}
+	return isSingleTestStep(parts.at(-1)!);
 }
 
 /** Bash results become attempt/evidence/failure entities with family keys.

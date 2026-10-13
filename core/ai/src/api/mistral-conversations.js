@@ -427,10 +427,20 @@ async function consumeChatStream(model, output, stream, mistralStream) {
         if (chunk.usage) {
             const promptTokens = chunk.usage.prompt_tokens || 0;
             const cachedPromptTokens = getMistralCachedPromptTokens(chunk.usage, promptTokens);
+            const rawUsage = chunk.usage;
+            const hasReportedCache = Number.isFinite(rawUsage.promptTokensDetails?.cachedTokens ??
+                rawUsage.prompt_tokens_details?.cached_tokens ??
+                rawUsage.promptTokenDetails?.cachedTokens ??
+                rawUsage.prompt_token_details?.cached_tokens ??
+                rawUsage.numCachedTokens ??
+                rawUsage.num_cached_tokens);
             output.usage.input = Math.max(0, promptTokens - cachedPromptTokens);
             output.usage.output = chunk.usage.completion_tokens || 0;
             output.usage.cacheRead = cachedPromptTokens;
             output.usage.cacheWrite = 0;
+            if (hasReportedCache) {
+                output.usage.cacheReadReported = true;
+            }
             output.usage.totalTokens =
                 chunk.usage.total_tokens ||
                     output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;

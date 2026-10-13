@@ -590,7 +590,7 @@ function buildParams(model, context, options, compat = getCompat(model), cacheRe
         model: model.id,
         messages,
         stream: true,
-        prompt_cache_key: (isOpenAIEndpoint(model.baseUrl) && cacheRetention !== "none") ||
+        prompt_cache_key: ((isOpenAIEndpoint(model.baseUrl) || (model.provider === "openrouter" && model.id.startsWith("openai/"))) && cacheRetention !== "none") ||
             (cacheRetention === "long" && compat.supportsLongCacheRetention)
             ? clampOpenAIPromptCacheKey(options?.sessionId)
             : undefined,
@@ -1380,7 +1380,7 @@ function detectCompat(model) {
         isZai;
     const isGrok = provider === "xai" || host === "api.x.ai";
     const isOpenRouterDeveloperRoleModel = isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
-    const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;
+    const cacheControlFormat = provider === "openrouter" && (model.id.startsWith("anthropic/") || model.id.startsWith("google/")) ? "anthropic" : undefined;
     return {
         supportsStore: !isNonStandard,
         supportsDeveloperRole: isOpenRouterDeveloperRoleModel || (!isNonStandard && !isOpenRouter),

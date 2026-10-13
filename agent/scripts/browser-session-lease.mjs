@@ -11,8 +11,8 @@ export function createBrowserLease(now = Date.now) {
     consume(action) {
       if (action === "close") return;
       assertLive();
-      // Recovery reads and renewal remain possible when the action budget is spent.
-      if (["tabs", "switch_tab", "close_tab", "read", "renew", "snapshot", "inspect", "verify", "logs", "network", "screenshot", "markers", "observe", "html"].includes(action)) return;
+      // Recovery reads, renewal, and the outer batch container (whose steps are budgeted individually) remain free.
+      if (["tabs", "switch_tab", "close_tab", "read", "renew", "snapshot", "inspect", "verify", "logs", "network", "screenshot", "markers", "observe", "html", "batch"].includes(action)) return;
       if (actions >= actionLimit) throw Error("Browser session action limit reached; inspect current state and renew before continuing");
       actions++;
     },

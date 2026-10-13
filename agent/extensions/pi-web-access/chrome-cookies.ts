@@ -41,9 +41,10 @@ export interface BrowserCookieDiagnosticDetails {
 	attempts: BrowserCookieAttemptDiagnostic[];
 }
 
-interface BrowserCookieEntry {
+export interface BrowserCookieEntry {
 	name: string;
 	value: string;
+	domain: string;
 	path: string;
 }
 
@@ -69,11 +70,15 @@ const MACOS_BROWSER_CONFIGS: BrowserConfig[] = [
 const LINUX_BROWSER_CONFIGS: BrowserConfig[] = [
 	{ id: "chromium", name: "Chromium", baseDir: ".config/chromium", secretToolApp: "chromium" },
 	{ id: "chrome", name: "Chrome", baseDir: ".config/google-chrome", secretToolApp: "chrome" },
+	{ id: "brave", name: "Brave", baseDir: ".config/BraveSoftware/Brave-Browser", secretToolApp: "brave" },
+	{ id: "edge", name: "Edge", baseDir: ".config/microsoft-edge", secretToolApp: "microsoft-edge" },
+	{ id: "helium", name: "Helium", baseDir: ".config/net.imput.helium", secretToolApp: "helium" },
 ];
 
 const WINDOWS_BROWSER_CONFIGS: BrowserConfig[] = [
 	{ id: "chrome", name: "Chrome", baseDir: "Google/Chrome/User Data", usesLocalAppData: true },
 	{ id: "edge", name: "Edge", baseDir: "Microsoft/Edge/User Data", usesLocalAppData: true },
+	{ id: "brave", name: "Brave", baseDir: "BraveSoftware/Brave-Browser/User Data", usesLocalAppData: true },
 ];
 
 const browserPasswordCache = new Map<string, Promise<string | null>>();
@@ -94,6 +99,33 @@ export function getLastGoogleCookieDiagnosticDetails(): BrowserCookieDiagnosticD
 	return lastCookieDiagnosticDetails;
 }
 
+export function discoverUserBrowserCdpCandidates(browser?: BrowserCookiePreset): string[] {
+	const candidates: string[] = [];
+	if (process.env.PI_BROWSER_CDP_URL?.trim()) {
+		candidates.push(process.env.PI_BROWSER_CDP_URL.trim());
+	}
+	const currentPlatform = process.platform;
+	const platformConfigs = currentPlatform === "darwin" ? MACOS_BROWSER_CONFIGS : currentPlatform === "linux" ? LINUX_BROWSER_CONFIGS : currentPlatform === "win32" ? WINDOWS_BROWSER_CONFIGS : [];
+	const configs = browser ? platformConfigs.filter((config) => config.id === browser) : platformConfigs;
+	const home = currentPlatform === "win32" ? process.env.USERPROFILE || homedir() : homedir();
+	for (const config of configs) {
+		const activePortFile = join(browserBasePath(home, config), "DevToolsActivePort");
+		if (!existsSync(activePortFile)) continue;
+		try {
+			const lines = readFileSync(activePortFile, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+			const port = Number(lines[0]);
+			if (Number.isInteger(port) && port >= 1024 && port <= 65535) {
+				const wsPath = lines[1]?.startsWith("/") ? lines[1] : "";
+				if (wsPath) candidates.push(`ws://127.0.0.1:${port}${wsPath}`);
+				candidates.push(`http://127.0.0.1:${port}`);
+			}
+		} catch {
+		}
+	}
+	candidates.push("http://127.0.0.1:9222");
+	return [...new Set(candidates)];
+}
+
 export async function getGoogleCookies(
 	options?: { browser?: BrowserCookiePreset; profile?: string; requiredCookies?: string[] },
 ): Promise<{ cookies: CookieMap; warnings: string[] } | null> {
@@ -108,11 +140,11 @@ export async function getGoogleCookies(
 }
 
 export async function getBrowserCookiesForHosts(
-	options: { hosts: string[]; browser?: BrowserCookiePreset; profile?: string; requiredCookies?: string[]; cookieNames?: Iterable<string>; requiredLabel?: string; requestUrl?: URL },
-): Promise<{ cookies: CookieMap; warnings: string[]; cookieHeader?: string } | null> {
+	options: { hosts: string[]; browser?: BrowserCookiePreset; profile?: string; requiredCookies?: string[]; cookieNames?: Iterable<string>; requiredLabel?: string; requestUrl?: URL; allowExplicit?: boolean },
+): Promise<{ cookies: CookieMap; entries: BrowserCookieEntry[]; warnings: string[]; cookieHeader?: string; browser?: string; profile?: string } | null> {
 	lastCookieDiagnostic = null;
 	lastCookieDiagnosticDetails = null;
-	if (!isBrowserCookieAccessAllowed()) {
+	if (!options.allowExplicit && !isBrowserCookieAccessAllowed()) {
 		setCookieDiagnostic("Browser cookie access is disabled; enable allowBrowserCookies to use browser cookies.");
 		return null;
 	}
@@ -235,7 +267,8 @@ export async function getBrowserCookiesForHosts(
 					if (!value) continue;
 					const path = typeof row.path === "string" && row.path.startsWith("/") ? row.path : "/";
 					if (options.requestUrl && !pathMatches(options.requestUrl.pathname || "/", path)) continue;
-					entries.push({ name, value, path });
+					const domain = typeof row.host_key === "string" && row.host_key.trim() ? row.host_key.trim() : hosts[0];
+					entries.push({ name, value, domain, path });
 					if (!cookies[name]) cookies[name] = value;
 				}
 
@@ -256,6 +289,9 @@ export async function getBrowserCookiesForHosts(
 				}
 				return {
 					cookies,
+					entries,
+					browser: config.name,
+					profile,
 					warnings: [...warningSet],
 					...(options.requestUrl ? { cookieHeader: buildCookieHeader(entries) } : {}),
 				};

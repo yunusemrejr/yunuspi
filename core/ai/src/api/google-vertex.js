@@ -177,6 +177,7 @@ export const stream = (model, context, options) => {
                         output: (chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
                         cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
                         cacheWrite: 0,
+                        ...(Number.isFinite(chunk.usageMetadata.cachedContentTokenCount) ? { cacheReadReported: true } : {}),
                         reasoning: chunk.usageMetadata.thoughtsTokenCount || 0,
                         totalTokens: chunk.usageMetadata.totalTokenCount || 0,
                         cost: {
@@ -252,7 +253,7 @@ export const streamSimple = (model, context, options) => {
     const clampedReasoning = clampThinkingLevel(model, options.reasoning);
     const resolvedLevel = resolveGoogleThinkingLevel(model, clampedReasoning);
     const geminiModel = model;
-    if (isGemini3ProModel(geminiModel) || isGemini3FlashModel(geminiModel)) {
+    if (isGemini3ProModel(geminiModel) || isGemini3FlashModel(geminiModel) || isGemma4Model(geminiModel)) {
         return stream(model, context, {
             ...base,
             thinking: {
@@ -400,6 +401,9 @@ function buildParams(model, context, options = {}) {
     };
     return params;
 }
+function isGemma4Model(model) {
+    return /gemma-?4/.test(model.id.toLowerCase());
+}
 function isGemini3ProModel(model) {
     return /gemini-3(?:\.\d+)?-pro/.test(model.id.toLowerCase());
 }
@@ -415,18 +419,33 @@ function getDisabledThinkingConfig(model) {
     if (isGemini3ProModel(geminiModel)) {
         return { thinkingLevel: ThinkingLevel.LOW };
     }
-    if (isGemini3FlashModel(geminiModel)) {
+    if (isGemini3FlashModel(geminiModel) || isGemma4Model(geminiModel)) {
         return { thinkingLevel: ThinkingLevel.MINIMAL };
     }
-    // Gemini 2.x supports disabling via thinkingBudget = 0.
+    if (geminiModel.id.toLowerCase().includes("2.5-pro")) {
+        return { thinkingBudget: 128 };
+    }
+    // Gemini 2.x Flash supports disabling via thinkingBudget = 0.
     return { thinkingBudget: 0 };
 }
 function getGemini3ThinkingLevel(effort, model) {
     if (isGemini3ProModel(model)) {
+        const isGemini31 = /gemini-3\.[1-9]/.test(model.id.toLowerCase());
         switch (effort) {
             case "minimal":
             case "low":
                 return "LOW";
+            case "medium":
+                return isGemini31 ? "MEDIUM" : "HIGH";
+            case "high":
+                return "HIGH";
+        }
+    }
+    if (isGemma4Model(model)) {
+        switch (effort) {
+            case "minimal":
+            case "low":
+                return "MINIMAL";
             case "medium":
             case "high":
                 return "HIGH";
@@ -453,6 +472,15 @@ function getGoogleBudget(model, level, customBudgets) {
             low: 2048,
             medium: 8192,
             high: 32768,
+        };
+        return budgets[level];
+    }
+    if (model.id.includes("2.5-flash-lite")) {
+        const budgets = {
+            minimal: 512,
+            low: 2048,
+            medium: 8192,
+            high: 24576,
         };
         return budgets[level];
     }

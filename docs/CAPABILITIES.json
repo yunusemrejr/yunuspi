@@ -3219,7 +3219,7 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 275
+        "line": 299
       },
       {
         "name": "bg",
@@ -3244,7 +3244,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1732
+        "line": 1731
       },
       {
         "name": "claude-cache",
@@ -3294,7 +3294,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 192
+        "line": 285
       },
       {
         "name": "google-account",
@@ -3399,12 +3399,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 270
+        "line": 294
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 265
+        "line": 289
       },
       {
         "name": "obs",
@@ -3444,7 +3444,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1223
+        "line": 1229
       },
       {
         "name": "run",
@@ -3564,7 +3564,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 280
+        "line": 304
       },
       {
         "name": "websearch",
@@ -3611,7 +3611,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 498,
+        "line": 502,
         "kind": "factory"
       },
       {
@@ -3708,7 +3708,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 155,
+        "line": 166,
         "kind": "literal"
       },
       {
@@ -3738,13 +3738,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 602,
+        "line": 606,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 302,
+        "line": 306,
         "kind": "factory"
       },
       {
@@ -3794,7 +3794,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 287,
+        "line": 311,
         "kind": "literal"
       },
       {
@@ -3818,7 +3818,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 544,
+        "line": 548,
         "kind": "factory"
       },
       {
@@ -3902,7 +3902,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 432,
+        "line": 436,
         "kind": "factory"
       },
       {
@@ -4059,13 +4059,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 463,
+        "line": 467,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 458,
+        "line": 462,
         "kind": "factory"
       },
       {
@@ -4107,13 +4107,13 @@
       {
         "name": "ui_consistency",
         "source": "agent/extensions/art-direction.ts",
-        "line": 421,
+        "line": 425,
         "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 394,
+        "line": 398,
         "kind": "factory"
       },
       {
@@ -4167,7 +4167,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 344,
+        "line": 348,
         "kind": "factory"
       },
       {
@@ -4236,7 +4236,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 155,
+        "line": 166,
         "kind": "literal"
       },
       {
@@ -4278,7 +4278,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 287,
+        "line": 311,
         "kind": "literal"
       },
       {
@@ -4484,7 +4484,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          268
+          272
         ],
         "knownNames": [
           "asset_register",

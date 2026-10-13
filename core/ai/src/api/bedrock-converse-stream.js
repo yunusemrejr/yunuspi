@@ -144,7 +144,7 @@ export const stream = (model, context, options = {}) => {
                     ...(inferenceMaxTokens !== undefined && { maxTokens: inferenceMaxTokens }),
                     ...(options.temperature !== undefined && { temperature: options.temperature }),
                 },
-                toolConfig: convertToolConfig(context.tools, options.toolChoice, supportsStrictMode),
+                toolConfig: convertToolConfig(context.tools, options.toolChoice, supportsStrictMode, model, cacheRetention, options.env),
                 additionalModelRequestFields: buildAdditionalModelRequestFields(model, options),
                 ...(options.requestMetadata !== undefined && { requestMetadata: options.requestMetadata }),
             };
@@ -530,7 +530,12 @@ function handleMetadata(event, model, output) {
         output.usage.output = event.usage.outputTokens || 0;
         output.usage.cacheRead = event.usage.cacheReadInputTokens || 0;
         output.usage.cacheWrite = event.usage.cacheWriteInputTokens || 0;
-        output.usage.totalTokens = event.usage.totalTokens || output.usage.input + output.usage.output;
+        if (Number.isFinite(event.usage.cacheReadInputTokens)) {
+            output.usage.cacheReadReported = true;
+        }
+        output.usage.totalTokens =
+            event.usage.totalTokens ||
+                output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
         calculateCost(model, output.usage);
     }
 }
@@ -896,7 +901,7 @@ function convertMessages(context, model, cacheRetention, env) {
     }
     return result;
 }
-function convertToolConfig(tools, toolChoice, supportsStrictMode) {
+function convertToolConfig(tools, toolChoice, supportsStrictMode, model, cacheRetention, env) {
     if (!tools?.length)
         return undefined;
     if (toolChoice === "none")
@@ -912,6 +917,14 @@ function convertToolConfig(tools, toolChoice, supportsStrictMode) {
             },
         };
     });
+    if (cacheRetention && cacheRetention !== "none" && model && supportsPromptCaching(model, env)) {
+        bedrockTools.push({
+            cachePoint: {
+                type: CachePointType.DEFAULT,
+                ...(cacheRetention === "long" ? { ttl: CacheTTL.ONE_HOUR } : {}),
+            },
+        });
+    }
     let bedrockToolChoice;
     switch (toolChoice) {
         case "auto":

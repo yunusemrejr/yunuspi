@@ -45,7 +45,9 @@ function parseModels(payload, baseline) {
     for (const row of payload.models.slice(0, 512)) {
         if (!identifier(row?.slug) || row.visibility !== "list" || row.supported_in_api === false || !positive(row.context_window)) continue;
         const input = [...new Set((Array.isArray(row.input_modalities) ? row.input_modalities : []).filter(value => value === "text" || value === "image"))];
-        const efforts = [...new Set((Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels : []).map(value => value?.effort).filter(value => levels.includes(value) && value !== "off"))];
+        const rawEfforts = (Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels : []).map(value => value?.effort);
+        const offEffort = rawEfforts.includes("none") ? "none" : rawEfforts.includes("off") ? "off" : null;
+        const efforts = [...new Set(rawEfforts.filter(value => levels.includes(value) && value !== "off"))];
         if (!input.length) continue;
         const previous = byId.get(row.slug);
         const outputKnown = positive(row.max_output_tokens) || previous && !previous.outputLimitEstimated;
@@ -58,7 +60,7 @@ function parseModels(payload, baseline) {
             provider: "openai-codex", api: "openai-codex-responses", baseUrl: BASE_URL,
             contextWindow: row.context_window, maxTokens, outputLimitEstimated: !outputKnown,
             input, reasoning: efforts.length > 0,
-            thinkingLevelMap: Object.fromEntries(levels.map(level => [level, efforts.includes(level) ? level : null])),
+            thinkingLevelMap: Object.fromEntries(levels.map(level => [level, level === "off" ? offEffort : (efforts.includes(level) ? level : null)])),
             cost: previous?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output", "cacheRead", "cacheWrite"] },
         });
     }

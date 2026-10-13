@@ -1401,7 +1401,6 @@ async function refreshIdOnlyCatalog(
 		models: ids.map((id) => {
 			const stored = store.get(id);
 			if (stored) return stored;
-			const f = facts[id];
 			const config = providerConfigJson(providerId);
 			const override =
 				config?.modelOverrides?.[id]?.maxTokens ??

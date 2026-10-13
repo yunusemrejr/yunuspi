@@ -98,7 +98,7 @@ export class FileModelsStore {
             return { result: undefined, next: JSON.stringify(current, null, 2) };
         }, options);
         if (latest)
-            this.updateReadState(this.readState, latest);
+            this.updateReadState(this.readState, latest, getFileRevision(this.path));
     }
     async delete(providerId, options) {
         let latest;
@@ -109,6 +109,6 @@ export class FileModelsStore {
             return { result: undefined, next: JSON.stringify(current, null, 2) };
         }, options);
         if (latest)
-            this.updateReadState(this.readState, latest);
+            this.updateReadState(this.readState, latest, getFileRevision(this.path));
     }
 }

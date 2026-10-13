@@ -52,6 +52,8 @@ interface SessionCreative {
   verifiedHashes: Map<string, string>;
   /** A delivered film's direction was reviewed with video_qa record. */
   mediaReviewed?: boolean;
+  /** Latched once a strong UI prompt activates the UI system-prompt block so follow-ups keep the same prompt prefix. */
+  uiPromptActive?: boolean;
 }
 
 const isChild = () => process.env.PI_SUBAGENT_CHILD === "1";
@@ -174,12 +176,14 @@ export default function artDirection(pi: any) {
       while (state.verifiedHashes.size > 64) state.verifiedHashes.delete(state.verifiedHashes.keys().next().value!);
       state.evidence = createCreativeEvidence();
       state.browserOrigins.clear();
+      state.uiPromptActive = false;
     }
   });
   pi.on?.('before_agent_start', (event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd) return;
-    sessionOf(ctx);
-    if (uiPromptCue(String(event.prompt ?? '')).strength !== 'strong') return;
+    const { state } = sessionOf(ctx);
+    if (uiPromptCue(String(event.prompt ?? '')).strength === 'strong') state.uiPromptActive = true;
+    if (!state.uiPromptActive) return;
     return { systemPrompt: `${event.systemPrompt ?? ''}\nUI work: inspect the existing product, real content, user tasks, tokens and component states before choosing a direction. Derive hierarchy, type, color, spacing and purposeful motion from the subject and requested ambition. Avoid template gradients, fake proof, decorative status and arbitrary SVGs. Use ui_explore for 320px/mobile/tablet/desktop measurements, visual_review for current rendered judgment, and browser_session for keyboard/focus and the representative task. Repair observed defects before completion. On text-only routes use permitted image_understand for the capture; report unavailable vision explicitly. Skills are optional references. Measurements and clean source cannot prove appearance.` };
   });
   pi.on?.('context', async (event: any, ctx: any) => {

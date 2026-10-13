@@ -20,6 +20,28 @@ function mergeCompat(base, override) {
     return merged;
 }
 function applyModelOverride(model, override) {
+    let mergedCost = model.cost;
+    if (override.cost) {
+        const remainingMissing = Array.isArray(model.cost?.missing)
+            ? model.cost.missing.filter((key) => override.cost[key] === undefined)
+            : undefined;
+        mergedCost = {
+            ...model.cost,
+            input: override.cost.input ?? model.cost.input,
+            output: override.cost.output ?? model.cost.output,
+            cacheRead: override.cost.cacheRead ?? model.cost.cacheRead,
+            cacheWrite: override.cost.cacheWrite ?? model.cost.cacheWrite,
+            ...(override.cost.cacheWrite1h !== undefined ? { cacheWrite1h: override.cost.cacheWrite1h } : {}),
+            ...(override.cost.knownFree !== undefined ? { knownFree: override.cost.knownFree } : {}),
+            tiers: override.cost.tiers ?? model.cost.tiers,
+        };
+        if (remainingMissing?.length) {
+            mergedCost.missing = remainingMissing;
+        }
+        else {
+            delete mergedCost.missing;
+        }
+    }
     return {
         ...model,
         name: override.name ?? model.name,
@@ -28,15 +50,7 @@ function applyModelOverride(model, override) {
             ? { ...model.thinkingLevelMap, ...override.thinkingLevelMap }
             : model.thinkingLevelMap,
         input: override.input ?? model.input,
-        cost: override.cost
-            ? {
-                input: override.cost.input ?? model.cost.input,
-                output: override.cost.output ?? model.cost.output,
-                cacheRead: override.cost.cacheRead ?? model.cost.cacheRead,
-                cacheWrite: override.cost.cacheWrite ?? model.cost.cacheWrite,
-                tiers: override.cost.tiers ?? model.cost.tiers,
-            }
-            : model.cost,
+        cost: mergedCost,
         /* PI_LOCAL_ALLOCATION */contextWindow:Math.min((Number.isSafeInteger(model._piAllocatedContext)&&model._piAllocatedContext>0?model._piAllocatedContext:Infinity),override.contextWindow??model.contextWindow),maxTokens:Math.min(override.maxTokens??model.maxTokens,Math.min((Number.isSafeInteger(model._piAllocatedContext)&&model._piAllocatedContext>0?model._piAllocatedContext:Infinity),override.contextWindow??model.contextWindow)),
         ...(override.maxTokens !== undefined ? { outputLimitEstimated: false } : {}),
         samplingParams: override.samplingParams
@@ -46,6 +60,7 @@ function applyModelOverride(model, override) {
     };
 }
 function modelFromJson(providerId, definition, providerConfig, defaults) {
+    const existing = defaults?.id === definition.id ? defaults : undefined;
     const api = definition.api ?? providerConfig.api ?? defaults?.api;
     if (!api) {
         throw new Error(`Provider ${providerId}, model ${definition.id}: no "api" specified. Set at provider or model level.`);
@@ -60,20 +75,26 @@ function modelFromJson(providerId, definition, providerConfig, defaults) {
         throw new Error(`Provider ${providerId}, model ${definition.id}: invalid maxTokens`);
     }
     return {
+        ...(existing ?? {}),
         id: definition.id,
-        name: definition.name ?? definition.id,
+        name: definition.name ?? existing?.name ?? definition.id,
         api: api,
         provider: providerId,
         baseUrl,
-        reasoning: definition.reasoning ?? false,
-        thinkingLevelMap: definition.thinkingLevelMap,
-        input: (definition.input ?? ["text"]),
-        cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: definition.contextWindow ?? 128000,
-        maxTokens: definition.maxTokens ?? 16384,
-        samplingParams: definition.samplingParams,
+        reasoning: definition.reasoning ?? existing?.reasoning ?? false,
+        thinkingLevelMap: definition.thinkingLevelMap
+            ? { ...existing?.thinkingLevelMap, ...definition.thinkingLevelMap }
+            : existing?.thinkingLevelMap,
+        input: (definition.input ?? existing?.input ?? ["text"]),
+        cost: definition.cost ?? existing?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: definition.contextWindow ?? existing?.contextWindow ?? 128000,
+        maxTokens: definition.maxTokens ?? existing?.maxTokens ?? 16384,
+        ...(definition.maxTokens !== undefined ? { outputLimitEstimated: false } : {}),
+        samplingParams: definition.samplingParams
+            ? { ...existing?.samplingParams, ...definition.samplingParams }
+            : existing?.samplingParams,
         headers: undefined,
-        compat: mergeCompat(providerConfig.compat, definition.compat),
+        compat: mergeCompat(mergeCompat(existing?.compat, providerConfig.compat), definition.compat),
     };
 }
 function findModelDefaults(models, modelId, api) {

@@ -168,6 +168,7 @@ export const stream = (model, context, options) => {
                         output: (chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
                         cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
                         cacheWrite: 0,
+                        ...(Number.isFinite(chunk.usageMetadata.cachedContentTokenCount) ? { cacheReadReported: true } : {}),
                         reasoning: chunk.usageMetadata.thoughtsTokenCount || 0,
                         totalTokens: chunk.usageMetadata.totalTokenCount || 0,
                         cost: {
@@ -350,16 +351,23 @@ function getDisabledThinkingConfig(model) {
     if (isGemma4Model(model)) {
         return { thinkingLevel: "MINIMAL" };
     }
-    // Gemini 2.x supports disabling via thinkingBudget = 0.
+    if (model.id.toLowerCase().includes("2.5-pro")) {
+        // Gemini 2.5 Pro cannot disable thinking (thinkingBudget = 0 returns HTTP 400);
+        // use its minimum budget (128) without includeThoughts.
+        return { thinkingBudget: 128 };
+    }
+    // Gemini 2.x Flash supports disabling via thinkingBudget = 0.
     return { thinkingBudget: 0 };
 }
 function getThinkingLevel(effort, model) {
     if (isGemini3ProModel(model)) {
+        const isGemini31 = /gemini-3\.[1-9]/.test(model.id.toLowerCase());
         switch (effort) {
             case "minimal":
             case "low":
                 return "LOW";
             case "medium":
+                return isGemini31 ? "MEDIUM" : "HIGH";
             case "high":
                 return "HIGH";
         }

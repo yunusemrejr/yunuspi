@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { calculateCost } from "../models.js";
+import { calculateCost, clampThinkingLevel } from "../models.js";
 import { splitDeferredTools } from "../utils/deferred-tools.js";
 import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
@@ -640,10 +640,11 @@ export const stream = (model, context, options) => {
  * "xhigh" is only available on Opus 4.7/4.8, Sonnet 5, and Fable 5.
  */
 function mapThinkingLevelToEffort(model, level) {
-    const mapped = level ? model.thinkingLevelMap?.[level] : undefined;
+    const clamped = level ? clampThinkingLevel(model, level) : undefined;
+    const mapped = clamped ? model.thinkingLevelMap?.[clamped] : undefined;
     if (typeof mapped === "string")
         return mapped;
-    switch (level) {
+    switch (clamped) {
         case "minimal":
         case "low":
             return "low";
@@ -651,6 +652,10 @@ function mapThinkingLevelToEffort(model, level) {
             return "medium";
         case "high":
             return "high";
+        case "xhigh":
+        case "max":
+        case "ultra":
+            return "max";
         default:
             return "high";
     }
@@ -661,7 +666,8 @@ export const streamSimple = (model, context, options) => {
         ...buildBaseOptions(model, context, options, options?.apiKey),
         toolChoice: options?.toolChoice,
     };
-    if (!options?.reasoning || options.reasoning === "off") {
+    const clampedReasoning = clampThinkingLevel(model, options?.reasoning ?? "off");
+    if (clampedReasoning === "off") {
         return stream(model, context, {
             ...base,
             thinkingEnabled: false,
@@ -670,7 +676,7 @@ export const streamSimple = (model, context, options) => {
     // For models with adaptive thinking: use an effort level.
     // For older models: use budget-based thinking.
     if (model.compat?.forceAdaptiveThinking === true) {
-        const effort = mapThinkingLevelToEffort(model, options.reasoning);
+        const effort = mapThinkingLevelToEffort(model, clampedReasoning);
         return stream(model, context, {
             ...base,
             thinkingEnabled: true,
@@ -679,7 +685,7 @@ export const streamSimple = (model, context, options) => {
     }
     // Undefined means the caller did not request an output cap; let the helper use the model cap.
     // Do not coerce to 0 here, or the thinking budget would become the entire max_tokens value.
-    const adjusted = adjustMaxTokensForThinking(base.maxTokens, model.maxTokens, options.reasoning, options.thinkingBudgets);
+    const adjusted = adjustMaxTokensForThinking(base.maxTokens, model.maxTokens, clampedReasoning, options?.thinkingBudgets);
     const maxTokens = clampMaxTokensToContext(model, context, adjusted.maxTokens);
     return stream(model, context, {
         ...base,
@@ -807,7 +813,7 @@ function buildParams(model, context, isOAuthToken, options) {
             {
                 type: "text",
                 text: "You are Claude Code, Anthropic's official CLI for Claude.",
-                ...(cacheControl ? { cache_control: cacheControl } : {}),
+                ...(!context.systemPrompt && cacheControl ? { cache_control: cacheControl } : {}),
             },
         ];
         if (context.systemPrompt) {
@@ -836,9 +842,10 @@ function buildParams(model, context, isOAuthToken, options) {
         params.temperature = options.temperature;
     }
     if (immediateTools.length > 0 || deferredTools.length > 0) {
+        const toolCacheControl = compat.supportsCacheControlOnTools ? cacheControl : undefined;
         params.tools = [
-            ...convertTools(immediateTools, isOAuthToken, compat.supportsEagerToolInputStreaming, compat.supportsStrictTools, compat.supportsCacheControlOnTools ? cacheControl : undefined),
-            ...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, compat.supportsStrictTools, undefined, true),
+            ...convertTools(immediateTools, isOAuthToken, compat.supportsEagerToolInputStreaming, compat.supportsStrictTools, deferredTools.length === 0 ? toolCacheControl : undefined),
+            ...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, compat.supportsStrictTools, deferredTools.length > 0 ? toolCacheControl : undefined, true),
         ];
     }
     // Managed effort models always use adaptive thinking so prefix mismatches can
