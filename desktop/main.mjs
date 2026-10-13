@@ -280,7 +280,7 @@ function createWindow() {
   const saved = store.data.window || {}, display = screen.getPrimaryDisplay().workArea;
   const bounds = { width: Math.min(Math.max(Number(saved.width) || 1320, 560), display.width), height: Math.min(Math.max(Number(saved.height) || 860, 420), display.height) };
   if (Number.isFinite(saved.x) && Number.isFinite(saved.y) && screen.getAllDisplays().some(d => saved.x >= d.workArea.x && saved.y >= d.workArea.y && saved.x + 160 < d.workArea.x + d.workArea.width && saved.y + 80 < d.workArea.y + d.workArea.height)) Object.assign(bounds, { x: saved.x, y: saved.y });
-  window = new BrowserWindow({ ...bounds, minWidth: 560, minHeight: 420, title: 'YunusPi', backgroundColor: nativeTheme.shouldUseDarkColors ? '#17191f' : '#f8f9fc', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(directory, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false } });
+  window = new BrowserWindow({ ...bounds, minWidth: 560, minHeight: 420, title: 'YunusPi', icon: path.join(directory, 'renderer/assets/app-icon.png'), backgroundColor: nativeTheme.shouldUseDarkColors ? '#17191f' : '#f8f9fc', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(directory, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (url !== pageURL) event.preventDefault(); });
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

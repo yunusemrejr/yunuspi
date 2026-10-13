@@ -38,6 +38,6 @@ if ((args.includes('--register') || registerOnly) && process.platform === 'linux
   const applicationRoot = path.join(os.homedir(), '.local/share/applications');
   fs.mkdirSync(applicationRoot, { recursive: true });
   const escape = value => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/%/g, '%%');
-  fs.writeFileSync(path.join(applicationRoot, 'yunuspi.desktop'), `[Desktop Entry]\nType=Application\nName=YunusPi\nComment=Your coding workspace, with a little more instinct\nExec="${escape(launcher)}" --gui\nIcon=${path.join(root, 'desktop/renderer/assets/rat.svg')}\nTerminal=false\nCategories=Development;\nStartupWMClass=YunusPi\nKeywords=AI;Code;Agent;\n`, { mode: 0o644 });
+  fs.writeFileSync(path.join(applicationRoot, 'yunuspi.desktop'), `[Desktop Entry]\nType=Application\nName=YunusPi\nComment=Your coding workspace, with a little more instinct\nExec="${escape(launcher)}" --gui\nIcon=${path.join(root, 'desktop/renderer/assets/app-icon.svg')}\nTerminal=false\nCategories=Development;\nStartupWMClass=YunusPi\nKeywords=AI;Code;Agent;\n`, { mode: 0o644 });
   console.log('Registered YunusPi in the Linux application launcher.');
 }

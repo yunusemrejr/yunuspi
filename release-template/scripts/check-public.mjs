@@ -11,6 +11,11 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const PUBLIC_BINARY_SHA256 = {
   // Pi 0.85.1 asset; byte-identical to fork origin d981de1229ef899957bbe968bc8dcda02a21f477.
   "core/coding-agent/src/modes/interactive/assets/clankolas.png": "169acd0dfe6fbb8d8742ed24a3fc654fd0b2e2d4223c733249c5493723f1b72d",
+  // Rendered from desktop/renderer/assets/app-icon.svg at 256px.
+  "desktop/renderer/assets/app-icon.png":
+    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
+  "release-template/desktop/renderer/assets/app-icon.png":
+    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
   "docs/assets/metrics-demo.png":
     "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
   "release-template/docs/assets/metrics-demo.png":
