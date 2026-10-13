@@ -1,6 +1,6 @@
 # 3D studio: headless Blender
 
-Agents build, render and inspect 3D work with Blender, entirely headless and on ordinary hardware (integrated AMD/Intel graphics included). The `blender` tool runs the binary guarded (harness read-only, GPU render nodes bound in), niced, memory-watched and under a deadline, and parses the engine output into structured results. The harness stages the tool automatically when a prompt or file reads as 3D work (skill route `3d-cad`); `tool_search` finds it otherwise.
+Agents build, render and inspect 3D work with Blender, entirely headless and on ordinary hardware (integrated AMD/Intel graphics included). The `blender` tool runs the binary guarded (harness read-only, GPU render nodes bound in), niced, memory-watched and under a deadline, and parses the engine output into structured results. The harness stages the tool automatically when a prompt or file reads as 3D work (skill route `3d-cad`); `tool_search` finds it otherwise. `/3d <assignment>` (see [GOAL.md](GOAL.md#3d-video-and-chaining)) turns a whole 3D job — Blender, three.js/WebGL or hybrid — into a goal judged on grounding, real assets, multi-angle rendered craft, performance and a clean end-to-end run; it chains with `/video` and `/noslop`.
 
 ## The `blender` tool
 

@@ -154,6 +154,7 @@
     "path-safety.ts",
     "popup-theme.ts",
     "pptx-build.ts",
+    "presets.ts",
     "prior-art.ts",
     "process-owner.ts",
     "project-identity.ts",

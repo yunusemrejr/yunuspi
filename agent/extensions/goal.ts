@@ -8,9 +8,11 @@
  * resume, fork and compaction all see the same goal. Fail-open: any error here
  * leaves the session running as if no goal existed.
  *
- * This extension also owns /noslop — a preset goal whose aim is desloppifying
- * the codebase (brief and fronts in lib/noslop.ts) — so both commands share
- * the one persisted goal state instead of writing competing snapshots.
+ * This extension also owns the preset goals /noslop, /3d and /video (briefs,
+ * fronts and the chaining grammar in lib/presets.ts and lib/noslop.ts) so
+ * every command shares the one persisted goal state instead of writing
+ * competing snapshots. `/3d /video /noslop <task>` stacks their aims onto
+ * one goal.
  */
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
@@ -24,7 +26,7 @@ import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
-import { createNoslopGoal, noslopFocus } from "./lib/noslop.ts";
+import { createPresetChainGoal, parsePresetChain, presetNotice, presetUserText, PRESET_LABELS, type PresetId } from "./lib/presets.ts";
 
 const ENTRY = "goal-state-v1";
 const CONTEXT = "goal-anchor";
@@ -234,31 +236,46 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// /noslop is /goal with the aim already written: desloppify the codebase.
-	// It shares this extension's goal state on purpose — one owner for the
-	// persisted snapshots — so /goal status, pause, resume and clear all work
-	// on a desloppify run, and its fronts close through the same goal tool.
+	// Preset goals are /goal with the aim already written: /noslop desloppifies,
+	// /3d boosts 3D work, /video boosts video work. They share this extension's
+	// goal state on purpose — one owner for the persisted snapshots — so /goal
+	// status, pause, resume and clear all work on a preset run, and its fronts
+	// close through the same goal tool. Leading preset tokens chain:
+	// `/3d /video /noslop make X` dispatches here once, as /3d, and the parser
+	// in lib/presets.ts stacks every named aim onto the one goal.
+	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
+		const chain = parsePresetChain(invoked, args);
+		const label = chain.presets.map((id) => PRESET_LABELS[id]).join(" + ");
+		try {
+			const next = createPresetChainGoal(chain);
+			checkStatic = createStaticCompletionCheck();
+			checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
+			refused.clear();
+			persist(next, ctx);
+			ctx.ui?.notify?.(presetNotice(chain, next), "info");
+			// Authored like a typed /goal, but userText stays the user's own
+			// short demand; the expanded briefs are the harness's wording and
+			// travel as the kickoff message (and the goal text) instead.
+			void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: presetUserText(chain.presets, chain.task) }))
+				.catch((error: unknown) => ctx.ui?.notify?.(`${label} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+		} catch (error) {
+			ctx.ui?.notify?.(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		}
+	};
 	pi.registerCommand("noslop", {
-		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, replacing what had a real job plainly. Runs as a goal until every front has evidence.",
+		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, replacing what had a real job plainly. Runs as a goal until every front has evidence. Chains with /3d and /video.",
 		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
-		handler: async (args: string, ctx: ExtensionContext) => {
-			try {
-				const focus = noslopFocus(args);
-				const next = createNoslopGoal(focus);
-				checkStatic = createStaticCompletionCheck();
-				checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-				refused.clear();
-				persist(next, ctx);
-				ctx.ui?.notify?.(`Desloppifying ${focus ? focus : "this codebase"} — goal ${next.id}, ${next.criteria.length} fronts to settle with evidence. /goal shows progress, /goal pause stops it.`, "info");
-				// Authored like a typed /goal, but userText stays the user's own
-				// short demand; the expanded brief is the harness's wording and
-				// travels as the kickoff message (and the goal text) instead.
-				void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: focus ? `/noslop ${focus}` : "/noslop" }))
-					.catch((error: unknown) => ctx.ui?.notify?.(`Noslop kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
-			} catch (error) {
-				ctx.ui?.notify?.(`Noslop unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
-			}
-		},
+		handler: startPreset("noslop"),
+	});
+	pi.registerCommand("3d", {
+		description: "3D boost: build or fix 3D work (Blender, three.js/WebGL) with real assets, grounded references and rendered proof. Bare /3d improves this project's existing 3D work, or says there is none. Chains: /3d /video /noslop <task>.",
+		argumentHint: "[assignment — what to make; omit to fix this project's 3D work]",
+		handler: startPreset("3d"),
+	});
+	pi.registerCommand("video", {
+		description: "Video boost: make or fix video with finished sound (narration/TTS, music, effects), purposeful visuals and a verified final export. Bare /video improves this project's existing video work, or says there is none. Chains with /3d and /noslop.",
+		argumentHint: "[assignment — what to make; omit to fix this project's video work]",
+		handler: startPreset("video"),
 	});
 
 	const text = (value: string, details?: Record<string, unknown>) => ({ content: [{ type: "text" as const, text: value }], details: details ?? {} });

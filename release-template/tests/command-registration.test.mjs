@@ -8,13 +8,13 @@ import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const expected = [
-  "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
+  "3d", "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
   "double", "effort", "errors", "export-json", "goal", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
   "logs", "memory-prime", "metrics", "noslop", "obs", "observer-book", "or-provider", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
   "models", "subagent-cost", "subagents", "subagents-check-profile", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-generate-profiles", "subagents-inspect-rpc",
   "subagents-load-profile", "subagents-models", "subagents-profiles", "subagents-refine", "subagents-refresh-provider-models", "subagents-steer", "subagents-stop", "subagents-watchdog",
-  "sys-prompt", "tasks", "task-state", "todos", "used", "websearch",
+  "sys-prompt", "tasks", "task-state", "todos", "used", "video", "websearch",
 ].sort();
 
 test("the installed extension graph registers every shipped command without load errors", { timeout: 90000 }, () => {

@@ -3217,6 +3217,11 @@
   "tools": {
     "commandRegistrations": [
       {
+        "name": "3d",
+        "source": "agent/extensions/goal.ts",
+        "line": 270
+      },
+      {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 568
@@ -3289,7 +3294,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 190
+        "line": 192
       },
       {
         "name": "google-account",
@@ -3394,7 +3399,7 @@
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 241
+        "line": 265
       },
       {
         "name": "obs",
@@ -3550,6 +3555,11 @@
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
         "line": 1780
+      },
+      {
+        "name": "video",
+        "source": "agent/extensions/goal.ts",
+        "line": 275
       },
       {
         "name": "websearch",
@@ -3779,7 +3789,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 265,
+        "line": 282,
         "kind": "literal"
       },
       {
@@ -4263,7 +4273,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 265,
+        "line": 282,
         "kind": "literal"
       },
       {
@@ -4701,7 +4711,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 709,
+      "sourceFiles": 710,
       "registrationSites": 64,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 100,
@@ -5364,6 +5374,10 @@
       },
       {
         "path": "agent/extensions/lib/pptx-build.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/presets.ts",
         "exists": true
       },
       {

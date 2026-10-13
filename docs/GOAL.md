@@ -34,7 +34,28 @@ Known focused test commands can run directly. The project-test owner adopts curr
 
 It starts the same goal machinery as `/goal` — same persisted state, same `goal` tool, same completion check — with six fixed fronts as its criteria plus the usual verification criterion: an inventory first, then UI/visual slop (fake live/active state and blinking dots, decorative pills and badges, stock gradients and glass, emoji icons, decorative mono fonts, build and meta narration in the interface), honest copy and labels (no made-up labels, SaaS boilerplate, stock phrases, invented metrics or text-noise), comments that earn their place, dead and duplicate code and functionality removed, and proof that the cleanup added no slop of its own and broke nothing real. Subtraction comes first: slop is deleted outright unless it was doing a real job, in which case the plainest honest alternative in the project's own style replaces it. Genuine state, earned proof, deliberate branding, product behavior and public interfaces are explicitly not slop and stay. Fronts outside a requested focus are waived with that reason through the goal tool rather than silently skipped. `/goal` shows a desloppify run's progress and pauses, resumes or clears it; the brief and fronts live in `agent/extensions/lib/noslop.ts`, and [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md) remains the detailed rule set for websites.
 
+## /3d, /video and chaining
+
+Two more presets work the same way, and all three chain:
+
+```
+/3d make a minecraft clone
+/video make a 60-second explainer about tides, narrated
+/3d /video /noslop please make a video about how a steam engine works
+/3d                       # no assignment: fix this project's 3D work
+/video                    # no assignment: fix this project's video work
+```
+
+`/3d` puts the harness's 3D capability at full strength: the route is chosen deliberately (Blender for real geometry and offline realism, three.js/WebGL for browser and interactive work, Blender-built assets presented in three.js when the subject wants both), the installed 3D skills and tools for that route are actually loaded, the subject is grounded in real references, web assets and images may be sourced with their licenses checked, and the result is iterated against renders from several angles within honest performance budgets. Its fronts judge grounding, real assets and geometry, craft at inspection distance, motion/interaction behavior, and a deliverable that runs clean end to end.
+
+`/video` demands a finished film on every track: script or shot list and audio plan before any render, purposeful picture and effects, sound that is mixed rather than attached (intelligible narration/TTS timed to the picture, music and effects under speech, consistent levels), pacing and sync that line up, and a master verified by watching the export with audio at its intended resolution, frame rate and format.
+
+With no assignment, `/3d` and `/video` survey the current project for work of their kind and improve and fix what exists. If there is none, the session says so plainly, waives the fronts with that reason, and stops — a bare preset never invents a project.
+
+Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. The tracked criteria compress to each preset's three core fronts so a three-way chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
+
 ## Loop safety
+
 
 - At most six continuations per goal, and the goal stops at the second continuation in a row that records no new evidence (`/goal retry` re-arms it).
 - An interrupt pauses the goal (`/goal resume` continues); queued user messages and provider errors never trigger a continuation.

@@ -2,7 +2,7 @@
 
 YunusPi agents can produce explainer, documentary and motion-design videos from code. A Remotion (React/TypeScript) project uses one master timeline, `video.json`, for scene order and duration, narration text and measured narration audio, scene-relative cues, music and sound effects. Reusable primitives provide animation; license-tracked media can be imported when appropriate. Rendering code reads that timeline, and both burned captions and sidecar subtitles use the same measured word timing when present.
 
-The shared tools own frame clocks, scene contracts and review evidence. Skills are optional workflow guides. `code-first-video` covers direction: research, narrative, storyboard, visual language and the review loop. `remotion-video` covers implementation and `audio` covers sound. The tools below can be found with `tool_search`; relevant tools are staged proactively for video and hybrid asset work within the host permission ceiling. Model/thinking selections remain unchanged.
+`/video <assignment>` (see [GOAL.md](GOAL.md#3d-video-and-chaining)) turns a whole film into a goal judged on planning, picture, finished sound, sync and a watched final export; it chains with `/3d` and `/noslop`. The shared tools own frame clocks, scene contracts and review evidence. Skills are optional workflow guides. `code-first-video` covers direction: research, narrative, storyboard, visual language and the review loop. `remotion-video` covers implementation and `audio` covers sound. The tools below can be found with `tool_search`; relevant tools are staged proactively for video and hybrid asset work within the host permission ceiling. Model/thinking selections remain unchanged.
 
 | Tool | Does |
 | --- | --- |
