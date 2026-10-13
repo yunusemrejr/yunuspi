@@ -3,7 +3,11 @@
 Standing design and implementation rules. The Observer Book's `anti-slop`
 chapter distills this list into reviewable passages; the `ui-design`
 skill covers the same failure modes. When they disagree about a specific page, this checklist wins
-for websites: it is the most specific rule set.
+for websites: it is the most specific rule set. To run a desloppify pass over
+an existing codebase — UI, copy, comments and dead or duplicate code alike —
+use `/noslop` (optionally with a focus, e.g. `/noslop the settings page`); it
+works as a goal whose fronts must each settle with evidence (see
+[GOAL.md](GOAL.md#noslop)).
 
 Standing UI constraints also reject generic lightbulb branding, muddy orange/brass/brown default palettes, decorative colored dots before labels, and boxed icon badges. Necessary state and explicitly requested branding are contextual exceptions with evidence. A generated source comment asserting brand ownership is insufficient. Visual/3D/motion upgrades require baseline-versus-final inspection of the relevant states, not merely a new asset or passing tests.
 

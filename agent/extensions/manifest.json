@@ -140,6 +140,7 @@
     "needle-runtime.ts",
     "needle-types.ts",
     "needle-worker.mjs",
+    "noslop.ts",
     "numeric-checks.ts",
     "observation-retrieval.ts",
     "observer-book.ts",

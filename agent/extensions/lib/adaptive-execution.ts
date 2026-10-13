@@ -260,6 +260,19 @@ export function automaticChildThinking(profile: ExecutionProfile, route: string,
   return !adaptiveExecutionEnabled() || configured || /:(?:off|minimal|low|medium|high|xhigh|max|ultra)$/.test(route) ? undefined : profile.reasoning;
 }
 
+/** Automatic effort changes must never spend the session's prompt cache.
+ * Anthropic renders the thinking configuration (mode, budget_tokens, effort)
+ * into the prompt, so changing it invalidates cached message blocks — and on
+ * models that render it ahead, tool and system blocks too. Models with
+ * per-message effort carry the change in appended system messages and keep
+ * the prefix intact; non-Anthropic caches key on prompt tokens, not on
+ * generation parameters. Only manual changes may pay the Anthropic price. */
+export function thinkingChangeBreaksPromptCache(model: any): boolean {
+  if (!model || model.compat?.supportsMidConvoEffort === true) return false;
+  const provider = String(model.provider ?? ''), id = String(model.id ?? '');
+  return String(model.api ?? '') === 'anthropic-messages' || /anthropic/i.test(provider) || /claude/i.test(`${provider}/${id}`);
+}
+
 const THINKING_LEVELS = ['off','minimal','low','medium','high','xhigh','max','ultra'] as const;
 type ThinkingLevel = typeof THINKING_LEVELS[number];
 /** Session-local thinking actuator. The configured current level is a ceiling;
@@ -283,6 +296,7 @@ export function createAdaptiveThinkingController(pi: any, options: {argv?: reado
   const restore = (ctx: any) => {
     const current=read();
     if(!sameOwner(ctx) || !current || manual || !ceiling || lastAuto===undefined)return current;
+    if(thinkingChangeBreaksPromptCache(ctx?.model))return current;
     if(current!==lastAuto){manual=true;ceiling=current;lastAuto=undefined;return current;}
     const restored=set(ceiling,current);lastAuto=undefined;return restored;
   };
@@ -297,6 +311,7 @@ export function createAdaptiveThinkingController(pi: any, options: {argv?: reado
       const current=read();if(!current || !ceiling || typeof pi.setThinkingLevel!=='function')return current;
       if(!adaptiveExecutionEnabled(options.env ?? process.env)){restore(ctx);return read();}
       if(manual || cliPinned || ceiling==='off')return current;
+      if(thinkingChangeBreaksPromptCache(ctx?.model))return current;
       if(lastAuto!==undefined && current!==lastAuto){manual=true;ceiling=current;lastAuto=undefined;return current;}
       const limit=THINKING_LEVELS.indexOf(ceiling),desired=Math.min(limit,THINKING_LEVELS.indexOf(profile.reasoning));
       const map=ctx?.model?.thinkingLevelMap;

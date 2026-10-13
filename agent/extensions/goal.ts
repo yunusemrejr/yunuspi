@@ -7,6 +7,10 @@
  * remain open. State is persisted as whole snapshots on the session branch so
  * resume, fork and compaction all see the same goal. Fail-open: any error here
  * leaves the session running as if no goal existed.
+ *
+ * This extension also owns /noslop — a preset goal whose aim is desloppifying
+ * the codebase (brief and fronts in lib/noslop.ts) — so both commands share
+ * the one persisted goal state instead of writing competing snapshots.
  */
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
@@ -20,6 +24,7 @@ import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
+import { createNoslopGoal, noslopFocus } from "./lib/noslop.ts";
 
 const ENTRY = "goal-state-v1";
 const CONTEXT = "goal-anchor";
@@ -225,6 +230,33 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				kickoff(rearmed);
 			} catch (error) {
 				ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+			}
+		},
+	});
+
+	// /noslop is /goal with the aim already written: desloppify the codebase.
+	// It shares this extension's goal state on purpose — one owner for the
+	// persisted snapshots — so /goal status, pause, resume and clear all work
+	// on a desloppify run, and its fronts close through the same goal tool.
+	pi.registerCommand("noslop", {
+		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, replacing what had a real job plainly. Runs as a goal until every front has evidence.",
+		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
+		handler: async (args: string, ctx: ExtensionContext) => {
+			try {
+				const focus = noslopFocus(args);
+				const next = createNoslopGoal(focus);
+				checkStatic = createStaticCompletionCheck();
+				checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
+				refused.clear();
+				persist(next, ctx);
+				ctx.ui?.notify?.(`Desloppifying ${focus ? focus : "this codebase"} — goal ${next.id}, ${next.criteria.length} fronts to settle with evidence. /goal shows progress, /goal pause stops it.`, "info");
+				// Authored like a typed /goal, but userText stays the user's own
+				// short demand; the expanded brief is the harness's wording and
+				// travels as the kickoff message (and the goal text) instead.
+				void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: focus ? `/noslop ${focus}` : "/noslop" }))
+					.catch((error: unknown) => ctx.ui?.notify?.(`Noslop kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+			} catch (error) {
+				ctx.ui?.notify?.(`Noslop unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
 			}
 		},
 	});

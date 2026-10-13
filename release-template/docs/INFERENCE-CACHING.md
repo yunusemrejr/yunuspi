@@ -49,6 +49,31 @@ Qwen offers implicit and explicit caching, with different supported models and
 creation charges; see [Alibaba Cloud's cache documentation](https://www.alibabacloud.com/help/en/model-studio/context-cache).
 GLM uses automatic reuse and reports cached tokens; see [Z.AI context caching](https://docs.z.ai/guides/capabilities/cache).
 
+## Thinking-level changes
+
+Changing effort is not cache-neutral everywhere. Anthropic renders the
+thinking configuration (mode, `budget_tokens`, `output_config.effort`) into
+the prompt, so a mid-session change invalidates cached message blocks, and on
+models that render it ahead, tool and system blocks too; see Anthropic's
+[prompt-caching documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+The exception is per-message effort (`supportsMidConvoEffort`): the core
+carries each change in an appended `role: "system"` message keyed to the
+level each assistant turn was produced at, which leaves the cached prefix
+intact. OpenAI-, DeepSeek- and Gemini-style caches key on the prompt token
+prefix, and effort travels as a generation parameter outside that prefix;
+the serialized history itself never depends on the active level, so past
+thinking blocks are replayed byte-identically whatever the level does.
+
+Automatic effort adjustment (the adaptive thinking controller for the main
+agent; the same controller runs inside sub-agent sessions) therefore refuses
+to move the level on Anthropic routes without per-message effort — direct
+Anthropic API and Claude models served through compatible gateways alike
+(`thinkingChangeBreaksPromptCache` in `lib/adaptive-execution.ts`). On those
+routes the configured or manually selected level simply stays in force, and
+only a manual `/thinking` or `/effort` change pays the invalidation price,
+deliberately. A sub-agent's level is chosen once when it is spawned, before
+its first request, so delegation never churns a child's cache mid-run.
+
 ## JEV and local Qwen
 
 The existing JEV client canonicalizes JSON map keys before deduplication.

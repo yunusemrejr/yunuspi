@@ -75,6 +75,13 @@ export function createGoal(text: string, now = Date.now()): GoalState {
 	return { version: 1, id: `g${now.toString(36)}`, text: goalText, status: "active", criteria, nudges: 0, progressMark: "", stalls: 0, createdAt: now, updatedAt: now };
 }
 
+/** A goal whose criteria are given rather than extracted from prose — preset aims such as /noslop, where the text is a working brief full of sentences that are instructions to the agent, not acceptance criteria. The verification criterion is appended as usual. */
+export function createPresetGoal(text: string, items: readonly string[], now = Date.now()): GoalState {
+	const criteria: GoalCriterion[] = items.slice(0, MAX_CRITERIA - 1).map((item, index) => ({ id: `C${index + 1}`, text: clip(item, 240), status: "open" }));
+	criteria.push({ id: VERIFY_ID, text: VERIFY_TEXT, status: "open" });
+	return { version: 1, id: `g${now.toString(36)}`, text: verbatim(text), status: "active", criteria, nudges: 0, progressMark: "", stalls: 0, createdAt: now, updatedAt: now };
+}
+
 export type GoalCommand =
 	| { kind: "set"; text: string }
 	| { kind: "status" }

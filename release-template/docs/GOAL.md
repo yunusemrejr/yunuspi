@@ -23,6 +23,17 @@
 
 Known focused test commands can run directly. The project-test owner adopts current execution receipts automatically; `project_tests inspect` and `assess` are for unclear setup, a deliberately different verification scope, or an explicit exception. Non-check shell calls retain their result-time source scan without a redundant pre-command scan. Actual verification commands still capture source identity before execution and invalidate passes if files change during the check.
 
+## /noslop
+
+`/noslop` is a goal with the aim already written: desloppify the codebase. It needs no instruction after it; an optional focus narrows it.
+
+```
+/noslop                       # the whole codebase, user-visible surfaces first
+/noslop the settings page     # one area or front, deeply
+```
+
+It starts the same goal machinery as `/goal` — same persisted state, same `goal` tool, same completion check — with six fixed fronts as its criteria plus the usual verification criterion: an inventory first, then UI/visual slop (fake live/active state and blinking dots, decorative pills and badges, stock gradients and glass, emoji icons, decorative mono fonts, build and meta narration in the interface), honest copy and labels (no made-up labels, SaaS boilerplate, stock phrases, invented metrics or text-noise), comments that earn their place, dead and duplicate code and functionality removed, and proof that the cleanup added no slop of its own and broke nothing real. Subtraction comes first: slop is deleted outright unless it was doing a real job, in which case the plainest honest alternative in the project's own style replaces it. Genuine state, earned proof, deliberate branding, product behavior and public interfaces are explicitly not slop and stay. Fronts outside a requested focus are waived with that reason through the goal tool rather than silently skipped. `/goal` shows a desloppify run's progress and pauses, resumes or clears it; the brief and fronts live in `agent/extensions/lib/noslop.ts`, and [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md) remains the detailed rule set for websites.
+
 ## Loop safety
 
 - At most six continuations per goal, and the goal stops at the second continuation in a row that records no new evidence (`/goal retry` re-arms it).

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyExecution, createAdaptiveThinkingController } from '../agent/extensions/lib/adaptive-execution.ts';
+import { classifyExecution, createAdaptiveThinkingController, thinkingChangeBreaksPromptCache } from '../agent/extensions/lib/adaptive-execution.ts';
 
 const direct=classifyExecution({task:'Fix a typo'}),standard=classifyExecution({task:'Investigate the parser failure'}),complex=classifyExecution({task:'Migrate cross-file source'});
 function fixture(initial='high',options={}) {
@@ -69,6 +69,27 @@ test('unsupported effort levels stay within actual model levels and adaptive rol
   assert.equal(f.controller.update(direct,f.ctx),'low');f.flush();
   env.PI_ADAPTIVE_EXECUTION='off';assert.equal(f.controller.update(complex,f.ctx),'high');f.flush();
   assert.equal(f.controller.state().manual,false);
+});
+
+test('cache-breaking routes are named: Anthropic rendering yes, per-message effort and token-keyed caches no',()=>{
+  assert.equal(thinkingChangeBreaksPromptCache({api:'anthropic-messages',provider:'anthropic',id:'claude-x'}),true);
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'anthropic',id:'claude-x'}),true,'provider alone names the family');
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'openrouter',id:'anthropic/claude-sonnet'}),true,'Claude served upstream still renders the config');
+  assert.equal(thinkingChangeBreaksPromptCache({api:'anthropic-messages',provider:'anthropic',id:'claude-x',compat:{supportsMidConvoEffort:true}}),false,'per-message effort keeps the cached prefix');
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'deepseek',id:'deepseek-chat'}),false);
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'openai',id:'gpt-x'}),false);
+  assert.equal(thinkingChangeBreaksPromptCache(undefined),false);
+  assert.equal(thinkingChangeBreaksPromptCache(null),false);
+});
+
+test('automatic thinking never spends an Anthropic prompt cache; manual and per-message-effort paths still move',()=>{
+  const f=fixture();f.ctx.model={reasoning:true,api:'anthropic-messages',provider:'anthropic',id:'claude-x'};
+  assert.equal(f.controller.update(direct,f.ctx),'high');assert.equal(f.setters.length,0,'no automatic mutation on a cache-breaking route');
+  assert.equal(f.controller.restore(f.ctx),'high');assert.equal(f.setters.length,0);
+  f.manual('low');assert.equal(f.get(),'low','the user may still pay the cache price deliberately');
+  const mid=fixture();mid.ctx.model={reasoning:true,api:'anthropic-messages',provider:'anthropic',id:'claude-x',compat:{supportsMidConvoEffort:true}};
+  assert.equal(mid.controller.update(direct,mid.ctx),'minimal');mid.flush();
+  assert.equal(mid.controller.restore(mid.ctx),'high');
 });
 
 test('missing or failing native thinking controls never prevent task execution',()=>{
