@@ -75,7 +75,7 @@ export const VIDEO_CRITERIA: readonly string[] = [
 
 /** Fronts that stay tracked when presets chain; the briefs themselves never compress. */
 const CORE_INDEXES: Record<PresetId, readonly number[]> = {
-	noslop: [1, 4, 5],
+	noslop: [1, 2, 6],
 	"3d": [1, 2, 4],
 	video: [1, 2, 4],
 };

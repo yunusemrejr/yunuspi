@@ -263,7 +263,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	};
 	pi.registerCommand("noslop", {
-		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, replacing what had a real job plainly. Runs as a goal until every front has evidence. Chains with /3d and /video.",
+		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /3d and /video.",
 		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
 		handler: startPreset("noslop"),
 	});

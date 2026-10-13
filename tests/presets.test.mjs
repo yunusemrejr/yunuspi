@@ -53,6 +53,7 @@ test('a three-way chain stacks full briefs and tracks only core fronts within bu
   for (const section of [/Assignment: please make a video about tides/, /Boosts in force — 3D \+ Video \+ Noslop/,
     /\[3D\]/, /\[Video\]/, /\[Noslop\]/, /Desloppify this codebase/, /3D boost in force/, /Video boost in force/])
     assert.match(goal.text, section);
+  assert.match(goal.criteria[7].text, /^Noslop: UI density cut/, 'chained noslop tracks screen density as a core front');
   const bareChain = ps.createPresetChainGoal(ps.parsePresetChain('3d', '/noslop'));
   assert.match(bareChain.text, /with no assignment: survey the current project/);
   assert.equal(bareChain.criteria.length, 7);
