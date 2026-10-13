@@ -1,9 +1,9 @@
 /**
  * Memory Extension with QMD-Powered Search
  *
- * Plain-Markdown memory system with semantic search via qmd.
- * Core memory tools (write/read/scratchpad) work without qmd installed.
- * The memory_search tool requires qmd for keyword, semantic, and hybrid search.
+ * Plain-Markdown memory system with search via qmd when it is installed.
+ * Every memory tool works without qmd: memory_search falls back to a built-in
+ * BM25 index (with local Needle3 reranking for semantic modes).
  *
  * Layout (under ~/.pi/agent/memory/):
  *   MEMORY.md              — curated long-term memory (decisions, preferences, durable facts)
@@ -1222,6 +1222,54 @@ export function _resetQmdJsResolutionForTest() {
 	cachedQmdJsPath = undefined;
 }
 
+// qmd is usually a global npm or bun install, and a desktop launch or a Node
+// version switch (nvm, volta, fnm) often leaves that bin directory off PATH.
+// Look in the usual user install places before concluding it is missing.
+let cachedQmdBinary: string | undefined;
+export function resolveQmdBinary(env: NodeJS.ProcessEnv = process.env, home = env.HOME ?? ""): string {
+	if (cachedQmdBinary !== undefined) return cachedQmdBinary;
+	const executable = (file: string) => { try { fs.accessSync(file, fs.constants.X_OK); return fs.statSync(file).isFile(); } catch { return false; } };
+	const fromPath = () => (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean).some((dir) => executable(path.join(dir, "qmd")));
+	const versions = (dir: string, bin: string) => {
+		try {
+			return fs.readdirSync(dir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((version) => path.join(dir, version, bin, "qmd"));
+		} catch { return []; }
+	};
+	let found = "qmd";
+	if (env.PI_QMD_BIN && executable(env.PI_QMD_BIN)) found = env.PI_QMD_BIN;
+	else if (process.platform !== "win32" && home && !fromPath()) {
+		const candidates = [
+			path.join(home, ".bun", "bin", "qmd"),
+			path.join(home, ".local", "bin", "qmd"),
+			path.join(home, ".npm-global", "bin", "qmd"),
+			path.join(home, ".volta", "bin", "qmd"),
+			...versions(path.join(home, ".nvm", "versions", "node"), "bin"),
+			...versions(path.join(home, ".local", "share", "fnm", "node-versions"), path.join("installation", "bin")),
+			"/usr/local/bin/qmd",
+			"/opt/homebrew/bin/qmd",
+		];
+		found = candidates.find(executable) ?? "qmd";
+	}
+	cachedQmdBinary = found;
+	return found;
+}
+
+function isNodeScript(file: string): boolean {
+	try {
+		const fd = fs.openSync(file, "r");
+		try {
+			const head = Buffer.alloc(64);
+			const bytes = fs.readSync(fd, head, 0, 64, 0);
+			return /^#!.*\bnode\b/.test(head.subarray(0, bytes).toString("utf8").split("\n")[0]);
+		} finally { fs.closeSync(fd); }
+	} catch { return false; }
+}
+
+/** Clear the resolved qmd binary cache (for testing). */
+export function _resetQmdBinaryForTest() {
+	cachedQmdBinary = undefined;
+}
+
 export function buildQmdSpawn(
 	file: string,
 	args: readonly string[],
@@ -1252,7 +1300,11 @@ const execFileWithQmdOptions: ExecFileFn = ((
 		process.platform === "win32" && isQmdCommand(file)
 			? resolveQmdJsPath()
 			: null;
-	const spawn = buildQmdSpawn(file, args ?? [], process.platform, qmdJs);
+	// A resolved node script (an nvm/fnm/volta global install) runs on this
+	// process's Node, since `#!/usr/bin/env node` fails where node is off PATH.
+	const spawn = qmdJs ? buildQmdSpawn(file, args ?? [], process.platform, qmdJs)
+		: isQmdCommand(file) && path.isAbsolute(file) && isNodeScript(file) ? { file: process.execPath, args: [file, ...(args ?? [])] }
+		: buildQmdSpawn(file, args ?? [], process.platform, null);
 	const execOptions = isQmdCommand(file)
 		? { ...options, env: buildQmdEnv(options.env ?? process.env) }
 		: options;
@@ -1332,28 +1384,12 @@ export function _clearQmdStatusCaches() {
 
 const QMD_REPO_URL = "https://github.com/tobi/qmd";
 
+/** Shown only on request (memory_status): memory search already works without qmd. */
 export function qmdInstallInstructions(): string {
 	return [
-		"memory_search requires qmd.",
-		"",
-		"Install qmd (either works):",
-		"  npm install -g @tobilu/qmd        # no Bun needed",
-		`  bun install -g ${QMD_REPO_URL}   # ensure ~/.bun/bin is on PATH`,
-		"",
-		"The extension auto-creates the collection on next session start.",
-		"To set it up manually instead:",
-		`  qmd collection add ${MEMORY_DIR} --name pi-memory`,
-		"  qmd embed",
-	].join("\n");
-}
-
-export function qmdCollectionInstructions(): string {
-	return [
-		"qmd collection pi-memory is not configured.",
-		"",
-		"Set up the collection (one-time):",
-		`  qmd collection add ${MEMORY_DIR} --name pi-memory`,
-		"  qmd embed",
+		"qmd was not found, so memory_search uses its built-in BM25 search (all modes work).",
+		`Optional: installing qmd adds embedding search — npm install -g @tobilu/qmd (or bun install -g ${QMD_REPO_URL}).`,
+		"A qmd outside PATH is found in the usual nvm, bun, volta and ~/.local locations, or set PI_QMD_BIN.",
 	].join("\n");
 }
 
@@ -1362,7 +1398,7 @@ export async function setupQmdCollection(): Promise<boolean> {
 	try {
 		await new Promise<void>((resolve, reject) => {
 			execFileFn(
-				"qmd",
+				resolveQmdBinary(),
 				["collection", "add", MEMORY_DIR, "--name", "pi-memory"],
 				{ timeout: 10_000 },
 				(err) => (err ? reject(err) : resolve()),
@@ -1382,7 +1418,7 @@ export async function setupQmdCollection(): Promise<boolean> {
 		try {
 			await new Promise<void>((resolve, reject) => {
 				execFileFn(
-					"qmd",
+					resolveQmdBinary(),
 					["context", "add", ctxPath, desc, "-c", "pi-memory"],
 					{ timeout: 10_000 },
 					(err) => (err ? reject(err) : resolve()),
@@ -1414,7 +1450,9 @@ export function detectQmd(): Promise<boolean> {
 		// `qmd status` can trigger slow model/device probing on some systems (e.g. Vulkan fallback),
 		// which may exceed short startup timeouts and produce false negatives.
 		// `qmd collection list` is much lighter and still validates the binary is callable.
-		execFileFn("qmd", ["collection", "list"], { timeout: 15_000 }, (err) => {
+		// A miss re-resolves next time, so a qmd installed mid-session is found.
+		if (!qmdAvailable) cachedQmdBinary = undefined;
+		execFileFn(resolveQmdBinary(), ["collection", "list"], { timeout: 15_000 }, (err) => {
 			qmdAvailable = !err;
 			qmdAvailabilityCheckedAt = Date.now();
 			resolve(qmdAvailable);
@@ -1431,7 +1469,7 @@ export function checkCollection(name: string): Promise<boolean> {
 
 	return new Promise((resolve) => {
 		execFileFn(
-			"qmd",
+			resolveQmdBinary(),
 			["collection", "list", "--json"],
 			{ timeout: 10_000 },
 			(err, stdout) => {
@@ -1488,7 +1526,7 @@ export function ensureQmdEmbed(): boolean {
 		return true;
 	}
 	embedInFlight = true;
-	execFileFn("qmd", ["embed"], { timeout: QMD_EMBED_TIMEOUT_MS }, () => {
+	execFileFn(resolveQmdBinary(), ["embed"], { timeout: QMD_EMBED_TIMEOUT_MS }, () => {
 		embedInFlight = false;
 		if (embedPending) {
 			embedPending = false;
@@ -1513,7 +1551,7 @@ export function scheduleQmdUpdate() {
 	if (updateTimer) clearTimeout(updateTimer);
 	updateTimer = setTimeout(() => {
 		updateTimer = null;
-		execFileFn("qmd", ["update"], { timeout: 30_000 }, () => ensureQmdEmbed());
+		execFileFn(resolveQmdBinary(), ["update"], { timeout: 30_000 }, () => ensureQmdEmbed());
 	}, 500);
 }
 
@@ -1521,7 +1559,7 @@ async function runQmdUpdateNow() {
 	if (getQmdUpdateMode() !== "background") return;
 	if (!qmdAvailable) return;
 	await new Promise<void>((resolve) => {
-		execFileFn("qmd", ["update"], { timeout: 30_000 }, () => resolve());
+		execFileFn(resolveQmdBinary(), ["update"], { timeout: 30_000 }, () => resolve());
 	});
 	// Embeds for the final writes are picked up by the session_start catch-up
 	// embed; not chained here so shutdown stays fast.
@@ -1691,7 +1729,7 @@ export function runQmdSearch(
 	const timeoutMs = getQmdSearchTimeoutMs();
 
 	return new Promise((resolve, reject) => {
-		execFileFn("qmd", args, { timeout: timeoutMs }, (err, stdout, stderr) => {
+		execFileFn(resolveQmdBinary(), args, { timeout: timeoutMs }, (err, stdout, stderr) => {
 			if (err) {
 				const cleaned = stripAnsi(stderr ?? "").trim();
 				const cleanedMessage = stripAnsi(err.message).trim();
@@ -1848,10 +1886,9 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		qmdAvailable = await detectQmd();
+		// No notice: memory_search works without qmd (built-in BM25), and
+		// memory_status explains the optional install when asked.
 		if (!qmdAvailable) {
-			if (ctx.hasUI) {
-				ctx.ui.notify(qmdInstallInstructions(), "info");
-			}
 			refreshMemorySnapshot("session_start");
 			return;
 		}

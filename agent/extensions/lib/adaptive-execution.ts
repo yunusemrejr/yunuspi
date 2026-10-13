@@ -5,7 +5,7 @@
 import type { ControlLevel } from './model-competence.ts';
 export type ExecutionScope = 'task' | 'subtask' | 'todo';
 export type ExecutionTier = 'direct' | 'standard' | 'complex' | 'critical';
-export type AutomaticCapability = 'assistance' | 'council' | 'qualityReview' | 'observer' | 'localLm' | 'jev';
+export type AutomaticCapability = 'assistance' | 'council' | 'qualityReview' | 'observer' | 'analysis' | 'jev';
 /** Measured reliability of the executing route (see model-competence.ts). Absent
  * evidence is `standard`; the control can only move optional coordination. */
 export interface ExecutionControl {
@@ -129,9 +129,10 @@ export function classifyExecution(input: ExecutionInput): ExecutionProfile {
     features: {
       assistance: help, council: !constrained && substantial && (alternatives || deliberation),
       qualityReview: tier !== 'direct' || guarded, observer: tier !== 'direct' || guarded,
-      // Cheap stages are useful only for a genuine choice. Deterministic
-      // routing goes first; failing helpers never suppress mandatory guards.
-      localLm: substantial || diagnostic || uncertainty >= .5,
+      // Cheap analysis stages (prompt analysis, skill discovery, semantic
+      // ranking) are useful only for a genuine choice. Deterministic routing
+      // goes first; failing helpers never suppress mandatory guards.
+      analysis: substantial || diagnostic || uncertainty >= .5,
       jev: substantial || uncertainty >= .6 || stuck,
     },
     cadence: {

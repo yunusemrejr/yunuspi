@@ -1,22 +1,18 @@
 # Changelog
 
-## 0.37.1 — Surviving desktop update protection
+## 0.38.0 — No automatic local LM, goal boosts anywhere, quicker desktop
 
-- Detect the exact installed Electron executable during updates, including helpers and windows that survive a crashed launcher. Electron's rewritten process title no longer hides the active runtime. Added a real Electron regression without a core CLI parent.
+**Removed: the automatic local language model.**
+- The Qwen3.5-0.8B service (`pi-local-lm.service`) no longer starts from sessions. Its bash output line selection, skill-hint relevance judgement, pre-screen step and tool/skill discovery re-ranking are gone; session skill hints are now purely lexical, and discovery and pre-screening run Needle then Jev. Kompress, Needle3, Jev and the neural code-reuse ranker are unchanged.
+- `--with-local-lm` is removed, `--skip-local-lm` is accepted as a no-op by the installer, and `yunuspi update` no longer accepts `--skip-local-lm`.
+- Installing or updating stops and removes `pi-local-lm.service` and the older `pi-smol-preprocessor.service`, and deletes the `local-models/qwen3.5-0.8b` and `local-models/smollm2-135m` weights. The `PI_LOCAL_LM`, `PI_LOCAL_LM_ASSETS`, `PI_SKILL_GATE` and `PI_SMOL_PREPROCESSOR` switches no longer exist.
+- The adaptive-execution profile `localLm` is renamed `analysis`; it gates prompt analysis, skill discovery and semantic re-ranking with the same formula.
 
-## 0.37.0 — Electron workspace
+**Goal boosts chain anywhere in the line.** `/noslop`, `/nobug`, `/3d` and `/video` count wherever they stand in a `/goal` — start, middle or end (`/goal build the bakery site /3d /noslop`, `/goal make the hero /3d, cut a promo /video, then /noslop everything`) — and inside each other's arguments (`/noslop make X /goal`). The goal keeps your own requirements as criteria first, adds each boost's core fronts in the order written, and quotes your exact wording so the agent knows which part each boost was attached to. Paths, file names and code spans (`src/3d`, `/video.mp4`, `` `/noslop` ``) stay text. A bare `/3d` (or any boost) while a goal is live joins that goal instead of replacing it. Goal kickoffs typed while a turn is running now queue (or steer into a running goal) instead of failing with "Agent is already processing".
 
-- Replaced default interactive terminal launches with a rat-led Electron GUI, native application menus, fixed composer, searchable project/session sidebar, and an optional workbench.
-- Added independent concurrent sessions, close/archive/restore/delete/export/import, per-session models/thinking/drafts, second-launch project/draft forwarding, and existing same-checkout collaboration.
-- History browsing reads the core transcript directly without starting a worker. Task/restored runtimes stay alive to protect background jobs and schedules. All started workers stay resident until explicitly closed; up to eight run concurrently.
-- Made long history paginated and byte bounded, kept pre-compaction messages visible, merged tool calls across page boundaries, and fenced live snapshots against streaming races.
-- Added atomic session metadata, recoverable deletion, coalesced draft saves, failed-save recovery, prompt/dialog cancellation, and managed GUI source receipts and update ownership guards.
-- Preserved selected models, extended thinking levels, tool ceilings, credentials and project memory ownership. Serialized concurrent vector-store creation, deduplication, source positions and supersession merges; failed initialization rolls back and closes its connection.
-- Removed eager frontend loading from metadata commands, shortened default subagent instructions by 46%, removed duplicate startup ranking, retained hook guidance across resume, and made reports/subagent/background/Double controls RPC-aware.
-- Added real Electron/core checks with a local provider, worker/storage/projection/update regressions, and Linux desktop CI.
+**Desktop menus open at once and notices stay out of the way.** The model, thinking and commands menus open immediately with "Starting this session…" while a closed session's runtime starts (about 10 s with the full harness), and show failures inside the dialog with a retry. Typing in a closed session starts its runtime in the background. Notices moved under the top bar, clamp to four lines and dismiss on click, so they no longer cover the composer's model, thinking and send controls. Opening a session to read it no longer starts its runtime just to show the cost line (that started one worker per browsed session and hit the eight-worker limit); the cost appears once the runtime is ready. The usage caption spells out subscription and unknown costs ("subscription", "cost unknown") instead of printing the footer's "sub total" or "$? total".
 
-
-## Unreleased
+**Installed tools are found from the desktop app.** A dock or menu launch now merges the login shell's PATH (nvm, bun, cargo and npm globals), and `memory_search` finds a `qmd` installed outside PATH (nvm, fnm, volta, bun, `~/.local`, or `PI_QMD_BIN`), running it on the harness's own Node. The session-start "memory_search requires qmd" notice is gone: memory search always worked through its built-in index, and `memory_status` explains the optional install when asked. Missing-tool hints name the platform's package manager instead of always suggesting Homebrew.
 
 **Browser: attach to your own browser, or stay headless.** The `browser` tool's `open` action takes `connectionMode: isolated|user|cdp` (isolated private headless Chromium stays the default), an explicit `cdpUrl` (HTTP(S)/WS(S), credentials rejected), a preferred `browser` (Chrome, Chromium, Brave, Edge, Helium, Arc), a `profile`, and `cookieHosts` to seed cookies. `connectionMode:user` discovers a running browser's `DevToolsActivePort` (or `PI_BROWSER_CDP_URL`). A new `batch` action runs up to ten steps in one call with a deadline scaled to the step count, saving model round trips.
 
@@ -44,10 +40,26 @@
 
 **Verification moved into the goal.** The session observer, watchmaker-style reviewers, project-integrity and quality gates are retired by default (`PI_LEAN_GATES=on` restores them for debugging). `/goal check` now ends with same-model self-verification: the model that did the work compares every open criterion against the goal text and its own session evidence. Automatic quality reviews now honor the same switch end to end: with the executor off, no reviewer is dispatched, no "Verification open" debt or follow-up assess turn is manufactured, and the disabled state is reported only inside the tool result when asked; deliberate `quality_review` calls and explicit blocked assessments behave as before. The 24 consolidated pointer skills are no longer advertised in every prompt (`disable-model-invocation`), leaving six visible skills (build, create, media, research, operate, ui-design) and saving about 1,700 tokens of catalog per uncached prompt; legacy names still resolve when invoked directly.
 
-**Fewer, smaller skills and tools.** Twenty-six skills (1359 lines) collapse into five short hubs — `build`, `create`, `media`, `research`, `operate` (259 lines total); legacy names remain as one-paragraph pointers. The `wasm` skill is removed. Media work starts from one `studio` hub tool (probe/frames/analyze/mix/compose sub-actions); granular tools and plain `bash` remain as overrides. Needle and the local language model are now opt-in at install (`--with-needle`, `--with-local-lm`). Soft tool/skill suggestions are budgeted to at most two per session with rising relevance thresholds (`SuggestionBudget` in `lib/lean-policy.ts`).
+**Fewer, smaller skills and tools.** Twenty-six skills (1359 lines) collapse into five short hubs — `build`, `create`, `media`, `research`, `operate` (259 lines total); legacy names remain as one-paragraph pointers. The `wasm` skill is removed. Media work starts from one `studio` hub tool (probe/frames/analyze/mix/compose sub-actions); granular tools and plain `bash` remain as overrides. Needle is now opt-in at install (`--with-needle`). Soft tool/skill suggestions are budgeted to at most two per session with rising relevance thresholds (`SuggestionBudget` in `lib/lean-policy.ts`).
 
 
 **Every session shows one total cost.** The desktop usage line and `/session` read the main model's responses only, so delegated runs, Jev, Span, observer and other helper calls were missing from the number. `getSessionStats()` now returns the footer's transcript-backed total (`cost`, with `costLabel` carrying the partial/estimate/subscription markers, plus `costParts` main/delegated/helpers and per-route `costRoutes`). The desktop caption reads "… total", the workbench gains a "Total cost" card, and a reopened session loads its total immediately instead of after the next turn. `/session` lists the split and per-model amounts that now reconcile with that total.
+
+## 0.37.1 — Surviving desktop update protection
+
+- Detect the exact installed Electron executable during updates, including helpers and windows that survive a crashed launcher. Electron's rewritten process title no longer hides the active runtime. Added a real Electron regression without a core CLI parent.
+
+## 0.37.0 — Electron workspace
+
+- Replaced default interactive terminal launches with a rat-led Electron GUI, native application menus, fixed composer, searchable project/session sidebar, and an optional workbench.
+- Added independent concurrent sessions, close/archive/restore/delete/export/import, per-session models/thinking/drafts, second-launch project/draft forwarding, and existing same-checkout collaboration.
+- History browsing reads the core transcript directly without starting a worker. Task/restored runtimes stay alive to protect background jobs and schedules. All started workers stay resident until explicitly closed; up to eight run concurrently.
+- Made long history paginated and byte bounded, kept pre-compaction messages visible, merged tool calls across page boundaries, and fenced live snapshots against streaming races.
+- Added atomic session metadata, recoverable deletion, coalesced draft saves, failed-save recovery, prompt/dialog cancellation, and managed GUI source receipts and update ownership guards.
+- Preserved selected models, extended thinking levels, tool ceilings, credentials and project memory ownership. Serialized concurrent vector-store creation, deduplication, source positions and supersession merges; failed initialization rolls back and closes its connection.
+- Removed eager frontend loading from metadata commands, shortened default subagent instructions by 46%, removed duplicate startup ranking, retained hook guidance across resume, and made reports/subagent/background/Double controls RPC-aware.
+- Added real Electron/core checks with a local provider, worker/storage/projection/update regressions, and Linux desktop CI.
+
 
 ## 0.36.3 — 2026-10-12
 

@@ -141,7 +141,7 @@ constraint.
 - Routine monitoring and actual WASM evaluations have separate visible receipts, so standby
   is not confused with successful inference. Reduced prompt coverage is explicit.
 - Child-subagent guidance is relayed to the parent session through the subagent supervisor channel.
-- Internal intelligence components (JEV, Needle3, the local LM, Kompress, fuzzy/neural helpers, the intent
+- Internal intelligence components (JEV, Needle3, Kompress, fuzzy/neural helpers, the intent
   classifier) report a single bounded `activity` line per real use, deduplicated per component.
 - `/guardian stats` and the `micro_status` tool expose counters; neither runs inference.
 

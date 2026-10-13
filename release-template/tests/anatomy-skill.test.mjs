@@ -102,9 +102,9 @@ test('bundled SVG and true 3D examples build offline from a project copy', () =>
 });
 
 test('the SDK offers Anatomy to text and vision models in parent and native child sessions', {timeout: 60000}, async () => {
-  const keys = ['PI_CODING_AGENT_DIR', 'PI_JEV', 'PI_NEEDLE', 'PI_LOCAL_LM', 'PI_SUBAGENT_CHILD'];
+  const keys = ['PI_CODING_AGENT_DIR', 'PI_JEV', 'PI_NEEDLE', 'PI_SUBAGENT_CHILD'];
   const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  Object.assign(process.env, {PI_JEV: 'off', PI_NEEDLE: 'off', PI_LOCAL_LM: 'off'});
+  Object.assign(process.env, {PI_JEV: 'off', PI_NEEDLE: 'off'});
   const cwds = [];
   try {
     for (const child of [false, true]) for (const input of [['text'], ['text', 'image']]) {

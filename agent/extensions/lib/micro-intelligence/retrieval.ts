@@ -1,7 +1,7 @@
 import { sessionObservability } from '../session-observability.ts';
 /** Multi-stage retrieval: deterministic eligibility (caller-owned) ->
- * lexical/statistical order (caller-provided) -> batched Jev for large
- * shortlists, local ranking first for small ones. Candidates entering this function are
+ * lexical/statistical order (caller-provided) -> Needle re-rank -> batched Jev.
+ * Candidates entering this function are
  * already authorized/eligible; ranking never grants access.
  *
  * Dependencies are injected so subsystem owners keep their wiring and tests
@@ -16,7 +16,6 @@ import { sessionObservability } from '../session-observability.ts';
 import type { NeedleResult } from "../needle-runtime.ts";
 import type { NeedleRankResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
-import { LOCAL_CHOICE_MIN_P, LOCAL_CHOICE_MIN_MARGIN, type LocalChooser } from "../local-lm.ts";
 import { readJevChoice } from "../jev-client.ts";
 
 export interface RetrievalCandidate {
@@ -43,7 +42,7 @@ export type RetrievalJev = (
 
 export interface RetrievalOutcome<T extends RetrievalCandidate> {
   ordered: T[];
-  applied: "lexical" | "needle" | "fused" | "local" | "jev";
+  applied: "lexical" | "needle" | "fused" | "jev";
   lexicalTop?: string;
   needleTop?: string;
   needleMargin?: number;
@@ -87,7 +86,7 @@ async function awaitStage<T>(work: Promise<T>, signal?: AbortSignal): Promise<T 
  * - Needle re-ranks the head slice; its order applies when the win is
  *   accepted (score/margin floors); agreement alone cannot reorder the tail.
  * - Jev first handles large shortlists; for small ones it validates uncertain
- *   or disagreeing local ranking. At most one batched call, same bars as the
+ *   or disagreeing Needle ranking. At most one batched call, same bars as the
  *   existing tool-discovery rerank (exists >= 0.5, topProb >= 0.4).
  */
 export interface RetrievalOptions<T extends RetrievalCandidate> {
@@ -96,7 +95,6 @@ export interface RetrievalOptions<T extends RetrievalCandidate> {
   query: string;
   lexical: readonly T[];
   needle?: RetrievalNeedle;
-  local?: LocalChooser;
   signal?: AbortSignal;
   jev?: RetrievalJev;
   jevMark?: (site: string, detail: string, usage: { inputTokens: number; cached: boolean }) => string;
@@ -293,22 +291,6 @@ async function retrieve<T extends RetrievalCandidate>(options: RetrievalOptions<
     const fused = slice.map((item, index) => ({ item, index, score: 1 / (RRF_K + index) + (needleRank.has(item.id) ? 1 / (RRF_K + needleRank.get(item.id)!) : 0) }))
       .sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.item);
     if (fused.some((item, index) => item.id !== slice[index].id)) fusedOrdered = fused.concat(lexical.slice(MAX_STAGE));
-  }
-
-  // One local token can settle a short capability shortlist. Only promote
-  // an existing entry; never drop evidence/candidates or expand authority.
-  // Exact names and shadow ranking keep their existing behavior.
-  if (options.local && !needleShadow && !named && !options.signal?.aborted) {
-    try {
-      const pool = needleOrdered ?? fusedOrdered ?? [...lexical];
-      const candidates = pool.slice(0, 3).map(entry => ({ id: entry.id, text: entry.text.slice(0, 300) }));
-      const picked = await stage(signal => options.local!(query, candidates, `${kind}-discovery`, { signal }));
-      if (options.signal?.aborted) return done([...lexical], 'lexical');
-      if (picked?.ok && !options.signal?.aborted && Number.isFinite(picked.p) && picked.p >= LOCAL_CHOICE_MIN_P && picked.p <= 1
-        && Number.isFinite(picked.margin) && picked.margin >= LOCAL_CHOICE_MIN_MARGIN && picked.margin <= 1 && candidates.some(entry => entry.id === picked.id)) {
-        return done([...pool.filter(entry => entry.id === picked.id), ...pool.filter(entry => entry.id !== picked.id)], 'local', { needleTop, needleMargin });
-      }
-    } catch { /* Unavailable/uncertain local advice retains the remote/lexical path. */ }
   }
 
   if (options.signal?.aborted) return done([...lexical], 'lexical');

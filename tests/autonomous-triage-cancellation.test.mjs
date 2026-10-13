@@ -13,7 +13,6 @@ process.env.OPENROUTER_API_KEY = 'synthetic-fixture';
 process.env.PI_AUTONOMOUS_FREE_ASSIST = 'off';
 process.env.PI_ADAPTIVE_EXECUTION = 'off';
 process.env.PI_SKILL_DISCOVERY = 'off';
-process.env.PI_LOCAL_LM = 'off';
 delete process.env.PI_SUBAGENT_CHILD;
 delete process.env.PI_JEV;
 delete process.env.PI_OFFLINE;

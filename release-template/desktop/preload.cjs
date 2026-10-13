@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('yunuspi', Object.freeze({
   chooseProject: () => invoke('chooseProject'),
   createSession: projectId => invoke('createSession', { projectId }),
   openSession: (id, loaded = false) => invoke('openSession', { id, loaded }),
+  warm: id => invoke('warm', { id }),
   history: (id, before) => invoke('history', { id, before }),
   sessionAction: (id, action) => invoke('sessionAction', { id, action }),
   updateSession: (id, patch) => invoke('updateSession', { id, patch }),

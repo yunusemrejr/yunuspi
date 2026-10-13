@@ -104,7 +104,7 @@ test("a worker refusal made before inference leaves no cooldown; other refusals 
 });
 
 function observations() {
-  const selects = [], offers = [];
+  const selects = [];
   const handlers = new Map();
   const pi = {
     on: (name, fn) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
@@ -112,24 +112,22 @@ function observations() {
     getActiveTools: () => ["obs_read", "read", "bash"],
   };
   register(pi,
-    { reset: () => {}, endTurn: () => {}, select: async (text) => { selects.push(text); } },
-    { reset: () => {}, endTurn: () => {}, offer: (_key, text) => offers.push(text), take: () => undefined, takeAsync: async () => undefined });
+    { reset: () => {}, endTurn: () => {}, select: async (text) => { selects.push(text); } });
   const result = (toolName, input, text) => handlers.get("tool_result")[0]({
-    toolName, toolCallId: `call-${selects.length + offers.length}`, input, isError: false,
+    toolName, toolCallId: `call-${selects.length}`, input, isError: false,
     content: [{ type: "text", text }], details: {},
   }, { model: { cost: { input: 3 } } });
   const read = (text, file = "notes.md") => result("read", { path: file }, text);
   const run = (text, command = "python3 report.py") => result("bash", { command }, text);
-  return { selects, offers, read, run };
+  return { selects, read, run };
 }
 
-test("Kompress claims only output it could shorten; the rest stays with Smol", async () => {
+test("Kompress claims only output it could shorten; the rest stays exact", async () => {
   const s = observations();
   await s.read(admissible);
   assert.deepEqual(s.selects, [admissible], "shortenable prose goes to Kompress");
-  assert.equal(s.offers.length, 0);
   // Eligible in shape, but every paragraph is protected: no selection could
-  // save anything, so Kompress must not swallow the Smol opportunity.
+  // save anything, so Kompress must not claim it.
   const protectedDoc = Array.from({ length: 22 }, (_, i) =>
     `The staging cluster only serves version ${i + 2} of the product catalogue to invited reviewers in the northern region during each quarterly audit window.`).join("\n\n");
   assert.ok(protectedDoc.length >= 3000 && protectedDoc.length <= 4096);
@@ -137,10 +135,8 @@ test("Kompress claims only output it could shorten; the rest stays with Smol", a
   assert.equal(mini.miniAdmissible(protectedDoc, 3), false);
   await s.read(protectedDoc);
   assert.equal(s.selects.length, 1, "no Kompress request for unshortenable prose");
-  assert.deepEqual(s.offers, [], "a file read is requested content and stays exact");
   await s.run(protectedDoc);
   assert.equal(s.selects.length, 1, "no Kompress request for unshortenable command output");
-  assert.deepEqual(s.offers, [protectedDoc], "Smol receives command output instead");
 });
 
 test("the worker answers shape refusals without spending its inference slot", (t) => {

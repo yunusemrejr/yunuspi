@@ -3,16 +3,14 @@
  *
  *   RAW TOOL RESULT -> deterministic classification (here)
  *     -> deterministic distiller (owner runs it first; its win ends routing)
- *     -> Smol for line/structured/noisy shapes
  *     -> Kompress for prose/block shapes
  *     -> Needle semantic relevance when meaning matters
  *     -> Jev validation when ambiguity matters
  *
  * This module only routes; subsystem owners keep execution, sealing and
- * fallback behavior. Routing never runs all four helpers on every result.
+ * fallback behavior. Routing never runs every helper on every result.
  */
 import { miniSource } from "../mini-preprocessor.ts";
-import { safeSmolOutput } from "../smol-preprocessor.ts";
 import { evidenceBlocks } from "../local-intelligence.mjs";
 
 export type ContentShape =
@@ -22,7 +20,6 @@ export interface EvidenceRoute {
   shape: ContentShape;
   /** Deterministic distiller should run first (owner decides the win). */
   deterministicFirst: boolean;
-  smol: boolean;
   kompress: boolean;
   needle: boolean;
   jev: boolean;
@@ -118,7 +115,7 @@ export function routeEvidence(input: RouteInput): EvidenceRoute {
   const reasons: string[] = [`shape=${shape}`];
   const route: EvidenceRoute = {
     shape, deterministicFirst: true,
-    smol: false, kompress: false, needle: false, jev: false, reasons,
+    kompress: false, needle: false, jev: false, reasons,
   };
   if (shape === "trivial" || shape === "unsupported") {
     // Small failures are still worth a semantic triage cue when they carry
@@ -134,23 +131,6 @@ export function routeEvidence(input: RouteInput): EvidenceRoute {
     return route;
   }
   const processed = new Set(input.alreadyProcessedBy ?? []);
-
-  // Smol: line/structured/noisy shapes. Error output is eligible for
-  // candidate-error-region selection only through the async offer path;
-  // safeSmolOutput keeps its conservative sync contract.
-  if ((shape === "structured" || shape === "mixed") && !processed.has("smol")) {
-    if (safeSmolOutput(tool, text, false, input.details)) {
-      route.smol = true;
-      reasons.push("smol:line-shaped");
-    } else if (tool === "bash" && text.length <= 32768 && text.split("\n").length >= 8) {
-      // Chunked async opportunity (see smol-preprocessor chunk offers):
-      // large line output the sync gate rejects can still warm selections.
-      route.smol = true;
-      reasons.push("smol:chunked-opportunity");
-    } else {
-      reasons.push("smol:ineligible-shape");
-    }
-  }
 
   // Kompress: prose/block shapes.
   if ((shape === "prose" || shape === "mixed") && !processed.has("kompress")) {
@@ -186,7 +166,7 @@ export function routeEvidence(input: RouteInput): EvidenceRoute {
   // Jev: ambiguity that matters. Large prose without local coverage (the
   // existing distill rule), or error output whose family is uncertain.
   if (!processed.has("jev")) {
-    if (!route.smol && !route.kompress && text.length >= 6000 && !isError) {
+    if (!route.kompress && text.length >= 6000 && !isError) {
       route.jev = true;
       reasons.push("jev:uncovered-prose");
     } else if (isError && route.needle && text.length >= 3000) {

@@ -9,7 +9,6 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-assessment-'));
 process.env.PI_CODING_AGENT_DIR = directory;
 process.env.PI_TASK_STATE_DIR = path.join(directory, 'state');
 delete process.env.PI_CHECKPOINTS;
-process.env.PI_LOCAL_LM = 'off';
 process.env.PI_OFFLINE = '1';
 process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'preferences.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'providers.json');

@@ -8,7 +8,6 @@ import { createEventBus } from '../core/coding-agent/src/core/event-bus.js';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-rpc-controls-'));
 process.env.PI_CODING_AGENT_DIR = path.join(dir, 'agent');
 process.env.PI_SUBAGENTS_TEMP_ROOT = path.join(dir, 'runs');
-process.env.PI_LOCAL_LM = 'off';
 const { registerSlashCommands } = await import('../agent/extensions/pi-subagents/src/slash/slash-commands.ts');
 const { openSubagentsAdmin } = await import('../agent/extensions/pi-subagents/src/slash/subagents-admin.ts');
 const { registerPromptWorkflowCommands } = await import('../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts');

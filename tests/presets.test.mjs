@@ -6,9 +6,10 @@ import path from 'node:path';
 const jiti = createJiti(import.meta.dirname);
 const ps = await jiti.import('../agent/extensions/lib/presets.ts');
 const ns = await jiti.import('../agent/extensions/lib/noslop.ts');
+const gs = await jiti.import('../agent/extensions/lib/goal-state.ts');
 const { default: goalExtension } = await jiti.import('../agent/extensions/goal.ts');
 
-test('chain grammar peels leading preset tokens in written order and dedupes', () => {
+test('chain grammar takes preset tokens in written order and dedupes', () => {
   assert.deepEqual(ps.parsePresetChain('3d', '/video /noslop please make a film about tides'),
     { presets: ['3d', 'video', 'noslop'], task: 'please make a film about tides' });
   assert.deepEqual(ps.parsePresetChain('3d', '/3d /video make x'), { presets: ['3d', 'video'], task: 'make x' });
@@ -17,7 +18,8 @@ test('chain grammar peels leading preset tokens in written order and dedupes', (
   assert.deepEqual(ps.parsePresetChain('3d', 'make a minecraft clone'), { presets: ['3d'], task: 'make a minecraft clone' });
   // Unknown slash words are assignment text, not presets; near-misses do not peel.
   assert.deepEqual(ps.parsePresetChain('3d', '/videos of cats'), { presets: ['3d'], task: '/videos of cats' });
-  assert.deepEqual(ps.parsePresetChain('3d', '/goal make x'), { presets: ['3d'], task: '/goal make x' });
+  // /goal is a token now (it asks for a goal), so it leaves the assignment instead of staying as text.
+  assert.deepEqual(ps.parsePresetChain('3d', '/goal make x'), { presets: ['3d'], task: 'make x' });
   assert.deepEqual(ps.parsePresetChain('noslop', '/nobug'), { presets: ['noslop', 'nobug'], task: '' });
   assert.deepEqual(ps.parsePresetChain('nobug', '/nobugs here'), { presets: ['nobug'], task: '/nobugs here' });
   assert.equal(ps.presetUserText(['3d', 'video', 'noslop'], 'please make  a\nfilm'), '/3d /video /noslop please make a film');
@@ -129,12 +131,150 @@ test('/3d /video /noslop <task> starts one stacked goal from a single dispatch',
   const goal = h.entries.at(-1).data;
   assert.equal(goal.criteria.length, 10);
   assert.match(h.sent[0], /Boosts in force — 3D \+ Video \+ Noslop/);
-  assert.deepEqual(h.sentOptions[0], { authored: true, userText: '/3d /video /noslop please make a video about tides' });
+  assert.deepEqual(h.sentOptions[0], { authored: true, userText: '/3d /video /noslop please make a video about tides', deliverAs: 'followUp' });
   assert.match(h.notes.at(-1).text, /3D \+ Video \+ Noslop boost on/);
+  // A bare boost on a live goal joins it; one the goal already carries adds nothing.
+  const entriesBefore = h.entries.length, sentBefore = h.sent.length;
   await h.commands.video.handler('', h.ctx); await tick();
-  assert.match(h.entries.at(-1).data.text, /Survey the current project for existing video work/, 'bare /video replaces the goal like any preset');
-  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/video' });
+  assert.equal(h.entries.length, entriesBefore, 'bare /video on a goal that already carries video persists nothing');
+  assert.equal(h.sent.length, sentBefore, 'and sends nothing');
+  assert.match(h.notes.at(-1).text, /Video already in force on goal/);
   await h.commands.nobug.handler('/noslop', h.ctx); await tick();
-  assert.match(h.sent.at(-1), /Boosts in force — Nobug \+ Noslop/);
-  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/nobug /noslop' });
+  assert.equal(h.entries.at(-1).data.id, goal.id, 'the goal is joined, not replaced');
+  assert.deepEqual(h.entries.at(-1).data.boosts, ['3d', 'video', 'noslop', 'nobug']);
+  assert.match(h.sent.at(-1), /Boosts added to this goal — Nobug/);
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/nobug', deliverAs: 'steer' });
+});
+
+test('preset tokens count anywhere in text, in written order, and never inside paths or code', () => {
+  assert.deepEqual(ps.extractPresetTokens('build a site /noslop'),
+    { presets: ['noslop'], goal: false, task: 'build a site', literal: 'build a site /noslop' });
+  const middle = ps.extractPresetTokens('make a rat scene /3d then a trailer /video and clean it');
+  assert.deepEqual([middle.presets, middle.task], [['3d', 'video'], 'make a rat scene then a trailer and clean it']);
+  const mixed = ps.extractPresetTokens('/video a teaser /goal /3d');
+  assert.deepEqual([mixed.presets, mixed.goal, mixed.task], [['video', '3d'], true, 'a teaser']);
+  assert.deepEqual(ps.extractPresetTokens('/noslop make X /goal'), { presets: ['noslop'], goal: true, task: 'make X', literal: '/noslop make X /goal' });
+  assert.deepEqual(ps.extractPresetTokens('/video cut it with /noslop and /3d /VIDEO').presets, ['video', 'noslop', '3d']);
+  assert.deepEqual(ps.extractPresetTokens('/noslop /3d /NOSLOP make x').presets, ['noslop', '3d']);
+  assert.deepEqual(ps.extractPresetTokens('/videos of cats /3d').presets, ['3d']);
+  for (const text of ['fix src/3d/model.ts and /video/x', 'open http://x/video now', 'foo/noslop bar', 'use src/3d/model.glb', '/3d/models', 'a/3d.']) {
+    const found = ps.extractPresetTokens(text);
+    assert.deepEqual([found.presets, found.goal, found.task], [[], false, text], text);
+  }
+  assert.deepEqual(ps.extractPresetTokens('use `/3d` and /video here'),
+    { presets: ['video'], goal: false, task: 'use `/3d` and here', literal: 'use `/3d` and /video here' });
+  assert.deepEqual(ps.extractPresetTokens('run `/noslop` only').presets, []);
+  const fenced = ps.extractPresetTokens('build it\n```\n/3d /video\n```\nthen /noslop');
+  assert.deepEqual([fenced.presets, fenced.task], [['noslop'], 'build it\n```\n/3d /video\n```']);
+  assert.equal(ps.extractPresetTokens('make\n  a  site /noslop').literal, 'make a site /noslop');
+});
+
+test('connector words a removed token strands at an edge go; mid-text ones stay', () => {
+  const task = (text) => ps.extractPresetTokens(text).task;
+  assert.equal(task('/3d and make X'), 'make X');
+  assert.equal(task('make a site, /noslop'), 'make a site');
+  assert.equal(task('make a site with /video, /noslop'), 'make a site');
+  assert.equal(task('build x; then /3d'), 'build x');
+  assert.equal(task('/goal build a site /noslop'), 'build a site');
+  assert.equal(task('C++ build /noslop'), 'C++ build', 'a + inside a word is not a connector');
+  assert.equal(task('make it and /noslop more'), 'make it and more');
+  assert.equal(task('with a dragon /3d'), 'with a dragon', 'a connector no token stranded stays');
+  assert.equal(task('with /3d a dragon'), 'a dragon', 'a connector a token stranded at the start goes');
+  assert.equal(task('no tokens here, and  nothing  changes'), 'no tokens here, and  nothing  changes');
+});
+
+test('a boosted goal keeps the user requirements first, budgets the fronts, and ends with V', () => {
+  const task = 'Make a film about tides. Keep it under two minutes. Use real footage only.';
+  const own = gs.createGoal(task).criteria.filter((c) => c.id !== 'V').map((c) => c.text);
+  const bullets = Array.from({ length: 9 }, (_, i) => `- requirement number ${i + 1} stays`).join('\n');
+  const listed = gs.createGoal(`Build the thing.\n${bullets}`).criteria.filter((c) => c.id !== 'V').map((c) => c.text);
+  const front = /^(Noslop|Nobug|3D|Video): /;
+  for (const presets of [['3d'], ['3d', 'video'], ['3d', 'video', 'noslop'], ['nobug', 'noslop', '3d', 'video']]) {
+    const goal = ps.createBoostedGoal(task, presets, `${presets.map((id) => `/${id}`).join(' ')} ${task}`);
+    const perPreset = presets.length === 1 ? 3 : presets.length === 2 ? 2 : 1;
+    assert.equal(goal.criteria.filter((c) => front.test(c.text)).length, perPreset * presets.length, `${presets.join('+')} fronts`);
+    assert.ok(goal.criteria.length <= 12, `${presets.join('+')} within budget`);
+    assert.equal(goal.criteria.at(-1).id, 'V');
+    const first = goal.criteria.findIndex((c) => front.test(c.text));
+    assert.ok(first >= 1, 'the user requirement leads');
+    assert.deepEqual(goal.criteria.slice(0, first).map((c) => c.text), own.slice(0, first));
+    assert.deepEqual(goal.boosts, presets);
+    assert.equal(goal.text.split('\n\n')[0], task, 'the task opens the text');
+    assert.match(goal.text, /The user wrote: «/);
+  }
+  const crowded = ps.createBoostedGoal(`Build the thing.\n${bullets}`, ['nobug', 'noslop', '3d', 'video'], 'lit');
+  assert.equal(crowded.criteria.length, 12);
+  assert.deepEqual(crowded.criteria.slice(0, 7).map((c) => c.text), listed.slice(0, 7), 'own requirements come first and take the slots left');
+});
+
+test('a bare boost joins a live goal: fronts fill free slots before V, and a repeat adds nothing', () => {
+  const full = gs.createPresetGoal('own work', Array.from({ length: 10 }, (_, i) => `own item ${i + 1} stays`));
+  const joined = ps.addBoosts(full, ['3d']);
+  assert.deepEqual(joined.fresh, ['3d']);
+  assert.equal(joined.fronts, 1, 'only one slot was free');
+  assert.equal(joined.goal.criteria.length, 12);
+  assert.equal(joined.goal.criteria.at(-1).id, 'V');
+  assert.match(joined.goal.criteria.at(-2).text, /^3D: /);
+  assert.deepEqual(joined.goal.criteria.slice(0, 10).map((c) => c.text), full.criteria.slice(0, 10).map((c) => c.text));
+  assert.match(joined.goal.text, /^own work\n\nBoosts added to this goal — 3D — /);
+  assert.match(joined.goal.text, /\[3D\]\n3D boost in force/);
+  assert.deepEqual(ps.addBoosts(joined.goal, ['3d']).fresh, [], 'a repeat adds nothing');
+  const solo = ps.createPresetChainGoal(ps.parsePresetChain('noslop', 'the settings page'));
+  assert.deepEqual(ps.addBoosts(solo, ['noslop']).fresh, [], 'a solo /noslop goal already carries its fronts');
+  assert.deepEqual(ps.addBoosts(solo, ['nobug']).fresh, ['nobug']);
+  const roomy = ps.addBoosts(gs.createPresetGoal('roomy', ['one thing']), ['3d', 'video']);
+  assert.deepEqual([roomy.fresh, roomy.fronts, roomy.goal.boosts], [['3d', 'video'], 4, ['3d', 'video']]);
+});
+
+test('preset tokens anywhere in /goal make one boosted goal; a preset inside /goal keeps the user words', async () => {
+  const h = harness();
+  await h.commands.goal.handler('build a bakery site /noslop', h.ctx); await tick();
+  const goal = h.entries.at(-1).data;
+  assert.deepEqual(goal.boosts, ['noslop']);
+  assert.ok(goal.text.startsWith('build a bakery site\n\nBoosts in force'));
+  assert.match(goal.text, /The user wrote: «build a bakery site \/noslop»/);
+  assert.ok(goal.criteria.some((c) => c.text.startsWith('Noslop: ')));
+  assert.equal(goal.criteria.at(-1).id, 'V');
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: 'build a bakery site /noslop', deliverAs: 'followUp' });
+  assert.match(h.notes.at(-1).text, /^Goal g\w+ with Noslop boosts — \d+ criteria/);
+  await h.commands['3d'].handler('make a rat scene /video /goal', h.ctx); await tick();
+  const chained = h.entries.at(-1).data;
+  assert.deepEqual(chained.boosts, ['3d', 'video']);
+  assert.ok(chained.text.startsWith('make a rat scene\n\n'));
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/3d make a rat scene /video /goal', deliverAs: 'followUp' });
+  await h.commands.noslop.handler('make X /goal', h.ctx); await tick();
+  assert.deepEqual(h.entries.at(-1).data.boosts, ['noslop']);
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/noslop make X /goal', deliverAs: 'followUp' });
+});
+
+test('a bare boost on a live goal joins it; with no live goal /goal /3d is the bare preset', async () => {
+  const h = harness();
+  await h.commands.goal.handler('Ship the bakery site', h.ctx); await tick();
+  const plain = h.entries.at(-1).data;
+  await h.commands['3d'].handler('', h.ctx); await tick();
+  const joined = h.entries.at(-1).data;
+  assert.equal(joined.id, plain.id, 'the same goal joins; it is not replaced');
+  assert.ok(joined.text.startsWith('Ship the bakery site\n\nBoosts added to this goal — 3D'));
+  assert.equal(joined.criteria.length, Math.min(12, plain.criteria.length + 3));
+  assert.equal(joined.criteria.at(-1).id, 'V');
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/3d', deliverAs: 'steer' });
+  assert.match(h.sent.at(-1), /Boosts added to this goal — 3D/);
+  assert.match(h.notes.at(-1).text, /^3D boost added to goal g\w+/);
+  const count = h.entries.length;
+  await h.commands['3d'].handler('', h.ctx); await tick();
+  assert.equal(h.entries.length, count, 'a repeat persists nothing');
+  assert.match(h.notes.at(-1).text, /3D already in force on goal g\w+/);
+  await h.commands['3d'].handler('status', h.ctx);
+  assert.match(h.notes.at(-1).text, /^Goal g\w+ \[active\]/, 'status still reads the live goal');
+  const fresh = harness();
+  await fresh.commands.goal.handler('/3d', fresh.ctx); await tick();
+  assert.match(fresh.entries.at(-1).data.text, /Survey the current project for existing 3D work/);
+  assert.deepEqual(fresh.entries.at(-1).data.boosts, ['3d']);
+});
+
+test('file names and paths that start like a preset stay text', () => {
+  const found = ps.extractPresetTokens('convert /video.mp4 and /3d.glb, then render /3d. Done /noslop');
+  assert.deepEqual(found.presets, ['3d', 'noslop']);
+  assert.match(found.task, /\/video\.mp4/);
+  assert.match(found.task, /\/3d\.glb/);
 });

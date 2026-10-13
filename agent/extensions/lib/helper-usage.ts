@@ -5,7 +5,7 @@ import { collectAuxiliaryModelUsage } from './cost-evidence.ts';
 
 export const HELPER_USAGE_VIEW = Symbol.for('yunuspi.helper-usage-view.v1');
 export const HELPER_USAGE_ENTRY = 'helper-usage-v1';
-const names = ['JEV', 'Needle3', 'Local LM', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection', 'Span sensor', 'Micro worker', 'Remote rerank'];
+const names = ['JEV', 'Needle3', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection', 'Span sensor', 'Micro worker', 'Remote rerank'];
 const fields = ['events','executions','cached','results','shadow','applied','delivered','returned','skipped','failed','timingSamples','durationMs','matches'];
 const numeric = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const clean = (value: unknown, max=200) => typeof value === 'string' ? value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,'').slice(0,max) : '';
@@ -44,14 +44,14 @@ export function createHelperUsageLedger() {
       row.events++;
       const cached=data.cached===true||data.coalesced===true||data.decision==='cache-hit';
       if(cached)row.cached++;
-      if(['ml.needle.call','ml.jev.used','ml.smol.inference','ml.mini.select','ml.wasm.completed','ml.span.used','ml.microworker.used','ml.rerank.used'].includes(kind)) {
+      if(['ml.needle.call','ml.jev.used','ml.mini.select','ml.wasm.completed','ml.span.used','ml.microworker.used','ml.rerank.used'].includes(kind)) {
         if(!cached)row.executions++;
         if(shadow&&!cached)row.shadow++;
         if(described.status==='ok')row.results++;
       }
       if(kind==='ml.evidence.delivered')row.delivered++;
       else if(kind==='ml.evidence.returned')row.returned++;
-      else if(!shadow&&['ml.smol.used','ml.mini.used','ml.fuzzy.used','ml.retrieval.used','ml.intent','ml.radar.rank'].includes(kind))row.applied++;
+      else if(!shadow&&['ml.mini.used','ml.fuzzy.used','ml.retrieval.used','ml.intent','ml.radar.rank'].includes(kind))row.applied++;
       if(described.status==='skip')row.skipped++;
       if(described.status==='error')row.failed++;
       if(numeric(data.durationMs)){row.durationMs+=data.durationMs;row.timingSamples++;}

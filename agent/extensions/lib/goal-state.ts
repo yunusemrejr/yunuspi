@@ -39,6 +39,8 @@ export interface GoalState {
 	updatedAt: number;
 	/** Native writes and the latest revision covered by a successful check. */
 	verification?: { revision: number; checked: number };
+	/** Preset boosts (3D, Video, ...) already written into this goal, so a bare repeat adds nothing. */
+	boosts?: string[];
 }
 
 export const MAX_CRITERIA = 12;

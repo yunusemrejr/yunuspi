@@ -20,7 +20,7 @@ test('desktop source receipts prevent silent local GUI loss and support a pre-de
   fs.writeFileSync(path.join(repo, 'agent/npm/package.json'), '{}');
   fs.writeFileSync(path.join(repo, 'agent/public.txt'), 'public fixture');
   fs.writeFileSync(path.join(repo, 'desktop/main.mjs'), 'export const fixture = 1;');
-  const run = (...flags) => spawnSync(process.execPath, [path.join(repo, 'scripts/install.mjs'), '--target', target, '--apply', '--skip-needle', '--skip-local-lm', ...flags], { encoding: 'utf8' });
+  const run = (...flags) => spawnSync(process.execPath, [path.join(repo, 'scripts/install.mjs'), '--target', target, '--apply', '--skip-needle', ...flags], { encoding: 'utf8' });
   const initial = run(); assert.equal(initial.status, 0, initial.stderr);
   const receiptPath = path.join(target, 'installation.json'), read = () => JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
   assert.equal(read().managedDesktopFiles['main.mjs'], createHash('sha256').update('export const fixture = 1;').digest('hex'));

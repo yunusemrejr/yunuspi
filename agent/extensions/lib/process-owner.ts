@@ -3,7 +3,7 @@
  *
  * A YunusPi process that starts long-lived detached children (managed bash
  * jobs, background tasks, browsers, desktop sessions, video renders) or uses
- * the shared local model writes one owner record, <dir>/<pid>: its own start
+ * the shared Kompress preprocessor writes one owner record, <dir>/<pid>: its own start
  * identity on the first line, then one "pgid identity" line per process group
  * it owns. Graceful shutdown already stops those groups via session_shutdown;
  * the record is the backstop when that never runs (SIGKILL, a terminal closed
@@ -11,11 +11,11 @@
  * (scripts/process-owner.sh reap) waits for the owner to die, stops the
  * listed groups whose leader identity still matches, and deletes the record.
  *
- * The same records are the leases on the shared local services (the local
- * model and the Kompress preprocessor): their units run under
- * `process-owner.sh guard`, which stops a server once no live owner record has
- * existed for a grace period. They therefore never outlive the last session,
- * and one session exiting never stops them under another.
+ * The same records are the leases on the shared Kompress preprocessor service:
+ * its unit runs under
+ * `process-owner.sh guard`, which stops the server once no live owner record has
+ * existed for a grace period. It therefore never outlives the last session,
+ * and one session exiting never stops it under another.
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -23,7 +23,6 @@ import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const LOCAL_LM_SERVICE = "pi-local-lm.service";
 export const MINI_PREPROCESSOR_SERVICE = "pi-mini-preprocessor.service";
 export const OWNER_SCRIPT = fileURLToPath(new URL("../../scripts/process-owner.sh", import.meta.url));
 
@@ -84,7 +83,7 @@ const requestedAt = new Map<string, number>();
 
 /** Hold a lease on a local service and start its unit when it is down.
  * Throttled per unit; a no-op without a user systemd unit (manual installs). */
-export function ensureLocalServices(now = Date.now(), unit = LOCAL_LM_SERVICE): boolean {
+export function ensureLocalServices(now: number, unit: string): boolean {
 	if (process.platform !== "linux" || now - (requestedAt.get(unit) ?? -Infinity) < 30_000) return false;
 	if (!existsSync(join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user", unit))) return false;
 	if (!ensureOwnerRecord()) return false;
@@ -95,10 +94,4 @@ export function ensureLocalServices(now = Date.now(), unit = LOCAL_LM_SERVICE): 
 		child.unref();
 	} catch { return false; }
 	return true;
-}
-
-/** True shortly after this process asked the local model to start. */
-export function localServicesWarming(now = Date.now(), windowMs = 20_000): boolean {
-	const at = requestedAt.get(LOCAL_LM_SERVICE);
-	return at !== undefined && now - at < windowMs;
 }

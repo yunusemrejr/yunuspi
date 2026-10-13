@@ -192,7 +192,7 @@ commands may still execute normally; only the evidence claim is conservative.
   child slice 1500) with item caps. The whole graph is never
   injected into context.
 - The graph is deterministic: no model calls, no background LLM. Cheap
-  intelligence (Needle/local-LM/Jev) is never required for correctness.
+  intelligence (Needle/Jev) is never required for correctness.
 
 ## Diagnostics
 
@@ -252,7 +252,7 @@ requirement coverage.
 Targeted command (after building the owned core):
 
 ```sh
-PI_LOCAL_LM=off node --test tests/task-state-{graph,integration,recovery,assessment}.test.mjs tests/requirement-ledger.test.mjs
+node --test tests/task-state-{graph,integration,recovery,assessment}.test.mjs tests/requirement-ledger.test.mjs
 ```
 
 The native test loads the actual checkpoint ledger and task-state factories

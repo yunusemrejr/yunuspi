@@ -26,7 +26,7 @@ import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
-import { createPresetChainGoal, parsePresetChain, presetNotice, presetUserText, PRESET_LABELS, type PresetId } from "./lib/presets.ts";
+import { addBoosts, boostedGoalNotice, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
 
 const ENTRY = "goal-state-v1";
 const CONTEXT = "goal-anchor";
@@ -207,9 +207,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// /nobug debugs, /3d boosts 3D work, /video boosts video work. They share
 	// this extension's goal state on purpose — one owner for the persisted
 	// snapshots — so /goal status, pause, resume and clear all work on a
-	// preset run, and its fronts close through the same goal tool. Leading preset tokens chain:
-	// `/3d /video /noslop make X` dispatches here once, as /3d, and the parser
-	// in lib/presets.ts stacks every named aim onto the one goal.
+	// preset run, and its fronts close through the same goal tool. Preset tokens count
+	// anywhere in the text: `/3d /video /noslop make X` dispatches here once, as /3d, and
+	// `/goal build X /noslop` is one goal with the boost applied. A bare boost on a live
+	// goal joins that goal. Parsing lives in lib/presets.ts.
 	const goalCommandHandler = async (args: string, ctx: ExtensionContext) => {
 		try {
 			const command = parseGoalArgs(args);
@@ -220,15 +221,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// the requirement ledger and memory must see it (continuations below stay synthetic).
 			// `userText` keeps the user's literal words apart from the criteria the harness adds, so
 			// analysis, the Guardian and memory work from what was asked, not from our wrapper.
-			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text }))
+			// A goal set while a turn is streaming starts after it instead of failing as "already processing".
+			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text, deliverAs: "followUp" }))
 				.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 			switch (command.kind) {
 				case "status": return notify(goalSummary(goal));
 				case "set": {
-					const presetMatch = /^\/(noslop|nobug|3d|video)(?=\s|$)/i.exec(command.text.trim());
-					if (presetMatch) {
-						return startPreset(presetMatch[1].toLowerCase() as PresetId)(command.text.trim().slice(presetMatch[0].length).trim(), ctx);
-					}
+					// Preset tokens anywhere in the text: with a task they make one boosted goal; alone they are a bare preset run.
+					const found = extractPresetTokens(command.text);
+					if (found.presets.length && found.task) return startBoosted(found, ctx);
+					if (found.presets.length) return startPreset(found.presets[0])(found.presets.slice(1).map((id) => `/${id}`).join(" "), ctx);
 					const next = createGoal(command.text);
 					checkStatic = createStaticCompletionCheck();
 					checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
@@ -258,14 +260,44 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 	};
 
+	// A /goal that names boosts: one goal carrying the user's words, each brief and its core fronts.
+	const startBoosted = (found: PresetTokens, ctx: ExtensionContext) => {
+		const next = createBoostedGoal(found.task, found.presets, found.literal);
+		checkStatic = createStaticCompletionCheck();
+		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
+		refused.clear();
+		persist(next, ctx);
+		ctx.ui?.notify?.(boostedGoalNotice(found.presets, next), "info");
+		// The literal is the user's own words; the expanded briefs travel as the kickoff text.
+		void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: found.literal, deliverAs: "followUp" }))
+			.catch((error: unknown) => ctx.ui?.notify?.(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+	};
+	// A bare boost while a goal is live joins that goal: its brief is appended and its fronts take the free criteria slots.
+	const boostLive = (live: GoalState, presets: PresetId[], ctx: ExtensionContext) => {
+		const { goal: updated, fresh, fronts } = addBoosts(live, presets);
+		if (!fresh.length) return ctx.ui?.notify?.(`${presets.map((id) => PRESET_LABELS[id]).join(" + ")} already in force on goal ${live.id}. /goal shows progress.`, "info");
+		persist(updated, ctx);
+		const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
+		const tracked = fronts ? `${fronts} front(s) tracked` : "no free criteria slots, so it applies through the brief";
+		ctx.ui?.notify?.(`${labels} boost added to goal ${updated.id} — ${tracked}, ${updated.criteria.length} criteria to settle with evidence. /goal shows progress, /goal pause stops it.`, "info");
+		// Steered into a running turn, so the work already underway picks the boost up at its next step.
+		void Promise.resolve(pi.sendUserMessage(goalKickoff(updated), { authored: true, userText: presetUserText(fresh, ""), deliverAs: "steer" }))
+			.catch((error: unknown) => ctx.ui?.notify?.(`${labels} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+	};
+
 	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
 		const trimmed = String(args ?? "").trim().toLowerCase();
 		if (goal && goal.status !== "cleared" && ["status", "pause", "resume", "clear", "done", "retry"].includes(trimmed)) {
 			return goalCommandHandler(trimmed, ctx);
 		}
-		const chain = parsePresetChain(invoked, args);
+		// The invoked name leads, so the whole invocation is one text: its tokens count wherever they stand.
+		const found = extractPresetTokens(`/${invoked} ${String(args ?? "")}`);
+		const chain: PresetChain = { presets: found.presets, task: found.task };
 		const label = chain.presets.map((id) => PRESET_LABELS[id]).join(" + ");
+		const live = goal;
 		try {
+			if (found.goal && found.task) return startBoosted(found, ctx);
+			if (!found.task && goalIsLive(live)) return boostLive(live, found.presets, ctx);
 			const next = createPresetChainGoal(chain);
 			checkStatic = createStaticCompletionCheck();
 			checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
@@ -275,7 +307,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// Authored like a typed /goal, but userText stays the user's own
 			// short demand; the expanded briefs are the harness's wording and
 			// travel as the kickoff message (and the goal text) instead.
-			void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: presetUserText(chain.presets, chain.task) }))
+			void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: presetUserText(chain.presets, chain.task), deliverAs: "followUp" }))
 				.catch((error: unknown) => ctx.ui?.notify?.(`${label} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");

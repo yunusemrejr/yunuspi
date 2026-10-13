@@ -82,7 +82,7 @@ function fixture() {
   const entry = { type: 'message', id: 'entry-1', message };
   let branch = [entry];
   const pi = { on: (name, handler) => hooks.set(name, handler), registerTool: tool => tools.set(tool.name, tool), registerCommand() {}, appendEntry() {}, getActiveTools: () => ['obs_read', 'bash'] };
-  register(pi, { reset() {}, endTurn() {}, select: async () => undefined }, { reset() {}, endTurn() {}, offer() {}, take() {}, takeAsync: async () => undefined });
+  register(pi, { reset() {}, endTurn() {}, select: async () => undefined });
   const ctx = { sessionManager: { getBranch: () => branch, getEntries: () => branch } };
   return { tool: tools.get('obs_read'), ctx, hooks, entry, raw: message.content[0].text, branch: value => { branch = value; } };
 }
@@ -117,18 +117,21 @@ test('first-seal context telemetry reports finite savings once, without changing
   globalThis[key] = (kind, data) => events.push({ kind, data });
   try {
     const f = fixture();
-    const message = { ...f.entry.message, isError: false, content: [{ type: 'text', text: 'plain prose line\n'.repeat(100) }], details: { ...f.entry.message.details, exitCode: 0 } };
+    const mini = await load('extensions/lib/mini-preprocessor.ts');
+    const filler = 'General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.';
+    const prose = ['Deployment remains blocked until external verification.', ...Array(9).fill(filler)].join('\n\n');
+    const selection = { version: 1, status: 'SELECT', sourceHash: mini.miniSource(prose).hash, keep: [0] };
+    const message = { ...f.entry.message, isError: false, content: [{ type: 'text', text: prose }], details: { ...f.entry.message.details, exitCode: 0, piMiniSelection: selection } };
     // A real registered extension consumes a validated selection, then seals it.
     const handlers = new Map();
     register({ on: (name, handler) => handlers.set(name, handler), registerTool() {}, registerCommand() {}, getActiveTools: () => ['obs_read'], appendEntry() {} },
-      { reset() {}, endTurn() {}, select: async () => undefined },
-      { reset() {}, endTurn() {}, offer() {}, take: () => 'selected exact prose', takeAsync: async () => 'selected exact prose' });
+      { reset() {}, endTurn() {}, select: async () => undefined });
     const first = await handlers.get('context')({ messages: [message] });
     const second = await handlers.get('context')({ messages: [message] });
     assert.deepEqual(first, second);
     const delivered = events.filter(event => event.kind === 'ml.evidence.delivered');
     assert.equal(delivered.length, 1);
-    assert.equal(delivered[0].data.helper, 'smol');
+    assert.equal(delivered[0].data.helper, 'kompress');
     assert.equal(delivered[0].data.savedChars, message.content[0].text.length - first.messages[0].content[0].text.length);
     assert.ok(Number.isFinite(delivered[0].data.savedChars));
   } finally { if (before === undefined) delete globalThis[key]; else globalThis[key] = before; }

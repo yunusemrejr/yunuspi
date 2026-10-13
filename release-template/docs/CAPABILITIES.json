@@ -3155,7 +3155,7 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
+      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
       "entrypoints": [
         "micro_status",
         "micro_task"
@@ -3219,7 +3219,7 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 299
+        "line": 331
       },
       {
         "name": "bg",
@@ -3294,7 +3294,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 285
+        "line": 317
       },
       {
         "name": "google-account",
@@ -3399,17 +3399,17 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 294
+        "line": 326
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 289
+        "line": 321
       },
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 897
+        "line": 786
       },
       {
         "name": "observer-book",
@@ -3564,7 +3564,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 304
+        "line": 336
       },
       {
         "name": "websearch",
@@ -3794,7 +3794,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 311,
+        "line": 343,
         "kind": "literal"
       },
       {
@@ -3848,37 +3848,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2567,
+        "line": 2604,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2427,
+        "line": 2464,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2710,
+        "line": 2747,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2809,
+        "line": 2846,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2964,
+        "line": 3001,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2079,
+        "line": 2116,
         "kind": "literal"
       },
       {
@@ -3926,7 +3926,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 821,
+        "line": 710,
         "kind": "literal"
       },
       {
@@ -3974,7 +3974,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2240,
+        "line": 2277,
         "kind": "literal"
       },
       {
@@ -4004,7 +4004,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 723,
+        "line": 689,
         "kind": "literal"
       },
       {
@@ -4101,7 +4101,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 489,
+        "line": 488,
         "kind": "literal"
       },
       {
@@ -4278,7 +4278,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 311,
+        "line": 343,
         "kind": "literal"
       },
       {
@@ -4296,37 +4296,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2567,
+        "line": 2604,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2427,
+        "line": 2464,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2710,
+        "line": 2747,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2809,
+        "line": 2846,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2964,
+        "line": 3001,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2079,
+        "line": 2116,
         "kind": "literal"
       },
       {
@@ -4344,7 +4344,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 821,
+        "line": 710,
         "kind": "literal"
       },
       {
@@ -4386,7 +4386,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2240,
+        "line": 2277,
         "kind": "literal"
       },
       {
@@ -4416,7 +4416,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 723,
+        "line": 689,
         "kind": "literal"
       },
       {
@@ -4446,7 +4446,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 489,
+        "line": 488,
         "kind": "literal"
       },
       {
@@ -4716,7 +4716,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 710,
+      "sourceFiles": 706,
       "registrationSites": 64,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 100,
@@ -5230,14 +5230,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/local-lm-assets.mjs",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/local-lm.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/local-models.ts",
         "exists": true
       },
@@ -5595,14 +5587,6 @@
       },
       {
         "path": "agent/extensions/lib/small-tools.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/smol-extraction.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/smol-preprocessor.ts",
         "exists": true
       },
       {
@@ -6318,6 +6302,16 @@
         "why": "LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate"
       },
       {
+        "name": "local-lm-assets.mjs",
+        "retired": "2026-10-14",
+        "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+      },
+      {
+        "name": "local-lm.ts",
+        "retired": "2026-10-14",
+        "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+      },
+      {
         "name": "long-prompt-offload.ts",
         "retired": "2026-08-31",
         "why": "long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted"
@@ -6401,6 +6395,11 @@
         "name": "pi-hermes-memory.ts",
         "retired": "2026-08-12",
         "why": "superseded by the pi-memory fork"
+      },
+      {
+        "name": "pi-local-lm.service",
+        "retired": "2026-10-14",
+        "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
       },
       {
         "name": "pi-mcp-adapter.ts",
@@ -6491,6 +6490,16 @@
         "name": "session-watchmaker.ts",
         "retired": "2026-10-10",
         "why": "merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate"
+      },
+      {
+        "name": "smol-extraction.ts",
+        "retired": "2026-10-14",
+        "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+      },
+      {
+        "name": "smol-preprocessor.ts",
+        "retired": "2026-10-14",
+        "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
       },
       {
         "name": "subagent-tool-description.md",

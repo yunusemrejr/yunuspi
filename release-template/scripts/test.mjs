@@ -98,7 +98,7 @@ function main(args) {
       ? ['--test-reporter=spec', '--test-reporter-destination=stdout', `--test-reporter=${reporter}`, '--test-reporter-destination=stdout'] : [];
     const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...plan.selected], {
       cwd: root, stdio: 'inherit', timeout: 15 * 60_000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined, PI_LOCAL_LM: 'off', PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot },
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined, PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot },
     });
     if (run.error) throw run.error;
     process.exitCode = run.status ?? 1;

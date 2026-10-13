@@ -6,7 +6,7 @@ import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { isGeminiApiAvailableWithVideo, queryGeminiApiWithVideo } from "./gemini-api.ts";
 import { isPerplexityAvailable, searchWithPerplexity } from "./perplexity.ts";
 import { extractHeadingTitle, type ExtractedContent, type FrameResult, type VideoFrame } from "./extract.ts";
-import { formatSeconds, readExecError, isTimeoutError, trimErrorText, mapFfmpegError, getWebSearchConfigPath } from "./utils.ts";
+import { formatSeconds, readExecError, isTimeoutError, trimErrorText, mapFfmpegError, getWebSearchConfigPath, installHint } from "./utils.ts";
 
 const CONFIG_PATH = getWebSearchConfigPath();
 
@@ -142,7 +142,7 @@ type StreamResult = StreamInfo | { error: string };
 
 function mapYtDlpError(err: unknown): string {
 	const { code, stderr, message } = readExecError(err);
-	if (code === "ENOENT") return "yt-dlp is not installed. Install with: brew install yt-dlp";
+	if (code === "ENOENT") return `yt-dlp is not installed. Install with: ${installHint("yt-dlp", "pipx install yt-dlp")}`;
 	if (isTimeoutError(err)) return "yt-dlp timed out fetching video info";
 	const lower = stderr.toLowerCase();
 	if (lower.includes("private")) return "Video is private or unavailable";

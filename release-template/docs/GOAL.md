@@ -67,6 +67,16 @@ With no assignment, `/3d` and `/video` survey the current project for work of th
 
 Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. Chained with `/3d` or `/video`, `/nobug` also inspects the media pipeline and the rendered output (audio/picture sync, dropped frames, wrong levels or aspect, z-fighting, missing textures, context loss) and treats weird or low-quality looks as bugs. Chained with `/noslop` in a terminal app, the TUI's output is the interface: banners, chatter, decorative colors and noise are slop there. The tracked criteria compress to each preset's three core fronts (two each in a four-way chain) so every chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
 
+Boost tokens count anywhere in a line, including inside `/goal`:
+
+```
+/goal build a portfolio site for my bakery /noslop /3d
+/goal make the hero /3d, cut a 30-second promo /video, then /noslop everything
+/noslop tidy the settings page /goal
+```
+
+A `/goal` with boosts keeps the user's own requirements as its first criteria, then adds each boost's core fronts in the order written (three for one boost, two each for two, one each for three or four), then the end-to-end check. Its text quotes the line exactly as typed, so a boost written next to one part of the goal applies chiefly to that part. Tokens must stand alone: paths, file names and code spans (`src/3d/scene.ts`, `/video.mp4`, `` `/noslop` ``) stay part of the text. A bare boost (`/3d`, `/noslop /nobug`) typed while a goal is active or paused joins that goal: its brief is appended, its fronts take the free criteria slots, and the running work is steered to pick it up; repeating a boost already in force changes nothing. A goal or boost started while a turn is running is queued instead of rejected.
+
 ## Loop safety
 
 

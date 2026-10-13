@@ -1,5 +1,5 @@
 // Session-owned process lifetime: the crash reaper stops only the process
-// groups a dead owner recorded, and the local-model guard stops the shared
+// groups a dead owner recorded, and the service guard stops the shared
 // server only once no live YunusPi process holds an owner record.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.existsSync(path.join(p, 'extensions/lib/process-owner.ts')));
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const owner = await load('extensions/lib/process-owner.ts');
-const L = await load('extensions/lib/local-lm.ts');
 const mini = await load('extensions/lib/mini-preprocessor.ts');
 const linux = process.platform === 'linux';
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -86,18 +85,6 @@ test('only a direct child leading its own group is recorded for killing', { skip
     owner.resetOwnerRecordForTests();
     if (prior === undefined) delete process.env.PI_OWNER_DIR; else process.env.PI_OWNER_DIR = prior;
   }
-});
-
-test('a refused connection while the local model warms up is unavailable, not a breaker failure', async () => {
-  const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18735/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
-  let ensured = 0, warming = true;
-  const refused = async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); };
-  const lm = L.createLocalLm({ runtime, fetch: refused, services: { ensure: () => ensured++, warming: () => warming } });
-  for (let i = 0; i < 5; i++) assert.equal((await lm.judge('q', 'x')).reason, 'unavailable');
-  assert.ok(ensured >= 5, 'each refusal asks for the service (throttled by the owner module)');
-  warming = false;
-  for (let i = 0; i < 3; i++) assert.equal((await lm.judge('q', 'x')).reason, 'failed');
-  assert.equal((await lm.judge('q', 'x')).reason, 'paused', 'a server that stays down still opens the breaker');
 });
 
 test('the Kompress client asks for its service after a failed request, never after a timeout', async () => {

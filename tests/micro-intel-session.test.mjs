@@ -19,7 +19,6 @@ const retrievalMod = await load("extensions/lib/micro-intelligence/retrieval.ts"
 const evidenceMod = await load("extensions/lib/micro-intelligence/evidence.ts");
 const advisoryMod = await load("extensions/lib/micro-intelligence/advisory.ts");
 const reviewMod = await load("extensions/lib/micro-intelligence/review.ts");
-const smol = await load("extensions/lib/smol-preprocessor.ts");
 const mini = await load("extensions/lib/mini-preprocessor.ts");
 
 // Scripted stand-ins with production-shaped results.
@@ -70,22 +69,7 @@ test("coding session: every layer does distinct useful work", async () => {
   layers.add("needle");
   assert.equal(ranked.ordered[0].id, "bash");
 
-  // 4. Real Smol owner, schema validation and sealing; only transport is mocked.
-  const log = ["Build completed and bundles ready.", ...Array(36).fill("Routine compilation background describes ordinary bundling activity and surrounding workspace operations."), "Deployment remains pending verification."].join("\n");
-  const lineClient = smol.createSmolPreprocessor({
-    runtime: { version: 2, enabled: true, model: "Qwen3.5-0.8B", endpoint: "http://127.0.0.1:18735/completion", apiKey: "TEST_SYNTHETIC_LOCAL_KEY", execution: "background", timeoutMs: 1000 },
-    acquireLease: async () => true,
-    fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: [2] }) })),
-  });
-  lineClient.offer("coding-output", log, 0);
-  const lineSelection = await lineClient.takeAsync("coding-output", log, 500);
-  assert.ok(lineSelection && lineSelection.includes("pending verification"));
-  assert.ok(lineSelection.length < log.length - 1000);
-  assert.equal(lineClient.inspect().requests, 1);
-  assert.equal(lineClient.inspect().accepted, 1);
-  layers.add("smol");
-
-  // 5. Real Kompress owner and source projection; only transport is mocked.
+  // 4. Real Kompress owner and source projection; only transport is mocked.
   const filler = "General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.";
   const prose = ["Deployment remains blocked until external verification.", ...Array(9).fill(filler)].join("\n\n");
   const proseClient = mini.createMiniPreprocessor({
@@ -100,7 +84,7 @@ test("coding session: every layer does distinct useful work", async () => {
   assert.equal(proseClient.inspect().accepted, 1);
   layers.add("kompress");
 
-  // 6. Review findings cluster deterministically; main LLM decides fixes.
+  // 5. Review findings cluster deterministically; main LLM decides fixes.
   const groups = await reviewMod.clusterFindings([
     { id: "a", text: "the login handler leaks the session token in error messages" },
     { id: "b", text: "the login handler leaks the session token in error responses" },
@@ -115,10 +99,10 @@ test("coding session: every layer does distinct useful work", async () => {
   layers.add("jev");
 
 
-  assert.deepEqual([...layers].sort(), ["deterministic", "jev", "kompress", "needle", "smol"]);
+  assert.deepEqual([...layers].sort(), ["deterministic", "jev", "kompress", "needle"]);
   const snapshot = metrics.snapshot();
   assert.ok(snapshot.helpers.needle.runs >= 1);
-  for (const helper of ["smol", "kompress"]) {
+  for (const helper of ["kompress"]) {
     assert.equal(snapshot.helpers[helper].runs, 1);
     assert.equal(snapshot.helpers[helper].accepted, 1);
     assert.ok(snapshot.helpers[helper].projectedSavedChars > 1000);
@@ -169,7 +153,6 @@ test("trivial session calls nothing gratuitous", async () => {
   assert.equal(needleCalls, 0);
   assert.equal(jevCalls, 0);
   const small = evidenceMod.routeEvidence({ tool: "bash", text: "done\n", isError: false });
-  assert.equal(small.smol, false);
   assert.equal(small.kompress, false);
   assert.equal(small.needle, false);
   assert.equal(small.jev, false);
@@ -178,32 +161,7 @@ test("trivial session calls nothing gratuitous", async () => {
   assert.equal(snapshot.jev.questions, 0);
 });
 
-test("smol and kompress selections stay source-linked under load", async () => {
-  // Direct-offer path with a mocked runtime: boundary retention holds and
-  // the projection never invents lines.
-  const rows = ["header line for output"];
-  for (let i = 0; i < 80; i++) rows.push(`entry-${String(i).padStart(3, "0")}.log bytes=${10000 + i * 137}`.padEnd(42, "."));
-  rows.push("listing complete");
-  const raw = rows.join("\n");
-  assert.equal(smol.safeSmolOutput("bash", raw, false, undefined), true);
-  const sp = smol.createSmolPreprocessor({
-    runtime: {
-      version: 2, enabled: true, model: "Qwen3.5-0.8B",
-      endpoint: "http://127.0.0.1:18735/completion",
-      apiKey: "TEST_SMOL_KEY_1234567890abcdef", execution: "background", timeoutMs: 2000,
-    },
-    acquireLease: async () => true,
-    fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: [40] }) })),
-  });
-  sp.offer("session:1", raw, 0.5, "list entries", "bash");
-  const taken = await sp.takeAsync("session:1", raw, 2000);
-  assert.ok(taken);
-  const parsed = JSON.parse(taken);
-  const ids = parsed.lines.map((l) => l.id);
-  assert.ok(ids.includes(1) && ids.includes(rows.length), "boundary retained");
-  for (const line of parsed.lines) {
-    assert.equal(line.text.trimEnd(), rows[line.id - 1], "every projected line is source-verbatim");
-  }
+test("kompress projections stay source-linked under load", async () => {
   // Kompress projection reconstructs source paragraphs exactly.
   const filler = "General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.";
   const fact = "Verification confirmed the deployment result this morning after the staging checks passed.";

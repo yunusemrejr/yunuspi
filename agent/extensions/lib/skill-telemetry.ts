@@ -11,11 +11,11 @@
  * not relevant after inspection, deferred, opened partially, fully opened,
  * applied. Telemetry without forced usage.
  *
- * Micro-intelligence helpers (Needle, Jev, Smol, Kompress) graduate from
+ * Micro-intelligence helpers (Needle, Jev, Kompress) graduate from
  * "offered" to "useful": eligible, invoked, accepted, rejected, fallback,
  * latency, token/cost effect, and whether the main-model decision changed. A
  * helper that correctly skips irrelevant work is functioning — invocation
- * count is never the goal. Smol/Kompress ineligibility carries structured
+ * count is never the goal. Kompress ineligibility carries structured
  * reasons instead of bare `ineligible`.
  *
  * Dependency-free and pure.
@@ -119,11 +119,11 @@ export function precisionRankSkill(input: SkillPrecisionInput): SkillPrecision {
 	};
 }
 
-export type MicroIntelHelper = "needle" | "jev" | "smol" | "kompress" | string;
+export type MicroIntelHelper = "needle" | "jev" | "kompress" | string;
 
 export type MicroIntelOutcome = "eligible" | "invoked" | "accepted" | "rejected" | "fallback" | "skipped-correctly";
 
-export type SmolKompressIneligibility =
+export type KompressIneligibility =
 	| "input-shape-unsupported"
 	| "too-small-to-benefit"
 	| "protected-content"
@@ -141,7 +141,7 @@ export interface MicroIntelSample {
 	/** Negative means tokens/cost saved. */
 	tokenDelta?: number;
 	costDeltaUsd?: number;
-	ineligibility?: SmolKompressIneligibility;
+	ineligibility?: KompressIneligibility;
 	at: number;
 }
 

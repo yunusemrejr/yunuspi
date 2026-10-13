@@ -16,9 +16,9 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
 // reach a provider and returns only the declared calls below.
 test('UI goals, source mutations and short follow-ups refresh real SDK tools and context within one owner', {timeout:60000}, async () => {
  const root=path.resolve(import.meta.dirname,'..'),cwd=fs.mkdtempSync(path.join(os.tmpdir(),'ui-routing-sdk-'));
- const envNames=['PI_CODING_AGENT_DIR','PI_JEV','PI_NEEDLE','PI_TOOL_DISCOVERY','PI_SUBAGENT_CHILD','PI_LOCAL_LM','PI_UI_VERIFICATION'];
+ const envNames=['PI_CODING_AGENT_DIR','PI_JEV','PI_NEEDLE','PI_TOOL_DISCOVERY','PI_SUBAGENT_CHILD','PI_UI_VERIFICATION'];
  const prior=Object.fromEntries(envNames.map(key=>[key,process.env[key]]));
- Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_JEV:'off',PI_NEEDLE:'off',PI_LOCAL_LM:'off',PI_TOOL_DISCOVERY:'on',PI_UI_VERIFICATION:'on'});delete process.env.PI_SUBAGENT_CHILD;
+ Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_JEV:'off',PI_NEEDLE:'off',PI_TOOL_DISCOVERY:'on',PI_UI_VERIFICATION:'on'});delete process.env.PI_SUBAGENT_CHILD;
  const html='<!doctype html><html lang="en"><head><title>Collection</title><style>:root{--space:16px}@media(max-width:768px){main{padding:var(--space)}}</style></head><body><main><h1>A real collection</h1><section id="story"><div class="layer">Explore the materials</div></section></main></body></html>';
  fs.writeFileSync(path.join(cwd,'index.html'),html);
  let session;

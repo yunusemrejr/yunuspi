@@ -47,7 +47,7 @@ function safeInspect(name: string): unknown {
   }
 }
 
-function smolStatus(inspect: unknown): string {
+function inspectStatus(inspect: unknown): string {
   if (!inspect || typeof inspect !== "object") return "unknown";
   const value = inspect as Record<string, unknown>;
   if (["unknown", "unavailable", "disabled", "busy", "ready"].includes(String(value.status))) return String(value.status);
@@ -94,7 +94,6 @@ export function microStatusSnapshot(request?: {
   const stats = needleHandle().stats();
   const jev = jevHealth();
   const hasKey = openRouterKey() !== undefined;
-  const smol = safeInspect("smol");
   const kompress = safeInspect("mini");
   const spanLive = safeInspect("span");
   const span = spanStatus();
@@ -110,9 +109,8 @@ export function microStatusSnapshot(request?: {
         ? `dim ${needle.dim}, ${stats.calls} calls`
         : needle.lastError || needle.state,
     },
-    { layer: "smol", status: smolStatus(smol), detail: "" },
-    { layer: "kompress", status: smolStatus(kompress), detail: "" },
-    { layer: "expert", status: smolStatus(expert), detail: expertRunsDetail(expert) },
+    { layer: "kompress", status: inspectStatus(kompress), detail: "" },
+    { layer: "expert", status: inspectStatus(expert), detail: expertRunsDetail(expert) },
     {
       layer: "jev",
       status: jevStatus(jev.state === "open", hasKey),
@@ -175,7 +173,6 @@ export function microStatusSnapshot(request?: {
       maxInputChars: JEV_MAX_INPUT_CHARS,
       disable: "PI_JEV=off",
     },
-    smol,
     kompress,
     span: { ...span, live: spanLive },
     microworker: worker,

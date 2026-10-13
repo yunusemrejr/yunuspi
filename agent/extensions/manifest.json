@@ -119,8 +119,6 @@
     "jev-client.ts",
     "jev-fusion.ts",
     "local-intelligence.mjs",
-    "local-lm-assets.mjs",
-    "local-lm.ts",
     "local-models.ts",
     "media-process.ts",
     "media-timeline.ts",
@@ -205,8 +203,6 @@
     "skill-telemetry.ts",
     "slop-guidance-signals.ts",
     "small-tools.ts",
-    "smol-extraction.ts",
-    "smol-preprocessor.ts",
     "source-check.ts",
     "specifics.ts",
     "stable-tool-order.ts",
@@ -634,6 +630,31 @@
       "name": "video-generate.ts",
       "retired": "2026-10-10",
       "why": "hosted video generation had no tool after video_generate was removed. Do not recreate"
+    },
+    {
+      "name": "local-lm.ts",
+      "retired": "2026-10-14",
+      "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+    },
+    {
+      "name": "local-lm-assets.mjs",
+      "retired": "2026-10-14",
+      "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+    },
+    {
+      "name": "smol-preprocessor.ts",
+      "retired": "2026-10-14",
+      "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+    },
+    {
+      "name": "smol-extraction.ts",
+      "retired": "2026-10-14",
+      "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+    },
+    {
+      "name": "pi-local-lm.service",
+      "retired": "2026-10-14",
+      "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
     }
   ],
   "supportFiles": [

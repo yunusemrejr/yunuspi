@@ -168,7 +168,7 @@ test('a missing path reported by an extension tool or bash gets the nearest-fold
 
 test('offline hook compatibility checks retain the current completion acknowledgement contract', () => {
   const output = execFileSync(process.execPath, [path.join(agent, 'scripts/compatibility/hook-lifecycle-integrity-test.mjs')], {
-    encoding: 'utf8', timeout: 20000, env: { ...process.env, PI_LOCAL_LM: 'off' },
+    encoding: 'utf8', timeout: 20000, env: { ...process.env },
   });
   assert.match(output, /PASS SDK\/CLI hook cancellation/);
 });

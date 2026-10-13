@@ -197,7 +197,7 @@ async function waitForRelayVisibility(relay, { timeoutMs = CHILD_ACK_TIMEOUT_MS,
 	return false;
 }
 
-const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "Local LM", "retrieval", "Neural ranker", "Intent classifier", "WASM source check", "Deterministic selection"]);
+const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "retrieval", "Neural ranker", "Intent classifier", "WASM source check", "Deterministic selection"]);
 export function relayIntelligenceUsageFromChild(input) {
 	if (!input || !ALLOWED_INTELLIGENCE.has(input.name) || typeof input.sessionId !== "string" || !liveGuardianSessions.get(input.sessionId)?.has(input.ownerId)) return false;
 	const stages = { result: "result ready", cached: "cached result ready", applied: "result applied", delivered: "added to model context", returned: "returned exact excerpts", skipped: "selection unused" };

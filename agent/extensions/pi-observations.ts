@@ -18,11 +18,6 @@ import {
 	miniAdmissible,
 	miniProjection,
 } from "./lib/mini-preprocessor.ts";
-import {
-	createSmolPreprocessor,
-	SMOL_TAKE_WAIT_MS,
-	safeSmolOutput,
-} from "./lib/smol-preprocessor.ts";
 import { routeEvidence } from "./lib/micro-intelligence/evidence.ts";
 import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { retrieveObservation } from "./lib/observation-retrieval.ts";
@@ -37,7 +32,6 @@ import {
 	outputDelta,
 	outputLineDelta,
 	MAX_OUTPUT_CHARS,
-	isFileViewCommand,
 	isSearchCommand,
 } from "./lib/output-distiller.ts";
 import { askJev, selectDistillChunks, jevEnabled } from "./lib/jev-client.ts";
@@ -145,20 +139,12 @@ function signature(tool: string, input: unknown, content: unknown): string {
 export default function piObservationsExtension(
 	pi: ExtensionAPI,
 	mini = createMiniPreprocessor(),
-	smol = createSmolPreprocessor(),
 ) {
 	// Publish bounded inspectors for the read-only micro_status tool.
 	// Inspection never runs inference; failures degrade to unknown.
 	try {
 		const key = Symbol.for("yunus-pi.micro.inspect.v1");
 		const registry = (((globalThis as Record<symbol, unknown>)[key] ?? {}) as Record<string, unknown>);
-		registry.smol = () => {
-			try {
-				return (smol as { inspect?: () => unknown }).inspect?.() ?? { status: "unknown" };
-			} catch {
-				return { status: "unavailable" };
-			}
-		};
 		registry.mini = () => {
 			try {
 				return (mini as { inspect?: () => unknown }).inspect?.() ?? { status: "unknown" };
@@ -235,7 +221,6 @@ export default function piObservationsExtension(
 
 	function restore(ctx: ExtensionContext): void {
 		mini.reset();
-		smol.reset();
 		jevDistillPending.clear();
 		taskSignal = "";
 		observations = new Map();
@@ -259,7 +244,6 @@ export default function piObservationsExtension(
 
 	pi.on("session_shutdown", () => {
 		mini.reset();
-		smol.reset();
 		jevDistillPending.clear();
 	});
 	pi.on("agent_end", () => {
@@ -267,7 +251,6 @@ export default function piObservationsExtension(
 		// offered late in this turn is usually first rendered next turn. Full
 		// reset stays on session/branch/compaction boundaries via restore().
 		mini.endTurn();
-		smol.endTurn();
 	});
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
@@ -411,7 +394,6 @@ export default function piObservationsExtension(
 		});
 		noteHealth("ml.evidence.route", {
 			shape: route.shape,
-			smol: route.smol,
 			kompress: route.kompress,
 			needle: route.needle,
 			jev: route.jev,
@@ -419,7 +401,7 @@ export default function piObservationsExtension(
 		});
 		// Existing deterministic compression wins. Only bounded successful prose
 		// that a selection could actually shorten claims local inference; other
-		// output stays available to Smol and Jev below. The original tool body
+		// output stays available to Jev below. The original tool body
 		// stays in the transcript.
 		const smallStatus = () => {
 			try {
@@ -446,60 +428,9 @@ export default function piObservationsExtension(
 			return mini
 				.select(text, ctx?.model?.cost?.input, taskSignal)
 				.then(finish, () => finish());
-		// Structured successful line output complements Kompress prose selection.
-		// Speculate without delaying this result; the first exposure waits about
-		// one local inference, then seals. File views are requested content: a
-		// selection of them would only force an obs_read round trip.
-		const fileView = event.toolName === "bash" && isFileViewCommand(event.input?.command);
-		if (fileView && route.smol && !preserveRaw && !distilled)
-			noteHealth("ml.smol.offer", { decision: "ineligible", reason: "requested-content" });
-		if (
-			!fileView &&
-			process.env.PI_OUTPUT_DISTILLER !== "off" &&
-			pi.getActiveTools().includes("obs_read") &&
-			safeSmolOutput(
-				event.toolName,
-				text,
-				event.isError === true,
-				event.details,
-			) &&
-			!preserveRaw &&
-			!distilled
-		) {
-			smol.offer(
-				`${ref.id}:${ref.signature}`,
-				text,
-				ctx?.model?.cost?.input,
-				taskSignal,
-				event.toolName,
-			);
-		}
-		// Oversized line output (4KB..32KB): window to head + diagnostics +
-		// tail and select within the window. Rendered with original line
-		// numbers; the full original stays behind obs_read.
-		if (
-			!fileView &&
-			route.smol &&
-			!event.isError &&
-			typeof (smol as { offerWindowed?: unknown }).offerWindowed === "function" &&
-			process.env.PI_OUTPUT_DISTILLER !== "off" &&
-			pi.getActiveTools().includes("obs_read") &&
-			!safeSmolOutput(event.toolName, text, false, event.details) &&
-			!preserveRaw &&
-			!distilled
-		) {
-			(smol as { offerWindowed: (...args: [string, string, unknown, string, string, unknown]) => void }).offerWindowed(
-				`${ref.id}:${ref.signature}`,
-				text,
-				ctx?.model?.cost?.input,
-				taskSignal,
-				event.toolName,
-				event.details,
-			);
-		}
 		// Jev scores chunks only when every deterministic and local path
-		// misses: large, successful, undistilled prose with no mini or smol
-		// coverage. Offered in the background like smol; the context render
+		// misses: large, successful, undistilled prose with no Kompress
+		// coverage. Offered in the background; the context render
 		// below consumes whatever is ready without waiting on slow calls.
 		if (
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
@@ -508,7 +439,6 @@ export default function piObservationsExtension(
 			!event.isError &&
 			text.length >= 6000 &&
 			text.length <= MAX_OUTPUT_CHARS &&
-			!safeSmolOutput(event.toolName, text, false, event.details) &&
 			!preserveRaw &&
 			!distilled
 		) {
@@ -571,46 +501,6 @@ export default function piObservationsExtension(
 			const visible = entry?.details?.piObservation?.id;
 			if (Number.isSafeInteger(visible)) presentIds.add(visible);
 		}
-		// Resolve local line selections up front, in parallel under one bounded
-		// budget: inference offered at tool_result time usually finished during
-		// the agent's reasoning gap, and a nearly-done request is worth a short
-		// wait. The sequential map below keeps source-order seals untouched.
-		// Take coverage is a superset of rendered messages (late status checks
-		// still apply in the map); ml.evidence.delivered, not take transitions, is the
-		// rendered-usefulness signal, and frozen selections stay re-readable.
-		const smolReady = new Map<number, string | undefined>();
-		if (process.env.PI_SMOL_PREPROCESSOR !== "off") {
-			const pending: Array<Promise<void>> = [];
-			event.messages.forEach((message, index) => {
-				const ref = message.details?.piObservation as Reference | undefined;
-				if (
-					message.role !== "toolResult" ||
-					!message.content.every((part) => part.type === "text") ||
-					skillCalls.has(message.toolCallId) ||
-					ref?.version !== 1 ||
-					!ref.operation ||
-					!TOOLS.has(message.toolName)
-				)
-					return;
-				const raw = textOf(message.content);
-				if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return;
-				if (raw.length < RAW_PASSTHROUGH_CHARS) return;
-				pending.push(
-					smol
-						.takeAsync(`${ref.id}:${ref.signature}`, raw)
-						.then(async (value) => {
-							const takeWindowed = (smol as { takeWindowed?: (key: string, waitMs?: number, raw?: string) => Promise<string | undefined> }).takeWindowed;
-							smolReady.set(
-								index,
-								value ?? (typeof takeWindowed === "function"
-										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, SMOL_TAKE_WAIT_MS, raw)
-									: undefined),
-							);
-						}),
-				);
-			});
-			if (pending.length) await Promise.all(pending);
-		}
 		const jevReady = new Map<number, string | undefined>();
 		if (jevEnabled()) {
 			const eligible = (message: any) => {
@@ -669,7 +559,7 @@ export default function piObservationsExtension(
 			const sealed = sealedRenders.get(ref.id);
 			if (sealed && sealed.resultHash === ref.resultHash) {
 				// The first rendering is authoritative for the branch lifetime.
-				// Never re-render here: mini/smol state and baseline availability
+				// Never re-render here: Kompress state and baseline availability
 				// vary per request, so a re-render flips provider-visible bytes
 				// and re-bills the whole prefix. A delta whose baseline is no
 				// longer visible degrades to the original in place - one
@@ -747,7 +637,6 @@ export default function piObservationsExtension(
 						raw,
 						ref.searchOutput || searchCalls.has(message.toolCallId),
 					);
-			const localLines = smolReady.get(index);
 			const miniRendered =
 				!delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off"
 					? miniProjection(raw, selection)
@@ -755,7 +644,7 @@ export default function piObservationsExtension(
 			const jevLines = jevReady.get(index);
 			const selected =
 				!delta && !summary && !message.isError
-					? (miniRendered ?? localLines ?? jevLines)
+					? (miniRendered ?? jevLines)
 					: undefined;
 			if (!delta && !summary && !selected) {
 				if (
@@ -802,7 +691,7 @@ export default function piObservationsExtension(
 				},
 			];
 			if (!sealed) {
-				const helper = selected ? miniRendered ? "kompress" : localLines ? "smol" : "jev" : "deterministic";
+				const helper = selected ? miniRendered ? "kompress" : "jev" : "deterministic";
 				const savedChars = Math.max(0, raw.length - textOf(projected).length);
 				microMetrics().rendered(helper, savedChars);
 				noteHealth("ml.evidence.delivered", { helper, savedChars, count: 1 });

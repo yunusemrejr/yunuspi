@@ -4,7 +4,7 @@ import { element, icon, markdown } from './markdown.mjs';
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
 let workspace = { projects: [], sessions: [], runtime: [] }, activeId = null, archived = false;
-let switchVersion = 0, renderTimer, toastTimer, modalCancel, modalOwner, modalTimer, opening = false;
+let switchVersion = 0, renderTimer, toastTimer, modalCancel, modalOwner, modalTimer, modalSequence = 0, opening = false;
 const conversations = new Map(), views = new Map(), attachments = new Map(), extensionQueue = [];
 const safeError = error => String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': Error: /, '').slice(-1800);
 const current = () => workspace.sessions.find(s => s.id === activeId);
@@ -12,11 +12,21 @@ const projectOf = session => workspace.projects.find(p => p.id === session?.proj
 const conversationOf = id => { if (!conversations.has(id)) conversations.set(id, createConversation()); return conversations.get(id); };
 const viewOf = id => { if (!views.has(id)) views.set(id, { pinned: true, top: 0, limit: 80, nodes: new Map(), widgets: new Map() }); return views.get(id); };
 const strip = value => String(value ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
-const tryAction = task => Promise.resolve().then(task).catch(error => toast(safeError(error)));
+// The core's cost label is a compact footer token ("sub", "$?", "$~1.20+?"); spell it out here.
+const costText = stats => {
+  const label = String(stats.costLabel || `$${Number(stats.cost || 0).toFixed(3)}`);
+  if (label.startsWith('sub')) return `subscription${label.includes('+?') ? ', some cost unknown' : ''}`;
+  if (label === '$?') return 'cost unknown';
+  return `${label.replace(' (sub)', ' incl. subscription').replace('+?', ' + unknown')} total`;
+};
+const tryAction = task => Promise.resolve().then(task).catch(error => toast(safeError(error), 'error'));
+const warming = new Set();
 
-function toast(message) {
-  $('toast').textContent = message; $('toast').hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 5000);
+// Notices sit under the top bar, clamp long text and dismiss on click, so they
+// never cover the composer's controls.
+function toast(message, tone = 'info') {
+  const node = $('toast'); node.textContent = message; node.title = message; node.dataset.tone = tone; node.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.hidden = true; }, tone === 'error' ? 9000 : 5000);
 }
 function saveView() {
   if (!activeId) return;
@@ -109,7 +119,7 @@ function renderChrome() {
   $('peer-indicator').title = 'Same-project sessions share coordination notices and project memory.';
   $('session-caption').textContent = state?.sending ? 'Sending…' : busy ? 'Enter to queue a follow-up · Esc to stop' : session ? 'Enter to send · Shift Enter for a new line' : 'Local files · persistent project memory';
   const stats = state?.stats;
-  $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · ${stats.costLabel || `$${Number(stats.cost || 0).toFixed(3)}`} total` : '';
+  $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · ${costText(stats)}` : '';
   $('welcome-project').hidden = Boolean(session);
   $('welcome').hidden = Boolean(state?.messages.length);
   $('welcome').querySelector('h1').textContent = archived ? 'A little room to think.' : 'What are we building?';
@@ -155,7 +165,7 @@ async function openSession(id) {
     while (other.length >= 8) { const oldest = other.shift(); conversations.delete(oldest); views.get(oldest)?.nodes.clear(); }
     opening = false; renderMessages(true); renderChrome(); renderActivity(); renderContext(); $('prompt').focus();
     // Totals come from the transcript, so a reopened session shows its cost before the next turn ends.
-    api.stats(id).then(stats => { if (conversations.get(id) === state) { state.stats = stats; if (activeId === id) { renderChrome(); renderContext(); } } }).catch(() => {});
+    if (!result.passive) refreshStats(id);
     showNextExtension();
   } catch (error) {
     if (version !== switchVersion || activeId !== id) return;
@@ -163,6 +173,10 @@ async function openSession(id) {
     conversationOf(id).error = safeError(error);
     if (version === switchVersion && activeId === id) { opening = false; renderChrome(); }
   }
+}
+function refreshStats(id) {
+  const state = conversationOf(id);
+  return api.stats(id).then(stats => { if (stats && conversations.get(id) === state) { state.stats = stats; if (activeId === id) { renderChrome(); renderContext(); } } }).catch(() => {});
 }
 function scheduleRender() {
   if (renderTimer) return;
@@ -285,7 +299,7 @@ function renderContext() {
     if (state.stats) fragment.append(contextCard('This session', 'chat', `${state.stats.userMessages} requests · ${state.stats.toolCalls} tool calls · ${state.stats.totalMessages} messages`));
     if (state.stats?.costLabel) {
       const parts = Object.entries({ Main: state.stats.costParts?.main, Delegated: state.stats.costParts?.delegated, Helpers: state.stats.costParts?.helpers }).filter(([, cost]) => cost > 0);
-      fragment.append(contextCard('Total cost', 'chat', `${state.stats.costLabel}${parts.length > 1 ? ` · ${parts.map(([name, cost]) => `${name} $${cost.toFixed(3)}`).join(' · ')}` : ''}`));
+      fragment.append(contextCard('Total cost', 'chat', `${costText(state.stats)}${parts.length > 1 ? ` · ${parts.map(([name, cost]) => `${name} $${cost.toFixed(3)}`).join(' · ')}` : ''}`));
     }
     for (const [key, value] of viewOf(activeId).widgets) {
       if (!value) continue;
@@ -311,7 +325,7 @@ async function sendPrompt(event) {
   const message = $('prompt').value.trim(), images = [...(attachments.get(id) || [])];
   if (!message && !images.length) return;
   if (/^\/models?\s*$/.test(message)) { setEditorDraft(id, ''); return showModels(); }
-  if (/^\/(metrics|cost|self|session)\s*$/.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); state.stats = await api.stats(id); renderContext(); return; }
+  if (/^\/(metrics|cost|self|session)\s*$/.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await api.warm(id); state.stats = await api.stats(id); renderContext(); return; }
   if (/^\/(skills|tools|help)\s*$/.test(message)) { setEditorDraft(id, ''); return showCommands(); }
   state.sending = true; state.error = '';
   const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? 'Queued' : 'Sending…', revision: 0 };
@@ -343,8 +357,28 @@ function closeModal(cancelled = true) {
 }
 function modal(title, build, onCancel) {
   if ($('dialog').open) closeModal();
+  modalSequence++;
   modalCancel = onCancel; $('dialog-title').textContent = title; $('dialog-content').replaceChildren();
   build($('dialog-content')); $('dialog').showModal();
+}
+// Opens at once, then fills: a closed session starts its runtime on first use,
+// which takes several seconds, and a click must never look ignored meanwhile.
+async function loadingModal(title, id, load, build) {
+  const starting = !workspace.runtime.some(r => r.id === id && r.status === 'ready');
+  modal(title, content => {
+    const status = element('p', 'dialog-loading'); status.setAttribute('role', 'status');
+    const mark = element('span', 'working-mark'); mark.append(element('i'), element('i'), element('i'));
+    status.append(mark, element('span', '', starting ? 'Starting this session…' : 'Loading…')); content.append(status);
+  });
+  const sequence = modalSequence, live = () => sequence === modalSequence && $('dialog').open;
+  try {
+    const data = await load();
+    if (live()) { $('dialog-content').replaceChildren(); build($('dialog-content'), data); }
+  } catch (error) {
+    if (!live()) return;
+    const retry = element('button', 'quiet-button', 'Try again'); retry.onclick = () => tryAction(() => loadingModal(title, id, load, build));
+    $('dialog-content').replaceChildren(element('p', 'dialog-error', safeError(error)), retry);
+  }
 }
 function actionButton(label, symbol, handler, danger = false) {
   const button = element('button', danger ? 'danger' : ''); button.append(icon(symbol), element('span', '', label)); button.onclick = () => { closeModal(false); tryAction(handler); }; return button;
@@ -373,8 +407,7 @@ function renameSession(id) {
 }
 async function showModels() {
   const id = activeId; if (!id) return;
-  const { models } = await api.models(id);
-  modal('Choose a model', content => {
+  await loadingModal('Choose a model', id, () => api.models(id), (content, { models }) => {
     const search = element('input', 'dialog-search'); search.type = 'search'; search.placeholder = 'Search models or providers'; search.setAttribute('aria-label', 'Search models');
     const list = element('div', 'dialog-list');
     const draw = () => {
@@ -382,22 +415,20 @@ async function showModels() {
       for (const model of models.filter(m => `${m.name} ${m.id} ${m.provider}`.toLocaleLowerCase().includes(query)).slice(0, 150)) {
         const button = element('button'), name = element('span', '', model.name || model.id); name.append(element('small', '', `${model.provider} · ${model.id}`)); button.append(name);
         if (conversationOf(id).model?.id === model.id && conversationOf(id).model?.provider === model.provider) button.append(icon('check'));
-        button.onclick = () => tryAction(async () => { await api.setModel(id, model.provider, model.id); closeModal(false); }); list.append(button);
+        button.onclick = () => tryAction(async () => { button.disabled = true; button.setAttribute('aria-busy', 'true'); try { await api.setModel(id, model.provider, model.id); closeModal(false); } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }); list.append(button);
       }
       if (!list.childNodes.length) list.append(element('p', 'empty-hint', 'No configured models match. Add a provider in Settings.'));
     };
-    search.oninput = draw; content.append(search, list); draw();
+    search.oninput = draw; content.append(search, list); draw(); search.focus();
   });
 }
 async function showThinking() {
   const id = activeId; if (!id) return;
-  const { levels } = await api.models(id);
-  modal('Thinking level', content => { const list = element('div', 'dialog-list'); for (const level of levels) list.append(actionButton(level[0].toUpperCase() + level.slice(1), 'brain', async () => { await api.setThinking(id, level); conversationOf(id).thinkingLevel = level; renderChrome(); })); content.append(list); });
+  await loadingModal('Thinking level', id, () => api.models(id), (content, { levels }) => { const list = element('div', 'dialog-list'); for (const level of levels) list.append(actionButton(level[0].toUpperCase() + level.slice(1), 'brain', async () => { await api.setThinking(id, level); conversationOf(id).thinkingLevel = level; renderChrome(); })); content.append(list); });
 }
 async function showCommands() {
   const id = activeId; if (!id) { toast('Open a project session first.'); return; }
-  const { commands } = await api.commands(id);
-  modal('Skills & commands', content => {
+  await loadingModal('Skills & commands', id, () => api.commands(id), (content, { commands }) => {
     const search = element('input', 'dialog-search'); search.type = 'search'; search.placeholder = 'Find a skill or command'; search.setAttribute('aria-label', 'Search skills and commands'); const list = element('div', 'dialog-list');
     const draw = () => {
       list.replaceChildren();
@@ -405,7 +436,7 @@ async function showCommands() {
         const button = element('button'), detail = element('span', '', `/${command.name}`); detail.append(element('small', '', command.description || command.source)); button.append(icon('compass'), detail);
         button.onclick = () => { closeModal(false); setEditorDraft(id, `/${command.name} `, true); }; list.append(button);
       }
-    }; search.oninput = draw; content.append(search, list); draw();
+    }; search.oninput = draw; content.append(search, list); draw(); search.focus();
   });
 }
 function showSettings() {
@@ -525,7 +556,12 @@ api.onEvent(value => {
       if (value.sessionId === activeId) scheduleRender();
       break;
     }
-    case 'state': Object.assign(conversationOf(value.sessionId), { model: value.data.model, thinkingLevel: value.data.thinkingLevel, busy: value.data.isStreaming }); if (value.sessionId === activeId) renderChrome(); break;
+    case 'state': {
+      const state = conversationOf(value.sessionId);
+      Object.assign(state, { model: value.data.model, thinkingLevel: value.data.thinkingLevel, busy: value.data.isStreaming });
+      if (!state.stats) refreshStats(value.sessionId);
+      if (value.sessionId === activeId) renderChrome(); break;
+    }
     case 'stats': conversationOf(value.sessionId).stats = value.data; if (value.sessionId === activeId) { renderChrome(); renderContext(); } break;
     case 'failure': if (value.sessionId) {
       for (let index = extensionQueue.length - 1; index >= 0; index--) if (extensionQueue[index].sessionId === value.sessionId) extensionQueue.splice(index, 1);
@@ -546,7 +582,14 @@ $('settings').onclick = showSettings;
 $('composer').onsubmit = event => { event.preventDefault(); tryAction(() => sendPrompt()); };
 $('prompt').oninput = () => {
   resizePrompt();
-  if (activeId) setEditorDraft(activeId, $('prompt').value);
+  if (!activeId) return;
+  setEditorDraft(activeId, $('prompt').value);
+  // Typing is intent to send: start a closed session's runtime now so the
+  // send (and the model menu) does not wait for it. Browsing alone never does.
+  if (!warming.has(activeId) && !workspace.runtime.some(r => r.id === activeId)) {
+    const id = activeId; warming.add(id);
+    api.warm(id).catch(() => {}).finally(() => warming.delete(id));
+  }
 };
 $('prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt()); } };
 $('stop').onclick = () => { if (activeId) tryAction(() => api.abort(activeId)); };
@@ -587,6 +630,7 @@ for (const tab of ['activity', 'context']) {
   $(`${tab}-tab`).onkeydown = event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = tab === 'activity' ? 'context' : 'activity'; setTab(next); $(`${next}-tab`).focus(); } };
 }
 $('dialog-close').onclick = () => closeModal();
+$('toast').onclick = () => { clearTimeout(toastTimer); $('toast').hidden = true; };
 $('dialog').addEventListener('cancel', event => { event.preventDefault(); closeModal(); });
 $('dialog').addEventListener('click', event => { if (event.target === $('dialog')) { const r = $('dialog').getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeModal(); } });
 document.addEventListener('keydown', event => {

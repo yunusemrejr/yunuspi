@@ -258,8 +258,8 @@ test("portable inference service templates ship without private units or model s
   try {
     const units = path.join(f.source, "scripts/systemd");
     fs.mkdirSync(units);
-    // The retired SmolLM unit is no longer a portable template: like a
-    // personal unit it stays private (the local LM unit is generated at install).
+    // A retired SmolLM unit file must never ship as a portable template: like a
+    // personal unit it stays private.
     const names = ["pi-mini-preprocessor.service"];
     const privateUnits = ["personal-task.service", "pi-smol-preprocessor.service"];
     for (const name of [...names, ...privateUnits])

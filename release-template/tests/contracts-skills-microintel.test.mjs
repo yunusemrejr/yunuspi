@@ -50,73 +50,20 @@ test('suggestion lifecycle distinguishes inspected, deferred, and applied', () =
 
 test('micro-intel usefulness rewards correct skips, not invocations', () => {
   let ledger = { version: 1, samples: [] };
-  for (let i = 0; i < 5; i++) ledger = recordMicroIntel(ledger, { helper: 'smol', outcome: 'skipped-correctly', ineligibility: 'too-small-to-benefit' });
-  ledger = recordMicroIntel(ledger, { helper: 'smol', outcome: 'accepted', decisionChanged: true, tokenDelta: -500 });
+  for (let i = 0; i < 5; i++) ledger = recordMicroIntel(ledger, { helper: 'kompress', outcome: 'skipped-correctly', ineligibility: 'too-small-to-benefit' });
+  ledger = recordMicroIntel(ledger, { helper: 'kompress', outcome: 'accepted', decisionChanged: true, tokenDelta: -500 });
   ledger = recordMicroIntel(ledger, { helper: 'jev', outcome: 'invoked' });
   ledger = recordMicroIntel(ledger, { helper: 'jev', outcome: 'rejected' });
   const summary = summarizeMicroIntelUsefulness(ledger);
-  const smol = summary.find((s) => s.helper === 'smol');
+  const kompress = summary.find((s) => s.helper === 'kompress');
   const jev = summary.find((s) => s.helper === 'jev');
-  assert.equal(smol.skippedCorrectly, 5);
-  assert.equal(smol.decisionChanged, 1);
-  assert.equal(smol.totalTokenDelta, -500);
-  assert.ok(smol.usefulness > jev.usefulness, 'correct skips beat empty invocations');
+  assert.equal(kompress.skippedCorrectly, 5);
+  assert.equal(kompress.decisionChanged, 1);
+  assert.equal(kompress.totalTokenDelta, -500);
+  assert.ok(kompress.usefulness > jev.usefulness, 'correct skips beat empty invocations');
 });
 
-test('smol offers carry structured skip reasons on the live gates', async () => {
-  const smol = await import(pathToFileURL(path.join(agent, 'extensions/lib/smol-preprocessor.ts')));
-  const seen = [];
-  const key = Symbol.for('yunus-pi.health.v1');
-  const prior = globalThis[key];
-  globalThis[key] = (kind, data) => { if (kind === 'ml.smol.offer') seen.push(data); };
-  try {
-    const clean = 'Routine output line with ordinary words. '.repeat(90);
-    // No runtime: model unavailable.
-    smol.createSmolPreprocessor({}).offer('k1', clean, 1);
-    // Unsafe content: protected.
-    smol.createSmolPreprocessor({}).offer('k2', `${clean} the password is hunter2`.slice(0, 4100), 1);
-    // Valid runtime but a short result: too small to benefit.
-    const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18735/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
-    smol.createSmolPreprocessor({ runtime }).offer('k3', clean.slice(0, 2000), 1);
-  } finally {
-    if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior;
-  }
-  const byKey = Object.fromEntries(seen.map((s, i) => [i, s]));
-  assert.equal(seen[0].decision, 'no-runtime');
-  assert.equal(seen[0].reason, 'model-unavailable');
-  assert.equal(seen[1].decision, 'ineligible');
-  assert.equal(seen[1].reason, 'protected-content');
-  assert.equal(seen[2].decision, 'ineligible');
-  assert.equal(seen[2].reason, 'too-small-to-benefit');
-  assert.ok(byKey, 'hook observed all offers');
-});
-
-test('Smol reports size and shape eligibility separately without weakening protected evidence gates', async () => {
-  const smol = await import(pathToFileURL(path.join(agent, 'extensions/lib/smol-preprocessor.ts')));
-  const clean = 'Routine output line with ordinary words. '.repeat(90);
-  const cases = [
-    ['bash', 'short output', false, undefined, 'too-small-to-benefit'],
-    ['bash', clean.repeat(2), false, undefined, 'input-budget'],
-    ['bash', clean + 'é ✓ → ├──', false, undefined, undefined],
-    ['bash', clean + '\u202e', false, undefined, 'control-characters'],
-    ['bash', clean + '\x1b[31m', false, undefined, 'control-characters'],
-    ['bash', clean, false, { truncated: true }, 'protected-content'],
-    ['bash', clean + ' warning: inspect this evidence', false, undefined, undefined],
-    ['bash', clean + '\nTraceback (most recent call last):', false, undefined, 'protected-content'],
-    ['bash', clean + ' Authorization: Bearer abc', false, undefined, 'protected-content'],
-    ['bash', clean, true, undefined, 'protected-content'],
-    ['custom', clean, false, undefined, 'unsupported-tool'],
-    ['read', clean, false, undefined, 'requested-content'],
-    ['grep', clean, false, undefined, 'requested-content'],
-    ['bash', clean, false, undefined, undefined],
-  ];
-  for (const [tool, raw, isError, details, reason] of cases) {
-    assert.equal(smol.smolOutputSkipReason(tool, raw, isError, details), reason);
-    assert.equal(smol.safeSmolOutput(tool, raw, isError, details), reason === undefined);
-  }
-});
-
-test('smol/kompress ineligibility is structured', () => {
+test('kompress ineligibility is structured', () => {
   let ledger = { version: 1, samples: [] };
   for (const reason of ['input-shape-unsupported', 'protected-content', 'already-compact', 'latency-budget-exceeded', 'confidence-too-low', 'model-unavailable']) {
     ledger = recordMicroIntel(ledger, { helper: 'kompress', outcome: 'eligible', ineligibility: reason });

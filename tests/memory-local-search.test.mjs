@@ -85,3 +85,19 @@ test("symlinked and oversized memory files are not read", async () => {
     assert.ok(found.results.every(hit => !hit.block.text.includes("outside secret")));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("qmd installed off PATH (nvm global bin) is found instead of reported missing", async (t) => {
+  const memory = await import(pathToFileURL(path.join(agentRoot, "extensions/pi-memory/index.ts")));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "qmd-home-"));
+  t.after(() => { memory._resetQmdBinaryForTest(); fs.rmSync(home, { recursive: true, force: true }); });
+  const bin = path.join(home, ".nvm/versions/node/v22.1.0/bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "qmd"), "#!/usr/bin/env node\n", { mode: 0o755 });
+  memory._resetQmdBinaryForTest();
+  if (process.platform !== "win32") assert.equal(memory.resolveQmdBinary({ PATH: "/nonexistent" }, home), path.join(bin, "qmd"));
+  memory._resetQmdBinaryForTest();
+  assert.equal(memory.resolveQmdBinary({ PATH: "/nonexistent" }, fs.mkdtempSync(path.join(home, "empty-"))), "qmd", "nothing found keeps the plain command");
+  memory._resetQmdBinaryForTest();
+  assert.equal(memory.resolveQmdBinary({ PATH: "/nonexistent", PI_QMD_BIN: path.join(bin, "qmd") }, "/nonexistent"), path.join(bin, "qmd"));
+  assert.doesNotMatch(memory.qmdInstallInstructions(), /requires qmd/);
+});

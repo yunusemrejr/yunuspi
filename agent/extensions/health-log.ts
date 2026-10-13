@@ -8,8 +8,8 @@ import {sharedCapabilityHealth} from './lib/capability-health.ts';
 import {createActivityIndicators,describeIntelligenceActivity,skillNameFromPath} from './lib/activity-indicators.ts';
 import {createHelperUsageLedger,HELPER_USAGE_ENTRY,HELPER_USAGE_VIEW} from './lib/helper-usage.ts';
 import {messageText,renderHarnessNotice} from './lib/harness-notice.ts';
-const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Local LM'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
- 'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress','Local LM':'Local LM',
+const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
+ 'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress',
  'Retrieval intelligence':'retrieval','Neural ranker':'Neural ranker','Intent classifier':'Intent classifier','WASM source check':'WASM source check','Deterministic selection':'Deterministic selection',
 };
 export default function healthLog(pi:any) {
@@ -36,10 +36,10 @@ export default function healthLog(pi:any) {
  const relayChildUse=(kind:string,data:Record<string,unknown>)=>{
   if(process.env.PI_SUBAGENT_CHILD!=='1'||!activeSessionId)return;
   const activity=describeIntelligenceActivity(kind,data),name=activity?childRelayNames[activity.label]:undefined;
-  if(!name||kind==='ml.smol.offer')return;
+  if(!name)return;
   const ownerId=guardianOwnerForSession(activeSessionId,activeSessionOwner);
   if(!ownerId)return;
-  const stage=kind==='ml.evidence.returned'?'returned':kind==='ml.evidence.delivered'?'delivered':data.cached===true?'cached':activity!.status!=='ok'?'skipped':kind==='ml.needle.call'||kind==='ml.jev.used'||kind==='ml.smol.inference'||kind==='ml.mini.select'||kind==='ml.wasm.completed'?'result':'applied';
+  const stage=kind==='ml.evidence.returned'?'returned':kind==='ml.evidence.delivered'?'delivered':data.cached===true?'cached':activity!.status!=='ok'?'skipped':kind==='ml.needle.call'||kind==='ml.jev.used'||kind==='ml.mini.select'||kind==='ml.wasm.completed'?'result':'applied';
   const source=name==='JEV'?'remote':name==='Needle3'||name==='WASM source check'?'wasm':'local';
   const key=[name,stage,source].join(':');
   const pending=childPending.get(key);

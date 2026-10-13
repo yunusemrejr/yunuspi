@@ -112,7 +112,7 @@ test('real fuzzy matching and accepted retrieval produce markers; abstention and
     assert.equal(result.applied, 'needle');
     await Promise.resolve();
     assert.equal(sent.at(-1).details.label, 'Retrieval intelligence');
-    for (const kind of ['ml.jev.used', 'ml.needle.call', 'ml.mini.used', 'ml.smol.used']) activity.note(kind, { isError: true });
+    for (const kind of ['ml.jev.used', 'ml.needle.call', 'ml.mini.used']) activity.note(kind, { isError: true });
     assert.equal(sent.length, 2);
     assert.ok(sent.every(m => m.excludeFromContext === true));
   } finally { activity.dispose(); if(before === undefined)delete globalThis[HEALTH];else globalThis[HEALTH] = before; }
@@ -131,7 +131,7 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
     assert.equal(sent.length, 31, 'neither the old 60s cooldown nor the generic 24/min cap hides meaningful completions');
     assert.match(sent.at(-1).details.detail, /cached embeddings · candidates ranked/);
     assert.ok(sent.every(message => message.excludeFromContext && message.display));
-    activity.note('ml.evidence.delivered', { helper: 'smol', savedChars: 4096, count: 1, raw: 'PRIVATE-TEXT' });
+    activity.note('ml.evidence.delivered', { helper: 'kompress', savedChars: 4096, count: 1, raw: 'PRIVATE-TEXT' });
     await Promise.resolve();
     assert.match(sent.at(-1).details.detail, /added to model context · 4096 characters saved/);
     assert.doesNotMatch(JSON.stringify(sent), /PRIVATE-TEXT/);
@@ -145,10 +145,10 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
     activity.note('ml.wasm.completed', { helper: 'source-check', runtime: 'tree-sitter-wasm', durationMs: 3, findings: 2 });
     await Promise.resolve();
     assert.match(sent.at(-1).details.detail, /local parse complete · 2 findings/);
-    activity.note('ml.smol.offer', { decision: 'ineligible-source', reason: 'protected-content' });
+    activity.note('ml.mini.select', { decision: 'ineligible-source', reason: 'protected-content' });
     await Promise.resolve();
     assert.equal(sent.at(-1).details.status, 'skip');
-    assert.match(sent.at(-1).details.detail, /skipped · protected content/);
+    assert.match(sent.at(-1).details.detail, /local selection unused · protected content/);
     const count = sent.length;
     activity.note('ml.needle.call', { count: 1 }); activity.reset(); await Promise.resolve();
     assert.equal(sent.length, count, 'queued prior-session events are discarded');
@@ -164,24 +164,24 @@ test('repeated eligibility and lexical checks stay counted without drowning out 
   Date.now = () => now;
   try {
     for (let i = 0; i < 50; i++) {
-      activity.note('ml.smol.offer', { decision: 'ineligible-source', reason: 'protected-content' });
+      activity.note('ml.needle.skipped', { reason: 'low-confidence' });
       activity.note('ml.fuzzy.used', { count: i % 6 + 1 });
       await Promise.resolve();
     }
     assert.equal(sent.length, 2, 'same routine status is visible once, not once per tool result');
-    assert.equal(activity.counters().events['ml.smol.offer'], 50);
+    assert.equal(activity.counters().events['ml.needle.skipped'], 50);
     assert.equal(activity.counters().events['ml.fuzzy.used'], 50);
     assert.equal(activity.snapshot().length, 100);
     now += 60_000;
     activity.note('ml.fuzzy.used', { count: 2 });
-    activity.note('ml.smol.offer', { decision: 'ineligible-source', reason: 'protected-content' });
+    activity.note('ml.needle.skipped', { reason: 'low-confidence' });
     await Promise.resolve();
-    assert.equal(sent.length, 3, 'lexical activity refreshes after one minute; unchanged Smol skips wait five');
-    activity.note('ml.smol.offer', { decision: 'no-runtime', reason: 'model-unavailable' });
+    assert.equal(sent.length, 4, 'lexical activity and unchanged skips refresh after one minute');
+    activity.note('ml.span.skipped', { reason: 'unavailable' });
     activity.note('ml.jev.skipped', { reason: 'timeout', durationMs: 15000, raw: 'PRIVATE-EVIDENCE' });
     activity.note('ml.needle.skipped', { reason: 'unavailable', detail: 'PRIVATE-WORKER-ERROR' });
     await Promise.resolve();
-    assert.equal(sent.length, 6, 'new outage states are visible immediately');
+    assert.equal(sent.length, 7, 'new outage states are visible immediately');
     assert.ok(sent.slice(-3).every(message => message.details.status === 'error'));
     assert.match(sent.at(-2).details.detail, /fallback retained.*timeout/);
     assert.equal(sent.at(-1).details.detail, 'unavailable; fallback retained', 'an unavailable reason is not repeated after the status');
@@ -238,11 +238,11 @@ test('loaded child health events relay bounded stages promptly only for their li
     assert.ok(records().every(record => record.reason === 'intelligence_used' && /JEV · remote · result ready/.test(record.message)));
     assert.equal(relayIntelligenceUsageFromChild({ name: 'JEV', sessionId: 'same-id', ownerId: 'forged' }), false);
     withSessionObservability(f.ctx, () => {
-      for (let i = 0; i < 3; i++) sessionObservability()[HEALTH]('ml.evidence.delivered', { helper: 'smol', savedChars: 1000, count: 1 });
+      for (let i = 0; i < 3; i++) sessionObservability()[HEALTH]('ml.evidence.delivered', { helper: 'kompress', savedChars: 1000, count: 1 });
     });
     await Promise.resolve();
     assert.equal(records().length, 4);
-    assert.match(records().find(record => /Local LM/.test(record.message)).message, /added to model context · 3 completions · 3000 characters saved/);
+    assert.match(records().find(record => /Kompress/.test(record.message)).message, /added to model context · 3 completions · 3000 characters saved/);
     guardian.dispose();
     await f.emit('tool_call', { toolCallId: 'after-owner-disposal', toolName: 'probe' });
     assert.equal(records().length, 4, 'a late child cannot relay after its owner was disposed');

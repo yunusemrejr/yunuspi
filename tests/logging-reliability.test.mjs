@@ -42,15 +42,15 @@ test('health logs retain bounded ML evidence without copying model content or ar
   const dir = temp();
   try {
     const log = createHealthLog(dir, 'fixture');
-    log.record('ml.evidence.route', { shape: 'prose', smol: true, kompress: true, needle: false, jev: false,
-      reasons: ['smol:eligible', 'kompress:prose-shaped', 'PRIVATE PAYLOAD'], raw: 'PRIVATE PAYLOAD' });
+    log.record('ml.evidence.route', { shape: 'prose', kompress: true, needle: false, jev: false,
+      reasons: ['kompress:prose-shaped', 'PRIVATE PAYLOAD'], raw: 'PRIVATE PAYLOAD' });
     log.record('ml.needle.call', { op: 'rank', cached: true, shadow: false, durationMs: 4, count: 1 });
-    log.record('ml.evidence.delivered', { helper: 'smol', savedChars: 4096, count: 1 });
-    log.record('ml.smol.offer', { decision: 'ineligible', reason: 'protected-content' });
+    log.record('ml.evidence.delivered', { helper: 'kompress', savedChars: 4096, count: 1 });
+    log.record('ml.mini.select', { decision: 'ineligible', reason: 'protected-content' });
     await log.close();
     const events = readHealth(log.file);
-    assert.deepEqual(events[0].reasons, ['smol:eligible', 'kompress:prose-shaped']);
-    assert.equal(events[0].shape, 'prose'); assert.equal(events[0].smol, true); assert.equal(events[0].needle, false);
+    assert.deepEqual(events[0].reasons, ['kompress:prose-shaped']);
+    assert.equal(events[0].shape, 'prose'); assert.equal(events[0].kompress, true); assert.equal(events[0].needle, false);
     assert.equal(events[1].cached, true); assert.equal(events[1].op, 'rank');
     assert.equal(events[2].savedChars, 4096); assert.equal(events[3].reason, 'protected-content');
     assert.doesNotMatch(JSON.stringify(events), /PRIVATE PAYLOAD/);

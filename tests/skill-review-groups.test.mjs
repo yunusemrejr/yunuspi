@@ -1,7 +1,6 @@
 // Keep metadata/routing fixtures independent of remote judge configuration.
 process.env.PI_JEV = "off";
 process.env.PI_NEEDLE = "off";
-process.env.PI_LOCAL_LM = "off";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -55,10 +55,10 @@ test('switch, abort and run end clear status and stale closures cannot finish re
     assert.match(f.writes.at(-1).text, /^◌ Review/);
     f.emit('agent_end', {}, next);
     assert.equal(f.writes.at(-1).text, undefined);
-    assert.equal(f.service({ action: 'start', id: 'late', label: 'model' }, next), undefined);
+    assert.equal(f.service({ action: 'start', id: 'late', label: 'review' }, next), undefined);
     const controller = new AbortController(), active = f.ctx('session-b', { signal: controller.signal });
     f.emit('before_agent_start', {}, active);
-    f.service({ action: 'start', id: 'new', label: 'model' }, active);
+    f.service({ action: 'start', id: 'new', label: 'review' }, active);
     controller.abort();
     assert.equal(f.writes.at(-1).text, undefined);
   } finally { f.close(); }

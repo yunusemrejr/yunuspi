@@ -269,7 +269,7 @@ test('the kickoff is the user\'s own request; harness continuations never are',a
  // A /goal kickoff carries the user's words, so it must arrive authored. A continuation must not.
  const h=harness();
  await h.commands.goal.handler('Redesign the settings page',h.ctx);
- assert.deepEqual(h.sentOptions[0],{authored:true,userText:'Redesign the settings page'},'the kickoff is authored input that carries the user\'s own words');
+ assert.deepEqual(h.sentOptions[0],{authored:true,userText:'Redesign the settings page',deliverAs:'followUp'},'the kickoff is authored input that carries the user\'s own words');
  await h.emit('message_end',{message:{role:'assistant',stopReason:'stop'}});
  await h.emit('agent_settled');
  assert.match(h.sent[1],/continuation 1/);
@@ -277,7 +277,7 @@ test('the kickoff is the user\'s own request; harness continuations never are',a
  await h.emit('message_end',{message:{role:'assistant',stopReason:'aborted'}});
  await h.emit('agent_settled');
  await h.commands.goal.handler('resume',h.ctx);
- assert.deepEqual(h.sentOptions.at(-1),{authored:true,userText:'Redesign the settings page'},'resuming restarts the user\'s request, also authored');
+ assert.deepEqual(h.sentOptions.at(-1),{authored:true,userText:'Redesign the settings page',deliverAs:'followUp'},'resuming restarts the user\'s request, also authored');
 });
 
 test('an interrupt pauses the goal and blocked reports reach the user without another turn',async()=>{

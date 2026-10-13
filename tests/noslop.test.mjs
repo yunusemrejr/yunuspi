@@ -71,7 +71,7 @@ test('/noslop with no instruction starts a desloppify goal and kicks the session
   assert.equal(h.sent.length, 1);
   assert.match(h.sent[0], /\[goal-tracked /);
   assert.match(h.sent[0], /Desloppify this codebase/);
-  assert.deepEqual(h.sentOptions[0], { authored: true, userText: '/noslop' });
+  assert.deepEqual(h.sentOptions[0], { authored: true, userText: '/noslop', deliverAs: 'followUp' });
   assert.match(h.notes.at(-1).text, /\/goal shows progress/);
   // The fronts close through the ordinary goal tool: one shared state owner.
   assert.match(await h.call({ action: 'met', id: 'C1', evidence: 'inventory diff read: 14 items listed per front in notes.md line 3' }), /Recorded/);
@@ -82,5 +82,5 @@ test('/noslop accepts an instruction and keeps the user words as the authored te
   await h.commands.goal.handler('Ship the exporter', h.ctx); await tick();
   await h.commands.noslop.handler('focus on src/ui only', h.ctx); await tick();
   assert.match(h.entries.at(-1).data.text, /Requested focus: focus on src\/ui only/, 'noslop replaces the previous goal like /goal does');
-  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/noslop focus on src/ui only' });
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: '/noslop focus on src/ui only', deliverAs: 'followUp' });
 });

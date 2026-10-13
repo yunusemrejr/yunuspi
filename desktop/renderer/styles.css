@@ -1030,18 +1030,45 @@ kbd {
 }
 .toast {
   position:fixed;
-  bottom:22px;
+  top:74px;
   left:50%;
   transform:translateX(-50%);
-  max-width:min(600px,90vw);
+  max-width:min(560px,calc(100vw - 32px));
   background:var(--surface-hover);
-  border:1px solid var(--line);
+  /* Spacing lives in a transparent border: overflow clips at the padding
+     edge, so the line clamp cannot leak a partial line into padding. */
+  border:solid transparent;
+  border-width:10px 16px;
   border-radius:10px;
-  padding:12px 18px;
+  padding:0;
   font-size:12px;
+  line-height:1.5;
   z-index:20;
-  box-shadow:0 4px 20px #0003;
-  overflow-wrap:anywhere
+  box-shadow:0 0 0 1px var(--line),0 4px 20px #0003;
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:4;
+  overflow:hidden;
+  cursor:pointer
+}
+.toast[data-tone="error"] {
+  box-shadow:0 0 0 1px var(--danger),0 4px 20px #0003;
+  color:var(--danger)
+}
+.dialog-loading {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--muted);
+  font-size:12px;
+  padding:10px 7px
+}
+.dialog-error {
+  color:var(--danger);
+  font-size:12px;
+  overflow-wrap:anywhere;
+  white-space:pre-wrap
 }
 .dialog {
   background:var(--bg);

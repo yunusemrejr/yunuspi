@@ -14,7 +14,7 @@
  * fits the goal system's criteria budget. Bare invocations survey the current project for work of their
  * kind, improve what exists, and say so plainly when there is none.
  */
-import { createPresetGoal, MAX_CRITERIA, type GoalState } from "./goal-state.ts";
+import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
 import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
 
 export type PresetId = "noslop" | "nobug" | "3d" | "video";
@@ -22,33 +22,91 @@ export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video"
 export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video" };
 
 const MAX_TASK = 4000;
-const CHAIN_TOKEN = /^\/(noslop|nobug|3d|video)(?=\s|$)/i;
+const VERIFY_ID = "V";
+/** A preset or /goal token: opened by start, whitespace or ( " ', closed by end, whitespace, or punctuation that itself ends the word
+ * (`/3d.` at a sentence end) — so paths, URLs and file names (`src/3d`, `/video.mp4`, `/3d/models`) never match. */
+const TOKEN = /(?<=^|[\s("'])\/(noslop|nobug|3d|video|goal)(?=$|\s|[,.;:!?)"'](?=$|[\s,.;:!?)"']))/gi;
+/** Fenced blocks and inline code spans: tokens inside them are text. */
+const CODE = /```[\s\S]*?(?:```|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
+/** Connector words and punctuation that a removed token can leave at either edge of the task. */
+const LEAD_CONNECTOR = /^(?:(?:and|with|then|plus|also)(?!\w)|[&+](?=\s|$)|[,;])\s*/i;
+const TAIL_CONNECTOR = /(?:^|\s)(?:and|with|then|plus|also|[&+])$|[,;]$/i;
+/** Text that holds nothing but connector words and punctuation: what a token leaves stranded at an edge. */
+const ONLY_CONNECTORS = /^[\s,;&+]*(?:(?:and|with|then|plus|also)(?!\w)[\s,;&+]*)*$/i;
 
 export interface PresetChain {
-	/** Invoked preset first, then peeled chain tokens in written order, deduped. */
+	/** Invoked preset first, then the rest of the chain in written order, deduped. */
 	presets: PresetId[];
 	/** Remaining assignment text (may be empty: bare survey-and-fix). */
 	task: string;
 }
 
+export interface PresetTokens extends PresetChain {
+	/** A /goal token appeared: the text asks for a goal, not only a preset run. */
+	goal: boolean;
+	/** The user's text as typed, whitespace flattened, for authored-input analysis. */
+	literal: string;
+}
+
+const clipTask = (text: string) => (text.length > MAX_TASK ? `${text.slice(0, MAX_TASK - 1)}…` : text);
+
+function trimConnectors(text: string, lead: boolean, tail: boolean): string {
+	let out = text.trim();
+	for (let previous = ""; previous !== out; ) {
+		previous = out;
+		if (lead) out = out.replace(LEAD_CONNECTOR, "");
+		if (tail) out = out.replace(TAIL_CONNECTOR, "");
+		out = out.trim();
+	}
+	return out;
+}
+
 /**
- * `/3d /video /noslop make X` grammar: the core dispatches only the first
- * token as a command, so chained presets arrive as leading `/name` tokens in
- * the args. Peel them (any order, repeats ignored); an unknown `/word` is
- * not a preset and stays part of the assignment, typo and all.
+ * Every preset and /goal token in a text, wherever it stands. The task is the
+ * text with the tokens removed: the spacing they leave closes up, and a
+ * connector word is dropped only where a token stranded it at an edge (the
+ * text on that side held nothing but connectors). Text without any token comes
+ * back trimmed and otherwise untouched.
+ */
+export function extractPresetTokens(text: string): PresetTokens {
+	const raw = String(text ?? "");
+	const literal = raw.replace(/\s+/g, " ").trim();
+	const masked = raw.replace(CODE, (code) => "\u0000".repeat(code.length));
+	const presets: PresetId[] = [];
+	const spans: [number, number][] = [];
+	let goal = false;
+	for (const match of masked.matchAll(TOKEN)) {
+		const name = match[1].toLowerCase();
+		if (name === "goal") goal = true;
+		else if (!presets.includes(name as PresetId)) presets.push(name as PresetId);
+		const start = match.index ?? 0;
+		spans.push([start, start + match[0].length]);
+	}
+	if (!spans.length) return { presets, goal, task: clipTask(raw.trim()), literal };
+	let out = "";
+	let cursor = 0;
+	for (const [start, end] of spans) {
+		out = (out + raw.slice(cursor, start)).replace(/[ \t]+$/, "");
+		cursor = end + /^[ \t]*/.exec(raw.slice(end))![0].length;
+		const next = raw[cursor];
+		// One space where the token stood, unless it sat at a line edge or before punctuation.
+		if (out && !/[\r\n]$/.test(out) && next !== undefined && !/[\r\n,.;:!?)"']/.test(next)) out += " ";
+	}
+	const lead = ONLY_CONNECTORS.test(raw.slice(0, spans[0][0]));
+	const tail = ONLY_CONNECTORS.test(raw.slice(spans[spans.length - 1][1]));
+	return { presets, goal, task: clipTask(trimConnectors(out + raw.slice(cursor), lead, tail)), literal };
+}
+
+/**
+ * `/3d /video /noslop make X` grammar: the core dispatches only the invoked
+ * name, so the rest of the chain arrives in the args, anywhere in them. The
+ * invoked preset leads, then the others in written order, deduped. A /goal
+ * token is not part of the chain (see extractPresetTokens); an unknown /word
+ * is not a preset and stays part of the assignment, typo and all.
  */
 export function parsePresetChain(invoked: PresetId, args: string): PresetChain {
-	const presets: PresetId[] = [invoked];
-	let rest = String(args ?? "").trim();
-	for (;;) {
-		const match = CHAIN_TOKEN.exec(rest);
-		if (!match) break;
-		const id = match[1].toLowerCase() as PresetId;
-		if (!presets.includes(id)) presets.push(id);
-		rest = rest.slice(match[0].length).trim();
-	}
-	const task = rest.length > MAX_TASK ? `${rest.slice(0, MAX_TASK - 1)}…` : rest;
-	return { presets, task };
+	const found = extractPresetTokens(`/${invoked} ${String(args ?? "")}`);
+	return { presets: found.presets, task: found.task };
 }
 
 /** The user's literal invocation, for authored-input analysis: `/3d /video make X`. */
@@ -93,6 +151,17 @@ const CORE_INDEXES: Record<PresetId, readonly number[]> = {
 	video: [1, 2, 4],
 };
 const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA };
+
+/** A criterion as createPresetGoal stores it (flattened, clipped), so fronts can be matched against a goal. */
+const fit = (text: string) => {
+	const flat = String(text).replace(/\s+/g, " ").trim();
+	return flat.length > 240 ? `${flat.slice(0, 239)}…` : flat;
+};
+
+/** A preset's first `count` core fronts, labelled and in the brief's order. */
+function labelledFronts(id: PresetId, count: number): string[] {
+	return CORE_INDEXES[id].slice(0, count).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`);
+}
 
 function nobugGoalText(task: string): string {
 	const scope = task
@@ -152,15 +221,95 @@ export function createPresetChainGoal(chain: PresetChain, now = Date.now()): Goa
 	if (presets.length === 1) {
 		const only = presets[0];
 		if (only === "noslop") return createNoslopGoal(noslopFocus(task), now);
-		return createPresetGoal(BRIEFS[only](task), CRITERIA[only], now);
+		return { ...createPresetGoal(BRIEFS[only](task), CRITERIA[only], now), boosts: [only] };
 	}
 	const header = task
 		? `Assignment: ${task}\n\nBoosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
 		: `Boosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
 	const text = [header, ...presets.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task)}`)].join("\n\n");
 	const perPreset = Math.min(3, Math.floor((MAX_CRITERIA - 1) / presets.length));
-	const criteria = presets.flatMap((id) => CORE_INDEXES[id].slice(0, perPreset).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`));
-	return createPresetGoal(text, criteria, now);
+	const criteria = presets.flatMap((id) => labelledFronts(id, perPreset));
+	return { ...createPresetGoal(text, criteria, now), boosts: [...presets] };
+}
+
+/** The text of a goal with boosts: the user's task first, then the order of the boosts, then each brief. */
+function boostedText(task: string, ids: readonly PresetId[], literal: string): string {
+	const order = ids.map((id) => PRESET_LABELS[id]).join(" → ");
+	const header = `Boosts in force, in the order written — ${order} — all applied to this goal. Where a boost was written next to a particular part of the goal, it applies chiefly to that part; where boosts pull against each other the goal's purpose wins and the conflict is named. The user wrote: «${literal}»`;
+	return [task, header, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task)}`)].join("\n\n");
+}
+
+/**
+ * A real goal with boosts: the user's own requirements first (what createGoal
+ * extracts from the task), then each boost's core fronts under its label, then
+ * V. Every brief joins the text, so each boost applies in full even where only
+ * its fronts are tracked. The budget gives the fronts k per boost (3, 2, or 1
+ * from one to four boosts); the user's requirements take what is left, at least 3.
+ */
+export function createBoostedGoal(task: string, presets: readonly PresetId[], literal: string, now = Date.now()): GoalState {
+	const ids = [...new Set(presets)];
+	const perPreset = ids.length === 1 ? 3 : ids.length === 2 ? 2 : 1;
+	const fronts = ids.flatMap((id) => labelledFronts(id, perPreset));
+	const room = Math.max(3, MAX_CRITERIA - 1 - fronts.length);
+	const own = createGoal(task, now).criteria.filter((criterion) => criterion.id !== VERIFY_ID).map((criterion) => criterion.text);
+	return { ...createPresetGoal(boostedText(task, ids, literal), [...own.slice(0, room), ...fronts], now), boosts: ids };
+}
+
+/** Core fronts of a boost that the goal does not track yet (plain or labelled), most important first. */
+function untrackedFronts(goal: GoalState, id: PresetId): string[] {
+	return CORE_INDEXES[id]
+		.map((index) => CRITERIA[id][index])
+		.filter((text) => !goal.criteria.some((criterion) => criterion.text === fit(text) || criterion.text === fit(`${PRESET_LABELS[id]}: ${text}`)));
+}
+
+/**
+ * Bare boosts added to a live goal: each new brief joins the goal text under
+ * its label, and its core fronts take the free criteria slots ahead of V. A
+ * boost already in force (recorded, or with every front tracked) is skipped;
+ * when nothing is new the goal comes back unchanged with `fresh` empty. The
+ * continuation budget is re-armed, as a resume does, because the goal has new work.
+ */
+export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = Date.now()): { goal: GoalState; fresh: PresetId[]; fronts: number } {
+	const recorded = goal.boosts ?? [];
+	const requested = [...new Set(presets)];
+	const fresh = requested.filter((id) => !recorded.includes(id) && untrackedFronts(goal, id).length > 0);
+	if (!fresh.length) return { goal, fresh, fronts: 0 };
+	const total = new Set([...recorded, ...requested]).size;
+	const perPreset = total === 1 ? 3 : total === 2 ? 2 : 1;
+	const queued: string[] = [];
+	for (let round = 0; round < perPreset; round++) {
+		for (const id of fresh) {
+			const text = untrackedFronts(goal, id)[round];
+			if (text) queued.push(`${PRESET_LABELS[id]}: ${text}`);
+		}
+	}
+	const body = goal.criteria.filter((criterion) => criterion.id !== VERIFY_ID);
+	const tail = goal.criteria.filter((criterion) => criterion.id === VERIFY_ID);
+	const room = Math.max(0, MAX_CRITERIA - goal.criteria.length);
+	let counter = body.reduce((max, criterion) => Math.max(max, Number(/^C(\d+)$/.exec(criterion.id)?.[1] ?? 0)), 0);
+	const added = queued.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
+	const flat = goal.text.replace(/\s+/g, " ").trim();
+	const summary = flat.length > 600 ? `${flat.slice(0, 599)}…` : flat;
+	const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
+	const appended = [
+		`Boosts added to this goal — ${labels} — in force from here on, alongside everything above. Where a boost pulls against the goal's purpose, the purpose wins and the conflict is named.`,
+		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](summary)}`),
+	].join("\n\n");
+	const full = `${goal.text}\n\n${appended}`;
+	const next: GoalState = {
+		...goal,
+		text: full.length > MAX_GOAL_TEXT ? `${full.slice(0, MAX_GOAL_TEXT - 1)}…` : full,
+		criteria: [...body, ...added, ...tail],
+		boosts: [...new Set([...recorded, ...requested])],
+		status: "active", nudges: 0, progressMark: "", stalls: 0, note: undefined, updatedAt: now,
+	};
+	return { goal: next, fresh, fronts: added.length };
+}
+
+/** One-line notice when a /goal starts with preset boosts. */
+export function boostedGoalNotice(presets: readonly PresetId[], goal: GoalState): string {
+	const labels = presets.map((id) => PRESET_LABELS[id]).join(" + ");
+	return `Goal ${goal.id} with ${labels} boosts — ${goal.criteria.length} criteria to settle with evidence. /goal shows progress, /goal pause stops it.`;
 }
 
 /** One-line user notice when a preset goal starts; solo /noslop keeps its shipped wording. */

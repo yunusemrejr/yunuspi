@@ -7,7 +7,7 @@ import { canAttachImages } from "./feature-config.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { queryGeminiApiWithVideo, getApiKey, fetchGeminiApi, getVersionedApiBase, getUploadBase, redactGeminiApiResponse } from "./gemini-api.ts";
 import { extractHeadingTitle, type ExtractedContent, type ExtractOptions, type FrameResult } from "./extract.ts";
-import { readExecError, trimErrorText, mapFfmpegError, getWebSearchConfigPath } from "./utils.ts";
+import { readExecError, trimErrorText, mapFfmpegError, getWebSearchConfigPath, installHint } from "./utils.ts";
 
 const CONFIG_PATH = getWebSearchConfigPath();
 
@@ -203,7 +203,7 @@ export async function extractVideo(
 
 function mapFfprobeError(err: unknown): string {
 	const { code, stderr, message } = readExecError(err);
-	if (code === "ENOENT") return "ffprobe is not installed. Install ffmpeg which includes ffprobe";
+	if (code === "ENOENT") return `ffprobe is not installed. Install with: ${installHint("ffmpeg")} (ffmpeg includes ffprobe)`;
 	const snippet = trimErrorText(stderr || message);
 	return snippet ? `ffprobe failed: ${snippet}` : "ffprobe failed";
 }

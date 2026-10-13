@@ -58,6 +58,9 @@ export default function(pi) {
   pi.registerCommand('desktop-timeout', {description:'Synthetic background dialog timeout',handler:async(_args,ctx)=>{
     await ctx.ui.confirm('Expiring background dialog','This local test expires.',{timeout:100});
   }});
+  pi.registerCommand('desktop-notify', {description:'Synthetic long notice', handler:async(_args,ctx)=>{
+    ctx.ui.notify('Long notice. '.repeat(160),'warning');
+  }});
   pi.registerCommand('desktop-confirm', {description:'Synthetic dialog coverage', handler:async (_args,ctx)=>{
     const confirmed=await ctx.ui.confirm('Desktop confirmation','Approve the local test dialog?');
     pi.sendMessage({customType:'desktop-confirmation',content:confirmed?'Confirmed local dialog.':'Cancelled local dialog.',display:true},{triggerTurn:false});
@@ -190,8 +193,25 @@ try {
   assert.equal(pooled.runtime.length, residentBeforeBrowsing, 'browsing must not start or stop extension runtimes');
   process.kill(jobPid, 0);
   assert.ok(pooled.runtime.some(worker => worker.id === first.id), 'background work owner stays resident');
+  await page.locator('#model-button').click();
+  await page.waitForSelector('#dialog[open]', { timeout: 1000 });
+  assert.match(await page.locator('#dialog-content').innerText(), /Starting this session|Search models/);
+  await page.waitForSelector('#dialog-content .dialog-list button', { timeout: 60_000 });
+  await page.locator('#dialog-content .dialog-search').fill('fixture');
+  assert.match(await page.locator('#dialog-content').innerText(), /Local fixture/);
+  await page.locator('#dialog-close').click();
+  check('the model menu opens at once on a session whose runtime is still starting');
   await open(first.id); assert.match(await page.locator('#messages').innerText(), /TOOL read this fixture/);
   check('many histories browse without starting or stopping workers');
+  await send('/desktop-notify');
+  await page.waitForSelector('#toast:not([hidden])');
+  const covered = await page.evaluate(() => ['model-button', 'thinking-button', 'prompt', 'attach'].filter(id => {
+    const rect = document.getElementById(id).getBoundingClientRect();
+    return document.getElementById('toast').contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+  }));
+  assert.deepEqual(covered, [], 'a notice must not cover composer controls');
+  await page.locator('#toast').click(); assert.equal(await page.locator('#toast').isHidden(), true);
+  check('long notices stay clear of the composer and dismiss on click');
   check('background jobs survive opening more histories');
   await page.locator('#settings').click();
   await page.locator('#provider-id').focus(); await page.keyboard.press('Tab');

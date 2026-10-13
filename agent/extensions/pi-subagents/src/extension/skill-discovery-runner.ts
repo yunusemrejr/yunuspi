@@ -96,7 +96,7 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
     // work. Admit this optional remote scout only for actual uncertainty or
     // coordination need, before judging candidates or reserving a budget.
     const profile = currentExecutionProfile(ctx) ?? (request.task?.trim() ? classifyExecution({task:request.task}) : undefined);
-    if (adaptiveExecutionEnabled() && profile && (profile.constraints.noDelegation || !profile.features.localLm && !profile.features.assistance)) return;
+    if (adaptiveExecutionEnabled() && profile && (profile.constraints.noDelegation || !profile.features.analysis && !profile.features.assistance)) return;
     let currentSnapshot: () => boolean;
     let sessionFile: string | undefined | null;
     let identity: string;

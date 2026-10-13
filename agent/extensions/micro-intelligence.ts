@@ -423,7 +423,7 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
 }
 
 export default function (pi: any, deps: MicroDependencies = { warmup: needleWarmup }) {
-  // Lean harness: micro-intelligence (local-LM/needle helpers) retired by default. Set PI_LEAN_GATES=on to re-enable.
+  // Lean harness: micro-intelligence (needle helpers) retired by default. Set PI_LEAN_GATES=on to re-enable.
   if (process.env.PI_LEAN_GATES !== 'on') return;
   if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD === "1") return;
   let lastRequest: MicroRequestState | undefined;
@@ -706,9 +706,9 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
 
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
       const execution = classifyExecution({ task: prompt });
-      const priorNeedsAnalysis = priorAnalysis && classifyExecution({ task: priorAnalysis.taskLabel }).features.localLm;
+      const priorNeedsAnalysis = priorAnalysis && classifyExecution({ task: priorAnalysis.taskLabel }).features.analysis;
       let skipped: PendingPromptAnalysis["skipped"];
-      if (adaptiveExecutionEnabled() && !execution.features.localLm && !priorNeedsAnalysis) {
+      if (adaptiveExecutionEnabled() && !execution.features.analysis && !priorNeedsAnalysis) {
         // Reuse the literal fallback, preserving constraints and provenance
         // without presenting it as a model judgment or spending a turn.
         selected.routes = [];

@@ -74,7 +74,7 @@ test('diagnostics, quoted data, ordinary app operations and managed process sign
   for (const command of [
     'nmcli device status', 'nmcli radio wifi', 'nmcli networking connectivity check', 'rfkill list',
     'ip route show', 'ip link show', 'systemctl status NetworkManager', 'systemctl restart example-web.service',
-    'systemctl --user restart pi-smol-preprocessor.service', 'ss -tulpn',
+    'systemctl --user restart pi-mini-preprocessor.service', 'ss -tulpn',
     'iptables -L -n', 'nft list ruleset', 'ufw status', 'shutdown -c', 'reboot --help',
     'kill -0 12345', 'kill -l', 'pkill -0 node', 'wipefs -n --all /dev/sda', 'wipefs /dev/sda',
     "printf '%s' 'nmcli radio wifi off'", "grep 'reboot' README.md", '# shutdown now\nip route',

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
 import { SessionStore } from './session-store.mjs';
 import { AgentWorker } from './agent-worker.mjs';
 import { readHistory, closeHistoryReaders, cancelPendingHistoryReads } from './history-reader.mjs';
@@ -20,6 +21,17 @@ const workers = new Map(), starting = new Map(), closing = new Map();
 const pendingLaunches = [];
 const launchContext = { project: process.env.YUNUSPI_OPEN_PROJECT || process.cwd(), prompt: process.env.YUNUSPI_INITIAL_PROMPT || '' };
 let window, store, quitting = false, quitReady = false;
+// A dock or menu launch inherits the desktop session's PATH, which lacks what a
+// login shell adds (nvm, bun, cargo, npm globals). Tools installed there then
+// look missing inside sessions. Merge the login shell's PATH once, bounded.
+const loginPath = process.platform === 'win32' ? Promise.resolve() : new Promise(resolve => {
+  const marker = '__YUNUSPI_PATH__';
+  execFile(process.env.SHELL || '/bin/bash', ['-ilc', `printf '${marker}%s${marker}' "$PATH"`], { timeout: 6000, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' } }, (_error, stdout) => {
+    const found = new RegExp(`${marker}(.*?)${marker}`).exec(String(stdout ?? ''))?.[1];
+    if (found) process.env.PATH = [...new Set([...found.split(path.delimiter), ...(process.env.PATH ?? '').split(path.delimiter)].filter(Boolean))].join(path.delimiter);
+    resolve();
+  });
+});
 let creationTail = Promise.resolve();
 let historyOpenVersion = 0;
 
@@ -60,6 +72,7 @@ async function workerFor(id) {
   let releaseCreation;
   creationTail = new Promise(resolve => { releaseCreation = resolve; });
   await priorCreation;
+  await loginPath;
   try {
   if (store.session(id).state !== 'open' || closing.has(id) || quitting) throw Error('Session is no longer open.');
   if (starting.has(id)) return starting.get(id);
@@ -174,6 +187,7 @@ async function dispatch(action, input = {}) {
       const [state, history] = await Promise.all([worker.request('get_state'), reuse ? Promise.resolve({ data: {}, sequence: worker.sequence }) : worker.requestWithBoundary('get_messages', { projection: 'desktop', limit: 80 })]);
       return { state: { ...state, isStreaming: history.data.isStreaming ?? worker.busy }, ...history.data, sequence: history.sequence };
     }
+    case 'warm': await workerFor(input.id); return;
     case 'history': return workers.has(input.id) ? (await workerFor(input.id)).request('get_messages', { projection: 'desktop', limit: 80, before: input.before }) : savedHistory(input.id, input.before);
     case 'updateSession': {
       if (!input.patch || Object.keys(input.patch).some(k => !['title', 'draft'].includes(k))) throw Error('Invalid session update.');
@@ -212,7 +226,10 @@ async function dispatch(action, input = {}) {
       await worker.request('set_thinking_level', { level: input.level });
       store.update(input.id, { thinkingLevel: input.level }); publish(); return input.level;
     }
-    case 'stats': return (await workerFor(input.id)).request('get_session_stats');
+    // Browsing a closed session must not start its runtime; the renderer asks
+    // again once one is ready. Only a live runtime knows the subscription state
+    // that the cost label depends on.
+    case 'stats': return workers.has(input.id) ? (await workerFor(input.id)).request('get_session_stats') : null;
     case 'commands': return (await workerFor(input.id)).request('get_commands');
     case 'extensionResponse': {
       const worker = workers.get(input.id);

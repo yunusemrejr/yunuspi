@@ -8,7 +8,6 @@ import { createEventBus } from '../core/coding-agent/src/core/event-bus.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-rpc-extensions-'));
 process.env.PI_CODING_AGENT_DIR = path.join(root, 'agent');
-process.env.PI_LOCAL_LM = 'off';
 const jiti = createJiti(import.meta.dirname);
 const { showRpcReport } = await jiti.import('../agent/extensions/lib/rpc-report.ts');
 const { registerSessionTelemetry } = await jiti.import('../agent/extensions/lib/session-telemetry.ts');

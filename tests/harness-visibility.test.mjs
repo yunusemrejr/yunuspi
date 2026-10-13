@@ -48,8 +48,7 @@ test('routine background work updates one live pulse; verdicts, hooks and gating
   activity.note('skill.route', { route: 'systems-languages' });
   activity.note('guardian.decision', { check: 'repeated-identical-failure', decision: 'abstained', score: 0.62, threshold: 0.95, evaluations: 1 });
   activity.note('hook.fired', { hook: 'deploy-verify-live', tool: 'bash', decision: 'guidance' });
-  activity.note('skill.gate', { skill: 'all-about-odoo', decision: 'filtered', score: 0.21 });
-  activity.note('ml.local.inference', { decision: 'answered', purpose: 'skill-relevance' });
+  activity.note('skill.gate', { skill: 'all-about-odoo', decision: 'ungrounded' });
   await new Promise(resolve => setTimeout(resolve, 1300));
   const kinds = lines.map(line => line.details.kind);
   assert.ok(!kinds.includes('guardian.observing'), 'heartbeats are not transcript lines');
@@ -58,7 +57,7 @@ test('routine background work updates one live pulse; verdicts, hooks and gating
   const decision = lines.find(line => line.details.kind === 'guardian.decision');
   assert.match(decision.details.detail, /WASM score 0\.62 < 0\.95 · no intervention/);
   assert.match(lines.find(line => line.details.kind === 'hook.fired').details.detail, /on bash · workflow guidance added/);
-  assert.match(lines.find(line => line.details.kind === 'skill.gate').details.detail, /Local LM off-topic hint filtered · P\(relevant\) 0\.21/);
+  assert.match(lines.find(line => line.details.kind === 'skill.gate').details.detail, /no task overlap$/);
   const pulse = pulses.at(-1);
   assert.match(pulse, /^harness · Guardian 5 checks · 1 WASM/);
   assert.match(pulse, /Needle3 1/); assert.match(pulse, /fuzzy 4/); assert.match(pulse, /hooks 1/); assert.match(pulse, /skill matches 1/);

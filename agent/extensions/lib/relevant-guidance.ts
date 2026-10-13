@@ -1,4 +1,3 @@
-import { localLm, skillRelevancePrefix, skillRelevancePrompt, SKILL_RELEVANCE_EXAMPLES, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * Deterministic routes prioritize advice; optional asynchronous discovery
@@ -77,17 +76,8 @@ export function createRelevantGuidance(pi: any) {
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null, skillFingerprint = '';
   let skillOffers = new Map<string, { n: number; at: number }>();
-  // Semantic gate for catalog-wide "session context" skill hints: the local
-  // model judges each candidate against the current request once; verdicts
-  // are cached per request focus. Measured on live sessions, lexical overlap
-  // alone offered an ERP reference and a proxy-research pack for a music blog.
-  let taskFocus = "", focusEpoch = 0;
-  // Judgements for a superseded task are useless but would still occupy the
-  // single-slot local server (~0.4-1 s each); a new focus cancels them.
-  let judgeAbort = new AbortController();
-  const skillVerdicts = new Map<string, "yes" | "no" | "pending">();
-  // Load the local model descriptor now so the first prompt is already gated.
-  try { localLm().ready(); } catch { /* optional */ }
+  // Current request focus for catalog-wide "session context" skill hints.
+  let taskFocus = "";
   // Delivery counts for re-offerable utility/topic hints, mirroring skill
   // fatigue: an ignored advisory hint demotes after 2 deliveries and stops
   // after 4, so an off-target nudge cannot refill its slot forever. Using
@@ -382,42 +372,19 @@ export function createRelevantGuidance(pi: any) {
   };
   const gateNote = (skill: string, decision: string, score?: number) => { try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.gate", { skill, decision, ...(score !== undefined ? { score } : {}) }); } catch { /* telemetry */ } };
   /** Deliver a session-context skill hint only when its match is substantive:
-   * at least one non-generic term, and (when the local model is installed) a
-   * calibrated relevance judgement for the current request. */
+   * at least one non-generic term that the user's request itself shares. */
   const gatedContextHint = (skill: Skill, matched: string[], hint: Hint) => {
     const meaningful = matched.map(term => term.split("~").at(-1)!).filter(term => !GENERIC_CONTEXT_TERMS.has(term));
     if (!meaningful.length) { gateNote(skill.name, "generic-terms"); return; }
     // Offers the agent did not read are a dismissal: after two unread
     // context offers in one request, stop proposing more for that request.
     if (unreadContextOffers() >= MAX_UNREAD_CONTEXT_OFFERS) { gateNote(skill.name, "unread-budget"); return; }
-    // Without the local judge, a context offer must share a term with the
-    // user's request itself; file vocabulary alone (browser, html, js)
-    // pushed slideshow and ML-in-browser skills at a Java mail app.
-    const judgeReady = Boolean(taskFocus) && process.env.PI_SKILL_GATE !== "off" && localLm().ready();
-    if (!judgeReady) {
-      const focus = new Set(skillTerms(taskFocus, 64));
-      if (taskFocus && !meaningful.some(term => focus.has(term))) { gateNote(skill.name, "ungrounded"); return; }
-      add(hint); return;
-    }
-    const key = `${skill.file}\0${focusEpoch}`;
-    const verdict = skillVerdicts.get(key);
-    if (verdict === "yes") { add(hint); return; }
-    if (verdict) return;
-    skillVerdicts.set(key, "pending");
-    if (skillVerdicts.size > 256) skillVerdicts.delete(skillVerdicts.keys().next().value!);
-    const epoch = focusEpoch;
-    // The task section is shared by every skill judged for this focus: warm it
-    // as its own checkpoint behind the constant examples so each judgement only
-    // evaluates its skill text.
-    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance", { signal: judgeAbort.signal, prefix: [SKILL_RELEVANCE_EXAMPLES, skillRelevancePrefix(taskFocus)] }).then(result => {
-      if (epoch !== focusEpoch) return;
-      // Without a usable model the lexical hint keeps its previous behavior.
-      if (!result.ok) { skillVerdicts.delete(key); add(hint); return; }
-      const keep = result.p >= SKILL_RELEVANCE_THRESHOLD;
-      skillVerdicts.set(key, keep ? "yes" : "no");
-      gateNote(skill.name, keep ? "kept" : "filtered", Math.round(result.p * 100) / 100);
-      if (keep) add(hint);
-    }, () => { if (epoch === focusEpoch) { skillVerdicts.delete(key); add(hint); } });
+    // A context offer must share a term with the user's request itself; file
+    // vocabulary alone (browser, html, js) pushed slideshow and ML-in-browser
+    // skills at a Java mail app.
+    const focus = new Set(skillTerms(taskFocus, 64));
+    if (taskFocus && !meaningful.some(term => focus.has(term))) { gateNote(skill.name, "ungrounded"); return; }
+    add(hint);
   };
   /** Catalog-wide relevance against the ongoing session profile. Weak or generic
    * overlap yields nothing; explicit routes and signals keep their priority. */
@@ -682,7 +649,6 @@ export function createRelevantGuidance(pi: any) {
         signal,
         jev: (site, state, questions) => askJev(site, state, questions, { signal,
           pi: { appendEntry(type: string, data: unknown) { if (!signal.aborted) pi.appendEntry?.(type, data); } } }),
-        local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options),
         needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }) }).catch(() => undefined);
       if (outcome && !signal.aborted && outcome.applied !== 'lexical') {
         unique = [...outcome.ordered.map(entry => entry.skill), ...unique.slice(12)];
@@ -978,7 +944,7 @@ export function createRelevantGuidance(pi: any) {
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
       const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
-      if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); focusEpoch++; judgeAbort.abort(); judgeAbort = new AbortController(); }
+      if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
       if (!readOnlyPrompt && !requestDisabled) uiDoctrine.observePrompt(taskPrompt, { keep: continuation });
       else uiDoctrine.cancel();

@@ -1,13 +1,13 @@
 import { sessionObservability } from '../session-observability.ts';
 /** Unified micro-intelligence metrics. Every helper (deterministic, Needle,
- * Smol, Kompress, Jev, full-LLM arbitration) reports offers, runs, skips and
+ * Kompress, Jev, full-LLM arbitration) reports offers, runs, skips and
  * latencies here so utilization and savings are measurable instead of
  * assumed. Savings are labeled estimates; only sealed, rendered reductions
  * count as observed.
  */
 const RING_MAX = 128;
 
-export type MicroHelper = "deterministic" | "needle" | "smol" | "kompress" | "jev" | "llm" | "span" | "microworker" | "rerank";
+export type MicroHelper = "deterministic" | "needle" | "kompress" | "jev" | "llm" | "span" | "microworker" | "rerank";
 
 export interface HelperCounters {
   offers: number;
@@ -72,7 +72,6 @@ export function createMicroMetrics() {
   const helpers: Record<MicroHelper, HelperCounters> = {
     deterministic: freshHelper(),
     needle: freshHelper(),
-    smol: freshHelper(),
     kompress: freshHelper(),
     jev: freshHelper(),
     llm: freshHelper(),

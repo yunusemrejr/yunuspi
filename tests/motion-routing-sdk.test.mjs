@@ -13,9 +13,9 @@ import {createGoal} from '../agent/extensions/lib/goal-state.ts';
 
 test('a resumed goal preserves discovery ownership and text models can activate deferred tools', {timeout:60000}, async () => {
  const root=path.resolve(import.meta.dirname,'..'),cwd=fs.mkdtempSync(path.join(os.tmpdir(),'motion-routing-sdk-'));
- const names=['PI_CODING_AGENT_DIR','PI_JEV','PI_NEEDLE','PI_TOOL_DISCOVERY','PI_SUBAGENT_CHILD','PI_LOCAL_LM','PI_GOAL'];
+ const names=['PI_CODING_AGENT_DIR','PI_JEV','PI_NEEDLE','PI_TOOL_DISCOVERY','PI_SUBAGENT_CHILD','PI_GOAL'];
  const prior=Object.fromEntries(names.map(key=>[key,process.env[key]]));
- Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_JEV:'off',PI_NEEDLE:'off',PI_LOCAL_LM:'off',PI_TOOL_DISCOVERY:'on',PI_GOAL:'1'});delete process.env.PI_SUBAGENT_CHILD;
+ Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_JEV:'off',PI_NEEDLE:'off',PI_TOOL_DISCOVERY:'on',PI_GOAL:'1'});delete process.env.PI_SUBAGENT_CHILD;
  let session;
  try {
   const settingsManager=SettingsManager.inMemory({compaction:{enabled:false},retry:{enabled:false}});

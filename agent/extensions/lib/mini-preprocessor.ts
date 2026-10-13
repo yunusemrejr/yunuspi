@@ -83,7 +83,7 @@ const priceOf = (inputUsdPerMillion:unknown) => typeof inputUsdPerMillion==='num
 const selectionSignal = (task:string) => process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).sort().join(' ');
 /** Whether a selection could pay for itself: context capacity on any route,
  * or the local compute budget on priced routes. Routing uses the same test,
- * so output Kompress cannot shorten stays available to Smol and Jev. */
+ * so output Kompress cannot shorten stays available to Jev. */
 export function miniAdmissible(raw:string,inputUsdPerMillion:unknown,task=''):boolean{
  // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
  // Newly produced tool bytes have not appeared in the provider prefix yet.

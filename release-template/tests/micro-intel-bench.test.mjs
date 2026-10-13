@@ -20,7 +20,6 @@ const load = (rel) => import(pathToFileURL(path.join(agent, rel)));
 const local = await load("extensions/lib/local-intelligence.mjs");
 const evidenceMod = await load("extensions/lib/micro-intelligence/evidence.ts");
 const mini = await load("extensions/lib/mini-preprocessor.ts");
-const smol = await load("extensions/lib/smol-preprocessor.ts");
 const diag = await load("extensions/lib/session-diagnostics.ts");
 const needleRuntime = await load("extensions/lib/needle-runtime.ts");
 const needleAssets = await load("extensions/lib/needle-assets.mjs");
@@ -195,9 +194,8 @@ test("evidence gate fallout on realistic shapes", () => {
   for (const [name, text, shape] of cases) {
     const got = evidenceMod.contentShape(text);
     const route = evidenceMod.routeEvidence({ tool: "bash", text, isError: name === "error-text" });
-    console.log(`bench shape ${name}: shape=${got} smol=${route.smol} kompress=${route.kompress} needle=${route.needle} jev=${route.jev}`);
+    console.log(`bench shape ${name}: shape=${got} kompress=${route.kompress} needle=${route.needle} jev=${route.jev}`);
     if (name !== "error-text") assert.equal(got, shape, name);
   }
   assert.equal(mini.miniSource(prose) !== undefined, true, "prose doc is kompress-eligible");
-  assert.equal(smol.safeSmolOutput("bash", structured, false, undefined), true, "listing is smol-eligible");
 });

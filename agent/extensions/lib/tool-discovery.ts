@@ -7,7 +7,6 @@ import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './h
 import { askJev, jevMark, tooShort } from './jev-client.ts';
 import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
-import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillIntentSegments, skillTaskText, skillRoutes } from './skill-routing.ts';
 import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded, pipelineToolExcluded, resolveRoutingTask } from './task-pipelines.ts';
 import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
@@ -16,7 +15,7 @@ import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } 
 
 import { choices } from "./tool-schema.ts";
 /** Multi-stage re-rank: large shortlists go straight to batched Jev;
- * small shortlists try local ranking before uncertain Jev validation.
+ * small shortlists try Needle before uncertain Jev validation.
  * Single candidates, trivial queries and
  * low-confidence judgments stay on the lexical order. Needle reordering is
  * local (no API spend); a Jev reorder carries its ledger mark. */
@@ -33,7 +32,7 @@ async function rerankWithJev<T>(
   try {
     if (tooShort(query, 3) || matches.length < 2) return undefined;
     const profile = currentExecutionProfile(ctx);
-    if (adaptiveExecutionEnabled() && profile && !profile.features.localLm && !profile.features.jev) return undefined;
+    if (adaptiveExecutionEnabled() && profile && !profile.features.analysis && !profile.features.jev) return undefined;
     // A named capability is already an unambiguous selection. Semantic
     // ranking cannot improve it and must not demote it or spend inference.
     const identity = (text: string) => text.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
@@ -41,7 +40,7 @@ async function rerankWithJev<T>(
     const lexical = matches.map((item) => ({ id: idOf(item), text: textOf(item), item }));
     const outcome = await multiStageRetrieve({
       kind, site: 'rank', query, lexical,
-      local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options), signal,
+      signal,
       needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }),
       jev: (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal ?? signal }),
       jevMark: (site, detail, usage) => jevMark(site, detail, usage),

@@ -28,14 +28,14 @@ test("isolated extensions report to one collector and session reset reaches ever
   isolated.resetMicroMetrics();
   try {
     const previous = isolated.microMetrics();
-    previous.run("smol", 12, 3000);
-    assert.equal(metricsMod.microMetrics().snapshot().helpers.smol.runs, 1, "status sees helpers in other extensions");
+    previous.run("kompress", 12, 3000);
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.kompress.runs, 1, "status sees helpers in other extensions");
     metricsMod.resetMicroMetrics();
     const next = isolated.microMetrics();
     assert.notEqual(next, previous);
     assert.equal(next, metricsMod.microMetrics());
-    previous.run("smol", 8, 3000);
-    assert.equal(next.snapshot().helpers.smol.runs, 0, "captured work retains its original session collector");
+    previous.run("kompress", 8, 3000);
+    assert.equal(next.snapshot().helpers.kompress.runs, 0, "captured work retains its original session collector");
   } finally {
     metricsMod.resetMicroMetrics();
     isolated.resetMicroMetrics();
@@ -47,14 +47,14 @@ test("metrics record offers/runs/skips and render honest summaries", () => {
   metrics.offer("needle");
   metrics.run("needle", 12, 500);
   metrics.accept("needle");
-  metrics.skip("smol", "too-small");
+  metrics.skip("kompress", "too-small");
   metrics.jevUsage("rank", 2, 400, 0.0001, false);
   metrics.llmHelperCall();
   metrics.llmAvoided(800);
   const snapshot = metrics.snapshot();
   assert.equal(snapshot.helpers.needle.offers, 1);
   assert.equal(snapshot.helpers.needle.runs, 1);
-  assert.equal(snapshot.helpers.smol.skipReasons["too-small"], 1);
+  assert.equal(snapshot.helpers.kompress.skipReasons["too-small"], 1);
   assert.equal(snapshot.jev.questions, 2);
   assert.equal(snapshot.llm.helperCalls, 1);
   assert.equal(snapshot.llm.avoided, 1);
@@ -74,11 +74,10 @@ test("latencyStats computes p50/p95 over the ring", () => {
   assert.ok(stats.p50 <= stats.p95);
 });
 
-test("health renders the compact five-layer block", () => {
+test("health renders the compact layer block", () => {
   const snapshot = healthMod.microHealthSnapshot([
     { layer: "deterministic", status: "ready", detail: "" },
     { layer: "needle", status: "ready", detail: "dim 3072" },
-    { layer: "smol", status: "busy", detail: "" },
     { layer: "kompress", status: "unavailable", detail: "" },
     { layer: "jev", status: "no-key", detail: "" },
   ]);
@@ -113,7 +112,7 @@ test("retrieval keeps lexical order for trivial/single inputs", async () => {
   assert.equal(needleCalls, 0);
 });
 
-test("large retrieval uses one batched judge before local fallbacks and retains every candidate", async () => {
+test("large retrieval uses one batched judge before the Needle fallback and retains every candidate", async () => {
   const lexical = Array.from({ length: 27 }, (_, i) => ({ id: `item-${i}`, text: `Authorized candidate ${i}` }));
   for (const mode of ['accepted', 'unavailable', 'uncertain', 'foreign', 'cancelled']) {
     const calls = [], controller = new AbortController();
@@ -133,13 +132,12 @@ test("large retrieval uses one batched judge before local fallbacks and retains 
         return { ok: true, answers: { rank: { choice: top, probabilities }, exists: { noul: .95 } }, usage: { inputTokens: 100, cached: false } };
       },
       needle: async () => { calls.push('needle'); return { ok: true, cached: false, ms: 1, shadow: false, value: { ranked: [{ id: 'item-1', score: .99 }], margin: .1 } }; },
-      local: async () => { calls.push('local'); return { ok: false, reason: 'unavailable' }; },
     });
     assert.deepEqual(new Set(result.ordered.map(x => x.id)), new Set(lexical.map(x => x.id)));
     assert.equal(calls.filter(x => x === 'jev').length, 1);
     if (mode === 'accepted') { assert.equal(result.applied, 'jev'); assert.equal(result.ordered[0].id, 'item-2'); assert.deepEqual(calls, ['jev']); }
     else if (mode === 'cancelled') { assert.equal(result.applied, 'lexical'); assert.deepEqual(calls, ['jev']); }
-    else { assert.equal(result.applied, 'needle'); assert.equal(result.ordered[0].id, 'item-1'); assert.deepEqual(calls, ['jev', 'needle', 'local']); }
+    else { assert.equal(result.applied, 'needle'); assert.equal(result.ordered[0].id, 'item-1'); assert.deepEqual(calls, ['jev', 'needle']); }
   }
 });
 
@@ -233,9 +231,8 @@ test("evidence router classifies shapes deterministically", () => {
   assert.ok(["prose", "mixed"].includes(contentShape(prose)));
   const route = routeEvidence({ tool: "bash", text: log, isError: false });
   assert.equal(route.deterministicFirst, true);
-  assert.equal(route.smol, true);
+  assert.equal(route.kompress, false, "structured output stays with deterministic owners");
   const distilled = routeEvidence({ tool: "bash", text: log, isError: false, distilled: true });
-  assert.equal(distilled.smol, false);
   assert.ok(distilled.reasons.includes("deterministic-won"));
   const error = routeEvidence({ tool: "bash", text: `Error: boom\n${"x".repeat(1200)}`, isError: true });
   assert.equal(error.needle, false, "error families belong to deterministic rules, not Needle similarity");
@@ -244,12 +241,11 @@ test("evidence router classifies shapes deterministically", () => {
 
 test("evidence router sends uncovered prose to jev and small text nowhere", () => {
   const { routeEvidence } = evidenceMod;
-  // Long unstructured text with no mini/smol coverage: jev triage.
+  // Long unstructured text with no mini coverage: jev triage.
   const blob = `${"word ".repeat(2000)}\n${"tail ".repeat(200)}`;
   const route = routeEvidence({ tool: "bash", text: blob, isError: false });
   assert.equal(route.jev, true);
   const small = routeEvidence({ tool: "bash", text: "ok\n".repeat(50), isError: false });
-  assert.equal(small.smol, false);
   assert.equal(small.kompress, false);
   assert.equal(small.needle, false);
   assert.equal(small.jev, false);
@@ -318,7 +314,7 @@ test("perspective cues reject shadow, weak and unrecognized model choices", asyn
 test("status snapshot reports health without running inference", async () => {
   const key = Symbol.for("yunus-pi.micro.inspect.v1");
   const prior = globalThis[key];
-  globalThis[key] = { smol: () => ({ busy: false, accepted: 3 }), mini: () => { throw new Error("x"); }, expert: () => ({ status: "ready", runs: 2, last: { action: "assess", domains: ["ml"], reason: "converged" } }) };
+  globalThis[key] = { mini: () => { throw new Error("x"); }, expert: () => ({ status: "ready", runs: 2, last: { action: "assess", domains: ["ml"], reason: "converged" } }) };
   try {
     const snapshot = statusMod.microStatusSnapshot({
       family: "implementation", substantive: true, terms: ["auth"],
@@ -326,8 +322,8 @@ test("status snapshot reports health without running inference", async () => {
       advisory: { ok: true, needsVerification: false, reviewWorthy: true, multiPerspective: false, perspectives: ["security"] },
       advisoryFamily: "lookup",
     });
-    assert.equal(snapshot.health.layers.length, 9);
-    assert.deepEqual(snapshot.health.layers.map((layer) => layer.layer).sort(), ["deterministic", "expert", "jev", "kompress", "microworker", "needle", "rerank", "smol", "span"]);
+    assert.equal(snapshot.health.layers.length, 8);
+    assert.deepEqual(snapshot.health.layers.map((layer) => layer.layer).sort(), ["deterministic", "expert", "jev", "kompress", "microworker", "needle", "rerank", "span"]);
     const expertLayer = snapshot.health.layers.find((layer) => layer.layer === "expert");
     assert.equal(expertLayer.status, "ready");
     assert.match(expertLayer.detail, /2 runs, last assess ml converged/);
@@ -338,7 +334,6 @@ test("status snapshot reports health without running inference", async () => {
     assert.ok(!("advisoryFamily" in unstarted.request));
     assert.ok(snapshot.needle && typeof snapshot.needle === "object");
     assert.ok(Array.isArray(snapshot.metrics));
-    assert.ok(snapshot.smol && typeof snapshot.smol === "object");
     assert.deepEqual(snapshot.kompress, { status: "unavailable" });
   } finally {
     if (prior === undefined) delete globalThis[key];
@@ -477,34 +472,8 @@ test('session switch during prompt-analysis display cannot return stale context 
   assert.equal(await f.context(), undefined, 'the replacement session cannot inherit old request advice');
 });
 
-test('confident local shortlist promotion retains all evidence and avoids paid judge calls', async () => {
-  let paid = 0;
-  const outcome = await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'capture a screenshot of the site', lexical: lexicalTools,
-    local: async (_query, candidates) => { assert.deepEqual(candidates.map(c => c.id), lexicalTools.map(c => c.id)); return { ok: true, id: 'browser_session', p: .96, margin: .92, ms: 12, cached: false }; },
-    jev: async () => { paid++; throw Error('not needed'); },
-  });
-  assert.equal(outcome.applied, 'local'); assert.equal(outcome.ordered[0].id, 'browser_session'); assert.equal(paid, 0);
-  assert.deepEqual([...outcome.ordered.map(c => c.id)].sort(), [...lexicalTools.map(c => c.id)].sort());
-});
-
-test('local discovery uncertainty, invalid choices, exact names and cancellation preserve fallback', async () => {
-  for (const choice of [{ ok: false, reason: 'low-confidence' }, { ok: true, id: 'invented', p: .99, margin: .98 }, { ok: true, id: 'bash', p: .7, margin: .5 }]) {
-    let calls = 0;
-    const result = await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'inspect a screenshot of the page', lexical: lexicalTools,
-      local: async () => choice, jev: async () => { calls++; return { ok: false, skipped: 'unavailable' }; } });
-    assert.equal(calls, 1); assert.equal(result.applied, 'lexical');
-  }
-  const c = new AbortController(); c.abort();
-  for (const extra of [{ query: 'browser_session' }, { signal: c.signal }]) {
-    let calls = 0;
-    await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'take a screenshot of a site', lexical: lexicalTools,
-      local: async () => { calls++; throw Error(); }, ...extra });
-    assert.equal(calls, 0);
-  }
-});
-
 test('cancelled retrieval starts no stages and leaves pending shared inference promptly', async () => {
-  for (const stage of ['before', 'needle', 'local', 'jev']) {
+  for (const stage of ['before', 'needle', 'jev']) {
     const controller = new AbortController(), calls = [];
     let release, started;
     const begun = new Promise(resolve => { started = resolve; });
@@ -513,7 +482,6 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
     const pending = retrievalMod.multiStageRetrieve({
       kind: 'tool', site: 'rank', query: 'capture a screenshot of the site', lexical: lexicalTools, signal: controller.signal,
       needle: async () => { calls.push('needle'); return stage === 'needle' ? wait() : { ok: false, reason: 'unavailable' }; },
-      local: async () => { calls.push('local'); return stage === 'local' ? wait() : { ok: false, reason: 'unavailable' }; },
       jev: async (_site, _state, _questions, options) => {
         calls.push('jev'); assert.equal(options.signal.aborted, false); return wait();
       },
@@ -523,7 +491,7 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
     try {
       const result = await Promise.race([pending, new Promise((_, reject) => { deadline = setTimeout(() => reject(Error('retrieval waited for cancelled inference')), 500); })]);
       assert.equal(result.applied, 'lexical'); assert.deepEqual(result.ordered, lexicalTools);
-      assert.deepEqual(calls, ['needle', 'local', 'jev'].slice(0, stage === 'before' ? 0 : ['needle', 'local', 'jev'].indexOf(stage) + 1));
+      assert.deepEqual(calls, ['needle', 'jev'].slice(0, stage === 'before' ? 0 : ['needle', 'jev'].indexOf(stage) + 1));
     } finally { clearTimeout(deadline); release?.({ ok: false, reason: 'unavailable', skipped: 'aborted' }); }
   }
 });
@@ -531,7 +499,7 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
 test('an exact identifier in a large pool needs no optional inference and retains all entries', async () => {
   const lexical = Array.from({ length: 27 }, (_, index) => ({ id: `tool-${index}`, text: `Authorized tool ${index}` }));
   const unexpected = async () => { assert.fail('exact selection must not start a helper'); };
-  const result = await retrievalMod.multiStageRetrieve({kind:'tool',site:'exact',query:'tool-14',lexical,needle:unexpected,local:unexpected,jev:unexpected});
+  const result = await retrievalMod.multiStageRetrieve({kind:'tool',site:'exact',query:'tool-14',lexical,needle:unexpected,jev:unexpected});
   assert.equal(result.applied,'lexical'); assert.equal(result.ordered[0].id,'tool-14');
   assert.deepEqual(new Set(result.ordered.map(row=>row.id)),new Set(lexical.map(row=>row.id)));
 });
@@ -549,14 +517,14 @@ test('retrieval rejects partial, extra, non-unit and non-winning probability dis
   }
 });
 
-test('a stuck local refinement releases its stage budget and a batched judge can still settle the choice', async () => {
-  let localSignal, release, guard;
+test('a stuck needle refinement releases its stage budget and a batched judge can still settle the choice', async () => {
+  let needleSignal, release, guard;
   const pending=retrievalMod.multiStageRetrieve({kind:'tool',site:'bounded',query:'capture a screenshot',lexical:lexicalTools,stageTimeoutMs:10,timeoutMs:1000,
-    local:async(_query,_candidates,_purpose,options)=>{localSignal=options.signal;return new Promise((_resolve,reject)=>{release=reject;});},
+    needle:async(_query,_candidates,_topK,options)=>{needleSignal=options.signal;return new Promise((_resolve,reject)=>{release=reject;});},
     jev:async()=>({ok:true,answers:{rank:{choice:'browser_session',probabilities:{browser_session:.9,read:.05,bash:.05}},exists:{noul:.95}},usage:{inputTokens:1,cached:false}})});
   try {
     const result=await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('fallback blocked by local inference')),1000);})]);
-    assert.equal(localSignal.aborted,true); assert.equal(result.applied,'jev');
+    assert.equal(needleSignal.aborted,true); assert.equal(result.applied,'jev');
     assert.equal(result.ordered[0].id,'browser_session'); release(Error('late local transport rejection'));
     await new Promise(resolve=>setImmediate(resolve));
   } finally {clearTimeout(guard);}
@@ -565,14 +533,13 @@ test('a stuck local refinement releases its stage budget and a batched judge can
 test('the total retrieval budget stops later stages even when helpers ignore cancellation', async () => {
   const calls=[], signals=[]; let guard;
   const stuck=(name,signal)=>{calls.push(name);signals.push(signal);return new Promise(()=>{});};
-  const pending=retrievalMod.multiStageRetrieve({kind:'tool',site:'total-budget',query:'capture a screenshot',lexical:lexicalTools,stageTimeoutMs:20,timeoutMs:30,
+  const pending=retrievalMod.multiStageRetrieve({kind:'tool',site:'total-budget',query:'capture a screenshot',lexical:lexicalTools,stageTimeoutMs:40,timeoutMs:30,
     needle:async(_query,_candidates,_topK,options)=>stuck('needle',options.signal),
-    local:async(_query,_candidates,_purpose,options)=>stuck('local',options.signal),
     jev:async()=>{calls.push('jev');assert.fail('expired budget must not start a remote judgment');}});
   try {
     const result=await Promise.race([pending,new Promise((_resolve,reject)=>{guard=setTimeout(()=>reject(Error('retrieval exceeded its total budget')),1000);})]);
     assert.equal(result.applied,'lexical'); assert.deepEqual(result.ordered,lexicalTools);
-    assert.deepEqual(calls,['needle','local']); assert.ok(signals.every(signal=>signal.aborted));
+    assert.deepEqual(calls,['needle']); assert.ok(signals.every(signal=>signal.aborted));
   } finally {clearTimeout(guard);}
 });
 

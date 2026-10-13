@@ -90,8 +90,8 @@ and command discovery runs deterministic eligibility, then lexical order,
 then a Needle head-slice re-rank, then Jev validation when Needle is
 uncertain or disagrees with lexical order; the main model still chooses
 what to execute. Tool results route by deterministic content shape to
-Smol (structured), Kompress (prose), Needle (relevance/error cues), and
-Jev (ambiguity triage) after the deterministic distiller. A Needle→Jev
+Kompress (prose), Needle (relevance/error cues), and Jev (ambiguity
+triage) after the deterministic distiller. A Needle→Jev
 intent pre-screen can resolve task-mutation rescue checks before the
 full-LLM arbiter, with asymmetric bars. None of these layers delay
 provider startup: slow or missing helpers degrade to skips, and the

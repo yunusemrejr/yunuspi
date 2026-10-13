@@ -145,7 +145,7 @@ calibration and `PI_COMPETENCE_STORE=off`.
 Run the policy, scheduler, helper and completion-review regressions:
 
 ```sh
-PI_LOCAL_LM=off node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/automatic-helper-lifecycle.test.mjs tests/skill-discovery-runner.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
+node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/automatic-helper-lifecycle.test.mjs tests/skill-discovery-runner.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
 ```
 
 ## Tool exposure and assurance output in 0.18

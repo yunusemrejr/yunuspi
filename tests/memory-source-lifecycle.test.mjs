@@ -18,7 +18,7 @@ test('dense source lines finish chunking and preserve every line after shrinking
   `;
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     cwd: new URL('..', import.meta.url), encoding: 'utf8', timeout: 5000, maxBuffer: 8192,
-    env: {...process.env, PI_LOCAL_LM: 'off', PI_NEEDLE_DISK_CACHE: 'off'},
+    env: {...process.env, PI_NEEDLE_DISK_CACHE: 'off'},
   });
   assert.equal(run.error, undefined, `chunking failed to settle: ${run.error?.code}`);
   assert.equal(run.status, 0, run.stderr);

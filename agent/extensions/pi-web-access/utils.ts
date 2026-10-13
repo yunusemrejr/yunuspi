@@ -184,9 +184,14 @@ export function trimErrorText(text: string): string {
 	return text.replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
+/** Install hint for this platform: brew on macOS, the system package manager elsewhere. */
+export function installHint(pkg: string, linux = `sudo apt install ${pkg}`): string {
+	return process.platform === "darwin" ? `brew install ${pkg}` : process.platform === "win32" ? `winget install ${pkg}` : linux;
+}
+
 export function mapFfmpegError(err: unknown): string {
 	const { code, stderr, message } = readExecError(err);
-	if (code === "ENOENT") return "ffmpeg is not installed. Install with: brew install ffmpeg";
+	if (code === "ENOENT") return `ffmpeg is not installed. Install with: ${installHint("ffmpeg")}`;
 	if (isTimeoutError(err)) return "ffmpeg timed out extracting frame";
 	if (stderr.includes("403")) return "Stream URL returned 403 — may have expired, try again";
 	const snippet = trimErrorText(stderr || message);
