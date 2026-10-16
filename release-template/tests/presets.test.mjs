@@ -116,6 +116,10 @@ test('/anatomy covers both anatomy skills, chains with /3d and /video, and bare 
   for (const rule of [/Assignment: an exploded view of a mechanical keyboard/, /anatomy explains how a system/, /anatomy-reveal shows off one physical object/,
     /scripts\/new-project\.mjs/, /references\/3d\.md/, /scan-apart/, /extract frames from the encoded MP4/, /silent by design: when \/video is also in force/])
     assert.match(made.text, rule);
+  for (const name of ['anatomy', 'anatomy-reveal']) {
+    const guide = path.resolve(import.meta.dirname, '../agent/skills', name, 'SKILL.md');
+    assert.ok(made.text.includes(`${name} at ${guide}`), `the brief names the installed ${name} guide`);
+  }
   const bare = ps.createPresetChainGoal(ps.parsePresetChain('anatomy', ''));
   assert.match(bare.text, /No assignment was given\. Survey the current project for existing anatomy work/);
   assert.match(bare.text, /Do not invent a figure nobody asked for/);

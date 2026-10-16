@@ -14,6 +14,7 @@
  * fits the goal system's criteria budget. Bare invocations survey the current project for work of their
  * kind, improve what exists, and say so plainly when there is none.
  */
+import path from "node:path";
 import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
 import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
 
@@ -213,6 +214,9 @@ function videoGoalText(task: string): string {
 	].join("\n\n");
 }
 
+/** Installed guide of a bundled skill, resolved at run time so the brief names the real file instead of leaving the model to search for it. */
+const bundledSkill = (name: string) => path.resolve(import.meta.dirname, "../../skills", name, "SKILL.md");
+
 function anatomyGoalText(task: string): string {
 	const scope = task
 		? `Assignment: ${task}`
@@ -220,7 +224,7 @@ function anatomyGoalText(task: string): string {
 	return [
 		"Anatomy boost in force: show this subject as a crafted anatomy figure, a real object of real parts whose motion and numbers come from one truthful model, using the two installed anatomy skills instead of approximating them.",
 		scope,
-		"Choose the skill by what the reader should understand, and read its SKILL.md before building. anatomy explains how a system, algorithm, machine or component works: an isometric SVG instrument with live readouts, cutaways, dials and gears, an interactive explainer, or parts turning in true 3D (its references/3d.md; references/webgl.md for fire, water or light) — open its closest example first and copy the kit and example into the project. anatomy-reveal shows off one physical object and its parts: scaffold with its scripts/new-project.mjs, then build an interactive dissection page to drag, turn and take apart, and, when asked, a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) that tumbles in, whips to macro details, works one feature, explodes and snaps back. When the work wants both — an object that is also a working mechanism — say which skill leads and why. Resolve every kit, template and script path against the installed skill directory and never write output into it.",
+		`Choose the skill by what the reader should understand, and read its guide before building: anatomy at ${bundledSkill("anatomy")}, anatomy-reveal at ${bundledSkill("anatomy-reveal")}. anatomy explains how a system, algorithm, machine or component works: an isometric SVG instrument with live readouts, cutaways, dials and gears, an interactive explainer, or parts turning in true 3D (its references/3d.md; references/webgl.md for fire, water or light) — open its closest example first and copy the kit and example into the project. anatomy-reveal shows off one physical object and its parts: scaffold with its scripts/new-project.mjs, then build an interactive dissection page to drag, turn and take apart, and, when asked, a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) that tumbles in, whips to macro details, works one feature, explodes and snaps back. When the work wants both — an object that is also a working mechanism — say which skill leads and why. Resolve every kit, template and script path against the installed skill directory and never write output into it.`,
 		"Ground it before geometry. From a photo, read silhouette, proportions, materials, controls and moving parts; from a name, research the real product (dimensions in millimetres, materials, every control and port, how it opens and what is inside — teardowns are the best source), pick the common variant of an ambiguous name and say which. Write the short spec first: dimensions, features, parts grouped by assembly, the one or two features that move. The figure is geometry only: no user, web or generated image traced, embedded or mapped into it; real counts of screws and buttons; detail from real parts, never noise; neutral markings unless a faithful replica was asked for.",
 		"Check what the reader sees, not what the code intends. Run the skill's own checks (the kit audit, scan-apart from front, back, top, below and side, the motion scan) until they report clean, and look at every image they make; drive the interactive page in a real browser; for a film, frame poses and timing with stills before the full render, render a short low-cost preview first (the full blur render costs about two minutes per second of film — run it in the background, one browser at a time), then extract frames from the encoded MP4 and look at a contact sheet. The reveal film is silent by design: when /video is also in force, its sound and master checks apply to this film; when /3d is in force, its rendered-proof standard covers these figures too. Deliver the pages, the film and the project folder, and name what was not verified.",
 	].join("\n\n");

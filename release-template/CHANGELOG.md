@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.39.1 — /anatomy names the installed skill guides
+
+**`/anatomy` points straight at both guides.** The Anatomy brief now names the installed `anatomy` and `anatomy-reveal` SKILL.md paths, resolved at run time. In a live `/anatomy /video` run on 0.39.0 the model spent its first tool calls searching the disk for the skills before reading them.
+
 ## 0.39.0 — Anatomy Reveal and the /anatomy boost
 
 **Anatomy Reveal is bundled.** Ann Nguyen's MIT skill (`agent/skills/anatomy-reveal`, pinned commit and hashes in `UPSTREAM.json`) builds one physical object from real dimensions as convex parts drawn with the Anatomy kit, then makes an interactive dissection page to drag, turn and take apart, and a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) from the same model. Requests for exploded-view animations, teardowns, dissection figures or product-reveal films offer it automatically, to native child agents too; `/skill:anatomy-reveal` loads it explicitly, and `/skill:anatomy-reveal` no longer also matches the sibling `anatomy` route. Its SKILL.md adds a YunusPi section: skill choice, tools for looking at frames, and cheap previews (`--dpr 0.5`, a 3 s 1:1 preview renders in about 30 s). The demo film and stills are not bundled.
