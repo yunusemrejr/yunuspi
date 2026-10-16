@@ -886,14 +886,16 @@ export function createRelevantGuidance(pi: any) {
         : [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)]
           .map(m => ({name:decode(m[1]),description:decode(m[2]),file:decode(m[3])}));
       // Builtin workers deliberately inherit no ambient skill catalogue. Offer
-      // this one bundled task reference when it fits, without enabling global
+      // the bundled anatomy task references when they fit, without enabling global
       // inheritance, loading bodies into the prompt or changing child tools.
-      if (process.env.PI_SUBAGENT_CHILD === '1' && !metadata.some(s => s.name === 'anatomy')
-        && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(skillTaskText(event.prompt ?? ''))
-        && routeSkills(event.prompt ?? '').some(route => route.name === 'anatomy')) {
-        const bundled = path.resolve(import.meta.dirname, '../../skills/anatomy');
-        if (fs.existsSync(path.join(bundled, 'SKILL.md'))) {
-          const skill = resolveSkills(['anatomy'], ctx.cwd, [bundled]).resolved[0];
+      if (process.env.PI_SUBAGENT_CHILD === '1'
+        && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(skillTaskText(event.prompt ?? ''))) {
+        const routed = routeSkills(event.prompt ?? '').map(route => route.name);
+        for (const name of ['anatomy', 'anatomy-reveal']) {
+          if (!routed.includes(name) || metadata.some(s => s.name === name)) continue;
+          const bundled = path.resolve(import.meta.dirname, '../../skills', name);
+          if (!fs.existsSync(path.join(bundled, 'SKILL.md'))) continue;
+          const skill = resolveSkills([name], ctx.cwd, [bundled]).resolved[0];
           if (skill) metadata.push({name:skill.name, description:skill.description ?? '', file:skill.path});
         }
       }

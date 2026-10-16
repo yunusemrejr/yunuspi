@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const expected = [
-  "3d", "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
+  "3d", "anatomy", "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
   "double", "effort", "errors", "export-json", "goal", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
   "logs", "memory-prime", "metrics", "nobug", "noslop", "obs", "observer-book", "or-provider", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",

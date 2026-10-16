@@ -35,3 +35,47 @@ the bundled examples are reusable references, not an output directory. Node
 build scripts require no npm packages. Browser checks use an existing Chrome or
 Chromium (`CHROME_PATH` can select it), or YunusPi's available rendering/browser
 tools; their results establish only the states actually checked.
+
+## Anatomy Reveal
+
+[Anatomy Reveal](https://github.com/annnguyentt/anatomy-reveal-skill) by Ann
+Nguyen is bundled under `agent/skills/anatomy-reveal`. It builds one physical
+object (a product, tool, instrument, shoe, fruit) from real dimensions as many
+convex parts drawn with the Anatomy kit, then makes two things from that one
+model: an interactive dissection page to drag, turn and take apart, and a
+product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) that tumbles in,
+whips to macro details, works a feature, explodes and snaps back. It is MIT
+licensed; its `template/kit` is a subset of Anatomy with extra materials, and
+`LICENSE`, `THIRD_PARTY_NOTICES.md` and `UPSTREAM.json` keep attribution, the
+pinned commit and hashes. The demo film and stills are not bundled.
+
+Use `anatomy` to explain how a system or mechanism works and `anatomy-reveal`
+to show off one object and its parts. Requests such as “an exploded-view
+animation of a mechanical keyboard” or “a product reveal film of my sneaker”
+offer it automatically; `/skill:anatomy-reveal` loads it explicitly.
+
+`node agent/skills/anatomy-reveal/scripts/new-project.mjs <dir>` scaffolds a
+project (it runs `npm install` for puppeteer-core) and needs Chrome or Chromium
+(`CHROME_PATH`), ffmpeg and ImageMagick 7. Frame size is the film's layout size
+times `--dpr` (default 2, so 1080 wide); a 3 s 1:1 preview with
+`--step 40 --most 2 --dpr 0.5` renders in about 30 s, while the full blur
+render costs about two minutes per second of film.
+
+## /anatomy
+
+`/anatomy <object, mechanism or system>` starts a goal that uses both skills
+and chooses between them by what the reader should understand. It chains like
+the other boosts (see [GOAL.md](GOAL.md)):
+
+```
+/anatomy an interactive cutaway of a watch escapement
+/anatomy /video a 10-second 1:1 reveal film of a Moka pot   # adds sound and a watched master
+/anatomy /3d /noslop replace the landing page's feature list with one take-apart figure
+/goal redesign the product page /anatomy /nobug
+/anatomy                                                      # improve this project's anatomy figures
+```
+
+Its fronts are a grounded spec with the right skill, real parts, one truthful
+model with clean geometry checks, rendered frames and a driven page actually
+looked at, and a deliverable that builds from a clean start.
+

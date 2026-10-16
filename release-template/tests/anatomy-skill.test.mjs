@@ -77,6 +77,70 @@ test('ordinary explanations, medical anatomy, quoted examples and exclusions sta
   ]) assert.ok(!routes(prompt).includes('anatomy'), prompt);
 });
 
+const revealDir = path.join(root, 'agent/skills/anatomy-reveal');
+
+test('Anatomy Reveal ships its pinned MIT references, scaffold and template with the kit notice', () => {
+  const provenance = JSON.parse(fs.readFileSync(path.join(revealDir, 'UPSTREAM.json'), 'utf8'));
+  assert.equal(provenance.repository, 'https://github.com/annnguyentt/anatomy-reveal-skill');
+  assert.match(provenance.commit, /^[a-f0-9]{40}$/);
+  assert.equal(provenance.license, 'MIT');
+  assert.deepEqual(Object.keys(provenance.modifiedFiles), ['SKILL.md']);
+  const shipped = [];
+  const walk = dir => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full); else shipped.push(path.relative(revealDir, full));
+  } };
+  walk(revealDir);
+  assert.deepEqual(shipped.filter(file => file !== 'UPSTREAM.json').sort(), Object.keys(provenance.files).sort(), 'every shipped file is pinned');
+  for (const [file, hash] of Object.entries(provenance.files)) {
+    const data = fs.readFileSync(path.join(revealDir, file));
+    if (!provenance.modifiedFiles[file]) assert.equal(createHash('sha256').update(data).digest('hex'), hash, file);
+  }
+  assert.match(fs.readFileSync(path.join(revealDir, 'LICENSE'), 'utf8'), /Copyright \(c\) 2026 Ann Nguyen/);
+  assert.match(fs.readFileSync(path.join(revealDir, 'template/kit/LICENSE'), 'utf8'), /Copyright \(c\) 2026 Ryan/);
+  const guide = fs.readFileSync(path.join(revealDir, 'SKILL.md'), 'utf8');
+  const metadata = parse(guide.split('---')[1]);
+  assert.equal(metadata.name, 'anatomy-reveal');
+  assert.ok(metadata.description.length <= 1024);
+  assert.match(guide, /any selected YunusPi model or native child agent/);
+  assert.match(guide, /`\/anatomy <object or mechanism>` starts a goal/);
+  assert.match(fs.readFileSync(skillFile, 'utf8'), /`\/anatomy <subject>` starts a goal that uses it together with the sibling `anatomy-reveal` skill/);
+});
+
+test('object reveal and teardown requests route to Anatomy Reveal; /anatomy offers both skills', () => {
+  for (const prompt of [
+    'Make an anatomy reveal video of a Moka pot.',
+    'Create a product reveal film of my sneaker, 1:1 for Instagram.',
+    'Build an exploded-view animation of a mechanical keyboard, 8 seconds.',
+    'Dissect this kettle into an interactive figure.',
+    '/skill:anatomy-reveal a desk lamp',
+  ]) {
+    assert.ok(routes(prompt).includes('anatomy-reveal'), prompt);
+    assert.ok(routeSkillsPrecise(prompt).slice(0, 3).some(route => route.name === 'anatomy-reveal'), prompt);
+  }
+  assert.ok(!routes('/skill:anatomy-reveal a desk lamp').includes('anatomy'), 'the reveal skill command does not also load the sibling');
+  assert.ok(!routes('/skill:anatomy explain a dial, interactive').includes('anatomy-reveal'));
+  for (const name of ['anatomy', 'anatomy-reveal']) assert.ok(routes('/anatomy a moka pot').includes(name), `/anatomy offers ${name}`);
+  for (const prompt of ['Explain how a mechanical watch works.', 'Fix the reveal animation timing in the modal.', 'Fix the reveal video in the hero section.', 'Review these human anatomy lecture notes.', 'Never use the anatomy-reveal skill.'])
+    assert.ok(!routes(prompt).includes('anatomy-reveal'), prompt);
+});
+
+test('the Anatomy Reveal template builds its figure and film pages offline from a project copy', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anatomy-reveal-'));
+  try {
+    fs.cpSync(path.join(revealDir, 'template'), cwd, {recursive: true});
+    for (const args of [['object/build.mjs'], ['object/build.mjs', '--light'], ['motion/build.mjs', '--duration', '3', '--ratio', '1:1']]) {
+      const result = spawnSync(process.execPath, args, {cwd, encoding: 'utf8', timeout: 120000});
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+    }
+    for (const page of ['object/figure.html', 'object/figure-light.html', 'motion/motion.html']) {
+      const html = fs.readFileSync(path.join(cwd, page), 'utf8');
+      assert.match(html, /<script/, page);
+    }
+    assert.match(fs.readFileSync(path.join(cwd, 'motion/motion.html'), 'utf8'), /window\.frame = frame/);
+  } finally { fs.rmSync(cwd, {recursive: true, force: true}); }
+});
+
 test('bundled SVG and true 3D examples build offline from a project copy', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anatomy-example-'));
   try {

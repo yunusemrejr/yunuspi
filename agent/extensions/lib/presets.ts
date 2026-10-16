@@ -1,5 +1,5 @@
 /**
- * Preset goals — /noslop, /nobug, /3d and /video, alone or chained.
+ * Preset goals — /noslop, /nobug, /3d, /video and /anatomy, alone or chained.
  *
  * Each preset is a /goal with its aim already written: a working brief plus
  * the fronts it is judged on. The commands live in goal.ts on the shared
@@ -17,15 +17,15 @@
 import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
 import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
 
-export type PresetId = "noslop" | "nobug" | "3d" | "video";
-export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video"];
-export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video" };
+export type PresetId = "noslop" | "nobug" | "3d" | "video" | "anatomy";
+export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video", "anatomy"];
+export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video", anatomy: "Anatomy" };
 
 const MAX_TASK = 4000;
 const VERIFY_ID = "V";
 /** A preset or /goal token: opened by start, whitespace or ( " ', closed by end, whitespace, or punctuation that itself ends the word
  * (`/3d.` at a sentence end) — so paths, URLs and file names (`src/3d`, `/video.mp4`, `/3d/models`) never match. */
-const TOKEN = /(?<=^|[\s("'])\/(noslop|nobug|3d|video|goal)(?=$|\s|[,.;:!?)"'](?=$|[\s,.;:!?)"']))/gi;
+const TOKEN = /(?<=^|[\s("'])\/(noslop|nobug|3d|video|anatomy|goal)(?=$|\s|[,.;:!?)"'](?=$|[\s,.;:!?)"']))/gi;
 /** Fenced blocks and inline code spans: tokens inside them are text. */
 const CODE = /```[\s\S]*?(?:```|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
 /** Connector words and punctuation that a removed token can leave at either edge of the task. */
@@ -140,6 +140,14 @@ export const VIDEO_CRITERIA: readonly string[] = [
 	"Verified master: the final export is watched end to end with audio (video_qa or equivalent) at the intended resolution, frame rate and format, and plays outside the build setup.",
 ];
 
+export const ANATOMY_CRITERIA: readonly string[] = [
+	"Right skill, real spec: anatomy (how a system or mechanism works) or anatomy-reveal (one object's dissection page or reveal film) read first; dimensions, features, parts by assembly and moving features written down, guesses named.",
+	"Built from real parts: convex solids at real dimensions and counts, made with the skill's kit from its closest example or template; no traced or embedded images, no placeholder blocks, generic markings unless a replica was asked.",
+	"One truthful model: motion, explode, poses, readouts and captions come from one model, and the skill's checks (kit audit, scan-apart from five views, motion scan) report no parts passing through each other and no forced picks.",
+	"Seen, not assumed: stills and frames from several angles and states were looked at, and the interactive page was driven in a real browser (drag, keys, take-apart, light and dark, reduced motion).",
+	"Deliverable is real: figure pages build and open from a clean start; a film, when asked, is encoded at the asked length and ratio and checked from frames of the MP4 itself; anything unverified is named.",
+];
+
 /**
  * Fronts that stay tracked when presets chain, most important first; a long
  * chain keeps fewer per preset. The briefs themselves never compress.
@@ -149,8 +157,9 @@ const CORE_INDEXES: Record<PresetId, readonly number[]> = {
 	nobug: [1, 4, 2],
 	"3d": [1, 2, 4],
 	video: [1, 2, 4],
+	anatomy: [2, 1, 3],
 };
-const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA };
+const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA, anatomy: ANATOMY_CRITERIA };
 
 /** A criterion as createPresetGoal stores it (flattened, clipped), so fronts can be matched against a goal. */
 const fit = (text: string) => {
@@ -185,7 +194,7 @@ function threeDGoalText(task: string): string {
 	return [
 		"3D boost in force: do this 3D work at full craft, using the harness's real 3D capability instead of approximating it.",
 		scope,
-		"Choose the route deliberately and use the installed skills and tools for it: Blender (the blender tools, the 3d-cad and anatomy skills) for real geometry, scenes and offline realism; three.js/WebGL for browser and interactive work; a hybrid — assets modeled in Blender, presented in three.js — when the subject wants both. Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
+		"Choose the route deliberately and use the installed skills and tools for it: Blender (the blender tools and the 3d-cad skill) for real geometry, scenes and offline realism; the anatomy skill for an isometric figure or mechanism that turns in true 3D, and anatomy-reveal for one object built part by part to take apart and film; three.js/WebGL for browser and interactive work; a hybrid — assets modeled in Blender, presented in three.js — when the subject wants both. Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
 		"Ground the subject before modeling: research real references for proportions, materials and motion, and keep them beside the work. Sourced assets and images from the web are legitimate inputs when they fit the subject — prefer own or generated assets, check the license of anything fetched, and never pass a found asset off as modeled. Build real geometry with real materials and motivated lighting; placeholder boxes, primitive-only scenes and flat unlit renders are scaffolding, never the delivery.",
 		"Iterate against renders, not intentions: render stills (render_see where available) from several angles and distances, compare with the references, fix what the comparison exposes. Keep performance honest — sane geometry, draw-call and texture budgets for the target, stable frame rate under interaction, honest degradation instead of stalls. Finish means the scene or app runs end to end from a clean start with every asset resolving.",
 	].join("\n\n");
@@ -198,9 +207,22 @@ function videoGoalText(task: string): string {
 	return [
 		"Video boost in force: make this video finished on every track — picture, sound and timing — not a silent render with music attached.",
 		scope,
-		"Plan before rendering: settle the script or shot list and the audio plan first (what is shown, said and heard, in what order), then build with the installed video skills and tools for the route (code-first-video, remotion-video, video-editing, audio; Blender or three.js scenes rendered to frames when the picture needs real 3D). Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
+		"Plan before rendering: settle the script or shot list and the audio plan first (what is shown, said and heard, in what order), then build with the installed video skills and tools for the route (code-first-video, remotion-video, video-editing, audio; Blender or three.js scenes rendered to frames when the picture needs real 3D; anatomy-reveal for a product reveal or exploded-view film of one object). Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
 		"Sound is a track, not an afterthought. Narration (TTS where no voice exists) must be intelligible, naturally paced and timed to the picture it describes — listen to it, do not trust the transcript. Music and sound effects are mixed under speech, levels stay consistent across cuts, nothing clips and no stretch is accidentally silent. Effects and transitions exist to serve the cut — orientation, emphasis, continuity — never as decoration; captions or on-screen text appear where speech carries information, legible and in sync.",
 		"Verify the master, not the timeline: watch the final export end to end with audio (video_qa where available), checking sync at the joins, loudness against speech, and that the runtime earns its length. Deliver at the intended resolution, frame rate and format, as a file that plays outside the build setup.",
+	].join("\n\n");
+}
+
+function anatomyGoalText(task: string): string {
+	const scope = task
+		? `Assignment: ${task}`
+		: "No assignment was given. Survey the current project for existing anatomy work — figures built with the Anatomy kit (iso-kit, turn, lathe, tube), anatomy-reveal projects (object/geometry.mjs, object/film.mjs, motion/timeline.mjs), isometric or exploded-view figures and their films — and improve and fix what is there: geometry truth, depth order, motion, readouts, film framing. If the project contains no such work at all, say so plainly in one line, waive these fronts with that reason through the goal tool, and stop. Do not invent a figure nobody asked for.";
+	return [
+		"Anatomy boost in force: show this subject as a crafted anatomy figure, a real object of real parts whose motion and numbers come from one truthful model, using the two installed anatomy skills instead of approximating them.",
+		scope,
+		"Choose the skill by what the reader should understand, and read its SKILL.md before building. anatomy explains how a system, algorithm, machine or component works: an isometric SVG instrument with live readouts, cutaways, dials and gears, an interactive explainer, or parts turning in true 3D (its references/3d.md; references/webgl.md for fire, water or light) — open its closest example first and copy the kit and example into the project. anatomy-reveal shows off one physical object and its parts: scaffold with its scripts/new-project.mjs, then build an interactive dissection page to drag, turn and take apart, and, when asked, a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) that tumbles in, whips to macro details, works one feature, explodes and snaps back. When the work wants both — an object that is also a working mechanism — say which skill leads and why. Resolve every kit, template and script path against the installed skill directory and never write output into it.",
+		"Ground it before geometry. From a photo, read silhouette, proportions, materials, controls and moving parts; from a name, research the real product (dimensions in millimetres, materials, every control and port, how it opens and what is inside — teardowns are the best source), pick the common variant of an ambiguous name and say which. Write the short spec first: dimensions, features, parts grouped by assembly, the one or two features that move. The figure is geometry only: no user, web or generated image traced, embedded or mapped into it; real counts of screws and buttons; detail from real parts, never noise; neutral markings unless a faithful replica was asked for.",
+		"Check what the reader sees, not what the code intends. Run the skill's own checks (the kit audit, scan-apart from front, back, top, below and side, the motion scan) until they report clean, and look at every image they make; drive the interactive page in a real browser; for a film, frame poses and timing with stills before the full render, render a short low-cost preview first (the full blur render costs about two minutes per second of film — run it in the background, one browser at a time), then extract frames from the encoded MP4 and look at a contact sheet. The reveal film is silent by design: when /video is also in force, its sound and master checks apply to this film; when /3d is in force, its rendered-proof standard covers these figures too. Deliver the pages, the film and the project folder, and name what was not verified.",
 	].join("\n\n");
 }
 
@@ -209,6 +231,7 @@ const BRIEFS: Record<PresetId, (task: string) => string> = {
 	nobug: nobugGoalText,
 	"3d": threeDGoalText,
 	video: videoGoalText,
+	anatomy: anatomyGoalText,
 };
 
 /**
@@ -244,7 +267,7 @@ function boostedText(task: string, ids: readonly PresetId[], literal: string): s
  * extracts from the task), then each boost's core fronts under its label, then
  * V. Every brief joins the text, so each boost applies in full even where only
  * its fronts are tracked. The budget gives the fronts k per boost (3, 2, or 1
- * from one to four boosts); the user's requirements take what is left, at least 3.
+ * from one to five boosts); the user's requirements take what is left, at least 3.
  */
 export function createBoostedGoal(task: string, presets: readonly PresetId[], literal: string, now = Date.now()): GoalState {
 	const ids = [...new Set(presets)];

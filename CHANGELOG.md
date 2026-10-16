@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.39.0 — Anatomy Reveal and the /anatomy boost
+
+**Anatomy Reveal is bundled.** Ann Nguyen's MIT skill (`agent/skills/anatomy-reveal`, pinned commit and hashes in `UPSTREAM.json`) builds one physical object from real dimensions as convex parts drawn with the Anatomy kit, then makes an interactive dissection page to drag, turn and take apart, and a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) from the same model. Requests for exploded-view animations, teardowns, dissection figures or product-reveal films offer it automatically, to native child agents too; `/skill:anatomy-reveal` loads it explicitly, and `/skill:anatomy-reveal` no longer also matches the sibling `anatomy` route. Its SKILL.md adds a YunusPi section: skill choice, tools for looking at frames, and cheap previews (`--dpr 0.5`, a 3 s 1:1 preview renders in about 30 s). The demo film and stills are not bundled.
+
+**`/anatomy` boost, chainable with `/3d`, `/video`, `/noslop` and `/nobug`.** `/anatomy <object, mechanism or system>` runs as a goal that uses both anatomy skills, choosing `anatomy` to explain how a system or mechanism works and `anatomy-reveal` to show off one object and its parts. It requires a grounded spec before geometry, real parts only, one model behind motion and readouts with the skills' geometry checks clean, frames and the page actually looked at, and a deliverable that builds from a clean start. `/anatomy /video` gives the silent reveal film finished sound and a watched master; bare `/anatomy` improves the project's existing figures or says there are none. Five-way chains keep two fronts per boost within the criteria budget, and the `/3d`, `/video` and `/noslop` briefs now name the anatomy skills where they fit.
+
 ## 0.38.0 — No automatic local LM, goal boosts anywhere, quicker desktop
 
 **Removed: the automatic local language model.**

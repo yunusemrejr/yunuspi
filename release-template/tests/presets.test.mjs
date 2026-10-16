@@ -103,6 +103,40 @@ test('a four-way chain keeps two core fronts per preset inside the criteria budg
   assert.match(goal.criteria[1].text, /interface works wherever it runs/, 'nobug keeps the interface front over dependencies when compressed');
 });
 
+test('/anatomy covers both anatomy skills, chains with /3d and /video, and bare /anatomy surveys honestly', () => {
+  assert.deepEqual(ps.parsePresetChain('anatomy', '/3d /video a 10 s reveal of a moka pot'),
+    { presets: ['anatomy', '3d', 'video'], task: 'a 10 s reveal of a moka pot' });
+  // Skill commands and file names are text, not boosts.
+  for (const text of ['/skill:anatomy explain a dial', 'see /anatomy-reveal/SKILL.md', 'open src/anatomy/figure.mjs'])
+    assert.deepEqual(ps.extractPresetTokens(text).presets, [], text);
+  const made = ps.createPresetChainGoal(ps.parsePresetChain('anatomy', 'an exploded view of a mechanical keyboard'));
+  assert.deepEqual(made.boosts, ['anatomy']);
+  assert.equal(made.criteria.length, 6, 'five anatomy fronts plus V');
+  assert.ok(made.criteria.every((c) => !c.text.endsWith('…')), 'no front is clipped');
+  for (const rule of [/Assignment: an exploded view of a mechanical keyboard/, /anatomy explains how a system/, /anatomy-reveal shows off one physical object/,
+    /scripts\/new-project\.mjs/, /references\/3d\.md/, /scan-apart/, /extract frames from the encoded MP4/, /silent by design: when \/video is also in force/])
+    assert.match(made.text, rule);
+  const bare = ps.createPresetChainGoal(ps.parsePresetChain('anatomy', ''));
+  assert.match(bare.text, /No assignment was given\. Survey the current project for existing anatomy work/);
+  assert.match(bare.text, /Do not invent a figure nobody asked for/);
+  const film = ps.createPresetChainGoal(ps.parsePresetChain('video', '/anatomy reveal film of a kettle'));
+  assert.match(film.text, /\[Video\]\nVideo boost in force[\s\S]*anatomy-reveal for a product reveal/);
+  assert.match(film.text, /\[Anatomy\]\nAnatomy boost in force/);
+  assert.match(ps.createPresetChainGoal(ps.parsePresetChain('3d', 'x')).text, /anatomy-reveal for one object built part by part/);
+});
+
+test('a five-way chain keeps two core fronts per preset inside the criteria budget', () => {
+  const goal = ps.createPresetChainGoal(ps.parsePresetChain('anatomy', '/3d /video /noslop /nobug make a reveal film'));
+  assert.equal(goal.criteria.length, 11);
+  assert.deepEqual(goal.criteria.slice(0, -1).map((c) => c.text.split(':')[0]),
+    ['Anatomy', 'Anatomy', '3D', '3D', 'Video', 'Video', 'Noslop', 'Noslop', 'Nobug', 'Nobug']);
+  assert.match(goal.criteria[1].text, /One truthful model/);
+  const boosted = ps.createBoostedGoal('Make a reveal film of a kettle.', ['anatomy', '3d', 'video', 'noslop', 'nobug'], 'lit');
+  assert.ok(boosted.criteria.length <= 12);
+  assert.equal(boosted.criteria.filter((c) => /^(Anatomy|3D|Video|Noslop|Nobug): /.test(c.text)).length, 5);
+  assert.match(boosted.criteria.find((c) => c.text.startsWith('Anatomy: ')).text, /One truthful model/);
+});
+
 test('solo /noslop through the chain builder is byte-identical to the shipped goal', () => {
   const viaChain = ps.createPresetChainGoal(ps.parsePresetChain('noslop', 'the settings page'), 1700000000000);
   const direct = ns.createNoslopGoal('the settings page', 1700000000000);
@@ -126,7 +160,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('/3d /video /noslop <task> starts one stacked goal from a single dispatch', async () => {
   const h = harness();
-  for (const name of ['noslop', 'nobug', '3d', 'video']) assert.equal(typeof h.commands[name]?.handler, 'function', `${name} registered`);
+  for (const name of ['noslop', 'nobug', '3d', 'video', 'anatomy']) assert.equal(typeof h.commands[name]?.handler, 'function', `${name} registered`);
   await h.commands['3d'].handler('/video /noslop please make a video about tides', h.ctx); await tick();
   const goal = h.entries.at(-1).data;
   assert.equal(goal.criteria.length, 10);

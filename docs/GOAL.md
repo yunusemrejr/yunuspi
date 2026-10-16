@@ -45,27 +45,32 @@ It starts the same goal machinery as `/goal` — same persisted state, same `goa
 
 It starts from a baseline (the project's own build, type check, lint and tests run and recorded, the in-scope surfaces mapped), then hunts across logic (wrong conditions, off-by-one, null paths, units and time zones, races, swallowed errors), edge cases (empty, huge, malformed and unicode input, boundaries, concurrency, failed network, missing files, first run versus upgrade), broken code, dependency problems (missing, unused, conflicting or deprecated packages, lockfile drift), duplicated rules that can drift, and the interface as it actually renders: UI/UX states, keyboard and focus, layouts from a 360px phone to a wide desktop, the target browsers (Chromium, Firefox and WebKit where available, naming any that could not be run), and for terminal apps narrow or resized terminals, non-TTY output, `NO_COLOR` and Ctrl-C cleanup. Every fix is reproduced first (a failing test where the project has tests), made at the root cause, and proven by the repro passing with the baseline still green. Masking is forbidden (swallowed errors, skipped tests, disabled lints, loosened types), unproven suspicions are reported as suspected, and unchecked environments are named. Its six fronts are baseline, logic and edge cases, broken code and dependencies, drifting duplicates, the interface, and honest fixes.
 
-## /3d, /video and chaining
+## /3d, /video, /anatomy and chaining
 
-Two more presets work the same way, and all four chain:
+Three more presets work the same way, and all five chain:
 
 ```
 /3d make a minecraft clone
 /video make a 60-second explainer about tides, narrated
+/anatomy an interactive cutaway of a mechanical watch escapement
+/anatomy /video a 10-second 1:1 reveal film of a Moka pot
 /3d /video /noslop please make a video about how a steam engine works
 /nobug /3d /video make sure the video has no problems
 /noslop /nobug             # e.g. in a terminal app: bugs, edge cases and TUI slop
 /3d                       # no assignment: fix this project's 3D work
 /video                    # no assignment: fix this project's video work
+/anatomy                  # no assignment: fix this project's anatomy figures
 ```
 
 `/3d` puts the harness's 3D capability at full strength: the route is chosen deliberately (Blender for real geometry and offline realism, three.js/WebGL for browser and interactive work, Blender-built assets presented in three.js when the subject wants both), the installed 3D skills and tools for that route are actually loaded, the subject is grounded in real references, web assets and images may be sourced with their licenses checked, and the result is iterated against renders from several angles within honest performance budgets. Its fronts judge grounding, real assets and geometry, craft at inspection distance, motion/interaction behavior, and a deliverable that runs clean end to end.
 
 `/video` demands a finished film on every track: script or shot list and audio plan before any render, purposeful picture and effects, sound that is mixed rather than attached (intelligible narration/TTS timed to the picture, music and effects under speech, consistent levels), pacing and sync that line up, and a master verified by watching the export with audio at its intended resolution, frame rate and format.
 
-With no assignment, `/3d` and `/video` survey the current project for work of their kind and improve and fix what exists. If there is none, the session says so plainly, waives the fronts with that reason, and stops — a bare preset never invents a project.
+`/anatomy` builds the subject as an anatomy figure — a real object of real parts whose motion, explode and readouts come from one model — with the two bundled anatomy skills (see [ANATOMY.md](ANATOMY.md)). The skill follows what the reader should understand: `anatomy` explains how a system, algorithm or mechanism works (isometric SVG instruments, cutaways, interactive explainers, parts turning in true 3D); `anatomy-reveal` shows off one physical object, as an interactive dissection page to drag, turn and take apart and, when asked, a product-reveal film (3–60 s MP4, 9:16, 4:5, 1:1 or 16:9). It grounds the object first (a photo or real product research, then a spec of dimensions, features and parts by assembly), builds only real geometry (no traced or embedded images), runs the skills' own geometry checks until clean, looks at rendered stills and frames, drives the page in a browser, and previews cheaply before the full film render. The reveal film is silent, so `/anatomy /video` gives it finished sound and a watched master; `/anatomy /3d` holds the figures to the 3D rendered-proof standard. Its fronts judge the right skill and a grounded spec, real parts, one truthful model with clean checks, what was actually seen, and a real deliverable.
 
-Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. Chained with `/3d` or `/video`, `/nobug` also inspects the media pipeline and the rendered output (audio/picture sync, dropped frames, wrong levels or aspect, z-fighting, missing textures, context loss) and treats weird or low-quality looks as bugs. Chained with `/noslop` in a terminal app, the TUI's output is the interface: banners, chatter, decorative colors and noise are slop there. The tracked criteria compress to each preset's three core fronts (two each in a four-way chain) so every chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
+With no assignment, `/3d`, `/video` and `/anatomy` survey the current project for work of their kind and improve and fix what exists. If there is none, the session says so plainly, waives the fronts with that reason, and stops — a bare preset never invents a project.
+
+Chaining stacks aims onto one goal: `/3d /video /noslop please make a video about …` dispatches once and starts a single goal whose brief contains every named directive set in full, applied to the same assignment together (the example gets real 3D craft, finished sound and picture, and desloppification of everything produced). Any order works and repeats are ignored. Chained with `/3d` or `/video`, `/nobug` also inspects the media pipeline and the rendered output (audio/picture sync, dropped frames, wrong levels or aspect, z-fighting, missing textures, context loss) and treats weird or low-quality looks as bugs. Chained with `/noslop` in a terminal app, the TUI's output is the interface: banners, chatter, decorative colors and noise are slop there. The tracked criteria compress to each preset's three core fronts (two each in a four- or five-way chain) so every chain fits the criteria budget; the briefs themselves never compress, and the goal tool can refine criteria as the work takes shape. Briefs, fronts and the chaining grammar live in `agent/extensions/lib/presets.ts`.
 
 Boost tokens count anywhere in a line, including inside `/goal`:
 
@@ -75,7 +80,7 @@ Boost tokens count anywhere in a line, including inside `/goal`:
 /noslop tidy the settings page /goal
 ```
 
-A `/goal` with boosts keeps the user's own requirements as its first criteria, then adds each boost's core fronts in the order written (three for one boost, two each for two, one each for three or four), then the end-to-end check. Its text quotes the line exactly as typed, so a boost written next to one part of the goal applies chiefly to that part. Tokens must stand alone: paths, file names and code spans (`src/3d/scene.ts`, `/video.mp4`, `` `/noslop` ``) stay part of the text. A bare boost (`/3d`, `/noslop /nobug`) typed while a goal is active or paused joins that goal: its brief is appended, its fronts take the free criteria slots, and the running work is steered to pick it up; repeating a boost already in force changes nothing. A goal or boost started while a turn is running is queued instead of rejected.
+A `/goal` with boosts keeps the user's own requirements as its first criteria, then adds each boost's core fronts in the order written (three for one boost, two each for two, one each for three to five), then the end-to-end check. Its text quotes the line exactly as typed, so a boost written next to one part of the goal applies chiefly to that part. Tokens must stand alone: paths, file names and code spans (`src/3d/scene.ts`, `/video.mp4`, `` `/noslop` ``) stay part of the text. A bare boost (`/3d`, `/noslop /nobug`) typed while a goal is active or paused joins that goal: its brief is appended, its fronts take the free criteria slots, and the running work is steered to pick it up; repeating a boost already in force changes nothing. A goal or boost started while a turn is running is queued instead of rejected.
 
 ## Loop safety
 

@@ -3219,7 +3219,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 331
+        "line": 332
+      },
+      {
+        "name": "anatomy",
+        "source": "agent/extensions/goal.ts",
+        "line": 342
       },
       {
         "name": "bg",
@@ -3294,7 +3299,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 317
+        "line": 318
       },
       {
         "name": "google-account",
@@ -3399,12 +3404,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 326
+        "line": 327
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 321
+        "line": 322
       },
       {
         "name": "obs",
@@ -3564,7 +3569,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 336
+        "line": 337
       },
       {
         "name": "websearch",
@@ -3794,7 +3799,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 343,
+        "line": 349,
         "kind": "literal"
       },
       {
@@ -4278,7 +4283,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 343,
+        "line": 349,
         "kind": "literal"
       },
       {
@@ -7013,6 +7018,10 @@
       {
         "name": "anatomy",
         "path": "agent/skills/anatomy/SKILL.md"
+      },
+      {
+        "name": "anatomy-reveal",
+        "path": "agent/skills/anatomy-reveal/SKILL.md"
       },
       {
         "name": "api-security",

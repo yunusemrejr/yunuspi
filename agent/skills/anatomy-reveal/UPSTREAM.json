@@ -1,0 +1,51 @@
+{
+  "repository": "https://github.com/annnguyentt/anatomy-reveal-skill",
+  "commit": "dd01e1c04559d79002da07862e26f8a5c2a07644",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Ann Nguyen",
+  "credit": "Ann Nguyen (https://x.com/ann_nnng). template/kit is from Anatomy by Ryan (https://github.com/wheresryan22/anatomy), MIT; see THIRD_PARTY_NOTICES.md.",
+  "modifiedFiles": {
+    "SKILL.md": "YunusPi integration section (the /anatomy goal and its chains, skill choice, tools, preview cost); upstream workflow retained."
+  },
+  "omitted": {
+    "README.md": "Install and credit text; credit is kept here and in THIRD_PARTY_NOTICES.md.",
+    "demo/": "Example film and stills (2.5 MB); not used by the workflow."
+  },
+  "files": {
+    "LICENSE": "c68fc92585b982684b31ddcd29cab37b0bb549f0831920a2ddbf46d63e8319a7",
+    "SKILL.md": "1d769487ccf6fe6a4f8b1889b9d5263e7b32627d783eee436fbe9a29776b0682",
+    "THIRD_PARTY_NOTICES.md": "f7cf16fe2ebc8ffd8839fb47595f2a433853abad43089b85a1d1572fae85a85e",
+    "references/inputs.md": "b836d1d3f818e38c2f70b591ce38868baca2ba529164533afcfbf0b37af01053",
+    "references/look.md": "71981d94aa0c1a21475c920360422936be1f566d485fa145ddc540dbbe639ed4",
+    "references/object.md": "f19de3eeb204d88ba4f40e0d0e8a65166c5b5135ab995f318449e660f73c918d",
+    "references/objects.md": "473c454ea4d2071e9c25c61e914d20b1d1c3dc12c11d1f4126c5f689b0877fcc",
+    "references/shots.md": "c5ba52acfe8faa1731647cbd9d8e98056b2d58dedf98d8cfb46014891ddbb7eb",
+    "scripts/new-project.mjs": "10dd8b9a3ae3a400d7681e5bae7bb50a980f5ddb758a1074619c1009638baa1f",
+    "template/.gitignore": "07d5c7406006270050835524225de596999dd1956262a75bea1c2b01f20b5338",
+    "template/kit/LICENSE": "87c078ab9d90a3044f359e6b563d4e6afea7aa060897cf4f21618687b3856796",
+    "template/kit/audit.mjs": "90c5bb4a86f108e8a1d3211dbea326bed16acd887c3438810ea29200a2cde28d",
+    "template/kit/iso-kit.mjs": "6d3ecc725d30c3b0346da309cf61dfa5a65017c23620bbd4093009d4fb104018",
+    "template/kit/lathe.mjs": "a4e7e974b1a37e603ad2b76363b6f9815cc101dfff0ad277a5d4e8f1dc56fccb",
+    "template/kit/tube.mjs": "bcb3cc360f6d83e6a5753f4c464b4587ab7965028b05a5d58e285abce58667c9",
+    "template/kit/turn-build.mjs": "b95d76f9181703508b5bb758973bf004eb92d298a01e0e5ff5457f830c183888",
+    "template/kit/turn.mjs": "27e7229d70c17e0ab203aa7704011252556b4c2149551159e3ddf72a5c53fa45",
+    "template/motion/build.mjs": "2b889ee81bfd3c23ed937fa87bbd087360edf0eb634bbbecd612c517fea5bf50",
+    "template/motion/encode.mjs": "501db04669a8d84f7fbeeeedd1198f0491358381bef495a2180559977d09d91e",
+    "template/motion/look.css": "69cf34bb00e464d7f0197ab30a80bdf4e6a318891b24b4139708c2fd6ef587a1",
+    "template/motion/render.mjs": "76b5fb7bcb0b798ac40a0d48e0c1b739b677a75e527db9def21e3e3becbe40b9",
+    "template/motion/scan.mjs": "1af0a8289bebde0096aa828b33cb927dbd248a3511d32e7fa722165dcab1f01d",
+    "template/motion/timeline.mjs": "5fac1a8f7d581689df44b0964fc433f11960a89430de634bf33e76d4d0c55b34",
+    "template/object/build.mjs": "a3c8077c7ae4b3873ed98298491c91c6d1f4e44692f4734d0f237353a304f93f",
+    "template/object/capture.mjs": "71da112c94129c19501d6e085dae53ef0cb542af393c6e5f9764c5f5ed6952cb",
+    "template/object/film.mjs": "1bef25b27729dbab38a9691c75b2720b7eccd7e12ba648122da96055522d1e3a",
+    "template/object/geometry.mjs": "e86a6398a44265b0a7a75b0f8db13305a6de7960ed30fea5d74db36d75504faf",
+    "template/object/live.js": "e743b3857441535bdcd65646bbf29798770ebaa1bcbe3cafe330b4b1c3d786ed",
+    "template/object/scan-apart.mjs": "815ad39f0573abb14e8b946caa7646aefb1bf8176e2e8d05532d17fde51cd0f8",
+    "template/object/scene.mjs": "4920ddb1b930ec4844ce3e377a70fc8cef667cff7fd17de0b5a35b9944d51f13",
+    "template/object/shots.mjs": "0065008f49ca9529e576ca43479c2941ee0b9066297ac27acea2f0c8ecb70cee",
+    "template/object/test-page.mjs": "678f41de3b0d488ccbf3bd2b1c853b7d56ed528b2dd3faea9644aadd1a210259",
+    "template/package.json": "94bf84ea89d016db10e1d887bced13867b5bf4a55e90499cc88d79d5d4b880ec",
+    "template/scripts/browser.mjs": "ce66ac0276094844ef4e5a09a42a6009b9d790ef96fa8f6ea921ad7c22224b67",
+    "template/scripts/inline-kit.mjs": "82620f1d95b35a630e473be214370aac3232c49a1fe1ef1b3fb7dbfa02e8558f"
+  }
+}
