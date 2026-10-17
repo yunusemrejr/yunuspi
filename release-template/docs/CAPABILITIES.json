@@ -1072,7 +1072,7 @@
     {
       "id": "cost-governor",
       "group": "commands",
-      "summary": "Keep long sessions affordable: fold old context at a stable boundary, batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten context/tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
+      "summary": "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
       "entrypoints": [
         "cost-governor",
         "/budget",
@@ -1103,7 +1103,7 @@
         },
         {
           "name": "PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP",
-          "summary": "Fold threshold and verbatim recent-tail tokens; defaults 100000 / 20000."
+          "summary": "Explicit fold threshold and verbatim recent-tail tokens. Unset, DeepSeek routes fold near 80% of the model window and other routes at 100000; the tail defaults to 20000."
         },
         {
           "name": "PI_TOOL_RESULT_MAX",
@@ -3310,7 +3310,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 635
+        "line": 663
       },
       {
         "name": "catalog-status",
@@ -4033,7 +4033,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 207,
+        "line": 226,
         "kind": "literal"
       },
       {
@@ -4451,7 +4451,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 207,
+        "line": 226,
         "kind": "literal"
       },
       {

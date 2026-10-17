@@ -523,7 +523,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "cost-governor",
 		group: "commands",
-		summary: "Keep long sessions affordable: fold old context at a stable boundary, batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten context/tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
+		summary: "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
 		entrypoints: ["cost-governor", "/budget", "read_many"],
 		tools: ["read_many"],
 		commands: ["budget"],
@@ -532,7 +532,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("/budget", "Report session spend, cache hit rate, current context budget, fold count, tool caps and adaptive effort state."),
 			option("/budget <usd|off|reset>", "Set the soft budget for this session; economy mode lowers caps and routine effort, it does not stop the task."),
 			option("PI_CONTEXT_GOVERNOR", "Set to off to disable folding, tool caps and the budget."),
-			option("PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP", "Fold threshold and verbatim recent-tail tokens; defaults 100000 / 20000."),
+			option("PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP", "Explicit fold threshold and verbatim recent-tail tokens. Unset, DeepSeek routes fold near 80% of the model window and other routes at 100000; the tail defaults to 20000."),
 			option("PI_TOOL_RESULT_MAX", "Bash/search result cap in characters; default 24000."),
 			option("PI_COST_BUDGET_USD", "Soft USD budget; default 0.10, off disables economy mode."),
 			option("PI_ADAPTIVE_EFFORT", "Set to off to keep the configured thinking level in economy mode."),

@@ -21,9 +21,14 @@
  * for the durable session and the file system; only the request projection is
  * smaller. `/budget` reports the current policy and spend.
  *
+ * Cache-first: a mid-session rewrite invalidates the provider's prefix cache,
+ * so a DeepSeek route (any provider serving a DeepSeek model) folds only near
+ * the model window, never at a flat 100k. A resume still trims the first call
+ * because that prefix is already cold. Other routes keep the original budget.
+ *
  * Kill switches:
  *   PI_CONTEXT_GOVERNOR=off          disable folding, caps and budget
- *   PI_CONTEXT_BUDGET=<tokens>       fold threshold (default 100000)
+ *   PI_CONTEXT_BUDGET=<tokens>       explicit fold threshold (overrides cache-first)
  *   PI_CONTEXT_KEEP=<tokens>         recent tail kept verbatim (default 20000)
  *   PI_TOOL_RESULT_MAX=<chars>       bash/search result cap (default 24000)
  *   PI_COST_BUDGET_USD=<amount|off>  soft budget (default 0.10)
@@ -51,6 +56,8 @@ const DIGEST_TYPE = "context-fold";
 const NOTICE_TYPE = "cost-governor-notice";
 
 const DEFAULT_CONTEXT_BUDGET = 100_000;
+const DEEPSEEK_WINDOW_FRACTION = 0.8;
+const OTHER_WINDOW_FRACTION = 0.5;
 const DEFAULT_KEEP_RECENT = 20_000;
 const DEFAULT_DIGEST_TOKENS = 900;
 const DEFAULT_TOOL_MAX = 24_000;
@@ -78,10 +85,22 @@ const positiveUsd = (value: string | undefined, fallback: number): number => {
 	return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : fallback;
 };
 
-const contextBudget = () => positiveInt(process.env.PI_CONTEXT_BUDGET, DEFAULT_CONTEXT_BUDGET, 8_000, 900_000);
+const configuredContextBudget = (): number | undefined => {
+	const raw = process.env.PI_CONTEXT_BUDGET;
+	if (raw === undefined || raw === "") return undefined;
+	return positiveInt(raw, DEFAULT_CONTEXT_BUDGET, 8_000, 900_000);
+};
 const keepRecent = () => positiveInt(process.env.PI_CONTEXT_KEEP, DEFAULT_KEEP_RECENT, 2_000, 200_000);
 const toolResultMax = () => positiveInt(process.env.PI_TOOL_RESULT_MAX, DEFAULT_TOOL_MAX, 1_000, 400_000);
 const defaultBudgetUsd = () => positiveUsd(process.env.PI_COST_BUDGET_USD, DEFAULT_BUDGET_USD);
+
+/** Automatic prefix-cache routes: the model id catches DeepSeek served by
+ *  DeepInfra, Alibaba, OpenRouter and other provider aliases. */
+const cacheFirstRoute = (model: any): boolean => {
+	const provider = String(model?.provider ?? "").toLowerCase();
+	const id = String(model?.id ?? "").toLowerCase();
+	return provider.includes("deepseek") || id.includes("deepseek");
+};
 
 interface Totals {
 	turns: number;
@@ -309,13 +328,22 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	const currentBudget = (): number => (budgetOverride !== undefined ? budgetOverride : budgetUsd);
 
 	const effectiveContextBudget = (model: any): number => {
-		let configured = economy ? Math.min(contextBudget(), ECONOMY_CONTEXT_BUDGET) : contextBudget();
-		if (resumed) configured = Math.min(configured, RESUME_CONTEXT_BUDGET);
 		const window = num(model?.contextWindow);
+		const cacheFirst = cacheFirstRoute(model);
+		const explicit = configuredContextBudget();
+		let configured = explicit
+			?? (cacheFirst && window > 0 ? Math.floor(window * DEEPSEEK_WINDOW_FRACTION) : DEFAULT_CONTEXT_BUDGET);
+		// Economy mode keeps rewriting the prefix cheap on other routes; on a
+		// cache-first route a rewrite costs more than it saves, so only the
+		// tool cap and effort policy change there.
+		if (economy && !cacheFirst) configured = Math.min(configured, ECONOMY_CONTEXT_BUDGET);
+		// A resumed prefix is already cold, so its first call can still trim.
+		if (resumed) configured = Math.min(configured, RESUME_CONTEXT_BUDGET);
 		if (window <= 0) return configured;
 		// Never fold a small window down to something that cannot hold the
-		// recent turn plus a digest; 50% of the window is a safe working cap.
-		const cap = Math.max(12_000, Math.floor(window * 0.5));
+		// recent turn plus a digest. DeepSeek keeps its automatic prefix cache
+		// valid up to 80% of the window; other routes stay at the safer 50%.
+		const cap = Math.max(12_000, Math.floor(window * (cacheFirst ? DEEPSEEK_WINDOW_FRACTION : OTHER_WINDOW_FRACTION)));
 		return Math.min(configured, cap);
 	};
 
@@ -681,10 +709,10 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				`Model: ${ctx?.model?.provider ?? "?"}/${ctx?.model?.id ?? "?"} · window ${fmtTokens(num(ctx?.model?.contextWindow))} · context ${fmtTokens(totals.lastPromptTokens)}`,
 				`Turns: ${totals.turns} · input ${fmtTokens(totals.input)} · output ${fmtTokens(totals.output)} · cache read ${fmtTokens(totals.cacheRead)} (${hit.toFixed(1)}% hit) · reasoning ${fmtTokens(totals.reasoning)}`,
 				`Cost split: input ${fmtUsd(totals.inputCost)} · output ${fmtUsd(totals.outputCost)} · cache ${fmtUsd(totals.cacheCost)} · total ${fmtUsd(totals.cost)}`,
-				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
+				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · ${cacheFirstRoute(ctx?.model) ? "cache-first, fold only near the window" : "fold at budget"} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
 				`Tool caps: ${toolCaps} result(s), ${fmtTokens(Math.round(toolCharsSaved / 4))} estimated tokens kept out of the request`,
 				`Adaptive effort: ${adaptiveEffortEnabled ? "economy-only" : "off"}${effortAuto ? ` · auto ${effortAuto}` : ""}${effortManual ? " · manual override" : ""} · ceiling ${effortCeiling ?? "?"}`,
-				"Policy: fold old turns deterministically at a stable boundary; cap bash/search output with full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking.",
+				"Policy: DeepSeek routes (any provider) are cache-first and fold only near the window so the automatic prefix cache stays warm; other routes fold at the budget. Folding is deterministic at a stable boundary; bash/search output is capped with a full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking.",
 			];
 			notify(ctx, lines.join("\n"));
 		},

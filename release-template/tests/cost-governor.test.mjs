@@ -141,6 +141,21 @@ test('capText keeps both ends, names the spill and leaves short text alone', () 
 	assert.equal(short.text, 'small');
 });
 
+function largeConversation(cycles = 140, chars = 4000) {
+	const messages = [user('Inspect the codebase and report the blocking issue.')];
+	for (let i = 0; i < cycles; i++) {
+		const callId = `large-${i}`;
+		messages.push({
+			role: 'assistant',
+			content: [{ type: 'toolCall', id: callId, name: 'bash', arguments: { command: `sed -n '1,120p' src/large_${i}.js` } }],
+			timestamp: stamp(),
+		});
+		messages.push(toolResult(callId, `file ${i}\n${'payload '.repeat(Math.ceil(chars / 8))}`));
+	}
+	messages.push(user('Continue with the fix.'));
+	return messages;
+}
+
 function fakePi() {
 	const hooks = new Map();
 	const commands = new Map();
@@ -323,6 +338,35 @@ test('resume uses the lower first-call budget so a retained prefix is not re-bil
 		assert.ok(entries.some((entry) => entry.type === 'context-fold-v1'));
 		const again = hooks.get('context')[0]({ type: 'context', messages }, ctx);
 		assert.equal(again.messages[0].content, first.messages[0].content, 'the resumed fold is stable');
+	} finally {
+		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+		Object.assign(process.env, saved);
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test('DeepSeek routes keep the prefix cache intact and fold only near the window', async () => {
+	const saved = { ...process.env };
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
+	delete process.env.PI_CONTEXT_BUDGET;
+	process.env.PI_COST_BUDGET_USD = 'off';
+	process.env.PI_CODING_AGENT_DIR = temp;
+	try {
+		const { default: register } = await import(extensionUrl);
+		const { pi, hooks, entries } = fakePi();
+		register(pi);
+		const messages = largeConversation();
+		assert.ok(estimateMessagesTokens(messages) > 100_000, 'the fixture is above the old flat budget');
+		const deepseekCtx = fakeCtx();
+		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, deepseekCtx));
+		const untouched = hooks.get('context')[0]({ type: 'context', messages }, deepseekCtx);
+		assert.equal(untouched, undefined, 'a DeepSeek request below 80% of its window is not rewritten');
+		assert.equal(entries.some((entry) => entry.type === 'context-fold-v1'), false, 'no mid-session prefix rewrite is persisted');
+		const otherCtx = fakeCtx({ model: { provider: 'anthropic', id: 'claude-sonnet-4-5', contextWindow: 200_000, maxTokens: 64_000, input: ['text'] } });
+		const folded = hooks.get('context')[0]({ type: 'context', messages }, otherCtx);
+		assert.ok(folded?.messages, 'a non-DeepSeek route keeps the existing budget');
+		assert.equal(folded.messages[0].customType, 'context-fold');
+		assert.ok(entries.some((entry) => entry.type === 'context-fold-v1'));
 	} finally {
 		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
 		Object.assign(process.env, saved);

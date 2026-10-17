@@ -99,7 +99,7 @@ Attach one deterministic workflow reminder to the first matching tool result (in
 
 #### cost-governor
 
-Keep long sessions affordable: fold old context at a stable boundary, batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten context/tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.
+Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.
 
 **Entrypoints:** `cost-governor`, `/budget`, `read_many`
 
@@ -113,7 +113,7 @@ Keep long sessions affordable: fold old context at a stable boundary, batch inde
 - `/budget`: Report session spend, cache hit rate, current context budget, fold count, tool caps and adaptive effort state.
 - `/budget <usd|off|reset>`: Set the soft budget for this session; economy mode lowers caps and routine effort, it does not stop the task.
 - `PI_CONTEXT_GOVERNOR`: Set to off to disable folding, tool caps and the budget.
-- `PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP`: Fold threshold and verbatim recent-tail tokens; defaults 100000 / 20000.
+- `PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP`: Explicit fold threshold and verbatim recent-tail tokens. Unset, DeepSeek routes fold near 80% of the model window and other routes at 100000; the tail defaults to 20000.
 - `PI_TOOL_RESULT_MAX`: Bash/search result cap in characters; default 24000.
 - `PI_COST_BUDGET_USD`: Soft USD budget; default 0.10, off disables economy mode.
 - `PI_ADAPTIVE_EFFORT`: Set to off to keep the configured thinking level in economy mode.
@@ -1289,7 +1289,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 793; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 811; literal)
-- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 207; literal)
+- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 226; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2277; literal)
@@ -1360,7 +1360,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
-- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 635)
+- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 663)
 - /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1731)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1846)
