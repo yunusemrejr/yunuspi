@@ -1070,6 +1070,54 @@
       "tools": []
     },
     {
+      "id": "cost-governor",
+      "group": "commands",
+      "summary": "Keep long sessions affordable: fold old context at a stable boundary, cap oversized bash/search output with a full-output spill, and tighten context/tool caps at a soft USD budget. No extra model call and no work skipped.",
+      "entrypoints": [
+        "cost-governor",
+        "/budget"
+      ],
+      "commands": [
+        "budget"
+      ],
+      "options": [
+        {
+          "name": "/budget",
+          "summary": "Report session spend, cache hit rate, current context budget, fold count and tool caps."
+        },
+        {
+          "name": "/budget <usd|off|reset>",
+          "summary": "Set the soft budget for this session; economy mode lowers caps, it does not stop the task."
+        },
+        {
+          "name": "PI_CONTEXT_GOVERNOR",
+          "summary": "Set to off to disable folding, tool caps and the budget."
+        },
+        {
+          "name": "PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP",
+          "summary": "Fold threshold and verbatim recent-tail tokens; defaults 100000 / 20000."
+        },
+        {
+          "name": "PI_TOOL_RESULT_MAX",
+          "summary": "Bash/search result cap in characters; default 24000."
+        },
+        {
+          "name": "PI_COST_BUDGET_USD",
+          "summary": "Soft USD budget; default 0.10, off disables economy mode."
+        }
+      ],
+      "related": [
+        "quick-commands",
+        "context-diagnostics"
+      ],
+      "sourceFiles": [
+        "agent/extensions/cost-governor.ts",
+        "agent/extensions/lib/context-governor.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
+      "tools": []
+    },
+    {
       "id": "quick-commands",
       "group": "commands",
       "summary": "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
@@ -1079,6 +1127,7 @@
       ],
       "commands": [
         "cost",
+        "budget",
         "self",
         "metrics",
         "obs",
@@ -3247,6 +3296,11 @@
         "line": 618
       },
       {
+        "name": "budget",
+        "source": "agent/extensions/cost-governor.ts",
+        "line": 432
+      },
+      {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
         "line": 1731
@@ -4721,7 +4775,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 706,
+      "sourceFiles": 708,
       "registrationSites": 64,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 100,
@@ -4766,6 +4820,10 @@
       },
       {
         "path": "agent/extensions/continuation-notice.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/cost-governor.ts",
         "exists": true
       },
       {
@@ -5016,6 +5074,10 @@
       },
       {
         "path": "agent/extensions/lib/context-anchor.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/context-governor.ts",
         "exists": true
       },
       {

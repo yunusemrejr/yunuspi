@@ -97,13 +97,36 @@ Attach one deterministic workflow reminder to the first matching tool result (in
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
+#### cost-governor
+
+Keep long sessions affordable: fold old context at a stable boundary, cap oversized bash/search output with a full-output spill, and tighten context/tool caps at a soft USD budget. No extra model call and no work skipped.
+
+**Entrypoints:** `cost-governor`, `/budget`
+
+**Commands:** `/budget`
+
+**Options:**
+
+- `/budget`: Report session spend, cache hit rate, current context budget, fold count and tool caps.
+- `/budget <usd|off|reset>`: Set the soft budget for this session; economy mode lowers caps, it does not stop the task.
+- `PI_CONTEXT_GOVERNOR`: Set to off to disable folding, tool caps and the budget.
+- `PI_CONTEXT_BUDGET|PI_CONTEXT_KEEP`: Fold threshold and verbatim recent-tail tokens; defaults 100000 / 20000.
+- `PI_TOOL_RESULT_MAX`: Bash/search result cap in characters; default 24000.
+- `PI_COST_BUDGET_USD`: Soft USD budget; default 0.10, off disables economy mode.
+
+**Related records:** `quick-commands`, `context-diagnostics`
+
+**Source:** [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts), [`agent/extensions/lib/context-governor.ts`](../../agent/extensions/lib/context-governor.ts)
+
+**Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
+
 #### quick-commands
 
 Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/goal`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
+**Commands:** `/cost`, `/budget`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/goal`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
 
 **Options:**
 
@@ -1332,6 +1355,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
+- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 432)
 - /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1731)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1846)
@@ -1497,6 +1521,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts)
 - [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts)
 - [`agent/extensions/continuation-notice.ts`](../../agent/extensions/continuation-notice.ts)
+- [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts)
 - [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts)
 - [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts)
 - [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts)
@@ -1562,6 +1587,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/completion-check.ts`](../../agent/extensions/lib/completion-check.ts)
 - [`agent/extensions/lib/completion-gate.ts`](../../agent/extensions/lib/completion-gate.ts)
 - [`agent/extensions/lib/context-anchor.ts`](../../agent/extensions/lib/context-anchor.ts)
+- [`agent/extensions/lib/context-governor.ts`](../../agent/extensions/lib/context-governor.ts)
 - [`agent/extensions/lib/context-limits.ts`](../../agent/extensions/lib/context-limits.ts)
 - [`agent/extensions/lib/context-provenance.ts`](../../agent/extensions/lib/context-provenance.ts)
 - [`agent/extensions/lib/continuation-notice.ts`](../../agent/extensions/lib/continuation-notice.ts)

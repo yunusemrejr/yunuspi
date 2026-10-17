@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const expected = [
-  "3d", "anatomy", "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
+  "3d", "anatomy", "bg", "bg-clear", "bg-tasks", "bg-update", "budget", "catalog-status", "claude-cache", "commands", "cost", "curator", "custom-double",
   "double", "effort", "errors", "export-json", "goal", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
   "logs", "memory-prime", "metrics", "nobug", "noslop", "obs", "observer-book", "or-provider", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
@@ -60,7 +60,7 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
     assert.deepEqual(result.badEnums, []);
-    assert.equal(result.extensions, 51);
+    assert.equal(result.extensions, 52);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

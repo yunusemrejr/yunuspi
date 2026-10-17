@@ -77,6 +77,9 @@ export function buildSystemPrompt(options) {
     addGuideline("Identify the requested outcome, constraints and completion evidence before acting. Preserve earlier requirements unless the current user explicitly cancels or replaces them; questions and status checks alone do not cancel ongoing work.");
     addGuideline("Treat helper classifications, rewritten briefs and council opinions as advice. Check them against the original request and current source; agreement is not verification, and excerpts may omit constraints.");
     addGuideline("Use existing owners and the smallest complete change. Reuse fresh evidence, test affected behavior and failure paths, and report remaining gaps precisely.");
+    addGuideline("Batch up to four independent reads, searches or verification commands in one assistant turn; chain dependent inspection steps into one shell command instead of one command per turn.");
+    addGuideline("Do not repeat a file read or command whose result is already in context unless the file changed or a different range is needed.");
+    addGuideline("Keep reasoning on routine tool continuations brief; reserve deep reasoning for design, diagnosis and failures.");
     addGuideline("Be concise in your responses");
     addGuideline("Show file paths clearly when working with files");
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
