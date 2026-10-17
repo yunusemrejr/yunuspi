@@ -1,3 +1,19 @@
+## 0.40.0 — Cost governor: fold context, cap spills, budget the session
+
+**The 19¢ session is now a bounded-context session.** A recent DeepSeek session on the SEO project made 126 provider calls, grew its request prefix to 276k tokens, and was billed 19.8¢: 37% output, 33% cache-read context, 29% fresh input. A 45.8¢ session grew to 410k tokens and re-billed the whole prefix after two long idle gaps. The harness now folds old history instead of carrying every old tool result to the end of the run.
+
+**How folding works.** Above `PI_CONTEXT_BUDGET` (default 100,000 estimated tokens) the new cost-governor extension replaces older turns with a deterministic digest at a safe tool boundary: latest user request kept verbatim, a 20k-token recent tail kept, and the rest reduced to goals, changed/inspected files, commands, verification, errors and decisions. The digest is built locally — no summary model call, no added latency. The cutoff and digest are persisted so a resume applies the same view; a resumed session uses a 60k first-call budget so a retained 278k/410k prefix is not re-billed whole. Re-folding happens only after the tail grows by a material amount (`PI_CONTEXT_GOVERNOR=off` disables it), so the provider prefix stays cacheable between folds. The full session and history are untouched; old files can always be re-read.
+
+**Large tool output is capped at the source.** Bash, PowerShell, grep, find and ls results over `PI_TOOL_RESULT_MAX` (default 24,000 characters) keep both ends and a private full-output spill, with the spill path in the result. A 47k-character test log no longer enters the prefix in full. `read` and structured verification tools keep their existing contract.
+
+**A soft dollar budget, not a hard stop.** `/budget` reports session spend, cache-hit rate, context size, fold count and tool-cap savings; `/budget <usd|off|reset>` sets the soft budget. At `PI_COST_BUDGET_USD` (default 0.10) the harness enters economy mode: a 60k context budget, a 10k tool cap and one short instruction to batch reads/tests and avoid repeated checks. It never stops the task, skips verification or changes the model.
+
+**Cheaper default agent behavior.** The base system prompt now asks for up to four independent reads/searches/verification commands per turn, one chained shell command for dependent inspection, no repeat of an unchanged file/command, and brief reasoning on routine tool continuations. These are guidance, not gates; hard design, diagnosis and failure turns keep their configured thinking level.
+
+**Updates preserve user skill links.** A `skills/<name>` symlink (for example a skill kept in `~/.claude/skills`) is carried through an update instead of aborting it; the installer still refuses a symlinked private-state root or a link that would replace incoming managed source. Private roots such as reminders, task-state, checkpoints, settings and expert state now move intact on a state-preserving update.
+
+**Evidence.** Offline deterministic replay over the recorded 19.8¢ transcript projects ~17% less modeled cost from folding/capping alone (2 folds; peak request 112k instead of 276k); the recorded 45.8¢ session projects ~22% (4 folds; peak 110k instead of 410k), before the resume trim and without assuming the model changes a single action. The replay is not a bill and not an end-to-end model-quality claim. The extension has 8 focused unit/integration tests, including tool-pair safety, deterministic digests, cache-stable application, spill files, economy mode and the kill switch. `node agent/scripts/compatibility/harness-load-test.mjs` loads all 52 extensions against the SDK with no errors.
+
 # Changelog
 
 ## 0.39.1 — /anatomy names the installed skill guides

@@ -10,6 +10,8 @@
 
 **Cheaper default agent behavior.** The base system prompt now asks for up to four independent reads/searches/verification commands per turn, one chained shell command for dependent inspection, no repeat of an unchanged file/command, and brief reasoning on routine tool continuations. These are guidance, not gates; hard design, diagnosis and failure turns keep their configured thinking level.
 
+**Updates preserve user skill links.** A `skills/<name>` symlink (for example a skill kept in `~/.claude/skills`) is carried through an update instead of aborting it; the installer still refuses a symlinked private-state root or a link that would replace incoming managed source. Private roots such as reminders, task-state, checkpoints, settings and expert state now move intact on a state-preserving update.
+
 **Evidence.** Offline deterministic replay over the recorded 19.8¢ transcript projects ~17% less modeled cost from folding/capping alone (2 folds; peak request 112k instead of 276k); the recorded 45.8¢ session projects ~22% (4 folds; peak 110k instead of 410k), before the resume trim and without assuming the model changes a single action. The replay is not a bill and not an end-to-end model-quality claim. The extension has 8 focused unit/integration tests, including tool-pair safety, deterministic digests, cache-stable application, spill files, economy mode and the kill switch. `node agent/scripts/compatibility/harness-load-test.mjs` loads all 52 extensions against the SDK with no errors.
 
 # Changelog

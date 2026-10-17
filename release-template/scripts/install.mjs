@@ -57,7 +57,10 @@ const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest
 const PRIVATE_STATE_DIRECTORIES = new Set([
   'sessions', 'memory', 'logs', 'backups', 'tasks', 'work', 'artifacts',
   'worktrees', 'missions', 'local-models', 'local-tools', 'project-intelligence',
-  'projects',
+  'projects', 'reminders', 'sys-prompts', 'task-state', 'settings',
+  'popups', 'checkpoints', 'expert', 'inference-slots', 'sibling-bridge',
+  'web-search-cache', 'web-search-pacing', 'deployment-stage-owned-core',
+  'competence', 'organize',
   // Existing live installations may also have these small private roots.
   '.pi', 'cache', 'agent', 'public-template',
 ]);
@@ -135,7 +138,18 @@ function carryState(previous, stage, incoming, incomingCore, incomingDesktop) {
         deferred.push(relative);
         continue;
       }
-      if (stat.isSymbolicLink()) throw Error(`Cannot preserve a symlink or special state file: ${relative}`);
+      if (stat.isSymbolicLink()) {
+        // User-owned skill links are state, not managed source. Preserve the
+        // link itself without following it; an incoming file of the same name
+        // still conflicts rather than being replaced by a link.
+        if (relative.split(path.sep)[0] === 'skills' && relative !== 'skills') {
+          if (incoming[relative] || hasLstat(destination)) conflict(relative);
+          fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+          fs.symlinkSync(fs.readlinkSync(file), destination);
+          continue;
+        }
+        throw Error(`Cannot preserve a symlink or special state file: ${relative}`);
+      }
       if (!stat.isDirectory() && !stat.isFile()) throw Error(`Cannot preserve a special state file: ${relative}`);
       if (stat.isDirectory()) {
         if (incoming[relative]) conflict(relative);
