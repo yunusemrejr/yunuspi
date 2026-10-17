@@ -145,15 +145,24 @@ function fakePi() {
 	const hooks = new Map();
 	const commands = new Map();
 	const entries = [];
+	const tools = new Map();
+	let thinking = 'max';
 	const pi = {
 		on(event, handler) {
 			if (!hooks.has(event)) hooks.set(event, []);
 			hooks.get(event).push(handler);
 		},
+		registerTool(definition) { tools.set(definition.name, definition); },
 		registerCommand(name, options) { commands.set(name, options); },
 		appendEntry(type, data) { entries.push({ type, data }); },
+		getThinkingLevel() { return thinking; },
+		setThinkingLevel(level) {
+			const previous = thinking;
+			thinking = level;
+			for (const handler of hooks.get('thinking_level_select') ?? []) handler({ type: 'thinking_level_select', level, previousLevel: previous });
+		},
 	};
-	return { pi, hooks, commands, entries };
+	return { pi, hooks, commands, entries, tools, thinking: () => thinking };
 }
 
 function fakeCtx(overrides = {}) {
@@ -161,8 +170,9 @@ function fakeCtx(overrides = {}) {
 	return {
 		hasUI: true,
 		ui: { notify: (text, kind) => notifications.push({ text, kind }) },
-		model: { provider: 'deepseek', id: 'deepseek-flash', contextWindow: 1_000_000, maxTokens: 384_000 },
+		model: { provider: 'deepseek', id: 'deepseek-flash', contextWindow: 1_000_000, maxTokens: 384_000, input: ['text'] },
 		sessionManager: { getSessionId: () => 'synthetic-session', getBranch: () => [] },
+		cwd: process.cwd(),
 		notifications,
 		...overrides,
 	};
@@ -313,6 +323,81 @@ test('resume uses the lower first-call budget so a retained prefix is not re-bil
 		assert.ok(entries.some((entry) => entry.type === 'context-fold-v1'));
 		const again = hooks.get('context')[0]({ type: 'context', messages }, ctx);
 		assert.equal(again.messages[0].content, first.messages[0].content, 'the resumed fold is stable');
+	} finally {
+		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+		Object.assign(process.env, saved);
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test('read_many batches independent files, caps one file and reports per-file failures', async () => {
+	const saved = { ...process.env };
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
+	process.env.PI_COST_BUDGET_USD = 'off';
+	process.env.PI_CODING_AGENT_DIR = temp;
+	try {
+		fs.writeFileSync(path.join(temp, 'alpha.txt'), 'alpha first\nalpha second\n');
+		fs.writeFileSync(path.join(temp, 'beta.txt'), 'beta first\nbeta second\n');
+		fs.writeFileSync(path.join(temp, 'large.txt'), `${'large line payload\n'.repeat(2200)}`);
+		const { default: register } = await import(extensionUrl);
+		const { pi, hooks, tools } = fakePi();
+		register(pi);
+		const ctx = fakeCtx({ cwd: temp });
+		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
+		const tool = tools.get('read_many');
+		assert.ok(tool, 'read_many is registered');
+		const result = await tool.execute('read-many-1', { files: [{ path: 'alpha.txt' }, { path: 'beta.txt' }, { path: 'large.txt' }, { path: 'missing.txt' }] }, undefined, undefined, ctx);
+		assert.match(result.content[0].text, /alpha first/);
+		assert.match(result.content[0].text, /beta second/);
+		assert.match(result.content[0].text, /read_many capped/);
+		assert.match(result.content[0].text, /ERROR: .*missing\.txt|ERROR: ENOENT/);
+		assert.equal(result.isError, undefined, 'one failed file does not fail the batch');
+		assert.ok(result.details.files.some((file) => file.truncated === true));
+		assert.ok(result.details.files.some((file) => file.error));
+		assert.ok(fs.readdirSync(temp).length >= 3);
+		const one = await tool.execute('read-many-2', { files: [{ path: 'alpha.txt' }] }, undefined, undefined, ctx);
+		assert.equal(one.isError, true);
+	} finally {
+		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+		Object.assign(process.env, saved);
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test('economy mode lowers routine tool-continuation thinking, restores on errors and yields to a manual level', async () => {
+	const saved = { ...process.env };
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
+	process.env.PI_COST_BUDGET_USD = '0.001';
+	process.env.PI_CONTEXT_BUDGET = '8000';
+	process.env.PI_CONTEXT_KEEP = '2000';
+	process.env.PI_CODING_AGENT_DIR = temp;
+	try {
+		const { default: register } = await import(extensionUrl);
+		const { pi, hooks, thinking } = fakePi();
+		register(pi);
+		const ctx = fakeCtx();
+		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
+		assert.equal(thinking(), 'max');
+		hooks.get('message_end')[0]({ message: { role: 'assistant', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.002 } } } }, ctx);
+		const turn = (tool, isError = false) => ({
+			type: 'turn_end',
+			message: { role: 'assistant', content: [{ type: 'toolCall', name: tool, arguments: { command: 'ls' } }] },
+			toolResults: [{ isError }],
+		});
+		hooks.get('turn_end')[0](turn('bash'), ctx);
+		assert.equal(thinking(), 'high', 'routine mechanical work steps down from max');
+		hooks.get('turn_end')[0](turn('bash', true), ctx);
+		assert.equal(thinking(), 'max', 'a failed tool keeps the configured ceiling');
+		hooks.get('turn_end')[0](turn('write'), ctx);
+		assert.equal(thinking(), 'max', 'judgment tools keep the configured ceiling');
+		hooks.get('turn_end')[0](turn('bash'), ctx);
+		assert.equal(thinking(), 'high', 'a later routine turn can step down again');
+		// A shutdown must not persist an automatic level as the user's choice.
+		hooks.get('session_shutdown')[0]({ type: 'session_shutdown' }, ctx);
+		assert.equal(thinking(), 'max', 'shutdown restores the configured ceiling after an auto step-down');
+		pi.setThinkingLevel('medium');
+		hooks.get('turn_end')[0](turn('bash'), ctx);
+		assert.equal(thinking(), 'medium', 'a manual selection disables automatic effort');
 	} finally {
 		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
 		Object.assign(process.env, saved);

@@ -87,7 +87,7 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
   return selected;
 }
 export const CORE_TOOLS = new Set([
-  'read','bash','edit','write','grep','find','ls','tool_search',
+  'read','read_many','bash','edit','write','grep','find','ls','tool_search',
   'session_self','subagent','bg_wait','quality_review','skill_review','micro_task',
   // These readers are dependencies of existing context/safety hook owners.
   'project_intel','project_tests','obs_read','checkpoint_read','todo',
@@ -103,7 +103,7 @@ export const CORE_TOOLS = new Set([
 /** Direct work keeps verification, discovery and bash's background dependencies.
  * All other capabilities remain discoverable under the same host ceiling. */
 export const DIRECT_CORE_TOOLS = new Set([
-  'read','bash','edit','write','grep','find','ls','tool_search',
+  'read','read_many','bash','edit','write','grep','find','ls','tool_search',
   // Planning is an established prompt dependency even for short tasks. Hiding
   // it caused a guaranteed failed first call before discovery could recover.
   'todo','quality_review','project_tests','checkpoint_read','skill_review',

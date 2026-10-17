@@ -1072,22 +1072,30 @@
     {
       "id": "cost-governor",
       "group": "commands",
-      "summary": "Keep long sessions affordable: fold old context at a stable boundary, cap oversized bash/search output with a full-output spill, and tighten context/tool caps at a soft USD budget. No extra model call and no work skipped.",
+      "summary": "Keep long sessions affordable: fold old context at a stable boundary, batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten context/tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
       "entrypoints": [
         "cost-governor",
-        "/budget"
+        "/budget",
+        "read_many"
+      ],
+      "tools": [
+        "read_many"
       ],
       "commands": [
         "budget"
       ],
       "options": [
         {
+          "name": "read_many.files",
+          "summary": "Two to six independent paths with optional offset/limit; one request instead of one read per file."
+        },
+        {
           "name": "/budget",
-          "summary": "Report session spend, cache hit rate, current context budget, fold count and tool caps."
+          "summary": "Report session spend, cache hit rate, current context budget, fold count, tool caps and adaptive effort state."
         },
         {
           "name": "/budget <usd|off|reset>",
-          "summary": "Set the soft budget for this session; economy mode lowers caps, it does not stop the task."
+          "summary": "Set the soft budget for this session; economy mode lowers caps and routine effort, it does not stop the task."
         },
         {
           "name": "PI_CONTEXT_GOVERNOR",
@@ -1104,6 +1112,10 @@
         {
           "name": "PI_COST_BUDGET_USD",
           "summary": "Soft USD budget; default 0.10, off disables economy mode."
+        },
+        {
+          "name": "PI_ADAPTIVE_EFFORT",
+          "summary": "Set to off to keep the configured thinking level in economy mode."
         }
       ],
       "related": [
@@ -1112,10 +1124,10 @@
       ],
       "sourceFiles": [
         "agent/extensions/cost-governor.ts",
-        "agent/extensions/lib/context-governor.ts"
+        "agent/extensions/lib/context-governor.ts",
+        "agent/extensions/lib/effort-policy.mjs"
       ],
-      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
-      "tools": []
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
     },
     {
       "id": "quick-commands",
@@ -3298,7 +3310,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 432
+        "line": 635
       },
       {
         "name": "catalog-status",
@@ -4019,6 +4031,12 @@
         "kind": "literal"
       },
       {
+        "name": "read_many",
+        "source": "agent/extensions/cost-governor.ts",
+        "line": 207,
+        "kind": "literal"
+      },
+      {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
         "line": 242,
@@ -4431,6 +4449,12 @@
         "kind": "literal"
       },
       {
+        "name": "read_many",
+        "source": "agent/extensions/cost-governor.ts",
+        "line": 207,
+        "kind": "literal"
+      },
+      {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
         "line": 242,
@@ -4776,10 +4800,10 @@
     ],
     "coverage": {
       "sourceFiles": 708,
-      "registrationSites": 64,
+      "registrationSites": 65,
       "indirectRegistrationSites": 21,
-      "stableRegistrationRows": 100,
-      "uniqueStableTools": 99,
+      "stableRegistrationRows": 101,
+      "uniqueStableTools": 100,
       "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",

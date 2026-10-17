@@ -33,6 +33,9 @@ import * as path from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
+import { createReadToolDefinition } from "@yunuspi/coding-agent";
+import { Type } from "typebox";
+import { createEffortController } from "./lib/effort-policy.mjs";
 import {
 	applyFold,
 	capText,
@@ -56,6 +59,9 @@ const HYSTERESIS = 8_000;
 const DEFAULT_BUDGET_USD = 0.1;
 const ECONOMY_CONTEXT_BUDGET = 60_000;
 const RESUME_CONTEXT_BUDGET = 60_000;
+const READ_MANY_MAX_FILES = 6;
+const READ_MANY_TOTAL_CHARS = 64_000;
+const READ_MANY_FILE_CHARS = 24_000;
 const ECONOMY_TOOL_MAX = 10_000;
 
 const enabled = () => String(process.env.PI_CONTEXT_GOVERNOR ?? "").toLowerCase() !== "off";
@@ -195,6 +201,86 @@ function writeSpill(text: string, ctx: any): string | undefined {
 export default function costGovernorExtension(pi: ExtensionAPI): void {
 	if (!enabled()) return;
 
+	// Batched independent inspection: one model request instead of one per file.
+	// The individual read tool remains the owner of path safety, image handling
+	// and its own truncation; this tool only batches calls and bounds the sum.
+	pi.registerTool({
+		name: "read_many",
+		label: "Read several files",
+		description: "Read two to six independent files in one call. Use this for broad inspection instead of serializing one read per turn. Each file is bounded; a capped file names its spill and can be continued with read offset/limit.",
+		promptSnippet: "Read several independent files in one turn",
+		promptGuidelines: [
+			"Use read_many for two to six independent file inspections; use read for one file or a long specific range.",
+			"Batch independent work in one turn: a single read_many or several parallel tool calls are cheaper than one file per turn.",
+		],
+		parameters: Type.Object({
+			files: Type.Array(Type.Object({
+				path: Type.String({ minLength: 1, maxLength: 4096, description: "File path relative to the working directory or absolute." }),
+				offset: Type.Optional(Type.Integer({ minimum: 1, description: "1-based first line." })),
+				limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000, description: "Maximum lines." })),
+			}), { minItems: 2, maxItems: READ_MANY_MAX_FILES, description: "Two to six files to read in one request." }),
+		}),
+		async execute(toolCallId: string, input: any, signal: any, _onUpdate: any, ctx: any) {
+			const files = Array.isArray(input?.files) ? input.files.slice(0, READ_MANY_MAX_FILES) : [];
+			if (files.length < 2) return { content: [{ type: "text", text: "read_many requires two to six files; use read for one file." }], isError: true };
+			const readTool = createReadToolDefinition(ctx?.cwd || process.cwd());
+			const sections: string[] = [];
+			const images: any[] = [];
+			const details: any[] = [];
+			let total = 0;
+			let failed = 0;
+			for (let index = 0; index < files.length; index++) {
+				if (signal?.aborted) throw new Error("Operation aborted");
+				const spec = files[index] || {};
+				const requested = typeof spec.path === "string" ? spec.path.slice(0, 4096) : "";
+				if (!requested) {
+					failed += 1;
+					sections.push(`### <missing path>\nERROR: path is required`);
+					details.push({ path: "", error: "path is required" });
+					continue;
+				}
+				try {
+					const result = await readTool.execute(`${toolCallId}:${index}`, {
+						path: requested,
+						...(Number.isSafeInteger(spec.offset) && spec.offset > 0 ? { offset: spec.offset } : {}),
+						...(Number.isSafeInteger(spec.limit) && spec.limit > 0 ? { limit: Math.min(2000, spec.limit) } : {}),
+					}, signal, undefined, ctx);
+					const text = (result?.content || []).filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n");
+					const resultImages = (result?.content || []).filter((part: any) => part?.type === "image");
+					let content = text;
+					let truncated = false;
+					const remaining = READ_MANY_TOTAL_CHARS - total;
+					const budget = Math.min(READ_MANY_FILE_CHARS, remaining);
+					if (budget < 1000) {
+						sections.push(`### ${requested}\n[read_many aggregate budget exhausted; continue with read path="${requested}"]`);
+						details.push({ path: requested, chars: 0, skipped: true });
+						continue;
+					}
+					if (content.length > budget) {
+						const spill = writeSpill(content, ctx);
+						const marker = `\n\n[... read_many capped this file at ${budget} chars; full output: ${spill ?? "unavailable"}. Continue with read path="${requested}" offset=...]\n\n`;
+						content = capText(content, budget, marker).text;
+						truncated = true;
+					}
+					total += content.length;
+					sections.push(`### ${requested}\n${content}`);
+					images.push(...resultImages);
+					details.push({ path: requested, chars: content.length, truncated, ...(result?.details?.fullOutputPath ? { fullOutputPath: result.details.fullOutputPath } : {}) });
+				} catch (error) {
+					failed += 1;
+					const message = error instanceof Error ? error.message : String(error);
+					sections.push(`### ${requested}\nERROR: ${message.slice(0, 300)}`);
+					details.push({ path: requested, error: message.slice(0, 300) });
+				}
+			}
+			return {
+				content: [{ type: "text", text: sections.join("\n\n") }, ...images],
+				details: { files: details, totalChars: total },
+				...(failed === files.length ? { isError: true } : {}),
+			};
+		},
+	});
+
 	let fold: FoldState | undefined;
 	let totals = emptyTotals();
 	let foldCount = 0;
@@ -210,6 +296,15 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	let lastView: GovernedMessage[] | undefined;
 	let resumed = false;
 	let initialized = false;
+	let effortCeiling: string | undefined;
+	let effort: ReturnType<typeof createEffortController> | undefined;
+	let effortManual = false;
+	let effortInitialized = false;
+	let effortAuto: string | undefined;
+	let effortNoticeSent = false;
+	let lastUserText = "";
+	const effortPending: string[] = [];
+	const adaptiveEffortEnabled = String(process.env.PI_ADAPTIVE_EFFORT ?? "").toLowerCase() !== "off";
 
 	const currentBudget = (): number => (budgetOverride !== undefined ? budgetOverride : budgetUsd);
 
@@ -257,6 +352,58 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		lastView = undefined;
 		resumed = false;
 		initialized = false;
+		effortCeiling = undefined;
+		effort = undefined;
+		effortManual = false;
+		effortInitialized = false;
+		effortAuto = undefined;
+		effortNoticeSent = false;
+		lastUserText = "";
+		effortPending.length = 0;
+	};
+
+	const initEffort = () => {
+		let level = "high";
+		try {
+			const current = pi.getThinkingLevel();
+			if (typeof current === "string") level = current;
+		} catch {
+			/* a host without a thinking selector keeps the default */
+		}
+		effortCeiling = level;
+		effort = createEffortController({ level, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
+		effortManual = false;
+		effortInitialized = true;
+		effortAuto = undefined;
+		effortNoticeSent = false;
+	};
+
+	const applyEffort = (level: string | undefined, ctx?: any) => {
+		if (!level) return;
+		let current = "";
+		try {
+			current = String(pi.getThinkingLevel());
+		} catch {
+			return;
+		}
+		if (current === level) return;
+		effortPending.push(level);
+		try {
+			pi.setThinkingLevel(level as any);
+			effortAuto = level;
+			if (ctx && effortCeiling && level !== effortCeiling && !effortNoticeSent) {
+				effortNoticeSent = true;
+				notify(ctx, `Cost governor: economy mode is setting routine tool continuations to ${level} thinking; deep, judgment, error and large-change turns keep ${effortCeiling}. Set PI_ADAPTIVE_EFFORT=off to disable.`);
+			}
+		} catch {
+			const index = effortPending.lastIndexOf(level);
+			if (index >= 0) effortPending.splice(index, 1);
+		}
+	};
+
+	const restoreEffort = (ctx?: any) => {
+		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
+		effortAuto = undefined;
 	};
 
 	const restore = (ctx: any) => {
@@ -281,6 +428,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		resumed = totals.turns > 0;
 		initialized = true;
 		if (currentBudget() > 0 && totals.cost >= currentBudget()) economy = true;
+		initEffort();
 	};
 
 	pi.on("session_start", (_event, ctx) => restore(ctx));
@@ -293,11 +441,66 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		lastView = undefined;
 		lastViewSignature = "";
 	});
+	pi.on("session_shutdown", () => {
+		// Never persist the economy step-down as the user's chosen level.
+		restoreEffort();
+	});
 	pi.on("model_select", () => {
 		// A smaller window can make the cached view illegal; re-evaluate the
 		// fold against the new effective budget on the next request.
 		lastView = undefined;
 		lastViewSignature = "";
+	});
+	pi.on("input", (event: any, ctx: any) => {
+		if (!effortInitialized || event?.source === "extension") return;
+		const text = typeof event?.originalText === "string" ? event.originalText : event?.text;
+		if (typeof text === "string" && text.trim()) lastUserText = text.slice(0, 8_000);
+		effort?.reset();
+		// A new human turn starts from the configured level again; only goal
+		// continuations and tool steps inherit the economy step-down.
+		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
+	});
+	pi.on("thinking_level_select", (event: any) => {
+		const pending = effortPending.indexOf(String(event?.level ?? ""));
+		if (pending >= 0) {
+			effortPending.splice(pending, 1);
+			return;
+		}
+		if (!effortInitialized) return;
+		// The initial level selection is the ceiling, not a manual override.
+		if (totals.turns === 0) {
+			effortCeiling = String(event.level);
+			effort = createEffortController({ level: effortCeiling, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
+			return;
+		}
+		// A human selection or another controller wins; the economy policy stays
+		// out of the way for the rest of this session.
+		effortManual = true;
+		effortCeiling = String(event.level);
+		effort = createEffortController({ level: effortCeiling, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
+		effortAuto = undefined;
+	});
+	pi.on("turn_end", (event: any, ctx: any) => {
+		if (!adaptiveEffortEnabled || !economy || effortManual || !effort || !effortCeiling) return;
+		const message = event?.message;
+		if (message?.role !== "assistant") return;
+		const calls = Array.isArray(message.content) ? message.content.filter((block: any) => block?.type === "toolCall") : [];
+		const tools = calls.map((call: any) => String(call.name ?? "")).filter(Boolean);
+		const paths = new Set<string>();
+		for (const call of calls) {
+			const name = String(call?.name ?? "");
+			const args = call?.arguments && typeof call.arguments === "object" ? call.arguments : {};
+			if (name === "edit" || name === "write" || name === "bulk_edit") {
+				if (typeof args.path === "string") paths.add(args.path);
+				if (Array.isArray(args.files)) for (const file of args.files) if (typeof file === "string") paths.add(file);
+				if (Array.isArray(args.edits)) for (const edit of args.edits) if (typeof edit?.path === "string") paths.add(edit.path);
+			}
+		}
+		const errors = (Array.isArray(event?.toolResults) ? event.toolResults : []).filter((result: any) => result?.isError === true).length;
+		const advice = effort.advise({ tools, errors, files: paths.size, userText: lastUserText });
+		const desired = advice.difficulty === "routine" && advice.mechanical ? advice.level : effortCeiling;
+		if (desired && desired !== effortCeiling) applyEffort(desired, ctx);
+		else if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
 	});
 
 	const maybeEconomy = (ctx: any): boolean => {
@@ -440,7 +643,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					noticeLevel = 0;
 					lastView = undefined;
 					lastViewSignature = "";
-					notify(ctx, "Cost governor: soft budget disabled for this session; context/tool caps remain active.");
+					restoreEffort(ctx);
+					notify(ctx, "Cost governor: soft budget disabled for this session; context/tool caps remain active and the configured thinking level is restored.");
 					return;
 				}
 				if (/^(?:reset|default)$/i.test(arg)) {
@@ -450,6 +654,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					noticeLevel = economy ? 1 : 0;
 					lastView = undefined;
 					lastViewSignature = "";
+					if (!economy) restoreEffort(ctx);
 					notify(ctx, `Cost governor: soft budget reset to ${budgetUsd > 0 ? fmtUsd(budgetUsd) : "off"}.`);
 					return;
 				}
@@ -463,6 +668,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				noticeLevel = economy ? 1 : 0;
 				lastView = undefined;
 				lastViewSignature = "";
+				if (!economy) restoreEffort(ctx);
 				notify(ctx, `Cost governor: soft budget set to ${parsed > 0 ? fmtUsd(parsed) : "off"} for this session.`);
 				return;
 			}
@@ -477,7 +683,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				`Cost split: input ${fmtUsd(totals.inputCost)} · output ${fmtUsd(totals.outputCost)} · cache ${fmtUsd(totals.cacheCost)} · total ${fmtUsd(totals.cost)}`,
 				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
 				`Tool caps: ${toolCaps} result(s), ${fmtTokens(Math.round(toolCharsSaved / 4))} estimated tokens kept out of the request`,
-				"Policy: fold old turns deterministically at a stable boundary; cap bash/search output with full-output spill; soft budget tightens caps only. /budget off disables the budget, PI_CONTEXT_GOVERNOR=off disables the governor.",
+				`Adaptive effort: ${adaptiveEffortEnabled ? "economy-only" : "off"}${effortAuto ? ` · auto ${effortAuto}` : ""}${effortManual ? " · manual override" : ""} · ceiling ${effortCeiling ?? "?"}`,
+				"Policy: fold old turns deterministically at a stable boundary; cap bash/search output with full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking.",
 			];
 			notify(ctx, lines.join("\n"));
 		},

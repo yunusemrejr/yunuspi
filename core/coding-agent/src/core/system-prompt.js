@@ -80,6 +80,7 @@ export function buildSystemPrompt(options) {
     addGuideline("Batch up to four independent reads, searches or verification commands in one assistant turn; chain dependent inspection steps into one shell command instead of one command per turn.");
     addGuideline("Do not repeat a file read or command whose result is already in context unless the file changed or a different range is needed.");
     addGuideline("Keep reasoning on routine tool continuations brief; reserve deep reasoning for design, diagnosis and failures.");
+    addGuideline("Change files with edit or write. Do not use bash heredocs, python -c, perl -pi or sed -i to author or rewrite file content; use one edit call with multiple edits[] for separate locations in the same file.");
     addGuideline("Be concise in your responses");
     addGuideline("Show file paths clearly when working with files");
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");

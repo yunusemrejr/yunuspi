@@ -229,6 +229,7 @@ interface ToolCallInfo {
 	name: string;
 	command?: string;
 	path?: string;
+	paths?: string[];
 }
 
 function toolCalls(message: GovernedMessage): ToolCallInfo[] {
@@ -240,11 +241,15 @@ function toolCalls(message: GovernedMessage): ToolCallInfo[] {
 		if (row.type !== "toolCall") continue;
 		const args = (row.arguments && typeof row.arguments === "object" ? row.arguments : {}) as Record<string, unknown>;
 		const name = String(row.name ?? "?");
+		const paths = Array.isArray(args.files)
+			? args.files.map((file) => (typeof file === "string" ? file : typeof (file as any)?.path === "string" ? (file as any).path : "")).filter(Boolean)
+			: [];
 		calls.push({
 			callId: String(row.id ?? ""),
 			name,
 			command: typeof args.command === "string" ? args.command : undefined,
 			path: typeof args.path === "string" ? args.path : undefined,
+			...(paths.length ? { paths } : {}),
 		});
 	}
 	return calls;
@@ -291,8 +296,11 @@ export function buildDigest(
 				if (call.name === "edit" || call.name === "write" || call.name === "bulk_edit") {
 					const path = call.path ?? (call.command ? clipText(call.command, 160) : "");
 					if (path) edited.set(path, (edited.get(path) ?? 0) + 1);
+					for (const extra of call.paths ?? []) edited.set(extra, (edited.get(extra) ?? 0) + 1);
 				} else if (call.name === "read" && call.path) {
 					read.set(call.path, (read.get(call.path) ?? 0) + 1);
+				} else if (call.name === "read_many" && call.paths) {
+					for (const path of call.paths) read.set(path, (read.get(path) ?? 0) + 1);
 				} else if (call.name === "bash" && call.command) {
 					commands.push(clipText(call.command, 180));
 				}

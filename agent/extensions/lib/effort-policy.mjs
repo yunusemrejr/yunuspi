@@ -42,7 +42,7 @@ export const levelAt = (rank) =>
  * assumption rather than a measurement.
  */
 export const MECHANICAL_TOOLS = Object.freeze(new Set([
-	"read", "bash", "grep", "find", "ls", "edit", "obs_read",
+	"read", "read_many", "bash", "grep", "find", "ls", "edit", "obs_read",
 	"bg_status", "bg_logs", "bg_kill", "bg_wait", "bg_run",
 	"module_report", "project_report", "symbol_search", "checkpoint_read",
 	"session_self", "tool_search", "context_slice",

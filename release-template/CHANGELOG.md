@@ -1,3 +1,15 @@
+## 0.41.0 — Batch reads and economy-only effort
+
+**`read_many` batches independent inspection.** The cost governor registers `read_many({files:[…]})` for two to six paths with optional offsets, staged as a core/direct tool so it is available without a discovery round trip. It calls the native read tool per file (same path safety, image handling and truncation), bounds each file at 24k characters and the batch at 64k, spills capped content, and reports per-file errors without failing the whole batch. The prompt asks for batched independent inspection; the tool itself adds a `read_many` schema to the request. It is read-only.
+
+**Economy mode also steps down routine thinking.** The soft budget (`PI_COST_BUDGET_USD`, default 0.10) already tightened context and tool caps. Now, only in economy mode, a routine all-mechanical turn (`read`/`read_many`/`bash`/`grep`/`find`/`ls`/`edit`, no tool error, no judgment tool, fewer than five changed files) steps from the configured thinking ceiling to `high`. Deep, judgment, error and large-change turns keep the ceiling. A manual `/effort` selection disables the automatic step-down, `/budget off` restores the configured level, and `PI_ADAPTIVE_EFFORT=off` disables it entirely. This reuses the existing pure `effort-policy.mjs` invariants (floor, ceiling, no-stick) rather than inventing a second heuristic.
+
+**File changes use edit/write, not heredocs.** The system prompt now asks the model to author and rewrite files through `edit`/`write` (one `edit` call with multiple `edits[]` for separate locations) instead of bash heredocs, `python -c`, `perl -pi` or `sed -i`. In the recorded 19.8¢ session those 39 heredoc-Python calls were 90,072 characters of tool-call arguments — over 40% of all tool-argument output — and they bypass the edit tool's atomic replacement, formatting and read-before-edit protections.
+
+**Why this matters to the bill.** A long autonomous session pays repeatedly for one-file-per-turn inspection and for `max` reasoning on mechanical continuations. `read_many` removes round trips without removing the files; the effort step-down only applies after the session has already spent the soft budget, so normal work keeps the user's exact thinking level. Neither changes the model, the task or verification.
+
+**Validation.** Focused cost-governor tests now cover batched reads with caps, spills and per-file failures, plus economy effort step-down, error restoration, judgment-tool restoration and manual override. The local full suite and GitHub’s main safety/desktop gates are the release gate.
+
 ## 0.40.0 — Cost governor: fold context, cap spills, budget the session
 
 **The 19¢ session is now a bounded-context session.** A recent DeepSeek session on the SEO project made 126 provider calls, grew its request prefix to 276k tokens, and was billed 19.8¢: 37% output, 33% cache-read context, 29% fresh input. A 45.8¢ session grew to 410k tokens and re-billed the whole prefix after two long idle gaps. The harness now folds old history instead of carrying every old tool result to the end of the run.
