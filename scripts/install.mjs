@@ -54,6 +54,9 @@ const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest
 // them on every update is both slow and unnecessary. They are moved intact
 // from the renamed private backup into the staged installation after all
 // source/dependency checks pass.
+// Private roots move intact; a state-preserving update never follows a
+// symlink inside them. User skill links in the mixed `skills/` tree are
+// recreated as links, while a managed-source collision still fails closed.
 const PRIVATE_STATE_DIRECTORIES = new Set([
   'sessions', 'memory', 'logs', 'backups', 'tasks', 'work', 'artifacts',
   'worktrees', 'missions', 'local-models', 'local-tools', 'project-intelligence',
