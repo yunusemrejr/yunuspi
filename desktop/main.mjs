@@ -100,7 +100,12 @@ async function workerFor(id) {
     if (event.type === 'extension_ui_closed') worker.uiRequests.delete(event.id);
     send({ type: 'agent', sessionId: id, event, sequence });
     if (event.type === 'agent_start' || event.type === 'agent_end') publish();
-    if (event.type === 'agent_end') void worker.request('get_session_stats', {}, 10_000).then(data => send({ type: 'stats', sessionId: id, data })).catch(() => {});
+    // Refresh after every completed model response, not only at the end of a long run, so the
+    // footer shows tokens and cost while the agent is still working. One request in flight.
+    if ((event.type === 'turn_end' || event.type === 'agent_end') && (!worker.statsPending || event.type === 'agent_end')) {
+      worker.statsPending = true;
+      void worker.request('get_session_stats', {}, 10_000).then(data => send({ type: 'stats', sessionId: id, data })).catch(() => {}).finally(() => { worker.statsPending = false; });
+    }
   });
   worker.on('stopped', result => {
     if (workers.get(id) !== worker) return;
