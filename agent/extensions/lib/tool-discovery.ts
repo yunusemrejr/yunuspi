@@ -12,6 +12,7 @@ import { selectTaskPipelines, automaticPipelineTools, pipelineGitExcluded, pipel
 import { priorArtIntent, PRIOR_ART_TOOLS } from './prior-art.ts';
 import { seoTaskIntent } from './seo-policy.ts';
 import { currentExecutionProfile, adaptiveExecutionEnabled, classifyExecution } from './adaptive-execution.ts';
+import { wireWarmth } from './wire-warmth.ts';
 
 import { choices } from "./tool-schema.ts";
 /** Multi-stage re-rank: large shortlists go straight to batched Jev;
@@ -310,6 +311,13 @@ export function registerToolDiscovery(pi: any) {
   const sessionSelections = new Set<string>();
   let known = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
+  // The system prompt lists the active tools and the tools array precedes the conversation, so every wire
+  // change re-bills the cached transcript. While that is expensive the wire only grows, and discretionary
+  // growth (a core-tier upgrade) waits until the model asks for the tool; the Tool-not-found path stages it.
+  // Warmth is read when it is used, from the last context seen, so a prompt that arrives after a long idle gap or
+  // from an extension never inherits a stale answer. The first task of a session is always cold.
+  let lastCtx: any;
+  const wireIsWarm = () => { if (!started) return false; try { return wireWarmth(lastCtx).warm; } catch { return false; } };
   let pendingInput: { id: string; text: string; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '';
   const excluded = (name: string, prompt = routingTask) => pipelineToolExcluded(prompt, name) || pipelineToolExcluded(authoredTask, name);
   let sessionController = new AbortController();
@@ -371,13 +379,15 @@ export function registerToolDiscovery(pi: any) {
   const stageCore = (tier: string, prompt = '') => {
     if (!adaptiveExecutionEnabled()) return;
     const base = tier === 'direct' ? DIRECT_CORE_TOOLS : CORE_TOOLS;
+    const warm = wireIsWarm();
     for (const name of CORE_TOOLS) {
       if (!allowed.has(name)) continue;
       if (excluded(name, prompt)) { expected.delete(name); continue; }
       // Explicit calls and named requests survive simplification in a todo.
       if (new RegExp(`\\b${name}\\b`).test(prompt)) namedCore.add(name);
-      if (base.has(name) || explicitSelections.has(name) || usedCore.has(name) || automatic.has(name) || namedCore.has(name)) expected.add(name);
-      else expected.delete(name);
+      const asked = explicitSelections.has(name) || usedCore.has(name) || automatic.has(name) || namedCore.has(name);
+      if (asked || base.has(name) && (!warm || expected.has(name))) expected.add(name);
+      else if (!warm) expected.delete(name);
     }
     wireDirty = !same(expected, flushed);
   };
@@ -399,7 +409,7 @@ export function registerToolDiscovery(pi: any) {
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
     manager = ctx.sessionManager;
-    sessionSelections.clear();
+    sessionSelections.clear(); lastCtx = ctx;
     pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = '';
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
@@ -413,6 +423,7 @@ export function registerToolDiscovery(pi: any) {
   // turn_end precedes the owned core's next-turn context snapshot. turn_start
   // would be too late; mutating in execute would split a parallel tool batch.
   pi.on('turn_end', (event: any, ctx: any) => {
+    if (ctx) lastCtx = ctx;
     // A call to a registered tool that lazy discovery kept off the wire fails
     // as "not found" (measured: todo on a direct-tier start). Stage it within
     // the original ceiling so the retry on the next turn finds it.
@@ -423,12 +434,12 @@ export function registerToolDiscovery(pi: any) {
     }
     flushPending();
   });
-  pi.on('input', (event: any) => {
-    if (!['interactive', 'rpc'].includes(event.source)) return;
-    const text = typeof event.originalText === 'string' ? event.originalText : event.text;
-    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, text, signal: event.signal };
-  });
-  pi.on('before_agent_start', (event: any, ctx: any) => {
+  // Stage the wire for one accepted prompt. It runs at `input` and again at `before_agent_start`: the host
+  // snapshots the system prompt before the second hook, and a handler that rewrites that snapshot (pi-memory
+  // does on every prompt) pins it for the whole run, so a wire staged only inside the hook leaves the first
+  // request listing tools that are not on the wire. The next prompt then rebuilds the head and re-bills the
+  // transcript. Staging is idempotent: an accepted input is staged once, intent bundles only add.
+  const stagePrompt = (fallbackPrompt: string, images: number, ctx: any) => {
     // Stage strong-intent studio bundles only while discovery owns the wire.
     try {
       if (owner && identity(ctx) === owner && reconcile()) {
@@ -438,15 +449,18 @@ export function registerToolDiscovery(pi: any) {
         // discoveries and the original safety/tool ceiling. A continuation
         // still owns its current pipelines and studio stages.
         if (nextTask) {
-          for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name) && !sessionSelections.has(name)) expected.delete(name);
-          authoredTask = resolveRoutingTask(authoredTask, pendingInput?.text ?? String(event?.prompt ?? '')).task;
+          if (ctx) lastCtx = ctx;
+          const warm = wireIsWarm();
+          if (!warm) for (const name of automatic) if (!CORE_TOOLS.has(name) && !explicitSelections.has(name) && !sessionSelections.has(name)) expected.delete(name);
+          authoredTask = resolveRoutingTask(authoredTask, pendingInput?.text ?? fallbackPrompt).task;
           routingTask = authoredTask;
           for (const name of explicitSelections) if (allowed.has(name) && !pipelineToolExcluded(routingTask, name)) expected.add(name);
           for (const name of expected) if (pipelineToolExcluded(routingTask, name)) expected.delete(name);
-          automatic.clear(); usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:routingTask}).tier, routingTask); wireDirty = !same(expected, flushed);
+          // While the wire is held, inferred schemas stay tracked so a later cold task can still release them.
+          if (!warm) automatic.clear();
+          usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:routingTask}).tier, routingTask); wireDirty = !same(expected, flushed);
           acceptedInput = pendingInput?.id ?? ''; started = true;
         }
-        const images = Array.isArray(event?.images) ? event.images.length : 0;
         const names = [...new Set([...requestedToolNames(routingTask, allowed), ...intentBundleTools(routingTask, images)])]
           .filter(name => allowed.has(name) && !expected.has(name));
         if (names.length) {
@@ -458,6 +472,19 @@ export function registerToolDiscovery(pi: any) {
       }
     } catch { /* Staging is an optimization; discovery stays available. */ }
     flushPending();
+  };
+  pi.on('input', (event: any, ctx: any) => {
+    if (!['interactive', 'rpc'].includes(event.source)) return;
+    const text = typeof event.originalText === 'string' ? event.originalText : event.text;
+    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, text, signal: event.signal };
+    // A queued steer or follow-up belongs to a run that is already streaming, and a prompt sent while the agent is busy
+    // is rejected by the host; only an idle prompt starts a new head.
+    let idle = true;
+    try { idle = typeof ctx?.isIdle === 'function' ? ctx.isIdle() : true; } catch { /* treat as idle */ }
+    if (pendingInput && !event.streamingBehavior && idle && ctx) stagePrompt(pendingInput.text, Array.isArray(event.images) ? event.images.length : 0, ctx);
+  });
+  pi.on('before_agent_start', (event: any, ctx: any) => {
+    stagePrompt(String(event?.prompt ?? ''), Array.isArray(event?.images) ? event.images.length : 0, ctx);
   });
   pi.on('agent_end', flushPending);
   pi.events?.on?.('adaptive-pipeline-selection', (event: any) => {
@@ -470,7 +497,10 @@ export function registerToolDiscovery(pi: any) {
       // next authored-task reset without mutating the wire behind discovery.
       for (const name of event.names) if (allowed.has(name) && !excluded(name)) {
         if (event.persistent === true) sessionSelections.add(name);
-        else if (event.persistent === false && sessionSelections.delete(name) && !explicitSelections.has(name) && !CORE_TOOLS.has(name)) { expected.delete(name); wireDirty = true; }
+        else if (event.persistent === false && sessionSelections.delete(name) && !explicitSelections.has(name) && !CORE_TOOLS.has(name)) {
+          // A released control schema leaves a held wire only once the cache is cold again.
+          if (wireIsWarm()) automatic.add(name); else { expected.delete(name); wireDirty = true; }
+        }
       }
       if (typeof event.task === 'string') routingTask = event.task;
       if (event.scope === 'task' && typeof event.task === 'string') {

@@ -37,6 +37,7 @@ import { intelContextCapsuleIntent, intelSystemGuidanceIntent } from "./lib/inte
 import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { collectScopeHistory } from "./lib/project-intelligence/scope-history.mjs";
 import { askJev } from "./lib/jev-client.ts";
+import { branchHasMessage, stickyHeadText } from "./lib/wire-warmth.ts";
 import {
   captureWorkflowContext,
   conversationContext,
@@ -460,9 +461,13 @@ export default function projectIntelligence(pi: any) {
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     if (!enabled()) return;
     const execution = currentExecutionProfile(ctx) ?? classifyExecution({ task: event.prompt ?? '' });
+    // A session that already carries this guidance keeps carrying exactly the same words on every later
+    // prompt, whatever the tier: a head that toggles re-bills the cached transcript.
+    const carried = stickyHeadText(ctx, "project-intelligence:guidance", undefined);
+    const carry = () => (carried === undefined ? undefined : { systemPrompt: event.systemPrompt + "\n\n" + carried });
     // Discovery already refreshes asynchronously. Direct tasks can inspect
     // source immediately and use project_intel explicitly when needed.
-    if (adaptiveExecutionEnabled() && execution.tier === 'direct') return;
+    if (adaptiveExecutionEnabled() && execution.tier === 'direct') return carry();
     const turn = inputGeneration;
     try {
       await ensure(ctx);
@@ -499,7 +504,7 @@ export default function projectIntelligence(pi: any) {
           : intentQuery,
       );
       assertCurrent(current, epoch, ctx);
-      if (turn !== inputGeneration) return;
+      if (turn !== inputGeneration) return carry();
       // Start without holding the SDK preflight (which has no abort signal).
       // The context hook joins it with the active agent signal before inference.
       void scope.start(event, ctx, capsule).catch(() => {});
@@ -527,18 +532,25 @@ export default function projectIntelligence(pi: any) {
         admitted = shadowPlane.enforce(intelSystemGuidanceIntent(guidance)).outcome === "admitted";
         if (admitted) shadowPlane.release("intel-system-guidance", "context");
       } catch { admitted = true; }
-      if (!admitted) return { systemPrompt: event.systemPrompt };
+      if (!admitted) return carry() ?? { systemPrompt: event.systemPrompt };
+      // A first appearance in a warm session would rebuild the cached head, so the same words ride one persisted
+      // hidden message instead (late-bound, delivered once per branch).
+      const head = stickyHeadText(ctx, "project-intelligence:guidance", guidance);
       try {
         publishInjectionEnvelope(envelopInjection({
           owner: "project-intelligence:guidance",
-          bytes: guidance,
+          bytes: head ?? guidance,
           sourceRevision: `generation:${generation}`,
-          placement: "stable-prefix",
+          placement: head === undefined ? "late-bound" : "stable-prefix",
         }).envelope);
       } catch { /* provenance never blocks injection */ }
-      return { systemPrompt: event.systemPrompt + "\n\n" + guidance };
+      if (head !== undefined) return { systemPrompt: event.systemPrompt + "\n\n" + head };
+      return branchHasMessage(ctx, "project-intelligence-guidance")
+        ? undefined
+        : { message: { customType: "project-intelligence-guidance", content: guidance, display: false } };
     } catch (error) {
       reportError(error, ctx);
+      return carry();
     }
   });
   pi.on("context", (event: any, ctx: any) => {

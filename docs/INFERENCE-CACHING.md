@@ -59,20 +59,71 @@ models that render it ahead, tool and system blocks too; see Anthropic's
 The exception is per-message effort (`supportsMidConvoEffort`): the core
 carries each change in an appended `role: "system"` message keyed to the
 level each assistant turn was produced at, which leaves the cached prefix
-intact. OpenAI-, DeepSeek- and Gemini-style caches key on the prompt token
-prefix, and effort travels as a generation parameter outside that prefix;
-the serialized history itself never depends on the active level, so past
-thinking blocks are replayed byte-identically whatever the level does.
+intact. OpenAI- and Gemini-style caches key on the prompt token prefix, and effort
+travels as a generation parameter outside that prefix; the serialized history
+itself never depends on the active level, so past thinking blocks are replayed
+byte-identically whatever the level does. DeepSeek is measured instead of
+assumed: across 572 recorded sessions a thinking-level change on the same
+DeepSeek model was followed by a cache miss on 24 of 32 requests, against 1.8%
+for requests with no change, so the DeepSeek family is handled like Anthropic.
 
 Automatic effort adjustment (the adaptive thinking controller for the main
-agent; the same controller runs inside sub-agent sessions) therefore refuses
-to move the level on Anthropic routes without per-message effort — direct
-Anthropic API and Claude models served through compatible gateways alike
-(`thinkingChangeBreaksPromptCache` in `lib/adaptive-execution.ts`). On those
-routes the configured or manually selected level simply stays in force, and
+agent, which also runs inside sub-agent sessions, and the cost governor's
+economy step-down) therefore refuses to move the level on Anthropic routes
+without per-message effort — direct Anthropic API and Claude models served
+through compatible gateways alike — on Qwen chat-template routes and on
+DeepSeek routes, whether named by provider, model id or `deepseek` thinking
+format (`thinkingChangeBreaksPromptCache` in `lib/adaptive-execution.ts`). On
+those routes the configured or manually selected level simply stays in force, and
 only a manual `/thinking` or `/effort` change pays the invalidation price,
 deliberately. A sub-agent's level is chosen once when it is spawned, before
 its first request, so delegation never churns a child's cache mid-run.
+
+## Keeping the request head stable
+
+The system prompt lists the active tools and the tools array precedes the
+conversation, so any change to either, to a system-prompt addition or to an
+earlier message re-bills the whole cached transcript at the fresh-input rate
+(about 50 times the cache rate on DeepSeek). Four rules keep the head still:
+
+- **Stage before the host snapshots.** Tool discovery stages the wire when a
+  prompt is accepted (`input`), not only in `before_agent_start`. The host
+  snapshots the system prompt before that hook, and any handler that rewrites
+  the prompt (`pi-memory` does on every prompt) pins the snapshot for the run,
+  which used to leave the first request listing tools it did not carry and
+  forced a rebuilt head on the second prompt. Only an idle prompt is staged.
+- **A warm wire only grows.** `lib/wire-warmth.ts` prices a rebuild from the
+  session's last request (prompt tokens at the route's fresh-minus-cached rate)
+  and treats it as warm when that exceeds 0.4 cents inside the route's cache
+  lifetime on the same route. While warm, a difficulty-tier change never
+  removes a schema and never adds core tools unasked; an explicit request, an
+  intent bundle, `tool_search` or a "Tool not found" retry still stage a tool
+  at once. Inferred schemas stay tracked and are released once the cache is
+  cold. A small, idle or free session simplifies as before.
+- **Head text never toggles.** System-prompt additions use `stickyHeadText`:
+  the first bytes a session receives are the bytes it keeps, recorded in the
+  session as `head-latch-v1`. In a warm session a new addition is delivered as
+  one persisted hidden message instead.
+- **Small notes ride the tail.** `createContextAnchor` places a block under
+  6,000 characters at the end of every request. A block kept at its first
+  boundary re-bills everything appended since when its content changes or it
+  retires, which costs more than re-sending a few hundred tokens each call.
+
+`/budget` reports every cache miss with its cause: tools (with the names that
+changed), system prompt, a rewritten earlier message, an idle gap past the
+route's cache lifetime, a route change, or the provider. Misses over 20,000
+tokens are also recorded as `cache-miss-v1` entries. `lib/cache-sentinel.ts`
+only hashes outgoing requests and never alters one.
+
+`node agent/scripts/cache-probe.mjs` checks all of this on any build. It drives
+the real harness over RPC against a local fake provider with a simulated prefix
+cache and a throwaway agent directory, then lists each tool, system-prompt and
+history change between consecutive requests and exits nonzero when the wire
+shrinks, the head changes without a tool change, an earlier message is
+rewritten, or the first request lists a tool it does not carry. `--repo
+<checkout>` probes a checkout, `--scenario ui` the larger interface-work wire,
+`--keep` keeps the work directory. Run it after changing tool staging,
+system-prompt owners, `context` hooks or thinking control.
 
 ## JEV
 

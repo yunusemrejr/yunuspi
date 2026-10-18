@@ -122,7 +122,7 @@ test('history remains bounded and checkout-scoped, preserves discovered defects,
   } finally { store.close(); }
 }));
 
-test('project context keeps unchanged evidence anchored across synthetic tool requests without persisting it', () => fixture(async ({ open }) => {
+test('project context rides the tail across synthetic tool requests without persisting it, so cached history is never rewritten', () => fixture(async ({ open }) => {
   const session = open('cache-prefix');
   await session.call(read);
   const user = { role: 'user', content: 'Inspect the README' };
@@ -132,8 +132,12 @@ test('project context keeps unchanged evidence anchored across synthetic tool re
   const call = { role: 'assistant', content: [{ type: 'toolCall', id: 'call', name: 'read', arguments: { path: 'README.md' } }] };
   const result = { role: 'toolResult', toolCallId: 'call', content: [{ type: 'text', text: 'Fixture project architecture' }] };
   const next = await context([user, call, result]);
-  assert.deepEqual(next.messages.slice(0, first.messages.length), first.messages);
-  assert.deepEqual(next.messages.slice(first.messages.length), [call, result]);
+  // A small capsule (bounded to ~2k characters) follows the newest message: leaving it mid-history would re-bill
+  // everything after it whenever the capsule changes or retires, which costs more than re-sending it.
+  assert.deepEqual(next.messages.slice(0, 3), [user, call, result], 'every real message keeps its place, so the previous request prefix still matches');
+  assert.equal(next.messages.length, 4);
+  assert.equal(next.messages.at(-1).customType, 'project-intelligence-context');
+  assert.equal(next.messages.at(-1).content, first.messages.at(-1).content, 'the capsule itself is unchanged');
   const repeated = await context(next.messages);
   assert.deepEqual(repeated.messages, next.messages, 'reprocessing wire context cannot duplicate the capsule');
 }));

@@ -266,12 +266,16 @@ export function automaticChildThinking(profile: ExecutionProfile, route: string,
  * into the prompt, so changing it invalidates cached message blocks — and on
  * models that render it ahead, tool and system blocks too. Models with
  * per-message effort carry the change in appended system messages and keep
- * the prefix intact; non-Anthropic caches key on prompt tokens, not on
- * generation parameters. Only manual changes may pay the Anthropic price. */
+ * the prefix intact. DeepSeek is measured, not assumed: across 572 recorded
+ * sessions a thinking-level change on the same DeepSeek model was followed by
+ * a cache miss on 24 of 32 requests (1.8% for requests with no change),
+ * re-billing 2.8M cached tokens at the fresh rate, and a miss at a 100k+
+ * prefix costs ~50x a normal request. Only manual changes may pay that price. */
 export function thinkingChangeBreaksPromptCache(model: any): boolean {
   if (!model || model.compat?.supportsMidConvoEffort === true) return false;
   const provider = String(model.provider ?? ''), id = String(model.id ?? ''), format = String(model.compat?.thinkingFormat ?? '');
-  return String(model.api ?? '') === 'anthropic-messages' || /anthropic/i.test(provider) || /claude/i.test(`${provider}/${id}`) || format === 'qwen-chat-template';
+  return String(model.api ?? '') === 'anthropic-messages' || /anthropic/i.test(provider) || /claude/i.test(`${provider}/${id}`) || format === 'qwen-chat-template'
+    || format === 'deepseek' || /deepseek/i.test(`${provider}/${id}`);
 }
 
 const THINKING_LEVELS = ['off','minimal','low','medium','high','xhigh','max','ultra'] as const;

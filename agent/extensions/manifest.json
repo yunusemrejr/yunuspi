@@ -57,6 +57,7 @@
     "capability-groups.ts",
     "capability-health.ts",
     "catalog-cache-lock.ts",
+    "cache-sentinel.ts",
     "checkpoint-files.ts",
     "ci-awareness.ts",
     "code-audit.ts",
@@ -250,7 +251,8 @@
     "media-sync.ts",
     "video-browser.ts",
     "video-segments.ts",
-    "research-evidence.ts"
+    "research-evidence.ts",
+    "wire-warmth.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

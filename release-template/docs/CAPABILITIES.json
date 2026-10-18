@@ -1072,7 +1072,7 @@
     {
       "id": "cost-governor",
       "group": "commands",
-      "summary": "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
+      "summary": "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, and name the cause of every prompt-cache miss. No extra model call and no work skipped.",
       "entrypoints": [
         "cost-governor",
         "/budget",
@@ -3310,7 +3310,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 663
+        "line": 689
       },
       {
         "name": "catalog-status",
@@ -3375,7 +3375,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 909
+        "line": 921
       },
       {
         "name": "harness-backup",
@@ -3682,7 +3682,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 502,
+        "line": 510,
         "kind": "factory"
       },
       {
@@ -3809,13 +3809,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 606,
+        "line": 614,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 306,
+        "line": 314,
         "kind": "factory"
       },
       {
@@ -3889,7 +3889,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 548,
+        "line": 556,
         "kind": "factory"
       },
       {
@@ -3973,7 +3973,7 @@
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 436,
+        "line": 444,
         "kind": "factory"
       },
       {
@@ -4021,7 +4021,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 793,
+        "line": 805,
         "kind": "literal"
       },
       {
@@ -4033,7 +4033,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 226,
+        "line": 229,
         "kind": "literal"
       },
       {
@@ -4136,13 +4136,13 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 467,
+        "line": 475,
         "kind": "factory"
       },
       {
         "name": "svg_render",
         "source": "agent/extensions/art-direction.ts",
-        "line": 462,
+        "line": 470,
         "kind": "factory"
       },
       {
@@ -4178,19 +4178,19 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 488,
+        "line": 518,
         "kind": "literal"
       },
       {
         "name": "ui_consistency",
         "source": "agent/extensions/art-direction.ts",
-        "line": 425,
+        "line": 433,
         "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 398,
+        "line": 406,
         "kind": "factory"
       },
       {
@@ -4244,7 +4244,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 348,
+        "line": 356,
         "kind": "factory"
       },
       {
@@ -4439,7 +4439,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 793,
+        "line": 805,
         "kind": "literal"
       },
       {
@@ -4451,7 +4451,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 226,
+        "line": 229,
         "kind": "literal"
       },
       {
@@ -4529,7 +4529,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 488,
+        "line": 518,
         "kind": "literal"
       },
       {
@@ -4567,7 +4567,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          272
+          280
         ],
         "knownNames": [
           "asset_register",
@@ -4799,7 +4799,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 708,
+      "sourceFiles": 710,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -5034,6 +5034,10 @@
       },
       {
         "path": "agent/extensions/lib/bulk-edit.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/cache-sentinel.ts",
         "exists": true
       },
       {
@@ -5794,6 +5798,10 @@
       },
       {
         "path": "agent/extensions/lib/video-studio.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/wire-warmth.ts",
         "exists": true
       },
       {

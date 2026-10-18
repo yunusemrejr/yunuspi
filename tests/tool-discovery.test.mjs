@@ -709,6 +709,88 @@ test('direct schemas shrink without dropping checks, explicit choices or host re
  assert.deepEqual(f.active(),['read','tool_search'],'schema routing never expands a host restriction');
 });
 
+test('a warm cached prefix keeps the wire: it never shrinks, and tier upgrades wait for the model to ask', async () => {
+ const {CORE_TOOLS,DIRECT_CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const model={provider:'deepseek',id:'deepseek-flash',cost:{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}};
+ const warm=(f,tokens=120000)=>f.entries.push({type:'message',message:{role:'assistant',timestamp:Date.now()-2000,usage:{input:2000,cacheRead:tokens,cacheWrite:0}}});
+ const make=()=>{const f=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));f.ctx.model=model;return f;};
+ // direct start, then a 120k-token warm prefix: a complex follow-up must not widen the wire
+ const grow=make();
+ grow.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, grow.ctx);
+ const started=[...grow.active()].sort();
+ assert.ok(!started.includes('subagent'));
+ warm(grow);grow.hooks.turn_end({toolResults:[]},grow.ctx);
+ grow.events['adaptive-pipeline-selection']({sessionManager:grow.ctx.sessionManager,tier:'complex',names:[],beforeStart:true});
+ grow.hooks.turn_end({toolResults:[]},grow.ctx);
+ assert.deepEqual([...grow.active()].sort(),started,'a core-tier upgrade would re-bill the cached transcript, so the wire stays identical');
+ await grow.call({names:['subagent'],enable:true});grow.hooks.turn_end({toolResults:[]},grow.ctx);
+ assert.ok(grow.active().includes('subagent'),'an explicit request still widens the wire');
+ // complex start, then warm: a mechanical follow-up must not shrink it
+ const keep=make();
+ keep.hooks.before_agent_start({prompt:'Refactor the authentication module across the repository.'}, keep.ctx);
+ keep.events['adaptive-pipeline-selection']({sessionManager:keep.ctx.sessionManager,tier:'complex',names:[],beforeStart:true});
+ keep.hooks.turn_end({toolResults:[]},keep.ctx);
+ const wide=[...keep.active()].sort();
+ assert.ok(wide.includes('subagent'));
+ warm(keep);keep.hooks.turn_end({toolResults:[]},keep.ctx);
+ keep.events['adaptive-pipeline-selection']({sessionManager:keep.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
+ keep.hooks.turn_end({toolResults:[]},keep.ctx);
+ assert.deepEqual([...keep.active()].sort(),wide,'dropping schemas never helps the model and re-bills the transcript');
+ // the same flips on a cold cache keep their original, proportionate behavior
+ const cold=make();
+ cold.hooks.before_agent_start({prompt:'Refactor the authentication module across the repository.'}, cold.ctx);
+ cold.events['adaptive-pipeline-selection']({sessionManager:cold.ctx.sessionManager,tier:'complex',names:[],beforeStart:true});
+ cold.hooks.turn_end({toolResults:[]},cold.ctx);
+ cold.events['adaptive-pipeline-selection']({sessionManager:cold.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
+ cold.hooks.turn_end({toolResults:[]},cold.ctx);
+ assert.ok(!cold.active().includes('subagent'),'a cold or tiny prefix still simplifies');
+ for(const name of DIRECT_CORE_TOOLS)assert.ok(cold.active().includes(name),name);
+});
+
+test('inferred schemas kept during a warm stretch are still released once the cache is cold', async () => {
+ const {CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const model={provider:'deepseek',id:'deepseek-flash',cost:{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}};
+ const f=fixture([...CORE_TOOLS,'image_generate','image_understand'].map(name=>typeof name==='string'?{name,description:name,parameters:{type:'object'}}:name));
+ f.ctx.model=model;
+ const stamp=(age)=>({type:'message',message:{role:'assistant',timestamp:Date.now()-age,usage:{input:2000,cacheRead:120000,cacheWrite:0}}});
+ f.hooks.input({source:'interactive',text:'Generate an image of a red kite for the landing page',requestId:'a'}, f.ctx);
+ f.hooks.before_agent_start({prompt:'Generate an image of a red kite for the landing page'}, f.ctx);
+ assert.ok(f.active().includes('image_generate'),'the intent bundle staged the studio tool on the first task');
+ f.entries.push(stamp(2000));
+ f.hooks.input({source:'interactive',text:'Correct teh to the in README.md. One-line typo.',requestId:'b'}, f.ctx);
+ f.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, f.ctx);
+ assert.ok(f.active().includes('image_generate'),'warm: dropping the schema would re-bill the transcript');
+ f.entries.length=0;f.entries.push(stamp(3*3600_000));
+ f.hooks.input({source:'interactive',text:'Fix the typo in CONTRIBUTING.md. One-line typo.',requestId:'c'}, f.ctx);
+ f.hooks.before_agent_start({prompt:'Fix the typo in CONTRIBUTING.md. One-line typo.'}, f.ctx);
+ assert.ok(!f.active().includes('image_generate'),'cold again: the inferred schema is released as before');
+});
+
+test('a prompt sent while the agent is busy is rejected by the host and must not move the wire', async () => {
+ const {CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const f=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ f.ctx.isIdle=()=>false;
+ f.hooks.input({source:'interactive',text:'Correct teh to the in README.md. One-line typo.',requestId:'busy'}, f.ctx);
+ assert.ok(f.active().includes('subagent'),'nothing was staged for a rejected prompt');
+ f.ctx.isIdle=()=>true;
+ f.hooks.input({source:'interactive',text:'Correct teh to the in README.md. One-line typo.',requestId:'idle'}, f.ctx);
+ assert.ok(!f.active().includes('subagent'),'an idle prompt is staged at input');
+});
+
+test('the wire is staged when the prompt is accepted, so the host snapshots the final head before extensions rewrite it', async () => {
+ const {CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const f=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ assert.ok(f.active().includes('subagent'),'a fresh session starts with the whole core wire');
+ f.hooks.input({source:'interactive',text:'Correct teh to the in README.md. One-line typo.',requestId:'r1'}, f.ctx);
+ assert.ok(!f.active().includes('subagent'),'staged at input: the host snapshots the prompt after this, before any before_agent_start handler can pin it');
+ const staged=[...f.active()].sort();
+ f.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, f.ctx);
+ assert.deepEqual([...f.active()].sort(),staged,'the hook finds the prompt already staged and changes nothing');
+ // a queued steer belongs to the running turn and must not move the wire
+ f.hooks.input({source:'interactive',text:'Also refactor the whole authentication module and use subagent',requestId:'r2',streamingBehavior:'steer'}, f.ctx);
+ assert.deepEqual([...f.active()].sort(),staged,'a steer does not restage the head');
+});
+
 test('named core tools and adaptive opt-out retain caller intent', () => {
  const f=fixture();
  f.hooks.before_agent_start({prompt:'Use session_self to inspect this session.'}, f.ctx);

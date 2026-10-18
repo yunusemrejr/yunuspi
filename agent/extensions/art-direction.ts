@@ -36,6 +36,7 @@ import { captureToFile } from "./render-and-wait.ts";
 import { sniffImage } from "./lib/design-studio.ts";
 import { choices } from "./lib/tool-schema.ts";
 import { svgRender } from "./lib/svg-render.ts";
+import { branchHasMessage, stickyHeadText } from "./lib/wire-warmth.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const strList = (maxItems: number, maxLength: number) => Type.Array(Type.String({ maxLength }), { maxItems });
@@ -153,7 +154,7 @@ export default function artDirection(pi: any) {
     if (ticket !== epoch) return;
     await refresh(ctx);
     if (ticket !== epoch) return;
-    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', 'svg_inspect'] });
+    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', ...(state.evidence.changed().some(row => row.kind === 'svg') ? ['svg_inspect'] : [])] }); // svg_inspect only where an SVG changed: every wire addition re-bills the cached transcript
     const svgs = state.evidence.changed().filter(row => row.kind === 'svg').slice(0, 8);
     if (svgs.length && state.autoSvgStamp !== state.evidence.stamp()) {
       try {
@@ -183,8 +184,15 @@ export default function artDirection(pi: any) {
     if (!automatic() || !ctx?.cwd) return;
     const { state } = sessionOf(ctx);
     if (uiPromptCue(String(event.prompt ?? '')).strength === 'strong') state.uiPromptActive = true;
-    if (!state.uiPromptActive) return;
-    return { systemPrompt: `${event.systemPrompt ?? ''}\nUI work: inspect the existing product, real content, user tasks, tokens and component states before choosing a direction. Derive hierarchy, type, color, spacing and purposeful motion from the subject and requested ambition. Avoid template gradients, fake proof, decorative status and arbitrary SVGs. Use ui_explore for 320px/mobile/tablet/desktop measurements, visual_review for current rendered judgment, and browser_session for keyboard/focus and the representative task. Repair observed defects before completion. On text-only routes use permitted image_understand for the capture; report unavailable vision explicitly. Skills are optional references. Measurements and clean source cannot prove appearance.` };
+    const carried = stickyHeadText(ctx, 'art-direction:ui-brief', undefined);
+    if (!state.uiPromptActive) return carried === undefined ? undefined : { systemPrompt: `${event.systemPrompt ?? ''}\n${carried}` };
+    const brief = `UI work: inspect the existing product, real content, user tasks, tokens and component states before choosing a direction. Derive hierarchy, type, color, spacing and purposeful motion from the subject and requested ambition. Avoid template gradients, fake proof, decorative status and arbitrary SVGs. Use ui_explore for 320px/mobile/tablet/desktop measurements, visual_review for current rendered judgment, and browser_session for keyboard/focus and the representative task. Repair observed defects before completion. On text-only routes use permitted image_understand for the capture; report unavailable vision explicitly. Skills are optional references. Measurements and clean source cannot prove appearance.`;
+    const head = stickyHeadText(ctx, 'art-direction:ui-brief', brief);
+    if (head !== undefined) return { systemPrompt: `${event.systemPrompt ?? ''}\n${head}` };
+    // A warm session keeps its cached head: the same brief rides one persisted message instead, once per branch
+    // (an aborted run never persisted it, so the next prompt delivers it again).
+    if (branchHasMessage(ctx, 'art-direction')) return;
+    return { message: { customType: 'art-direction', content: brief, display: false } };
   });
   pi.on?.('context', async (event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd) return;

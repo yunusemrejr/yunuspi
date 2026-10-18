@@ -523,7 +523,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "cost-governor",
 		group: "commands",
-		summary: "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, and tighten tool caps and routine thinking at a soft USD budget. No extra model call and no work skipped.",
+		summary: "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, and name the cause of every prompt-cache miss. No extra model call and no work skipped.",
 		entrypoints: ["cost-governor", "/budget", "read_many"],
 		tools: ["read_many"],
 		commands: ["budget"],

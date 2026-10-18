@@ -419,7 +419,8 @@ test('economy mode lowers routine tool-continuation thinking, restores on errors
 		const { default: register } = await import(extensionUrl);
 		const { pi, hooks, thinking } = fakePi();
 		register(pi);
-		const ctx = fakeCtx();
+		// A route whose cache does not key on the thinking mode may step down; DeepSeek, Anthropic and Qwen templates may not.
+		const ctx = fakeCtx({ model: { provider: 'openai', id: 'gpt-5', contextWindow: 400_000, maxTokens: 64_000, input: ['text'] } });
 		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
 		assert.equal(thinking(), 'max');
 		hooks.get('message_end')[0]({ message: { role: 'assistant', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.002 } } } }, ctx);
@@ -442,6 +443,27 @@ test('economy mode lowers routine tool-continuation thinking, restores on errors
 		pi.setThinkingLevel('medium');
 		hooks.get('turn_end')[0](turn('bash'), ctx);
 		assert.equal(thinking(), 'medium', 'a manual selection disables automatic effort');
+	} finally {
+		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+		Object.assign(process.env, saved);
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test('economy mode never flips thinking on a route where the change re-bills the cached prefix', async () => {
+	const saved = { ...process.env };
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
+	process.env.PI_COST_BUDGET_USD = '0.001';
+	process.env.PI_CODING_AGENT_DIR = temp;
+	try {
+		const { default: register } = await import(extensionUrl);
+		const { pi, hooks, thinking } = fakePi();
+		register(pi);
+		const ctx = fakeCtx();
+		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
+		hooks.get('message_end')[0]({ message: { role: 'assistant', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.002 } } } }, ctx);
+		for (let i = 0; i < 3; i++) hooks.get('turn_end')[0]({ type: 'turn_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'bash', arguments: { command: 'ls' } }] }, toolResults: [{ isError: false }] }, ctx);
+		assert.equal(thinking(), 'max', 'DeepSeek measured: a thinking change misses the cache on most requests, so the configured level stays');
 	} finally {
 		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
 		Object.assign(process.env, saved);

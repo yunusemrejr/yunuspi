@@ -76,7 +76,8 @@ test('cache-breaking routes are named: Anthropic rendering yes, per-message effo
   assert.equal(thinkingChangeBreaksPromptCache({provider:'anthropic',id:'claude-x'}),true,'provider alone names the family');
   assert.equal(thinkingChangeBreaksPromptCache({provider:'openrouter',id:'anthropic/claude-sonnet'}),true,'Claude served upstream still renders the config');
   assert.equal(thinkingChangeBreaksPromptCache({api:'anthropic-messages',provider:'anthropic',id:'claude-x',compat:{supportsMidConvoEffort:true}}),false,'per-message effort keeps the cached prefix');
-  assert.equal(thinkingChangeBreaksPromptCache({provider:'deepseek',id:'deepseek-chat'}),false);
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'deepseek',id:'deepseek-chat'}),true,'measured: a DeepSeek thinking change re-bills the cached prefix');
+  assert.equal(thinkingChangeBreaksPromptCache({provider:'openrouter',id:'~deepseek/deepseek-flash-latest'}),true,'DeepSeek served through a router keeps the family');
   assert.equal(thinkingChangeBreaksPromptCache({provider:'openai',id:'gpt-x'}),false);
   assert.equal(thinkingChangeBreaksPromptCache(undefined),false);
   assert.equal(thinkingChangeBreaksPromptCache(null),false);

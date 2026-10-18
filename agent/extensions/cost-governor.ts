@@ -41,6 +41,9 @@ import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { createReadToolDefinition } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { createEffortController } from "./lib/effort-policy.mjs";
+import { thinkingChangeBreaksPromptCache } from "./lib/adaptive-execution.ts";
+import { createCacheSentinel, describeCacheMisses } from "./lib/cache-sentinel.ts";
+import { cacheProfileFor } from "./lib/lean-policy.ts";
 import {
 	applyFold,
 	capText,
@@ -302,6 +305,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 
 	let fold: FoldState | undefined;
 	let totals = emptyTotals();
+	const sentinel = createCacheSentinel();
 	let foldCount = 0;
 	let foldedTotalTokens = 0;
 	let toolCaps = 0;
@@ -368,6 +372,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	const reset = () => {
 		fold = undefined;
 		totals = emptyTotals();
+		sentinel.reset();
 		foldCount = 0;
 		foldedTotalTokens = 0;
 		toolCaps = 0;
@@ -510,6 +515,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	});
 	pi.on("turn_end", (event: any, ctx: any) => {
 		if (!adaptiveEffortEnabled || !economy || effortManual || !effort || !effortCeiling) return;
+		// Where a thinking change re-bills the cached prefix (Anthropic, Qwen templates, DeepSeek) the step-down costs more than it saves.
+		if (thinkingChangeBreaksPromptCache(ctx?.model)) return;
 		const message = event?.message;
 		if (message?.role !== "assistant") return;
 		const calls = Array.isArray(message.content) ? message.content.filter((block: any) => block?.type === "toolCall") : [];
@@ -541,9 +548,28 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		return true;
 	};
 
+	// Observation only: fingerprint the outgoing request so a cache miss can be named, never alter it.
+	pi.on("before_provider_request", (event: any, ctx: any) => {
+		try {
+			const provider = String(ctx?.model?.provider ?? ""), id = String(ctx?.model?.id ?? "");
+			sentinel.request(event?.payload, `${provider}/${id}`, Date.now(), cacheProfileFor(provider, id).ttlSeconds * 1000);
+		} catch {
+			/* diagnostics never break a request */
+		}
+		return undefined;
+	});
+
 	pi.on("message_end", (event: any, ctx: any) => {
 		const message = event?.message;
 		if (message?.role !== "assistant" || !message.usage) return;
+		try {
+			const cost = ctx?.model?.cost;
+			const premium = Math.max(0, num(cost?.input) - num(cost?.cacheRead));
+			const miss = sentinel.response(message.usage, premium, Date.now(), message.usage.cacheReadReported !== false);
+			if (miss && miss.rebilledTokens >= 20_000) pi.appendEntry?.("cache-miss-v1", { ...miss, route: `${ctx?.model?.provider ?? ""}/${ctx?.model?.id ?? ""}` });
+		} catch {
+			/* diagnostics never break a turn */
+		}
 		addUsage(totals, message.usage);
 		const modelKey = `${message.provider ?? ""}/${message.model ?? ""}`;
 		if (modelKey !== lastModelKey) lastModelKey = modelKey;
@@ -708,6 +734,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				`Cost governor · ${status}${economy ? " · economy mode" : ""}`,
 				`Model: ${ctx?.model?.provider ?? "?"}/${ctx?.model?.id ?? "?"} · window ${fmtTokens(num(ctx?.model?.contextWindow))} · context ${fmtTokens(totals.lastPromptTokens)}`,
 				`Turns: ${totals.turns} · input ${fmtTokens(totals.input)} · output ${fmtTokens(totals.output)} · cache read ${fmtTokens(totals.cacheRead)} (${hit.toFixed(1)}% hit) · reasoning ${fmtTokens(totals.reasoning)}`,
+				describeCacheMisses(sentinel.summary(), fmtTokens, fmtUsd),
 				`Cost split: input ${fmtUsd(totals.inputCost)} · output ${fmtUsd(totals.outputCost)} · cache ${fmtUsd(totals.cacheCost)} · total ${fmtUsd(totals.cost)}`,
 				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · ${cacheFirstRoute(ctx?.model) ? "cache-first, fold only near the window" : "fold at budget"} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
 				`Tool caps: ${toolCaps} result(s), ${fmtTokens(Math.round(toolCharsSaved / 4))} estimated tokens kept out of the request`,
