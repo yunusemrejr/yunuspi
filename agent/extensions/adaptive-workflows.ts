@@ -26,8 +26,26 @@ const burstNote = (family: string) => {
 export default function adaptiveWorkflows(pi: any) {
   // Lean harness: adaptive workflow/council layer retired by default. Set PI_LEAN_GATES=on to re-enable.
   if (process.env.PI_LEAN_GATES !== 'on') return;
+  // The cost governor owns Jev-backed thinking-level routing. When that is
+  // active, the older deterministic thinking controller stands down instead of
+  // fighting it for the same setter (both would otherwise mark each other's
+  // changes as manual).
+  const jevOwnsThinking = (() => {
+    const own = String(process.env.PIJEV_EFFORT ?? '').toLowerCase();
+    if (['off', '0', 'false', 'no'].includes(own)) return false;
+    if (['off', '0'].includes(String(process.env.PI_JEV ?? 'on').toLowerCase())) return false;
+    return !['1', 'true', 'yes'].includes(String(process.env.PI_OFFLINE ?? '').toLowerCase());
+  })();
+  const inertThinking = {
+    begin() {},
+    update() { try { return pi.getThinkingLevel?.(); } catch { return undefined; } },
+    onSelection() {},
+    restore() { try { return pi.getThinkingLevel?.(); } catch { return undefined; } },
+    reset() {},
+    state: () => ({ ceiling: undefined, lastAuto: undefined, manual: true, cliPinned: false }),
+  };
   const execution = createAdaptiveExecutionController();
-  const thinking = createAdaptiveThinkingController(pi);
+  const thinking = jevOwnsThinking ? inertThinking : createAdaptiveThinkingController(pi);
   let dispose: (() => void) | undefined, owner: any, ownerFile = '', ownerCwd = '', ownerId = '', epoch = 0;
   let task = '', scope = 'task', revision = 'initial', selection = selectTaskPipelines({ prompt: '' });
   let ledger = createPipelineLedger(), pendingInput: { text: string; id: string; signal?: AbortSignal } | undefined, acceptedId = '';

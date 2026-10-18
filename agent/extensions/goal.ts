@@ -24,7 +24,7 @@ import { completionReport, createStaticCompletionCheck, staticAdvisories } from 
 import { selfVerificationPrompt } from "./lib/lean-policy.ts";
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalRestoreNotice, goalStatusText, goalSummary,
-	parseGoalArgs, GOAL_USAGE, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
+	parseGoalArgs, GOAL_USAGE, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalState,
 } from "./lib/goal-state.ts";
 import { addBoosts, boostedGoalNotice, chainCompletions, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
 
@@ -73,12 +73,25 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	const refused = new Set<string>();
 	let lastStop: string | undefined;
 
+	let unsaved: GoalState | undefined;
+	// A failed append used to leave the session running on state the disk never
+	// accepted: `/goal clear` said "Goal cleared." while reopening the session
+	// brought the goal back. Report it, and retry at the next turn boundary.
 	const persist = (next: GoalState | undefined, ctx?: ExtensionContext) => {
 		goal = next;
 		if (next) {
-			try { pi.appendEntry(ENTRY, next); } catch { /* the in-memory goal still drives this run */ }
+			try { pi.appendEntry(ENTRY, next); unsaved = undefined; }
+			catch (error) {
+				unsaved = next;
+				ctx?.ui?.notify?.(`Goal state could not be saved (${error instanceof Error ? error.message : String(error)}); it will not survive a restart.`, "warning");
+			}
 		}
+		else unsaved = undefined;
 		show(ctx);
+	};
+	const persistPending = () => {
+		if (!unsaved || !goal) return;
+		try { pi.appendEntry(ENTRY, goal); unsaved = undefined; } catch { /* retried at the next boundary */ }
 	};
 	const show = (ctx?: ExtensionContext) => {
 		// A stalled goal stays visible too: it is waiting for /goal retry, not gone.
@@ -116,6 +129,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// though tool discovery starts from the small default tool set.
 	pi.on("before_agent_start", (_event, ctx) => {
 		lastStop = undefined;
+		persistPending();
 		try {
 			pi.events?.emit('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['goal'], persistent: goalIsLive(goal), beforeStart: true });
 		} catch { /* discovery still stages the tool from the kickoff marker */ }
@@ -183,6 +197,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// One continuation per settled run; bounded and stall-aware inside stopGate.
 	pi.on("agent_settled", async (_event, ctx) => {
 		try {
+			persistPending();
 			const stop = lastStop;
 			lastStop = undefined;
 			// Recording the last criterion used to wake a model just to call complete. Close that exact checked goal
@@ -290,22 +305,25 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 	// A bare boost while a goal is live joins that goal: its brief is appended and its fronts take the free criteria slots.
 	const boostLive = (live: GoalState, presets: PresetId[], ctx: ExtensionContext) => {
-		const { goal: updated, fresh, fronts } = addBoosts(live, presets);
+		const { goal: updated, fresh, fronts, clipped } = addBoosts(live, presets);
 		if (!fresh.length) return ctx.ui?.notify?.(`${presets.map((id) => PRESET_LABELS[id]).join(" + ")} already in force on goal ${live.id}. /goal shows progress.`, "info");
 		persist(updated, ctx);
 		const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
 		const tracked = fronts ? `${fronts} front(s) tracked` : "no free criteria slots, so it applies through the brief";
-		ctx.ui?.notify?.(`${labels} boost added to goal ${updated.id} — ${tracked}, ${updated.criteria.length} criteria to settle with evidence. /goal shows progress, /goal pause stops it.`, "info");
+		ctx.ui?.notify?.(`${labels} boost added to goal ${updated.id} — ${tracked}, ${updated.criteria.length} criteria to settle with evidence.${clipped ? ` The goal text is at its ${MAX_GOAL_TEXT}-character cap, so this brief was clipped — /goal clear then re-run the boost for the full brief.` : ""} /goal shows progress, /goal pause stops it.`, "info");
 		// Steered into a running turn, so the work already underway picks the boost up at its next step.
 		void Promise.resolve(pi.sendUserMessage(goalKickoff(updated), { authored: true, userText: presetUserText(fresh, ""), deliverAs: "steer" }))
 			.catch((error: unknown) => ctx.ui?.notify?.(`${labels} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 	};
 
 	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
-		const trimmed = String(args ?? "").trim().toLowerCase();
-		if (goal && goal.status !== "cleared" && ["status", "help", "pause", "resume", "continue", "clear", "stop", "done", "retry"].includes(trimmed)) {
-			return goalCommandHandler(trimmed, ctx);
-		}
+		const text = String(args ?? "").trim();
+		const [head = "", ...rest] = text.split(/\s+/);
+		const word = head.toLowerCase();
+		// `resume|retry|continue <note>` are /goal forms with a note; keep the note's case.
+		const subcommand = ["status", "help", "pause", "resume", "continue", "clear", "stop", "done", "retry"].includes(word)
+			&& (!rest.length || ["resume", "retry", "continue"].includes(word));
+		if (goal && goal.status !== "cleared" && subcommand) return goalCommandHandler(text, ctx);
 		// The invoked name leads, so the whole invocation is one text: its tokens count wherever they stand.
 		const found = extractPresetTokens(`/${invoked} ${String(args ?? "")}`);
 		const chain: PresetChain = { presets: found.presets, task: found.task };

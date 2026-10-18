@@ -523,7 +523,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "cost-governor",
 		group: "commands",
-		summary: "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, and name the cause of every prompt-cache miss. No extra model call and no work skipped.",
+		summary: "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, name the cause of every prompt-cache miss, and route one thinking-level decision per human turn through the configured Jev judge when the request is clearly simple. No work skipped.",
 		entrypoints: ["cost-governor", "/budget", "read_many"],
 		tools: ["read_many"],
 		commands: ["budget"],
@@ -536,8 +536,9 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("PI_TOOL_RESULT_MAX", "Bash/search result cap in characters; default 24000."),
 			option("PI_COST_BUDGET_USD", "Soft USD budget; default 0.10, off disables economy mode."),
 			option("PI_ADAPTIVE_EFFORT", "Set to off to keep the configured thinking level in economy mode."),
+			option("PIJEV_EFFORT", "Set to off to disable Jev-backed per-turn thinking-level routing. Jev may only lower effort below the configured ceiling, never to off, and only when the cache miss fits the switch budget."),
 		],
-		related: ["quick-commands", "context-diagnostics"],
+		related: ["quick-commands", "context-diagnostics", "micro-intelligence"],
 		sourceFiles: ["agent/extensions/cost-governor.ts", "agent/extensions/lib/context-governor.ts", "agent/extensions/lib/effort-policy.mjs"],
 		doc: "agent/public-template/docs/GUIDANCE-AND-DIAGNOSTICS.md",
 	}),
@@ -1136,7 +1137,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "micro-intelligence",
 		group: "models",
-		summary: "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
+		summary: "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
 		entrypoints: ["micro_status", "micro_task"],
 		tools: ["micro_status", "micro_task"],
 		options: [

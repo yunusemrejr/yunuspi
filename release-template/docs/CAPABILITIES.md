@@ -99,7 +99,7 @@ Attach one deterministic workflow reminder to the first matching tool result (in
 
 #### cost-governor
 
-Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, and name the cause of every prompt-cache miss. No extra model call and no work skipped.
+Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, name the cause of every prompt-cache miss, and route one thinking-level decision per human turn through the configured Jev judge when the request is clearly simple. No work skipped.
 
 **Entrypoints:** `cost-governor`, `/budget`, `read_many`
 
@@ -117,8 +117,9 @@ Keep long sessions affordable: DeepSeek routes stay cache-first and fold only ne
 - `PI_TOOL_RESULT_MAX`: Bash/search result cap in characters; default 24000.
 - `PI_COST_BUDGET_USD`: Soft USD budget; default 0.10, off disables economy mode.
 - `PI_ADAPTIVE_EFFORT`: Set to off to keep the configured thinking level in economy mode.
+- `PIJEV_EFFORT`: Set to off to disable Jev-backed per-turn thinking-level routing. Jev may only lower effort below the configured ceiling, never to off, and only when the cache miss fits the switch budget.
 
-**Related records:** `quick-commands`, `context-diagnostics`
+**Related records:** `quick-commands`, `context-diagnostics`, `micro-intelligence`
 
 **Source:** [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts), [`agent/extensions/lib/context-governor.ts`](../../agent/extensions/lib/context-governor.ts), [`agent/extensions/lib/effort-policy.mjs`](../../agent/extensions/lib/effort-policy.mjs)
 
@@ -622,7 +623,7 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 #### micro-intelligence
 
-Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.
+Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.
 
 **Entrypoints:** `micro_status`, `micro_task`
 
@@ -1261,7 +1262,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 381; literal)
+- `goal` — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 399; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts) (line 32; factory)
@@ -1289,7 +1290,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 805; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 811; literal)
-- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 230; literal)
+- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 256; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2277; literal)
@@ -1310,7 +1311,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `svg_render` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 470; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 562; literal)
+- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../../agent/extensions/adaptive-workflows.ts) (line 580; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 518; literal)
@@ -1354,13 +1355,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Literal slash commands
 
-- /3d — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 358)
-- /anatomy — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 372)
+- /3d — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 376)
+- /anatomy — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 390)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 568)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
-- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 691)
+- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 884)
 - /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1731)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1846)
@@ -1371,7 +1372,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1812)
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 333)
+- /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 351)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3446)
 - /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 921)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)
@@ -1392,8 +1393,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts) (line 221)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 59)
 - /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 494)
-- /nobug — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 351)
-- /noslop — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 344)
+- /nobug — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 369)
+- /noslop — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 362)
 - /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 786)
 - /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 577)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 654)
@@ -1425,7 +1426,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 594)
 - /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1780)
-- /video — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 365)
+- /video — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 383)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3143)
 
 ### Dynamic command owners
@@ -1438,6 +1439,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
 - [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) — `wrapper/adapter`
+- [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) — `wrapper/adapter`
 - [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
 - [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) — `wrapper/adapter`

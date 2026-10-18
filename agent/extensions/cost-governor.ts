@@ -40,11 +40,20 @@ import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { createReadToolDefinition } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
-import { createEffortController } from "./lib/effort-policy.mjs";
+import {
+	classifyEffortRequest,
+	createEffortController,
+	effortLevelForTier,
+	effortMissTokens,
+	gateEffortSwitch,
+	levelRank,
+} from "./lib/effort-policy.mjs";
 import { thinkingChangeBreaksPromptCache } from "./lib/adaptive-execution.ts";
 import { sessionObservability } from "./lib/session-observability.ts";
 import { createCacheSentinel, describeCacheMisses } from "./lib/cache-sentinel.ts";
 import { cacheProfileFor } from "./lib/lean-policy.ts";
+import { askJev, jevEnabled } from "./lib/jev-client.ts";
+import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import {
 	applyFold,
 	capText,
@@ -58,6 +67,15 @@ import {
 const FOLD_ENTRY = "context-fold-v1";
 const DIGEST_TYPE = "context-fold";
 const NOTICE_TYPE = "cost-governor-notice";
+/** Whole-state snapshot of the Jev effort router (ceiling/manual/auto), so a
+ * reopened session can restore the user's ceiling instead of inheriting an
+ * automatic step-down as if it were a manual choice. */
+const EFFORT_ENTRY = "jev-effort-v1";
+/** One typed judgment per human turn may take at most this long; a slow judge
+ * fails open to the configured ceiling rather than delaying the request. */
+const EFFORT_JUDGE_TIMEOUT_MS = 3500;
+/** Only steps below `low` are worth a judged call; lower ceilings stay put. */
+const EFFORT_MIN_CEILING_RANK = levelRank("low");
 
 const DEFAULT_CONTEXT_BUDGET = 100_000;
 const DEEPSEEK_WINDOW_FRACTION = 0.8;
@@ -76,6 +94,14 @@ const READ_MANY_FILE_CHARS = 24_000;
 const ECONOMY_TOOL_MAX = 10_000;
 
 const enabled = () => String(process.env.PI_CONTEXT_GOVERNOR ?? "").toLowerCase() !== "off";
+
+/** Jev effort routing: on by default, and off whenever the judge itself is
+ * disabled. `PIJEV_EFFORT=off` keeps the deterministic economy policy only. */
+const jevEffortEnabled = (): boolean => {
+	const own = String(process.env.PIJEV_EFFORT ?? "").toLowerCase();
+	if (own === "off" || own === "0" || own === "false" || own === "no") return false;
+	return jevEnabled();
+};
 
 const positiveInt = (value: string | undefined, fallback: number, min: number, max: number): number => {
 	const parsed = Number(value);
@@ -325,8 +351,20 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	let effortManual = false;
 	let effortInitialized = false;
 	let effortAuto: string | undefined;
+	/** Who applied `effortAuto`: economy step-downs restore at the next human
+	 * turn; a Jev decision is re-judged at the next turn instead. */
+	let effortAutoSource: "economy" | "jev" | "restore" | undefined;
 	let effortNoticeSent = false;
 	let lastUserText = "";
+	/** Level used for the current turn's requests, and the prompt size last seen
+	 * at each level (the prefix that level's cache already carries). */
+	let effortLevelUsed: string | undefined;
+	const effortMarks = new Map<string, number>();
+	/** No provider cache exists yet for this session/route/prefix (start, a
+	 * compaction, or a route switch), so a level change re-reads nothing that was
+	 * already paid for; the cache gate only applies to a warm prefix. */
+	let effortCacheCold = true;
+	let effortTurnErrors = 0;
 	const effortPending: string[] = [];
 	const adaptiveEffortEnabled = String(process.env.PI_ADAPTIVE_EFFORT ?? "").toLowerCase() !== "off";
 
@@ -391,8 +429,13 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		effortManual = false;
 		effortInitialized = false;
 		effortAuto = undefined;
+		effortAutoSource = undefined;
 		effortNoticeSent = false;
 		lastUserText = "";
+		effortLevelUsed = undefined;
+		effortMarks.clear();
+		effortCacheCold = true;
+		effortTurnErrors = 0;
 		effortPending.length = 0;
 	};
 
@@ -409,10 +452,30 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		effortManual = false;
 		effortInitialized = true;
 		effortAuto = undefined;
+		effortAutoSource = undefined;
 		effortNoticeSent = false;
 	};
 
-	const applyEffort = (level: string | undefined, ctx?: any) => {
+	const validLevel = (level: unknown): string | undefined => (typeof level === "string" && levelRank(level) >= 0 ? level : undefined);
+
+	/** Append the durable effort state so a reopened session restores the user's
+	 * ceiling and never mistakes an automatic step-down for a manual choice. */
+	const persistEffort = () => {
+		if (!effortInitialized || !effortCeiling) return;
+		try {
+			pi.appendEntry(EFFORT_ENTRY, {
+				version: 1,
+				ceiling: effortCeiling,
+				autoLevel: effortAuto,
+				manual: effortManual,
+				updatedAt: Date.now(),
+			});
+		} catch {
+			/* persistence is useful, not required for this turn */
+		}
+	};
+
+	const applyEffort = (level: string | undefined, ctx?: any, reason?: string, source: "economy" | "jev" | "restore" = "economy") => {
 		if (!level) return;
 		let current = "";
 		try {
@@ -420,13 +483,22 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		} catch {
 			return;
 		}
-		if (current === level) return;
+		if (current === level) {
+			effortLevelUsed = level;
+			effortAuto = level === effortCeiling ? undefined : level;
+			effortAutoSource = effortAuto ? source : undefined;
+			return;
+		}
 		effortPending.push(level);
 		try {
 			pi.setThinkingLevel(level as any);
-			effortAuto = level;
-			try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.change", { from: current, to: level, reason: level === effortCeiling ? "economy mode restored" : "economy mode" }); } catch { /* visibility only */ }
-			if (ctx && effortCeiling && level !== effortCeiling && !effortNoticeSent) {
+			effortAuto = level === effortCeiling ? undefined : level;
+			effortAutoSource = effortAuto ? source : undefined;
+			effortLevelUsed = level;
+			const detail = reason ?? (level === effortCeiling ? "economy mode restored" : "economy mode");
+			try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.change", { from: current, to: level, reason: detail }); } catch { /* visibility only */ }
+			persistEffort();
+			if (ctx && source === "economy" && effortCeiling && level !== effortCeiling && !effortNoticeSent) {
 				effortNoticeSent = true;
 				notify(ctx, `Cost governor: economy mode is setting routine tool continuations to ${level} thinking; deep, judgment, error and large-change turns keep ${effortCeiling}. Set PI_ADAPTIVE_EFFORT=off to disable.`);
 			}
@@ -437,13 +509,15 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	};
 
 	const restoreEffort = (ctx?: any) => {
-		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
+		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx, "configured thinking level restored", "restore");
 		effortAuto = undefined;
+		effortAutoSource = undefined;
 	};
 
 	const restore = (ctx: any) => {
 		reset();
 		let latest: FoldState | undefined;
+		let savedEffort: Record<string, unknown> | undefined;
 		const entries = (() => {
 			try {
 				return ctx?.sessionManager?.getBranch?.() ?? [];
@@ -454,6 +528,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		for (const entry of entries) {
 			if (entry?.type === "message" && entry.message?.role === "assistant" && entry.message.usage) addUsage(totals, entry.message.usage);
 			if (entry?.type === "custom" && entry.customType === FOLD_ENTRY && isFoldState(entry.data)) latest = entry.data;
+			if (entry?.type === "custom" && entry.customType === EFFORT_ENTRY && entry.data?.version === 1) savedEffort = entry.data;
 		}
 		if (latest) {
 			fold = latest;
@@ -464,6 +539,21 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		initialized = true;
 		if (currentBudget() > 0 && totals.cost >= currentBudget()) economy = true;
 		initEffort();
+		// A reopened session restores the human's ceiling from the saved snapshot
+		// instead of inheriting the level the router last auto-selected. Applies
+		// on session start/switch/tree, where the prefix is already cold.
+		const savedCeiling = validLevel(savedEffort?.ceiling);
+		const savedAuto = validLevel(savedEffort?.autoLevel);
+		if (savedCeiling) {
+			effortCeiling = savedCeiling;
+			effort = createEffortController({ level: savedCeiling, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
+			effortManual = savedEffort?.manual === true;
+			let current: string | undefined;
+			try { current = String(pi.getThinkingLevel()); } catch { current = undefined; }
+			effortAuto = !effortManual && savedAuto && current === savedAuto ? savedAuto : undefined;
+			effortAutoSource = effortAuto ? "jev" : undefined;
+			if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx, "session restored at the configured level", "restore");
+		}
 	};
 
 	pi.on("session_start", (_event, ctx) => restore(ctx));
@@ -475,25 +565,37 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		foldedTotalTokens = 0;
 		lastView = undefined;
 		lastViewSignature = "";
+		// The rewritten prefix has no provider cache: a level change is free.
+		effortCacheCold = true;
 	});
 	pi.on("session_shutdown", () => {
 		// Never persist the economy step-down as the user's chosen level.
 		restoreEffort();
 	});
-	pi.on("model_select", () => {
+	pi.on("model_select", (_event: any, ctx: any) => {
 		// A smaller window can make the cached view illegal; re-evaluate the
 		// fold against the new effective budget on the next request.
 		lastView = undefined;
 		lastViewSignature = "";
+		effortMarks.clear();
+		effortCacheCold = true;
+		effortTurnErrors = 0;
+		if (!effortInitialized || effortManual) return;
+		// A route switch remaps the level. An automatic step-down belongs to the
+		// old route; return to the human's ceiling instead of carrying it over.
+		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx, "model changed; configured level restored", "restore");
+		try { effortLevelUsed = String(pi.getThinkingLevel()); } catch { effortLevelUsed = undefined; }
 	});
 	pi.on("input", (event: any, ctx: any) => {
 		if (!effortInitialized || event?.source === "extension") return;
 		const text = typeof event?.originalText === "string" ? event.originalText : event?.text;
 		if (typeof text === "string" && text.trim()) lastUserText = text.slice(0, 8_000);
 		effort?.reset();
-		// A new human turn starts from the configured level again; only goal
-		// continuations and tool steps inherit the economy step-down.
-		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
+		effortTurnErrors = 0;
+		// A new human turn starts from the configured level for an economy
+		// step-down. A Jev decision is re-judged in before_agent_start instead:
+		// pre-restoring it would move the level twice and break the prefix cache.
+		if (effortAuto && effortCeiling && effortAutoSource !== "jev") applyEffort(effortCeiling, ctx, "configured thinking level restored", "restore");
 	});
 	pi.on("thinking_level_select", (event: any) => {
 		const pending = effortPending.indexOf(String(event?.level ?? ""));
@@ -502,18 +604,96 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			return;
 		}
 		if (!effortInitialized) return;
+		// A restored automatic level is not a human override; the router owns it.
+		if (effortAuto && String(event?.level ?? "") === effortAuto) return;
 		// The initial level selection is the ceiling, not a manual override.
 		if (totals.turns === 0) {
 			effortCeiling = String(event.level);
 			effort = createEffortController({ level: effortCeiling, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
+			persistEffort();
 			return;
 		}
-		// A human selection or another controller wins; the economy policy stays
+		// A human selection or another controller wins; the effort policy stays
 		// out of the way for the rest of this session.
 		effortManual = true;
 		effortCeiling = String(event.level);
 		effort = createEffortController({ level: effortCeiling, floor: "high", maxStepDown: 2, stepDownAfter: 1, enabled: adaptiveEffortEnabled });
 		effortAuto = undefined;
+		effortAutoSource = undefined;
+		persistEffort();
+	});
+	/**
+	 * One conservative Jev decision per human turn. Jev may only step *down*
+	 * from the configured ceiling when both typed scores say the request is
+	 * simple and not deep; an ambiguous answer, a failure, a goal round or a
+	 * step whose cache miss is too expensive keeps the ceiling. Never `off`.
+	 * Economy mode keeps its own deterministic policy; the cache gate protects
+	 * a warm DeepSeek prefix exactly like the economy step-down does.
+	 */
+	const judgeEffort = async (event: any, ctx: any): Promise<void> => {
+		if (!effortInitialized) initEffort();
+		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy) return;
+		if (process.env.PI_SUBAGENT_CHILD === "1" || ctx?.model?.reasoning === false) return;
+		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+		if (!prompt.trim()) return;
+		if (levelRank(effortCeiling) < EFFORT_MIN_CEILING_RANK) return;
+		let current = "";
+		try { current = String(pi.getThinkingLevel()); } catch { return; }
+		if (levelRank(current) < 0) return;
+		effortLevelUsed = current;
+		const classification = classifyEffortRequest(prompt);
+		if (classification.kind === "ceiling") {
+			// A complex turn after an automatic step-down restores the ceiling;
+			// stepping up is always allowed because quality outranks cache.
+			if (current !== effortCeiling) applyEffort(effortCeiling, ctx, `jev effort kept at the ceiling · ${classification.reasons[0] ?? "no easy evidence"}`, "jev");
+			return;
+		}
+		if (classification.kind === "inherit") return;
+		const flat = prompt.replace(/\s+/g, " ").trim();
+		const shortPlain = flat.length <= 400;
+		const judged = await askTypedDecision(
+			"effort-tier",
+			{ state: { request: flat.slice(0, 3000) } },
+			{
+				judge: (site, state, questions, options) => askJev(site, state, questions, {
+					pi,
+					signal: options?.signal,
+					timeoutMs: EFFORT_JUDGE_TIMEOUT_MS,
+				}),
+				signal: event?.signal,
+			},
+		);
+		if (event?.signal?.aborted) return;
+		const verdictTier = judged.verdict?.tier;
+		const tier = judged.ok && (verdictTier === "easy" || verdictTier === "moderate") ? verdictTier : undefined;
+		if (!tier) {
+			if (current !== effortCeiling) applyEffort(effortCeiling, ctx, `jev effort ${String(judged.reason ?? "abstained")}; configured level kept`, "jev");
+			return;
+		}
+		const target = effortLevelForTier(tier, effortCeiling, { shortPlain });
+		// The current request's own prompt text is not yet in totals; include it
+		// so a first turn with a large paste cannot be judged cheap.
+		const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);
+		const contextTokens = Math.max(totals.lastPromptTokens, promptTokens);
+		const miss = effortMissTokens(target, effortMarks, contextTokens);
+		// On a cold prefix no provider cache is lost by moving level; only a warm
+		// one pays the re-read. The first request of a session starts cold even
+		// though its system prompt and tool schemas are large.
+		const gate: { level: string; gated?: string; missTokens?: number } = effortCacheCold ? { level: target } : gateEffortSwitch(target, current, miss);
+		if (gate.gated) {
+			try {
+				sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.held", {
+					to: current,
+					reason: `jev step to ${target} would re-read ~${Math.round(Number(gate.missTokens) || 0)} tokens uncached`,
+				});
+			} catch { /* visibility only */ }
+			return;
+		}
+		if (gate.level === current) return;
+		applyEffort(gate.level, ctx, `jev: ${tier} request${shortPlain ? " (short)" : ""}`, "jev");
+	};
+	pi.on("before_agent_start", async (event: any, ctx: any) => {
+		try { await judgeEffort(event, ctx); } catch { /* a judge must never delay or break the request */ }
 	});
 	pi.on("turn_end", (event: any, ctx: any) => {
 		if (!adaptiveEffortEnabled || !economy || effortManual || !effort || !effortCeiling) return;
@@ -536,8 +716,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		const errors = (Array.isArray(event?.toolResults) ? event.toolResults : []).filter((result: any) => result?.isError === true).length;
 		const advice = effort.advise({ tools, errors, files: paths.size, userText: lastUserText });
 		const desired = advice.difficulty === "routine" && advice.mechanical ? advice.level : effortCeiling;
-		if (desired && desired !== effortCeiling) applyEffort(desired, ctx);
-		else if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx);
+		if (desired && desired !== effortCeiling) applyEffort(desired, ctx, "economy mode", "economy");
+		else if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx, "economy mode restored", "economy");
 	});
 
 	const maybeEconomy = (ctx: any): boolean => {
@@ -573,6 +753,10 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			/* diagnostics never break a turn */
 		}
 		addUsage(totals, message.usage);
+		// The request just sent at `effortLevelUsed` cached this prefix at that
+		// level; a later step back to it only re-reads what grew since.
+		if (effortLevelUsed && totals.lastPromptTokens > 0) effortMarks.set(effortLevelUsed, totals.lastPromptTokens);
+		effortCacheCold = false;
 		const modelKey = `${message.provider ?? ""}/${message.model ?? ""}`;
 		if (modelKey !== lastModelKey) lastModelKey = modelKey;
 		const activated = maybeEconomy(ctx);
@@ -670,6 +854,15 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_result", async (event: any, ctx: any) => {
+		// A burst of tool errors means the judged-simple turn was harder than
+		// it looked: restore the ceiling at once (a step up never waits on the
+		// prompt cache, because quality outranks it).
+		if (event?.isError === true && process.env.PI_SUBAGENT_CHILD !== "1" && !effortManual && !economy) {
+			effortTurnErrors += 1;
+			if (effortTurnErrors >= 2 && effortAuto && effortCeiling && effortAuto !== effortCeiling) {
+				applyEffort(effortCeiling, ctx, `${effortTurnErrors} tool errors; configured level restored`, "jev");
+			}
+		}
 		const cap = effectiveToolMax(String(event?.toolName ?? ""));
 		if (!cap) return undefined;
 		const content = Array.isArray(event.content) ? event.content : [];
@@ -740,8 +933,9 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				`Cost split: input ${fmtUsd(totals.inputCost)} · output ${fmtUsd(totals.outputCost)} · cache ${fmtUsd(totals.cacheCost)} · total ${fmtUsd(totals.cost)}`,
 				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · ${cacheFirstRoute(ctx?.model) ? "cache-first, fold only near the window" : "fold at budget"} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
 				`Tool caps: ${toolCaps} result(s), ${fmtTokens(Math.round(toolCharsSaved / 4))} estimated tokens kept out of the request`,
-				`Adaptive effort: ${adaptiveEffortEnabled ? "economy-only" : "off"}${effortAuto ? ` · auto ${effortAuto}` : ""}${effortManual ? " · manual override" : ""} · ceiling ${effortCeiling ?? "?"}`,
-				"Policy: DeepSeek routes (any provider) are cache-first and fold only near the window so the automatic prefix cache stays warm; other routes fold at the budget. Folding is deterministic at a stable boundary; bash/search output is capped with a full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking.",
+				`Adaptive effort: ${adaptiveEffortEnabled ? "economy-only" : "off"}${effortAuto ? ` · auto ${effortAuto}${effortAutoSource ? ` (${effortAutoSource})` : ""}` : ""}${effortManual ? " · manual override" : ""} · ceiling ${effortCeiling ?? "?"}`,
+				`Jev effort: ${jevEffortEnabled() ? "on · one judged level decision per human turn" : "off"}${effortLevelUsed ? ` · current turn ${effortLevelUsed}` : ""}${effortMarks.size ? ` · levels seen ${[...effortMarks.keys()].join(", ")}` : ""}`,
+				"Policy: DeepSeek routes (any provider) are cache-first and fold only near the window so the automatic prefix cache stays warm; other routes fold at the budget. Folding is deterministic at a stable boundary; bash/search output is capped with a full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. Outside economy mode Jev may lower the level once per human turn only when both typed scores say the request is simple and the cache miss fits the switch budget; ambiguous answers, goal rounds and tool-error bursts keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking, PIJEV_EFFORT=off disables Jev effort routing.",
 			];
 			notify(ctx, lines.join("\n"));
 		},

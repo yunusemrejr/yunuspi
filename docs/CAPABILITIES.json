@@ -1072,7 +1072,7 @@
     {
       "id": "cost-governor",
       "group": "commands",
-      "summary": "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, and name the cause of every prompt-cache miss. No extra model call and no work skipped.",
+      "summary": "Keep long sessions affordable: DeepSeek routes stay cache-first and fold only near the window, other routes fold at a stable budget; batch independent file reads, cap oversized bash/search output with a full-output spill, tighten tool caps and routine thinking at a soft USD budget, name the cause of every prompt-cache miss, and route one thinking-level decision per human turn through the configured Jev judge when the request is clearly simple. No work skipped.",
       "entrypoints": [
         "cost-governor",
         "/budget",
@@ -1116,11 +1116,16 @@
         {
           "name": "PI_ADAPTIVE_EFFORT",
           "summary": "Set to off to keep the configured thinking level in economy mode."
+        },
+        {
+          "name": "PIJEV_EFFORT",
+          "summary": "Set to off to disable Jev-backed per-turn thinking-level routing. Jev may only lower effort below the configured ceiling, never to off, and only when the cache miss fits the switch budget."
         }
       ],
       "related": [
         "quick-commands",
-        "context-diagnostics"
+        "context-diagnostics",
+        "micro-intelligence"
       ],
       "sourceFiles": [
         "agent/extensions/cost-governor.ts",
@@ -3216,7 +3221,7 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
+      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
       "entrypoints": [
         "micro_status",
         "micro_task"
@@ -3280,12 +3285,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 358
+        "line": 376
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 372
+        "line": 390
       },
       {
         "name": "bg",
@@ -3310,7 +3315,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 691
+        "line": 884
       },
       {
         "name": "catalog-status",
@@ -3365,7 +3370,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 333
+        "line": 351
       },
       {
         "name": "google-account",
@@ -3470,12 +3475,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 351
+        "line": 369
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 344
+        "line": 362
       },
       {
         "name": "obs",
@@ -3635,7 +3640,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 365
+        "line": 383
       },
       {
         "name": "websearch",
@@ -3865,7 +3870,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 381,
+        "line": 399,
         "kind": "literal"
       },
       {
@@ -4033,7 +4038,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 230,
+        "line": 256,
         "kind": "literal"
       },
       {
@@ -4160,7 +4165,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 562,
+        "line": 580,
         "kind": "literal"
       },
       {
@@ -4355,7 +4360,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 381,
+        "line": 399,
         "kind": "literal"
       },
       {
@@ -4451,7 +4456,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 230,
+        "line": 256,
         "kind": "literal"
       },
       {
@@ -4517,7 +4522,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 562,
+        "line": 580,
         "kind": "literal"
       },
       {
@@ -6662,6 +6667,12 @@
     "serviceOwners": [
       {
         "source": "agent/extensions/checkpoints.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/cost-governor.ts",
         "signals": [
           "wrapper/adapter"
         ]

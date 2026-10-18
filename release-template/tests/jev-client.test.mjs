@@ -73,10 +73,10 @@ test('distillation asks only about omittable chunks and handles twelve bounded c
   assert.match(selected,/ERROR: preserve failure/);assert.match(selected,/omitted/);
 });
 
-test("cascade tries tilde latest, then pinned, then discovered variations", async () => {
+test("cascade tries tilde latest, then the current dated release, then the previous one, then discovered variations", async () => {
   const seen = [];
   const { pi } = harness(async (url, opts) => {
-    if (String(url).includes("/api/v1/models")) return jsonOk({ data: [{ id: "typesafe/jev-9.9" }, { id: "other/jev-x" }, { id: "openai/gpt" }] });
+    if (String(url).includes("/api/v1/models")) return jsonOk({ data: [{ id: "typesafe/jev-9.9" }, { id: "other/jev-x" }, { id: "openai/gpt" }, { id: "typesafe/jev-router" }] });
     const slug = JSON.parse(opts.body).model;
     seen.push(slug);
     if (slug !== "typesafe/jev-9.9") return httpFail(404, "model not found");
@@ -84,13 +84,47 @@ test("cascade tries tilde latest, then pinned, then discovered variations", asyn
   });
   const first = await jev.askJev("probe", "hello world", { ping: { type: "noul", instructions: "Affirmative?" } }, { pi });
   assert.equal(first.ok, true);
-  assert.deepEqual(seen, ["~typesafe/jev-latest", "typesafe/jev-1.13", "typesafe/jev-9.9"]);
+  assert.deepEqual(seen, ["~typesafe/jev-latest", "typesafe/jev-1.14-20261014", "typesafe/jev-1.13", "typesafe/jev-9.9"]);
   assert.equal(first.usage.model, "typesafe/jev-9.9");
+  assert.ok(!seen.includes("typesafe/jev-router"), "the chat-only router never joins the decisions cascade");
   // Sticky slug serves the next call without re-walking the cascade.
   seen.length = 0;
   const second = await jev.askJev("probe", "different state here", { ping: { type: "noul", instructions: "Affirmative?" } }, { pi });
   assert.equal(second.ok, true);
   assert.deepEqual(seen, [jev.KEV_SLUG, "typesafe/jev-9.9"], "the other family is tried, then the working Jev alias takes over");
+});
+
+test("the served dated release is reported as the model and kept as the next Jev fallback", async () => {
+  const seen = [];
+  let calls = 0;
+  const { pi } = harness(async (url, opts) => {
+    if (String(url).includes("/api/v1/models")) return emptyModels();
+    const slug = JSON.parse(opts.body).model;
+    seen.push(slug);
+    calls += 1;
+    // The first call proves the alias; a later call has the alias rejected and
+    // must fall back to the concrete dated model the route reported.
+    if (calls > 1 && slug === "~typesafe/jev-latest") return httpFail(404, "model not found");
+    return jsonOk({ model: "typesafe/jev-1.14-20261014", answers: ANSWERS, usage: { input_tokens: 10, cost: 0.000001 } });
+  });
+  const q = { ping: { type: "noul", instructions: "Affirmative?" } };
+  const first = await jev.askJev("latest", "first decision", q, { pi });
+  assert.equal(first.ok, true);
+  assert.equal(first.usage.model, "typesafe/jev-1.14-20261014", "the dated model that answered is reported, not only the alias");
+  assert.equal(jev.jevHealth().resolvedSlug, "typesafe/jev-1.14-20261014");
+  seen.length = 0;
+  const second = await jev.askJev("latest", "second decision", q, { pi, family: "jev" });
+  assert.equal(second.ok, true);
+  assert.deepEqual(seen, ["~typesafe/jev-latest", "typesafe/jev-1.14-20261014"], "a rejected alias falls back to the known dated release");
+});
+
+test("a caller-selected deadline bounds the whole advisory call", async () => {
+  harness(async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })));
+  jev.configureJevClient({ requestTimeoutMs: 5_000 });
+  const started = Date.now();
+  const result = await jev.askJev("bounded-caller", "a slow judge decision", { ping: { type: "noul", instructions: "Affirmative?" } }, { timeoutMs: 40 });
+  assert.ok(result.ok === false && ["timeout", "unavailable"].includes(result.skipped), `a short caller deadline fails open (${JSON.stringify(result)})`);
+  assert.ok(Date.now() - started < 1_000, "the short caller deadline is honored instead of the full cascade deadline");
 });
 
 test("transport failure opens the breaker and background probe recovers", async () => {
@@ -267,12 +301,12 @@ test("cancellation during fallback discovery returns promptly without another pa
   abort.abort();
   try {
     assert.equal((await work).skipped, 'aborted');
-    assert.equal(judgments, 2, 'only the two preferred aliases were attempted');
+    assert.equal(judgments, 3, 'only the three preferred aliases were attempted');
   } finally {
-    releaseCatalog(jsonOk({ data: [{ id: 'typesafe/jev-fallback' }] }));
+    releaseCatalog(jsonOk({ data: [{ id: 'typesafe/jev-9.8-20261001' }] }));
     await new Promise(resolve => setImmediate(resolve));
   }
-  assert.equal(judgments, 2);
+  assert.equal(judgments, 3);
   assert.equal(jev.jevHealth().state, 'closed', 'cancellation is not a provider outage');
 });
 
@@ -590,9 +624,11 @@ test('a slow Jev route leaves deadline budget for Kev; caller cancellation poiso
 
 test('unpriced routes report unknown cost instead of borrowing Jev’s price', async () => {
   assert.equal(jev.resolveJevInputPricePerM('~typesafe/jev-latest'), 0.042);
+  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-1.14-20261014'), 0.042, 'the dated current release is the same Jev family');
   assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-1.13'), 0.042);
+  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-router'), undefined, 'the chat-only router is not a decisions judge');
   assert.equal(jev.resolveJevInputPricePerM(jev.KEV_SLUG), undefined);
-  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-9.9'), undefined, 'discovered aliases carry no presumed price');
+  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-9.9'), 0.042, 'a discovered Jev release carries the documented family price');
   const { ledger, pi } = harness(async (url, { body }) => {
     if (String(url).includes('/api/v1/models')) return emptyModels();
     return JSON.parse(body).model === jev.KEV_SLUG ? decisionsOk() : httpFail(404, 'model not found');

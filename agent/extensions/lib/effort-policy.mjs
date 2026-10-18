@@ -273,3 +273,136 @@ export const compareModes = (opts) => {
 		tokenRatio: transaction.totalTokens / micro.totalTokens,
 	};
 };
+
+// ---------------------------------------------------------------------------
+// Jev-assisted per-turn effort routing.
+//
+// The deterministic policy above owns routine mechanical continuations. This
+// additive layer lets the configured typed judge (TypeSafe Jev on OpenRouter)
+// make ONE conservative decision per human turn: it may step below the
+// configured ceiling only when both Jev scores say the request is simple and
+// not deep, and only when re-reading the context at the new level is cheap.
+// Quality rules are unchanged: the configured level is a ceiling, the human's
+// manual selection wins, unknowns and failures keep the ceiling, `off` is
+// never chosen automatically, and a step up is always allowed.
+//
+// The cost-owner in cost-governor.ts supplies the judge; this module stays
+// pure and deterministic so the thresholds, level mapping and cache gate are
+// testable without network or clocks.
+// ---------------------------------------------------------------------------
+
+/** Minimum Jev evidence before a step down: the two scores must agree. */
+export const EFFORT_JUDGE_BARS = Object.freeze({
+	simpleStrong: 0.75,
+	simpleSome: 0.6,
+	deepClear: 0.25,
+	deepSome: 0.3,
+});
+
+/** Re-reading this many tokens uncached costs more than one easier turn saves. */
+export const EFFORT_SWITCH_BUDGET_TOKENS = 4000;
+
+/** Levels a Jev-judged simple turn may step to (never `off`: that changes mode). */
+export const EFFORT_JUDGE_TIERS = Object.freeze({ easy: "low", moderate: "medium" });
+
+const EFFORT_GOAL_MARK = /\[goal(?:-tracked)? [a-z0-9]|goal continuing on its own|boosts in force|fronts this goal is judged on|acceptance criteria \(refine with/i;
+const EFFORT_CRITICAL = /\b(?:authentication|authorization|credentials?|security|vulnerabilit\w*|billing|payments?|production deploy|deploy\w*.{0,32}production|data loss|delete.{0,20}(?:database|production)|schema migration)\b/i;
+const EFFORT_COMPLEX = /\b(?:architect(?:ure|ural)?|redesign|rearchitect|overhaul|rethink|migrat\w+|concurrency|race condition|deadlock|intermittent|root cause|debug|investigate|audit|refactor\w*|optimi[sz]\w+|performance|algorithm|prove|proof|compiler|parser|distributed|end[- ]to[- ]end|cross[- ]file|multiple (?:files|services|modules))\b/i;
+const EFFORT_MECHANICAL = /\b(?:typo|spelling|whitespace|indentation|format(?:ting)?|prettier|eslint|gofmt|rustfmt|rename|one[- ]line|bump (?:the )?version|add (?:a )?comment|what does .{0,40} (?:mean|do)|where is|which (?:file|command)|show me|list|print)\b/i;
+const EFFORT_WORK = /\b(?:implement|build|create|write|fix|add|remove|change|update|refactor|make|design|port|migrate|run|test|deploy|install|configure|set up|debug|find|search|check|review|analy[sz]e)\b/i;
+const EFFORT_ACK = /^\s*(?:ok(?:ay)?|yes|yep|yeah|sure|go on|go ahead|continue|proceed|keep going|please do|do it|thanks?|thank you|great|good|nice|perfect|next|and then\??|retry|try again)\b[\s.!,)]*$/i;
+
+/**
+ * Deterministic pre-classification of one human request.
+ * - `ceiling`: no automatic demotion is eligible (goal round, preset brief,
+ *   prior failures, critical or complex wording, long input, code, stack trace).
+ * - `inherit`: short acknowledgement of ongoing work; keep the current level.
+ * - `judge`: ask Jev whether the request is genuinely simple.
+ * `mechanical` is only a hint; Jev still has to agree before anything moves.
+ */
+export const classifyEffortRequest = (text, { source = "human", priorFailures = 0 } = {}) => {
+	const prompt = String(text ?? "").replace(/\u0000/g, "");
+	const flat = prompt.replace(/```[\s\S]*?(?:```|$)/g, " ").trim();
+	const reasons = [];
+	if (source === "goal" || EFFORT_GOAL_MARK.test(prompt)) return { kind: "ceiling", reasons: ["goal round"] };
+	if (priorFailures >= 2) return { kind: "ceiling", reasons: [`previous turn had ${priorFailures} tool failures`] };
+	if (!flat) return { kind: "ceiling", reasons: ["no text (attachment-only)"] };
+	if (EFFORT_ACK.test(flat) && flat.length <= 80) return { kind: "inherit", reasons: ["short acknowledgement"] };
+	if (EFFORT_CRITICAL.test(flat)) return { kind: "ceiling", reasons: ["critical-area cue"] };
+	if (EFFORT_COMPLEX.test(flat)) return { kind: "ceiling", reasons: ["complexity cue"] };
+	if (prompt.length > 1500 || /```/.test(prompt) || /\bat \S+:\d+:\d+\)?$/m.test(prompt)) return { kind: "ceiling", reasons: ["long input, code or stack trace"] };
+	if (flat.length <= 300 && EFFORT_MECHANICAL.test(flat)) return { kind: "judge", reasons: ["mechanical cue"], mechanical: true };
+	if (flat.length <= 160 && !EFFORT_WORK.test(flat)) return { kind: "judge", reasons: ["short question"], mechanical: true };
+	return { kind: "judge", reasons: ["no strong ceiling cue"] };
+};
+
+/** Two typed noul questions for the shared Jev decision registry. */
+export const effortQuestions = () => ({
+	deep: { type: "noul", instructions: "Does settling this request need careful multi-step reasoning, such as debugging, design, algorithm work, changes across several files, or verifying subtle behavior?" },
+	simple: { type: "noul", instructions: "Is this request simple, mechanical or conversational, so that a quick answer or one small edit would settle it (rename, formatting, short factual question, trivial lookup)?" },
+});
+
+const effortScore = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined);
+
+/**
+ * Interpret the two Jev scores. Returns a tier only when the evidence is
+ * asymmetric in the same direction; everything else abstains (ceiling kept).
+ */
+export const interpretEffortAnswers = (answers) => {
+	const deep = effortScore(answers?.deep?.noul);
+	const simple = effortScore(answers?.simple?.noul);
+	if (deep === undefined || simple === undefined) return { ok: false, reason: "jev answer unusable" };
+	const bars = EFFORT_JUDGE_BARS;
+	if (simple >= bars.simpleStrong && deep <= bars.deepClear)
+		return { tier: "easy", confidence: Math.min(simple, 1 - deep), simple, deep };
+	if (simple >= bars.simpleSome && deep <= bars.deepSome)
+		return { tier: "moderate", confidence: Math.min(simple, 1 - deep), simple, deep };
+	return { ok: false, reason: "kept ceiling", simple, deep };
+};
+
+/** Map a judged tier to a concrete level, clamped by the user's ceiling and the floor. */
+export const effortLevelForTier = (tier, ceiling, { shortPlain = false } = {}) => {
+	const ceilingRank = levelRank(ceiling);
+	if (ceilingRank <= 0) return ceiling;
+	let wanted = EFFORT_JUDGE_TIERS[tier];
+	if (tier === "easy" && shortPlain) wanted = "minimal";
+	const wantedRank = levelRank(wanted);
+	if (wantedRank < 0) return ceiling;
+	// Never `off` automatically: that changes the mode, not just the budget.
+	const floor = Math.min(ceilingRank, 1);
+	return levelAt(Math.max(floor, Math.min(ceilingRank, wantedRank)));
+};
+
+/** True when the candidate level is below the current level (a cache-costing step). */
+export const effortStepDown = (target, current) => levelRank(target) >= 0 && levelRank(current) >= 0 && levelRank(target) < levelRank(current);
+
+/**
+ * Cache gate for an automatic level change. Raising is always allowed
+ * (quality outranks cache); lowering is allowed only when the context tokens
+ * that would have to be re-read at the new level fit inside `budget`.
+ * `missTokens` may be a number or a function; unknown cost is treated as all.
+ */
+export const gateEffortSwitch = (target, current, missTokens, budget = EFFORT_SWITCH_BUDGET_TOKENS) => {
+	if (levelRank(target) < 0 || levelRank(current) < 0) return { level: current, reason: "unknown level" };
+	if (target === current) return { level: current };
+	if (levelRank(target) > levelRank(current)) return { level: target, raised: true };
+	let miss = Infinity;
+	try {
+		miss = typeof missTokens === "function" ? missTokens(target) : missTokens;
+	} catch {
+		miss = Infinity;
+	}
+	if (typeof miss !== "number" || !Number.isFinite(miss)) miss = Infinity;
+	if (miss <= budget) return { level: target, missTokens: Math.max(0, miss) };
+	return { level: current, gated: "cache", missTokens: miss };
+};
+
+/** Tokens that a request at `level` would have to re-read uncached. The owner
+ * records the prompt size last sent at each level; a level never used before
+ * misses the whole current context. */
+export const effortMissTokens = (level, marks, contextTokens) => {
+	const context = Number.isFinite(contextTokens) && contextTokens > 0 ? contextTokens : 0;
+	const mark = marks?.get?.(level);
+	const seen = typeof mark === "number" && Number.isFinite(mark) && mark > 0 ? Math.min(mark, context) : 0;
+	return Math.max(0, context - seen);
+};

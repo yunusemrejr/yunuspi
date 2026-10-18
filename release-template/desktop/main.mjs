@@ -120,6 +120,13 @@ async function workerFor(id) {
   worker.on('event', (event, sequence) => {
     if (event.type === 'extension_ui_request' && ['select', 'confirm', 'input', 'editor'].includes(event.method)) worker.uiRequests.add(event.id);
     if (event.type === 'extension_ui_closed') worker.uiRequests.delete(event.id);
+    // Keep workspace.json in step with the session's real effort level: automatic
+    // changes (economy/adaptive, model-switch remap) only reach the transcript.
+    // workerFor() re-passes the cached level as `--thinking` on the next start
+    // (line 114), which would otherwise reopen the session at a stale level.
+    if (event.type === 'thinking_level_changed' && typeof event.level === 'string') {
+      try { store.update(id, { thinkingLevel: event.level }); } catch { /* a stale cache is recoverable next start */ }
+    }
     send({ type: 'agent', sessionId: id, event, sequence });
     if (event.type === 'agent_start' || event.type === 'agent_end') publish();
     // Refresh after every completed model response, not only at the end of a long run, so the
@@ -154,6 +161,21 @@ async function stop(id) {
   if (closing.has(id)) return closing.get(id);
   const worker = workers.get(id);
   if (!worker) return;
+  // Text the user queued while a turn was running lives only in the worker's
+  // memory (AgentSession._steeringMessages/_followUpMessages are never persisted)
+  // and vanishes with the process. Ask for it first and keep it as the draft.
+  let queued = null;
+  try { queued = await worker.request('clear_queue', {}, 2000); } catch { /* already closing */ }
+  const saved = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])]
+    .filter((text) => typeof text === 'string' && text.trim());
+  if (saved.length) {
+    try {
+      const draft = saved.join('\n\n');
+      const existing = store.session(id).draft.trim();
+      store.setDraft(id, existing ? `${draft}\n\n${existing}` : draft);
+      publish();
+    } catch { /* the transcript still closes */ }
+  }
   const pending = worker.stop().finally(() => { closing.delete(id); workers.delete(id); starting.delete(id); publish(); });
   closing.set(id, pending);
   return pending;

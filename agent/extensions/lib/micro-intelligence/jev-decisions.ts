@@ -13,6 +13,7 @@
 import { microMetrics } from "./metrics.ts";
 import type { JudgeFn } from "./review.ts";
 import { readJevChoice } from "../jev-client.ts";
+import { effortQuestions, interpretEffortAnswers } from "../effort-policy.mjs";
 
 export type TypedDecisionId =
   | "requirement-closure"
@@ -28,7 +29,8 @@ export type TypedDecisionId =
   | "evidence-relevance"
   | "tool-skill-shortlist"
   | "ui-work"
-  | "scope-council-need";
+  | "scope-council-need"
+  | "effort-tier";
 
 export interface TypedDecisionContext {
   /** Bounded state excerpt the judge reads (already trimmed by caller). */
@@ -304,6 +306,21 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
       // small edits scored 0.43-0.84, open redesign/refactor work 0.04-0.23.
       // Veto at 0.7, leaving a wide margin above the highest open score.
       return score >= SCOPE_PRECISE_MIN ? { ok: true, verdict: { precise: true }, confidence: score } : { ok: false, reason: "low-confidence" };
+    },
+  },
+  "effort-tier": {
+    site: "effort",
+    owner: "cost-governor owns the thinking level; Jev may only lower it when the request is clearly simple and not deep, and the cache gate passes",
+    maxStateChars: 3000,
+    questions: () => effortQuestions(),
+    interpret: (answers) => {
+      // Thresholds and the "both scores agree" rule live in effort-policy.mjs;
+      // this registry entry only routes the typed answer through the shared
+      // judge so /metrics and the Jev ledger treat effort like every other site.
+      const judged = interpretEffortAnswers(answers as Record<string, { noul?: number }>) as { tier?: "easy" | "moderate"; confidence?: number };
+      return judged.tier
+        ? { ok: true, verdict: { tier: judged.tier }, confidence: judged.confidence ?? 0 }
+        : { ok: false, reason: "low-confidence" };
     },
   },
 };

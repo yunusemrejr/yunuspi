@@ -8,11 +8,11 @@
  * and replace it in place. It is pure: callers pass the names they know.
  */
 /** Leading command token: `/name` followed by whitespace or the end. Names with `:` (skills) or `/` (paths) never match. */
-const LEADING = /^(\s*)\/([A-Za-z0-9][\w-]*)(?=\s|$)/;
+const LEADING = /^(\s*)\/([A-Za-z0-9][\w-]*)([,.;:!?)"']?)(?=\s|$)/;
 /** A chained token inside the arguments, bounded like the preset grammar so paths and file names never match. */
 const CHAINED = /(?<=^|[\s("'])\/([A-Za-z0-9][\w-]*)(?=$|\s|[,.;:!?)"'](?=$|[\s,.;:!?)"']))/g;
 /** Fenced blocks and inline code spans: tokens inside them are text. */
-const CODE = /```[\s\S]*?(?:```|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
+const CODE = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
 
 /** Optimal-string-alignment distance (adjacent swaps count once), stopping early past `limit`. */
 function distance(a, b, limit) {
@@ -95,16 +95,21 @@ export function correctSlashCommands(input, { commands = [], chainable = [] } = 
     const boosts = new Set(chainable);
     const lowerBoosts = new Map([...boosts].map((name) => [name.toLowerCase(), name]));
     const fixes = [], unrecognized = [];
+    // A sentence punctuation mark typed straight after the command name (`/3d.`) was not a
+    // command at all, so the whole text reached the model as a paid prompt. Strip it here.
+    const punctuation = leading[3] ?? "";
     let head = leading[2], unknown;
     if (!known.has(head)) {
         const meant = closestCommand(head, [...known]);
         if (meant) {
-            fixes.push({ from: `/${head}`, to: `/${meant}` });
+            fixes.push({ from: `/${head}${punctuation}`, to: `/${meant}` });
             head = meant;
         }
         else
             unknown = `/${head}`;
     }
+    else if (punctuation)
+        fixes.push({ from: `/${head}${punctuation}`, to: `/${head}` });
     let text = `${leading[1]}/${head}${raw.slice(leading[0].length)}`;
     if (boosts.has(head)) {
         const start = leading[1].length + head.length + 1;

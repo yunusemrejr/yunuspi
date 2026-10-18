@@ -7,6 +7,7 @@ const jiti = createJiti(import.meta.dirname);
 const ps = await jiti.import('../agent/extensions/lib/presets.ts');
 const ns = await jiti.import('../agent/extensions/lib/noslop.ts');
 const gs = await jiti.import('../agent/extensions/lib/goal-state.ts');
+const fb = await jiti.import('../agent/extensions/lib/film-blend.ts');
 const { default: goalExtension } = await jiti.import('../agent/extensions/goal.ts');
 
 test('chain grammar takes preset tokens in written order and dedupes', () => {
@@ -153,9 +154,9 @@ test('solo /noslop through the chain builder is byte-identical to the shipped go
 });
 
 function harness() {
-  const commands = {}, tools = {}, entries = [], sent = [], sentOptions = [], notes = [];
+  const commands = {}, tools = {}, entries = [], sent = [], sentOptions = [], notes = [], hooks = new Map();
   const pi = {
-    on: () => {},
+    on: (event, handler) => { if (!hooks.has(event)) hooks.set(event, []); hooks.get(event).push(handler); },
     registerCommand: (name, options) => { commands[name] = options; },
     registerTool: (tool) => { tools[tool.name] = tool; },
     appendEntry: (customType, data) => { entries.push({ type: 'custom', customType, data }); },
@@ -163,7 +164,7 @@ function harness() {
   };
   const ctx = { cwd: path.resolve(import.meta.dirname, '..'), ui: { notify: (text, level) => notes.push({ text, level }), setStatus: () => {} }, sessionManager: { getBranch: () => entries }, hasPendingMessages: () => false };
   goalExtension(pi);
-  return { commands, entries, sent, sentOptions, notes, ctx };
+  return { commands, entries, sent, sentOptions, notes, ctx, pi, hooks };
 }
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -321,4 +322,113 @@ test('file names and paths that start like a preset stay text', () => {
   assert.deepEqual(found.presets, ['3d', 'noslop']);
   assert.match(found.task, /\/video\.mp4/);
   assert.match(found.task, /\/3d\.glb/);
+});
+
+
+test('long assignments keep every chained brief inside the 20k goal cap', () => {
+  const cases = [
+    [['3d', 'video', 'noslop'], 4000],
+    [['anatomy', '3d', 'video', 'noslop'], 2000],
+    [['anatomy', '3d', 'video', 'noslop', 'nobug'], 4000],
+  ];
+  for (const [presets, size] of cases) {
+    const goal = ps.createPresetChainGoal({ presets, task: 'x'.repeat(size) });
+    assert.ok(goal.text.length <= gs.MAX_GOAL_TEXT, `${presets.join('+')} stays inside the cap`);
+    for (const id of presets) assert.ok(goal.text.includes(`[${ps.PRESET_LABELS[id]}]`), `${id} brief present for a ${size}-char assignment`);
+    assert.ok(goal.criteria.length <= 12);
+  }
+  const five = ps.createPresetChainGoal({ presets: ['anatomy', '3d', 'video', 'noslop', 'nobug'], task: 'make a watch film about brass gears' });
+  assert.match(five.text, /\[Nobug\]\n/);
+  assert.ok(!five.text.endsWith('…'), 'a complete brief ends the text, never a half-cut one');
+});
+
+test('/goal + boosts keeps every brief and the film blend for a long paste', () => {
+  const task = 'x'.repeat(4000);
+  const literal = `/goal /3d /video ${'y'.repeat(100_000)}`;
+  const goal = ps.createBoostedGoal(task, ['3d', 'video', 'noslop', 'nobug', 'anatomy'], literal);
+  assert.ok(goal.text.length <= gs.MAX_GOAL_TEXT);
+  for (const label of ['3D', 'Video', 'Noslop', 'Nobug', 'Anatomy', '3D film']) assert.ok(goal.text.includes(`[${label}]`), `${label} section present`);
+  assert.ok(goal.text.startsWith(task.slice(0, 200)), 'the assignment still opens the goal text');
+  assert.ok(!goal.text.includes('y'.repeat(500)), 'the quoted invocation is bounded, not pasted wholesale');
+});
+
+test('a bare boost on a live preset goal quotes the user assignment, not the earlier brief', () => {
+  const pair = ps.createPresetChainGoal(ps.parsePresetChain('3d', 'Make a watch film with brass gears'));
+  const joined = ps.addBoosts(pair, ['video']);
+  assert.deepEqual(joined.fresh, ['video']);
+  assert.match(joined.goal.text, /\[Video\]\nVideo boost in force[\s\S]*?Assignment: Make a watch film with brass gears/);
+  assert.ok(!joined.goal.text.includes('Assignment: 3D boost in force'), 'the old brief is not quoted as the assignment');
+  assert.ok(!joined.goal.text.includes('Assignment: Assignment:'), 'no nested assignment labels');
+});
+
+test('joining the film pair live plans the same film as the chain typed once', () => {
+  for (const task of ['a flythrough of a city at night', 'a film about a kettle', '']) {
+    const expected = fb.planFilmBlend(task).text;
+    const oneShot = ps.createPresetChainGoal(ps.parsePresetChain('3d', `/video ${task}`.trim()));
+    assert.ok(oneShot.text.includes(expected), `one-shot ${JSON.stringify(task)} carries the planned blend`);
+    const pair = ps.createPresetChainGoal(ps.parsePresetChain('3d', task));
+    const joined = ps.addBoosts(pair, ['video']).goal;
+    assert.ok(joined.text.includes(expected), `live join ${JSON.stringify(task)} plans the same blend, not a brief-scanned one`);
+  }
+});
+
+test('a boost whose brief cannot fit the goal cap is reported as clipped', () => {
+  const near = gs.createPresetGoal('x'.repeat(19_950), ['one thing']);
+  const joined = ps.addBoosts(near, ['3d']);
+  assert.deepEqual(joined.fresh, ['3d']);
+  assert.equal(joined.clipped, true, 'the owner must know the appended brief was cut');
+  assert.ok(joined.goal.text.length <= gs.MAX_GOAL_TEXT);
+  const plenty = ps.addBoosts(gs.createPresetGoal('short goal', ['one thing']), ['3d']);
+  assert.equal(plenty.clipped, false, 'a normal join is not reported as clipped');
+});
+
+test('tilde fenced code is text, never boosts', () => {
+  const found = ps.extractPresetTokens('run this example:\n~~~\n/3d /video\n~~~\nthen /noslop');
+  assert.deepEqual(found.presets, ['noslop']);
+  assert.match(found.task, /~~~\n\/3d \/video\n~~~/);
+});
+
+test('a preset command routes /goal resume and retry with a note to the live goal', async () => {
+  const h = harness();
+  await h.commands.goal.handler('Ship the bakery site', h.ctx); await tick();
+  const id = h.entries.at(-1).data.id;
+  await h.commands['3d'].handler('resume keep going', h.ctx); await tick();
+  assert.equal(h.entries.at(-1).data.id, id, 'the live goal is resumed, not replaced');
+  assert.equal(h.entries.at(-1).data.status, 'active');
+  assert.match(h.sent.at(-1), /The user's note on resuming: keep going/);
+  assert.deepEqual(h.sentOptions.at(-1), { authored: true, userText: 'keep going', deliverAs: 'followUp' });
+  await h.commands.video.handler('retry try the staging host', h.ctx); await tick();
+  assert.equal(h.entries.at(-1).data.id, id);
+  assert.match(h.sent.at(-1), /try the staging host/);
+});
+
+test('a near-cap live goal reports the clipped boost instead of claiming the full brief', async () => {
+  const h = harness();
+  await h.commands.goal.handler('x'.repeat(19_950), h.ctx); await tick();
+  await h.commands['3d'].handler('', h.ctx); await tick();
+  assert.match(h.notes.at(-1).text, /character cap, so this brief was clipped/);
+});
+
+
+test('a failed goal-state append warns and is retried at the next turn boundary', async () => {
+  const h = harness();
+  await h.commands.goal.handler('Ship the exporter', h.ctx); await tick();
+  const id = h.entries.at(-1).data.id;
+  const append = h.pi.appendEntry;
+  let failed = false;
+  h.pi.appendEntry = (type, data) => {
+    if (type === 'goal-state-v1' && !failed) { failed = true; throw Error('ENOSPC: no space left on device'); }
+    return append(type, data);
+  };
+  await h.commands.goal.handler('clear', h.ctx); await tick();
+  const warning = h.notes.find((note) => /Goal state could not be saved/.test(note.text));
+  assert.ok(warning, JSON.stringify(h.notes));
+  assert.match(warning.text, /will not survive a restart/);
+  assert.equal(warning.level, 'warning');
+  // Disk state still says active: the failed append was rolled back by the manager.
+  assert.equal(h.entries.at(-1).data.id, id);
+  assert.notEqual(h.entries.at(-1).data.status, 'cleared');
+  // The next turn boundary retries the same snapshot, so a restart sees `cleared`.
+  for (const handler of h.hooks.get('before_agent_start') ?? []) await handler({ type: 'before_agent_start' }, h.ctx);
+  assert.equal(h.entries.at(-1).data.status, 'cleared');
 });

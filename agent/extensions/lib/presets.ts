@@ -29,7 +29,7 @@ const VERIFY_ID = "V";
  * (`/3d.` at a sentence end) — so paths, URLs and file names (`src/3d`, `/video.mp4`, `/3d/models`) never match. */
 const TOKEN = /(?<=^|[\s("'])\/(noslop|nobug|3d|video|anatomy|goal)(?=$|\s|[,.;:!?)"'](?=$|[\s,.;:!?)"']))/gi;
 /** Fenced blocks and inline code spans: tokens inside them are text. */
-const CODE = /```[\s\S]*?(?:```|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
+const CODE = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|(`+)[\s\S]*?(?<!`)\1(?!`)/g;
 /** Connector words and punctuation that a removed token can leave at either edge of the task. */
 const LEAD_CONNECTOR = /^(?:(?:and|with|then|plus|also)(?!\w)|[&+](?=\s|$)|[,;])\s*/i;
 const TAIL_CONNECTOR = /(?:^|\s)(?:and|with|then|plus|also|[&+])$|[,;]$/i;
@@ -318,6 +318,29 @@ const BRIEFS: Record<PresetId, (task: string, ids?: readonly PresetId[]) => stri
 };
 
 /**
+ * Keep a chained goal under MAX_GOAL_TEXT without cutting a brief in half: the briefs
+ * run in full, the assignment stays once in the header, and the copies passed to the
+ * briefs are replaced by a reference first. Only a paste too large for the header
+ * itself is shortened, and the header then says so.
+ */
+function assembleBraid(head: (assignment: string) => readonly string[], briefs: readonly ((assignment: string) => string)[], task: string): string {
+	const reference = "(the assignment stated at the top of this goal)";
+	const body = (headerTask: string, briefTask: string) => [...head(headerTask), ...briefs.map((brief) => brief(briefTask))].join("\n\n");
+	let text = body(task, task);
+	if (text.length <= MAX_GOAL_TEXT) return text;
+	text = body(task, reference);
+	if (text.length <= MAX_GOAL_TEXT) return text;
+	const shortened = (length: number) => `${task.slice(0, length)}… (assignment shortened to fit the goal text cap)`;
+	const fits = (length: number) => body(length >= task.length ? task : shortened(length), reference).length <= MAX_GOAL_TEXT;
+	let low = 0, high = task.length;
+	while (low < high) {
+		const mid = Math.ceil((low + high) / 2);
+		if (fits(mid)) low = mid; else high = mid - 1;
+	}
+	return body(low >= task.length ? task : shortened(low), reference);
+}
+
+/**
  * Build the goal for a parsed chain. Solo /noslop keeps its shipped goal
  * byte for byte; chains stack full briefs under one header and track each
  * preset's core fronts under its label.
@@ -329,11 +352,16 @@ export function createPresetChainGoal(chain: PresetChain, now = Date.now()): Goa
 		if (only === "noslop") return createNoslopGoal(noslopFocus(task), now);
 		return { ...createPresetGoal(BRIEFS[only](task), CRITERIA[only], now), boosts: [only] };
 	}
-	const header = task
-		? `Assignment: ${task}\n\nBoosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
-		: `Boosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
+	const labels = presets.map((id) => PRESET_LABELS[id]).join(" + ");
+	const header = (assignment: string) => assignment
+		? `Assignment: ${assignment}\n\nBoosts in force — ${labels} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
+		: `Boosts in force — ${labels} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
 	const combined = synergy(presets, task);
-	const text = [header, ...combined.sections, ...presets.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task, presets)}`)].join("\n\n");
+	const text = assembleBraid(
+		(assignment) => [header(assignment), ...combined.sections],
+		presets.map((id) => (brief: string) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](brief, presets)}`),
+		task,
+	);
 	const perPreset = Math.min(3, Math.floor((MAX_CRITERIA - 1) / presets.length));
 	const criteria = presets.flatMap((id) => labelledFronts(id, perPreset, presets));
 	return withSynergyFronts({ ...createPresetGoal(text, criteria, now), boosts: [...presets] }, combined.fronts);
@@ -342,8 +370,38 @@ export function createPresetChainGoal(chain: PresetChain, now = Date.now()): Goa
 /** The text of a goal with boosts: the user's task first, then the order of the boosts, then each brief. */
 function boostedText(task: string, ids: readonly PresetId[], literal: string): string {
 	const order = ids.map((id) => PRESET_LABELS[id]).join(" → ");
-	const header = `Boosts in force, in the order written — ${order} — all applied to this goal. Where a boost was written next to a particular part of the goal, it applies chiefly to that part; where boosts pull against each other the goal's purpose wins and the conflict is named. The user wrote: «${literal}»`;
-	return [task, header, ...synergy(ids, task).sections, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task, ids)}`)].join("\n\n");
+	const sections = synergy(ids, task).sections;
+	const reference = "(the assignment stated at the top of this goal)";
+	const written = (assignment: string, quoted: string) => `${assignment}\n\nBoosts in force, in the order written — ${order} — all applied to this goal. Where a boost was written next to a particular part of the goal, it applies chiefly to that part; where boosts pull against each other the goal's purpose wins and the conflict is named. The user wrote: «${quoted}»`;
+	const body = (assignment: string, quoted: string, briefTask: string) =>
+		[written(assignment, quoted), ...sections, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](briefTask, ids)}`)].join("\n\n");
+	let quoted = literal.length > MAX_TASK ? `${literal.slice(0, MAX_TASK - 1)}…` : literal;
+	let text = body(task, quoted, task);
+	if (text.length > MAX_GOAL_TEXT) text = body(task, quoted, reference);
+	if (text.length > MAX_GOAL_TEXT) {
+		// The quoted invocation repeats words the first paragraph already holds: it gives way first.
+		const smallest = "…";
+		const fits = (length: number) => body(task, length >= quoted.length ? quoted : `${quoted.slice(0, length)}…`, reference).length <= MAX_GOAL_TEXT;
+		let low = 0, high = quoted.length;
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			if (fits(mid)) low = mid; else high = mid - 1;
+		}
+		quoted = low >= quoted.length ? quoted : (low ? `${quoted.slice(0, low)}…` : smallest);
+		text = body(task, quoted, reference);
+	}
+	if (text.length > MAX_GOAL_TEXT) {
+		// A paste too large for the header: shorten the assignment itself, and say so.
+		const shortened = (length: number) => `${task.slice(0, length)}… (assignment shortened to fit the goal text cap)`;
+		const fits = (length: number) => body(length >= task.length ? task : shortened(length), "…", reference).length <= MAX_GOAL_TEXT;
+		let low = 0, high = task.length;
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			if (fits(mid)) low = mid; else high = mid - 1;
+		}
+		text = body(low >= task.length ? task : shortened(low), "…", reference);
+	}
+	return text;
 }
 
 /**
@@ -370,6 +428,17 @@ function untrackedFronts(goal: GoalState, id: PresetId, ids: readonly PresetId[]
 		.filter((text) => !goal.criteria.some((criterion) => criterion.text === fit(text) || criterion.text === fit(`${PRESET_LABELS[id]}: ${text}`)));
 }
 
+/** The preset briefs a goal text can start with — a goal that opens with one has no user assignment of its own. */
+const PRESET_BRIEF = /^(?:3D boost in force|Video boost in force|Anatomy boost in force|Desloppify this codebase|Debug this work|Boosts in force —)/;
+/** The user's own words in a goal: the Assignment paragraph a preset goal writes, or the text before boosts were appended. */
+function goalAssignment(text: string): string {
+	const assignment = /(?:^|\n\n)Assignment: ([\s\S]*?)\n\n/.exec(text)?.[1];
+	if (assignment !== undefined) return assignment.replace(/\s+/g, " ").trim();
+	const added = text.indexOf("\n\nBoosts added to this goal —");
+	const base = (added >= 0 ? text.slice(0, added) : text).replace(/\s+/g, " ").trim();
+	return PRESET_BRIEF.test(base) ? "" : base;
+}
+
 /**
  * Bare boosts added to a live goal: each new brief joins the goal text under
  * its label, and its core fronts take the free criteria slots ahead of V. A
@@ -377,11 +446,11 @@ function untrackedFronts(goal: GoalState, id: PresetId, ids: readonly PresetId[]
  * when nothing is new the goal comes back unchanged with `fresh` empty. The
  * continuation budget is re-armed, as a resume does, because the goal has new work.
  */
-export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = Date.now()): { goal: GoalState; fresh: PresetId[]; fronts: number } {
+export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = Date.now()): { goal: GoalState; fresh: PresetId[]; fronts: number; clipped: boolean } {
 	const recorded = goal.boosts ?? [];
 	const requested = [...new Set(presets)];
 	const fresh = requested.filter((id) => !recorded.includes(id) && untrackedFronts(goal, id).length > 0);
-	if (!fresh.length) return { goal, fresh, fronts: 0 };
+	if (!fresh.length) return { goal, fresh, fronts: 0, clipped: false };
 	const all = [...new Set([...recorded, ...requested])];
 	const total = all.length;
 	const perPreset = total === 1 ? 3 : total === 2 ? 2 : 1;
@@ -397,10 +466,14 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 	const room = Math.max(0, MAX_CRITERIA - goal.criteria.length);
 	let counter = body.reduce((max, criterion) => Math.max(max, Number(/^C(\d+)$/.exec(criterion.id)?.[1] ?? 0)), 0);
 	const added = queued.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
-	const flat = goal.text.replace(/\s+/g, " ").trim();
-	const summary = flat.length > 600 ? `${flat.slice(0, 599)}…` : flat;
+	// The new brief and the film blend read the user's own assignment: the whole goal text
+	// starts with the earlier briefs, and scanning those (they name anatomy-reveal, launch,
+	// mechanisms) made a live second boost plan a different film than the same chain typed
+	// once. Quoted back as an "Assignment:" line it read "Assignment: 3D boost in force: …".
+	const assignment = goalAssignment(goal.text);
+	const summary = assignment.length > 600 ? `${assignment.slice(0, 599)}…` : assignment;
 	const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
-	const combined = synergy([...new Set([...recorded, ...requested])], goal.text);
+	const combined = synergy([...new Set([...recorded, ...requested])], assignment);
 	const appended = [
 		`Boosts added to this goal — ${labels} — in force from here on, alongside everything above. Where a boost pulls against the goal's purpose, the purpose wins and the conflict is named.`,
 		...combined.sections.filter((section) => !goal.text.includes(section.slice(0, section.indexOf("\n")))),
@@ -414,7 +487,7 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 		boosts: [...new Set([...recorded, ...requested])],
 		status: "active", nudges: 0, progressMark: "", stalls: 0, note: undefined, updatedAt: now,
 	};
-	return { goal: next, fresh, fronts: added.length };
+	return { goal: next, fresh, fronts: added.length, clipped: full.length > MAX_GOAL_TEXT };
 }
 
 /** One-line notice when a /goal starts with preset boosts. */

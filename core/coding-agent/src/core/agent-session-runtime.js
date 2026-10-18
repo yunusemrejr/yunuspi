@@ -108,6 +108,11 @@ export class AgentSessionRuntime {
             reason,
             targetSessionFile,
         });
+        // A fresh session keeps its first entries in memory until an assistant
+        // message exists. A clean switch is the last chance to make the goal
+        // snapshot, the kickoff, any pending user message and the shutdown
+        // handlers' entries durable; flush after the handlers for that reason.
+        try { this.session.sessionManager.flush(); } catch { /* keep replacing the session */ }
         this.beforeSessionInvalidate?.();
         this.session.dispose();
     }
@@ -298,6 +303,17 @@ export class AgentSessionRuntime {
             type: "session_shutdown",
             reason: "quit",
         });
+        // The quit path used to exit with the first turn still buffered: a
+        // session that had a /goal but no completed assistant answer left no
+        // transcript at all, so reopening it lost the goal. Settle the aborted
+        // turn (bounded) and flush the buffered history before exiting.
+        try {
+            await Promise.race([
+                this.session.abort(),
+                new Promise((resolve) => setTimeout(resolve, 1500)),
+            ]);
+        } catch { /* quitting wins over a wedged provider */ }
+        try { this.session.sessionManager.flush(); } catch { /* keep quitting */ }
         this.beforeSessionInvalidate?.();
         this.session.dispose();
     }

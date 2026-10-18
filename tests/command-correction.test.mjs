@@ -27,3 +27,15 @@ test("the correction reads as one question", () => {
   assert.equal(describeCorrection([{ from: "/nobugs", to: "/nobug" }]), "Did you mean /nobug (not /nobugs)?");
   assert.equal(describeCorrection([{ from: "/a", to: "/b" }, { from: "/c", to: "/d" }, { from: "/e", to: "/f" }]), "Did you mean /b (not /a), /d (not /c) and /f (not /e)?");
 });
+
+
+test("a sentence mark after a leading command is dropped, not sent as prose", () => {
+  assert.deepEqual(check("/3d. make X"), { text: "/3d make X", fixes: [{ from: "/3d.", to: "/3d" }] });
+  assert.deepEqual(check("/noslop, tidy it"), { text: "/noslop tidy it", fixes: [{ from: "/noslop,", to: "/noslop" }] });
+  assert.equal(check("/3d. make X").unknown, undefined);
+});
+
+test("tilde fenced code is text, never commands or corrections", () => {
+  assert.equal(check("/3d build this example\n~~~\n/nobugs /vidoe\n~~~\ndone"), undefined);
+  assert.equal(check("run this:\n~~~\n/3d /nobugz\n~~~"), undefined);
+});

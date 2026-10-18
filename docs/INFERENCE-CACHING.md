@@ -136,8 +136,34 @@ this to start network work. Distillation keeps protected outcome evidence and
 both edges deterministically, asks only about omittable chunks, and accepts up
 to twelve bounded chunks within the existing request budget.
 
+**The latest Jev is resolved, not pinned.** The decisions route is called
+through the `~typesafe/jev-latest` alias first, so a new release is used without
+a code change; the route reports the dated model it served
+(`typesafe/jev-1.14-20261014`), and that concrete id is what `/used`, the Jev
+ledger and health show. The dated id is also kept as the next fallback if the
+alias is ever rejected, followed by the previous stable release. The chat-only
+`typesafe/jev-router` is not a decisions model and never joins the cascade.
+
+**Effort routing is a Jev site.** Once per human turn the cost governor may ask
+two typed `noul` questions — is this request genuinely simple, and does it need
+deep multi-step reasoning — through the shared decision registry. Only two
+agreeing scores can step the thinking level *down* from the user's configured
+ceiling, never to `off`, and only when the context that would have to be
+re-read at the new level is within `EFFORT_SWITCH_BUDGET_TOKENS` (4000). That
+budget applies to a warm prefix only: the session's first request, a compacted
+prefix and a route switch have no provider cache to lose, so the decision is
+not blocked there even when the system prompt is large. Goal
+rounds, preset briefs, complex or critical wording, long input, code, prior tool
+failures and an ambiguous/failed judge keep the ceiling. A step up is always
+allowed, and a burst of two tool errors restores the ceiling immediately.
+`PIJEV_EFFORT=off` (or `PI_JEV=off`, `PI_OFFLINE=1`) disables the router; a
+manual `/effort` or `/thinking` selection wins for the rest of the session. The
+decision and the configured ceiling are persisted, so reopening a session
+restores the human's ceiling rather than inheriting the last automatic level.
+
 ## Verification
 
 Synthetic regressions exercise catalog upgrades, reasoning propagation,
 provider counter mapping, tool-set stability, cancellation, expiry, response
-isolation and JEV failover/cache reuse without credentials or inference.
+isolation, latest-alias resolution, Jev effort routing and JEV failover/cache
+reuse without credentials or inference.

@@ -59,7 +59,15 @@ import { uncertainChoice, fuseAnswers } from "./jev-fusion.ts";
 
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
-export const JEV_PREFERRED_SLUGS = ["~typesafe/jev-latest", "typesafe/jev-1.13"];
+/** The alias OpenRouter serves as the newest Jev; resolved decisions report the
+ * dated model they actually served (e.g. typesafe/jev-1.14-20261014). */
+export const JEV_LATEST_ALIAS = "~typesafe/jev-latest";
+/** Newest dated model seen on the decisions route (2026-10-18). The alias is
+ * always tried first, so a newer release is used without a code change; this
+ * pinned slug keeps a working fallback if the alias is rejected. */
+export const JEV_LATEST_VERSIONED = "typesafe/jev-1.14-20261014";
+/** Alias first, then the pinned current family, then the previous stable model. */
+export const JEV_PREFERRED_SLUGS = [JEV_LATEST_ALIAS, JEV_LATEST_VERSIONED, "typesafe/jev-1.13"];
 export const KEV_SLUG = "jaredpalmer/kev-4b";
 export const JEV_PRICE_PER_M_INPUT = 0.042;
 export const JEV_REQUEST_TIMEOUT_MS = 15_000;
@@ -103,12 +111,16 @@ export const estimateJevTokens = (chars: number): number =>
 export const jevCostUsd = (inputTokens: number): number =>
   (Math.max(0, inputTokens) / 1_000_000) * JEV_PRICE_PER_M_INPUT;
 
+/** Any decisions-route Jev family slug (alias, dated release or latest). The
+ * chat-only `typesafe/jev-router` is a different product and is excluded. */
+const JEV_FAMILY_SLUG = /^~?typesafe\/jev(?:-[\w.-]+)?$/i;
+
 /** Input price evidence ($/M) for a judge slug. Only the documented Jev
  * family price is presumed; Kev and discovered aliases report unknown cost
  * unless the decisions response carries provider-reported usage. Assigning
  * Jev's price to another model manufactures auxiliary-cost accounting. */
 export function resolveJevInputPricePerM(slug: string): number | undefined {
-  return (JEV_PREFERRED_SLUGS as readonly string[]).includes(slug) ? JEV_PRICE_PER_M_INPUT : undefined;
+  return JEV_FAMILY_SLUG.test(slug) && !/jev-router$/i.test(slug) ? JEV_PRICE_PER_M_INPUT : undefined;
 }
 
 const fmtTokens = (n: number): string =>
@@ -201,6 +213,9 @@ const routeHealth = { jev: { retryAt: 0, active: 0, failures: 0 }, kev: { retryA
 let nextFamily: JudgeFamily = "jev";
 let generation = 0;
 let stickySlug: string | undefined;
+/** Dated model the decisions route reported for the latest alias, so health,
+ * cost evidence and failover name the model that actually served the call. */
+let resolvedSlug: string | undefined;
 let breakerOpen = false;
 let breakerOpenedAt = 0;
 let probeScheduled = false;
@@ -223,6 +238,7 @@ export function resetJevClient(): void {
   nextFamily = "jev";
   for (const route of Object.values(routeHealth)) Object.assign(route, { retryAt: 0, active: 0, failures: 0 });
   stickySlug = undefined;
+  resolvedSlug = undefined;
   secondOpinionTokens = SECOND_OPINION_BURST; secondOpinionAt = 0;
   breakerOpen = false;
   breakerOpenedAt = 0;
@@ -238,6 +254,8 @@ export function resetJevClient(): void {
 export function jevHealth(): {
   state: "closed" | "open";
   slug?: string;
+  /** Dated model reported by the route for the requested alias. */
+  resolvedSlug?: string;
   lastError: string;
   nextProbeInMs: number;
   routes: Array<{ family: JudgeFamily; model: string; state: "ready" | "cooling" | "probing"; active: number; retryInMs: number }>;
@@ -248,6 +266,7 @@ export function jevHealth(): {
       active: routeHealth[family].active, retryInMs: Math.max(0, routeHealth[family].retryAt - deps.now()) })),
     state: breakerOpen ? "open" : "closed",
     slug: stickySlug,
+    ...(resolvedSlug ? { resolvedSlug } : {}),
     lastError,
     nextProbeInMs: breakerOpen
       ? Math.max(0, breakerOpenedAt + deps.openMs - deps.now())
@@ -283,6 +302,10 @@ function cacheSet(key: string, value: { answers: Record<string, JevAnswer>; inpu
   cache.set(key, { ...value, answers: structuredClone(value.answers), at: deps.now() });
 }
 
+/** Any decisions-route Jev release OpenRouter lists; the chat-only router
+ * product cannot answer typed decisions and must never join the cascade. */
+const DISCOVERABLE_JEV_SLUG = /^~?typesafe\/jev-[\w.-]*\d[\w.-]*$/i;
+
 /** Any jev variation OpenRouter lists, typesafe-authored first. */
 async function discoverSlugs(): Promise<string[]> {
   if (deps.now() - discovered.at < JEV_DISCOVERY_TTL_MS) return discovered.slugs;
@@ -297,7 +320,7 @@ async function discoverSlugs(): Promise<string[]> {
         const body = await boundedJson(response) as { data?: Array<{ id?: string }> };
         const ids = (body.data ?? [])
           .map((entry) => entry?.id)
-          .filter((id): id is string => typeof id === "string" && /^~?typesafe\/jev[-\w.]*$/.test(id));
+          .filter((id): id is string => typeof id === "string" && DISCOVERABLE_JEV_SLUG.test(id));
         ids.sort((a, b) => Number(b.startsWith("typesafe/")) - Number(a.startsWith("typesafe/")));
         discovered = { at: deps.now(), slugs: [...new Set(ids)] };
       } finally {
@@ -316,7 +339,7 @@ async function discoverSlugs(): Promise<string[]> {
 /** Full cascade order: preferred slugs, then discovered variations. */
 export async function jevCascadeSlugs(): Promise<string[]> {
   const found = await discoverSlugs();
-  return [...new Set([...JEV_PREFERRED_SLUGS, ...found])];
+  return [...new Set([JEV_LATEST_ALIAS, ...(resolvedSlug ? [resolvedSlug] : []), ...JEV_PREFERRED_SLUGS, ...found])];
 }
 
 function ledger(
@@ -347,7 +370,7 @@ async function postDecisions(
   key: string,
   signal?: AbortSignal,
   timeoutMs = JEV_REQUEST_TIMEOUT_MS,
-): Promise<{ answers: Record<string, JevAnswer>; inputTokens?: number; costUsd?: number }> {
+): Promise<{ answers: Record<string, JevAnswer>; model?: string; inputTokens?: number; costUsd?: number }> {
   signal?.throwIfAborted();
   const finish = beginHarnessActivity('jev');
   let returned = false;
@@ -375,10 +398,10 @@ async function postDecisions(
       err.status = response.status;
       throw err;
     }
-    const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
-    controller.signal.throwIfAborted();
-    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
-      throw Error("decisions: malformed answers");
+        const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; model?: string; usage?: { input_tokens?: number; cost?: number } };
+        controller.signal.throwIfAborted();
+        if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
+          throw Error("decisions: malformed answers");
     // Validate the requested typed values before they reach routing, caches,
     // intent guards or review planning. HTTP success is not a valid judgment.
     const unit = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
@@ -394,6 +417,9 @@ async function postDecisions(
     }
     returned = true;
     return { answers: body.answers,
+      // The decisions route reports the concrete dated model it served. Keep it
+      // only when it is a Jev family slug; provider echo may not rename a call.
+      ...(typeof body.model === "string" && JEV_SERVED_SLUG.test(body.model) ? { model: body.model } : {}),
       inputTokens: Number.isSafeInteger(body.usage?.input_tokens) && body.usage!.input_tokens! >= 0 ? body.usage!.input_tokens : undefined,
       costUsd: typeof body.usage?.cost === "number" && Number.isFinite(body.usage.cost) && body.usage.cost >= 0 ? body.usage.cost : undefined };
   } finally {
@@ -402,6 +428,10 @@ async function postDecisions(
     signal?.removeEventListener("abort", onAbort);
   }
 }
+
+/** Model ids the decisions route may report for a Jev family call (dated
+ * releases contain several hyphen-separated parts, e.g. 1.14-20261014). */
+const JEV_SERVED_SLUG = /^typesafe\/jev-(?:latest|[\w.-]*\d[\w.-]*)$/i;
 
 function isModelRejection(status: number | undefined, message: string): boolean {
   if (status === 404) return true;
@@ -453,10 +483,28 @@ export type JevAskOpts = {
   protect?: readonly string[];
   /** Restrict the call to one judge family (used for the second opinion). */
   family?: "jev" | "kev";
+  /** Deadline for this advisory call. Coordinators on a human-turn path use a
+   * short one (for example 3.5 s) so a slow judge never delays the request;
+   * omitted means the full JEV_REQUEST_TIMEOUT_MS cascade deadline. */
+  timeoutMs?: number;
 };
 
+/** The whole cascade (both families and alias discovery) stays inside one
+ * caller-selected deadline, capped so a caller cannot create an unbounded wait. */
+function cascadeDeadline(opts: JevAskOpts): number {
+  const wanted = opts.timeoutMs ?? deps.requestTimeoutMs;
+  return Math.max(1, Math.min(Number.isFinite(wanted) ? wanted : deps.requestTimeoutMs, 60_000));
+}
+
 function knownSlugs(): string[] {
-  return [...new Set([...(stickySlug ? [stickySlug] : []), ...JEV_PREFERRED_SLUGS, ...discovered.slugs, KEV_SLUG])];
+  return [...new Set([
+    ...(stickySlug ? [stickySlug] : []),
+    JEV_LATEST_ALIAS,
+    ...(resolvedSlug ? [resolvedSlug] : []),
+    ...JEV_PREFERRED_SLUGS,
+    ...discovered.slugs,
+    KEV_SLUG,
+  ])];
 }
 
 /** Catalog discovery is shared, but a cancelled caller need not wait for it. */
@@ -658,7 +706,7 @@ async function waitForInflight(entry: InflightEntry, signal?: AbortSignal, onAbo
 async function boundedAsk(state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
   const controller = new AbortController();
   const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
-  const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), deps.requestTimeoutMs);
+  const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), cascadeDeadline(opts));
   try {
     const result = await askJevOnce(state, questions, { ...opts, signal });
     return controller.signal.aborted && !opts.signal?.aborted ? { ok: false, skipped: 'timeout' } : result;
@@ -684,6 +732,7 @@ async function askJevOnce(
   if (payloadChars > JEV_MAX_INPUT_CHARS) return { ok: false, skipped: 'input-budget' };
   const inputTokens = estimateJevTokens(payloadChars);
   const started = deps.now();
+  const routeBudget = cascadeDeadline(opts);
   // Known-good and preferred routes need no catalog request. Discover other
   // aliases only after all known ones explicitly reject the requested model.
   const ordered = knownSlugs().filter(slug => !opts.family || (opts.family === "kev") === (slug === KEV_SLUG));
@@ -694,7 +743,7 @@ async function askJevOnce(
       return {
         ok: true,
         answers: structuredClone(hit.answers),
-        usage: { model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true },
+        usage: { model: hit.model || slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true },
       };
     }
   }
@@ -720,7 +769,7 @@ async function askJevOnce(
     route.active++;
     const familyStarted = deps.now();
     // Reserve time for the other route inside the one overall deadline.
-    const familyBudget = Math.max(1, Math.floor(deps.requestTimeoutMs * 0.45));
+    const familyBudget = Math.max(1, Math.floor(routeBudget * 0.45));
     const familyController = new AbortController();
     const familyTimer = setTimeout(() => familyController.abort(new DOMException("Judge route timeout", "TimeoutError")), familyBudget);
     const familySignal = opts.signal ? AbortSignal.any([opts.signal, familyController.signal]) : familyController.signal;
@@ -744,12 +793,17 @@ async function askJevOnce(
           if (epoch !== generation) return { ok: false, skipped: "aborted" };
           route.retryAt = 0; route.failures = 0;
           if (family === "jev") stickySlug = slug;
+          // The decisions route names the dated model it served. Report that
+          // model (not only the alias) so health, /used and cost evidence show
+          // exactly which Jev release answered; keep it as the next fallback.
+          const served = family === "jev" ? response.model : undefined;
+          if (served) resolvedSlug = served;
           lastError = "";
           const tokens = response.inputTokens ?? inputTokens;
-          const routePrice = resolveJevInputPricePerM(slug);
+          const routePrice = resolveJevInputPricePerM(served ?? slug);
           const costUsd = response.costUsd ?? (routePrice === undefined ? undefined : (Math.max(0, tokens) / 1_000_000) * routePrice);
-          cacheSet(cacheKey(slug, state, questions), { answers: response.answers, inputTokens: tokens, model: slug });
-          return { ok: true, answers: response.answers, usage: { model: slug, inputTokens: tokens, costUsd, ms: deps.now() - started, cached: false } };
+          cacheSet(cacheKey(slug, state, questions), { answers: response.answers, inputTokens: tokens, model: served ?? slug });
+          return { ok: true, answers: response.answers, usage: { model: served ?? slug, inputTokens: tokens, costUsd, ms: deps.now() - started, cached: false } };
         } catch (error) {
           if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
           const status = (error as { status?: number }).status;

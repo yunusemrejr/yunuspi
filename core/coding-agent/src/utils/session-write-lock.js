@@ -20,20 +20,39 @@ function ownerIsDead(owner) {
 function inspectOwner(lock) {
     try {
         const entries = readdirSync(lock, { withFileTypes: true });
-        if (entries.length !== 1 || !entries[0].isFile() || !/^owner-\d+-[a-f0-9-]{36}$/.test(entries[0].name)) return;
+        // An empty directory, an unreadable/partial owner file or extra entries is
+        // not a live owner: it is what a process killed between mkdir(lock) and
+        // publishing its owner file (or between unlink(owner) and rmdir(lock))
+        // leaves behind. Report it as an orphan instead of an unknown owner.
+        if (entries.length !== 1 || !entries[0].isFile() || !/^owner-\d+-[a-f0-9-]{36}$/.test(entries[0].name)) return { orphan: true };
         const file = join(lock, entries[0].name);
-        if (statSync(file).size > 512) return;
+        if (statSync(file).size > 512) return { orphan: true };
         const owner = JSON.parse(readFileSync(file, "utf8"));
-        if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) return;
+        if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) return { orphan: true };
         return { ...owner, file };
     }
-    catch { return undefined; }
+    catch { return { orphan: true }; }
 }
 function releaseOwner(lock, file) {
     // Only the actor that removed this unique owner file may remove the
     // directory. A competing stale reclaimer cannot remove a newer lock.
     unlinkSync(file);
     rmdirSync(lock);
+}
+/** A live writer publishes its owner file within one syscall of mkdir, so an
+ *  ownerless lock directory this old cannot belong to a running writer: it is a
+ *  crash artifact and may be reclaimed. Without this, one SIGKILL in the
+ *  publish/release window wedged the session permanently ("unknown owner
+ *  requires manual inspection"). */
+const ORPHAN_GRACE_MS = 2_000;
+function reclaimOrphan(lock) {
+    try {
+        if (Date.now() - statSync(lock).mtimeMs < ORPHAN_GRACE_MS) return false;
+        for (const entry of readdirSync(lock)) unlinkSync(join(lock, entry));
+        rmdirSync(lock);
+        return true;
+    }
+    catch { return false; }
 }
 /** Short synchronous transactions; no live owner can lose its lock by age. */
 export function withSessionWriteLock(file, transaction) {
@@ -51,12 +70,20 @@ export function withSessionWriteLock(file, transaction) {
         catch (error) {
             if (error.code !== "EEXIST") throw error;
             const owner = inspectOwner(lock);
-            if (owner && ownerIsDead(owner)) {
+            if (owner?.orphan) {
+                // Wait out the acquisition deadline first: a live writer may be
+                // inside its one-syscall publish window. Only an ownerless lock
+                // older than the grace is reclaimed; a fresh one stays busy.
+                if (performance.now() < deadline) { Atomics.wait(sleepWord, 0, 0, 10); continue; }
+                if (reclaimOrphan(lock)) continue;
+                throw Object.assign(new Error(`Session write is locked: ${lock}. Retry after the active writer finishes; an unknown owner requires manual inspection.`), { code: "ESESSIONBUSY" });
+            }
+            else if (owner && ownerIsDead(owner)) {
                 try { releaseOwner(lock, owner.file); }
                 catch (cleanup) { if (cleanup.code !== "ENOENT") throw cleanup; }
                 continue;
             }
-            if (owner?.pid === process.pid || performance.now() >= deadline) {
+            else if (owner?.pid === process.pid || performance.now() >= deadline) {
                 throw Object.assign(new Error(`Session write is locked: ${lock}. Retry after the active writer finishes; an unknown owner requires manual inspection.`), { code: "ESESSIONBUSY" });
             }
             Atomics.wait(sleepWord, 0, 0, 10);
