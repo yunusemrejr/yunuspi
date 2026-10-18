@@ -2416,6 +2416,15 @@ export class InteractiveMode {
                 this.showWarning(`${describeCorrection(correction.fixes)} Corrected in the editor: press Enter to send it.`);
                 return;
             }
+            // A chained token after a boost that is no command at all would reach the model as words; say so once,
+            // then Enter sends as typed. An unknown leading word before prose (`/a prose prompt`) stays ordinary text.
+            const stray = correction?.unrecognized;
+            if (stray?.length) {
+                this.commandCorrectionOffer = { original: text };
+                this.editor.setText(text);
+                this.showWarning(`${stray.join(", ")} ${stray.length > 1 ? "are not commands" : "is not a command"} here, so ${stray.length > 1 ? "they" : "it"} would be sent as plain words. Edit it, or press Enter again to send as typed. /commands lists what works.`);
+                return;
+            }
             // Command separators may be tabs/newlines, including pasted input.
             const command = parseSlashCommand(text);
             if (command && BUILTIN_SLASH_COMMANDS.some((builtin) => builtin.name === command.name))

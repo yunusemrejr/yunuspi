@@ -1,5 +1,6 @@
 import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
+import { readCommand, goalFromStatus } from './command-lens.mjs';
 
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
@@ -35,7 +36,7 @@ function saveView() {
 function setEditorDraft(id, value, focus = false) {
   const session = workspace.sessions.find(s => s.id === id); if (!session) return;
   session.draft = value;
-  if (activeId === id) { $('prompt').value = value; resizePrompt(); if (focus) $('prompt').focus(); }
+  if (activeId === id) { $('prompt').value = value; resizePrompt(); scheduleLens(); if (focus) $('prompt').focus(); }
   tryAction(() => api.updateSession(id, { draft: value }));
 }
 function syncWorkspace(value) {
@@ -122,6 +123,7 @@ function renderChrome() {
   $('connection').dataset.status = status;
   $('connection').querySelector('span').textContent = { error: 'Needs attention', working: 'Working', connecting: 'Connecting…', ready: 'Ready' }[status] || 'Local workspace';
   $('turn-status').hidden = !busy;
+  renderGoal();
   $('turn-status').lastElementChild.textContent = state?.compacting ? 'Making room in context' : state?.retrying ? `Retrying · ${state.retrying}` : 'Working';
   const error = state?.error || '';
   $('session-error').hidden = !error; $('session-error').querySelector('span').textContent = strip(error);
@@ -150,7 +152,7 @@ async function openSession(id) {
   const session = workspace.sessions.find(s => s.id === id);
   const pendingView = viewOf(id);
   pendingView.replay = []; pendingView.pendingHistory = true;
-  $('prompt').value = session?.draft || ''; resizePrompt(); renderAttachments(); $('messages').replaceChildren();
+  $('prompt').value = session?.draft || ''; resizePrompt(); lensText = ''; lensReading = null; scheduleLens(); renderAttachments(); $('messages').replaceChildren();
   conversationOf(id).error = '';
   renderSidebar(); renderMessages(true); renderChrome(); hideSidebarOnNarrow();
   try {
@@ -160,14 +162,14 @@ async function openSession(id) {
     // its response boundary, and deltas arriving afterwards continue the reducer.
     const previous = conversationOf(id);
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
-    if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; }
+    if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
     state.loaded = true;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, activities: previous.activities, stats: previous.stats });
     if (state.busy) {
       const last = [...state.messages].reverse().find(m => m.kind === 'assistant');
       if (last) state.streaming = last.key;
     }
-    if (result.messages) for (const item of pendingView.replay) if (item.sequence > result.sequence) applyAgentEvent(state, item.event);
+    for (const item of pendingView.replay) if (item.event.type === 'notice' || (result.messages && item.sequence > result.sequence)) applyAgentEvent(state, item.event);
     pendingView.pendingHistory = false; pendingView.replay = [];
     conversations.set(id, state); viewOf(id).nodes.clear();
     // Keep at most eight loaded transcript caches. Closed/archived sessions are
@@ -208,7 +210,7 @@ function toolSummary(message) {
   return `${message.name || 'Tool'}${detail ? ` · ${strip(detail).slice(0, 130).replace(/\s+/g, ' ')}` : ''}`;
 }
 function renderMessage(message, existing) {
-  const node = existing || element('article', `message ${message.kind}`);
+  const node = existing || element('article', message.goal ? `message goal-${message.goal.type}` : `message ${message.kind}`);
   node.dataset.key = message.key;
   if (String(message.revision) === node.dataset.revision && existing) return node;
   const wasOpen = node.querySelector('details')?.open;
@@ -220,8 +222,17 @@ function renderMessage(message, existing) {
     summary.setAttribute('aria-label', `${toolSummary(message)}, ${message.status}`);
     const output = element('div', 'tool-output', strip(message.output) || (message.status === 'running' ? 'Running…' : 'Complete'));
     details.append(summary, output); if (message.images?.length) details.append(imageNodes(message.images)); node.append(details);
+  } else if (message.kind === 'notice') {
+    node.dataset.tone = message.tone; node.append(icon(message.tone === 'info' ? 'pulse' : 'alert'), element('span', 'notice-text', `${message.text}${message.count > 1 ? `  ×${message.count}` : ''}`));
+  } else if (message.kind === 'activity') {
+    node.append(activityRow(message.items));
+  } else if (message.kind === 'user' && message.goal?.type === 'continuation') {
+    node.append(icon('restore'), element('span', 'notice-text', `Goal continuing on its own · step ${message.goal.step} of ${message.goal.limit}${message.goal.open ? ` · ${message.goal.open} criteria open` : ' · closing'}`));
+  } else if (message.kind === 'user' && message.goal?.type === 'kickoff') {
+    node.append(goalCard(message));
   } else if (message.kind === 'user') {
-    if (messageText(message)) node.append(element('div', 'user-bubble', messageText(message)));
+    if (message.command && messageText(message)) node.append(commandBubble(messageText(message), message.command));
+    else if (messageText(message)) node.append(element('div', 'user-bubble', messageText(message)));
     if (imageParts(message).length) node.append(imageNodes(imageParts(message)));
     if (message.optimistic) node.append(element('small', 'empty-hint', message.delivery || 'Queued'));
     if (message.failed) {
@@ -242,6 +253,49 @@ function renderMessage(message, existing) {
     if (imageParts(message).length) node.append(imageNodes(imageParts(message)));
   }
   return node;
+}
+// Harness lines (JEV, effort, skills, guardian): one quiet row naming what ran, expandable to every line.
+function activityRow(items) {
+  const counts = new Map();
+  for (const item of items) counts.set(item.label, (counts.get(item.label) || 0) + 1);
+  const details = element('details', 'harness-row'), summary = element('summary');
+  const single = items.length === 1 ? [items[0].label, items[0].detail].filter(Boolean).join(' · ') : [...counts].map(([label, count]) => count > 1 ? `${label} ×${count}` : label).join(' · ');
+  summary.append(icon('pulse'), element('span', 'harness-label', 'Harness'), element('span', 'harness-summary', single));
+  const list = element('ul', 'harness-list');
+  for (const item of items) { const row = element('li'); row.dataset.status = item.status; row.append(element('strong', '', item.label), document.createTextNode(` ${item.detail}`)); list.append(row); }
+  details.append(summary, list);
+  return details;
+}
+// A goal kickoff is the harness's message, not the user's: show what was asked, which boosts apply and what counts as done.
+function goalCard(message) {
+  const goal = message.goal, card = element('section', 'goal-card'), head = element('header');
+  head.append(icon('target'), element('strong', '', goal.resumed ? 'Goal resumed' : 'Goal started'), element('small', '', goal.id));
+  for (const boost of goal.boosts) head.append(element('span', 'goal-boost', boost));
+  card.append(head, element('p', 'goal-words', goal.note ? `Your note: ${goal.note}` : goal.words.length > 700 ? `${goal.words.slice(0, 699)}…` : goal.words));
+  const criteria = element('ol', 'goal-criteria');
+  for (const criterion of goal.criteria) { const row = element('li'); row.append(element('b', '', criterion.id), document.createTextNode(` ${criterion.text}`)); criteria.append(row); }
+  const brief = element('details', 'goal-brief'); brief.append(element('summary', '', 'Full brief sent to the model'), element('div', 'goal-brief-body', messageText(message).slice(0, 60_000)));
+  card.append(criteria, brief);
+  return card;
+}
+// A sent command keeps the marks and the reading it had in the composer, so the transcript shows how it was taken.
+function commandBubble(text, reading) {
+  const bubble = element('div', 'user-bubble command-bubble');
+  bubble.append(markedText(text, reading.marks, 'span'));
+  const wrap = document.createDocumentFragment(); wrap.append(bubble);
+  const line = element('small', 'command-reading', reading.text); line.dataset.tone = reading.tone; wrap.append(line);
+  return wrap;
+}
+function markedText(text, marks, tag = 'mark') {
+  const fragment = document.createDocumentFragment(); let cursor = 0;
+  for (const mark of [...marks].sort((a, b) => a.start - b.start)) {
+    if (mark.start < cursor || mark.end > text.length) continue;
+    fragment.append(document.createTextNode(text.slice(cursor, mark.start)));
+    const node = element(tag, 'command-token', text.slice(mark.start, mark.end)); node.dataset.kind = mark.kind; fragment.append(node);
+    cursor = mark.end;
+  }
+  fragment.append(document.createTextNode(text.slice(cursor)));
+  return fragment;
 }
 function renderMessages(restore = false) {
   if (!activeId) { $('messages').replaceChildren(); $('load-earlier').hidden = true; renderChrome(); return; }
@@ -335,6 +389,7 @@ function offerCorrection(id, check) {
   const fixes = check.fixes.map(fix => fix.to).join(' ');
   modal(`Did you mean ${fixes}?`, content => {
     content.append(element('p', '', `You typed ${check.fixes.map(fix => fix.from).join(', ')}, which is not a command here.`));
+    if (check.unrecognized?.length) content.append(element('p', '', `${check.unrecognized.join(', ')} matches no command and stays in the text as words.`));
     content.append(element('pre', 'command-preview', check.text.length > 400 ? `${check.text.slice(0, 399)}…` : check.text));
     const actions = element('div', 'dialog-actions'), keep = element('button', 'quiet-button', 'Keep editing'), use = element('button', 'primary-button', `Use ${fixes}`);
     keep.onclick = () => { closeModal(false); $('prompt').focus(); };
@@ -349,6 +404,7 @@ async function sendPrompt(event, { checked = false } = {}) {
   const state = conversationOf(id); if (state.sending) return;
   const message = $('prompt').value.trim(), images = [...(attachments.get(id) || [])];
   if (!message && !images.length) return;
+  let reading = null;
   if (/^\/models?(?:\s|$)/.test(message)) { setEditorDraft(id, ''); return showModels(); }
   if (/^\/(metrics|cost|self|session)\s*$/.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await api.warm(id); state.stats = await api.stats(id); renderContext(); return; }
   if (/^\/(skills|tools|help)\s*$/.test(message)) { setEditorDraft(id, ''); return showCommands(); }
@@ -365,12 +421,26 @@ async function sendPrompt(event, { checked = false } = {}) {
     if (check?.fixes?.length) return offerCorrection(id, check);
     if (check?.terminalOnly) { toast(`${check.terminalOnly} works in the terminal app only. Type / to see what works here.`); return; }
     if (check?.unknown) { toast(`${check.unknown} is not a command. Type / to see the commands.`, 'error'); return; }
+    // Words that look like commands but are not would reach the model as text: say so once, then Enter sends as typed.
+    if (check?.unrecognized?.length && state.strayOffer !== message) {
+      state.strayOffer = message;
+      toast(`${check.unrecognized.join(', ')} ${check.unrecognized.length > 1 ? 'are not commands' : 'is not a command'}, so it would be sent as plain words. Press Enter again to send as typed.`);
+      return;
+    }
+    reading = readCommand(message, { commands: await commandsFor(id).catch(() => []), check, goal: goalOf(id) });
   }
-  state.sending = true; state.error = '';
-  const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? 'Queued' : 'Sending…', revision: 0 };
-  state.messages.push(optimistic); viewOf(id).pinned = true;
+  state.strayOffer = null;
   session.draft = '';
-  $('prompt').value = ''; attachments.set(id, []); renderAttachments(); resizePrompt(); renderMessages();
+  $('prompt').value = ''; attachments.set(id, []); renderAttachments(); resizePrompt(); drawLens(null);
+  return deliver(id, message, images, reading, true);
+}
+// Sends one message or command and keeps its bubble honest: queued, sent, or failed with the draft restorable.
+async function deliver(id, message, images, reading, restoreDraft) {
+  const state = conversationOf(id);
+  state.sending = true; state.error = '';
+  const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? 'Queued' : 'Sending…', revision: 0, ...(reading ? { command: reading } : {}) };
+  state.messages.push(optimistic); viewOf(id).pinned = true;
+  renderMessages();
   try {
     await api.prompt(id, message, images.map(({ name, ...part }) => part));
     if (message.startsWith('/') && optimistic.optimistic) { optimistic.optimistic = false; optimistic.revision++; }
@@ -379,11 +449,79 @@ async function sendPrompt(event, { checked = false } = {}) {
     state.error = safeError(error);
     const pending = state.messages.find(m => m.key === optimistic.key && m.optimistic);
     if (pending) { pending.failed = true; pending.optimistic = false; pending.revision++; }
-    if (!workspace.sessions.find(s => s.id === id)?.draft && !(attachments.get(id)?.length)) {
+    if (restoreDraft && !workspace.sessions.find(s => s.id === id)?.draft && !(attachments.get(id)?.length)) {
       setEditorDraft(id, message); attachments.set(id, images);
       if (activeId === id) renderAttachments();
     }
   } finally { state.sending = false; if (activeId === id) { renderMessages(); renderChrome(); } }
+}
+
+// The goal this session holds: the goal extension's live status line (see goalStatusText) once its runtime
+// runs, and before that the last goal snapshot in the saved transcript, so a reopened session shows it at once.
+const goalOf = id => !id ? null : workspace.runtime.some(r => r.id === id && r.status === 'ready') ? goalFromStatus(viewOf(id).widgets.get('goal')) : viewOf(id).savedGoal ?? null;
+function renderGoal() {
+  const id = activeId, goal = goalOf(id), runtime = workspace.runtime.find(r => r.id === id);
+  $('goal-strip').hidden = !goal;
+  if (!goal) return;
+  const busy = Boolean(conversationOf(id).busy || runtime?.busy);
+  const state = goal.status === 'active' ? busy ? 'Goal running' : 'Goal open' : goal.status === 'paused' ? 'Goal paused' : 'Goal stalled';
+  const pill = $('goal-pill');
+  pill.dataset.status = goal.status === 'active' && busy ? 'running' : goal.status;
+  pill.querySelector('span').textContent = `${state} · ${goal.settled}/${goal.total} criteria settled`;
+  pill.title = goal.status === 'active' ? busy ? 'Working toward the goal; it continues on its own until every criterion has evidence.' : 'The goal is open but nothing is running. Your next message continues it, or press Resume.' : goal.status === 'paused' ? 'Paused: no automatic continuations until you resume.' : 'Stalled: continuations stopped without new evidence. Retry gives it another try.';
+  const action = goal.status === 'blocked' ? 'retry' : !busy ? 'resume' : null;
+  $('goal-action').hidden = !action;
+  if (action) { $('goal-action').textContent = action === 'retry' ? 'Retry' : 'Resume'; $('goal-action').dataset.command = `/goal ${action}`; }
+}
+async function runCommand(id, text) {
+  if (!id || conversationOf(id).sending) return;
+  let check, commands = [];
+  try { [commands, check] = await Promise.all([commandsFor(id), api.checkCommand(id, text)]); } catch { /* the send reports a runtime that cannot start */ }
+  return deliver(id, text, [], readCommand(text, { commands, check, goal: goalOf(id) }), false);
+}
+function showGoalMenu() {
+  const id = activeId, goal = goalOf(id); if (!goal) return;
+  modal('Goal', content => {
+    content.append(element('p', '', `${goal.status === 'blocked' ? 'Stalled' : goal.status[0].toUpperCase() + goal.status.slice(1)} · ${goal.settled} of ${goal.total} criteria settled.`));
+    const list = element('div', 'dialog-list');
+    list.append(actionButton('Show criteria and evidence', 'file', () => runCommand(id, '/goal')));
+    if (goal.status !== 'active' || !conversationOf(id).busy) list.append(actionButton(goal.status === 'blocked' ? 'Retry the goal' : 'Resume the goal', 'restore', () => runCommand(id, goal.status === 'blocked' ? '/goal retry' : '/goal resume')));
+    if (goal.status === 'active') list.append(actionButton('Pause automatic continuations', 'stop', () => runCommand(id, '/goal pause')));
+    list.append(actionButton('Mark achieved', 'check', () => runCommand(id, '/goal done')));
+    list.append(element('hr'), actionButton('Clear the goal', 'trash', () => runCommand(id, '/goal clear'), true));
+    content.append(list);
+  });
+}
+
+// Composer lens: commands are marked where they stand and one line says what Enter will do.
+// The marks overlay sits behind the transparent textarea with identical metrics.
+let lensTimer, lensSequence = 0, lensText = '', lensReading = null;
+function drawLens(reading = lensReading, text = $('prompt').value) {
+  lensReading = reading; lensText = text;
+  const marks = $('prompt-marks');
+  // Plain text needs no mirror: the overlay only carries text while there is something to mark.
+  marks.replaceChildren(reading?.marks?.length ? markedText(text, reading.marks) : '');
+  if (reading?.marks?.length && text.endsWith('\n')) marks.append(document.createTextNode(' '));
+  marks.scrollTop = $('prompt').scrollTop;
+  const lens = $('command-lens');
+  lens.hidden = !reading; if (!reading) return;
+  lens.textContent = reading.text; lens.dataset.tone = reading.tone;
+}
+function scheduleLens() {
+  const text = $('prompt').value;
+  // Keep only marks the edit did not touch, so they never drift while the core reads the new text.
+  let same = 0; while (same < text.length && same < lensText.length && text[same] === lensText[same]) same++;
+  drawLens(lensReading && /^\s*\//.test(text) ? { ...lensReading, marks: lensReading.marks.filter(mark => mark.end <= same) } : null, text);
+  clearTimeout(lensTimer);
+  if (/^\s*\//.test(text)) lensTimer = setTimeout(() => void updateLens(), 140);
+}
+async function updateLens() {
+  const id = activeId, text = $('prompt').value, sequence = ++lensSequence;
+  if (!id || !/^\s*\//.test(text)) return drawLens(null);
+  let commands = [], check;
+  try { [commands, check] = await Promise.all([commandsFor(id), api.checkCommand(id, text)]); } catch { /* the lens is a reading aid only */ }
+  if (sequence !== lensSequence || id !== activeId || text !== $('prompt').value) return;
+  drawLens(readCommand(text, { commands, check, goal: goalOf(id) }), text);
 }
 
 function closeModal(cancelled = true) {
@@ -669,14 +807,25 @@ function showNextExtension() {
   modalOwner = { sessionId, requestId: event.id };
   if (event.timeout) modalTimer = setTimeout(() => { if (modalOwner?.requestId === event.id && $('dialog').open) closeModal(); }, Math.min(event.timeout, 2_147_483_647));
 }
-function extensionRequest(sessionId, event) {
+function extensionRequest(sessionId, event, sequence) {
   const view = viewOf(sessionId);
-  if (event.method === 'notify') { if (sessionId === activeId) toast(strip(event.message)); return; }
+  // Notices land in the conversation, where they stay readable, instead of a toast that fades in seconds.
+  if (event.method === 'notify') {
+    const notice = { type: 'notice', text: strip(event.message), tone: event.notifyType };
+    if (view.pendingHistory) view.replay.push({ event: notice, sequence });
+    else applyAgentEvent(conversationOf(sessionId), notice);
+    if (sessionId === activeId) scheduleRender();
+    return;
+  }
   if (event.method === 'setWidget') {
     if (!event.widgetLines) view.widgets.delete(event.widgetKey); else { if (view.widgets.size >= 16 && !view.widgets.has(event.widgetKey)) view.widgets.delete(view.widgets.keys().next().value); view.widgets.set(event.widgetKey, event.widgetLines.join('\n')); }
     if (sessionId === activeId) renderContext(); return;
   }
-  if (event.method === 'setStatus') { if (event.statusText) view.widgets.set(event.statusKey, event.statusText); else view.widgets.delete(event.statusKey); return; }
+  if (event.method === 'setStatus') {
+    if (event.statusText) view.widgets.set(event.statusKey, event.statusText); else view.widgets.delete(event.statusKey);
+    if (event.statusKey === 'goal' && sessionId === activeId) renderGoal();
+    return;
+  }
   if (event.method === 'set_editor_text') { setEditorDraft(sessionId, event.text || ''); return; }
   if (['select', 'confirm', 'input', 'editor'].includes(event.method)) {
     if (extensionQueue.length >= 32) { tryAction(() => api.extensionResponse(sessionId, { id: event.id, cancelled: true })); return; }
@@ -706,7 +855,7 @@ api.onEvent(value => {
         for (let index = extensionQueue.length - 1; index >= 0; index--) if (extensionQueue[index].event.id === value.event.id && extensionQueue[index].sessionId === value.sessionId) extensionQueue.splice(index, 1);
         if (modalOwner?.requestId === value.event.id && modalOwner.sessionId === value.sessionId) closeModal(false);
       }
-      else if (value.event.type === 'extension_ui_request') extensionRequest(value.sessionId, value.event);
+      else if (value.event.type === 'extension_ui_request') extensionRequest(value.sessionId, value.event, value.sequence);
       else {
         const view = viewOf(value.sessionId);
         if (view.pendingHistory) view.replay.push({ event: value.event, sequence: value.sequence });
@@ -741,6 +890,7 @@ $('settings').onclick = showSettings;
 $('composer').onsubmit = event => { event.preventDefault(); tryAction(() => sendPrompt()); };
 $('prompt').oninput = () => {
   resizePrompt();
+  scheduleLens();
   if (!activeId) return;
   setEditorDraft(activeId, $('prompt').value);
   void updateCommandMenu();
@@ -761,6 +911,9 @@ $('prompt').onkeydown = event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt()); }
 };
 $('prompt').addEventListener('click', () => { if (commandMenu || slashContext()) void updateCommandMenu(); });
+$('prompt').addEventListener('scroll', () => { $('prompt-marks').scrollTop = $('prompt').scrollTop; }, { passive: true });
+$('goal-pill').onclick = showGoalMenu;
+$('goal-action').onclick = () => tryAction(() => runCommand(activeId, $('goal-action').dataset.command));
 $('prompt').addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== $('prompt')) closeCommandMenu(); }, 0));
 $('stop').onclick = () => { if (activeId) tryAction(() => api.abort(activeId)); };
 $('model-button').onclick = () => tryAction(showModels);

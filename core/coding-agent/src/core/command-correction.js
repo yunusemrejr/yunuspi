@@ -81,8 +81,10 @@ export function closestCommand(name, names) {
  *   leading command is itself chainable (`/3d /video /noslop make X`).
  *
  * Returns undefined when the text is not a command or every token is known.
- * Otherwise `fixes` lists each replacement made in `text`, and `unknown` names a
- * leading command with no close match (the caller decides whether that is an error).
+ * Otherwise `fixes` lists each replacement made in `text`, `unknown` names a
+ * leading command with no close match (the caller decides whether that is an error),
+ * and `unrecognized` lists chained tokens that match no boost (`/autonomy`): they
+ * would reach the model as plain words, so callers say so before sending.
  */
 export function correctSlashCommands(input, { commands = [], chainable = [] } = {}) {
     const raw = String(input ?? "");
@@ -92,7 +94,7 @@ export function correctSlashCommands(input, { commands = [], chainable = [] } = 
     const known = new Set(commands);
     const boosts = new Set(chainable);
     const lowerBoosts = new Map([...boosts].map((name) => [name.toLowerCase(), name]));
-    const fixes = [];
+    const fixes = [], unrecognized = [];
     let head = leading[2], unknown;
     if (!known.has(head)) {
         const meant = closestCommand(head, [...known]);
@@ -114,8 +116,11 @@ export function correctSlashCommands(input, { commands = [], chainable = [] } = 
             if (lowerBoosts.has(token.toLowerCase()))
                 continue;
             const meant = closestCommand(token, [...boosts]);
-            if (!meant)
+            if (!meant) {
+                if (!/^\d+$/.test(token) && !unrecognized.includes(`/${token}`))
+                    unrecognized.push(`/${token}`);
                 continue;
+            }
             const at = match.index ?? 0;
             out += `${rest.slice(cursor, at)}/${meant}`;
             cursor = at + token.length + 1;
@@ -123,9 +128,38 @@ export function correctSlashCommands(input, { commands = [], chainable = [] } = 
         }
         text = text.slice(0, start) + out + rest.slice(cursor);
     }
-    if (!fixes.length && !unknown)
+    if (!fixes.length && !unknown && !unrecognized.length)
         return undefined;
-    return { text, fixes, ...(unknown ? { unknown } : {}) };
+    return { text, fixes, ...(unknown ? { unknown } : {}), ...(unrecognized.length ? { unrecognized } : {}) };
+}
+
+/**
+ * Where the commands sit in a text, so a composer can mark them as typed: the leading
+ * token, then (when it is chainable) every chained token outside code, each with whether
+ * it is a known name. Uses the same grammar as correctSlashCommands.
+ */
+export function commandTokens(input, { commands = [], chainable = [] } = {}) {
+    const raw = String(input ?? "");
+    const leading = LEADING.exec(raw);
+    if (!leading)
+        return [];
+    const known = new Set(commands);
+    const boosts = new Map([...new Set(chainable)].map((name) => [name.toLowerCase(), name]));
+    const head = leading[2], start = leading[1].length;
+    const tokens = [{ start, end: leading[0].length, name: head, known: known.has(head), chained: false }];
+    if (!boosts.has(head.toLowerCase()) || !known.has(head))
+        return tokens;
+    const offset = leading[0].length;
+    const masked = raw.slice(offset).replace(CODE, (code) => "\u0000".repeat(code.length));
+    for (const match of masked.matchAll(CHAINED)) {
+        // `/2` is a number, not a command; correctSlashCommands ignores it the same way.
+        if (/^\d+$/.test(match[1]))
+            continue;
+        const at = offset + (match.index ?? 0);
+        const name = boosts.get(match[1].toLowerCase());
+        tokens.push({ start: at, end: at + match[1].length + 1, name: name ?? match[1], known: !!name, chained: true });
+    }
+    return tokens;
 }
 
 /** One readable line for a correction: "Did you mean /nobug (not /nobugs)?" */

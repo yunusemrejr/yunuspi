@@ -23,12 +23,22 @@ import { collectVerificationReceipts, resumesElsewhere } from './lib/continuatio
 import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
 import { selfVerificationPrompt } from "./lib/lean-policy.ts";
 import {
-	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
-	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
+	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalRestoreNotice, goalStatusText, goalSummary,
+	parseGoalArgs, GOAL_USAGE, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
 import { addBoosts, boostedGoalNotice, chainCompletions, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
 
 const ENTRY = "goal-state-v1";
+const GOAL_SUBCOMMANDS: ReadonlyArray<readonly [string, string]> = [
+	["resume", "continue this session's goal; words after it go to the agent as a note"],
+	["status", "show the goal and each criterion"],
+	["pause", "stop the automatic continuations"],
+	["retry", "try a stalled goal again"],
+	["done", "mark the goal achieved yourself"],
+	["clear", "drop the goal"],
+	["criteria", "replace the open criteria: criteria a; b"],
+	["help", "every /goal form"],
+];
 const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
 const WRITE_TOOLS = new Set(["edit", "write", "bulk_edit"]);
@@ -71,10 +81,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		show(ctx);
 	};
 	const show = (ctx?: ExtensionContext) => {
-		try {
-			const settled = goal?.criteria.filter((criterion) => criterion.status !== "open").length ?? 0;
-			ctx?.ui?.setStatus?.(STATUS_KEY, goalIsLive(goal) ? `goal ${goal!.status === "paused" ? "⏸" : "◎"} ${settled}/${goal!.criteria.length}` : undefined);
-		} catch { /* status is cosmetic */ }
+		// A stalled goal stays visible too: it is waiting for /goal retry, not gone.
+		try { ctx?.ui?.setStatus?.(STATUS_KEY, goalStatusText(goal)); } catch { /* status is cosmetic */ }
 	};
 	const restore = (ctx: ExtensionContext) => {
 		try { goal = restoreGoal(ctx.sessionManager.getBranch()); } catch { goal = undefined; }
@@ -82,6 +90,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 		refused.clear();
 		show(ctx);
+		// A reopened session (after an update, a crash or a closed window) must say it still holds unfinished work.
+		const notice = ctx.hasUI ? goalRestoreNotice(goal) : undefined;
+		if (notice) ctx.ui?.notify?.(notice, goal?.status === "blocked" ? "warning" : "info");
 	};
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_switch", (_event, ctx) => restore(ctx));
@@ -214,7 +225,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// goal joins that goal. Parsing lives in lib/presets.ts.
 	const goalCommandHandler = async (args: string, ctx: ExtensionContext) => {
 		try {
-			const command = parseGoalArgs(args);
+			const command = parseGoalArgs(args, !!goal && goal.status !== "cleared");
 			const notify = (text: string, level: "info" | "warning" = "info") => ctx.ui?.notify?.(text, level);
 			// The kickoff starts a full agent run; the command must return immediately so
 			// the editor and working indicator stay live while that run streams. It carries the
@@ -227,6 +238,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 			switch (command.kind) {
 				case "status": return notify(goalSummary(goal));
+				case "help": return notify(GOAL_USAGE);
 				case "set": {
 					// Preset tokens anywhere in the text: with a task they make one boosted goal; alone they are a bare preset run.
 					const found = extractPresetTokens(command.text);
@@ -246,7 +258,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					persist(setCriteria(goal!, command.items), ctx);
 					return notify(goalSummary(goal));
 			}
-			if (!goal || goal.status === "cleared") return notify("No goal set. /goal <what you want done> starts one.");
+			if (!goal || goal.status === "cleared") return notify(`No goal in this session to ${command.kind}.\n${GOAL_USAGE}`);
 			const now = Date.now();
 			if (command.kind === "pause") { persist({ ...goal, status: "paused", updatedAt: now }, ctx); return notify("Goal paused. /goal resume continues it."); }
 			if (command.kind === "clear") { persist({ ...goal, status: "cleared", updatedAt: now }, ctx); return notify("Goal cleared."); }
@@ -254,8 +266,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// resume and retry both re-arm the continuation budget and fingerprint.
 			const rearmed: GoalState = { ...goal, status: "active", nudges: 0, stalls: 0, progressMark: "", note: undefined, updatedAt: now };
 			persist(rearmed, ctx);
-			notify(`Goal ${rearmed.id} resumed.`);
-			kickoff(rearmed);
+			const open = rearmed.criteria.filter((criterion) => criterion.status === "open").length;
+			const note = "note" in command ? command.note : undefined;
+			notify(`Goal ${rearmed.id} resumed: ${open} of ${rearmed.criteria.length} criteria open, continuation budget reset.${note ? " Your note goes with it." : ""}`);
+			void Promise.resolve(pi.sendUserMessage(`${goalKickoff(rearmed)}${note ? `\n\nThe user's note on resuming: ${note}` : ""}`, { authored: true, userText: note ?? rearmed.text, deliverAs: "followUp" }))
+				.catch((error) => notify(`Goal resume failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
@@ -288,7 +303,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	const startPreset = (invoked: PresetId) => async (args: string, ctx: ExtensionContext) => {
 		const trimmed = String(args ?? "").trim().toLowerCase();
-		if (goal && goal.status !== "cleared" && ["status", "pause", "resume", "clear", "done", "retry"].includes(trimmed)) {
+		if (goal && goal.status !== "cleared" && ["status", "help", "pause", "resume", "continue", "clear", "stop", "done", "retry"].includes(trimmed)) {
 			return goalCommandHandler(trimmed, ctx);
 		}
 		// The invoked name leads, so the whole invocation is one text: its tokens count wherever they stand.
@@ -316,9 +331,14 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.registerCommand("goal", {
-		description: "Set a goal with a real definition of done: /goal <what you want>, then /goal to inspect, pause, resume, retry, done or clear. Boosts chain anywhere in it: /goal /3d /video <task>.",
+		description: "Set a goal with a real definition of done: /goal <what you want>. /goal shows progress; /goal pause, resume [note], retry, done, clear, help. Boosts chain anywhere in it: /goal /3d /video <task>.",
 		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "goal"),
+		// `/goal ` lists its subcommands; a `/` token lists the boosts that can join.
+		getArgumentCompletions: (prefix: string) => {
+			const word = /^\s*([a-z]*)$/i.exec(prefix)?.[1]?.toLowerCase();
+			const items = word === undefined ? [] : GOAL_SUBCOMMANDS.filter(([name]) => name.startsWith(word)).map(([name, description]) => ({ value: `${name} `, label: name, description }));
+			return items.length ? items : chainCompletions(prefix, "goal");
+		},
 		handler: goalCommandHandler,
 	});
 	pi.registerCommand("noslop", {

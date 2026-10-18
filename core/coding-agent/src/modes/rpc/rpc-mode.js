@@ -16,7 +16,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { theme } from "../interactive/theme/theme.js";
 import { toJsonEvent } from "../json-event.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
-import { desktopEvent, desktopHistory, desktopMessage, desktopBranchMessages } from "./desktop-projection.js";
+import { desktopEvent, desktopGoal, desktopHistory, desktopMessage, desktopBranchMessages } from "./desktop-projection.js";
 /**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
@@ -547,6 +547,7 @@ export async function runRpcMode(runtimeHost) {
             case "get_messages": {
                 if (command.projection === 'desktop') return success(id, "get_messages", {
                     ...desktopHistory(desktopBranchMessages(session.sessionManager.getBranch()), { limit: command.limit, before: command.before }),
+                    goal: command.before === undefined ? desktopGoal(session.sessionManager.getBranch()) : undefined,
                     isStreaming: session.isStreaming,
                     streamingMessage: command.before === undefined && session.agent.state.streamingMessage?.role === 'assistant' ? desktopMessage(session.agent.state.streamingMessage) : null,
                 });

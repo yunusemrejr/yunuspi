@@ -1,14 +1,30 @@
 // Desktop previews never alter the authoritative messages sent to the model or
 // saved in JSONL. Keep wire records bounded, including image-heavy history.
+/** Harness-activity lines are drawn from their small, fixed-shape details (label, status, detail), never from model content. */
+const activityDetails = (customType, details) => {
+    if (customType !== 'harness-activity' || !details || typeof details !== 'object') return undefined;
+    const json = JSON.stringify(details);
+    return json.length <= 1024 ? JSON.parse(json) : undefined;
+};
 const clip = (value, limit) => typeof value === 'string' && value.length > limit ? value.slice(0, limit) + '\n[Desktop preview truncated; full content is retained in session history.]' : value;
 export function desktopBranchMessages(entries) {
     const messages = [];
     for (const entry of entries) {
         if (entry.type === 'message') messages.push(entry.message);
-        else if (entry.type === 'custom_message') messages.push({ role: 'custom', customType: entry.customType, content: entry.content, display: entry.display, timestamp: entry.timestamp });
+        else if (entry.type === 'custom_message') messages.push({ role: 'custom', customType: entry.customType, content: entry.content, display: entry.display, timestamp: entry.timestamp, ...(activityDetails(entry.customType, entry.details) ? { details: activityDetails(entry.customType, entry.details) } : {}) });
         else if (entry.type === 'compaction') messages.push({ role: 'custom', customType: 'desktop-compaction', content: 'Context compacted. Earlier conversation remains available.', display: true, timestamp: entry.timestamp });
     }
     return messages;
+}
+/** The latest /goal snapshot on a branch, so the desktop shows an unfinished goal before any runtime starts. */
+export function desktopGoal(entries) {
+    for (let index = entries.length - 1; index >= 0; index--) {
+        const entry = entries[index];
+        if (entry?.type !== 'custom' || entry.customType !== 'goal-state-v1' || !Array.isArray(entry.data?.criteria)) continue;
+        if (!['active', 'paused', 'blocked'].includes(entry.data.status)) return null;
+        return { id: String(entry.data.id ?? ''), status: entry.data.status, settled: entry.data.criteria.filter((criterion) => criterion?.status !== 'open').length, total: entry.data.criteria.length };
+    }
+    return null;
 }
 export function desktopMessage(message, budget = { remaining: 8 * 1024 * 1024 }) {
     if (!message || typeof message !== 'object') return message;
@@ -16,6 +32,8 @@ export function desktopMessage(message, budget = { remaining: 8 * 1024 * 1024 })
     for (const key of ['role', 'toolCallId', 'toolName', 'isError', 'errorMessage', 'stopReason', 'customType', 'display', 'timestamp', 'provider', 'model', 'usage']) {
         if (message[key] !== undefined) preview[key] = typeof message[key] === 'string' ? clip(message[key], 4000) : message[key];
     }
+    const details = activityDetails(message.customType, message.details);
+    if (details) preview.details = details;
     if (typeof message.content === 'string') preview.content = clip(message.content, 32_000);
     else {
     let remaining = Math.min(budget.remaining, 4 * 1024 * 1024);

@@ -17,9 +17,24 @@ const MEDIA_PATH = /(?:^|\/)(?:films?|videos?|remotion|hyperframes|shots|public\
 /** Remotion and HyperFrames sources, and HtmlScene pages fed by the video timeline. */
 const MEDIA_CONTENT = /from\s+['"](?:remotion|@remotion\/[\w-]+)['"]|\buseCurrentFrame\s*\(|\bdata-composition-id\b|window\.__PROPS__/;
 
+/** A preset front or the verification line: harness wording, e.g. Noslop's "UI and visual slop gone". */
+const HARNESS_CRITERION = /^\s*-\s*(?:V:|C\d+:\s*(?:3D|Video|Noslop|Nobug|Anatomy)\b[^:\n]{0,30}:)/i;
+
+/**
+ * The user's request inside a goal turn. A kickoff or continuation carries the harness's own briefs and preset
+ * fronts, which name interface surfaces for every goal; judged whole, a film goal with /noslop read as UI work
+ * and its continuations were handed UI doctrine. Keep the user's words and their own criteria only.
+ */
+export function goalRequestText(prompt: string): string {
+	if (!/^\[goal(?:-tracked)? \w+/.test(prompt)) return prompt;
+	const words = /The user wrote: «([\s\S]*?)»/.exec(prompt)?.[1] ?? /^\[goal-tracked \w+\] Goal: ([^\n]*)/.exec(prompt)?.[1] ?? "";
+	const own = (prompt.match(/^\s*-\s*(?:C\d+|V):[^\n]*$/gm) ?? []).filter((line) => !HARNESS_CRITERION.test(line));
+	return [words, ...own].join("\n");
+}
+
 /** The request is film, video or render work and names no interface surface. */
 export function mediaWork(prompt: string): boolean {
-	const text = typeof prompt === "string" ? prompt.slice(0, 6000) : "";
+	const text = typeof prompt === "string" ? goalRequestText(prompt.slice(0, 20000)).slice(0, 6000) : "";
 	return MEDIA_PROMPT.test(text) && !UI_SURFACE.test(text);
 }
 

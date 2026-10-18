@@ -198,7 +198,14 @@ try {
   assert.equal(await page.locator('#command-menu').isHidden(), true);
   check('the slash menu lists boosts first, completes them, and offers chain members after a boost');
   const requestsBeforeCommands = requests.length;
+  await page.locator('#prompt').fill('/desktop-boost /desktop-boost-two go');
+  await page.waitForFunction(() => document.querySelectorAll('#prompt-marks .command-token[data-kind="boost"]').length === 2 && /one goal for your task/.test(document.getElementById('command-lens').textContent));
+  await page.locator('#prompt').fill('/desktop-boost /desktop-bost-two /notaboost go');
+  await page.waitForFunction(() => document.querySelector('#prompt-marks .command-token[data-kind="near"]') && document.querySelector('#prompt-marks .command-token[data-kind="unknown"]')
+    && /Did you mean \/desktop-boost-two/.test(document.getElementById('command-lens').textContent) && /\/notaboost is not a command/.test(document.getElementById('command-lens').textContent));
+  await page.screenshot({ path: path.join(output, 'desktop-command-lens.png') }); report.screenshots.push('desktop-command-lens.png');
   await page.locator('#prompt').fill('/desktop-boost /desktop-bost-two go');
+  check('the composer marks boosts, near misses and non-commands where they stand and says what Enter will do');
   await page.keyboard.press('Enter');
   await page.waitForSelector('#dialog[open]');
   assert.match(await page.locator('#dialog-title').innerText(), /Did you mean \/desktop-boost-two\?/);
@@ -250,14 +257,14 @@ try {
   await open(first.id); assert.match(await page.locator('#messages').innerText(), /TOOL read this fixture/);
   check('many histories browse without starting or stopping workers');
   await send('/desktop-notify');
-  await page.waitForSelector('#toast:not([hidden])');
+  await page.waitForFunction(() => document.querySelector('#messages .message.notice[data-tone="warning"]')?.textContent.includes('Long notice.'));
   const covered = await page.evaluate(() => ['model-button', 'thinking-button', 'prompt', 'attach'].filter(id => {
     const rect = document.getElementById(id).getBoundingClientRect();
-    return document.getElementById('toast').contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    return document.querySelector('#messages .message.notice')?.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
   }));
   assert.deepEqual(covered, [], 'a notice must not cover composer controls');
-  await page.locator('#toast').click(); assert.equal(await page.locator('#toast').isHidden(), true);
-  check('long notices stay clear of the composer and dismiss on click');
+  assert.equal(await page.locator('#toast').evaluate(node => node.hidden || !node.textContent.includes('Long notice')), true, 'extension notices stay in the transcript instead of a fading toast');
+  check('extension notices stay readable in the transcript, clear of the composer');
   check('background jobs survive opening more histories');
   await page.locator('#settings').click();
   await page.locator('#provider-id').focus(); await page.keyboard.press('Tab');

@@ -525,7 +525,7 @@ export async function askJev(
   // Only the controlled reason is emitted: state and provider errors stay out.
   try {
     sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(result.ok ? "ml.jev.used" : "ml.jev.skipped", result.ok
-      ? { count: 1, cached: result.usage.cached, route: result.usage.model, durationMs: result.usage.ms, questions: Object.keys(questions).length, ...(consensus ? { consensus } : {}) }
+      ? { count: 1, cached: result.usage.cached, route: result.usage.model, site: site.slice(0, 40), durationMs: result.usage.ms, questions: Object.keys(questions).length, ...(consensus ? { consensus } : {}) }
       : { count: 1, reason: result.skipped, site: site.slice(0, 40), durationMs: Math.max(0, deps.now() - started) });
   } catch { /* optional visibility */ }
   return result;

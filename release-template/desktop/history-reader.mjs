@@ -75,7 +75,7 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
   parentPort.on('message', request => {
     tail = tail.then(async () => {
       try {
-        const [{ loadEntriesFromFile, migrateSessionEntries }, { desktopBranchMessages, desktopHistory }] = await modules;
+        const [{ loadEntriesFromFile, migrateSessionEntries }, { desktopBranchMessages, desktopGoal, desktopHistory }] = await modules;
         let names;
         try { names = fs.readdirSync(request.directory).filter(name => name.endsWith('.jsonl')); }
         catch (error) { if (error.code !== 'ENOENT') throw error; names = []; }
@@ -124,7 +124,7 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
           }
           branch.reverse();
         }
-        const data = { ...desktopHistory(desktopBranchMessages(branch), { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null };
+        const data = { ...desktopHistory(desktopBranchMessages(branch), { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null, goal: request.before === undefined ? desktopGoal(branch) : undefined };
         // The projection clips normal text/images; malformed imported metadata
         // must not bypass its page budget on the first returned message.
         if (Buffer.byteLength(JSON.stringify(data)) > 8 * 1024 * 1024 + 4096) throw Error('This history preview exceeds the 8 MiB transfer limit. Its original file is retained.');

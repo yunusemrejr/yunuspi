@@ -73,6 +73,9 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "reminder.ack": "error",
   "reminder.follow": "error",
   "review.disposition": "all",
+  // Automatic thinking changes, and the one-time note that the level is held to protect the prompt cache.
+  "effort.change": "all",
+  "effort.held": "all",
 };
 /** Local helpers whose routine completions update the live pulse instead of
  * the transcript: they run on most tool results and change ordering only. */
@@ -160,7 +163,9 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   if (kind === "ml.project-memory.recalled") return { label: "Project memory", status: 'ok', detail: `Historical evidence retrieved · ${amount('count') ?? 0} memories` };
   if (kind === "ml.jev.used") {
     const questions = amount("questions");
-    return { label: "JEV", status, ms, detail: `${data.route === "jaredpalmer/kev-4b" ? "Kev" : "Jev"} · ${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
+    // The site is a fixed caller label (rank, classify, verify, …), never request content.
+    const site = typeof data.site === "string" && /^[\w .:-]{1,40}$/.test(data.site) ? data.site.replace(/[-_]/g, " ") : undefined;
+    return { label: "JEV", status, ms, detail: `${data.route === "jaredpalmer/kev-4b" ? "Kev" : "Jev"}${site ? ` · ${site}` : ""} · ${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}${data.consensus === "split" ? " · second opinion disagreed" : data.consensus === "agree" ? " · second opinion agreed" : ""}` };
   }
   if (kind === "ml.span.used") {
     const present = amount("present");
@@ -219,6 +224,13 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     const outcome = typeof data.outcome === "string" ? data.outcome : "";
     const route = typeof data.route === "string" ? data.route : "";
     const skill = typeof data.skill === "string" ? data.skill : "";
+    if (kind === "effort.change" || kind === "effort.held") {
+      const level = (value: unknown) => typeof value === "string" && /^[a-z]{2,8}$/.test(value) ? value : "?";
+      const why = clean(String(data.reason ?? "").replaceAll("-", " "), 60);
+      return kind === "effort.change"
+        ? { label: "Effort", status: "ok", detail: `thinking ${level(data.from)} → ${level(data.to)}${why ? ` · ${why}` : ""}` }
+        : { label: "Effort", status: "skip", detail: `thinking held at ${level(data.to)}${why ? ` · ${why}` : ""}` };
+    }
     if (kind === "guardian.observing" || kind === "guardian.evaluated") {
       const count = Number.isSafeInteger(data.count) && Number(data.count) >= 0 ? Number(data.count) : 0;
       const evaluations = Number.isSafeInteger(data.evaluations) && Number(data.evaluations) >= 0 ? Number(data.evaluations) : 0;
@@ -346,6 +358,13 @@ export function createActivityIndicators(send: ActivitySender, pulse?: ActivityP
   const countPulse = (kind: string, data: Record<string, unknown>) => {
     if (!pulse || process.env.PI_SUBAGENT_CHILD === "1") return;
     const amount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+    if (kind === "effort.change" || kind === "effort.held") {
+      const level = (value: unknown) => typeof value === "string" && /^[a-z]{2,8}$/.test(value) ? value : "?";
+      const why = clean(String(data.reason ?? "").replaceAll("-", " "), 60);
+      return kind === "effort.change"
+        ? { label: "Effort", status: "ok", detail: `thinking ${level(data.from)} → ${level(data.to)}${why ? ` · ${why}` : ""}` }
+        : { label: "Effort", status: "skip", detail: `thinking held at ${level(data.to)}${why ? ` · ${why}` : ""}` };
+    }
     if (kind === "guardian.observing" || kind === "guardian.evaluated") {
       pulseCounts.guardianChecks = Math.max(pulseCounts.guardianChecks, amount(data.count) ?? 0);
       pulseCounts.guardianWasm = Math.max(pulseCounts.guardianWasm, amount(data.evaluations) ?? 0);

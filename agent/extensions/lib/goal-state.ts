@@ -86,20 +86,33 @@ export function createPresetGoal(text: string, items: readonly string[], now = D
 
 export type GoalCommand =
 	| { kind: "set"; text: string }
-	| { kind: "status" }
-	| { kind: "pause" | "resume" | "clear" | "done" | "retry" }
+	| { kind: "status" | "help" }
+	| { kind: "pause" | "clear" | "done" }
+	| { kind: "resume" | "retry"; note?: string }
 	| { kind: "criteria"; items: string[] };
 
-const SUBCOMMANDS = new Set(["pause", "resume", "clear", "done", "retry", "status"]);
+const SUBCOMMANDS = new Set(["pause", "resume", "clear", "done", "retry", "status", "help"]);
+/** Words people reach for that mean an existing subcommand. */
+const ALIASES: Record<string, GoalCommand["kind"]> = { stop: "clear", continue: "resume", show: "status", progress: "status" };
 
-/** `/goal` argument grammar; anything that is not a subcommand is the goal text. */
-export function parseGoalArgs(args: string): GoalCommand {
+/** Every `/goal` form in one place: `/goal help`, the bare-goal status and the desktop composer show it. */
+export const GOAL_USAGE = [
+	"/goal <what you want done> starts a goal; boosts chain anywhere in it: /goal /3d /video <task>.",
+	"/goal shows progress · /goal pause · /goal resume [note] (or continue) · /goal retry after a stall · /goal done marks it achieved yourself · /goal clear (or stop) drops it · /goal criteria a; b replaces the open criteria.",
+].join("\n");
+
+/**
+ * `/goal` argument grammar; anything that is not a subcommand is the goal text.
+ * With a goal in the session (`hasGoal`), `resume|continue|retry <words>` resumes it with the words
+ * as a note for the agent; without one those words start a new goal, as any other text does.
+ */
+export function parseGoalArgs(args: string, hasGoal = false): GoalCommand {
 	const text = String(args ?? "").trim();
 	if (!text) return { kind: "status" };
 	const [head, ...rest] = text.split(/\s+/);
-	const word = head.toLowerCase();
+	const word = ALIASES[head.toLowerCase()] ?? head.toLowerCase();
 	if (SUBCOMMANDS.has(word) && rest.length === 0) return { kind: word as "status" };
-	if (word === "stop" && rest.length === 0) return { kind: "clear" };
+	if (hasGoal && (word === "resume" || word === "retry") && rest.length) return { kind: word, note: clip(text.slice(head.length), 600) };
 	if (word === "criteria" && rest.length) {
 		const items = text.slice(head.length).trim().split(/\s*(?:;|\n)\s*/).map((item) => clip(item, 240)).filter((item) => item.length >= 4);
 		if (items.length) return { kind: "criteria", items: items.slice(0, MAX_CRITERIA - 1) };
@@ -285,10 +298,31 @@ export function goalKickoff(goal: GoalState): string {
 }
 
 export function goalSummary(goal: GoalState | undefined): string {
-	if (!goal || goal.status === "cleared") return "No goal set. /goal <what you want done> starts one.";
+	if (!goal || goal.status === "cleared") return `No goal set in this session.\n${GOAL_USAGE}`;
 	const met = goal.criteria.filter((criterion) => criterion.status !== "open").length;
 	const header = `Goal ${goal.id} [${goal.status}] ${met}/${goal.criteria.length} criteria settled, ${goal.nudges} continuation(s)${goal.note ? ` — ${goal.note}` : ""}`;
-	return [header, clip(goal.text, 300), ...goal.criteria.map((criterion) => `  ${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}${criterion.evidence ? ` — ${criterion.evidence}` : ""}`)].join("\n");
+	const next = { active: "/goal pause stops it · /goal clear drops it", paused: "/goal resume continues it", blocked: "/goal retry continues it · /goal clear drops it", achieved: "/goal <text> starts the next one" }[goal.status as "active"];
+	return [header, clip(goal.text, 300), ...goal.criteria.map((criterion) => `  ${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}${criterion.evidence ? ` — ${criterion.evidence}` : ""}`), ...(next ? [next] : [])].join("\n");
+}
+
+/**
+ * The one-line status for the footer and the desktop goal pill: `goal ◎ 2/6` active, `⏸` paused,
+ * `⚠` stalled or blocked. The desktop parses exactly this shape, so change both together.
+ */
+export function goalStatusText(goal: GoalState | undefined): string | undefined {
+	const mark = goal ? { active: "◎", paused: "⏸", blocked: "⚠" }[goal.status as "active"] : undefined;
+	if (!goal || !mark) return undefined;
+	return `goal ${mark} ${goal.criteria.filter((criterion) => criterion.status !== "open").length}/${goal.criteria.length}`;
+}
+
+/** Said once when a session reopens with an unfinished goal, so a resumed session never hides one. */
+export function goalRestoreNotice(goal: GoalState | undefined): string | undefined {
+	if (!goal || !["active", "paused", "blocked"].includes(goal.status)) return undefined;
+	const settled = goal.criteria.filter((criterion) => criterion.status !== "open").length;
+	const progress = `${settled}/${goal.criteria.length} criteria settled`;
+	if (goal.status === "active") return `Goal ${goal.id} is still open in this session (${progress}). Your next message continues it; /goal resume continues it now, /goal shows the criteria.`;
+	if (goal.status === "paused") return `Goal ${goal.id} is paused (${progress}). /goal resume continues it, /goal clear drops it.`;
+	return `Goal ${goal.id} stalled (${progress})${goal.note ? `: ${goal.note}` : "."} /goal retry gives it another try, /goal clear drops it.`;
 }
 
 /** Latest persisted goal on a session branch (entries are whole-state snapshots). */

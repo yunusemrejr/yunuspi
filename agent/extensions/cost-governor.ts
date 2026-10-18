@@ -42,6 +42,7 @@ import { createReadToolDefinition } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { createEffortController } from "./lib/effort-policy.mjs";
 import { thinkingChangeBreaksPromptCache } from "./lib/adaptive-execution.ts";
+import { sessionObservability } from "./lib/session-observability.ts";
 import { createCacheSentinel, describeCacheMisses } from "./lib/cache-sentinel.ts";
 import { cacheProfileFor } from "./lib/lean-policy.ts";
 import {
@@ -424,6 +425,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		try {
 			pi.setThinkingLevel(level as any);
 			effortAuto = level;
+			try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.change", { from: current, to: level, reason: level === effortCeiling ? "economy mode restored" : "economy mode" }); } catch { /* visibility only */ }
 			if (ctx && effortCeiling && level !== effortCeiling && !effortNoticeSent) {
 				effortNoticeSent = true;
 				notify(ctx, `Cost governor: economy mode is setting routine tool continuations to ${level} thinking; deep, judgment, error and large-change turns keep ${effortCeiling}. Set PI_ADAPTIVE_EFFORT=off to disable.`);

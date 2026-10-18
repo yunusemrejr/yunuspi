@@ -3280,12 +3280,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 338
+        "line": 358
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 352
+        "line": 372
       },
       {
         "name": "bg",
@@ -3310,7 +3310,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 689
+        "line": 691
       },
       {
         "name": "catalog-status",
@@ -3365,7 +3365,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 318
+        "line": 333
       },
       {
         "name": "google-account",
@@ -3470,12 +3470,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 331
+        "line": 351
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 324
+        "line": 344
       },
       {
         "name": "obs",
@@ -3635,7 +3635,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 345
+        "line": 365
       },
       {
         "name": "websearch",
@@ -3865,7 +3865,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 361,
+        "line": 381,
         "kind": "literal"
       },
       {
@@ -4033,7 +4033,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 229,
+        "line": 230,
         "kind": "literal"
       },
       {
@@ -4160,7 +4160,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 549,
+        "line": 562,
         "kind": "literal"
       },
       {
@@ -4355,7 +4355,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 361,
+        "line": 381,
         "kind": "literal"
       },
       {
@@ -4451,7 +4451,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 229,
+        "line": 230,
         "kind": "literal"
       },
       {
@@ -4517,7 +4517,7 @@
       {
         "name": "task_pipeline",
         "source": "agent/extensions/adaptive-workflows.ts",
-        "line": 549,
+        "line": 562,
         "kind": "literal"
       },
       {

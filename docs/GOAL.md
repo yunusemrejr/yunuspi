@@ -6,8 +6,13 @@
 /goal Make the exporter handle unicode filenames, add regression tests and update the docs
 /goal                # progress and evidence per criterion
 /goal criteria unicode names survive round trip; docs mention the flag
-/goal pause | resume | retry | done | clear
+/goal pause | resume | retry | done | clear | help
+/goal resume pick up from the logo end card   # resume with a note for the agent
 ```
+
+**Subcommands are safe to type.** A bare subcommand never becomes a goal: `/goal resume` (or `continue`) resumes this session's goal, or says there is none and starts nothing. With a goal in the session, `/goal resume <words>` resumes it and hands your words to the agent as a note; without one, the same words start a new goal. `stop` means `clear`, `show` and `progress` mean the status view, and `/goal help` lists every form. In the terminal, `/goal ` offers the subcommands as completions.
+
+**Seeing the goal.** The footer status reads `goal ◎ 2/6` while active, `⏸` paused and `⚠` stalled (waiting for `/goal retry`). Reopening a session with an unfinished goal says so once ("Goal … is still open in this session"), so a resumed or updated session never hides one. The desktop shows the same state as a goal bar above the composer (open, running, paused or stalled, with Resume or Retry), even before the session's runtime starts. It draws the kickoff as a goal card (your words, the boosts, the criteria, the full brief folded away) and each automatic continuation as a "Goal continuing on its own · step n of 6" row.
 
 ## What happens
 

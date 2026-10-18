@@ -2,6 +2,41 @@ export const messageText = message => typeof message?.content === 'string' ? mes
 export const imageParts = message => Array.isArray(message?.content) ? message.content.filter(c => c.type === 'image' && typeof c.data === 'string' && /^image\/(png|jpeg|webp|gif)$/.test(c.mimeType)) : [];
 export const toolIcon = name => /bash|shell|terminal/.test(name) ? 'terminal' : /memory|recall|remember/.test(name) ? 'memory' : /search|find|browse/.test(name) ? 'search' : /edit|write|patch/.test(name) ? 'code' : 'file';
 const key = () => globalThis.crypto.randomUUID();
+
+/**
+ * The harness writes goal turns as user messages: the kickoff carries the whole brief and each
+ * continuation is synthetic. Read them back so the transcript shows a goal card and a
+ * "continuing" row instead of a wall of text the user never typed (goal-state.ts formats).
+ */
+export function goalMessage(text) {
+  const value = String(text ?? '');
+  const continuation = /^\[goal (\w+), continuation (\d+)\/(\d+)\] ([^\n]*)/.exec(value);
+  if (continuation) {
+    const open = /^The goal is not finished: (\d+) criteria/.exec(continuation[4]);
+    return { type: 'continuation', id: continuation[1], step: Number(continuation[2]), limit: Number(continuation[3]), open: open ? Number(open[1]) : 0 };
+  }
+  const kickoff = /^\[goal-tracked (\w+)\] Goal: ([\s\S]*?)\n\nAcceptance criteria[^\n]*\n((?:- [^\n]*\n?)+)/.exec(value);
+  if (!kickoff) return null;
+  const body = kickoff[2];
+  const literal = /The user wrote: «([\s\S]*?)»/.exec(body)?.[1] ?? /^Assignment: ([^\n]+)/.exec(body)?.[1];
+  const order = /Boosts (?:in force|added to this goal)(?:, in the order written)? — (.+?) —/.exec(body)?.[1] ?? /^(\w+) boost in force/.exec(body)?.[1];
+  const criteria = kickoff[3].split('\n').map(line => /^- (\w+): (.*)$/.exec(line)).filter(Boolean).map(([, id, text]) => ({ id, text }));
+  const note = /\n\nThe user's note on resuming: ([^\n]+)/.exec(value)?.[1];
+  return { type: 'kickoff', id: kickoff[1], words: (literal ?? body.split('\n\n')[0]).trim(), boosts: order ? order.split(/\s*(?:→|\+)\s*/).filter(Boolean) : [], criteria, ...(note ? { note } : {}) };
+}
+
+/** Consecutive harness lines (JEV, effort, skills, guardian) share one compact row. */
+function appendActivity(state, message) {
+  const details = message.details && typeof message.details === 'object' ? message.details : {};
+  // Lines carry their reading in details; the content string is only a fallback for lines without any.
+  const fallback = message.details ? '' : typeof message.content === 'string' ? message.content : '';
+  const item = { label: String(details.label ?? 'Harness').slice(0, 60), detail: String(details.detail ?? fallback).slice(0, 240), status: details.status === 'error' ? 'error' : details.status === 'skip' ? 'skip' : 'ok' };
+  const last = state.messages.at(-1);
+  if (last?.kind === 'activity' && last.items.length < 40) { last.items.push(item); last.revision++; return last; }
+  const entry = { key: key(), kind: 'activity', items: [item], revision: 0 };
+  state.messages.push(entry);
+  return entry;
+}
 export function createConversation(messages = []) {
   const state = { messages: [], streaming: null, busy: false, activities: [], error: '', stats: null };
   for (const message of messages) appendMessage(state, message);
@@ -37,10 +72,16 @@ function appendMessage(state, message) {
   if (message.role === 'assistant' || message.role === 'user') {
     const entry = { key: key(), kind: message.role, content: structuredClone(message.content ?? []), revision: 0 };
     if (message.role === 'assistant') entry.error = message.errorMessage || '';
+    else {
+      const goal = goalMessage(messageText(message));
+      if (goal?.type === 'kickoff') { state.goals ??= new Set(); if (state.goals.has(goal.id)) goal.resumed = true; state.goals.add(goal.id); }
+      if (goal) entry.goal = goal;
+    }
     state.messages.push(entry);
     if (Array.isArray(message.content)) for (const part of message.content) if (part.type === 'toolCall') ensureTool(state, part.id, part.name, part.arguments);
     return entry;
   }
+  if (message.role === 'custom' && message.customType === 'harness-activity') return appendActivity(state, message);
   if (message.role === 'custom' && message.display !== false) state.messages.push({ key: key(), kind: 'note', content: message.content, revision: 0 });
 }
 export function applyAgentEvent(state, event) {
@@ -95,6 +136,16 @@ export function applyAgentEvent(state, event) {
       const activity = state.activities.find(a => a.id === event.toolCallId); if (activity) activity.status = tool.status;
       break;
     }
+    // Extension notices (goal set, continuing, achieved, cost and effort notes) stay in the transcript.
+    case 'notice': {
+      const text = String(event.text ?? '').slice(0, 4000), last = state.messages.at(-1);
+      // "Goal g…: continuing (n)" repeats the continuation row the goal's own message draws right after it.
+      if (!text || /^Goal \w+: continuing \(\d+\) — /.test(text)) break;
+      if (last?.kind === 'notice' && last.text === text) { last.count = (last.count ?? 1) + 1; last.revision++; break; }
+      state.messages.push({ key: key(), kind: 'notice', text, tone: event.tone === 'error' || event.tone === 'warning' ? event.tone : 'info', revision: 0 });
+      break;
+    }
+    case 'thinking_level_changed': if (typeof event.level === 'string') state.thinkingLevel = event.level; break;
     case 'auto_compaction_start': state.compacting = true; break;
     case 'auto_compaction_end': state.compacting = false; break;
     case 'auto_retry_start': state.retrying = event.attempt ?? 1; break;

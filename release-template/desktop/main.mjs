@@ -50,18 +50,19 @@ const DESKTOP_COMMANDS = ['model', 'models', 'metrics', 'cost', 'self', 'session
 // A typed command is checked against the session's real command list before it
 // is sent, so a near miss is offered as a correction instead of being dropped
 // from a boost chain or sent to the model as a paid prompt.
+// The composer also calls this while typing: `tokens` mark each command where it stands, so
+// the user sees what is a command, what chains and what would be sent as plain words.
 async function checkCommand(id, message) {
-  const [{ correctSlashCommands }, { BUILTIN_SLASH_COMMANDS }] = await Promise.all([coreModule('command-correction.js'), coreModule('slash-commands.js')]);
+  const [{ correctSlashCommands, commandTokens }, { BUILTIN_SLASH_COMMANDS }] = await Promise.all([coreModule('command-correction.js'), coreModule('slash-commands.js')]);
   const { commands } = await (await workerFor(id)).request('get_commands');
   const terminal = [...BUILTIN_SLASH_COMMANDS.map(c => c.name).filter(name => !DESKTOP_COMMANDS.includes(name)), ...commands.filter(c => c.interactiveOnly).map(c => c.name)];
-  const result = correctSlashCommands(message, {
-    commands: [...commands.filter(c => c.source !== 'skill').map(c => c.name), ...DESKTOP_COMMANDS, ...terminal],
-    chainable: commands.filter(c => c.chainable).map(c => c.name),
-  });
+  const names = { commands: [...commands.filter(c => c.source !== 'skill').map(c => c.name), ...DESKTOP_COMMANDS, ...terminal], chainable: commands.filter(c => c.chainable).map(c => c.name) };
+  const result = correctSlashCommands(message, names);
+  const tokens = commandTokens(message, names);
   const head = /^\s*\/([\w-]+)(?=\s|$)/.exec(result?.text ?? message)?.[1];
   // Never offer a correction that would then be sent: a terminal-only command is only explained.
-  if (head && terminal.includes(head)) return { text: message, fixes: [], terminalOnly: `/${head}` };
-  return result ?? null;
+  if (head && terminal.includes(head)) return { text: message, fixes: [], terminalOnly: `/${head}`, tokens };
+  return { text: message, fixes: [], ...result, tokens };
 }
 
 async function projectTrustStore() {

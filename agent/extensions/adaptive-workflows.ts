@@ -5,7 +5,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { getAgentDir } from '@yunuspi/coding-agent';
-import { createAdaptiveExecutionController, registerAdaptiveExecution, adaptiveExecutionEnabled, createAdaptiveThinkingController } from './lib/adaptive-execution.ts';
+import { createAdaptiveExecutionController, registerAdaptiveExecution, adaptiveExecutionEnabled, createAdaptiveThinkingController, thinkingChangeBreaksPromptCache } from './lib/adaptive-execution.ts';
+import { sessionObservability } from './lib/session-observability.ts';
 import { selectTaskPipelines, automaticPipelineTools, createPipelineLedger, recordPipelineEvidence, pendingPipelineStages, buildPipelineContext, inspectPipelineSource, resolveRoutingTask, pipelineToolExcluded, PIPELINE_EVIDENCE_KINDS, type PipelineSelection, type PipelineSourceMetadata } from './lib/task-pipelines.ts';
 import { projectCheckCommand } from './lib/project-tests.ts';
 import { isLiveByteVerification } from './lib/session-hooks.ts';
@@ -205,8 +206,20 @@ export default function adaptiveWorkflows(pi: any) {
     } catch { /* Missing source supplies no dependency or syntax evidence. */ }
   };
   const automaticNames = () => automaticPipelineTools(selection, { prompt: routingTask(), constraints: constraintsTask(), inheritedConstraints: inheritedConstraints(), profile: execution.profile(), files: scopedFiles(), ledger, coordinate: coordinate() });
+  // Automatic effort is visible: each change is a transcript line, and so (once per session) is the
+  // decision to hold the level because changing it would re-bill the provider's prompt cache.
+  const health = (kind: string, data: Record<string, unknown>) => { try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* visibility only */ } };
+  const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+  let heldNoted: unknown;
   const save = (ctx: any, beforeStart = false) => {
-    thinking.update(execution.profile(), ctx);
+    const before = (() => { try { return String(pi.getThinkingLevel?.() ?? ''); } catch { return ''; } })();
+    const profile = execution.profile();
+    const after = thinking.update(profile, ctx);
+    if (before && after && after !== before) health('effort.change', { from: before, to: after, reason: `${profile.tier} work` });
+    else if (LEVELS.indexOf(profile.reasoning) >= 0 && LEVELS.indexOf(profile.reasoning) < LEVELS.indexOf(before) && !thinking.state().manual && heldNoted !== ctx?.sessionManager && thinkingChangeBreaksPromptCache(ctx?.model) && adaptiveExecutionEnabled()) {
+      heldNoted = ctx?.sessionManager;
+      health('effort.held', { to: before, reason: `${String(ctx?.model?.provider ?? 'provider')} prompt cache kept warm` });
+    }
     scopes.set(scope, { selection, revision, task: scopes.get(scope)?.task ?? task });
     try { pi.appendEntry?.('adaptive-execution-v1', { scope, revision, ...execution.profile(), pipelines: selection.ids }); } catch { /* diagnostics */ }
     const snapshot = JSON.stringify({ version: 1, task });

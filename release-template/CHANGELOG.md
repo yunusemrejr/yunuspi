@@ -1,3 +1,52 @@
+## 0.45.0 — See what the harness does: commands, goals, Jev and effort in the conversation
+
+**The installed harness was two releases behind.** The live install was still 0.42.0, because both earlier deploys were refused while the desktop app ran. So 0.44.0's command correction never reached use. A goal typed today as `/3d /video /autonomy /noslop /nobugs …` ran without the Nobug boost, and nothing said so. This release ships to the live install as well.
+
+**Commands are marked as you type.** The desktop composer tints each command token where it stands:
+- a recognized command or boost is tinted;
+- a near miss gets an amber underline;
+- a token that matches no command (`/autonomy`) gets a red one.
+
+One line under the text says what Enter will do. Examples: "/3d + /video → one goal for your task", "Adds /nobug to the current goal", "Resumes the goal (2 of 6 criteria settled) with a fresh continuation budget", "This session has no goal to resume; nothing will start", "Starts a new goal; it replaces the current one". The sent bubble keeps those marks and that reading.
+
+Positions come from the core's grammar: new `commandTokens()` in `core/coding-agent/src/core/command-correction.js`, served by the desktop's `checkCommand`. `correctSlashCommands` also reports `unrecognized` chained tokens. A chained non-command would reach the model as plain words, so both the terminal and the desktop say so once; the second Enter sends as typed.
+
+**`/goal` subcommands are safe to type.**
+- A bare `/goal resume` or `/goal continue` resumes this session's goal. With no goal it says there is none and starts nothing.
+- With a goal, `/goal resume <words>` resumes it and hands the words to the agent as a note. Without a goal, those words start a new goal, as any text does.
+- `stop`, `show` and `progress` are aliases; `/goal help` lists every form.
+- In the terminal, `/goal ` completes the subcommands.
+
+**A goal is always visible.**
+- The footer status now also shows a stalled goal (`goal ⚠ 2/6`).
+- Reopening a session with an unfinished goal says so once: "Goal … is still open in this session …".
+- The desktop shows a goal bar above the composer (open, running, paused or stalled, with Resume or Retry). It is read from the saved transcript (`desktopGoal`), so it appears before the session's runtime starts.
+- The kickoff renders as a goal card: your words, the boosts, the criteria, with the full brief folded away.
+- Each automatic continuation is a "Goal continuing on its own · step n of 6" row, no longer a wall of text shown as if you typed it.
+
+**Notices and harness work stay in the conversation.** Extension notices land in the desktop transcript instead of a 5-second toast; that covers goal set, continuing, stalled and achieved, plus cost and effort notes. Harness lines group into one quiet "Harness" row per run that expands to every line; the desktop projection now carries their fixed-shape `details`. Lines cover:
+- Jev and Kev judgements, now naming their caller site and whether a second opinion agreed;
+- automatic effort changes (`thinking high → medium · standard work`);
+- the one-time note that effort is held because changing it would re-bill the provider's prompt cache;
+- skill reads and Guardian verdicts.
+
+The thinking button follows automatic changes live.
+
+**No UI doctrine on film goals.** A resumed `/3d /video /noslop` film goal still had `[UI reference: optional]` injected into every continuation. Noslop's own front ("UI and visual slop gone …") named an interface surface, which overrode the media gate. `mediaWork` now judges a goal turn by the user's words and own criteria (`goalRequestText`), not the preset fronts and briefs the harness wrote into it.
+
+**Resuming old sessions.** A 362-message desktop session from 0.42.0 was resumed on this build against a local fake provider, through the same `rpc-entry` path the desktop uses. Its active goal restored with the notice, the history paged, `/goal` and `/goal resume` ran, and the provider got a valid request (81 messages, 58 tools, 27 historical tool calls). Two continuations followed, then the stall guard. No errors, and no UI hint in any request.
+
+**Validation.** Seven new test files cover:
+- goal aliases, notes, status and restore notices;
+- command tokens and unrecognized tokens;
+- the composer reading;
+- goal cards, continuations, notice and harness grouping;
+- the activity projection and the saved goal;
+- effort and Jev lines;
+- the media gate on goal turns.
+
+The desktop e2e (25 checks) adds the composer marks and reading and notices kept in the transcript.
+
 ## 0.44.0 — Commands that say what they are, and films that blend their skills
 
 **Boosts read as a family.** `/goal`, `/noslop`, `/nobug`, `/3d`, `/video` and `/anatomy` now register as chainable (`chainable: true` on `registerCommand`, carried through `getCommands`, RPC `get_commands` and both front ends). The terminal autocomplete lists them first, tagged `[boost · chains]`. The desktop composer gains a slash menu: typing `/` lists Boosts (with a link mark and the hint "combine any of these in one message"), then Commands, then Skills once two letters are typed. After a boost, typing `/` and a letter offers only the boosts that can still join. "Skills & commands" uses the same groups, and the terminal's `/commands` window lists Boosts as their own group first.

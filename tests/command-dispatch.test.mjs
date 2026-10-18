@@ -388,3 +388,20 @@ test("a near-miss command is corrected in the editor, Enter sends the correction
   assert.equal(warnings.length, 2, "only the first submission is corrected");
   assert.match(fixture.errors.at(-1), /Unknown command '\/nobugs'/, "sent as typed, an unknown bare command still never reaches the model");
 });
+
+test("a chained token that is no command is named once in the terminal, then sent as typed", async () => {
+  const fixture = editorFixture();
+  const boosts = ["goal", "noslop", "nobug", "3d", "video", "anatomy"].map((name) => ({ name, invocationName: name, chainable: true }));
+  fixture.mode.session.extensionRunner.getRegisteredCommands = () => boosts;
+  fixture.mode.session.extensionRunner.getCommand = (name) => boosts.find((command) => command.name === name);
+  const warnings = [], editorText = [];
+  fixture.mode.showWarning = (message) => warnings.push(message);
+  fixture.mode.editor.setText = (text) => editorText.push(text);
+  await fixture.mode.defaultEditor.onSubmit("/3d /video /autonomy make a film");
+  assert.match(warnings[0], /\/autonomy is not a command here, so it would be sent as plain words/);
+  assert.deepEqual(editorText, ["/3d /video /autonomy make a film"], "the text stays in the editor to edit");
+  assert.deepEqual(fixture.inputs, []);
+  await fixture.mode.defaultEditor.onSubmit("/3d /video /autonomy make a film");
+  assert.deepEqual(fixture.inputs, ["/3d /video /autonomy make a film"], "the second Enter sends it as typed");
+  assert.equal(warnings.length, 1);
+});

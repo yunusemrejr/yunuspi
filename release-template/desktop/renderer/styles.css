@@ -12,6 +12,7 @@
   --accent-ink:#121c3b;
   --success:#8bc6a0;
   --danger:#f1a3a3;
+  --warning:#e8c27a;
   --radius:16px;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   font-size:14px
@@ -673,6 +674,156 @@ kbd {
   font:11px/1.7 ui-monospace,monospace;
   color:var(--muted)
 }
+.message.notice,.message.goal-continuation {
+  display:flex;
+  gap:8px;
+  align-items:flex-start;
+  margin:10px 0 14px;
+  font-size:12px;
+  color:var(--muted)
+}
+.message.notice svg,.message.goal-continuation svg {
+  width:15px;
+  height:15px;
+  margin-top:1px;
+  color:var(--faint)
+}
+.notice-text {
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  line-height:1.55;
+  min-width:0
+}
+.message.notice[data-tone="warning"],.message.notice[data-tone="warning"] svg {
+  color:var(--warning)
+}
+.message.notice[data-tone="error"],.message.notice[data-tone="error"] svg {
+  color:var(--danger)
+}
+.message.activity {
+  margin:6px 0 12px
+}
+.harness-row summary {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  font-size:11.5px;
+  color:var(--faint);
+  cursor:pointer;
+  list-style:none;
+  min-width:0
+}
+.harness-row summary::-webkit-details-marker {
+  display:none
+}
+.harness-row summary svg {
+  width:15px;
+  height:15px
+}
+.harness-label {
+  color:var(--muted);
+  font-weight:600
+}
+.harness-summary {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  min-width:0
+}
+.harness-list {
+  margin:6px 0 0 23px;
+  padding:0;
+  list-style:none;
+  font-size:11.5px;
+  line-height:1.6;
+  color:var(--muted)
+}
+.harness-list strong {
+  color:var(--ink);
+  font-weight:600
+}
+.harness-list li[data-status="error"] {
+  color:var(--danger)
+}
+.goal-card {
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:14px 16px;
+  background:var(--surface)
+}
+.goal-card header {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  font-size:12.5px
+}
+.goal-card header svg {
+  width:17px;
+  height:17px;
+  color:var(--accent)
+}
+.goal-card header small {
+  color:var(--faint);
+  font-size:11px
+}
+.goal-boost {
+  font-size:11px;
+  padding:1px 7px;
+  border-radius:6px;
+  border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));
+  color:var(--accent)
+}
+.goal-words {
+  margin:10px 0;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  line-height:1.6
+}
+.goal-criteria {
+  margin:0;
+  padding:0;
+  list-style:none;
+  display:grid;
+  gap:4px;
+  font-size:12px;
+  line-height:1.55;
+  color:var(--muted)
+}
+.goal-criteria b {
+  color:var(--ink);
+  font-weight:600;
+  margin-right:2px
+}
+.goal-brief summary {
+  margin-top:10px;
+  font-size:11.5px;
+  color:var(--faint);
+  cursor:pointer
+}
+.goal-brief-body {
+  margin-top:8px;
+  max-height:320px;
+  overflow:auto;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  font-size:12px;
+  line-height:1.55;
+  color:var(--muted)
+}
+.command-bubble .command-token {
+  border-radius:4px;
+  padding:0 3px;
+  background:color-mix(in srgb,var(--accent) 24%,transparent)
+}
+.command-reading {
+  margin-top:6px;
+  max-width:min(85%,680px);
+  font-size:11px;
+  line-height:1.5;
+  color:var(--faint);
+  text-align:right
+}
 .message.note {
   font-size:12px;
   color:var(--muted);
@@ -852,6 +1003,108 @@ kbd {
   overflow-y:auto;
   overscroll-behavior:contain;
   scrollbar-gutter:stable
+}
+.prompt-field {
+  position:relative
+}
+/* The marks mirror the textarea's text box exactly (font, padding, wrapping, gutter) and sit
+   behind it, so a command is tinted where it stands while the text stays the textarea's own. */
+.prompt-marks {
+  position:absolute;
+  inset:0;
+  padding:0 4px 10px;
+  font-size:14px;
+  line-height:1.65;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  color:transparent;
+  overflow:hidden;
+  scrollbar-gutter:stable;
+  pointer-events:none
+}
+.composer .prompt-field textarea {
+  position:relative;
+  white-space:pre-wrap;
+  overflow-wrap:break-word
+}
+.prompt-marks .command-token {
+  color:transparent;
+  border-radius:4px;
+  background:color-mix(in srgb,var(--accent) 26%,transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)
+}
+.command-token[data-kind="command"] {
+  background:color-mix(in srgb,var(--success) 24%,transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--success) 24%,transparent)
+}
+.command-token[data-kind="near"] {
+  background:color-mix(in srgb,var(--warning) 22%,transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--warning) 22%,transparent);
+  text-decoration:underline wavy var(--warning)
+}
+.command-token[data-kind="unknown"] {
+  background:none;
+  box-shadow:none;
+  text-decoration:underline wavy var(--danger)
+}
+.command-lens {
+  margin:0 4px 8px;
+  font-size:11.5px;
+  line-height:1.5;
+  color:var(--muted)
+}
+.command-lens[data-tone="warn"],.command-reading[data-tone="warn"] {
+  color:var(--warning)
+}
+.command-lens[data-tone="error"],.command-reading[data-tone="error"] {
+  color:var(--danger)
+}
+.goal-strip {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:0 4px 8px
+}
+.goal-pill,.goal-action {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-height:28px;
+  padding:4px 10px 4px 8px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface);
+  font-size:11.5px;
+  color:var(--muted);
+  max-width:100%
+}
+.goal-pill span {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.goal-pill svg {
+  width:15px;
+  height:15px
+}
+.goal-pill:hover,.goal-action:hover {
+  color:var(--ink);
+  background:var(--surface-hover)
+}
+.goal-pill[data-status="running"] {
+  color:var(--ink);
+  border-color:color-mix(in srgb,var(--accent) 55%,var(--line))
+}
+.goal-pill[data-status="running"] svg,.goal-pill[data-status="active"] svg {
+  color:var(--accent)
+}
+.goal-pill[data-status="blocked"],.goal-pill[data-status="blocked"] svg {
+  color:var(--warning)
+}
+.goal-action {
+  padding:4px 10px;
+  color:var(--ink)
 }
 .composer textarea::placeholder {
   color:var(--faint)
@@ -1490,7 +1743,8 @@ kbd {
     --accent:#4266d2;
     --accent-ink:#fff;
     --success:#28754a;
-    --danger:#b54242
+    --danger:#b54242;
+    --warning:#8a5a00
   }
   .hero-rat {
     filter:brightness(.8)

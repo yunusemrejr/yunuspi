@@ -39,6 +39,9 @@
     <symbol id="i-people" viewBox="0 0 24 24"><circle cx="8" cy="7" r="3"/><path d="M2 21v-4a6 6 0 0 1 12 0v4M16 4a3 3 0 0 1 0 6m1 4a5 5 0 0 1 5 5v2"/></symbol>
     <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 16V2m-5 5 5-5 5 5M4 12v9h16v-9"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M3 4h18v13H8l-5 4Z"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 20h18.4Z"/><path d="M12 10v4.5m0 2.5h0"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></symbol>
   </svg>
   <div id="app" class="app">
     <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
@@ -74,9 +77,11 @@
         <footer class="composer-zone">
           <div id="attachment-list" class="attachments"></div>
           <div id="command-menu" class="command-menu" role="listbox" aria-label="Commands" hidden></div>
+          <div id="goal-strip" class="goal-strip" hidden><button id="goal-pill" type="button" class="goal-pill"><svg><use href="#i-target"/></svg><span></span></button><button id="goal-action" type="button" class="quiet-button goal-action" hidden></button></div>
           <form id="composer" class="composer">
             <label class="sr-only" for="prompt">Message YunusPi</label>
-            <textarea id="prompt" rows="1" maxlength="100000" placeholder="Give the rat something to work on…  Type / for commands" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="command-menu" aria-expanded="false"></textarea>
+            <div class="prompt-field"><div id="prompt-marks" class="prompt-marks" aria-hidden="true"></div><textarea id="prompt" rows="1" maxlength="100000" placeholder="Give the rat something to work on…  Type / for commands" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="command-menu" aria-expanded="false" aria-describedby="command-lens"></textarea></div>
+            <p id="command-lens" class="command-lens" role="status" aria-live="polite" hidden></p>
             <div class="composer-toolbar"><div class="composer-options"><button id="attach" type="button" class="icon-button" aria-label="Attach images"><svg><use href="#i-attach"/></svg></button><button id="model-button" type="button" class="model-button"><span>Choose model</span><svg class="small"><use href="#i-down"/></svg></button><button id="thinking-button" type="button" class="thinking-button" title="Thinking level"><svg><use href="#i-brain"/></svg><span>Thinking</span></button></div><button id="send" class="send-button" type="submit" aria-label="Send message" disabled><svg><use href="#i-arrow"/></svg></button><button id="stop" class="send-button stop-button" type="button" aria-label="Stop current turn" hidden><svg><use href="#i-stop"/></svg></button></div>
           </form>
           <div class="composer-caption"><span id="session-caption">Local files · persistent project memory</span><span id="usage-caption"></span></div>
