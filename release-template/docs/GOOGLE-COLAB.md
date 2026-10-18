@@ -15,7 +15,7 @@ This page covers setup, authentication, the tool surface, ML workflows, cost and
 
 ## Setup
 
-The tool installs the CLI when it is missing:
+The tool installs the CLI when it is missing. It creates a harness-local `uv` venv under the agent's `local-tools/` directory and installs the pinned `google-colab-cli==0.7.4` there, so the system Python and your other tools are untouched:
 
 ```text
 setup    # install/verify the CLI; reports version and path
@@ -23,14 +23,14 @@ status   # CLI, sign-in and active sessions at a glance
 doctor   # deeper check: uv, CLI version, gcloud, ADC, platform
 ```
 
-Manual installation is the same command the tool runs:
+Manual installation is also supported when you prefer a system-wide tool:
 
 ```sh
 uv tool install google-colab-cli
 colab version
 ```
 
-`uv tool install` puts the executable in `uv tool`'s bin directory (usually `~/.local/bin`); if `colab` is not found, add that directory to `PATH` or use the tool's `setup` result to locate it. `colab update --install` upgrades an installed CLI.
+`uv tool install` puts the executable in `uv tool`'s bin directory (usually `~/.local/bin`); the tool finds it on `PATH`, or you can set `PI_COLAB_CLI` to an explicit binary. `colab update --install` upgrades an installed CLI; set `PI_COLAB_CLI_VERSION` to pin a different package version for the tool's own install.
 
 ## Authentication
 
@@ -39,11 +39,11 @@ The `auth` action has four steps, selected with `auth_action`:
 | `auth_action` | Behavior |
 | --- | --- |
 | `status` | Report whether the CLI has usable credentials. |
-| `login` | Start the sign-in. A visible browser is opened; if that is impossible the URL is printed. |
-| `complete` | Finish the flow with the authorization `code` shown by Google. |
+| `login` | Start the sign-in. A visible browser is opened and the helper clicks the account/consent pages; when it can read Google's code it finishes the exchange automatically. If it cannot, the URL is printed and the flow stays pending. |
+| `complete` | Manual fallback: finish a pending flow with the authorization `code` shown by Google. |
 | `cancel` | Abandon a pending sign-in. |
 
-The CLI uses a remote copy-paste OAuth flow: after approving access in the browser, Google displays an authorization code, and that code completes the exchange. Credentials are cached at `~/.config/colab-cli/token.json`, so later sessions normally skip the browser step until the token expires or is revoked. Never paste a token or account credential into chat, a script, a repository file or a session log; the tool owns the flow.
+The CLI uses a remote copy-paste OAuth flow. The browser helper handles the normal case: it opens a visible browser, clicks the account chooser and consent pages, reads the short-lived authorization code from Google's landing page, and writes it to the waiting CLI without returning it in tool output. If the helper cannot complete the flow (no display, a fresh profile where Google asks for a password, 2-step verification, CAPTCHA, or a closed window), it reports `awaiting_user`, and `complete` accepts the one-time code shown by Google. Credentials are cached at `~/.config/colab-cli/token.json`, so later sessions normally skip the browser until the token expires or is revoked. Never store a token or account password in a script, repository file or session log; treat an authorization code as a one-time credential and do not repeat it after the exchange.
 
 Alternative on headless or automated hosts: authenticate with ADC and run the CLI with `--auth=adc` (the global flag goes before the subcommand). The Colab backend needs the `colaboratory` scope, and `gcloud` requires `cloud-platform` and `openid`:
 
@@ -81,26 +81,26 @@ Action names are the stable contract. The authoritative schema is the extension 
 | Action | Purpose | Main inputs |
 | --- | --- | --- |
 | `setup` | Install or verify the CLI | none |
-| `status` | Readiness: CLI, sign-in, current sessions | `session` (optional) |
+| `status` | Readiness: CLI, sign-in, compute units, sessions and jobs | none |
 | `auth` | Sign in or inspect sign-in | `auth_action`, `code` |
 | `new` | Allocate a session | `session`, `gpu`, `tpu`, `high_mem` |
 | `sessions` | List live sessions on the backend | none |
-| `exec` | Run a local script/code on an existing session | `session`, `script`, `timeout_sec`, `env`, `background` |
+| `exec` | Run a local script or inline code on an existing session | `session`, `script` (alias `file`), `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec` |
 | `run` | Ephemeral job: allocate, run, tear down | `script`, `gpu`, `tpu`, `high_mem`, `keep`, `timeout_sec`, `env`, `background`, `session` |
 | `install_packages` | Install Python packages on the VM | `session`, package list or requirements file |
 | `upload` | Copy a local file to the VM | `session`, local path, remote path |
 | `download` | Copy a VM file to the host | `session`, remote path, local path |
 | `ls` | List VM files | `session`, `path` |
 | `rm` | Delete a VM file | `session`, `path` |
-| `log` | Read or export session history | `session`, output path, event count |
+| `log` | Read or export session history | `session`, `output`, `lines`, `kind` |
 | `stop` | Terminate the VM and release it | `session` |
 | `restart` | Restart the kernel, keep the VM and files | `session` |
-| `url` | Print or open the Colab web UI for the session | `session` |
+| `url` | Print or open the Colab web UI for the session | `session`, `open` |
 | `usage` | Account compute-unit rate and balance | none |
-| `doctor` | Environment diagnosis | none |
+| `doctor` | Environment diagnosis: uv, CLI, auth, gcloud/ADC, display, disk and sessions | none |
 | `jobs` | List background jobs | none |
-| `job_output` | Read a background job's output | job id |
-| `job_kill` | Cancel a background job | job id |
+| `job_output` | Read a background job's output | `job_id`, `max_chars` |
+| `job_kill` | Cancel a background job | `job_id`, `force` |
 
 `exec` and `run` accept `background: true`. That returns a job handle instead of blocking: `jobs` lists jobs, `job_output` reads them and `job_kill` cancels. Background execution is still a VM running and still consumes compute units; a killed job does not necessarily release its session, so check `sessions` and `stop` explicitly. One blocking job occupies a kernel: use a separate session for parallel work.
 

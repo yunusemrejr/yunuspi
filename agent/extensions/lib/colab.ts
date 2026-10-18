@@ -309,6 +309,8 @@ export async function installCli(onLine?: (line: string) => void): Promise<CliIn
   return { bin, source: "harness", ...(version ? { version } : {}) };
 }
 
+export function binaryOnPath(name: string): string | undefined { return pathLookupBinary(name); }
+
 function pathLookupBinary(name: string): string | undefined {
   for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
     if (!entry) continue;

@@ -50,7 +50,7 @@ Work:
 
 ```text
 {"action": "install_packages", "session": "qlora", "packages": ["trl>=0.16", "peft>=0.13"]}
-{"action": "exec", "session": "qlora", "script": "finetune_qlora.py", "timeout_sec": 1800}
+{"action": "exec", "session": "qlora", "script": "finetune_qlora.py", "timeout_sec": 1800}   # `file` is an accepted alias
 {"action": "exec", "session": "qlora", "script": "train.py", "background": true}
 {"action": "jobs"} / {"action": "job_output", "job_id": "..."} / {"action": "job_kill", "job_id": "..."}
 {"action": "run", "script": "one_shot.py", "gpu": "T4"}  # fresh VM, script runs, VM released
@@ -78,7 +78,7 @@ Action names are the stable contract of the `colab` tool. Pass one `action` per 
 | `auth` | Sign in or inspect sign-in. `auth_action`: `status`, `login`, `complete`, `cancel`; `code` carries the pasted authorization code for `complete`. |
 | `new` | Allocate a session. Inputs: `session`, `gpu`, `tpu`, `high_mem`. |
 | `sessions` | List sessions alive on the backend, including ones this host no longer tracks. |
-| `exec` | Run a local script or code on an existing session. Inputs: `session`, `script` (local path), `timeout_sec`, `env`, `background`. |
+| `exec` | Run a local script or inline code on an existing session. Inputs: `session`, `script` (local path; `file` is an alias), `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec`. |
 | `run` | One-shot ephemeral job: allocate a fresh VM, run the script, release it. Accepts `gpu`, `tpu`, `high_mem`, `keep`, `timeout_sec`, `env`, `background`, `session`. |
 | `install_packages` | Install Python packages on the VM (`uv` first, `pip` fallback). |
 | `upload` / `download` | Copy a local file to the VM or a remote file back. Use `/content/...` paths. |
@@ -96,7 +96,7 @@ If a call fails with a parameter error, read the tool error and retry with the d
 ## Standard run
 
 1. `setup`, then `status`. Fix installation or sign-in before allocating anything.
-2. If sign-in is missing: `auth` with `auth_action: "status"`. If not signed in, run `login`, complete the browser step, then `complete` with the code from the browser. `cancel` abandons a pending flow. Never ask the user to paste credentials into chat; the tool owns the flow.
+2. If sign-in is missing: `auth` with `auth_action: "status"`. If not signed in, run `login`: a visible browser opens, the helper clicks the account/consent pages and finishes automatically when it can read Google's one-time code. If it returns `awaiting_user` (no display, password, 2-step, CAPTCHA, closed window), have the person finish the browser step; then either wait for the helper or use `complete` with the one-time code. `cancel` abandons a pending flow. Never store a token or account password; the tool owns the flow and redacts the code from its output.
 3. `new` with an explicit `session` name and the lowest accelerator that fits the job. A missing name becomes an unhelpful random suffix.
 4. Run `colab_smoke.py` and read its JSON. Do not start a training run until the report shows the required device (`cuda_available: true`, expected `gpu_name`) and a free-memory figure compatible with the plan.
 5. `install_packages` (or install inside the script) with versions pinned for the run.

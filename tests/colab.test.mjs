@@ -204,6 +204,24 @@ test("auth login completes the CLI prompt with the browser-captured code and nev
   assert.ok(fs.existsSync(path.join(state, "authed")));
 });
 
+test("exec accepts the script alias for a local file", async () => {
+  configure(true);
+  const script = path.join(tmp, "alias.py");
+  fs.writeFileSync(script, "print('alias')\n");
+  const result = await call({ action: "exec", session: "train1", script, wait_sec: 5 });
+  assert.equal(result.isError, undefined);
+  assert.equal(result.details.state, "completed");
+  assert.equal(result.details.exit_code, 0);
+});
+
+test("redaction masks token and API-key assignments, not just bearer headers", () => {
+  const redacted = lib.redactSecrets("HF_TOKEN=hf_abcdefghij-TESTONLY-0123456789 WANDB_API_KEY=very-secret-value COLAB_JUPYTER_TOKEN=jupyter-secret");
+  assert.doesNotMatch(redacted, /hg_|hf_abcdefghij|very-secret|jupyter-secret/i);
+  assert.match(redacted, /HF_TOKEN=<redacted>/);
+  assert.match(redacted, /WANDB_API_KEY=<redacted>/);
+  assert.match(redacted, /COLAB_JUPYTER_TOKEN=<redacted>/);
+});
+
 test("new allocates a named session and exec returns its output", async () => {
   configure(true);
   const created = await call({ action: "new", session: "train1", gpu: "T4" });
@@ -256,4 +274,7 @@ test("doctor reports a healthy authenticated install without claiming remote GPU
   assert.equal(result.details.healthy, true);
   assert.ok(result.details.checks.some((check) => check.name === "auth" && check.ok === true));
   assert.ok(result.details.checks.some((check) => check.name === "compute_units" && check.ok === true));
+  assert.ok(result.details.checks.some((check) => check.name === "uv"));
+  assert.ok(result.details.checks.some((check) => check.name === "gcloud"));
+  assert.ok(result.details.checks.some((check) => check.name === "adc"));
 });

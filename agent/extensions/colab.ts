@@ -18,9 +18,8 @@ import {
   GPU_ACCELERATORS,
   TPU_ACCELERATORS,
   authArgs,
+  binaryOnPath,
   cliVersion,
-  cliEnvironment,
-  ensureCli,
   execArgs,
   harnessAgentDir,
   jobsDir,
@@ -241,7 +240,7 @@ export default function colabExtension(pi: any): void {
     label: "Google Colab",
     description:
       "Google Colab through the official google-colab-cli: install and browser-authenticate the CLI, rent CPU/GPU/TPU runtimes, run Python scripts or inline code, transfer files, export notebooks, track long training jobs and stop sessions. Use for model fine-tuning (LoRA/QLoRA/SFT/DPO), RL (GRPO/PPO), small from-scratch training, evaluation, dataset work and any compute that outgrows the local machine. " +
-      "Actions: setup (install/verify CLI; install:true downloads the pinned official package); status (CLI/auth/usage/sessions/jobs); auth (auth_action: status|login|complete|cancel; login opens a visible browser and auto-completes when signed in; manual code fallback); new (session name + gpu T4/L4/G4/H100/A100 or tpu v5e1/v6e1 + high_mem); sessions; exec (code or file, timeout_sec, output_image, env, background); run (local Python script on a fresh VM, gpu/tpu/high_mem/keep, args); install_packages (packages or requirements); upload/download/ls/rm; log (export .ipynb/.md/.txt/.jsonl); stop; restart; url; usage; doctor; jobs/job_output/job_kill. " +
+      "Actions: setup (install/verify CLI; install:true downloads the pinned official package); status (CLI/auth/usage/sessions/jobs); auth (auth_action: status|login|complete|cancel; login opens a visible browser and auto-completes when signed in; manual code fallback); new (session name + gpu T4/L4/G4/H100/A100 or tpu v5e1/v6e1 + high_mem); sessions; exec (code or script/file, timeout_sec, output_image, env, background); run (local Python script on a fresh VM, gpu/tpu/high_mem/keep, args); install_packages (packages or requirements); upload/download/ls/rm; log (export .ipynb/.md/.txt/.jsonl); stop; restart; url; usage; doctor; jobs/job_output/job_kill. " +
       "Runs that outlive the foreground grace return a job_id and keep streaming to a private log; poll them rather than re-running. Download checkpoints and stop the runtime when done: a Colab session is billable while it exists. Authentication codes and provider tokens are never returned in tool output.",
     parameters: Type.Object({
       action: choices([...ACTIONS], "Operation to perform. Each action accepts only its own fields; unknown fields are ignored by that action's validation."),
@@ -436,9 +435,10 @@ export default function colabExtension(pi: any): void {
           let input: string | undefined;
           let label: string;
           if (action === "exec") {
-            if (!params.code && !params.file) throw new ColabError("exec needs code (inline) or file (a local .py or .ipynb).", "missing-input");
-            if (params.code && params.file) throw new ColabError("exec takes either code or file, not both.", "invalid-input");
-            const file = params.file ? resolveLocal(params.file, cwd, "file") : undefined;
+            const scriptPath = params.script ?? params.file;
+            if (!params.code && !scriptPath) throw new ColabError("exec needs code (inline) or script/file (a local .py or .ipynb).", "missing-input");
+            if (params.code && scriptPath) throw new ColabError("exec takes either code or script/file, not both.", "invalid-input");
+            const file = scriptPath ? resolveLocal(scriptPath, cwd, "file") : undefined;
             if (file) {
               const size = fs.statSync(file).size;
               if (size > 128 * 1024 * 1024) throw new ColabError("Local script is larger than 128 MB; upload data separately instead of embedding it in exec.", "too-large");
@@ -598,6 +598,12 @@ export default function colabExtension(pi: any): void {
               add("content_listing", undefined, "remote /content listing is checked only when a session name is supplied");
             }
           }
+          const uv = binaryOnPath("uv");
+          add("uv", uv ? true : undefined, uv ? `uv at ${uv}` : "uv not installed; the CLI can still be run from an existing install", uv ? undefined : "Install uv (https://docs.astral.sh/uv/) for one-command setup.");
+          const gcloud = binaryOnPath("gcloud");
+          const adcFile = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json");
+          add("gcloud", gcloud ? true : undefined, gcloud ? `gcloud at ${gcloud}` : "gcloud not installed", gcloud ? undefined : "Only needed for ADC sign-in; the browser OAuth flow does not require it.");
+          add("adc", adcFile && fs.existsSync(adcFile) ? true : undefined, adcFile && fs.existsSync(adcFile) ? `ADC credentials present at ${adcFile}` : "no ADC credential file found", adcFile && fs.existsSync(adcFile) ? undefined : adcInstructions());
           add("display", Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY), process.env.DISPLAY || process.env.WAYLAND_DISPLAY ? "desktop display present" : "no display; browser sign-in falls back to manual code or ADC");
           const configDir = path.join(os.homedir(), ".config", "colab-cli");
           try { fs.mkdirSync(configDir, { recursive: true }); fs.accessSync(configDir, fs.constants.W_OK); add("config_writable", true, configDir); }
