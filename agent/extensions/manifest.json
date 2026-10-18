@@ -43,7 +43,8 @@
     "art-direction.ts",
     "goal.ts",
     "adaptive-workflows.ts",
-    "blender-studio.ts"
+    "blender-studio.ts",
+    "colab.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -53,6 +54,9 @@
     "bash-routing.ts",
     "binary-read.ts",
     "browser-session.ts",
+    "colab.ts",
+    "colab-auth.ts",
+    "colab-jobs.ts",
     "bulk-edit.ts",
     "capability-groups.ts",
     "capability-health.ts",
@@ -670,6 +674,7 @@
     "scripts/render-noise-state.mjs",
     "scripts/browser-session-runner.mjs",
     "scripts/browser-session-lease.mjs",
+    "scripts/colab-auth-browser.mjs",
     "scripts/browser-diagnostics.mjs",
     "scripts/browser-markers.mjs",
     "scripts/browser-page-tools.mjs",

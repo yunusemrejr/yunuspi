@@ -367,6 +367,29 @@ Check SVG references and source cues, image/text metadata, measured frame timing
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
+#### google-colab
+
+Run ML and general compute on Google Colab through the official google-colab-cli: install and browser-authenticate the CLI, rent CPU, T4/L4/G4/H100/A100 or TPU v5e1/v6e1 runtimes, execute scripts or notebooks, sync files, export session logs, detach long training jobs and release billable sessions. Includes QLoRA/SFT, GRPO/PPO, from-scratch small-model and evaluation workflows with reference scripts.
+
+**Entrypoints:** `colab`
+
+**Catalog tool pointers:** `colab`
+
+**Options:**
+
+- `action`: setup, status, auth, new, sessions, exec, run, install_packages, upload, download, ls, rm, log, stop, restart, url, usage, doctor, jobs, job_output or job_kill.
+- `gpu|tpu`: new/run: T4, L4, G4, H100, A100 or TPU v5e1/v6e1. Availability is account-tier gated; unknown GPUs are rejected instead of silently falling back.
+- `session`: Persistent kernel name. Reuse it for iterative exec calls; stop it to release the VM.
+- `background`: Detach a long exec/run after the foreground grace and return a job id; poll jobs/job_output.
+- `auth_action`: status, login (visible browser or manual code), complete with a pasted code, or cancel. Values: `status`, `login`, `complete`, `cancel`.
+- `mode`: oauth2 cached user token or adc Application Default Credentials. Values: `oauth2`, `adc`.
+
+**Related records:** `background-tasks`, `web-and-media`, `model-routing`
+
+**Source:** [`agent/extensions/colab.ts`](../agent/extensions/colab.ts), [`agent/extensions/lib/colab.ts`](../agent/extensions/lib/colab.ts), [`agent/extensions/lib/colab-auth.ts`](../agent/extensions/lib/colab-auth.ts), [`agent/extensions/lib/colab-jobs.ts`](../agent/extensions/lib/colab-jobs.ts), [`agent/scripts/colab-auth-browser.mjs`](../agent/scripts/colab-auth-browser.mjs), [`agent/skills/colab/SKILL.md`](../agent/skills/colab/SKILL.md)
+
+**Documentation:** [`docs/GOOGLE-COLAB.md`](GOOGLE-COLAB.md)
+
 #### rendered-design-review
 
 Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.
@@ -1251,6 +1274,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 166; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
+- `colab` — [`agent/extensions/colab.ts`](../agent/extensions/colab.ts) (line 239; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
 - `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 614; factory)
@@ -1314,7 +1338,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 580; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 518; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 521; literal)
 - `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 433; factory)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 406; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
@@ -1527,6 +1551,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts)
 - [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts)
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts)
+- [`agent/extensions/colab.ts`](../agent/extensions/colab.ts)
 - [`agent/extensions/continuation-notice.ts`](../agent/extensions/continuation-notice.ts)
 - [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts)
 - [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts)
@@ -1589,6 +1614,9 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/code-lexical-mask.ts`](../agent/extensions/lib/code-lexical-mask.ts)
 - [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts)
 - [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts)
+- [`agent/extensions/lib/colab-auth.ts`](../agent/extensions/lib/colab-auth.ts)
+- [`agent/extensions/lib/colab-jobs.ts`](../agent/extensions/lib/colab-jobs.ts)
+- [`agent/extensions/lib/colab.ts`](../agent/extensions/lib/colab.ts)
 - [`agent/extensions/lib/compact-tool-json.ts`](../agent/extensions/lib/compact-tool-json.ts)
 - [`agent/extensions/lib/compaction-policy.ts`](../agent/extensions/lib/compaction-policy.ts)
 - [`agent/extensions/lib/competence-store.ts`](../agent/extensions/lib/competence-store.ts)
@@ -1851,6 +1879,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/browser-page-tools.mjs`](../agent/scripts/browser-page-tools.mjs)
 - [`agent/scripts/browser-session-lease.mjs`](../agent/scripts/browser-session-lease.mjs)
 - [`agent/scripts/browser-session-runner.mjs`](../agent/scripts/browser-session-runner.mjs)
+- [`agent/scripts/colab-auth-browser.mjs`](../agent/scripts/colab-auth-browser.mjs)
 - [`agent/scripts/compatibility/atomic-edit-preflight-test.mjs`](../agent/scripts/compatibility/atomic-edit-preflight-test.mjs)
 - [`agent/scripts/compatibility/automatic-compaction-test.mjs`](../agent/scripts/compatibility/automatic-compaction-test.mjs)
 - [`agent/scripts/compatibility/autonomous-recovery-test.mjs`](../agent/scripts/compatibility/autonomous-recovery-test.mjs)
@@ -1926,7 +1955,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 32 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 33 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1937,6 +1966,7 @@ The exporter includes 32 public skill directories. This list is a path inventory
 - `build` — [`agent/skills/build/SKILL.md`](../agent/skills/build/SKILL.md)
 - `cinetic` — [`agent/skills/cinetic/SKILL.md`](../agent/skills/cinetic/SKILL.md)
 - `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../agent/skills/code-first-video/SKILL.md)
+- `colab` — [`agent/skills/colab/SKILL.md`](../agent/skills/colab/SKILL.md)
 - `create` — [`agent/skills/create/SKILL.md`](../agent/skills/create/SKILL.md)
 - `data-science` — [`agent/skills/data-science/SKILL.md`](../agent/skills/data-science/SKILL.md)
 - `engineering` — [`agent/skills/engineering/SKILL.md`](../agent/skills/engineering/SKILL.md)
@@ -1990,6 +2020,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/ENGINEERING-RELIABILITY.md`](ENGINEERING-RELIABILITY.md)
 - [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
 - [`docs/GOAL.md`](GOAL.md)
+- [`docs/GOOGLE-COLAB.md`](GOOGLE-COLAB.md)
 - [`docs/GUARDIAN-INTELLIGENCE.md`](GUARDIAN-INTELLIGENCE.md)
 - [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 - [`docs/INFERENCE-CACHING.md`](INFERENCE-CACHING.md)

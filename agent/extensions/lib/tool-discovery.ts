@@ -122,6 +122,9 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: '3d-cad', tools: ['blender', 'video_shot', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
+  // Colab has one tool with its own lifecycle; stage it with the first turn so
+  // the agent does not invent a local GPU path before discovering the runtime.
+  { skill: 'colab', tools: ['colab'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.

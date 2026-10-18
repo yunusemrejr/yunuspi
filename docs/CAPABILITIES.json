@@ -2703,6 +2703,68 @@
       "commands": []
     },
     {
+      "id": "google-colab",
+      "group": "engineering",
+      "summary": "Run ML and general compute on Google Colab through the official google-colab-cli: install and browser-authenticate the CLI, rent CPU, T4/L4/G4/H100/A100 or TPU v5e1/v6e1 runtimes, execute scripts or notebooks, sync files, export session logs, detach long training jobs and release billable sessions. Includes QLoRA/SFT, GRPO/PPO, from-scratch small-model and evaluation workflows with reference scripts.",
+      "entrypoints": [
+        "colab"
+      ],
+      "tools": [
+        "colab"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "summary": "setup, status, auth, new, sessions, exec, run, install_packages, upload, download, ls, rm, log, stop, restart, url, usage, doctor, jobs, job_output or job_kill."
+        },
+        {
+          "name": "gpu|tpu",
+          "summary": "new/run: T4, L4, G4, H100, A100 or TPU v5e1/v6e1. Availability is account-tier gated; unknown GPUs are rejected instead of silently falling back."
+        },
+        {
+          "name": "session",
+          "summary": "Persistent kernel name. Reuse it for iterative exec calls; stop it to release the VM."
+        },
+        {
+          "name": "background",
+          "summary": "Detach a long exec/run after the foreground grace and return a job id; poll jobs/job_output."
+        },
+        {
+          "name": "auth_action",
+          "values": [
+            "status",
+            "login",
+            "complete",
+            "cancel"
+          ],
+          "summary": "status, login (visible browser or manual code), complete with a pasted code, or cancel."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "oauth2",
+            "adc"
+          ],
+          "summary": "oauth2 cached user token or adc Application Default Credentials."
+        }
+      ],
+      "related": [
+        "background-tasks",
+        "web-and-media",
+        "model-routing"
+      ],
+      "sourceFiles": [
+        "agent/extensions/colab.ts",
+        "agent/extensions/lib/colab.ts",
+        "agent/extensions/lib/colab-auth.ts",
+        "agent/extensions/lib/colab-jobs.ts",
+        "agent/scripts/colab-auth-browser.mjs",
+        "agent/skills/colab/SKILL.md"
+      ],
+      "doc": "docs/GOOGLE-COLAB.md",
+      "commands": []
+    },
+    {
       "id": "office-and-deliverables",
       "group": "web_media",
       "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, post-2007 functions stored without the _xlfn. prefix, numbers stored as text, empty slides), builds docx, xlsx and pptx decks from declarative specs (a deck is laid out and measured for the model: type sizes chosen to fit, long lists and tables continue on numbered follow-on slides) with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results (about 100 functions including SUMIF, COUNTIF, VLOOKUP, INDEX/MATCH, XLOOKUP, TEXT and DATE, checked against LibreOffice), renders PDF and PNG pages through LibreOffice, and converts between formats with LibreOffice (office_doc convert: docx, xlsx, pptx, pdf, odt, csv per sheet, txt, html, and the legacy doc, xls, ppt, rtf, which the read tool and office_doc read also open by converting them). deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. For documents the session itself produced (docx, pptx, odt, odp, pdf) the checks also compare the specifics they state (emails, phone numbers, links, greeting and signature names, rooms and addresses, dates, times, amounts) with the user's words, tool output and the input files the session referenced, and warn about contact data, names and places that appeared nowhere, so a made-up room or phone number is caught instead of delivered. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.",
@@ -3800,6 +3862,12 @@
         "kind": "literal"
       },
       {
+        "name": "colab",
+        "source": "agent/extensions/colab.ts",
+        "line": 239,
+        "kind": "literal"
+      },
+      {
         "name": "contact_supervisor",
         "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
         "line": 305,
@@ -4183,7 +4251,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 518,
+        "line": 521,
         "kind": "literal"
       },
       {
@@ -4331,6 +4399,12 @@
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
         "line": 222,
+        "kind": "literal"
+      },
+      {
+        "name": "colab",
+        "source": "agent/extensions/colab.ts",
+        "line": 239,
         "kind": "literal"
       },
       {
@@ -4534,7 +4608,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 518,
+        "line": 521,
         "kind": "literal"
       },
       {
@@ -4804,11 +4878,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 712,
-      "registrationSites": 65,
+      "sourceFiles": 716,
+      "registrationSites": 66,
       "indirectRegistrationSites": 21,
-      "stableRegistrationRows": 101,
-      "uniqueStableTools": 100,
+      "stableRegistrationRows": 102,
+      "uniqueStableTools": 101,
       "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4845,6 +4919,10 @@
       },
       {
         "path": "agent/extensions/checkpoints.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/colab.ts",
         "exists": true
       },
       {
@@ -5083,6 +5161,18 @@
       },
       {
         "path": "agent/extensions/lib/code-structure.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab-auth.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab-jobs.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab.ts",
         "exists": true
       },
       {
@@ -6117,6 +6207,10 @@
       },
       {
         "path": "agent/scripts/browser-session-runner.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/colab-auth-browser.mjs",
         "exists": true
       },
       {
@@ -7161,6 +7255,10 @@
         "path": "agent/skills/code-first-video/SKILL.md"
       },
       {
+        "name": "colab",
+        "path": "agent/skills/colab/SKILL.md"
+      },
+      {
         "name": "create",
         "path": "agent/skills/create/SKILL.md"
       },
@@ -7337,6 +7435,10 @@
       {
         "name": "GOAL.md",
         "path": "docs/GOAL.md"
+      },
+      {
+        "name": "GOOGLE-COLAB.md",
+        "path": "docs/GOOGLE-COLAB.md"
       },
       {
         "name": "GUARDIAN-INTELLIGENCE.md",
