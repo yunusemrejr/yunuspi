@@ -28,7 +28,10 @@ function editorFixture() {
   mode.defaultEditor = mode.editor = { setText() {}, addToHistory() {} };
   mode.runtimeHost = { session: {
     isCompacting: false, isStreaming: false, promptTemplates: [],
-    extensionRunner: { getCommand: (name) => name === "fixture" ? { handler() {} } : undefined },
+    extensionRunner: {
+      getCommand: (name) => name === "fixture" ? { handler() {} } : undefined,
+      getRegisteredCommands: () => [{ name: "fixture", invocationName: "fixture" }],
+    },
     async prompt(...args) { prompts.push(args); },
   } };
   mode.showError = (message) => errors.push(message);
@@ -363,4 +366,25 @@ test("loaded-extension labels name a built package entry after its package", () 
     `${root}/goal.ts`, `${root}/pi-lens/dist/index.js`, `${root}/pi-lens/fork-resources.ts`, `${root}/pi-memory/index.ts`, `${root}/pi-subagents/fork-resources.ts`,
   ].map((path) => ({ path, sourceInfo: { source: "local", scope: "user" } })));
   assert.deepEqual(labels, ["goal.ts", "pi-lens", "pi-lens/fork-resources.ts", "pi-memory", "pi-subagents/fork-resources.ts"]);
+});
+
+test("a near-miss command is corrected in the editor, Enter sends the correction, and resubmitting the original sends it as typed", async () => {
+  const fixture = editorFixture();
+  const boosts = ["goal", "noslop", "nobug", "3d", "video", "anatomy"].map((name) => ({ name, invocationName: name, chainable: true }));
+  fixture.mode.session.extensionRunner.getRegisteredCommands = () => boosts;
+  fixture.mode.session.extensionRunner.getCommand = (name) => boosts.find((command) => command.name === name);
+  const warnings = [], editorText = [];
+  fixture.mode.showWarning = (message) => warnings.push(message);
+  fixture.mode.editor.setText = (text) => editorText.push(text);
+  await fixture.mode.defaultEditor.onSubmit("/3d /noslop /nobugs make a film");
+  assert.deepEqual(editorText, ["/3d /noslop /nobug make a film"]);
+  assert.match(warnings[0], /Did you mean \/nobug \(not \/nobugs\)\? Corrected in the editor/);
+  assert.deepEqual(fixture.prompts, []);
+  assert.deepEqual(fixture.inputs, []);
+  await fixture.mode.defaultEditor.onSubmit("/3d /noslop /nobug make a film");
+  assert.deepEqual(fixture.inputs, ["/3d /noslop /nobug make a film"], "the corrected chain is submitted");
+  await fixture.mode.defaultEditor.onSubmit("/nobugs");
+  await fixture.mode.defaultEditor.onSubmit("/nobugs");
+  assert.equal(warnings.length, 2, "only the first submission is corrected");
+  assert.match(fixture.errors.at(-1), /Unknown command '\/nobugs'/, "sent as typed, an unknown bare command still never reaches the model");
 });

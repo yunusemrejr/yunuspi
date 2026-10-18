@@ -11,6 +11,7 @@ import { Type } from "typebox";
 import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
+import { mediaFile, mediaWork } from "./media-work.ts";
 import { routeSkills, routeSkillsPrecise, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
 import { resolveSkills } from "../pi-subagents/src/agents/skills.ts";
 import { buildSkillIndex, rankSkills, skillCatalogFingerprint, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
@@ -891,7 +892,7 @@ export function createRelevantGuidance(pi: any) {
       if (process.env.PI_SUBAGENT_CHILD === '1'
         && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(skillTaskText(event.prompt ?? ''))) {
         const routed = routeSkills(event.prompt ?? '').map(route => route.name);
-        for (const name of ['anatomy', 'anatomy-reveal']) {
+        for (const name of ['anatomy', 'anatomy-reveal', 'cinetic']) {
           if (!routed.includes(name) || metadata.some(s => s.name === name)) continue;
           const bundled = path.resolve(import.meta.dirname, '../../skills', name);
           if (!fs.existsSync(path.join(bundled, 'SKILL.md'))) continue;
@@ -971,7 +972,7 @@ export function createRelevantGuidance(pi: any) {
         ['systems-languages', /\b(compiler|parser|interpreter|ast rewrite|ir transformation|dsl)\b/i, 'Specify grammar and semantics; preserve effects and evaluation order through transformations.'],
         ['engineering', /\b(incremental computation|incremental build|dependency graph|cache invalidation|memoization)\b/i, 'Compare incremental results to clean recomputation across edit and configuration sequences.'],
         ['engineering', /\b(property.based|metamorphic|differential testing|fuzz(?:ing|er)?|generative testing)\b/i, 'Use independent properties, meaningful generators and shrinking; confirm a known defect is rejected.'],
-        ['engineering', /\b(state machine|invariant|idempotenc[ey]|race condition|lifecycle|transition)\b/i, 'Write one failing event sequence and verify the invariant through the real owner.'],
+        ['engineering', /\b(state machine|invariant|idempotenc[ey]|race condition|lifecycle|state transitions?)\b/i, 'Write one failing event sequence and verify the invariant through the real owner.'],
         ['data-science', /\b(numerical|floating.point|linear algebra|matrix|jacobian|gradient check|integration tolerance)\b/i, 'Check shapes, units and an independent small answer; measure residuals and convergence.'],
         ['data-science', /\b(constrained optimization|convex|linear program|integer program|optimality|objective function)\b/i, 'Write variables, domains and constraints, then independently verify feasibility.'],
         ['data-science', /\b(a\/b test|causal|confidence interval|hypothesis test|statistical significance)\b/i, 'Identify the independent unit, effect and uncertainty before claiming improvement.'],
@@ -991,7 +992,7 @@ export function createRelevantGuidance(pi: any) {
         }
       }
       if (action.test(prompt)) {
-        if (ui.test(prompt)) uiHints();
+        if (ui.test(prompt) && !mediaWork(prompt)) uiHints();
         if (env.test(prompt)) {
           orient();
           skillHint("Environment/data changes", ["engineering"], /deployment|infrastructure/i);
@@ -1156,7 +1157,7 @@ export function createRelevantGuidance(pi: any) {
           sourceNavigation(file, broadRead);
         }
         contextSkill(52);
-        if (uiFile.test(file)) uiHints();
+        if (uiFile.test(file) && !mediaFile(file, typeof input.content === 'string' ? input.content : undefined)) uiHints();
         if (name !== 'read') uiDoctrine.observeFile(file, typeof input.content === 'string' ? input.content : undefined);
         if (/\.(?:csv|tsv|parquet|jsonl)$/i.test(file) || /(?:^|\/)(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(file)) precision();
         const language = /\.(php|py|rs|go)$/i.exec(file)?.[1]?.toLowerCase();

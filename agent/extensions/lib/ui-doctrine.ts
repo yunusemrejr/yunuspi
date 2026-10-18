@@ -19,6 +19,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { askTypedDecision, type TypedVerdict } from "./micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./micro-intelligence/review.ts";
+import { mediaFile, mediaWork } from "./media-work.ts";
 
 export const UI_DOCTRINE_SKILL = "ui-design";
 export const UI_DOCTRINE_CONTEXT = "ui-doctrine-context";
@@ -41,7 +42,8 @@ export type UiCue = { strength: "none" | "weak" | "strong"; terms: string[] };
 /** Deterministic first reading of a request. `none` never reaches the judge. */
 export function uiPromptCue(prompt: string): UiCue {
   const text = typeof prompt === "string" ? prompt.slice(0, 6000) : "";
-  if (!text.trim() || NARRATIVE.test(text) || NO_UI.test(text) || !WORK_VERB.test(text)) return { strength: "none", terms: [] };
+  // Film work says "typography" and "palette" too; it is not interface work unless it names a surface.
+  if (!text.trim() || NARRATIVE.test(text) || NO_UI.test(text) || !WORK_VERB.test(text) || mediaWork(text)) return { strength: "none", terms: [] };
   const strong = [...text.matchAll(new RegExp(STRONG_PROMPT.source, "gi"))].map((m) => m[0].toLowerCase());
   if (strong.length) return { strength: "strong", terms: [...new Set(strong)].slice(0, 6) };
   const weak = [...text.matchAll(new RegExp(WEAK_PROMPT.source, "gi"))].map((m) => m[0].toLowerCase());
@@ -51,7 +53,8 @@ export function uiPromptCue(prompt: string): UiCue {
 /** A written file is interface work by extension, or by GUI markers in what is written. */
 export function uiFileCue(file: string, content?: string): boolean {
   const normalized = String(file ?? "").replaceAll("\\", "/");
-  if (!normalized || EXCLUDED_PATH.test(normalized)) return false;
+  // Remotion acts (.tsx) and video HTML scenes are film frames, not an interface.
+  if (!normalized || EXCLUDED_PATH.test(normalized) || mediaFile(normalized, content)) return false;
   if (UI_FILE.test(normalized)) return true;
   if (/\.(?:php|phtml)$/i.test(normalized) && typeof content === 'string' && /<(?:html|body|main|form|button|nav|section|div)\b/i.test(content)) return true;
   return SCRIPT_FILE.test(normalized) && typeof content === "string" && GUI_CONTENT.test(content.slice(0, 24000));

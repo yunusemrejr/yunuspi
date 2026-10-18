@@ -162,6 +162,7 @@ export default function llamaExtension(pi) {
     };
     pi.registerCommand("llama", {
         description: "Manage llama.cpp router models",
+        interactiveOnly: true,
         handler: async (_args, ctx) => {
             if (ctx.mode !== "tui") {
                 ctx.ui.notify("/llama is available in interactive mode", "warning");

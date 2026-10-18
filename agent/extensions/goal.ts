@@ -26,7 +26,7 @@ import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalSummary,
 	parseGoalArgs, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, type GoalState,
 } from "./lib/goal-state.ts";
-import { addBoosts, boostedGoalNotice, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
+import { addBoosts, boostedGoalNotice, chainCompletions, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
 
 const ENTRY = "goal-state-v1";
 const CONTEXT = "goal-anchor";
@@ -316,32 +316,44 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.registerCommand("goal", {
-		description: "Set a goal with a real definition of done: /goal <what you want>, then /goal to inspect, pause, resume, retry, done or clear.",
+		description: "Set a goal with a real definition of done: /goal <what you want>, then /goal to inspect, pause, resume, retry, done or clear. Boosts chain anywhere in it: /goal /3d /video <task>.",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "goal"),
 		handler: goalCommandHandler,
 	});
 	pi.registerCommand("noslop", {
 		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /nobug, /3d, /video and /anatomy.",
 		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "noslop"),
 		handler: startPreset("noslop"),
 	});
 	pi.registerCommand("nobug", {
 		description: "Debug the codebase: hunt logic, edge-case, broken-code, dependency, duplication, UI/UX, responsive and cross-browser bugs; reproduce each, fix it at its root, prove it. Runs as a goal. Chains with /noslop, /3d, /video and /anatomy.",
 		argumentHint: "[focus or assignment — an area, pipeline or output; omit for the whole codebase]",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "nobug"),
 		handler: startPreset("nobug"),
 	});
 	pi.registerCommand("3d", {
 		description: "3D boost: build or fix 3D work (Blender, three.js/WebGL) with real assets, grounded references and rendered proof. Bare /3d improves this project's existing 3D work, or says there is none. Chains: /3d /video /noslop /nobug /anatomy <task>.",
 		argumentHint: "[assignment — what to make; omit to fix this project's 3D work]",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "3d"),
 		handler: startPreset("3d"),
 	});
 	pi.registerCommand("video", {
 		description: "Video boost: make or fix video with finished sound (narration/TTS, music, effects), purposeful visuals and a verified final export. Bare /video improves this project's existing video work, or says there is none. Chains with /3d, /anatomy, /noslop and /nobug.",
 		argumentHint: "[assignment — what to make; omit to fix this project's video work]",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "video"),
 		handler: startPreset("video"),
 	});
 	pi.registerCommand("anatomy", {
 		description: "Anatomy boost: an object or mechanism built from real parts with the anatomy and anatomy-reveal skills — interactive explainers, exploded/dissection pages, product-reveal films — checked by audit and rendered frames. Bare /anatomy improves this project's anatomy figures, or says there are none. Chains: /anatomy /3d /video <task>.",
 		argumentHint: "[assignment — an object, mechanism or system to show; omit to fix this project's anatomy figures]",
+		chainable: true,
+		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "anatomy"),
 		handler: startPreset("anatomy"),
 	});
 

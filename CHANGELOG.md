@@ -1,3 +1,37 @@
+## 0.44.0 — Commands that say what they are, and films that blend their skills
+
+**Boosts read as a family.** `/goal`, `/noslop`, `/nobug`, `/3d`, `/video` and `/anatomy` now register as chainable (`chainable: true` on `registerCommand`, carried through `getCommands`, RPC `get_commands` and both front ends). The terminal autocomplete lists them first, tagged `[boost · chains]`. The desktop composer gains a slash menu: typing `/` lists Boosts (with a link mark and the hint "combine any of these in one message"), then Commands, then Skills once two letters are typed. After a boost, typing `/` and a letter offers only the boosts that can still join. "Skills & commands" uses the same groups, and the terminal's `/commands` window lists Boosts as their own group first.
+
+**A near miss is offered back, never dropped.** `/3d /noslop /nobugs make a film` used to run without the Nobug boost, because the unknown `/nobugs` stayed in the assignment as text. The new `core/coding-agent/src/core/command-correction.js` matches small edits, adjacent swaps, case and unique prefixes, and leaves known names, paths, code spans, prose and ties alone. The terminal puts the corrected line in the editor with "Did you mean /nobug (not /nobugs)?", and Enter sends it; submitting the original again sends it as typed. The desktop checks a command against the session's real command list before sending it and opens "Did you mean /nobug?" with the fix focused, so Enter applies it. An unknown command, or a terminal-only one (`/tree`, `/llama`), is explained in a notice and never reaches the model. The desktop now also handles `/new` and `/name`.
+
+**Broken commands fixed or retired.** A runtime audit of all 80 extension and prompt commands against a fake provider found four problems. `/provider-health` printed nothing, because command return values are discarded; it now shows its report. The fan-out worker contract (`prompts/fanout.md`) was exposed as a `/fanout` user command with a heading for a description; it stays as the orchestrator's document but is no longer a command. `/llama` only works in the terminal, so it is now marked `interactiveOnly` and the desktop treats it as terminal-only. `/graph` and `/observer-book` exist only behind `PI_LEAN_GATES`; with the correction above, typing them no longer turns into a paid prompt.
+
+**3D + Video makes a blended film.** When `/video` chains with `/3d` or `/anatomy`, the goal gains a `[3D film]` section and one tracked front. New `lib/film-blend.ts` reads the request and casts three skills as one crew, instead of listing them for the model to choose from:
+- **Lead:** `anatomy` for how something works (the default), `anatomy-reveal` for one object taken apart, the newly bundled `cinetic` for launch, product and brand films, and a three.js world for places.
+- **Roles and engine:** cinetic stays the film system around any lead (brief, technique draw, one `timeline.ts` driving picture and sound, transitions, sound kit, finishing, review loop). One clock carries everything: anatomy figures and three.js scenes mount inside cinetic acts.
+- **Conflicts:** the user's words and brand win, then cinetic's hard bans, then the lead's defaults.
+- **Narration and pace** follow the request: asked, implied by an explainer, or optional; calm unless energy is asked for.
+- **Blender** builds GLB assets for three.js and never renders the film. Previews stay cheap and renders run one at a time, so the machine stays usable.
+- **Picture perfect:** every film is held to that bar, stated back as binding when the user writes "perfect".
+
+`/noslop` and `/nobug` in such a chain apply to the film's craft and to its encoded master.
+
+**cinetic is bundled.** `agent/skills/cinetic` is cinetic by Leonxlnx (MIT, pinned in `UPSTREAM.json` at ecfa6605). It is a cinematic motion-design skill with Remotion and HyperFrames starters, a measured technique library, a beat-locked timeline, a sound kit, motion-blur finishing and critic prompts. Only `SKILL.md` gains a YunusPi section, covering the blend, npm install approval (`--link-modules`), harness narration and QA tools, and the render budget. `/video` names it, motion-design requests route to it, and child agents are offered it like the anatomy skills.
+
+**No interface guidance on film work.** An audit of every guidance trigger against prompts from other domains found UI help firing on video work. Film requests say "typography", "a calm palette", "transitions" and "logo reveal"; Remotion acts are `.tsx` and HtmlScene pages are `.html`. So video sessions received the UI-design doctrine, the art-direction UI brief, UI hints, and `ui-design` or `frontend` routes. New `lib/media-work.ts` recognises film, video and render requests that name no interface surface, and video-project files by folder or content (Remotion, HyperFrames, `__PROPS__`). The UI doctrine, art-direction, relevant-guidance and the interface routes now consult it. A request that names a page, a dashboard, a screen or a video player still gets interface guidance. The state-machine practice no longer fires on the word "transition", only on "state transition". In a film chain, Noslop tracks honest on-screen copy, dead weight and "added no slop" instead of "UI density cut on every screen", and leaves its interface, terminal and density paragraphs out of the brief. Nobug tracks defects and dependencies instead of "the interface works wherever it runs".
+
+**Archive a whole project.** The desktop sidebar's project menu now archives a project with all its sessions. Running sessions stop, after confirmation if one is working. Each session keeps its own state, so restoring the project from Archive brings back exactly what was there. Opening its folder again also restores it.
+
+**Validation.** New and updated tests cover:
+- command correction and the terminal correct-then-send flow;
+- chain completions, the film blend's modes, roles and conflict order;
+- film chains carrying no interface fronts while other chains keep them;
+- the media detector against film, UI and mixed prompts and files;
+- cinetic's provenance and routing;
+- project archive persistence and restore.
+
+The real-Electron desktop run (24 checks) adds the slash menu, the correction dialog with Enter, an unknown command never reaching the provider, and project archive and restore.
+
 ## 0.43.0 — A stable head: stop re-billing the cached conversation
 
 **The cache was warm, but the front of the request kept changing.** Across 572 recorded sessions (2026-09-21 to 10-12, 12.5k DeepSeek Flash requests) the prefix cache hit 97.7% of prompt tokens, yet 262 requests that followed their predecessor within seconds missed the cache almost entirely and re-billed 24.4M cached tokens at the 50x fresh rate, about a third of the DeepSeek Flash spend (a cache read costs $0.006/M, fresh input $0.30/M). Most of those sessions ran before the lean gates, so a local probe drove the current build to see what still changes the head. It found three live causes, all fixed here.

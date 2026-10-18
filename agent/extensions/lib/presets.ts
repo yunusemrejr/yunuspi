@@ -17,6 +17,7 @@
 import path from "node:path";
 import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
 import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
+import { planFilmBlend } from "./film-blend.ts";
 
 export type PresetId = "noslop" | "nobug" | "3d" | "video" | "anatomy";
 export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video", "anatomy"];
@@ -110,6 +111,36 @@ export function parsePresetChain(invoked: PresetId, args: string): PresetChain {
 	return { presets: found.presets, task: found.task };
 }
 
+/** One line per chain member, for completion menus and command lists. */
+export const CHAIN_SUMMARIES: Record<PresetId | "goal", string> = {
+	goal: "track it as a goal with a real definition of done",
+	noslop: "cut AI slop and clutter from UI, copy and code",
+	nobug: "hunt, reproduce and fix bugs at the root",
+	"3d": "real 3D assets and rendered proof (Blender, three.js)",
+	video: "finished video: narration, music, effects, verified export",
+	anatomy: "animated anatomy figures and reveal films from real parts",
+};
+
+/**
+ * Completions for the token being typed after a chainable command: `/3d /no`
+ * offers /noslop and /nobug. The invoked command and members already in the
+ * text are not offered again.
+ * Each value is the whole argument text with the partial token completed, since
+ * the editor replaces the full argument prefix.
+ */
+export function chainCompletions(argumentPrefix: string, invoked?: PresetId | "goal"): { value: string; label: string; description: string }[] | null {
+	const text = String(argumentPrefix ?? "");
+	const partial = /(?:^|\s)(\/[\w-]*)$/.exec(text)?.[1];
+	if (!partial) return null;
+	const typed = partial.slice(1).toLowerCase();
+	const present = extractPresetTokens(text.slice(0, text.length - partial.length));
+	const base = text.slice(0, text.length - partial.length);
+	const items = (["goal", ...PRESET_IDS] as const)
+		.filter((id) => id !== invoked && id.startsWith(typed) && !(id === "goal" ? present.goal : present.presets.includes(id)))
+		.map((id) => ({ value: `${base}/${id} `, label: `/${id}`, description: `boost · ${CHAIN_SUMMARIES[id]}` }));
+	return items.length ? items : null;
+}
+
 /** The user's literal invocation, for authored-input analysis: `/3d /video make X`. */
 export function presetUserText(presets: readonly PresetId[], task: string): string {
 	const flat = task.replace(/\s+/g, " ").trim();
@@ -160,6 +191,14 @@ const CORE_INDEXES: Record<PresetId, readonly number[]> = {
 	video: [1, 2, 4],
 	anatomy: [2, 1, 3],
 };
+/**
+ * In a film chain (Video with 3D or Anatomy) there are no screens to declutter
+ * and no interface to test, so Noslop tracks honest on-screen copy and "added no
+ * slop" and Nobug tracks defects and dependencies; the briefs carry the rest.
+ */
+const FILM_CORE_INDEXES: Partial<Record<PresetId, readonly number[]>> = { noslop: [3, 6, 5], nobug: [1, 2, 5] };
+const isFilm = (ids: readonly PresetId[]) => ids.includes("video") && (ids.includes("3d") || ids.includes("anatomy"));
+const coreIndexes = (id: PresetId, ids: readonly PresetId[]) => (isFilm(ids) && FILM_CORE_INDEXES[id]) || CORE_INDEXES[id];
 const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA, anatomy: ANATOMY_CRITERIA };
 
 /** A criterion as createPresetGoal stores it (flattened, clipped), so fronts can be matched against a goal. */
@@ -168,9 +207,9 @@ const fit = (text: string) => {
 	return flat.length > 240 ? `${flat.slice(0, 239)}…` : flat;
 };
 
-/** A preset's first `count` core fronts, labelled and in the brief's order. */
-function labelledFronts(id: PresetId, count: number): string[] {
-	return CORE_INDEXES[id].slice(0, count).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`);
+/** A preset's first `count` core fronts for this chain, labelled and in the brief's order. */
+function labelledFronts(id: PresetId, count: number, ids: readonly PresetId[] = [id]): string[] {
+	return coreIndexes(id, ids).slice(0, count).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`);
 }
 
 function nobugGoalText(task: string): string {
@@ -208,7 +247,7 @@ function videoGoalText(task: string): string {
 	return [
 		"Video boost in force: make this video finished on every track — picture, sound and timing — not a silent render with music attached.",
 		scope,
-		"Plan before rendering: settle the script or shot list and the audio plan first (what is shown, said and heard, in what order), then build with the installed video skills and tools for the route (code-first-video, remotion-video, video-editing, audio; Blender or three.js scenes rendered to frames when the picture needs real 3D; anatomy-reveal for a product reveal or exploded-view film of one object). Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
+		`Plan before rendering: settle the script or shot list and the audio plan first (what is shown, said and heard, in what order), then build with the installed video skills and tools for the route (cinetic at ${bundledSkill("cinetic")} for premium motion design — launch, product and feature films, loops, logo stings, kinetic type — with its beat-locked timeline, sound kit and review loop; code-first-video, remotion-video, video-editing, audio; three.js scenes, with Blender only building their assets, when the picture needs real 3D; anatomy-reveal for a product reveal or exploded-view film of one object). Read the relevant skill before building; it carries the workflow, this brief carries the standard.`,
 		"Sound is a track, not an afterthought. Narration (TTS where no voice exists) must be intelligible, naturally paced and timed to the picture it describes — listen to it, do not trust the transcript. Music and sound effects are mixed under speech, levels stay consistent across cuts, nothing clips and no stretch is accidentally silent. Effects and transitions exist to serve the cut — orientation, emphasis, continuity — never as decoration; captions or on-screen text appear where speech carries information, legible and in sync.",
 		"Verify the master, not the timeline: watch the final export end to end with audio (video_qa where available), checking sync at the joins, loudness against speech, and that the runtime earns its length. Deliver at the intended resolution, frame rate and format, as a file that plays outside the build setup.",
 	].join("\n\n");
@@ -230,8 +269,48 @@ function anatomyGoalText(task: string): string {
 	].join("\n\n");
 }
 
-const BRIEFS: Record<PresetId, (task: string) => string> = {
-	noslop: (task) => noslopGoalText(noslopFocus(task)),
+/** The user asked for flawless output in so many words: the bar is stated back as binding. */
+const PERFECT = /\b(?:picture|pixel)[\s-]?perfect\b|\bflawless\b|\bperfect\b/i;
+
+/**
+ * Directives that exist only when boosts are chained together: what the
+ * combination means beyond each brief alone. 3D (or Anatomy) + Video makes a
+ * 3D film whose skills are blended for the request (film-blend.ts: anatomy,
+ * anatomy-reveal and cinetic in roles, Blender only for assets that three.js
+ * renders); Noslop and Nobug then apply to the film's craft and its technical
+ * defects. Returns brief sections and at most one tracked front.
+ */
+function synergy(ids: readonly PresetId[], task: string): { sections: string[]; fronts: string[] } {
+	const has = (id: PresetId) => ids.includes(id);
+	if (!has("video") || !(has("3d") || has("anatomy"))) return { sections: [], fronts: [] };
+	const paragraphs = [
+		"3D film in force (3D or Anatomy chained with Video): one film whose hero visuals are real 3D, finished on every track, delivered picture perfect.",
+		planFilmBlend(task).text,
+		"Production, not a slideshow. Write any narration for the ear and time it to the picture; score the arc, rising and resolving with the story and ducked under speech; put a sound on every meaningful motion — a whoosh on a whip pan, a click as a part seats, a low hit on an explode. Transitions are motion graphics with a reason: match cuts between parts, whips that follow motion, a part becoming the next shot, kinetic type that lands with the picture. No default crossfades, no stock looks, no placeholder frames.",
+	];
+	if (has("noslop")) paragraphs.push("Noslop applies to the film: a look derived from the subject (video_project look), a type pair and palette this film owns, low on-screen text density, and every element on screen doing a job — no glow halos, gradient washes or template lower thirds.");
+	if (has("nobug")) paragraphs.push("Nobug applies to the film: audio and picture in sync at every join, no dropped or duplicated frames, consistent loudness with nothing clipped, captions on time, correct aspect and colour, and a file that plays in standard players — checked on frames and audio of the encoded master (video_qa, video_frames), not the timeline.");
+	paragraphs.push(`Picture perfect means it.${PERFECT.test(task) ? " The user asked for perfect in their own words: treat it as the acceptance bar, not a figure of speech." : ""} Every frame of the final could be published as a still: review a contact sheet of every shot, listen to the full mix, fix each defect you find before delivery, and name honestly anything you could not check. Do not ship a fixable flaw with a caveat.`);
+	return {
+		sections: [`[3D film]\n${paragraphs.join("\n\n")}`],
+		fronts: ["3D film: the skill blend is written into the brief and followed (lead and roles); Blender only builds GLB assets for three.js; sound, narration where asked and motion-graphics transitions are finished and synced; previewed low-cost first."],
+	};
+}
+
+/** Synergy fronts join ahead of V while the criteria budget has room. */
+function withSynergyFronts(goal: GoalState, fronts: readonly string[]): GoalState {
+	const body = goal.criteria.filter((criterion) => criterion.id !== VERIFY_ID);
+	const tail = goal.criteria.filter((criterion) => criterion.id === VERIFY_ID);
+	const missing = fronts.filter((text) => !body.some((criterion) => criterion.text === fit(text)));
+	const room = MAX_CRITERIA - goal.criteria.length;
+	if (room <= 0 || !missing.length) return goal;
+	let counter = body.reduce((max, criterion) => Math.max(max, Number(/^C(\d+)$/.exec(criterion.id)?.[1] ?? 0)), 0);
+	const added = missing.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
+	return { ...goal, criteria: [...body, ...added, ...tail] };
+}
+
+const BRIEFS: Record<PresetId, (task: string, ids?: readonly PresetId[]) => string> = {
+	noslop: (task, ids = []) => noslopGoalText(noslopFocus(task), { film: isFilm(ids) }),
 	nobug: nobugGoalText,
 	"3d": threeDGoalText,
 	video: videoGoalText,
@@ -253,17 +332,18 @@ export function createPresetChainGoal(chain: PresetChain, now = Date.now()): Goa
 	const header = task
 		? `Assignment: ${task}\n\nBoosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
 		: `Boosts in force — ${presets.map((id) => PRESET_LABELS[id]).join(" + ")} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
-	const text = [header, ...presets.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task)}`)].join("\n\n");
+	const combined = synergy(presets, task);
+	const text = [header, ...combined.sections, ...presets.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task, presets)}`)].join("\n\n");
 	const perPreset = Math.min(3, Math.floor((MAX_CRITERIA - 1) / presets.length));
-	const criteria = presets.flatMap((id) => labelledFronts(id, perPreset));
-	return { ...createPresetGoal(text, criteria, now), boosts: [...presets] };
+	const criteria = presets.flatMap((id) => labelledFronts(id, perPreset, presets));
+	return withSynergyFronts({ ...createPresetGoal(text, criteria, now), boosts: [...presets] }, combined.fronts);
 }
 
 /** The text of a goal with boosts: the user's task first, then the order of the boosts, then each brief. */
 function boostedText(task: string, ids: readonly PresetId[], literal: string): string {
 	const order = ids.map((id) => PRESET_LABELS[id]).join(" → ");
 	const header = `Boosts in force, in the order written — ${order} — all applied to this goal. Where a boost was written next to a particular part of the goal, it applies chiefly to that part; where boosts pull against each other the goal's purpose wins and the conflict is named. The user wrote: «${literal}»`;
-	return [task, header, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task)}`)].join("\n\n");
+	return [task, header, ...synergy(ids, task).sections, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](task, ids)}`)].join("\n\n");
 }
 
 /**
@@ -276,15 +356,16 @@ function boostedText(task: string, ids: readonly PresetId[], literal: string): s
 export function createBoostedGoal(task: string, presets: readonly PresetId[], literal: string, now = Date.now()): GoalState {
 	const ids = [...new Set(presets)];
 	const perPreset = ids.length === 1 ? 3 : ids.length === 2 ? 2 : 1;
-	const fronts = ids.flatMap((id) => labelledFronts(id, perPreset));
-	const room = Math.max(3, MAX_CRITERIA - 1 - fronts.length);
+	const fronts = ids.flatMap((id) => labelledFronts(id, perPreset, ids));
+	const combined = synergy(ids, task).fronts;
+	const room = Math.max(3, MAX_CRITERIA - 1 - fronts.length - combined.length);
 	const own = createGoal(task, now).criteria.filter((criterion) => criterion.id !== VERIFY_ID).map((criterion) => criterion.text);
-	return { ...createPresetGoal(boostedText(task, ids, literal), [...own.slice(0, room), ...fronts], now), boosts: ids };
+	return withSynergyFronts({ ...createPresetGoal(boostedText(task, ids, literal), [...own.slice(0, room), ...fronts], now), boosts: ids }, combined);
 }
 
 /** Core fronts of a boost that the goal does not track yet (plain or labelled), most important first. */
-function untrackedFronts(goal: GoalState, id: PresetId): string[] {
-	return CORE_INDEXES[id]
+function untrackedFronts(goal: GoalState, id: PresetId, ids: readonly PresetId[] = [id]): string[] {
+	return coreIndexes(id, ids)
 		.map((index) => CRITERIA[id][index])
 		.filter((text) => !goal.criteria.some((criterion) => criterion.text === fit(text) || criterion.text === fit(`${PRESET_LABELS[id]}: ${text}`)));
 }
@@ -301,12 +382,13 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 	const requested = [...new Set(presets)];
 	const fresh = requested.filter((id) => !recorded.includes(id) && untrackedFronts(goal, id).length > 0);
 	if (!fresh.length) return { goal, fresh, fronts: 0 };
-	const total = new Set([...recorded, ...requested]).size;
+	const all = [...new Set([...recorded, ...requested])];
+	const total = all.length;
 	const perPreset = total === 1 ? 3 : total === 2 ? 2 : 1;
 	const queued: string[] = [];
 	for (let round = 0; round < perPreset; round++) {
 		for (const id of fresh) {
-			const text = untrackedFronts(goal, id)[round];
+			const text = untrackedFronts(goal, id, all)[round];
 			if (text) queued.push(`${PRESET_LABELS[id]}: ${text}`);
 		}
 	}
@@ -318,9 +400,11 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 	const flat = goal.text.replace(/\s+/g, " ").trim();
 	const summary = flat.length > 600 ? `${flat.slice(0, 599)}…` : flat;
 	const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
+	const combined = synergy([...new Set([...recorded, ...requested])], goal.text);
 	const appended = [
 		`Boosts added to this goal — ${labels} — in force from here on, alongside everything above. Where a boost pulls against the goal's purpose, the purpose wins and the conflict is named.`,
-		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](summary)}`),
+		...combined.sections.filter((section) => !goal.text.includes(section.slice(0, section.indexOf("\n")))),
+		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](summary, all)}`),
 	].join("\n\n");
 	const full = `${goal.text}\n\n${appended}`;
 	const next: GoalState = {

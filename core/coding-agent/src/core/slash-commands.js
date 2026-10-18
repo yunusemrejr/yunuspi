@@ -30,3 +30,5 @@ export const BUILTIN_SLASH_COMMANDS = [
     { name: "reload", description: "Reload keybindings, extensions, skills, prompts, themes, and context files" },
     { name: "quit", description: `Quit ${APP_NAME}` },
 ];
+/** Interactive commands that work but are not advertised in autocomplete. */
+export const HIDDEN_SLASH_COMMANDS = ["debug", "arminsayshi", "dementedelves"];

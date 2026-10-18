@@ -563,6 +563,9 @@ export async function runRpcMode(runtimeHost) {
                         description: command.description,
                         source: "extension",
                         sourceInfo: command.sourceInfo,
+                        ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
+                        ...(command.chainable ? { chainable: true } : {}),
+                        ...(command.interactiveOnly ? { interactiveOnly: true } : {}),
                     });
                 }
                 for (const template of session.promptTemplates) {

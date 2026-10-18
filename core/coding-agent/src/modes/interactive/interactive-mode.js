@@ -25,7 +25,8 @@ import { CredentialSynchronizationError } from "../../core/model-runtime.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.js";
-import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../core/slash-commands.js";
+import { BUILTIN_SLASH_COMMANDS, HIDDEN_SLASH_COMMANDS, parseSlashCommand } from "../../core/slash-commands.js";
+import { correctSlashCommands, describeCorrection } from "../../core/command-correction.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.js";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.js";
@@ -463,14 +464,17 @@ export class InteractiveMode {
         }));
         // Convert extension commands to SlashCommand format
         const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
-        const extensionCommands = this.session.extensionRunner
-            .getRegisteredCommands()
-            .filter((cmd) => !builtinCommandNames.has(cmd.name))
-            .map((cmd) => ({
+        // Chainable boosts lead the list and say so, so they read as a family
+        // distinct from one-shot commands.
+        const toItem = (cmd) => ({
             name: cmd.invocationName,
-            description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
+            description: cmd.chainable ? `[boost · chains] ${cmd.description ?? ""}` : this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
+            ...(cmd.argumentHint && { argumentHint: cmd.argumentHint }),
             getArgumentCompletions: cmd.getArgumentCompletions,
-        }));
+        });
+        const registered = this.session.extensionRunner.getRegisteredCommands().filter((cmd) => !builtinCommandNames.has(cmd.name));
+        const boostCommands = registered.filter((cmd) => cmd.chainable).map(toItem);
+        const extensionCommands = registered.filter((cmd) => !cmd.chainable).map(toItem);
         // Build skill commands from session.skills (if enabled)
         this.skillCommands.clear();
         const skillCommandList = [];
@@ -484,7 +488,7 @@ export class InteractiveMode {
                 });
             }
         }
-        return new CombinedAutocompleteProvider([...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList], this.sessionManager.getCwd(), this.fdPath);
+        return new CombinedAutocompleteProvider([...boostCommands, ...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList], this.sessionManager.getCwd(), this.fdPath);
     }
     setupAutocompleteProvider() {
         let provider = this.createBaseAutocompleteProvider();
@@ -2400,6 +2404,18 @@ export class InteractiveMode {
             text = text.trim();
             if (!text)
                 return;
+            // A near-miss command (`/nobugs`, or a typo inside a boost chain) is
+            // corrected in the editor instead of running without it; Enter then
+            // sends the correction. Submitting the original again sends it as typed.
+            const offered = this.commandCorrectionOffer;
+            this.commandCorrectionOffer = undefined;
+            const correction = offered?.original === text ? undefined : correctSlashCommands(text, this.slashCommandNames());
+            if (correction?.fixes.length) {
+                this.commandCorrectionOffer = { original: text };
+                this.editor.setText(correction.text);
+                this.showWarning(`${describeCorrection(correction.fixes)} Corrected in the editor: press Enter to send it.`);
+                return;
+            }
             // Command separators may be tabs/newlines, including pasted input.
             const command = parseSlashCommand(text);
             if (command && BUILTIN_SLASH_COMMANDS.some((builtin) => builtin.name === command.name))
@@ -2546,8 +2562,7 @@ export class InteractiveMode {
             }
             // A missing extension must not silently turn a command into a paid model prompt.
             // Keep absolute paths and prompt-template invocations usable as ordinary input.
-            if (/^\/[a-z][\w-]*$/i.test(text) && !this.isExtensionCommand(text) &&
-                !this.session.promptTemplates.some((template) => template.name === text.slice(1)) && !fs.existsSync(text)) {
+            if (/^\/[a-z][\w-]*$/i.test(text) && !this.slashCommandNames().commands.includes(text.slice(1)) && !fs.existsSync(text)) {
                 this.showError(`Unknown command '${text}'. Use /reload to reload extensions or /commands to list available commands.`);
                 return;
             }
@@ -3733,6 +3748,19 @@ export class InteractiveMode {
         this.editor.setText("");
         this.updatePendingMessagesDisplay();
         this.showStatus("Queued message for after compaction");
+    }
+    /** Names a typed command may legally be, and the boosts that chain after a chainable one. */
+    slashCommandNames() {
+        const extension = this.session.extensionRunner.getRegisteredCommands();
+        return {
+            commands: [
+                ...BUILTIN_SLASH_COMMANDS.map((command) => command.name),
+                ...HIDDEN_SLASH_COMMANDS,
+                ...extension.map((command) => command.invocationName),
+                ...this.session.promptTemplates.map((template) => template.name),
+            ],
+            chainable: extension.filter((command) => command.chainable).map((command) => command.invocationName),
+        };
     }
     isExtensionCommand(text) {
         if (!text.startsWith("/"))

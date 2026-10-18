@@ -267,3 +267,25 @@ test('session deletion refuses paths through a symlink and retains external data
   assert.equal(store.session(session.id).id, session.id);
   assert.equal(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8'), 'outside data');
 });
+
+test('archiving a project hides it with its sessions, closes open ones, and restoring brings back each session state', t => {
+  const { store, project, session, projectPath } = fixture(t);
+  const second = store.create(project.id);
+  store.update(second.id, { state: 'archived' });
+  store.activate(session.id);
+  store.setProjectArchived(project.id, true);
+  assert.equal(store.project(project.id).archived, true);
+  assert.equal(store.session(session.id).state, 'closed', 'an open session closes with its project');
+  assert.equal(store.session(second.id).state, 'archived', 'a session archived on its own keeps that state');
+  assert.equal(store.snapshot().activeId, null);
+  assert.throws(() => store.activate(session.id), /Restore this project/);
+  assert.throws(() => store.create(project.id), /Restore this project/);
+  const reloaded = new SessionStore(store.directory);
+  assert.equal(reloaded.project(project.id).archived, true, 'the archive survives a restart');
+  store.setProjectArchived(project.id, false);
+  assert.equal('archived' in store.project(project.id), false);
+  assert.equal(store.session(second.id).state, 'archived');
+  store.setProjectArchived(project.id, true);
+  assert.equal(store.addProject(projectPath).archived, undefined, 'opening the folder again restores the project');
+  assert.equal(store.create(project.id).projectId, project.id);
+});

@@ -5,6 +5,11 @@ export interface SlashCommandInfo {
     description?: string;
     source: SlashCommandSource;
     sourceInfo: SourceInfo;
+    argumentHint?: string;
+    /** A boost that combines with the other chainable commands in one message: `/3d /video /noslop make X`. */
+    chainable?: boolean;
+    /** Works only in the terminal UI. */
+    interactiveOnly?: boolean;
 }
 export interface BuiltinSlashCommand {
     name: string;
@@ -12,5 +17,6 @@ export interface BuiltinSlashCommand {
     argumentHint?: string;
 }
 export declare const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand>;
+export declare const HIDDEN_SLASH_COMMANDS: readonly string[];
 
 export declare function parseSlashCommand(text: string): { name: string; args: string } | undefined;

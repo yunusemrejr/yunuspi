@@ -1261,7 +1261,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 397; literal)
 - `github_search` — [`agent/extensions/pi-web-access/github-search.ts`](../agent/extensions/pi-web-access/github-search.ts) (line 422; literal)
-- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 349; literal)
+- `goal` — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 361; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 8; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 496; literal)
 - `image_crop` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 32; factory)
@@ -1295,9 +1295,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2277; literal)
 - `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 824; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1875; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1876; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 689; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 690; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
@@ -1354,8 +1354,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Literal slash commands
 
-- /3d — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 332)
-- /anatomy — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 342)
+- /3d — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 338)
+- /anatomy — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 352)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 568)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
@@ -1392,8 +1392,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 221)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 59)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 494)
-- /nobug — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 327)
-- /noslop — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 322)
+- /nobug — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 331)
+- /noslop — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 324)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 786)
 - /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 577)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
@@ -1425,7 +1425,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 594)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1780)
-- /video — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 337)
+- /video — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 345)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3143)
 
 ### Dynamic command owners
@@ -1619,6 +1619,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/expert-doctrine.ts`](../agent/extensions/lib/expert-doctrine.ts)
 - [`agent/extensions/lib/expert-domains.ts`](../agent/extensions/lib/expert-domains.ts)
 - [`agent/extensions/lib/expert-taste.ts`](../agent/extensions/lib/expert-taste.ts)
+- [`agent/extensions/lib/film-blend.ts`](../agent/extensions/lib/film-blend.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
@@ -1653,6 +1654,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
 - [`agent/extensions/lib/media-sync.ts`](../agent/extensions/lib/media-sync.ts)
 - [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts)
+- [`agent/extensions/lib/media-work.ts`](../agent/extensions/lib/media-work.ts)
 - [`agent/extensions/lib/memory-guard.ts`](../agent/extensions/lib/memory-guard.ts)
 - [`agent/extensions/lib/memory-redaction.ts`](../agent/extensions/lib/memory-redaction.ts)
 - [`agent/extensions/lib/metrics-panel.ts`](../agent/extensions/lib/metrics-panel.ts)
@@ -1922,7 +1924,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 31 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 32 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1931,6 +1933,7 @@ The exporter includes 31 public skill directories. This list is a path inventory
 - `audio` — [`agent/skills/audio/SKILL.md`](../agent/skills/audio/SKILL.md)
 - `browser` — [`agent/skills/browser/SKILL.md`](../agent/skills/browser/SKILL.md)
 - `build` — [`agent/skills/build/SKILL.md`](../agent/skills/build/SKILL.md)
+- `cinetic` — [`agent/skills/cinetic/SKILL.md`](../agent/skills/cinetic/SKILL.md)
 - `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../agent/skills/code-first-video/SKILL.md)
 - `create` — [`agent/skills/create/SKILL.md`](../agent/skills/create/SKILL.md)
 - `data-science` — [`agent/skills/data-science/SKILL.md`](../agent/skills/data-science/SKILL.md)

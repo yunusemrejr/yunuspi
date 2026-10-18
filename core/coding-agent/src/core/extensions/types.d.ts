@@ -921,6 +921,12 @@ export interface RegisteredCommand {
     name: string;
     sourceInfo: SourceInfo;
     description?: string;
+    /** Shown after the command name in autocomplete: what the arguments are. */
+    argumentHint?: string;
+    /** A boost that combines with the other chainable commands in one message: `/3d /video /noslop make X`. */
+    chainable?: boolean;
+    /** Works only in the terminal UI; other front ends present it as terminal-only. */
+    interactiveOnly?: boolean;
     getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;
     handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 }

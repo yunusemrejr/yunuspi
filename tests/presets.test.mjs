@@ -50,14 +50,17 @@ test('/video demands finished sound and a verified master; bare /video surveys f
 
 test('a three-way chain stacks full briefs and tracks only core fronts within budget', () => {
   const goal = ps.createPresetChainGoal(ps.parsePresetChain('3d', '/video /noslop please make a video about tides'));
-  assert.equal(goal.criteria.length, 10, 'three core fronts per preset plus V');
+  assert.equal(goal.criteria.length, 11, 'three core fronts per preset, the 3D film front, then V');
   assert.equal(goal.criteria.at(-1).id, 'V');
   const labels = goal.criteria.slice(0, -1).map((c) => c.text.split(':')[0]);
-  assert.deepEqual(labels, ['3D', '3D', '3D', 'Video', 'Video', 'Video', 'Noslop', 'Noslop', 'Noslop']);
+  assert.deepEqual(labels, ['3D', '3D', '3D', 'Video', 'Video', 'Video', 'Noslop', 'Noslop', 'Noslop', '3D film']);
   for (const section of [/Assignment: please make a video about tides/, /Boosts in force — 3D \+ Video \+ Noslop/,
     /\[3D\]/, /\[Video\]/, /\[Noslop\]/, /Desloppify this codebase/, /3D boost in force/, /Video boost in force/])
     assert.match(goal.text, section);
-  assert.match(goal.criteria[7].text, /^Noslop: UI density cut/, 'chained noslop tracks screen density as a core front');
+  assert.ok(!goal.criteria.some((c) => /UI density cut|interface works wherever/.test(c.text)), 'a film tracks no interface fronts');
+  assert.match(goal.criteria[6].text, /^Noslop: Copy and labels honest/, 'a film chain tracks honest on-screen copy instead');
+  const page = ps.createPresetChainGoal(ps.parsePresetChain('3d', '/noslop a three.js landing page hero'));
+  assert.ok(page.criteria.some((c) => /^Noslop: UI density cut/.test(c.text)), 'outside a film, chained noslop still tracks screen density');
   const bareChain = ps.createPresetChainGoal(ps.parsePresetChain('3d', '/noslop'));
   assert.match(bareChain.text, /with no assignment: survey the current project/);
   assert.equal(bareChain.criteria.length, 7);
@@ -82,7 +85,7 @@ test('/nobug /3d /video checks the media pipeline and output for bugs and weird 
   const chain = ps.parsePresetChain('nobug', '/3d /video make sure video has no problem');
   assert.deepEqual(chain, { presets: ['nobug', '3d', 'video'], task: 'make sure video has no problem' });
   const goal = ps.createPresetChainGoal(chain);
-  assert.equal(goal.criteria.length, 10);
+  assert.equal(goal.criteria.length, 11);
   for (const section of [/Boosts in force — Nobug \+ 3D \+ Video/, /\[Nobug\]/, /including work from chained boosts/,
     /audio\/picture sync, dropped or duplicated frames/, /z-fighting, inverted normals/, /weird or low-quality looks as bugs/])
     assert.match(goal.text, section);
@@ -98,9 +101,11 @@ test('/noslop /nobug on a terminal app reads the TUI output as its interface', (
 
 test('a four-way chain keeps two core fronts per preset inside the criteria budget', () => {
   const goal = ps.createPresetChainGoal(ps.parsePresetChain('nobug', '/noslop /3d /video make a film'));
-  assert.equal(goal.criteria.length, 9, 'two per preset plus V, never silently clipped');
-  assert.deepEqual(goal.criteria.slice(0, -1).map((c) => c.text.split(':')[0]), ['Nobug', 'Nobug', 'Noslop', 'Noslop', '3D', '3D', 'Video', 'Video']);
-  assert.match(goal.criteria[1].text, /interface works wherever it runs/, 'nobug keeps the interface front over dependencies when compressed');
+  assert.equal(goal.criteria.length, 10, 'two per preset, the 3D film front and V, never silently clipped');
+  assert.deepEqual(goal.criteria.slice(0, -1).map((c) => c.text.split(':')[0]), ['Nobug', 'Nobug', 'Noslop', 'Noslop', '3D', '3D', 'Video', 'Video', '3D film']);
+  assert.match(goal.criteria[1].text, /Broken code and dependencies/, 'in a film chain nobug tracks dependencies, not an interface');
+  const app = ps.createPresetChainGoal(ps.parsePresetChain('nobug', '/noslop /3d /anatomy the configurator page'));
+  assert.match(app.criteria[1].text, /interface works wherever it runs/, 'outside a film nobug keeps the interface front when compressed');
 });
 
 test('/anatomy covers both anatomy skills, chains with /3d and /video, and bare /anatomy surveys honestly', () => {
@@ -131,9 +136,9 @@ test('/anatomy covers both anatomy skills, chains with /3d and /video, and bare 
 
 test('a five-way chain keeps two core fronts per preset inside the criteria budget', () => {
   const goal = ps.createPresetChainGoal(ps.parsePresetChain('anatomy', '/3d /video /noslop /nobug make a reveal film'));
-  assert.equal(goal.criteria.length, 11);
+  assert.equal(goal.criteria.length, 12);
   assert.deepEqual(goal.criteria.slice(0, -1).map((c) => c.text.split(':')[0]),
-    ['Anatomy', 'Anatomy', '3D', '3D', 'Video', 'Video', 'Noslop', 'Noslop', 'Nobug', 'Nobug']);
+    ['Anatomy', 'Anatomy', '3D', '3D', 'Video', 'Video', 'Noslop', 'Noslop', 'Nobug', 'Nobug', '3D film']);
   assert.match(goal.criteria[1].text, /One truthful model/);
   const boosted = ps.createBoostedGoal('Make a reveal film of a kettle.', ['anatomy', '3d', 'video', 'noslop', 'nobug'], 'lit');
   assert.ok(boosted.criteria.length <= 12);
@@ -167,7 +172,7 @@ test('/3d /video /noslop <task> starts one stacked goal from a single dispatch',
   for (const name of ['noslop', 'nobug', '3d', 'video', 'anatomy']) assert.equal(typeof h.commands[name]?.handler, 'function', `${name} registered`);
   await h.commands['3d'].handler('/video /noslop please make a video about tides', h.ctx); await tick();
   const goal = h.entries.at(-1).data;
-  assert.equal(goal.criteria.length, 10);
+  assert.equal(goal.criteria.length, 11);
   assert.match(h.sent[0], /Boosts in force — 3D \+ Video \+ Noslop/);
   assert.deepEqual(h.sentOptions[0], { authored: true, userText: '/3d /video /noslop please make a video about tides', deliverAs: 'followUp' });
   assert.match(h.notes.at(-1).text, /3D \+ Video \+ Noslop boost on/);
@@ -242,7 +247,8 @@ test('a boosted goal keeps the user requirements first, budgets the fronts, and 
   }
   const crowded = ps.createBoostedGoal(`Build the thing.\n${bullets}`, ['nobug', 'noslop', '3d', 'video'], 'lit');
   assert.equal(crowded.criteria.length, 12);
-  assert.deepEqual(crowded.criteria.slice(0, 7).map((c) => c.text), listed.slice(0, 7), 'own requirements come first and take the slots left');
+  assert.deepEqual(crowded.criteria.slice(0, 6).map((c) => c.text), listed.slice(0, 6), 'own requirements come first and take the slots left');
+  assert.match(crowded.criteria.at(-2).text, /^3D film: /, 'the 3D film front keeps its reserved slot');
 });
 
 test('a bare boost joins a live goal: fronts fill free slots before V, and a repeat adds nothing', () => {

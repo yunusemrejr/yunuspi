@@ -953,18 +953,18 @@ export function sysPromptHtml(snapshot: SysSnapshot): string {
     `<pre id="prompt-text">${body}</pre>` + copyScript("copy-prompt", "prompt-text", "copy-prompt-status", "the prompt");
 }
 
-const SOURCE_LABELS: Record<string, string> = { extension: "Extension commands", prompt: "Prompt templates", skill: "Skill commands" };
-const SOURCE_ORDER = ["extension", "prompt", "skill"];
+const SOURCE_LABELS: Record<string, string> = { boost: "Boosts — combine any of these in one message: /3d /video /noslop make …", extension: "Extension commands", prompt: "Prompt templates", skill: "Skill commands" };
+const SOURCE_ORDER = ["boost", "extension", "prompt", "skill"];
 
 const COMMAND_FILTER_SCRIPT = `<script>(function(){var box=document.getElementById('cmd-filter'),count=document.getElementById('cmd-count'),none=document.getElementById('cmd-none');if(!box)return;var rows=[].slice.call(document.querySelectorAll('[data-cmd]')),groups=[].slice.call(document.querySelectorAll('[data-group]'));function apply(){var q=box.value.trim().toLowerCase(),shown=0;rows.forEach(function(r){var hit=!q||r.getAttribute('data-cmd').indexOf(q)>=0;r.hidden=!hit;if(hit)shown++;});groups.forEach(function(g){g.hidden=!g.querySelector('[data-cmd]:not([hidden])');});count.textContent=q?shown+' of '+rows.length+' shown':rows.length+' registered';none.hidden=shown>0;}box.addEventListener('input',apply);})();</script>`;
 
-export function commandsHtml(commands: { name: string; description?: string; source?: string }[]): string {
+export function commandsHtml(commands: { name: string; description?: string; source?: string; chainable?: boolean }[]): string {
   const rows = [...commands]
     .filter((command) => command && typeof command.name === "string" && command.name)
     .sort((a, b) => a.name.localeCompare(b.name));
   const groups = new Map<string, typeof rows>();
   for (const row of rows) {
-    const key = typeof row.source === "string" && row.source ? row.source : "other";
+    const key = row.chainable ? "boost" : typeof row.source === "string" && row.source ? row.source : "other";
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   const rank = (key: string) => (SOURCE_ORDER.includes(key) ? SOURCE_ORDER.indexOf(key) : SOURCE_ORDER.length);
@@ -1864,6 +1864,7 @@ export default function (pi: any) {
               name: String(command?.name ?? ""),
               description: typeof command?.description === "string" ? command.description : "",
               source: typeof command?.source === "string" ? command.source : "",
+              chainable: command?.chainable === true,
             })),
           ),
           ctx,

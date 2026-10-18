@@ -43,6 +43,27 @@ const text = (value, max = 100_000) => {
   return value;
 };
 const idle = worker => { if (worker.busy) throw Error('Stop the current turn before changing this session.'); };
+const coreModule = name => import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core', name)).href);
+// Commands the renderer answers itself; they never reach the core.
+const DESKTOP_COMMANDS = ['model', 'models', 'metrics', 'cost', 'self', 'session', 'skills', 'tools', 'help', 'new', 'name'];
+
+// A typed command is checked against the session's real command list before it
+// is sent, so a near miss is offered as a correction instead of being dropped
+// from a boost chain or sent to the model as a paid prompt.
+async function checkCommand(id, message) {
+  const [{ correctSlashCommands }, { BUILTIN_SLASH_COMMANDS }] = await Promise.all([coreModule('command-correction.js'), coreModule('slash-commands.js')]);
+  const { commands } = await (await workerFor(id)).request('get_commands');
+  const terminal = [...BUILTIN_SLASH_COMMANDS.map(c => c.name).filter(name => !DESKTOP_COMMANDS.includes(name)), ...commands.filter(c => c.interactiveOnly).map(c => c.name)];
+  const result = correctSlashCommands(message, {
+    commands: [...commands.filter(c => c.source !== 'skill').map(c => c.name), ...DESKTOP_COMMANDS, ...terminal],
+    chainable: commands.filter(c => c.chainable).map(c => c.name),
+  });
+  const head = /^\s*\/([\w-]+)(?=\s|$)/.exec(result?.text ?? message)?.[1];
+  // Never offer a correction that would then be sent: a terminal-only command is only explained.
+  if (head && terminal.includes(head)) return { text: message, fixes: [], terminalOnly: `/${head}` };
+  return result ?? null;
+}
+
 async function projectTrustStore() {
   const { ProjectTrustStore } = await import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core/trust-manager.js')).href);
   return new ProjectTrustStore(agentDir);
@@ -171,6 +192,22 @@ async function sessionAction(id, action) {
   return { cancelled: false };
 }
 
+async function projectAction(id, action) {
+  const project = store.project(text(id, 40));
+  if (!['archive', 'restore'].includes(action)) throw Error('Unknown project action.');
+  if (action === 'archive') {
+    const running = store.data.sessions.filter(s => s.projectId === project.id && workers.has(s.id));
+    if (running.some(s => workers.get(s.id).busy)) {
+      const result = await dialog.showMessageBox(window, { type: 'question', message: `Stop running sessions in “${project.name}”?`, detail: 'Archiving the project stops its sessions. Conversations are saved; restore the project from Archive to continue them.', buttons: ['Cancel', 'Stop and archive'], defaultId: 0, cancelId: 0, noLink: true });
+      if (result.response === 0) return { cancelled: true };
+    }
+    await Promise.allSettled(running.map(s => stop(s.id)));
+  }
+  store.setProjectArchived(project.id, action === 'archive');
+  publish();
+  return { cancelled: false };
+}
+
 async function dispatch(action, input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error('Invalid action.');
   switch (action) {
@@ -200,6 +237,7 @@ async function dispatch(action, input = {}) {
       const result = store.update(input.id, input.patch); publish(); return result;
     }
     case 'sessionAction': return sessionAction(input.id, input.action);
+    case 'projectAction': return projectAction(input.id, input.action);
     case 'prompt': {
       const message = text(input.message);
       if (!message.trim() && !input.images?.length) throw Error('Write a message or attach an image.');
@@ -236,6 +274,7 @@ async function dispatch(action, input = {}) {
     // that the cost label depends on.
     case 'stats': return workers.has(input.id) ? (await workerFor(input.id)).request('get_session_stats') : null;
     case 'commands': return (await workerFor(input.id)).request('get_commands');
+    case 'checkCommand': return checkCommand(input.id, text(input.message));
     case 'extensionResponse': {
       const worker = workers.get(input.id);
       if (!worker) return;

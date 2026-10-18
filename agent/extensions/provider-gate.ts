@@ -485,7 +485,7 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 	pi.registerCommand?.("provider-health", {
 		description:
 			"Show shared provider cooldown/rate state (provider-health.json)",
-		handler: () => {
+		handler: (_args: string, ctx: any) => {
 			const snap = snapshot();
 			const lines: string[] = [
 				`state: ${snap.file}`,
@@ -509,7 +509,8 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			}
 			if (!snap.providers.length && !snap.pending.length)
 				lines.push("no recorded provider state");
-			return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+			// Command handlers' return values are discarded; the report must be shown.
+			ctx.ui?.notify?.(lines.join("\n"), "info");
 		},
 	});
 }

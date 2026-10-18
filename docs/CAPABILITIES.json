@@ -3280,12 +3280,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 332
+        "line": 338
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 342
+        "line": 352
       },
       {
         "name": "bg",
@@ -3470,12 +3470,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 327
+        "line": 331
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 322
+        "line": 324
       },
       {
         "name": "obs",
@@ -3635,7 +3635,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 337
+        "line": 345
       },
       {
         "name": "websearch",
@@ -3865,7 +3865,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 349,
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -4069,7 +4069,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1875,
+        "line": 1876,
         "kind": "literal"
       },
       {
@@ -4081,7 +4081,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 689,
+        "line": 690,
         "kind": "literal"
       },
       {
@@ -4355,7 +4355,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 349,
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -4487,7 +4487,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1875,
+        "line": 1876,
         "kind": "literal"
       },
       {
@@ -4499,7 +4499,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 689,
+        "line": 690,
         "kind": "literal"
       },
       {
@@ -4799,7 +4799,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 710,
+      "sourceFiles": 712,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -5209,6 +5209,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/film-blend.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/git-authority.ts",
         "exists": true
       },
@@ -5342,6 +5346,10 @@
       },
       {
         "path": "agent/extensions/lib/media-timeline.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/media-work.ts",
         "exists": true
       },
       {
@@ -7132,6 +7140,10 @@
       {
         "name": "build",
         "path": "agent/skills/build/SKILL.md"
+      },
+      {
+        "name": "cinetic",
+        "path": "agent/skills/cinetic/SKILL.md"
       },
       {
         "name": "code-first-video",

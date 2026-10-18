@@ -148,6 +148,12 @@ export interface RpcSlashCommand {
     source: "extension" | "prompt" | "skill";
     /** Source metadata for the owning resource */
     sourceInfo: SourceInfo;
+    /** What the arguments are, for extension commands that declare it */
+    argumentHint?: string;
+    /** A boost that combines with the other chainable commands in one message */
+    chainable?: boolean;
+    /** Works only in the terminal UI */
+    interactiveOnly?: boolean;
 }
 export interface RpcSessionState {
     model?: Model<any>;

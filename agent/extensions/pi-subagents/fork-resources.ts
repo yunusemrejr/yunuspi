@@ -7,7 +7,9 @@
  * package prompts — so the fork re-declares them via `resources_discover`.
  * Upstream's duplicate package skills (council-mode, pi-subagents) were
  * already shadowed by user ~/skills copies and are deliberately NOT
- * re-declared. Upstream provenance: npm:pi-subagents (MIT).
+ * re-declared. Upstream provenance: npm:pi-subagents (MIT). prompts/fanout.md
+ * is the fan-out worker contract the orchestrator reads, not a user command,
+ * so it is not registered as a template.
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +18,6 @@ const baseDir = dirname(fileURLToPath(import.meta.url));
 
 const PROMPTS = [
 	"council.md",
-	"fanout.md",
 	"gather-context-and-clarify.md",
 	"parallel-cleanup.md",
 	"parallel-research.md",

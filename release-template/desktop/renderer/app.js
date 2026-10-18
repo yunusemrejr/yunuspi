@@ -5,7 +5,7 @@ const api = window.yunuspi;
 const $ = id => document.getElementById(id);
 let workspace = { projects: [], sessions: [], runtime: [] }, activeId = null, archived = false;
 let switchVersion = 0, renderTimer, toastTimer, modalCancel, modalOwner, modalTimer, modalSequence = 0, opening = false;
-const conversations = new Map(), views = new Map(), attachments = new Map(), extensionQueue = [];
+const conversations = new Map(), views = new Map(), attachments = new Map(), commandLists = new Map(), extensionQueue = [];
 const safeError = error => String(error?.message ?? error).replace(/^Error invoking remote method '[^']*': Error: /, '').slice(-1800);
 const current = () => workspace.sessions.find(s => s.id === activeId);
 const projectOf = session => workspace.projects.find(p => p.id === session?.projectId);
@@ -41,6 +41,7 @@ function setEditorDraft(id, value, focus = false) {
 function syncWorkspace(value) {
   workspace = value;
   const retained = new Set(workspace.sessions.filter(s => s.state === 'open').map(s => s.id));
+  for (const id of commandLists.keys()) if (!retained.has(id)) commandLists.delete(id);
   for (const id of conversations.keys()) if (!retained.has(id)) {
     conversations.delete(id); attachments.delete(id); views.get(id)?.nodes.clear();
     if (!workspace.sessions.some(s => s.id === id)) views.delete(id);
@@ -56,11 +57,20 @@ function renderSidebar() {
   const query = $('session-search').value.trim().toLocaleLowerCase();
   const fragment = document.createDocumentFragment();
   for (const project of workspace.projects) {
-    const sessions = workspace.sessions.filter(s => s.projectId === project.id && (archived ? s.state === 'archived' : s.state !== 'archived') && (!query || `${s.title} ${project.name}`.toLocaleLowerCase().includes(query))).sort((a, b) => b.updatedAt - a.updatedAt);
-    if (!sessions.length && (query || archived)) continue;
+    // An archived project shows only in Archive, with all its sessions; elsewhere Archive lists archived sessions.
+    if (!archived && project.archived) continue;
+    const sessions = workspace.sessions.filter(s => s.projectId === project.id && (project.archived || (archived ? s.state === 'archived' : s.state !== 'archived')) && (!query || `${s.title} ${project.name}`.toLocaleLowerCase().includes(query))).sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!sessions.length && (query || archived) && !(archived && project.archived && !query)) continue;
     const group = element('section', 'project-group'), heading = element('div', 'project-heading');
-    heading.append(icon('folder'), element('span', '', project.name)); heading.title = project.path;
-    const add = element('button', 'icon-button'); add.append(icon('plus')); add.setAttribute('aria-label', `New session in ${project.name}`); add.onclick = () => tryAction(() => newSession(project.id)); heading.append(add); group.append(heading);
+    heading.append(icon(project.archived ? 'archive' : 'folder'), element('span', '', project.name)); heading.title = project.path;
+    if (project.archived) {
+      const restore = element('button', 'icon-button'); restore.append(icon('restore')); restore.setAttribute('aria-label', `Restore project ${project.name}`); restore.title = 'Restore project'; restore.onclick = () => tryAction(() => api.projectAction(project.id, 'restore')); heading.append(restore);
+    } else {
+      const add = element('button', 'icon-button'); add.append(icon('plus')); add.setAttribute('aria-label', `New session in ${project.name}`); add.onclick = () => tryAction(() => newSession(project.id));
+      const more = element('button', 'icon-button project-menu'); more.append(icon('dots')); more.setAttribute('aria-label', `Actions for project ${project.name}`); more.onclick = () => showProjectMenu(project.id);
+      heading.append(add, more);
+    }
+    group.append(heading);
     for (const session of sessions) {
       const runtime = workspace.runtime.find(r => r.id === session.id);
       const row = element('div', `session-row${session.id === activeId ? ' active' : ''}`);
@@ -84,7 +94,8 @@ function renderSidebar() {
   const wasMenu = document.activeElement?.classList.contains('row-menu');
   $('session-list').replaceChildren(fragment);
   if (focusedId) $('session-list').querySelector(`[data-session-id="${focusedId}"] ${wasMenu ? '.row-menu' : '.session-select'}`)?.focus({ preventScroll: true });
-  $('archive-count').textContent = String(workspace.sessions.filter(s => s.state === 'archived').length || '');
+  const shelved = new Set(workspace.projects.filter(p => p.archived).map(p => p.id));
+  $('archive-count').textContent = String(shelved.size + workspace.sessions.filter(s => s.state === 'archived' && !shelved.has(s.projectId)).length || '');
   $('archive-view').setAttribute('aria-pressed', String(archived));
   $('archive-view').querySelector('span').textContent = archived ? 'All sessions' : 'Archive';
 }
@@ -125,7 +136,7 @@ function renderChrome() {
   $('welcome').querySelector('h1').textContent = archived ? 'A little room to think.' : 'What are we building?';
 }
 async function newSession(projectId) {
-  if (!projectId) projectId = current()?.projectId || workspace.projects[0]?.id;
+  if (!projectId) projectId = current()?.projectId || workspace.projects.find(p => !p.archived)?.id;
   if (!projectId) { const project = await api.chooseProject(); if (!project) return; projectId = project.id; }
   archived = false;
   const session = await api.createSession(projectId);
@@ -133,7 +144,7 @@ async function newSession(projectId) {
 }
 async function openSession(id) {
   if (current()?.id === id && !conversationOf(id).error && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
-  saveView();
+  saveView(); closeCommandMenu();
   const version = ++switchVersion;
   activeId = id; opening = true;
   const session = workspace.sessions.find(s => s.id === id);
@@ -318,15 +329,43 @@ function renderAttachments() {
   }
   $('attachment-list').replaceChildren(fragment);
 }
-async function sendPrompt(event) {
+// A near-miss command is offered back, never sent as typed: Enter (the focused
+// button) puts the correction in the composer and sends it.
+function offerCorrection(id, check) {
+  const fixes = check.fixes.map(fix => fix.to).join(' ');
+  modal(`Did you mean ${fixes}?`, content => {
+    content.append(element('p', '', `You typed ${check.fixes.map(fix => fix.from).join(', ')}, which is not a command here.`));
+    content.append(element('pre', 'command-preview', check.text.length > 400 ? `${check.text.slice(0, 399)}…` : check.text));
+    const actions = element('div', 'dialog-actions'), keep = element('button', 'quiet-button', 'Keep editing'), use = element('button', 'primary-button', `Use ${fixes}`);
+    keep.onclick = () => { closeModal(false); $('prompt').focus(); };
+    use.onclick = () => { closeModal(false); setEditorDraft(id, check.text, true); tryAction(() => sendPrompt(null, { checked: true })); };
+    actions.append(keep, use); content.append(actions); queueMicrotask(() => use.focus());
+  });
+}
+async function sendPrompt(event, { checked = false } = {}) {
   event?.preventDefault();
+  closeCommandMenu();
   const id = activeId, session = current(); if (!session || opening) return;
   const state = conversationOf(id); if (state.sending) return;
   const message = $('prompt').value.trim(), images = [...(attachments.get(id) || [])];
   if (!message && !images.length) return;
-  if (/^\/models?\s*$/.test(message)) { setEditorDraft(id, ''); return showModels(); }
+  if (/^\/models?(?:\s|$)/.test(message)) { setEditorDraft(id, ''); return showModels(); }
   if (/^\/(metrics|cost|self|session)\s*$/.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await api.warm(id); state.stats = await api.stats(id); renderContext(); return; }
   if (/^\/(skills|tools|help)\s*$/.test(message)) { setEditorDraft(id, ''); return showCommands(); }
+  if (/^\/new\s*$/.test(message)) { setEditorDraft(id, ''); return newSession(session.projectId); }
+  const rename = /^\/name(?:\s+([\s\S]+))?$/.exec(message);
+  if (rename) { setEditorDraft(id, ''); return rename[1] ? api.updateSession(id, { title: rename[1].trim() }) : renameSession(id); }
+  if (!checked && message.startsWith('/')) {
+    state.sending = true;
+    let check = null;
+    try { check = await api.checkCommand(id, message); }
+    catch { check = null; } // The send itself reports a runtime that cannot start.
+    finally { state.sending = false; }
+    if (activeId !== id || $('prompt').value.trim() !== message) return;
+    if (check?.fixes?.length) return offerCorrection(id, check);
+    if (check?.terminalOnly) { toast(`${check.terminalOnly} works in the terminal app only. Type / to see what works here.`); return; }
+    if (check?.unknown) { toast(`${check.unknown} is not a command. Type / to see the commands.`, 'error'); return; }
+  }
   state.sending = true; state.error = '';
   const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? 'Queued' : 'Sending…', revision: 0 };
   state.messages.push(optimistic); viewOf(id).pinned = true;
@@ -383,8 +422,23 @@ async function loadingModal(title, id, load, build) {
 function actionButton(label, symbol, handler, danger = false) {
   const button = element('button', danger ? 'danger' : ''); button.append(icon(symbol), element('span', '', label)); button.onclick = () => { closeModal(false); tryAction(handler); }; return button;
 }
+function showProjectMenu(id) {
+  const project = workspace.projects.find(p => p.id === id); if (!project) return;
+  modal(project.name, content => {
+    const list = element('div', 'dialog-list');
+    if (project.archived) list.append(actionButton('Restore project', 'restore', () => api.projectAction(id, 'restore')));
+    else {
+      list.append(actionButton('New session', 'plus', () => newSession(id)));
+      const archive = actionButton('Archive project', 'archive', () => api.projectAction(id, 'archive'));
+      archive.querySelector('span').append(element('small', '', 'Hides the project and its sessions from the sidebar. Restore it from Archive.'));
+      list.append(archive);
+    }
+    content.append(list);
+  });
+}
 function showSessionMenu(id) {
   const session = workspace.sessions.find(s => s.id === id); if (!session) return;
+  if (projectOf(session)?.archived) return showProjectMenu(session.projectId);
   modal(session.title, content => {
     const list = element('div', 'dialog-list');
     if (session.state === 'archived') list.append(actionButton('Restore session', 'restore', () => api.sessionAction(id, 'restore')));
@@ -426,18 +480,123 @@ async function showThinking() {
   const id = activeId; if (!id) return;
   await loadingModal('Thinking level', id, () => api.models(id), (content, { levels }) => { const list = element('div', 'dialog-list'); for (const level of levels) list.append(actionButton(level[0].toUpperCase() + level.slice(1), 'brain', async () => { await api.setThinking(id, level); conversationOf(id).thinkingLevel = level; renderChrome(); })); content.append(list); });
 }
+// The session's commands, fetched once per runtime: boosts (chainable), then
+// one-shot commands and workflows, then skills.
+function commandsFor(id) {
+  // Terminal-only commands cannot run here, so they are not offered.
+  if (!commandLists.has(id)) commandLists.set(id, api.commands(id).then(result => result.commands.filter(c => !c.interactiveOnly)).catch(error => { commandLists.delete(id); throw error; }));
+  return commandLists.get(id);
+}
+const COMMAND_GROUPS = [
+  { key: 'boost', title: 'Boosts', note: 'Combine any of these in one message: /3d /video /noslop make a film about…', symbol: 'link' },
+  { key: 'command', title: 'Commands', note: 'Run one at a time.', symbol: 'compass' },
+  { key: 'skill', title: 'Skills', note: 'Load one guide into the session.', symbol: 'file' },
+];
+const groupOf = command => command.chainable ? 'boost' : command.source === 'skill' ? 'skill' : 'command';
+function commandOption(command, symbol) {
+  const button = element('button'), detail = element('span', '', `/${command.name}`);
+  detail.append(element('small', '', command.description || command.source)); button.append(icon(symbol), detail);
+  return button;
+}
 async function showCommands() {
   const id = activeId; if (!id) { toast('Open a project session first.'); return; }
-  await loadingModal('Skills & commands', id, () => api.commands(id), (content, { commands }) => {
+  await loadingModal('Skills & commands', id, () => commandsFor(id), (content, commands) => {
     const search = element('input', 'dialog-search'); search.type = 'search'; search.placeholder = 'Find a skill or command'; search.setAttribute('aria-label', 'Search skills and commands'); const list = element('div', 'dialog-list');
     const draw = () => {
       list.replaceChildren();
-      for (const command of commands.filter(c => `${c.name} ${c.description ?? ''}`.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())).slice(0, 150)) {
-        const button = element('button'), detail = element('span', '', `/${command.name}`); detail.append(element('small', '', command.description || command.source)); button.append(icon('compass'), detail);
-        button.onclick = () => { closeModal(false); setEditorDraft(id, `/${command.name} `, true); }; list.append(button);
+      const query = search.value.toLocaleLowerCase();
+      const matches = commands.filter(c => `${c.name} ${c.description ?? ''}`.toLocaleLowerCase().includes(query));
+      for (const group of COMMAND_GROUPS) {
+        const members = matches.filter(c => groupOf(c) === group.key).slice(0, 150);
+        if (!members.length) continue;
+        const heading = element('div', 'command-group'); heading.append(element('strong', '', group.title), element('span', '', group.note)); list.append(heading);
+        for (const command of members) {
+          const button = commandOption(command, group.symbol); if (group.key === 'boost') button.classList.add('boost');
+          button.onclick = () => { closeModal(false); setEditorDraft(id, `/${command.name} `, true); }; list.append(button);
+        }
       }
+      if (!list.childNodes.length) list.append(element('p', 'empty-hint', 'No command matches.'));
     }; search.oninput = draw; content.append(search, list); draw(); search.focus();
   });
+}
+
+// Slash menu: typing /… at the start lists commands; after a boost, typing /…
+// again lists the boosts that can still join the chain.
+let commandMenu = null, commandMenuRequest = 0;
+function slashContext() {
+  const prompt = $('prompt'); if (prompt.selectionStart !== prompt.selectionEnd) return null;
+  const before = prompt.value.slice(0, prompt.selectionStart);
+  const lead = /^\/([\w:-]*)$/.exec(before);
+  if (lead) return { kind: 'command', query: lead[1].toLocaleLowerCase(), from: 0 };
+  const head = /^\/([\w-]+)\s/.exec(prompt.value), token = /(?:^|\s)\/([\w-]*)$/.exec(before);
+  if (head && token) return { kind: 'chain', head: head[1], query: token[1].toLocaleLowerCase(), from: before.length - token[1].length - 1 };
+  return null;
+}
+function closeCommandMenu() {
+  commandMenu = null; commandMenuRequest++;
+  $('command-menu').hidden = true; $('command-menu').replaceChildren();
+  $('prompt').setAttribute('aria-expanded', 'false'); $('prompt').removeAttribute('aria-activedescendant');
+}
+function rankCommands(commands, query) {
+  const score = c => c.name.toLocaleLowerCase().startsWith(query) ? 0 : c.name.toLocaleLowerCase().includes(query) ? 1 : 2;
+  return commands.filter(c => score(c) < 2 || (query.length > 1 && (c.description ?? '').toLocaleLowerCase().includes(query))).sort((a, b) => score(a) - score(b));
+}
+async function updateCommandMenu() {
+  const id = activeId, request = ++commandMenuRequest;
+  if (!id || !slashContext()) return closeCommandMenu();
+  let commands; try { commands = await commandsFor(id); } catch { return closeCommandMenu(); }
+  const context = slashContext();
+  if (request !== commandMenuRequest || id !== activeId || !context) return request === commandMenuRequest ? closeCommandMenu() : undefined;
+  const sections = [];
+  if (context.kind === 'command') {
+    const ranked = rankCommands(commands, context.query);
+    for (const group of COMMAND_GROUPS) {
+      if (group.key === 'skill' && context.query.length < 2) continue;
+      const members = ranked.filter(c => groupOf(c) === group.key).slice(0, group.key === 'boost' ? 8 : 6);
+      if (members.length) sections.push({ group, members });
+    }
+  } else if (commands.find(c => c.name === context.head)?.chainable) {
+    const present = new Set([...$('prompt').value.matchAll(/(?:^|\s)\/([\w-]+)/g)].map(match => match[1].toLocaleLowerCase()));
+    const members = commands.filter(c => c.chainable && !present.has(c.name) && c.name.startsWith(context.query));
+    if (members.length) sections.push({ group: { ...COMMAND_GROUPS[0], note: `Joins /${context.head} in the same message.` }, members });
+  }
+  if (!sections.length) return closeCommandMenu();
+  commandMenu = { context, items: sections.flatMap(section => section.members), index: 0 };
+  const fragment = document.createDocumentFragment();
+  let position = 0;
+  for (const { group, members } of sections) {
+    const heading = element('div', 'command-group'); heading.setAttribute('role', 'presentation'); heading.append(element('strong', '', group.title), element('span', '', group.note)); fragment.append(heading);
+    for (const command of members) {
+      const option = element('div', `command-option${group.key === 'boost' ? ' boost' : ''}`), index = position++;
+      option.id = `command-option-${index}`; option.setAttribute('role', 'option');
+      const detail = element('span', '', `/${command.name}`); detail.append(element('small', '', command.description || command.source));
+      option.append(icon(group.symbol), detail);
+      option.onmousedown = event => event.preventDefault();
+      option.onclick = () => { commandMenu.index = index; acceptCommand(); };
+      fragment.append(option);
+    }
+  }
+  $('command-menu').replaceChildren(fragment); $('command-menu').hidden = false;
+  $('prompt').setAttribute('aria-expanded', 'true');
+  highlightCommand();
+}
+function highlightCommand() {
+  if (!commandMenu) return;
+  for (const option of $('command-menu').querySelectorAll('[role="option"]')) {
+    const selected = option.id === `command-option-${commandMenu.index}`;
+    option.setAttribute('aria-selected', String(selected));
+    if (selected) option.scrollIntoView({ block: 'nearest' });
+  }
+  $('prompt').setAttribute('aria-activedescendant', `command-option-${commandMenu.index}`);
+}
+function acceptCommand() {
+  if (!commandMenu || !activeId) return;
+  const command = commandMenu.items[commandMenu.index], prompt = $('prompt'), { from } = commandMenu.context;
+  const after = prompt.value.slice(prompt.selectionStart).replace(/^\S*/, '');
+  const insert = `/${command.name} `, value = prompt.value.slice(0, from) + insert + after.replace(/^\s+/, '');
+  closeCommandMenu();
+  setEditorDraft(activeId, value, true);
+  prompt.selectionStart = prompt.selectionEnd = from + insert.length;
 }
 function showSettings() {
   modal('Settings', content => {
@@ -456,7 +615,7 @@ async function importSession() { const session = await api.importSession(); if (
 function showProjects() {
   modal('Projects', content => {
     const list = element('div', 'dialog-list');
-    for (const project of workspace.projects) list.append(actionButton(project.name, 'folder', () => newSession(project.id)));
+    for (const project of workspace.projects.filter(p => !p.archived)) list.append(actionButton(project.name, 'folder', () => newSession(project.id)));
     list.append(element('hr'), actionButton('Open another project…', 'plus', async () => { const project = await api.chooseProject(); if (project) await newSession(project.id); })); content.append(list);
   });
 }
@@ -584,6 +743,7 @@ $('prompt').oninput = () => {
   resizePrompt();
   if (!activeId) return;
   setEditorDraft(activeId, $('prompt').value);
+  void updateCommandMenu();
   // Typing is intent to send: start a closed session's runtime now so the
   // send (and the model menu) does not wait for it. Browsing alone never does.
   if (!warming.has(activeId) && !workspace.runtime.some(r => r.id === activeId)) {
@@ -591,7 +751,17 @@ $('prompt').oninput = () => {
     api.warm(id).catch(() => {}).finally(() => warming.delete(id));
   }
 };
-$('prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt()); } };
+$('prompt').onkeydown = event => {
+  if (commandMenu && !event.isComposing) {
+    const count = commandMenu.items.length;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); commandMenu.index = (commandMenu.index + (event.key === 'ArrowDown' ? 1 : count - 1)) % count; highlightCommand(); return; }
+    if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') { event.preventDefault(); acceptCommand(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeCommandMenu(); return; }
+  }
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt()); }
+};
+$('prompt').addEventListener('click', () => { if (commandMenu || slashContext()) void updateCommandMenu(); });
+$('prompt').addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== $('prompt')) closeCommandMenu(); }, 0));
 $('stop').onclick = () => { if (activeId) tryAction(() => api.abort(activeId)); };
 $('model-button').onclick = () => tryAction(showModels);
 $('thinking-button').onclick = () => tryAction(showThinking);

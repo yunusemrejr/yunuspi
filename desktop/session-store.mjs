@@ -17,7 +17,7 @@ function validWorkspace(saved) {
   for (const project of saved.projects) {
     if (!record(project) || typeof project.id !== 'string' || !UUID.test(project.id) || projectIds.has(project.id)
       || typeof project.path !== 'string' || !path.isAbsolute(project.path) || typeof project.name !== 'string'
-      || typeof project.trusted !== 'boolean') return false;
+      || typeof project.trusted !== 'boolean' || project.archived !== undefined && project.archived !== true) return false;
     projectIds.add(project.id);
   }
   const sessionIds = new Set();
@@ -127,12 +127,14 @@ export class SessionStore {
     const canonical = fs.realpathSync(directory);
     if (!fs.statSync(canonical).isDirectory()) throw Error('Choose a project folder.');
     const existing = this.data.projects.find(p => p.path === canonical);
+    // Opening an archived project's folder again is a clear wish to use it.
+    if (existing?.archived) return this.setProjectArchived(existing.id, false);
     if (existing) return existing;
     const project = { id: randomUUID(), path: canonical, name: path.basename(canonical) || canonical, trusted: false };
     return this.commit(() => { this.data.projects.push(project); return project; });
   }
   create(projectId) {
-    this.project(projectId);
+    if (this.project(projectId).archived) throw Error('Restore this project before starting a session in it.');
     if (this.data.sessions.length >= 2000) throw Error('The workspace contains 2,000 sessions. Delete unneeded sessions first.');
     const now = Date.now();
     const session = { id: randomUUID(), projectId, title: 'New session', state: 'open', createdAt: now, updatedAt: now, draft: '' };
@@ -169,8 +171,25 @@ export class SessionStore {
   activate(id) {
     const session = this.session(id);
     if (session.state === 'archived') throw Error('Restore this session before opening it.');
+    if (this.project(session.projectId).archived) throw Error('Restore this project before opening its sessions.');
     if (session.state === 'open' && this.data.activeId === id) return session;
     return this.commit(() => { const opened = this.session(id); opened.state = 'open'; this.data.activeId = id; return opened; });
+  }
+  // An archived project leaves the sidebar with all its sessions; each session
+  // keeps its own state, so restoring the project brings back exactly what was
+  // there. Open sessions close: the caller stops their runtimes first.
+  setProjectArchived(id, archived) {
+    if (Boolean(this.project(id).archived) === archived) return this.project(id);
+    return this.commit(() => {
+      const project = this.project(id);
+      if (archived) project.archived = true; else delete project.archived;
+      if (archived) for (const session of this.data.sessions) {
+        if (session.projectId !== id) continue;
+        if (session.state === 'open') session.state = 'closed';
+        if (this.data.activeId === session.id) this.data.activeId = null;
+      }
+      return project;
+    });
   }
   transcriptDirectory(id, create = true) {
     this.session(id);

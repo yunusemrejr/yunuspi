@@ -19,6 +19,7 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
     <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
     <symbol id="i-workbench" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16m3-11h0m0 5h0"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
     <symbol id="i-archive" viewBox="0 0 24 24"><path d="M4 8h16v13H4ZM3 3h18v5H3Zm6 9h6"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
@@ -72,9 +73,10 @@
         <div id="session-error" class="session-error" role="alert" hidden><span></span><button id="retry-session" class="quiet-button">Reconnect</button></div>
         <footer class="composer-zone">
           <div id="attachment-list" class="attachments"></div>
+          <div id="command-menu" class="command-menu" role="listbox" aria-label="Commands" hidden></div>
           <form id="composer" class="composer">
             <label class="sr-only" for="prompt">Message YunusPi</label>
-            <textarea id="prompt" rows="1" maxlength="100000" placeholder="Give the rat something to work on…" spellcheck="false"></textarea>
+            <textarea id="prompt" rows="1" maxlength="100000" placeholder="Give the rat something to work on…  Type / for commands" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="command-menu" aria-expanded="false"></textarea>
             <div class="composer-toolbar"><div class="composer-options"><button id="attach" type="button" class="icon-button" aria-label="Attach images"><svg><use href="#i-attach"/></svg></button><button id="model-button" type="button" class="model-button"><span>Choose model</span><svg class="small"><use href="#i-down"/></svg></button><button id="thinking-button" type="button" class="thinking-button" title="Thinking level"><svg><use href="#i-brain"/></svg><span>Thinking</span></button></div><button id="send" class="send-button" type="submit" aria-label="Send message" disabled><svg><use href="#i-arrow"/></svg></button><button id="stop" class="send-button stop-button" type="button" aria-label="Stop current turn" hidden><svg><use href="#i-stop"/></svg></button></div>
           </form>
           <div class="composer-caption"><span id="session-caption">Local files · persistent project memory</span><span id="usage-caption"></span></div>
