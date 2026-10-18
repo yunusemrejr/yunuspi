@@ -1,3 +1,9 @@
+## 0.45.1 — Every effort change shows, including the restore
+
+**An effort restore was hidden as a repeat.** A live economy-mode run (soft budget spent, a routine read/bash turn, a model whose cache tolerates effort changes) stepped thinking from `xhigh` to `high` and back. Only the step-down reached the conversation: the activity deduper keyed lines by kind and status, so the restore within 45 seconds looked like a repeat. Effort lines are now keyed by their transition too. A step-down and its restore both show, and an identical repeated step is still collapsed. Verified on the same probe: `Effort · thinking xhigh → high · economy mode`, then `Effort · thinking high → xhigh · economy mode restored`.
+
+**What drives effort, for the record:** automatic thinking changes happen only in economy mode (after `PI_COST_BUDGET_USD` is spent) and only on routine mechanical turns. A thinking level pinned with `--thinking` or chosen by hand is left alone. On DeepSeek and Anthropic routes the level is held, because changing it re-bills the prompt cache; the harness says so once when a turn would otherwise have stepped down. Jev never sets effort. It answers typed questions for tool discovery, guidance, triage and verification, and each answer is a Harness line naming its caller.
+
 ## 0.45.0 — See what the harness does: commands, goals, Jev and effort in the conversation
 
 **The installed harness was two releases behind.** The live install was still 0.42.0, because both earlier deploys were refused while the desktop app ran. So 0.44.0's command correction never reached use. A goal typed today as `/3d /video /autonomy /noslop /nobugs …` ran without the Nobug boost, and nothing said so. This release ships to the live install as well.

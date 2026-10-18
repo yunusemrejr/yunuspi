@@ -502,7 +502,8 @@ export function createActivityIndicators(send: ActivitySender, pulse?: ActivityP
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
       const lineStatus = d.status;
       const guardianState = lineKind.startsWith("guardian.") ? ["lazy", "initializing", "quarantined"].includes(String(data.decision)) ? String(data.decision) : "evaluating" : "";
-      const key = `${lineKind}\0${lineLabel}\0${lineStatus}\0${guardianState}`;
+      // Each effort transition is its own news: a step-down and its restore must both show.
+      const key = `${lineKind}\0${lineLabel}\0${lineStatus}\0${guardianState}${lineKind.startsWith("effort.") ? `\0${rec.detail ?? ""}` : ""}`;
       const last = lastLine.get(key);
       if (last !== undefined && now - last < dedupeMs(lineKind, lineStatus)) return;
       while (lineAt.length && now - lineAt[0]! > 60_000) lineAt.shift();
