@@ -183,6 +183,14 @@ async function runChecked(
   return result;
 }
 
+function kernelFailure(output: unknown): string | undefined {
+  const text = String(output ?? "");
+  const explicit = text.match(/__YUNUSPI_SCRIPT_EXIT__=(\d+)/);
+  if (explicit && explicit[1] !== "0") return `The remote script exited with code ${explicit[1]}.`;
+  if (/An exception has occurred, use %tb|Traceback \(most recent call last\)/.test(text)) return "The remote kernel reported an uncaught exception; the cell did not complete successfully.";
+  return undefined;
+}
+
 function jobResult(job: ColabJob, graceSec: number) {
   return {
     ok: true,
@@ -255,7 +263,7 @@ export default function colabExtension(pi: any): void {
       high_mem: Type.Optional(Type.Boolean({ description: "new/run: request a high-RAM shape when the accelerator supports it." })),
       file: Type.Optional(LOCAL_PATH),
       script: Type.Optional(LOCAL_PATH),
-      args: Type.Optional(Type.Array(Type.String({ maxLength: 4000 }), { maxItems: 64, description: "run: arguments forwarded to the script as sys.argv[1:]." })),
+      args: Type.Optional(Type.Array(Type.String({ maxLength: 4000 }), { maxItems: 64, description: "exec/run: arguments forwarded to the script as sys.argv[1:]." })),
       local: Type.Optional(LOCAL_PATH),
       remote: Type.Optional(REMOTE_PATH),
       path: Type.Optional(REMOTE_PATH),
@@ -445,8 +453,23 @@ export default function colabExtension(pi: any): void {
             }
             const outputImage = params.output_image ? resolveLocal(params.output_image, cwd, "parent") : undefined;
             const env = parseEnv(params.env);
-            args = execArgs({ session: params.session, file, timeoutSec, outputImage, env, auth: mode });
-            if (!file) input = String(params.code);
+            const scriptArgs = Array.isArray(params.args) ? params.args.map(String) : [];
+            if (scriptArgs.some((arg: string) => arg.includes("\0"))) throw new ColabError("Script arguments may not contain NUL bytes.", "invalid-input");
+            if (file && !/\.ipynb$/i.test(file)) {
+              // The official CLI sends `-f script.py` through a Jupyter kernel whose
+              // launcher appends its own `-f kernel.json` to sys.argv, so every
+              // argparse script would fail. Send the source with an explicit
+              // sys.argv/__file__ instead; notebooks keep the CLI's cell runner.
+              const source = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+              const basename = path.basename(file);
+              const argv = JSON.stringify([basename, ...scriptArgs]);
+              input = `import sys as __yunuspi_sys\n__yunuspi_sys.argv = ${argv}\n__file__ = ${JSON.stringify(basename)}\ntry:\n    exec(compile(${JSON.stringify(source)}, ${JSON.stringify(basename)}, 'exec'))\nexcept SystemExit as __yunuspi_exit:\n    __yunuspi_code = __yunuspi_exit.code\n    if __yunuspi_code not in (None, 0):\n        print(f"__YUNUSPI_SCRIPT_EXIT__={1 if isinstance(__yunuspi_code, str) else __yunuspi_code}")\n`;
+              args = execArgs({ session: params.session, timeoutSec, outputImage, env, auth: mode });
+            } else {
+              if (scriptArgs.length) throw new ColabError("exec on a notebook takes no script arguments; run a .py file instead.", "invalid-input");
+              args = execArgs({ session: params.session, file, timeoutSec, outputImage, env, auth: mode });
+              if (!file) input = String(params.code);
+            }
             label = file ? `Exec ${path.basename(file)}` : "Exec inline code";
           } else {
             if (!params.script) throw new ColabError("run needs script (a local Python file).", "missing-input");
@@ -465,15 +488,16 @@ export default function colabExtension(pi: any): void {
           const finished = await waitForJob(job, graceSec * 1000, progress);
           if (!finished) return json(jobResult(job, graceSec));
           const output = await jobOutput(job.id, 20_000);
+          const kernelError = action === "exec" ? kernelFailure(output.output) : undefined;
           const result = {
-            ok: job.state === "completed",
+            ok: job.state === "completed" && !kernelError,
             session: params.session ?? null,
             job_id: job.id,
             state: job.state,
             exit_code: job.exitCode ?? null,
             output: output.output,
             log: job.logPath,
-            hint: job.state === "completed" ? undefined : job.error ? redactSecrets(job.error) : parseErrorHints(String(output.output || "")),
+            hint: kernelError || (job.state === "completed" ? undefined : job.error ? redactSecrets(job.error) : parseErrorHints(String(output.output || ""))),
             elapsed_sec: elapsed(started),
           };
           return json(result, result.ok !== true);

@@ -50,7 +50,7 @@ Work:
 
 ```text
 {"action": "install_packages", "session": "qlora", "packages": ["trl>=0.16", "peft>=0.13"]}
-{"action": "exec", "session": "qlora", "script": "finetune_qlora.py", "timeout_sec": 1800}   # `file` is an accepted alias
+{"action": "exec", "session": "qlora", "script": "finetune_qlora.py", "args": ["--max-steps", "10"], "timeout_sec": 1800}   # `file` is an accepted alias
 {"action": "exec", "session": "qlora", "script": "train.py", "background": true}
 {"action": "jobs"} / {"action": "job_output", "job_id": "..."} / {"action": "job_kill", "job_id": "..."}
 {"action": "run", "script": "one_shot.py", "gpu": "T4"}  # fresh VM, script runs, VM released
@@ -78,7 +78,7 @@ Action names are the stable contract of the `colab` tool. Pass one `action` per 
 | `auth` | Sign in or inspect sign-in. `auth_action`: `status`, `login`, `complete`, `cancel`; `code` carries the pasted authorization code for `complete`. |
 | `new` | Allocate a session. Inputs: `session`, `gpu`, `tpu`, `high_mem`. |
 | `sessions` | List sessions alive on the backend, including ones this host no longer tracks. |
-| `exec` | Run a local script or inline code on an existing session. Inputs: `session`, `script` (local path; `file` is an alias), `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec`. |
+| `exec` | Run a local script or inline code on an existing session. Inputs: `session`, `script` (local path; `file` is an alias), `args`, `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec`. A kernel-side exception makes the call fail even when the CLI process exits zero. |
 | `run` | One-shot ephemeral job: allocate a fresh VM, run the script, release it. Accepts `gpu`, `tpu`, `high_mem`, `keep`, `timeout_sec`, `env`, `background`, `session`. |
 | `install_packages` | Install Python packages on the VM (`uv` first, `pip` fallback). |
 | `upload` / `download` | Copy a local file to the VM or a remote file back. Use `/content/...` paths. |
@@ -152,7 +152,7 @@ These are starting points to verify with the smoke report and a short completed 
 
 ## Files, logs and artifacts
 
-- Scripts do not need to be uploaded: `exec` reads a local file and sends its content to the kernel. Upload only datasets, configs and files the remote process must read by path.
+- Scripts do not need to be uploaded: `exec` reads a local file and sends its content to the kernel, with `args` available as `sys.argv[1:]`. Upload only datasets, configs and files the remote process must read by path. The reference scripts strip the kernel launcher's own `-f kernel.json` argument, so they also work with raw `colab exec -f`.
 - Write every output under `/content` (for example `/content/runs/<name>`), then `download /content/runs/<name>/...` to a local path. Download the adapter, tokenizer, final checkpoint, metrics and prediction files before `stop`.
 - `log` reads structured session history and can export it. Treat exported notebooks and JSONL as sensitive: history contains executed code and outputs. Pass secrets only via the `env` input, and never publish or share a log export that may contain a token, key or private data.
 - The export format follows the output suffix: `.ipynb` keeps cells in execution order and is the clearest artifact for notebook-shaped work, `.md`/`.txt` are readable summaries, and `.jsonl` is searchable raw events. A first line `# @title NAME` in a cell labels that cell in CLI progress output. A log export is not a copy of the filesystem: adapters and checkpoints still need `download`.

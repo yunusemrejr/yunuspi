@@ -29,6 +29,26 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+
+def _clean_argv() -> list[str]:
+    """Drop the Jupyter kernel launcher's own ``-f kernel.json`` arguments.
+
+    ``colab exec -f script.py`` runs the source through a Colab kernel and the
+    kernel launcher appends ``-f /.../kernel-*.json`` to ``sys.argv``. Strip
+    only that exact shape so ``python script.py --flag`` and ``colab run``
+    (which sets sys.argv itself) behave normally.
+    """
+    raw = list(sys.argv[1:])
+    cleaned: list[str] = []
+    i = 0
+    while i < len(raw):
+        if raw[i] == "-f" and i + 1 < len(raw) and str(raw[i + 1]).endswith(".json"):
+            i += 2
+            continue
+        cleaned.append(raw[i])
+        i += 1
+    return cleaned
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -173,7 +193,7 @@ class GPT(nn.Module):
         return idx
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Pretrain a small byte-level GPT on a local text file.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -214,7 +234,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Checkpoint path, or auto/latest for <output-dir>/ckpt.pt.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def set_seed(seed: int) -> None:
@@ -355,7 +375,7 @@ def save_checkpoint(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args()
+    args = parse_args(argv)
     started = time.time()
     set_seed(args.seed)
 
@@ -583,4 +603,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(_clean_argv()))

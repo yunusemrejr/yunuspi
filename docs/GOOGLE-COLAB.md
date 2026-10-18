@@ -2,7 +2,7 @@
 
 The `colab` tool runs work on Google Colab runtimes from a harness session: it allocates a CPU, GPU or TPU VM, sends local scripts to that VM's Jupyter kernel, moves files in and out, exports execution history as a notebook, and releases the VM. It wraps the official [google-colab-cli](https://github.com/googlecolab/google-colab-cli), installs it on demand and drives the browser sign-in flow.
 
-Local code stays local. `exec` reads a script on this machine and transmits its text to the kernel, so a training script does not need to be uploaded first. The VM is disposable: artifacts must be downloaded before `stop`, and an idle session still consumes compute units.
+Local code stays local. `exec` reads a script on this machine and transmits its text to the kernel, so a training script does not need to be uploaded first; pass `args` to forward script arguments as `sys.argv[1:]`. The VM is disposable: artifacts must be downloaded before `stop`, and an idle session still consumes compute units.
 
 This page covers setup, authentication, the tool surface, ML workflows, cost and safety, and troubleshooting. The operational method for ML runs lives in the [colab skill](../agent/skills/colab/SKILL.md); runnable reference scripts live in [agent/skills/colab/references](../agent/skills/colab/references/README.md).
 
@@ -85,7 +85,7 @@ Action names are the stable contract. The authoritative schema is the extension 
 | `auth` | Sign in or inspect sign-in | `auth_action`, `code` |
 | `new` | Allocate a session | `session`, `gpu`, `tpu`, `high_mem` |
 | `sessions` | List live sessions on the backend | none |
-| `exec` | Run a local script or inline code on an existing session | `session`, `script` (alias `file`), `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec` |
+| `exec` | Run a local script or inline code on an existing session | `session`, `script` (alias `file`), `args`, `code`, `timeout_sec`, `output_image`, `env`, `background`, `wait_sec` |
 | `run` | Ephemeral job: allocate, run, tear down | `script`, `gpu`, `tpu`, `high_mem`, `keep`, `timeout_sec`, `env`, `background`, `session` |
 | `install_packages` | Install Python packages on the VM | `session`, package list or requirements file |
 | `upload` | Copy a local file to the VM | `session`, local path, remote path |

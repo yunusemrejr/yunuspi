@@ -31,11 +31,31 @@ import time
 from pathlib import Path
 from typing import Any
 
+
+def _clean_argv() -> list[str]:
+    """Drop the Jupyter kernel launcher's own ``-f kernel.json`` arguments.
+
+    ``colab exec -f script.py`` runs the source through a Colab kernel and the
+    kernel launcher appends ``-f /.../kernel-*.json`` to ``sys.argv``. Strip
+    only that exact shape so ``python script.py --flag`` and ``colab run``
+    (which sets sys.argv itself) behave normally.
+    """
+    raw = list(sys.argv[1:])
+    cleaned: list[str] = []
+    i = 0
+    while i < len(raw):
+        if raw[i] == "-f" and i + 1 < len(raw) and str(raw[i + 1]).endswith(".json"):
+            i += 2
+            continue
+        cleaned.append(raw[i])
+        i += 1
+    return cleaned
+
 DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 DEFAULT_DATASET = "HuggingFaceH4/no_robots"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="QLoRA supervised fine-tuning (transformers + peft + trl).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -143,7 +163,7 @@ def parse_args() -> argparse.Namespace:
         help="Checkpoint path, or auto/latest to resume the newest one in output-dir.",
     )
     train.add_argument("--max-new-tokens", type=int, default=128)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def set_seed(seed: int) -> None:
@@ -470,7 +490,7 @@ def save_generation_sample(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args()
+    args = parse_args(argv)
     started = time.time()
     set_seed(args.seed)
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
@@ -583,4 +603,4 @@ def package_versions() -> dict[str, str | None]:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(_clean_argv()))

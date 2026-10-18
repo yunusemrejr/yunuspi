@@ -3864,7 +3864,7 @@
       {
         "name": "colab",
         "source": "agent/extensions/colab.ts",
-        "line": 238,
+        "line": 246,
         "kind": "literal"
       },
       {
@@ -4404,7 +4404,7 @@
       {
         "name": "colab",
         "source": "agent/extensions/colab.ts",
-        "line": 238,
+        "line": 246,
         "kind": "literal"
       },
       {

@@ -67,6 +67,7 @@ case "$cmd" in
     code=$(cat)
     if printf '%s' "$code" | grep -q SLEEP; then sleep 5; fi
     printf 'EXEC:%s\\n' "$code"
+    if printf '%s' "$code" | grep -q TRACEBACK; then printf 'An exception has occurred, use %%tb to see the full traceback.\n'; exit 0; fi
     if printf '%s' "$code" | grep -q FAIL; then exit 2; fi
     exit 0;;
   run) echo "[run] ok";;
@@ -207,11 +208,20 @@ test("auth login completes the CLI prompt with the browser-captured code and nev
 test("exec accepts the script alias for a local file", async () => {
   configure(true);
   const script = path.join(tmp, "alias.py");
-  fs.writeFileSync(script, "print('alias')\n");
-  const result = await call({ action: "exec", session: "train1", script, wait_sec: 5 });
+  fs.writeFileSync(script, "import sys\nprint('alias', sys.argv)\n");
+  const result = await call({ action: "exec", session: "train1", script, args: ["--demo", "1"], wait_sec: 5 });
   assert.equal(result.isError, undefined);
   assert.equal(result.details.state, "completed");
   assert.equal(result.details.exit_code, 0);
+  assert.match(result.details.output, /__yunuspi_sys\.argv = \["alias\.py","--demo","1"\]/);
+});
+
+test("a kernel exception is a failed exec even when the CLI exits zero", async () => {
+  configure(true);
+  const result = await call({ action: "exec", session: "train1", code: "TRACEBACK", wait_sec: 5 });
+  assert.equal(result.isError, true);
+  assert.equal(result.details.state, "completed");
+  assert.match(result.details.hint, /uncaught exception/i);
 });
 
 test("redaction masks token and API-key assignments, not just bearer headers", () => {

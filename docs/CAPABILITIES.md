@@ -1274,7 +1274,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 166; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
-- `colab` — [`agent/extensions/colab.ts`](../agent/extensions/colab.ts) (line 238; literal)
+- `colab` — [`agent/extensions/colab.ts`](../agent/extensions/colab.ts) (line 246; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
 - `creative_compare` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 614; factory)
