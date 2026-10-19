@@ -7,7 +7,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { packetRequirements } from './requirement-ledger.ts';
 import { promptRequestFocus } from './prompt-interpretation.ts';
 import { createContextAnchor } from './context-anchor.ts';
-import { observerTimeText, buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, plannerStatusText, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './session-observer.ts';
+import { observerTimeText, buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerLabel, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './session-observer.ts';
 import { projectMemoryKey } from '../pi-memory/project-identity.ts';
 import { needleHealth, needleRank } from './needle-runtime.ts';
 import { needlePolicy } from './needle-policy.ts';
@@ -189,8 +189,6 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       const own = ledger.tasks.filter(task => !isHarnessOwnedChild(task)), harness = ledger.tasks.length - own.length;
       childSummary = { total: own.length, failed: own.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
       if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery or automatic review) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
-      const planners = plannerStatusText();
-      if (planners) rows.push({ id: 'planner-state', kind: 'current state', text: planners });
       if (own.length) {
         const unresolved = own.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
         const finished = own.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');

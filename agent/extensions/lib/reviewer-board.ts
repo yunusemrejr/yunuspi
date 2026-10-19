@@ -1,16 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-/** Everything that can put a note on the board. The three reviewers observe the
- * session; the scope council deliberates before it and says what it told the
- * agent through the same board, so no one repeats or contradicts it. */
-export type ReviewerSource = 'guardian' | 'observer' | 'council' | 'assist';
-const REVIEWER_LABELS: Record<ReviewerSource, string> = {
-  guardian: 'Guardian', observer: 'Observer', council: 'Scope council', assist: 'Automatic helpers',
-};
+/** Everything that puts a note on the board: Guardian and the observer. */
+export type ReviewerSource = 'guardian' | 'observer';
+const REVIEWER_LABELS: Record<ReviewerSource, string> = { guardian: 'Guardian', observer: 'Observer' };
 export const reviewerLabel = (reviewer: string): string => REVIEWER_LABELS[reviewer as ReviewerSource] ?? 'A peer';
 
-/** Shared note board for one session. Each source (the reviewers, Guardian,
- * the scope council, the automatic helper team) publishes its latest delivered note; the others see it as
+/** Shared note board for one session. Each source publishes its latest delivered note; the others see it as
  * evidence and suppress a restatement, so the agent is not told the same thing
  * twice or pulled in opposite directions by sources blind to each other.
  * In-process and bounded; nothing persists. */
@@ -43,29 +38,3 @@ export function peerReviewerNotes(session: string, reviewer: string, now = Date.
   return [...(peerBoard().get(session)?.values() ?? [])].filter(row => row.reviewer !== reviewer && now - row.at <= maxAgeMs).sort((a, b) => b.at - a.at);
 }
 
-/** What the pre-turn planners are doing right now,
- * as short facts the reviewers add to their evidence. A planner registers a reader
- * and returns its disposer; a reader returns nothing while it has nothing to say.
- * Reviewers never import a planner, so a planner can come and go. */
-const PLANNER_STATUS = Symbol.for('yunus-pi.planner-status.v1');
-type PlannerReader = () => string | undefined;
-const plannerReaders = (): Map<string, PlannerReader> => ((globalThis as any)[PLANNER_STATUS] ??= new Map());
-export function registerPlannerStatus(source: ReviewerSource, reader: PlannerReader): () => void {
-  const readers = plannerReaders();
-  readers.set(source, reader);
-  return () => { if (readers.get(source) === reader) readers.delete(source); };
-}
-export function plannerStatusText(): string | undefined {
-  const facts: string[] = [];
-  for (const [source, reader] of plannerReaders()) {
-    try {
-      const text = reader();
-      if (text) facts.push(`${reviewerLabel(source)}: ${text}`);
-    } catch { /* A planner's status can never break a review. */ }
-  }
-  return facts.length ? facts.join(' ') : undefined;
-}
-/** True while the planner is registered and reporting. */
-export function plannerActive(source: ReviewerSource): boolean {
-  try { return Boolean(plannerReaders().get(source)?.()); } catch { return false; }
-}
