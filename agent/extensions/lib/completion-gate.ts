@@ -76,7 +76,9 @@ export function completionGateReceipts(moment: "deploy" | "plan-complete", recei
 		block: true,
 		waived: false,
 		key,
-		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\n${protectedReview ? 'Review the current delivered media and record honest video_qa verdicts: frames from the export for the picture, video_qa action:"listen" for narration and mix. A repeated completion call cannot approve unreviewed or failed media.' : "Resolve these first: run the project's real checks (a passing run of its test or build command counts automatically) and settle open reviews. Do not resend this call just to get past the check. Only when the user explicitly told you to proceed anyway does the same call again record a waiver; the final report must then name each unresolved item."}`,
+		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\n${protectedReview ? 'Review the current delivered media and record honest video_qa verdicts: frames from the export for the picture, video_qa action:"listen" for narration and mix. A repeated completion call cannot approve unreviewed or failed media.' : moment === "deploy"
+			? "Resolve these first: run the project's real checks (a passing run of its test or build command counts automatically) and settle open reviews. Do not resend this call just to get past the check. Only when the user explicitly told you to proceed anyway does the same call again record a waiver; the final report must then name each unresolved item."
+			: "Resolve the ones that bear on what the user asked for: run the project's real checks (a passing run of its test or build command counts automatically) and settle open reviews. A check that does not apply to the requested deliverable (for example a viewer page around a requested video) is not work to do: call complete again with reason naming each such item and why. That waiver is recorded and shown to the user; a call without a reason is refused again."}`,
 	};
 }
 

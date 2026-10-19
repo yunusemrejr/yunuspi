@@ -474,16 +474,23 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					// Unopened intermediate files (stems, previews, QA builds) stay in the user's verification
 					// footer; gating on them paged three at a time through every refusal.
 					const receipts = collectVerificationReceipts(32, ctx.sessionManager).filter((receipt) => receipt.source !== "deliverables");
-					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...receipts, ...verification] });
-					if (decision.block) {
+					const gated = [...receipts, ...verification];
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: gated });
+					const why = String(params.reason ?? "").trim();
+					// After one refusal, a reasoned call closes the goal even when the list of
+					// gaps changed: checks that unfold one after another (capture, review,
+					// interaction) kept a finished film open for nine more minutes. Open
+					// criteria and failed media review never waive.
+					const reasoned = why.length >= 12 && refused.size > 0 && !goal.criteria.some((criterion) => criterion.status === "open") && !gated.some((receipt) => receipt.requiresUserWaiver);
+					if (decision.block && !reasoned) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");
 					}
+					if (decision.block) decision.waived = true;
 					// A repeated call used to waive silently, and models repeated it on their
-					// own. A waiver now needs the reason each gap cannot close here; it is
+					// own. A waiver needs the reason each gap cannot close here; it is
 					// recorded on the goal and shown to the user.
-					const why = String(params.reason ?? "").trim();
-					if (decision.waived && why.length < 12) return text("The same checks are still unresolved. Resolve them, or, only if one genuinely cannot be resolved in this environment, call complete again with reason naming each unresolved item and why. That waiver is recorded and shown to the user.");
+					if (decision.waived && why.length < 12) return text("The same checks are still unresolved. Resolve the ones that bear on the requested deliverable, or call complete again with reason naming each remaining item and why. That waiver is recorded and shown to the user.");
 					// A waiver is spent by the call that used it. The refusal keys on the
 				// shape of the gaps, so keeping a spent key for the whole session let
 				// any later gap of the same shape auto-waive — a fresh unverified edit

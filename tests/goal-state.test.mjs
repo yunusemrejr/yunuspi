@@ -339,6 +339,19 @@ test('an unfinished goal keeps its tool; a settled goal silences follow-ups unti
  assert.equal(isSessionStopped(h.ctx),false,'a new goal starts unstopped');
 });
 
+test('after one refusal a reasoned completion closes the goal although the gaps changed; open criteria never waive',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ const state=()=>h.entries.at(-1).data;
+ const reason='The viewer page is not part of the requested video.';
+ await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+ assert.match(await h.call({action:'complete',reason}),/refused/,'open criteria refuse even with a reason');
+ for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'b.ts'}});
+ assert.match(await h.call({action:'complete',reason}),/recorded waiver/);
+ assert.equal(state().status,'achieved');
+});
+
 test('a spent waiver does not carry over to a later, unrelated gap',async()=>{
  const h=harness();
  await h.commands.goal.handler('Ship the exporter',h.ctx);
