@@ -1,3 +1,13 @@
+## 0.47.2 — Start-up trims: no model round trip to pick an effort level for work requests, one protected-roots walk, pre-sorted extension aliases
+
+Three small start-up costs found by profiling a warm one-shot run against the DeepSeek Harness (`dsh` reaches its first model request about 1.3 s after launch; YunusPi was at 3.4-3.7 s and is still the larger of the two gaps).
+
+- The Jev effort judge asked a model whether a request was simple before the first request of every turn that the keyword pre-classifier left undecided (about 0.3-0.5 s on the critical path). A work request longer than a one-liner, with no mechanical cue (typo, rename, formatting, "what does ... mean") and none of the existing complexity or critical cues, now keeps the configured level without asking: in four A/B runs of a fix-the-failing-tests prompt the judge never moved the level, so the call only added latency. Short questions and mechanical requests are still judged and can still step down.
+- Every extension evaluates its own copy of `self-mutation-guard`, and each copy walked the global skill trees to discover protected roots: 17 walks of about 20 ms at start-up. Copies loaded within 15 s of each other now share one walk (a changed `settings.json` or a later reload walks again); a repeated import of the module went from 21 ms to 1 ms.
+- jiti re-sorted the 29-entry extension alias table on every import resolution. The table is now sorted once and marked as normalized, which jiti honours; median extension loading in six alternating pairs went from 2,217 ms to 2,036 ms.
+
+**Validation.** `tests/jev-effort.test.mjs` pins the long-request and mechanical-request classifications. The full suite (400 files, 3,388 tests, 3,380 passed, 8 skipped) passes in 242 s, `check-syntax` parses 2,439 files and the public scanner is clean.
+
 ## 0.47.1 — Faster one-shot runs: no exit-time model call, no per-edit package-manager probing
 
 Follow-up to the 0.47.0 comparison with the DeepSeek Harness (`dsh`). Same two prompts, both on `deepseek-flash` at max thinking, stdin from `/dev/null`, three runs each on a quiet machine: writing a small module with its tests took a median 18.7 s in YunusPi against 15.3 s in `dsh` (0.47.0: 33.5 s against 18.1 s), and fixing a seeded failing-test repo took 21.9 s against 15.9 s (0.47.0: 38.7 s against 21.0 s). One YunusPi run of the second prompt took 68.8 s because the model made about 24 tool calls instead of 6-9 (the median is not moved by it, and that run was model behaviour, not harness time). YunusPi still spends about two and a half times the CPU (about 8 s against 3 s), mostly in start-up and hook work, so this is closer, not equal.

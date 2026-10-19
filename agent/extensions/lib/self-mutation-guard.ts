@@ -191,10 +191,39 @@ export function discoverMutationRoots(harness: string, home: string, agentDirect
 }
 
 let rootDiscoveryFailed = false;
+// Every extension evaluates its own copy of this module, so a start-up walks the global skill trees once per
+// copy (~20 ms each, 17 copies). Copies loaded together share one walk; a later reload walks again, and a
+// changed settings.json (which names the skill roots) never reuses an older answer.
+const ROOTS_SHARE_MS = 15_000;
+const rootsShared: Map<string, { at: number; settings: string; roots?: string[] }> =
+  ((globalThis as any)[Symbol.for("yunus-pi.mutation-roots.v1")] ??= new Map());
+function discoverMutationRootsOnce(harness: string, home: string, agent: string): string[] {
+  let settings = "none";
+  try {
+    const info = fs.statSync(path.join(agent, "settings.json"));
+    settings = `${info.ino}:${info.size}:${info.mtimeMs}`;
+  } catch {
+    /* an absent settings file is part of the signature */
+  }
+  const key = JSON.stringify([harness, home, agent]);
+  const hit = rootsShared.get(key);
+  if (hit && hit.settings === settings && Date.now() - hit.at < ROOTS_SHARE_MS) {
+    if (!hit.roots) throw new Error("Global skill discovery failed earlier in this load");
+    return [...hit.roots];
+  }
+  try {
+    const roots = discoverMutationRoots(harness, home, agent);
+    rootsShared.set(key, { at: Date.now(), settings, roots: [...roots] });
+    return roots;
+  } catch (error) {
+    rootsShared.set(key, { at: Date.now(), settings });
+    throw error;
+  }
+}
 export const PROTECTED_MUTATION_ROOTS: readonly string[] = Object.freeze(
   (() => {
     try {
-      return discoverMutationRoots(HARNESS_ROOT, homedir(), AGENT_ROOT);
+      return discoverMutationRootsOnce(HARNESS_ROOT, homedir(), AGENT_ROOT);
     } catch {
       rootDiscoveryFailed = true;
       return [HARNESS_ROOT];

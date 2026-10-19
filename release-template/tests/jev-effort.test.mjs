@@ -125,6 +125,8 @@ test('classification sends goal rounds, complex work and long input to the ceili
   assert.equal(effort.classifyEffortRequest('ok').kind, 'inherit');
   assert.equal(effort.classifyEffortRequest('what does the json flag mean').kind, 'judge');
   assert.equal(effort.classifyEffortRequest('please implement a new feature').kind, 'judge');
+  assert.equal(effort.classifyEffortRequest('The tests in this repo fail. Find the root causes, fix the library code (do not change the tests), and run npm test until everything passes. Report what you fixed.').kind, 'ceiling', 'a long work request skips the model round trip');
+  assert.equal(effort.classifyEffortRequest('rename the variable foo to bar in the config loader and then run the formatter over the whole src directory please').kind, 'judge', 'a mechanical cue still asks');
 });
 
 test('only two agreeing Jev scores authorize a tier; the level is clamped by ceiling and never off', () => {

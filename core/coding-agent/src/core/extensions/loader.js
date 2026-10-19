@@ -134,6 +134,11 @@ function getAliases() {
         "@sinclair/typebox/compile": typeboxCompileEntry,
         "@sinclair/typebox/value": typeboxValueEntry,
     };
+    // jiti sorts and rewrites its alias table on every resolution unless the table is already normalized
+    // (about 0.2 s over a start-up). Sorting is by segment count, deepest first, and no value here starts with
+    // another key, so doing it once is equivalent; the marker is jiti's own (pathe) one.
+    _aliases = Object.fromEntries(Object.entries(_aliases).sort(([a], [b]) => b.split("/").length - a.split("/").length));
+    Object.defineProperty(_aliases, Symbol.for("pathe:normalizedAlias"), { value: true, enumerable: false });
     return _aliases;
 }
 let extensionCacheCwd;

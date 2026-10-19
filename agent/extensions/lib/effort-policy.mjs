@@ -333,6 +333,9 @@ export const classifyEffortRequest = (text, { source = "human", priorFailures = 
 	if (prompt.length > 1500 || /```/.test(prompt) || /\bat \S+:\d+:\d+\)?$/m.test(prompt)) return { kind: "ceiling", reasons: ["long input, code or stack trace"] };
 	if (flat.length <= 300 && EFFORT_MECHANICAL.test(flat)) return { kind: "judge", reasons: ["mechanical cue"], mechanical: true };
 	if (flat.length <= 160 && !EFFORT_WORK.test(flat)) return { kind: "judge", reasons: ["short question"], mechanical: true };
+	// A task statement longer than a one-liner is almost never "simple" to the judge, which then abstains and
+	// leaves the ceiling; asking costs a model round trip (~0.4 s) before the first request to learn that.
+	if (flat.length > 160 && EFFORT_WORK.test(flat)) return { kind: "ceiling", reasons: ["multi-part work request"] };
 	return { kind: "judge", reasons: ["no strong ceiling cue"] };
 };
 
