@@ -6,7 +6,7 @@ It consults [the Observer Book](OBSERVER-BOOK.md), 14 chapters of doctrine selec
 
 ## Cadence and cost
 
-- Reviews start after the main agent's first response of a task (harness preparation such as prompt analysis or a scope council is not agent work to judge).
+- Reviews start after the main agent's first response of a task (harness preparation such as prompt analysis is not agent work to judge).
 - Opportunities start every 30 seconds during active work, at least 30 seconds apart. After a review that adds nothing new the next waits 60, 120, then at most 240 seconds, until something salient happens: a tool error, a test or build result, a plan change, a completion claim, a peer message or a newly fired book trigger. Idle sessions generate no inference.
 - At most one review is pending. Each has a three-minute allowance.
 - Reviews run on the session model with its own credentials, the same model as the main agent. No other model, preference, fallback or route is chosen for the observer. If the session model is missing or cannot produce the output a review needs, the review is skipped and says so. Reviews use the session's thinking level; a timeout or truncated reply steps it down for later reviews, and clean reviews step it back up. The observer runs only with `PI_LEAN_GATES=on`; `PI_SESSION_OBSERVER=off` and the user phrases `no observers` or `work offline` also stop it.
@@ -21,6 +21,6 @@ It can investigate with bounded read-only tools (`session_detail`, `session_sear
 
 An accepted note (at most 150 words) appears in the TUI and rides the main agent's next normal model request with a delivery receipt; it is never pushed into an idle session. Unknown evidence ids, tools and skills are removed rather than voiding a paid note, a long copy of the user's words is cut out, and a note whose premise has vanished (a cited command has finished) is withheld. Accepted user input, session replacement and model changes invalidate old observations.
 
-While Double mode is on, one `planner-state` row names the mode and its routes, and Double's directive and the scope council's brief appear as peer notes beside Guardian's: the observer does not restate them or advise repeating the deliberation.
+While Double mode is on, one `planner-state` row names the mode and its routes, and Double's directive appears as a peer note beside Guardian's: the observer does not restate it or advise repeating the deliberation.
 
 Usage is counted as auxiliary model work, never as a spawned child agent. Child sessions cannot register an observer.

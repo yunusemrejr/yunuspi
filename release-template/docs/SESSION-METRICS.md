@@ -61,7 +61,7 @@ New hook snapshots contain bounded numeric counters and extension/hook names. Th
 
 ## Harness corrections and activation
 
-Automatic helpers prioritize the supplied brief within their four-call budget, use at most one directory listing before reading relevant source, and avoid searching session directories for context. Advisory helpers return concise findings or proposed checks; they do not produce work-acceptance reports or spend tool calls formatting them. The parent still verifies their claims. Writer acceptance checks remain separate. Report-only responses are not fused as findings.
+Advisory helpers return concise findings or proposed checks; they do not produce work-acceptance reports or spend tool calls formatting them. The parent still verifies their claims. Writer acceptance checks remain separate. Report-only responses are not fused as findings.
 
 UI/design requests receive relevant skill and browser guidance before generic utility hints consume the delivery budget. Incidental phrases and paths do not trigger unrelated utilities or skills. Successful skill reads are counted independently of whether a route receipt exists.
 

@@ -1,16 +1,16 @@
-# Model routing and automatic assistance
+# Model routing
 
 LongCat is discovered through its [authenticated OpenAI-compatible catalog](https://longcat.ai/platform/docs/api/models) using `LONGCAT_API_KEY`. `LongCat-2.5-Preview` and `LongCat-2.0` use the documented binary [thinking control](https://longcat.ai/platform/docs/api/chat): off or enabled (shown as medium), without invented effort tiers. Live context/output limits override static assumptions; unknown prices remain unknown. New catalog IDs appear without acquiring unverified reasoning or vision support. Discovery uses the existing cache, health reporting and provider-confined registry path; proxy credentials are never sent to the official origin. Native tool calls were verified against both listed models on 2026-09-25.
 
 The main session keeps the model you selected, and every subagent runs on that same session model. Agent definitions carry no model, fallback or thinking selection; a child's thinking level is chosen per run by the effort controller, up to the ceiling in `subagents.maxThinking`.
 
-Optional `~/.pi/settings/llm_preferences.json` preferences guide selection per role (subagents, councils, fan-out, quality/project/error reviews, main-session fallback) with explicit thinking levels and OpenRouter backend control. The session observer and prompt analysis run on the session model only and read no preference role. Preferences are validated against the live registry, exclusions, cooldowns and capabilities, tried in order, and skipped when unusable; missing or exhausted preferences fall back to the autonomous logic below. The main session keeps your last harness-selected configuration while healthy and consults JSON fallbacks only after repeated failure (three consecutive failures, or immediately for dead credentials). See [Model preferences](LLM-PREFERENCES.md) and [Session recovery](RECOVERY-AND-TESTING.md).
+Optional `~/.pi/settings/llm_preferences.json` preferences guide selection per role (subagents, councils, fan-out, quality/project/error reviews) with explicit thinking levels and OpenRouter backend control. The session observer and prompt analysis run on the session model only and read no preference role. Preferences are validated against the live registry, exclusions, cooldowns and capabilities, tried in order, and skipped when unusable; missing or exhausted preferences fall back to the autonomous logic below. See [Model preferences](LLM-PREFERENCES.md) and [Session recovery](RECOVERY-AND-TESTING.md).
 
 `/models` no longer edits language-model routes. It opens a local browser window for image, speech, music and sound-effect choices only (see [Video studio](VIDEO-STUDIO.md)).
 
 Search ranks matching configured, available routes before temporarily blocked routes and unconfigured catalog entries. Availability labels describe the session registry and recorded exclusions/cooldowns; they do not claim a successful inference probe. Exact `provider/model` queries stay within that provider, including regional IDs. The main TUI puts registered matches before unlisted session-only IDs and labels the latter unverified.
 
-The collapsed Routing diagnostics section reports bounded process-local samples for config load/save and actual HTTP model-search latency, plus child-route attempts and fallback frequency. Samples reset with the harness process and do not include task text or credentials.
+The collapsed Routing diagnostics section reports bounded process-local samples for config load/save and actual HTTP model-search latency, plus child-route attempts. Samples reset with the harness process and do not include task text or credentials.
 
 ## Quality before price
 
@@ -52,11 +52,11 @@ Metadata cannot prove inference availability, undocumented capabilities, tokeniz
 
 Sources checked 2026-09-19: [OpenRouter model schema](https://github.com/OpenRouterTeam/terraform-provider-openrouter/blob/main/docs/data-sources/model.md), [Friendli's provider integration](https://github.com/friendliai/hermes-friendli-provider), [Cerebras public catalog](https://api.cerebras.ai/public/v1/models), and [DeepSeek thinking protocol](https://api-docs.deepseek.com/guides/thinking_mode/). Regression coverage: `tests/provider-capabilities.test.mjs`, `agent/scripts/compatibility/live-models-refresh-test.mjs`, and `agent/scripts/compatibility/provider-cache-wire-test.mjs` use synthetic data and loopback requests.
 
-## Choosing the form of assistance
+## Choosing the form of delegation
 
-Automatic assistance uses one helper for a bounded independent investigation, and fan-out for separable project investigations or competing approaches or alternatives, with the workers' outputs merged with provenance. It runs once per user input and does not delay the parent's first request. Explicit delegation requests are left to the parent to avoid launching a duplicate team; delegation/tool/route opt-outs still apply.
+Delegation is on demand. The main model starts one `subagent` for a bounded independent investigation, or fan-out for separable project investigations or competing approaches or alternatives, and the workers' outputs are merged with provenance. The harness does not start helpers by itself; delegation, tool and route opt-outs still apply.
 
-Teams contain at most three different model identities and try their role's configured preferences first. Autonomous fill prefers proven free routes across different providers and admits at most one metered helper under the configured economy caps. Explicit preference entries retain their own priority and pricing admission; the free selector does not replace a viable preferred route merely because it has been used before. Total estimated cost is bounded to $0.01 for one helper, or $0.03 for a fan-out team; each child also has token, tool and runtime limits. Provider billing for a request already in flight can settle after a local stop, so these are runtime admission and usage limits, not provider-side dollar guarantees.
+Each child has token, tool and runtime limits.
 
 Children perform advisory investigations; the parent owns changes, resolves disagreements and validates claims. Fan-out preserves source ownership and failed-member counts. It does not turn agreement into proof or silently choose a factual winner. A single usable child remains a single helper. Existing executor cancellation, fleet capacity, request caps and recovery remain authoritative.
 
@@ -75,7 +75,7 @@ transient overloads keep their retry policy. The original diagnostic remains
 available so the request can be corrected. This prevents wasted retries without
 claiming to repair every provider-specific payload mismatch.
 
-`model-routing-decision` session entries record the selected mode, reason, routes, evidence explanations and budgets. Model listings distinguish capability metadata, price status and cached benchmark coverage. Set `PI_AUTONOMOUS_FREE_ASSIST=0` to disable proactive helpers while keeping manual delegation available.
+Model listings distinguish capability metadata, price status and cached benchmark coverage.
 
 ## Local preprocessing reuse
 

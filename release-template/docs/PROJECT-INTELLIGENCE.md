@@ -1,6 +1,6 @@
 # Project intelligence
 
-Automatic [change-scope deliberation](CHANGE-SCOPE.md) connects relevant prior-session evidence to the graph and completion reviews. Its transcript retrieval is temporary; the graph retains bounded structural provenance rather than another copy of conversation prose. Conversation branches, native checkpoints and project Git references remain separate, with explicit links when the harness observes their relationship.
+Conversation branches, native checkpoints and project Git references remain separate, with explicit links when the harness observes their relationship.
 
 YunusPi builds a private, persistent project model automatically. Start Pi in a
 project and discovery begins in a worker. Returning sessions reuse the model and
@@ -99,7 +99,7 @@ sessions can provide complementary evidence, or expose a disagreement.
 Project peers may deliberately revise or retract another session's agent record
 using its explicit source ID and observed version. Session provenance identifies
 the evidence author; it is not a separate ownership boundary. Compare-and-swap
-rejects stale edits, while automatic read-only helpers cannot mutate records.
+rejects stale edits, while read-only helpers cannot mutate records.
 
 `exclusive: true` identifies a single-valued property. Contradictory active
 values in the same checkout remain visible as conflicts. Different branch
@@ -132,10 +132,10 @@ evidence into child handoffs. The viewer is an optional inspection surface.
   These record observed writes, not a claim that tests or deployment succeeded.
 - Git, shell, memory and child completion events schedule a debounced refresh.
   A 30-second heartbeat catches external edits and changes from other sessions.
-- Built-in scout, worker, reviewer, researcher, delegate, oracle and automatic
-  helper profiles load the capability. Fan-out workers using those profiles
+- Built-in scout, worker, reviewer, researcher, delegate and oracle profiles
+  load the capability. Fan-out workers using those profiles
   share the same project domain. Explicit custom extension/tool restrictions
-  continue to apply. Automatic read-only helpers can query; they return proposed
+  continue to apply. Read-only helpers can query; they return proposed
   manual knowledge changes to their parent.
 - Curated project memory and recent curated daily notes contribute selected
   historical decisions and constraints. Raw transcripts are not imported.

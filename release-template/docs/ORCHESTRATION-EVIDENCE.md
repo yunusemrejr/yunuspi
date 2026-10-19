@@ -16,8 +16,7 @@ is a subset of output, and cost evidence retains its existing reported versus
 estimated distinction.
 
 Recovery remains bounded by the existing execution policy. Startup retries
-require evidence of no useful work, model fallback respects permitted routes,
-and retained-session continuation requires verified process-tree termination
+require evidence of no useful work, and retained-session continuation requires verified process-tree termination
 and no in-flight tool calls. Stops, exhausted budgets and failed acceptance do
 not authorize relaunch. Review groups preserve completed validated reports
 when a peer fails or reaches its deadline; incomplete aspects remain gaps.

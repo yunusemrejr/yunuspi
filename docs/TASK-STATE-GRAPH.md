@@ -26,7 +26,7 @@ Task State Graph
         ↓
 ┌────────────┬────────────┬────────────┬────────────┐
 Main Agent   Observer     Guardian     Subagents
-Reviews      Council      Completion   Metrics
+Reviews                   Completion   Metrics
 ```
 
 Pipeline:

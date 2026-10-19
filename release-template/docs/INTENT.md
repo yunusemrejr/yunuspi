@@ -1,6 +1,6 @@
 # Intent evidence and critique
 
-The harness uses the existing project intelligence and automatic helper paths
+The harness uses the existing project intelligence and prompt-analysis paths
 to recover context for vague follow-ups. The original user message remains
 unchanged. Short referential requests add recent user vocabulary to the existing
 bounded graph query; helpers receive intact user excerpts with branch references
@@ -32,8 +32,7 @@ Their conclusions remain advisory; agreement does not establish correctness.
 This local selection adds no model calls, tools, processes or higher helper
 budgets. Queries retain their 900-character cap, graph briefs their 1,800-character
 cap, and helper history uses at most 280 encoded UTF-8 bytes. These are context
-limits, not a guarantee of identical actual token use or total task cost. The
-separate scope council has its own inference costs and limits.
+limits, not a guarantee of identical actual token use or total task cost.
 
 Portable regression coverage is in `tests/intent-context.test.mjs`. It uses
 synthetic data and local fixtures; it makes no model calls.

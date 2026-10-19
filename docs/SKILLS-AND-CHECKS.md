@@ -1,6 +1,6 @@
 # Skill routing and source checks
 
-Default guidance offers a brief, optional workflow match with its installed path and a bounded description or discovery reason. The agent decides whether to read and apply it; the suggestion creates no review requirement. Grouped browsing and search remain available when the match is insufficient. Deterministic routing uses no model calls; the enabled asynchronous advisor can add suggestions after distinct successful observations within the shared assistance budget. The model-based advisor remains one assistance unit: only an instant no-output launch failure can try another distinct eligible route, with at most three total route attempts under the same claimed budget and deadline; once a child produces a genuine output attempt it is not retried. The final launched failure keeps a bounded diagnostic in health telemetry. The detailed routing below supplies local relevance signals and remains available through inspect. Explicit task and file
+Default guidance offers a brief, optional workflow match with its installed path and a bounded description or discovery reason. The agent decides whether to read and apply it; the suggestion creates no review requirement. Grouped browsing and search remain available when the match is insufficient. Deterministic routing uses no model calls. The detailed routing below supplies local relevance signals and remains available through inspect. Explicit task and file
 routes take priority; catalog descriptions provide additional suggestions when
 at least two distinct discriminating terms match. Hyphenated skill names also
 match ordinary prose. Negated clauses, quoted text and code fences do not become
@@ -53,7 +53,7 @@ chosen names and call the tools on the next model turn of the same request.
 Discovery and activation do not execute the tools or establish task completion.
 
 Exact tool names in positive task clauses stage their schemas before the first
-model turn without needing a matching skill, catalog search or helper inference.
+model turn without needing a matching skill or a catalog search.
 Negation, quoted examples, code fences, paths and explicit tool restrictions do
 not grant access. Complex and critical pipeline scopes expose `task_pipeline`
 for tracking stages and native evidence; ordinary fixes keep it discoverable.

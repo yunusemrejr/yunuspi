@@ -1,7 +1,6 @@
 # Competence control
 
-Optional coordination (periodic observers, completion reviewers, automatic
-helpers) is a cost paid to lower the cost of mistakes. YunusPi therefore
+Optional coordination (periodic observers, completion reviewers) is a cost paid to lower the cost of mistakes. YunusPi therefore
 allocates it from what the executing route is measurably doing, never from a
 model name. `agent/extensions/lib/model-competence.ts` turns observed tool
 outcomes into a control level; `adaptive-execution.ts` applies it to the same
@@ -51,7 +50,7 @@ rate was 3.8%, strong slips 2.4%):
 
 | Level | Condition | Effect on optional coordination |
 | --- | --- | --- |
-| earned | the whole interval is below 1.2x the fleet rate, at least 60 weighted observations, every slip repaired | observer cadence doubled, timing review only once failures appear, one reviewer fewer for complex work, no automatic helper for open-ended work alone, a standard-scope change of up to four files with resolved checks needs no copy reviewer |
+| earned | the whole interval is below 1.2x the fleet rate, at least 60 weighted observations, every slip repaired | observer cadence doubled, timing review only once failures appear, one reviewer fewer for complex work, a standard-scope change of up to four files with resolved checks needs no copy reviewer |
 | standard | not enough evidence, or in between | the established policy, unchanged |
 | guarded | the whole interval is above 1.4x the fleet rate, at least 10 observations | observer cadence halved and enabled even for direct work, independent review of code changes (prose-only changes stay exempt), two reviewers for standard scope |
 

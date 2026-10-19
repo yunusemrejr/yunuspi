@@ -9,16 +9,12 @@ and the main agent remains responsible for the session in every case.
 | Quality review | Implementation quality and regressions in observed changes; for interfaces also identity (look-alike reuse of an incidentally mentioned site or category-default output is flagged) | Quality-review lifecycle with the native runner | `quality_review({action:"review"})`, then `assess` |
 | Project review | Architecture, goals, consistency, debt, direction | One bounded advisory helper via the native subagent executor | `subagent` worker with a project-review brief |
 | Error review | Likely faults, root causes, failed assumptions, debugging leads | One bounded advisory helper via the native subagent executor | `subagent` worker with an error-review brief |
-| Council | Multi-perspective reasoning for genuinely hard questions | Automatic scope council, or the supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
-| Fan-out | Separable parallel investigations in one broad task, or competing approaches merged with provenance | Assistance-plan fan-out mode with bounded respawns; merged fragments keep their provenance | `subagent({tasks:[...],async:true})`, then `runs.fuse` to merge competing results |
+| Council | Multi-perspective reasoning for genuinely hard questions | Supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
+| Fan-out | Separable parallel investigations in one broad task, or competing approaches merged with provenance | Native subagent executor with bounded respawns; merged fragments keep their provenance | `subagent({tasks:[...],async:true})`, then `runs.fuse` to merge competing results |
 | Double | Two independent streams (the current model twice) reconciled into one decision | Double runner with the native subagent executor | `/double`, then work normally |
 
 Findings come back concise: bounded reports with evidence and explicit gaps,
 never raw reasoning dumps. The parent verifies, decides and owns changes.
-
-The per-request automatic-assistance budget binds only harness-initiated
-reviews. An explicit `quality_review({action:"review"})` call is never refused
-by it, because the completion gate requires the review it would skip.
 
 Interface review reads current implementation before inspecting at most three representative captures. A test log does not qualify as an implementation read. Large native edits and current files changed through commands receive bounded source checks; rendered label dots, icon tiles and accent rails feed the same checkpoint. Unaddressed standing UI policy cues appear as `policyFindings` separately from independent reports and prevent acceptance until repaired/reviewed or explicitly dismissed with evidence. These obligations survive session resume and do not create additional review rounds. New rendered findings invalidate earlier acceptance; source edits invalidate stale rendered cues.
 
@@ -72,36 +68,24 @@ inference. `PI_DOUBLE=off` disables the mode; children never re-double.
 
 ### One board for every planner and reviewer
 
-Double, the scope council and the automatic helper team (the single helper,
-fan-out that planning starts on its own) now say what they told the agent
-on the same in-process board the Guardian, the session observer and
-the observer already used, and read it back. The reviewers see "Double mode
-already told the agent …", "Scope council already told the agent …" and
-"Automatic helpers already told the agent …" beside each other's notes, so a
-note that merely restates a directive is suppressed instead of delivered twice.
+Double now says what it told the agent on the same in-process board the
+Guardian and the session observer already used, and reads it back. The
+reviewers see "Double mode already told the agent …" beside each other's notes,
+so a note that merely restates a directive is suppressed instead of delivered
+twice.
 While Double is on, both reviewers get one evidence row naming the mode and the
 two routes, so they do not recommend repeating a deliberation the harness
 already runs before every prompt. In the other direction, both Double streams
 receive the reviewers' most recent notes (identically, so the shared prefix stays
 byte-identical) as evidence the forked transcript does not carry. Double's own
 streams and reconciliation are counted as harness-owned runs, never as children
-the agent launched. While Double is on, the automatic assistance team
-(the proactive helper, fan-out that planning would otherwise start for the
-same prompt) stands down, as it already does for the scope council: Double is the
-independent analysis of that prompt, and a third team would repeat it. Failure-driven
-assistance after repeated tool errors is unchanged.
+the agent launched.
 
 ## Session-start disclosure
 
 The first prompt of a session carries one short orientation line naming
 native-tool preference and the availability of reviews, councils and fan-out. It appears once per session, costs negligible context and never
 repeats. The main agent invokes these workflows deliberately when they fit.
-When an automatic scope council runs, its transcript shows each phase and
-member starting and finishing, including the selected model/thinking and elapsed
-time. Successful members show a short advice preview that expands to the
-bounded full report; completion, partial results and cancellation remain visible
-after the footer clears. These persisted display messages do not enter model
-context or wake the agent. They expose returned advice, never hidden thinking.
 
 ## Automatic behavior and anti-spam
 
@@ -116,15 +100,10 @@ it:
   re-reviews only the aspects the files changed since the last review would
   select, plus any that did not pass cleanly; a clean pass whose files did not
   change carries forward with a note naming the revision it came from.
-- Harness-owned runs (scope councils, skill discovery, automatic review) are
+- Harness-owned runs (Double streams, automatic review) are
   not the agent's children: `subagent` status on their ids explains that their
   results arrive in context by themselves, and the background reviewers count
   them separately from agent-launched children.
-- The scope council runs only for qualifying change-scope requests, and in
-  design-direction mode for a new open visual brief: the same three members,
-  budgets and read-only limits read the brief (classifying mentioned sites as
-  style or context-only), propose three distinct directions, and critique
-  them to recommend one. Its progress rows are labelled "Design council".
 - A strong stuck pattern — the same fix attempted four or more times, four
   or more consecutive errors with multi-cause or loop evidence — earns at
   most a single bounded *suggestion* naming an error review. Suggestions
@@ -132,7 +111,7 @@ it:
 - Suggestions honor a 30-minute per-kind cooldown, a cap of two per session
   and kind, and suppression for ten minutes after a review ran.
 
-The following never trigger councils or reviews: trivial formatting, linting
+The following never trigger reviews: trivial formatting, linting
 or cleanup work; expected transient failures (rate limits, quota, budget);
 repeated successful commands; harmless iteration. Deliberate invocation
 always stays available regardless of these gates.
@@ -144,8 +123,7 @@ second. See [Model routing](MODEL-ROUTING.md) for budgets and quality gates.
 Short follow-ups such as “keep going” retain the current task. A model,
 provider or thinking change is not a new project objective; a genuine task
 pivot starts a new scope. Automatic wakes reuse the latest real user direction
-and do not spend a fresh council budget or reinterpret a completion notice as
-a user request. Late advice from a cancelled or replaced session is discarded.
+and do not reinterpret a completion notice as a user request. Late advice from a cancelled or replaced session is discarded.
 
 Interpretation and effort helpers provide passive advice. They do not change
 the main session's model or thinking, interrupt its active turn, or wake it.

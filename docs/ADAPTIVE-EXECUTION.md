@@ -8,9 +8,9 @@ work, cancellation and receipts.
 
 | Scope evidence | Automatic support |
 | --- | --- |
-| A bounded direct edit, command or explanation | Direct completion; no helper, council, periodic reviewer or routing judge |
-| Diagnosis, moderate uncertainty or repeated failures | One bounded investigator, one completion reviewer, observer at 120 seconds |
-| Broad independent work or competing approaches | Up to three independent workers, up to three completion reviewers, observer at 60 seconds |
+| A bounded direct edit, command or explanation | Direct completion; no periodic reviewer or routing judge |
+| Diagnosis, moderate uncertainty or repeated failures | One completion reviewer, observer at 120 seconds |
+| Broad independent work or competing approaches | Up to three completion reviewers, observer at 60 seconds |
 | High consequence work | Independent assurance, observer at 30 seconds |
 
 Failure evidence can shorten reviewer admission to the scheduler's next tick.
@@ -48,16 +48,12 @@ remain effective. `adaptive-subagent-dispatch-v1` records applied defaults; the
 parallelism. The rollback switch removes adaptive capacity and reasoning
 defaults while retaining configured capacity.
 
-Remote installed-skill discovery is admitted only when the current scope needs
-uncertainty or coordination support. Direct work does not perform a skill judge,
-budget reservation or scouting child. Captured `*.log.txt` verification output
+Captured `*.log.txt` verification output
 remains review evidence without adding a copy reviewer; explicitly requested
 textual artifacts remain covered. Completed review reports ask for one parent
 assessment with `quality_review`, while an active review is identified as
 running. Neither state creates acceptance automatically.
 
-Automatic assistance carries at most two locally selected optional skill
-references; startup does not wait for a second remote ranking of those links.
 The subagent tool describes native execution and essential contracts briefly,
 leaving detailed fields in its schema. Models choose useful orchestration and
 may consult skills without a required read sequence. First-use session hooks
@@ -119,8 +115,8 @@ waive that mismatch. When formatting leaves bytes unchanged, direct prose
 readback keeps its existing low-overhead completion path. Later settlement
 cannot mutate a document whose owned deferred work finished before readback.
 
-Set `PI_ADAPTIVE_EXECUTION=off` (or `0`) to restore established automatic
-assistance and reviewer admission. Existing subsystem switches, configured
+Set `PI_ADAPTIVE_EXECUTION=off` (or `0`) to restore established reviewer
+admission. Existing subsystem switches, configured
 preferences and user opt-outs remain effective.
 
 ## Measured reliability control
@@ -128,8 +124,7 @@ preferences and user opt-outs remain effective.
 The tier above comes from the task and its failures. A second input, the
 measured reliability of the executing route, adjusts only optional
 coordination: a route with a long clean record (an `earned` level) gets lighter
-observer cadence, one reviewer fewer for complex work, no automatic helper for
-open-ended work alone and no copy review of a small verified change; a route
+observer cadence, one reviewer fewer for complex work and no copy review of a small verified change; a route
 whose slip rate is credibly above the fleet's (`guarded`) gets the opposite,
 and a short burst of slips gets a targeted recovery note. The level comes from
 decayed, interval-bounded counts of classified tool outcomes compared with the
@@ -143,7 +138,7 @@ calibration and `PI_COMPETENCE_STORE=off`.
 Run the policy, scheduler, helper and completion-review regressions:
 
 ```sh
-node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/automatic-helper-lifecycle.test.mjs tests/skill-discovery-runner.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
+node --test tests/adaptive-execution.test.mjs tests/adaptive-observer.test.mjs tests/adaptive-thinking.test.mjs tests/adaptive-dispatch.test.mjs tests/subagent-executor-routing.test.mjs tests/quality-review.test.mjs tests/lens-verification-order.test.mjs
 ```
 
 ## Tool exposure and assurance output in 0.18

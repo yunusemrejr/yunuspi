@@ -175,16 +175,7 @@ observation owner therefore routes output to Kompress only when a selection
 could pay for itself (`miniAdmissible`, the same test `select` applies);
 Kompress-shaped output it cannot shorten stays available to Jev.
 
-## Council and recovery consumers
-
-The automatic scope council starts one local Needle perspective ranking alongside
-its two required independent peers. At critique time it may add already-settled,
-recognized perspective descriptions with score at least 0.90 and margin at least
-0.025. Slow, shadow, malformed and weak results add nothing. This introduces no
-remote judgment or extra wait; it does not replace either peer, discard evidence,
-limit required reviews or approve a result. Accepted metrics count hints actually
-included. This wiring is regression-tested with injected ranks; live improvement
-in council judgment quality has not been established.
+## Review and skill-ranking consumers
 
 Recovery skill ranking checks that subagents and multiple applicable installed
 skills exist before asking Jev. Missing catalog entries never consume ranking
@@ -222,13 +213,7 @@ per consolidation). Related judgments batch into one call;
 identical judgments reuse the bounded process cache; simultaneous uncancelled
 identical requests share one paid call. Caller mutation cannot alter cached
 answers. The circuit breaker preserves heuristic fallback. Call sites include `rank` (validation),
-`intent`, `finding-duplicate`, `classify`, and
-`skill-discovery`. Skill discovery asks one typed choice/existence batch before
-launching a general-model advisor. It sends the evidence section of the brief,
-not its embedded catalog copy; a catalog over the 32 KiB budget is shortlisted
-by lexical overlap. Valid catalog choices or clear no-fit judgments over the
-complete catalog avoid that launch; a no-fit over a shortlist, and uncertainty,
-keep the bounded original fallback.
+`intent`, `finding-duplicate` and `classify`.
 
 **Second opinion (consensus or abstain).** A `choice` answer is a full
 unit-sum distribution. When it is genuinely uncertain (best-versus-runner-up
@@ -310,8 +295,8 @@ Observer admission and focus, quality-review aspect
 selection (add-only: Jev may suggest aspects, never remove the
 deterministic set), memory classification/admission, delegation
 topology, recovery strategy, verification method, evidence relevance,
-and shortlist-based tool/skill routing. Two decisions run live rather than
-in shadow because each degrades to the previous behavior when the judge
+and shortlist-based tool/skill routing. One decision runs live rather than
+in shadow because it degrades to the previous behavior when the judge
 abstains:
 
 - `ui-work` decides whether a request is interface work. Deterministic
@@ -324,13 +309,6 @@ abstains:
   When it says yes, `relevant-guidance` demands the embedded
   `ui-design` skill (see
   [ANTI-SLOP-CHECKLIST.md](ANTI-SLOP-CHECKLIST.md)).
-- `scope-council-need` may veto only a heuristic yes for the change-scope
-  council, and only when the request is confidently a small self-contained
-  edit (score at least 0.7; probed small edits 0.43–0.84, open
-  redesign/refactor work 0.04–0.23). Open visual briefs are never
-  vetoed, and uncertainty, a timeout (2.5 s) or an unavailable judge keeps
-  the council. A skipped council is recorded as a `scope-deliberation-v1`
-  receipt with status `skipped-by-jev`.
 
 Deterministic code still owns permissions, safety, completion, and
 final decisions; a typed decision only refines an ambiguous choice the
@@ -338,7 +316,7 @@ owner framed, and every verdict degrades to unknown (caller keeps its
 heuristic). New production uses start in shadow mode — judged,
 measured, and agreement-recorded via `ml.jev.shadow` health events, but
 never applied — until calibration evidence justifies influence.
-Currently shadow-wired (besides the two live decisions above): requirement closure at ledger settle time,
+Currently shadow-wired (besides the live decision above): requirement closure at ledger settle time,
 review aspects per review round, and recovery strategy per recovery
 episode. The remaining registry entries are defined, barred, and
 tested, with production call sites staged behind the same shadow

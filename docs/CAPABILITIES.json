@@ -3163,7 +3163,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 921
+        "line": 831
       },
       {
         "name": "harness-backup",
@@ -3779,7 +3779,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 805,
+        "line": 715,
         "kind": "literal"
       },
       {
@@ -4197,7 +4197,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 805,
+        "line": 715,
         "kind": "literal"
       },
       {
@@ -4557,7 +4557,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 701,
+      "sourceFiles": 697,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -5191,10 +5191,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/observer-model-evidence.ts",
-        "exists": false
-      },
-      {
         "path": "agent/extensions/lib/office-build.ts",
         "exists": true
       },
@@ -5339,10 +5335,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/scope-deliberation.ts",
-        "exists": false
-      },
-      {
         "path": "agent/extensions/lib/scoped-snapshots.ts",
         "exists": true
       },
@@ -5421,14 +5413,6 @@
       {
         "path": "agent/extensions/lib/shot-scene.ts",
         "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/skill-discovery-controller.ts",
-        "exists": false
-      },
-      {
-        "path": "agent/extensions/lib/skill-discovery.ts",
-        "exists": false
       },
       {
         "path": "agent/extensions/lib/skill-relevance.ts",
@@ -5673,10 +5657,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/micro-intelligence/router-shadow.ts",
-        "exists": false
-      },
-      {
         "path": "agent/extensions/lib/micro-intelligence/span-sensor.ts",
         "exists": true
       },
@@ -5891,10 +5871,6 @@
       {
         "path": "agent/scripts/compatibility/automatic-compaction-test.mjs",
         "exists": true
-      },
-      {
-        "path": "agent/scripts/compatibility/autonomous-recovery-test.mjs",
-        "exists": false
       },
       {
         "path": "agent/scripts/compatibility/harness-load-test.mjs",
@@ -6209,6 +6185,31 @@
         "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
       },
       {
+        "name": "lib/micro-intelligence/router-shadow.ts",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/observer-model-evidence.ts",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/scope-deliberation.ts",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/skill-discovery-controller.ts",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/skill-discovery.ts",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
         "name": "lichtfeld-studio.ts",
         "retired": "2026-10-02",
         "why": "LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate"
@@ -6387,6 +6388,11 @@
         "name": "scene-studio.ts",
         "retired": "2026-10-10",
         "why": "scene_create and scene_render tools removed; lib/scene-studio.ts had no production caller left. Do not recreate"
+      },
+      {
+        "name": "scripts/compatibility/autonomous-recovery-test.mjs",
+        "retired": "2026-10-19",
+        "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
       },
       {
         "name": "session-bridge.ts",
@@ -7077,10 +7083,6 @@
       {
         "name": "AUTONOMOUS-ORCHESTRATION.md",
         "path": "docs/AUTONOMOUS-ORCHESTRATION.md"
-      },
-      {
-        "name": "CHANGE-SCOPE.md",
-        "path": "docs/CHANGE-SCOPE.md"
       },
       {
         "name": "CODE-AUDIT.md",

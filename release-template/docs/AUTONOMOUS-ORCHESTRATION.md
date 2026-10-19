@@ -1,7 +1,6 @@
 # Autonomous orchestration
 
-Automatic helpers remain enabled by default. Admission follows the current
-task's scope, uncertainty, errors and user constraints. Skill routing, child
+Skill routing, child
 tasks, fan-out, reviews, hooks, the session observer, project vector memory,
 Guardian and WASM checks retain their existing owners and lifecycle.
 Configuration and deliberate user selections retain priority.
@@ -29,18 +28,9 @@ relevance thresholds still apply. This implements the documented
 [TypeSafe Choice contract](https://docs.typesafe.ai/primitives/choice);
 probabilities are selection evidence, not proof that a task is correct.
 
-## Skill selection and recovery
+## Cancellation and memory recall
 
-The skill scout supplies candidate names/descriptions in shared JEV state.
-Both its choice question and its existence question see those descriptions.
-Descriptions are sent once, and an exact serialized-size check includes JSON
-escaping and criteria overhead. Oversized catalogs retain the most relevant
-entries within the 32,768-character input cap and the 255-option API limit.
-An inconclusive partial catalog retains the existing bounded child fallback.
-Valid JEV selections can avoid that child. The agent still resolves the
-installed identifier and reads the skill before applying it.
-
-Skill judgments and project-memory recall stop waiting promptly on
+Project-memory recall stops waiting promptly on
 cancellation, including cancellation triggered inside the helper itself.
 Late transport failures remain handled. Memory consumers retain their role
 policies and existing store; recalled text stays untrusted evidence.

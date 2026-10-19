@@ -10,9 +10,8 @@ Resolution hierarchy:
 2. Validate it against the live registry, cached exclusions, shared
    provider-health cooldowns and capability requirements.
 3. Try configured preferences in their declared order.
-4. If one is unusable or fails, continue through the remaining entries.
-5. If the file is missing, malformed, has no applicable preference, or every
-   configured option fails, hand control back to the current autonomous
+4. If one is unusable, continue through the remaining entries.
+5. If the file is missing, malformed or has no applicable preference, hand control back to the current autonomous
    selection (free-model preference, availability, benchmark quality gates,
    economy caps — see [Model routing](MODEL-ROUTING.md)).
 
@@ -28,13 +27,10 @@ chain, fallback or economy selection applies (see
 A viable preference keeps its place across repeated requests and sessions.
 Usage frequency and random rotation do not move free alternatives ahead of it.
 Context, output, modality, tool-support and quota failures explain why an entry
-was skipped. The same order survives launch-time economy filtering; bounded
-fallback attempts try the remaining configured routes before autonomous picks.
+was skipped. The same order survives launch-time economy filtering.
 
 An explicit free-only task constraint filters preference chains to
-proven-free routes. Automatic council and review rounds keep honoring
-configured routes while their autonomous fill stays free-only.
-
+proven-free routes.
 Tool-calling capability is proven by catalog facts that exist only for
 OpenRouter and OrcaRouter with fresh evidence. A configured route whose
 tool support is unknown (another provider, or stale/missing evidence)
@@ -68,15 +64,10 @@ authoritative even when that route is absent from the cache.
 ## State vs policy
 
 Harness persistence records the main model/provider/thinking configuration
-you actually selected. `llm_preferences.json` defines preferences and
-fallbacks. The JSON never silently becomes the source of truth for the
+you actually selected. `llm_preferences.json` defines preferences. The JSON never silently becomes the source of truth for the
 normal main-session model:
 
-- Main session: your last harness-selected configuration stays active while
-  healthy. Only after repeated failure (three consecutive failures, or
-  immediately for dead credentials) does recovery consult
-  `main_session_fallback`, and only then the autonomous fallback logic.
-- Automatic-recovery routes are never persisted as your default model.
+- Main session: your last harness-selected configuration stays active.
 - Main-session thinking always stays yours; preference thinking levels apply
   to child teams, never to your active session.
 
@@ -104,7 +95,6 @@ normal main-session model:
     }
   },
   "preferences": {
-    "main_session_fallback": { "models": ["cheap_auto"] },
     "subagents": { "models": ["cheap_auto", "strong_pinned"] },
     "council": { "models": ["strong_pinned", "cheap_auto"] },
     "fanout": { "models": ["cheap_auto"] },
@@ -122,9 +112,8 @@ normal main-session model:
   supported separator differences resolve against the live registry.
 - `preferences.<role>.models` is an ordered list of aliases (or inline
   entries). Role names accept `subagents`, `council`, `fanout` (`swarm` and `fusion` are accepted aliases),
-  `quality_review`, `project_review`, `error_review` and
-  `main_session_fallback` (dashes, case and singular/plural variants are
-  accepted). Unknown roles pass through for future mechanisms.
+  `quality_review`, `project_review`, `error_review` (dashes,
+  case and singular/plural variants are accepted). Unknown roles pass through for future mechanisms.
 - Ad-hoc subagent tasks use the `subagents` chain unless the task explicitly
   names a review or council (`project review`, `error review`, `bug review`,
   `quality review`, `council`). Automatic dispatchers pass their role
@@ -151,8 +140,7 @@ vocabulary — the same shapes `/provider order|only|json` persists:
 - `"routing": "custom"` with `order`/`allow_fallbacks` (plus optional
   `only`, `ignore`, `sort`) becomes an ordered backend preference.
 
-Backend pins apply to main-session fallback recovery through the existing
-`compat` path. Child launches carry the selected provider options into each
+Child launches carry the selected provider options into each
 request payload with a request-local hook, so a retry on the same model can
 use a different configured backend without mutating the shared registry
 model. Global `/provider` pins in `models.json` remain part of the route.

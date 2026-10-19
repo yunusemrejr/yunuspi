@@ -61,7 +61,7 @@ Deferred work needs evidence first: a generative selector must beat deterministi
 
 ## Request lifetime and interactive latency
 
-Request classification and the single JEV advisory batch are canceled or discarded when input, session, or branch changes. Finished advice is reusable only for the exact current request; councils may use its bounded perspective cues without changing mandatory roles or treating agreement as verification. Long request excerpts retain both ends and mark omitted text. The request family comes from deterministic cues; no local model classifies it. Micro-metrics start afresh at session boundaries.
+Request classification and the single JEV advisory batch are canceled or discarded when input, session, or branch changes. Finished advice is reusable only for the exact current request. Long request excerpts retain both ends and mark omitted text. The request family comes from deterministic cues; no local model classifies it. Micro-metrics start afresh at session boundaries.
 
 Exact capability names bypass semantic re-ranking. Searches cache only shortlisted embeddings; they do not queue whole-catalog warmups ahead of interactive work. Short technical skill terms (SQL, PHP, API, CSS, C++, AI, ML) remain searchable, and long metadata typos can use the existing bounded single-edit matcher. JEV validates typed answers before caching, applies one deadline across its alias cascade, and keeps provider-echoed request bodies out of health diagnostics.
 

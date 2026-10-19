@@ -1218,7 +1218,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 170; literal)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 618; literal)
-- `project_intel` — [`agent/extensions/lib/project-intelligence-impl.ts`](../../agent/extensions/lib/project-intelligence-impl.ts) (line 805; literal)
+- `project_intel` — [`agent/extensions/lib/project-intelligence-impl.ts`](../../agent/extensions/lib/project-intelligence-impl.ts) (line 715; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 811; literal)
 - `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 257; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 242; literal)
@@ -1303,7 +1303,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
 - /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 362)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3325)
-- /graph — [`agent/extensions/lib/project-intelligence-impl.ts`](../../agent/extensions/lib/project-intelligence-impl.ts) (line 921)
+- /graph — [`agent/extensions/lib/project-intelligence-impl.ts`](../../agent/extensions/lib/project-intelligence-impl.ts) (line 831)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 78)
 - /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 648)
@@ -1598,7 +1598,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/observation-retrieval.ts`](../../agent/extensions/lib/observation-retrieval.ts)
 - [`agent/extensions/lib/observer-book.ts`](../../agent/extensions/lib/observer-book.ts)
 - [`agent/extensions/lib/observer-journal.ts`](../../agent/extensions/lib/observer-journal.ts)
-- `agent/extensions/lib/observer-model-evidence.ts` (missing from sanitized source) — missing from source tree
 - [`agent/extensions/lib/office-build.ts`](../../agent/extensions/lib/office-build.ts)
 - [`agent/extensions/lib/office-read.ts`](../../agent/extensions/lib/office-read.ts)
 - [`agent/extensions/lib/office-render.ts`](../../agent/extensions/lib/office-render.ts)
@@ -1635,7 +1634,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
 - [`agent/extensions/lib/reviewer-board.ts`](../../agent/extensions/lib/reviewer-board.ts)
 - [`agent/extensions/lib/rpc-report.ts`](../../agent/extensions/lib/rpc-report.ts)
-- `agent/extensions/lib/scope-deliberation.ts` (missing from sanitized source) — missing from source tree
 - [`agent/extensions/lib/scoped-snapshots.ts`](../../agent/extensions/lib/scoped-snapshots.ts)
 - [`agent/extensions/lib/self-mutation-guard.ts`](../../agent/extensions/lib/self-mutation-guard.ts)
 - [`agent/extensions/lib/seo-policy.ts`](../../agent/extensions/lib/seo-policy.ts)
@@ -1656,8 +1654,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts)
 - [`agent/extensions/lib/sheet-formula.ts`](../../agent/extensions/lib/sheet-formula.ts)
 - [`agent/extensions/lib/shot-scene.ts`](../../agent/extensions/lib/shot-scene.ts)
-- `agent/extensions/lib/skill-discovery-controller.ts` (missing from sanitized source) — missing from source tree
-- `agent/extensions/lib/skill-discovery.ts` (missing from sanitized source) — missing from source tree
 - [`agent/extensions/lib/skill-relevance.ts`](../../agent/extensions/lib/skill-relevance.ts)
 - [`agent/extensions/lib/skill-routing.ts`](../../agent/extensions/lib/skill-routing.ts)
 - [`agent/extensions/lib/skill-telemetry.ts`](../../agent/extensions/lib/skill-telemetry.ts)
@@ -1722,7 +1718,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../../agent/extensions/lib/micro-intelligence/retrieval.ts)
 - [`agent/extensions/lib/micro-intelligence/review.ts`](../../agent/extensions/lib/micro-intelligence/review.ts)
 - [`agent/extensions/lib/micro-intelligence/route-privacy.ts`](../../agent/extensions/lib/micro-intelligence/route-privacy.ts)
-- `agent/extensions/lib/micro-intelligence/router-shadow.ts` (missing from sanitized source) — missing from source tree
 - [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../../agent/extensions/lib/micro-intelligence/span-sensor.ts)
 - [`agent/extensions/lib/micro-intelligence/status.ts`](../../agent/extensions/lib/micro-intelligence/status.ts)
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../../agent/extensions/lib/project-intelligence/client.mjs)
@@ -1777,7 +1772,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/colab-auth-browser.mjs`](../../agent/scripts/colab-auth-browser.mjs)
 - [`agent/scripts/compatibility/atomic-edit-preflight-test.mjs`](../../agent/scripts/compatibility/atomic-edit-preflight-test.mjs)
 - [`agent/scripts/compatibility/automatic-compaction-test.mjs`](../../agent/scripts/compatibility/automatic-compaction-test.mjs)
-- `agent/scripts/compatibility/autonomous-recovery-test.mjs` (missing from sanitized source) — missing from source tree
 - [`agent/scripts/compatibility/harness-load-test.mjs`](../../agent/scripts/compatibility/harness-load-test.mjs)
 - [`agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs`](../../agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs)
 - [`agent/scripts/compatibility/retry-lifecycle-test.mjs`](../../agent/scripts/compatibility/retry-lifecycle-test.mjs)
@@ -1902,7 +1896,6 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/ART-DIRECTION.md`](ART-DIRECTION.md)
 - [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 - [`docs/AUTONOMOUS-ORCHESTRATION.md`](AUTONOMOUS-ORCHESTRATION.md)
-- [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 - [`docs/CODE-AUDIT.md`](CODE-AUDIT.md)
 - [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 - [`docs/COMPETENCE-CONTROL.md`](COMPETENCE-CONTROL.md)
@@ -1986,6 +1979,11 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/expert-doctrine.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/expert-domains.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/expert-taste.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/micro-intelligence/router-shadow.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/observer-model-evidence.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/scope-deliberation.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/skill-discovery-controller.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/skill-discovery.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lichtfeld-studio.ts` — retired 2026-10-02: LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate
 - `local-lm-assets.mjs` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
 - `local-lm.ts` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
@@ -2022,6 +2020,7 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `scene-model.mjs` — retired 2026-10-10: scene studio runtime had no tool after scene_create/scene_render were removed. Do not recreate
 - `scene-runtime.mjs` — retired 2026-10-10: scene studio runtime had no tool after scene_create/scene_render were removed. Do not recreate
 - `scene-studio.ts` — retired 2026-10-10: scene_create and scene_render tools removed; lib/scene-studio.ts had no production caller left. Do not recreate
+- `scripts/compatibility/autonomous-recovery-test.mjs` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `session-bridge.ts` — retired 2026-08-31: cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations
 - `session-reviewer.ts` — retired 2026-08-31: review channel superseded by checkpoints; references scrubbed
 - `session-watchmaker.ts` — retired 2026-10-10: merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate
