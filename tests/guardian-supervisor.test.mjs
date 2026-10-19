@@ -951,7 +951,7 @@ for (const scenario of ['same-tick-edit', 'check-overlaps-edit', 'edit-overlaps-
 			await end(await start('bash', { command: 'npm test' }));
 			if (scenario === 'same-tick-edit') await mutate();
 			if (scenario === 'pass-then-fail') await end(await start('bash', { command: 'npm test' }), {}, true);
-			if (scenario === 'partial-mutation') await end(await start('bulk_edit', { path: 'parser.js' }), { fileMutation: true }, true);
+			if (scenario === 'partial-mutation') await end(await start('edit', { path: 'parser.js' }), { fileMutation: true }, true);
 		} else if (scenario === 'check-overlaps-edit') {
 			const check = await start('bash', { command: 'npm test' }); await mutate(); await end(check);
 		} else if (scenario === 'edit-overlaps-check') {

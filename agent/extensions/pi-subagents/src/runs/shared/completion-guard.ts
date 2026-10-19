@@ -6,7 +6,7 @@ import { classifyTaskMutationIntent, expectsImplementationMutation, taskMayMutat
 export { expectsImplementationMutation };
 
 const READ_ONLY_BUILTIN_TOOLS = new Set([
-	"sqlite_probe", "package_probe", "net_probe", "archive_probe",
+	"sqlite_probe", 
 	"read",
 	"grep",
 	"find",

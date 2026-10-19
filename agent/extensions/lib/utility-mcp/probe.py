@@ -1,24 +1,21 @@
-"""Stdlib-only SQLite/archive executor. Invoked by the one utility MCP server.
+"""Stdlib-only SQLite executor. Invoked by the one utility MCP server.
 
 Input/output are bounded JSON; no shell, extraction, project writes or extensions.
 The independent alarm survives cancellation of the parent worker thread.
 """
-import fnmatch
 import importlib.util
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import resource
 import signal
 import sqlite3
 import stat
 import sys
-import tarfile
 import tempfile
 import time
-import zipfile
 
 FILE_CAP = 256 * 1024 * 1024
 TEXT_CAP = 16 * 1024
@@ -177,83 +174,6 @@ def sqlite_probe(root, args):
             db.close()
 
 
-def safe_member(name):
-    p = PurePosixPath(name)
-    return bool(name) and not p.is_absolute() and '..' not in p.parts and '\\' not in name and not re.match(r'^[A-Za-z]:', name) and '\x00' not in name
-
-
-def archive_probe(root, args):
-    source, _ = regular(root, args['path'])
-    with source:
-        before = os.fstat(source.fileno())
-        sha = hashlib.sha256()
-        read_bytes = 0
-        while True:
-            chunk = source.read(1024 * 1024)
-            if not chunk:
-                break
-            read_bytes += len(chunk)
-            if read_bytes > FILE_CAP:
-                raise ValueError('Archive byte limit exceeded')
-            sha.update(chunk)
-        source.seek(0)
-        rows, matched, names, expanded = [], [], set(), 0
-        is_zip = zipfile.is_zipfile(source)
-        source.seek(0)
-        archive = zipfile.ZipFile(source) if is_zip else tarfile.open(fileobj=source, mode='r:*')
-        with archive:
-            members = archive.infolist() if is_zip else archive
-            for index, member in enumerate(members):
-                if index >= MEMBERS_CAP:
-                    raise ValueError('Archive member count limit exceeded')
-                name = member.filename if is_zip else member.name
-                size = member.file_size if is_zip else member.size
-                mode = member.external_attr >> 16 if is_zip else member.mode
-                directory = member.is_dir() if is_zip else member.isdir()
-                link = stat.S_ISLNK(mode) if is_zip else member.issym() or member.islnk()
-                regular_member = (not directory and not link and (stat.S_IFMT(mode) in (0, stat.S_IFREG))) if is_zip else member.isfile()
-                unsafe = not safe_member(name) or link or not (regular_member or directory)
-                expanded += size
-                if expanded > 512 * 1024 * 1024:
-                    raise ValueError('Archive expanded byte limit exceeded')
-                if name in names:
-                    raise ValueError('Duplicate archive member names are ambiguous')
-                names.add(name)
-                row = dict(name=name, size=size, type='link' if link else 'directory' if directory else 'file' if regular_member else 'special', unsafe=unsafe)
-                if is_zip:
-                    row.update(compressed_size=member.compress_size, encrypted=bool(member.flag_bits & 1))
-                rows.append(row)
-                if name == args.get('member'):
-                    matched.append((member, row))
-            action = args['action']
-            if action in ('stat', 'read'):
-                if len(matched) != 1:
-                    raise ValueError('Exact member not found')
-                member, row = matched[0]
-                if action == 'stat':
-                    result = row
-                else:
-                    if row['unsafe'] or row['type'] != 'file' or row.get('encrypted'):
-                        raise ValueError('Unsafe, linked, encrypted or non-file member')
-                    if row['size'] > TEXT_CAP:
-                        raise ValueError('Text member exceeds 16 KiB limit')
-                    with archive.open(member) if is_zip else archive.extractfile(member) as stream:
-                        data = stream.read(TEXT_CAP + 1)
-                    if len(data) > TEXT_CAP or b'\x00' in data:
-                        raise ValueError('Binary or oversized text member')
-                    result = dict(row, text=data.decode('utf-8', errors='strict'))
-            else:
-                if action == 'find':
-                    if not args.get('pattern'):
-                        raise ValueError('find requires pattern')
-                    rows = [r for r in rows if fnmatch.fnmatchcase(r['name'], args['pattern'])]
-                result = page(rows, args)
-            after = os.fstat(source.fileno())
-            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-                raise ValueError('Archive changed during inspection; retry')
-            return dict(result, input_hash=hashlib.sha256(json.dumps([sha.hexdigest(), args], sort_keys=True).encode()).hexdigest())
-
-
 def main():
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError('Utility deadline exceeded')))
     signal.alarm(5)
@@ -269,7 +189,7 @@ def main():
             spec.loader.exec_module(operations)
             result = getattr(operations, request['name'])(root, request['args'], regular)
         else:
-            result = {'sqlite_probe': sqlite_probe, 'archive_probe': archive_probe}[request['name']](root, request['args'])
+            result = {'sqlite_probe': sqlite_probe}[request['name']](root, request['args'])
         encoded = json.dumps(result, ensure_ascii=True, allow_nan=False)
         if len(encoded) > 2 * 1024 * 1024:
             raise ValueError('Result byte limit exceeded; narrow request')

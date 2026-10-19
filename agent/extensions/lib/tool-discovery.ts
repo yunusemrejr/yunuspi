@@ -117,13 +117,10 @@ export const DIRECT_CORE_TOOLS = new Set([
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'frontend', tools: ['image_understand', 'image_crop', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_understand', 'blender'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'svg_render', 'image_understand', 'video_assets'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'image_understand', 'video_assets'] },
   { skill: '3d-cad', tools: ['blender', 'video_shot', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
-  // Colab has one tool with its own lifecycle; stage it with the first turn so
-  // the agent does not invent a local GPU path before discovering the runtime.
-  { skill: 'colab', tools: ['colab'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.
@@ -142,15 +139,13 @@ const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[];
   { pattern: /\b(?:promote|promotion|launch (?:post|announcement|campaign)|social media|reddit|hacker news|product hunt|linkedin post|tweet|marketing (?:campaign|plan|copy))\b/i, tools: ['web_search', 'fetch_content', 'browser_session'] },
   { pattern: /\b(?:call|hit|query|poll|test|curl|fetch)\b[^.\n]{0,50}\b(?:(?:rest|graphql|http|json|public) api|api endpoints?|endpoints?|webhooks?)\b|\bhttp requests?\b|\bapi (?:call|request)s?\b/i, tools: ['http_request'] },
   { pattern: /\b(?:scrape|crawl|browse (?:to|the web)|log in(?:to)?\b|sign ?(?:in|up) (?:to|for|on)\b|fill (?:in|out) (?:the |a )?(?:form|application)|submit (?:the |a )?form|go to (?:https?:\/\/|www\.))/i, tools: ['browser_session', 'fetch_content'], acting: true },
-  { pattern: /\b(?:network|dns|tcp|tls|https?)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|connectivity|failure|refused|timeout)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:network|dns|tcp|tls|https?)\b/i, tools: ['net_probe'] },
-  { pattern: /\b(?:linux|systemd|cgroup|memory pressure|disk pressure|listening port|service unit)\b[^.\n]{0,70}\b(?:diagnos\w*|troubleshoot\w*|failure|resource|unavailable|slow)\b|\b(?:diagnos\w*|troubleshoot\w*)\b[^.\n]{0,70}\b(?:linux|systemd|cgroup|service unit)\b/i, tools: ['sys_probe'] },
   { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
-  { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['motion_inspect', 'media_info'] },
+  { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['media_info'] },
   { pattern: /\b(?:image editing|image generation|image converting|image understanding|edit (?:an? |the |this )?(?:image|photo)|generate (?:an? |the |this )?image|convert (?:an? |the |this )?image)\b/i, tools: ['image_generate', 'image_understand'] },
   // The /goal command marks its own kickoff and continuation messages.
   { pattern: /^\[goal(?:-tracked)?\b/, tools: ['goal'] },
   // Security, backend, efficiency and UI-source audits: staged for work that ships to users or handles untrusted input.
-  { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect', 'svg_render'] },
+  { pattern: /\bsvgs?\b|\.svg\b|\b(?:icon (?:set|pack|library|system)|vector (?:icons?|logos?|illustrations?)|logo (?:mark|design)|illustrations?)\b/i, tools: ['svg_inspect'] },
   { pattern: /\b(?:git(?:hub)?|commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit|repository history|release (?:process|pipeline|version|tag))\b/i, tools: ['git_info'] },
   // Visual UI work is verified by rendering it: stage the browser tools with
   // the first turn instead of waiting for a late discovery heuristic.

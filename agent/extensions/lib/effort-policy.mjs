@@ -51,7 +51,7 @@ export const MECHANICAL_TOOLS = Object.freeze(new Set([
 /** Tools whose *use* implies a judgment the policy must not cheapen. */
 export const JUDGMENT_TOOLS = Object.freeze(new Set([
 	"subagent", "quality_review", "project_intel", "project_tests",
-	"handoff_capsule", "bulk_edit", "write", "todo", "skill_review",
+	"handoff_capsule", "write", "todo", "skill_review",
 ]));
 
 // Deliberation markers. Kept narrow on purpose: over-matching would raise cost

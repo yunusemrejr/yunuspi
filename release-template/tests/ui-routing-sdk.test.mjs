@@ -45,7 +45,7 @@ test('UI goals, source mutations and short follow-ups refresh real SDK tools and
   const results=session.messages.filter(message=>message.role==='toolResult');
   assert.equal(results.find(message=>message.toolCallId==='ui-2').isError,false,'real creative_direct direction dispatch');
   assert.equal(results.find(message=>message.toolCallId==='ui-3').isError,false,'native write mutation dispatch');
-  for(const name of ['ui_explore','motion_inspect','ui_consistency'])assert.ok(contexts[3].tools.includes(name),`${name} ready after implementation receipt`);
+  for(const name of ['ui_explore'])assert.ok(contexts[3].tools.includes(name),`${name} ready after implementation receipt`);
   assert.match(JSON.stringify(contexts[3].messages),/ui-scroll|forward\/backtrack|forward and backward/);
   const phoneBoundary=contexts.length;
   await session.prompt('Make it work on phones too.',{source:'rpc'});
@@ -53,7 +53,6 @@ test('UI goals, source mutations and short follow-ups refresh real SDK tools and
   assert.match(JSON.stringify(contexts[phoneBoundary].messages),/Three\.js|three-model/,'original purpose survives steering');
   const arithmeticBoundary=contexts.length;
   await session.prompt('Calculate 2 + 2.',{source:'rpc'});
-  assert.ok(!contexts[arithmeticBoundary].tools.includes('ui_consistency'));
   assert.ok(contexts.every(context=>context.model==='ui-fixture'));assert.equal(session.model.id,'ui-fixture');assert.equal(session.thinkingLevel,'high');
  } finally {
   if(session){await emitSessionShutdownEvent(session.extensionRunner,{type:'session_shutdown',reason:'exit'});session.dispose();}

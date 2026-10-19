@@ -19,12 +19,11 @@ const { default: registerWorkflows } = await import(pathToFileURL(path.join(agen
 const { currentExecutionProfile } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const { registerToolDiscovery } = await import(pathToFileURL(path.join(agent, 'extensions/lib/tool-discovery.ts')));
 const { createProjectTestLifecycle } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-tests.ts')));
-const { default: registerBulkEdit } = await import(pathToFileURL(path.join(agent, 'extensions/bulk-edit.ts')));
 
 function fixture(t, { discovery = false, activeNames, nativeSources = false, sourceDiscover } = {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-workflows-'));
   const hooks = new Map(), tools = new Map(), entries = [], messages = [], events = new EventEmitter();
-  const names = activeNames ?? ['read', 'bash', 'edit', 'write', 'tool_search', 'task_pipeline', 'project_intel', 'project_tests', 'render_see', 'visual_review', 'quality_review', 'browser_session', 'git_info', 'ssh_plan', 'net_probe', 'bg_run', 'todo', 'ui_explore', 'ui_consistency', 'motion_inspect', 'creative_direct', 'module_report', 'symbol_search', 'context_slice', 'bulk_edit'];
+  const names = activeNames ?? ['read', 'bash', 'edit', 'write', 'tool_search', 'task_pipeline', 'project_intel', 'project_tests', 'render_see', 'visual_review', 'quality_review', 'browser_session', 'git_info', 'bg_run', 'todo', 'ui_explore', 'creative_direct', 'module_report', 'symbol_search', 'context_slice'];
   let active = names.slice(), sessionFile = path.join(cwd, 'session.jsonl'), sequence = 0;
   const manager = { getSessionId: () => 'workflow-session', getSessionFile: () => sessionFile, getBranch: () => entries };
   const ctx = { cwd, sessionManager: manager, isIdle: () => true, hasPendingMessages: () => false, ui: { notify() {} } };
@@ -357,7 +356,6 @@ test('ordinary Node fixes share minimal activation between initial intent and th
   const f = fixture(t, { discovery: true });
   const events = []; f.events.on('adaptive-pipeline-selection', event => events.push(event));
   await f.emit('session_start');
-  assert.ok(!f.active().includes('bulk_edit'));
   const initial = await f.start('Fix the Node.js parser');
   const hints = initial.filter(row => row.message?.customType === 'task-pipeline');
   assert.equal(hints.length, 1); assert.ok(hints[0].message.content.length <= 2400);
@@ -366,21 +364,17 @@ test('ordinary Node fixes share minimal activation between initial intent and th
   const last = events.at(-1);
   assert.equal(last.sessionManager, f.ctx.sessionManager);
   assert.ok(last.names.includes('project_tests') && last.names.includes('read'));
-  for (const name of ['task_pipeline', 'bulk_edit', 'git_info']) assert.ok(!last.names.includes(name) && !f.active().includes(name), `${name} stays discoverable without adding its schema`);
-  assert.ok(!f.active().includes('ssh_plan'), 'an unrelated deployment schema stays off wire');
+  for (const name of ['task_pipeline', 'git_info']) assert.ok(!last.names.includes(name) && !f.active().includes(name), `${name} stays discoverable without adding its schema`);
   await f.emit('before_agent_start', { prompt: 'Automatic continuation: finish checking the parser' });
-  for (const name of ['task_pipeline', 'bulk_edit', 'git_info']) assert.ok(!f.active().includes(name), `${name} remains optional on continuation`);
+  for (const name of ['task_pipeline', 'git_info']) assert.ok(!f.active().includes(name), `${name} remains optional on continuation`);
 });
 
 test('source audit, risk escalation, Git metadata and explicit workflow control activate their actual schemas', async t => {
   const f = fixture(t, { discovery: true }); await f.emit('session_start');
   await f.start('Refactor the Node.js parser');
-  assert.ok(f.active().includes('bulk_edit'));
-  await f.start('Use bulk_edit on the Node.js parser');
-  assert.ok(f.active().includes('bulk_edit'), 'an exact requested capability needs no extra discovery round trip');
+  await f.start('Fix the Node.js parser');
   assert.ok(!f.active().includes('git_info') && !f.active().includes('task_pipeline'));
   await f.start('Fix the Node.js parser');
-  assert.ok(!f.active().includes('bulk_edit'));
   await f.call('bash', { command: 'node --test' }, { details: { execution: { exitCode: 1 } } });
   await f.call('bash', { command: 'node --test' }, { details: { execution: { exitCode: 1 } } });
   await f.emit('turn_end');
@@ -409,12 +403,12 @@ test('required UI and deployment schemas are ready before the first turn without
   await f.emit('before_agent_start', { prompt: 'Automatic continuation: finish browser verification' });
   for (const name of ['browser_session', 'render_see', 'visual_review']) assert.ok(f.active().includes(name), name);
   await f.start('Deploy the PHP website through Git SSH to GoDaddy');
-  for (const name of ['git_info', 'ssh_plan', 'net_probe', 'browser_session']) assert.ok(f.active().includes(name), name);
+  for (const name of ['git_info', 'browser_session']) assert.ok(f.active().includes(name), name);
 });
 
 test('deliberately discovered optional schemas stay active through continuation and a new factual task', async t => {
   const f = fixture(t, { discovery: true }); await f.emit('session_start'); await f.start('Fix the Node.js parser');
-  const names = ['bulk_edit', 'git_info', 'task_pipeline'];
+  const names = ['git_info', 'task_pipeline'];
   for (const name of names) assert.ok(!f.active().includes(name));
   await f.tools.get('tool_search').execute('selected-tools', { names, enable: true }, undefined, undefined, f.ctx);
   await f.emit('turn_end');
@@ -447,27 +441,6 @@ test('native nonzero exits retire previous passes even when isError is false', a
   });
 });
 
-test('native bulk preview preserves validation and committed bulk apply invalidates it', async t => {
-  const f = await prepared(t, 'Fix the Node.js parser', { nativeSources: true });
-  registerBulkEdit(f.api);
-  await f.call('bash', { command: 'node --test' }, { details: { execution: { exitCode: 0 } } });
-  const before = await f.status();
-  assert.ok(before.evidence.some(row => row.stageId === 'validation' && row.status === 'passed'));
-  const args = { action: 'preview', pattern: 'value = 1', replacement: 'value = 2', files: ['parser.mjs'] };
-  const previewCall = await f.beginCall('bulk_edit', args);
-  const preview = await f.tools.get('bulk_edit').execute(previewCall.toolCallId, args, undefined, undefined, f.ctx);
-  await f.finish(previewCall, preview);
-  assert.equal((await f.status()).revision, before.revision);
-  const applyArgs = { ...args, action: 'apply', token: preview.details.token };
-  const applyCall = await f.beginCall('bulk_edit', applyArgs);
-  const result = await f.tools.get('bulk_edit').execute(applyCall.toolCallId, applyArgs, undefined, undefined, f.ctx);
-  await f.finish(applyCall, result);
-  assert.match(fs.readFileSync(path.join(f.cwd, 'parser.mjs'), 'utf8'), /value = 2/);
-  const changed = await f.status();
-  assert.notEqual(changed.revision, before.revision);
-  assert.ok(!changed.evidence.some(row => row.stageId === 'validation' && row.status === 'passed'));
-  assert.ok(changed.evidence.some(row => row.stageId === 'implementation' && row.source === `tool:${applyCall.toolCallId}`));
-});
 
 test('native source scans observe shell and background changes outside previously written artifacts', async t => {
   for (const toolName of ['bash', 'bg_run']) await t.test(toolName, async nested => {
@@ -688,7 +661,6 @@ test('pipeline and studio schemas remain available throughout automatic continua
   const abort = new AbortController(); abort.abort();
   await f.start('Deploy production PHP to the hosting server', { signal: abort.signal });
   assert.ok(f.active().includes('render_see'));
-  assert.ok(!f.active().includes('ssh_plan'), 'aborted replacement must not activate an unrelated deployment');
   await f.start('What is the capital of France?');
   assert.ok(!f.active().includes('render_see') && !f.active().includes('task_pipeline'));
 });
@@ -742,12 +714,12 @@ test('a factual follow-up releases automatically selected schemas while retainin
   const f = fixture(t, { discovery: true }); await f.emit('session_start');
   await f.start('Build a vanilla frontend website');
   assert.ok(f.active().includes('render_see') && f.active().includes('visual_review'));
-  await f.tools.get('tool_search').execute('explicit-tool', { names: ['ssh_plan'], enable: true }, undefined, undefined, f.ctx);
+  await f.tools.get('tool_search').execute('explicit-tool', { names: ['todo'], enable: true }, undefined, undefined, f.ctx);
   await f.emit('turn_end');
-  assert.ok(f.active().includes('ssh_plan'));
+  assert.ok(f.active().includes('todo'));
   await f.start('What is the capital of France?');
   assert.ok(!f.active().includes('render_see') && !f.active().includes('visual_review'), 'old inferred capabilities must not keep charging unrelated factual tasks');
-  assert.ok(f.active().includes('ssh_plan'), 'explicit caller discovery still owns its tool choice');
+  assert.ok(f.active().includes('todo'), 'explicit caller discovery still owns its tool choice');
 });
 
 test('recognized commands still require a completed substantive success before simplifying policy', async t => {
@@ -874,28 +846,25 @@ test('live context replaces discovery with current ready stages and exposes miss
   const f = fixture(t,{discovery:true}); await f.emit('session_start');
   const initial = await f.start('Build a responsive UI with scroll-driven animation and consistent tokens');
   assert.ok(f.active().includes('creative_direct'));
-  assert.ok(!f.active().includes('motion_inspect') && !f.active().includes('ui_consistency'));
   fs.writeFileSync(path.join(f.cwd,'page.html'),'<main><h1>Original content</h1></main>');
   await f.call('read',{path:'page.html'});
   const implementationContext = (await f.emit('context',{messages:[initial.find(row=>row.message)?.message]}))[0].messages;
   assert.equal(implementationContext.filter(row=>row.customType==='task-pipeline').length,1);
   assert.match(implementationContext.at(-1).content,/implementation:/);
   await f.write('page.html','<main><h1>Revised content</h1></main>'); await f.emit('turn_end');
-  for (const name of ['motion_inspect','ui_explore','ui_consistency']) assert.ok(f.active().includes(name),name);
+  for (const name of ['ui_explore']) assert.ok(f.active().includes(name),name);
   const ready = (await f.emit('context',{messages:implementationContext}))[0].messages.at(-1).content;
   assert.match(ready,/ui-scroll:/); assert.match(ready,/ui-responsive:/); assert.ok(!ready.includes('discovery:'));
   const restricted = fixture(t,{discovery:true,activeNames:['read','write','bash','tool_search','task_pipeline','project_intel','project_tests']});
   await restricted.emit('session_start'); await restricted.start('Fix responsive UI animation');
   fs.writeFileSync(path.join(restricted.cwd,'page.html'),'<main>Before</main>'); await restricted.call('read',{path:'page.html'}); await restricted.write('page.html','<main>After</main>');
   const gap = (await restricted.emit('context',{messages:[]}))[0].messages.at(-1).content;
-  assert.match(gap,/Missing tools here:/); assert.match(gap,/motion_inspect|ui_explore/);
-  assert.ok(!restricted.active().includes('motion_inspect'),'missing capability is not granted');
-  const availability=(await restricted.status()).toolAvailability.find(tool=>tool.name==='motion_inspect');
-  assert.equal(availability.registered,false); assert.equal(availability.active,false);
+  assert.match(gap,/Missing tools here:/); assert.match(gap,/ui_explore/);
+  assert.ok(!restricted.active().includes('ui_explore'),'missing capability is not granted');
 });
 
 test('short authored follow-ups, goal continuations and related scopes preserve UI intent and exclusions', async t => {
-  const f=fixture(t,{discovery:true,activeNames:['read','write','bash','tool_search','task_pipeline','project_intel','project_tests','todo','creative_direct','ui_explore','ui_consistency','motion_inspect','blender','git_info']});
+  const f=fixture(t,{discovery:true,activeNames:['read','write','bash','tool_search','task_pipeline','project_intel','project_tests','todo','creative_direct','ui_explore','blender','git_info']});
   await f.emit('session_start'); await f.start('Build a responsive animated UI without Blender or Git');
   await f.call('bash',{command:'false'},{isError:true});
   const initial=await f.status();
@@ -932,34 +901,6 @@ test('inspected local source and dependency evidence stages tools while tool pro
   assert.ok(!(await plain.status()).pipelines.includes('ui-motion') && !plain.active().includes('creative_direct'));
 });
 
-test('native UI captures index only current technical evidence, with appearance and interaction still open', async t => {
-  const f=fixture(t); await f.emit('session_start'); await f.start('Fix responsive UI scroll animations and consistent tokens');
-  const a='one#card.html',b='two.html';
-  fs.writeFileSync(path.join(f.cwd,a),'<main>First</main>'); fs.writeFileSync(path.join(f.cwd,b),'<main>Second</main>');
-  await f.call('read',{path:a}); await f.write(a,'<main>Revised</main>');
-  const revision=file=>createHash('sha256').update(fs.readFileSync(path.join(f.cwd,file))).digest('hex').slice(0,16);
-  const source={source:a,revision:revision(a)};
-  const matrix={...source,consistent:true,status:'measured',coverage:{complete:true},cells:[{ok:true,width:320,dom:{available:true}},{ok:true,width:1440,dom:{available:true}}],findings:[]};
-  await f.call('ui_explore',{source:a},{details:matrix});
-  await f.call('ui_consistency',{sources:[a,b]},{details:{coverage:{complete:true,comparedRoles:1},captures:[{...source,ok:true},{source:b,revision:revision(b),ok:true}],findings:[],missing:[]}});
-  const scroll={...source,mode:'scroll',samples:[{progress:0},{progress:1}],reducedPass:'checked',coverage:{complete:true,persistentDocument:true,hasScrollRange:true},findings:[]};
-  await f.call('motion_inspect',{source:a,mode:'scroll'},{details:scroll});
-  const state=await f.status();
-  for(const id of ['ui-responsive','ui-consistency','ui-scroll']) assert.ok(state.evidence.some(row=>row.stageId===id&&row.status==='passed'),id);
-  for(const id of ['ui-pixels','ui-interaction']) assert.ok(state.pending.some(row=>row.id===id),`${id} needs its own evidence`);
-  await f.call('motion_inspect',{source:a,mode:'scroll'},{details:{...scroll,coverage:{...scroll.coverage,complete:false}}});
-  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-scroll'&&row.status==='blocked'));
-  const temporal={...source,mode:'render',samples:[{timeMs:0},{timeMs:1000}],reducedPass:'checked',coverage:{complete:true},findings:[]};
-  await f.call('motion_inspect',{source:a,mode:'render'},{details:temporal});
-  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-motion'&&row.status==='passed'));
-  await f.call('motion_inspect',{source:a,mode:'render'},{details:{...temporal,coverage:{complete:false}}});
-  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-motion'&&row.status==='blocked'),'even a clean-looking partial temporal receipt leaves verification open');
-  const delayed=await f.beginCall('ui_explore',{source:a}); await f.write(a,'<main>New revision</main>');
-  await f.finish(delayed,{details:matrix});
-  assert.ok(!(await f.status()).evidence.some(row=>row.stageId==='ui-responsive'&&row.status==='passed'),'late captures cannot approve changed source');
-  await f.call('ui_consistency',{sources:[a,b]},{details:{coverage:{complete:false},captures:[],findings:[],missing:[{source:a}]}});
-  assert.ok((await f.status()).evidence.some(row=>row.stageId==='ui-consistency'&&row.status==='blocked'));
-});
 
 test('responsive indexing requires the native consistent complete narrow and desktop measurement contract', async t => {
   const f=await prepared(t,'Fix the UI typography');
@@ -1012,7 +953,7 @@ test('same-source phone steering retains prepared implementation and stages fres
   const after=await f.status(); assert.notEqual(after.revision,before.revision);
   for(const id of ['discovery','implementation']) assert.ok(after.evidence.some(row=>row.stageId===id&&row.status==='passed'),id);
   assert.ok(after.pending.some(row=>row.id==='ui-responsive'&&row.ready),'new criteria require fresh device evidence');
-  for(const name of ['ui_explore','motion_inspect','ui_consistency']) assert.ok(f.active().includes(name),name);
+  for(const name of ['ui_explore']) assert.ok(f.active().includes(name),name);
   const context=(await f.emit('context',{messages:[]}))[0].messages.at(-1).content;
   assert.match(context,/ui-responsive:/); assert.ok(!context.includes('discovery:'));
   await f.start('Add scroll choreography to its 3D WebGL hero');

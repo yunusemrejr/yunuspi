@@ -10,12 +10,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
-const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => syncFs.existsSync(path.join(p, 'extensions/lib/svg-render.ts')));
+const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => syncFs.existsSync(path.join(p, 'extensions/lib/svg-inspect.ts')));
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const design = await load('extensions/lib/design-studio.ts');
 const image = await load('extensions/lib/image-generate.ts');
 const vision = await load('extensions/lib/image-understand.ts');
-const svg = await load('extensions/lib/svg-render.ts');
 const blender = await load('extensions/lib/blender-studio.ts');
 const video = await load('extensions/lib/video-studio.ts');
 const workspace = async t => { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-creation-')); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; };
@@ -129,31 +128,7 @@ test('vision uses current provider registry, thinking and real cropped attachmen
   assert.equal(calls.length, 1);
 });
 
-test('SVG tracks validate topology, ownership, timing, alpha delivery and safe source before export', async t => {
-  const cwd = await workspace(t);
-  assert.equal(svg.sampleSvgValue([{ time: 0, value: '#000000' }, { time: 1, value: '#ffffff' }], .5), '#808080');
-  assert.equal(svg.sampleSvgValue([{ time: 0, value: 'translate(0 0)', ease: 'hold' }, { time: 1, value: 'translate(20 4)' }], .5), 'translate(0 0)');
-  await assert.rejects(svg.prepareSvgSource({ svg: source, tracks: [{ ...tracks[0], target: 'missing' }] }, cwd), /existing element id/);
-  await assert.rejects(svg.prepareSvgSource({ svg: source, tracks: [{ target: 'box', property: 'd', keys: [{ time: 0, value: 'M0 0L4 4' }, { time: 1, value: 'M0 0C1 1 4 4 5 5' }] }] }, cwd), /topology/);
-  await assert.rejects(svg.prepareSvgSource({ svg: source, tracks: [{ ...tracks[0], property: 'width', keys: [{ time: 0, value: -1 }, { time: 1, value: 1 }] }] }, cwd), /negative/);
-  await assert.rejects(svg.svgRender({ svg: source.replace('<circle', '<script>bad()</script><circle') }, cwd), /preflight/);
-  assert.throws(() => svg.planSvgRender({ mode: 'video', background: 'transparent' }), /no alpha/);
-  assert.equal(syncFs.existsSync(path.join(cwd, '.pi')), false);
-});
 
-test('real SVG frames synchronize CSS, SMIL and data tracks; export encodes a verified timeline', { timeout: 90000 }, async t => {
-  const cwd = await workspace(t);
-  const cssSource = source.replace('<circle', '<style>@keyframes dim{from{opacity:1}to{opacity:.25}}#box{animation:dim 1s linear forwards}</style><circle');
-  let result;
-  try { result = await svg.svgRender({ svg: cssSource, tracks, width: 64, height: 64, duration: 1, times: [0, .5, 1] }, cwd); }
-  catch (e) { if (process.env.PI_BROWSER_REQUIRE !== '1' && /browser|chromium|chrome|executable|sandbox/i.test(e.message)) { t.skip(e.message); return; } throw e; }
-  const a = await design.decodeImage(await fs.readFile(result.samples[0].path)), b = await design.decodeImage(await fs.readFile(result.samples[1].path));
-  const red = (img, x) => img.data[(20 * 64 + x) * 4] > 240 && img.data[(20 * 64 + x) * 4 + 1] < 30;
-  assert.equal(red(a, 8), true); assert.equal(red(b, 32), true); assert.equal(red(b, 8), false);
-  assert.equal(result.diagnostics[0].smilAnimations, 1); assert.equal(result.diagnostics[0].programmaticTracks, 1); assert.ok(result.diagnostics[0].cssAnimations > 0);
-  const animation = await svg.svgRender({ svg: source, tracks, width: 64, height: 64, duration: 1, fps: 6, mode: 'video' }, cwd);
-  assert.equal(animation.frames, 6); assert.equal(animation.duration, 1); assert.equal(animation.decodeVerified, true); assert.ok(animation.motion);
-});
 
 test('nonconsecutive Blender images preserve source timeline and explicit fps retimes samples', async t => {
   const cwd = await workspace(t);

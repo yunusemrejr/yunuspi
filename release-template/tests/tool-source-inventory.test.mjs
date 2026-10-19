@@ -16,16 +16,13 @@ assert.ok(fs.existsSync(inventoryModule), "source inventory helper is present");
 const { collectToolSourceInventory } = await import(pathToFileURL(inventoryModule));
 
 const EXPECTED_STABLE_NAMES = [
-	"audio_mix", "web_asset_check",
-	"archive_probe", "ast_diff", "audio_analyze", "bash", "bg_kill", "bg_logs", "bg_run", "bg_status", "bg_wait",
-	"browser_session", "bulk_edit", "checkpoint_read", "contact_supervisor", "context_slice",
-	"data_query", "fetch_content", "get_search_content",
-	"git_info", "handoff_capsule", "http_request", "math_check", "media_info", "memory_forget", "memory_read", "memory_restore",
-	"memory_search", "memory_status", "memory_write", "music_compose", "net_probe", "obs_read", "package_probe", "process",
+	"audio_mix", "audio_analyze", "bash", "bg_kill", "bg_logs", "bg_run", "bg_status", "bg_wait",
+	"browser_session", "checkpoint_read", "contact_supervisor", "context_slice",
+	"fetch_content", "get_search_content",
+	"git_info", "handoff_capsule", "http_request", "media_info", "memory_forget", "memory_read", "memory_restore",
+	"memory_search", "memory_status", "memory_write", "music_compose", "obs_read", "process",
 	"project_intel", "quality_review", "render_see", "sandbox_run", "scratchpad", "session_coordinate", "session_self",
-	"skill_review", "source_check", "sqlite_probe", "structured_output", "subagent", "subagent_supervisor", "symbol_expand",
-	"sys_probe", "todo", "tool_search", "value_convert", "video_frames", "web_probe", "web_research", "web_search", "workdir_snapshot",
-];
+	"skill_review", "source_check", "sqlite_probe", "structured_output", "subagent", "subagent_supervisor", "todo", "tool_search", "video_frames", "web_probe", "web_research", "web_search", ];
 
 test("inventory enumerates source-backed registrations, factories, catalogs, and defaults", () => {
 	const inventory = collectToolSourceInventory(projectRoot);
@@ -36,7 +33,6 @@ test("inventory enumerates source-backed registrations, factories, catalogs, and
 	assert.equal(inventory.coverage.stableRegistrationRows, inventory.literalRegistrations.length);
 	assert.equal(inventory.coverage.registrationSites, inventory.coverage.indirectRegistrationSites +
 		inventory.literalRegistrations.filter((row) => row.kind === "literal").length);
-	assert.ok(inventory.literalRegistrations.some((row) => row.name === "math_check" && row.kind === "factory"));
 	assert.ok(inventory.literalRegistrations.some((row) => row.name === "sqlite_probe" && row.kind === "catalog"));
 	assert.ok(inventory.literalRegistrations.some((row) => row.name === "context_slice" && row.kind === "definition"));
 	assert.ok(inventory.literalRegistrations.some((row) => row.name === "web_search" && row.kind === "configured-default" && row.configurable === true));
@@ -47,7 +43,6 @@ test("inventory reports indirect owners while excluding generated bundles", () =
 	const inventory = collectToolSourceInventory(agentRoot);
 	const owners = new Map(inventory.dynamicOwners.map((owner) => [owner.source, owner]));
 	for (const source of [
-		"agent/extensions/lib/small-tools.ts",
 		"agent/extensions/media-tools.ts",
 		"agent/extensions/pi-lens/context-tools.ts",
 		"agent/extensions/pi-subagents/src/extension/index.ts",
@@ -56,7 +51,7 @@ test("inventory reports indirect owners while excluding generated bundles", () =
 		"agent/extensions/utility-tools.ts",
 	]) assert.ok(owners.has(source), `missing indirect owner: ${source}`);
 	assert.ok(!inventory.dynamicOwners.some((owner) => owner.source.includes("/dist/")));
-	assert.ok(owners.get("agent/extensions/utility-tools.ts").knownNames.includes("archive_probe"));
+	assert.ok(owners.get("agent/extensions/utility-tools.ts").knownNames.includes("sqlite_probe"));
 	assert.ok(owners.get("agent/extensions/rpiv-todo/todo.ts").knownNames.includes("todo"));
 	for (const row of [...inventory.literalRegistrations, ...inventory.dynamicOwners]) {
 		assert.match(row.source, /^agent\//);

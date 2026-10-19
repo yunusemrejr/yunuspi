@@ -307,7 +307,7 @@ export function buildDigest(
 			if (text) decisions.push(text);
 			for (const call of toolCalls(message)) {
 				calls.set(call.callId, call);
-				if (call.name === "edit" || call.name === "write" || call.name === "bulk_edit") {
+				if (call.name === "edit" || call.name === "write") {
 					const path = call.path ?? (call.command ? clipText(call.command, 160) : "");
 					if (path) edited.set(path, (edited.get(path) ?? 0) + 1);
 					for (const extra of call.paths ?? []) edited.set(extra, (edited.get(extra) ?? 0) + 1);

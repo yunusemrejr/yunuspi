@@ -410,7 +410,7 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
 		if (message.role === 'assistant') for (const part of message.content) if (part.type === 'toolCall') {
 			if (seenIds.has(part.id)) duplicateIds.add(part.id);
 			seenIds.add(part.id);
-			if (['read','context_slice','symbol_expand'].includes(part.name)) {
+			if (['read','context_slice'].includes(part.name)) {
 				sourceCalls.set(part.id,part.name);
 				const file = part.arguments?.path ?? part.arguments?.file;
 				if (typeof file === 'string' && file.length <= 4096) sourcePaths.set(part.id,file);

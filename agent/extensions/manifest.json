@@ -16,7 +16,6 @@
     "thinking.ts",
     "session-signals.ts",
     "render-and-wait.ts",
-    "scoped-snapshots.ts",
     "provider-gate.ts",
     "health-log.ts",
     "continuation-notice.ts",
@@ -24,8 +23,6 @@
     "git-tools.ts",
     "deliverables.ts",
     "http-tools.ts",
-    "bulk-edit.ts",
-    "sys-probe.ts",
     "session-hooks.ts",
     "project-intelligence.ts",
     "sandbox.ts",
@@ -42,21 +39,15 @@
     "art-direction.ts",
     "goal.ts",
     "adaptive-workflows.ts",
-    "blender-studio.ts",
-    "colab.ts"
+    "blender-studio.ts"
   ],
   "lib": [
     "activity-indicators.ts",
-    "artifact-checks.ts",
     "asset-registry.ts",
     "authored-review.ts",
     "bash-routing.ts",
     "binary-read.ts",
     "browser-session.ts",
-    "colab.ts",
-    "colab-auth.ts",
-    "colab-jobs.ts",
-    "bulk-edit.ts",
     "capability-groups.ts",
     "capability-health.ts",
     "catalog-cache-lock.ts",
@@ -83,7 +74,6 @@
     "creative-direction.ts",
     "creative-evidence.ts",
     "creative-qa.ts",
-    "data-query.ts",
     "deliverable-inspect.ts",
     "deliverable-ledger.ts",
     "design-direction.ts",
@@ -125,7 +115,6 @@
     "model-competence.ts",
     "model-facts.ts",
     "model-routing-metrics.ts",
-    "motion-inspect.ts",
     "music-score.ts",
     "needle-assets.mjs",
     "needle-embedding-cache.mjs",
@@ -133,7 +122,6 @@
     "needle-runtime.ts",
     "needle-types.ts",
     "needle-worker.mjs",
-    "numeric-checks.ts",
     "observation-retrieval.ts",
     "observer-book.ts",
     "observer-journal.ts",
@@ -169,9 +157,7 @@
     "review-coordinator.ts",
     "reviewer-board.ts",
     "rpc-report.ts",
-    "scoped-snapshots.ts",
     "self-mutation-guard.ts",
-    "service-probe.ts",
     "session-audit.ts",
     "session-cost.ts",
     "seo-policy.ts",
@@ -201,7 +187,6 @@
     "svg-analysis.ts",
     "svg-check.ts",
     "svg-inspect.ts",
-    "sys-probe.ts",
     "token-budget.ts",
     "tool-discovery.ts",
     "tool-schema.ts",
@@ -235,7 +220,6 @@
     "guarded-process.ts",
     "xml-lite.ts",
     "image-understand.ts",
-    "svg-render.ts",
     "elevenlabs.ts",
     "media-sync.ts",
     "video-browser.ts",
@@ -835,6 +819,116 @@
       "name": "scripts/run-model-qual-lab.mjs",
       "retired": "2026-10-19",
       "why": "Model qualification for helper roles (micro-worker, skill router, coding child, observer, reviewer, fallback) removed with role routing: every role runs on the session model."
+    },
+    {
+      "name": "colab.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab tool and google-colab-cli helper removed: 0 calls in 30 days; its helpers, skill folder and pipeline/routing entries deleted with it. Do not recreate."
+    },
+    {
+      "name": "lib/colab.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab helper removed with the colab tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "lib/colab-auth.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab auth helper removed with the colab tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "lib/colab-jobs.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab job helper removed with the colab tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "scripts/colab-auth-browser.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab browser-auth script removed with the colab tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "sys-probe.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). sys_probe tool removed: 0 calls in 30 days; bash ps/ss/systemctl remain available. Do not recreate."
+    },
+    {
+      "name": "lib/sys-probe.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). sys_probe helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "lib/service-probe.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). service-detail helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "lib/utility-mcp/system-probe.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). local system diagnosis helper removed with sys_probe (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "scoped-snapshots.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). workdir_snapshot tool removed: 0 calls in 30 days; edit with explicit paths and Git instead. Do not recreate."
+    },
+    {
+      "name": "lib/scoped-snapshots.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). snapshot store removed with workdir_snapshot (0 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "bulk-edit.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). bulk_edit tool removed: 4 calls in 30 days; the edit tool with several edits[] entries covers the same work. Do not recreate."
+    },
+    {
+      "name": "lib/bulk-edit.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). bulk_edit helper removed with the bulk_edit tool (4 calls in 30 days). Do not recreate."
+    },
+    {
+      "name": "lib/data-query.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). data_query helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/numeric-checks.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). math_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/artifact-checks.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). value_convert helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/motion-inspect.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). motion_inspect helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/svg-render.ts",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). svg_render helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/utility-mcp/net.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). net_probe and ssh_plan helpers removed: tools had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/utility-mcp/package.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). package_probe helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/utility-mcp/web-assets.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). web_asset_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+    },
+    {
+      "name": "lib/utility-mcp/local-reference.mjs",
+      "retired": "2026-10-19",
+      "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). reference evidence helper for web_asset_check removed with it. Do not recreate."
     }
   ],
   "supportFiles": [
@@ -844,7 +938,6 @@
     "scripts/render-noise-state.mjs",
     "scripts/browser-session-runner.mjs",
     "scripts/browser-session-lease.mjs",
-    "scripts/colab-auth-browser.mjs",
     "scripts/browser-diagnostics.mjs",
     "scripts/browser-markers.mjs",
     "scripts/browser-page-tools.mjs",
@@ -908,8 +1001,6 @@
     "scripts/compatibility/atomic-edit-preflight-test.mjs",
     "extensions/lib/utility-mcp/catalog.mjs",
     "extensions/lib/utility-mcp/files.mjs",
-    "extensions/lib/utility-mcp/net.mjs",
-    "extensions/lib/utility-mcp/package.mjs",
     "extensions/lib/utility-mcp/probe.py",
     "extensions/lib/utility-mcp/local_operations.py",
     "extensions/lib/utility-mcp/server.mjs",
@@ -928,8 +1019,6 @@
     "extensions/lib/micro-intelligence/route-privacy.ts",
     "extensions/lib/micro-intelligence/rerank.ts",
     "scripts/render-design-state.mjs",
-    "extensions/lib/utility-mcp/local-reference.mjs",
-    "extensions/lib/utility-mcp/web-assets.mjs",
     "scripts/video-render.mjs",
     "scripts/blender-studio.py",
     "scripts/music-soundfont.py",

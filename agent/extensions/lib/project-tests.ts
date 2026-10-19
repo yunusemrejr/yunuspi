@@ -627,7 +627,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       const start = starts.get(event.toolCallId); starts.delete(event.toolCallId);
       const mutationPath = event.details?.fileMutation?.resolved ?? event.input?.path;
       const previousHash = typeof mutationPath === 'string' ? hashes[path.relative(state.root || ctx.cwd, path.resolve(ctx.cwd, mutationPath))] : undefined;
-      if (['write', 'edit', 'bulk_edit', 'bash', 'bg_run'].includes(event.toolName)) {
+      if (['write', 'edit', 'bash', 'bg_run'].includes(event.toolName)) {
         const before = state.revision;
         await scan(ctx, true);
         if (ticket !== epoch || !active) return;

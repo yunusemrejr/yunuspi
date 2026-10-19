@@ -10,8 +10,7 @@ const UTILITY_GUIDANCE = 'Prefer utility probes over shell/Python inspection sni
 
 /** Native tool exposure, MCP lifecycle and prompt guidance share one catalog. */
 export default function utilityTools(pi: any) {
-  // Local checks (math_check, value_convert, data_query), AST context tools and the advisory post-edit source check
-  // share this owner so subagents that list utility-tools.ts get them too.
+  // Context slices and the advisory post-edit source check share this owner so subagents that list utility-tools.ts get them too.
   registerSmallTools(pi);
   registerContextCodeTools(pi);
   registerSourceCheck(pi);

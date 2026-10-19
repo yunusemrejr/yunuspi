@@ -96,7 +96,7 @@ test('skill modes never block relevant execution, including old required setting
     f.start('Build a Python website and research scientific papers');
     for(const event of [
       {toolName:'edit',input:{path:'main.py'}}, {toolName:'write',input:{path:'index.html',content:'<main>Hello</main>'}},
-      {toolName:'bulk_edit',input:{action:'apply',files:['a.py']}}, {toolName:'bash',input:{command:'python main.py'}},
+      {toolName:'bash',input:{command:'python main.py'}},
       {toolName:'web_search',input:{query:'papers'}}, {toolName:'browser_session',input:{action:'open'}},
       {toolName:'subagent',input:{task:'Inspect Python'}},
     ]) assert.equal(f.g.beforeToolCall(event),undefined,`${mode}: ${event.toolName}`);

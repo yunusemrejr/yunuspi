@@ -51,7 +51,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
   };
   const risk = (reason: string, level: 'block' | 'review' = 'block'): HostOperationRisk => ({level, reason, target: name, resolved: values.every(value => value !== undefined)});
   const unresolved = () => risk('A host-control operation is unresolved. Establish its exact operation and target from read-only evidence before running it', 'review');
-  const network = () => risk('Host connectivity could be lost, including provider access and remote control. Inspect sys_probe host and the active route first; test in a disposable network namespace or use an operator-controlled recovery path outside this session');
+  const network = () => risk('Host connectivity could be lost, including provider access and remote control. Inspect the active route first (ip route, ip link); test in a disposable network namespace or use an operator-controlled recovery path outside this session');
   // Only an unambiguous leading diagnostic is a generic exemption: later
   // --help may be an option value (e.g. nft -f --help), not a help request.
   // The service script itself recognizes these flags in every argument slot.
@@ -145,7 +145,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     const targets = args.slice(i).filter(arg => arg !== '--');
     const protectedPids = ancestors ?? sessionAncestorPids();
     if (targets.some(arg => !/^\d+$/.test(arg) || Number(arg) === 0 || protectedPids.includes(Number(arg))))
-      return risk(`This signal may terminate the harness, an ancestor or a process group. Inspect sys_probe processes and target an exact unrelated PID; use process/bg tools to stop their own managed jobs${ownedTaskHint()}`);
+      return risk(`This signal may terminate the harness, an ancestor or a process group. Inspect the process list (ps) and target an exact unrelated PID; use process/bg tools to stop their own managed jobs${ownedTaskHint()}`);
   }
   if (name === 'pkill' || name === 'killall') {
     // pkill -s selects a session; only killall uses -s for a signal. A probe
@@ -158,7 +158,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
       else if (/^-(?:\d+|(?:SIG)?[A-Z][A-Z0-9+-]+)$/.test(arg)) signals.push(arg.slice(1));
     }
     if (signals.length && signals.every(signal => signal === '0') || name === 'killall' && flag('-l','--list')) return;
-    return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect sys_probe processes and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
+    return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect the process list (ps) and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
   }
   if (name === 'wipefs') {
     let noAct = false, erases = false;
@@ -183,7 +183,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     (name === 'arduino-cli' && has('upload', 'burn-bootloader')) ||
     (/^(?:pio|platformio)$/.test(name) && args.some(arg => /^(?:upload|uploadfs|erase)$/.test(arg))) ||
     (name === 'avrdude' && !flag('-n') && args.some(arg => /:w(?::|$)/.test(arg))))
-    return risk('Firmware write/erase needs the exact board, port, voltage, image and recovery method verified; sys_probe devices is metadata only and cannot validate wiring', 'review');
+    return risk('Firmware write/erase needs the exact board, port, voltage, image and recovery method verified; device listings (ls /dev, lsusb) are metadata only and cannot validate wiring', 'review');
   if (name === 'stress' || name === 'stress-ng')
     return risk('Host stress tests can exhaust CPU, memory or thermals and disrupt this session. Use sandbox_run with explicit resource/time bounds instead');
   if (values.includes(undefined) && /^(?:service|loginctl|ip|ifconfig|iwconfig|iw|wpa_cli|networkctl|netplan|rfkill)$/.test(name) && !has('status','show','list','get')) return unresolved();

@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
-tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, read, grep, find, ls, math_check, value_convert, data_query, handoff_capsule, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
+tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, handoff_capsule, git_info, context_slice, obs_read, project_intel, sandbox_run, render_see
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true
@@ -96,9 +96,9 @@ For each actionable finding give the source location, triggering scenario, user-
 
 Check whether verification could detect the original failure. Never claim tests passed without observed results; with read-only tools, identify the exact check the parent should run. Stop after the relevant scope is covered. Return “no actionable findings” when appropriate, with coverage and material limitations; do not invent findings to justify delegation or request another review without new evidence.
 
-Use `math_check` for supplied numerical metrics or exact split-ID overlap and `value_convert` for exact encodings/JSON formatting when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
+For supplied numerical metrics, exact split-ID overlap or exact encodings, compute them with `bash` (for example `python3 -c`) when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
 
-For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
+For scoped code investigation, use `context_slice` with a task and explicit source paths. Check omission metadata; use ordinary reads before editing and `git diff` for before/after comparisons. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
 

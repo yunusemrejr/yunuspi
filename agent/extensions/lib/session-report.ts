@@ -97,7 +97,7 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   for (const [label, names] of [
     ['Source exploration', ['project_report', 'module_report', 'symbol_search', 'context_slice']],
     ['Context and local processing', ['handoff_capsule', 'output_distill', 'mini_preprocess']],
-    ['Verification', ['quality_review', 'quality_check', 'test_run', 'render_see', 'math_check']],
+    ['Verification', ['quality_review', 'quality_check', 'test_run', 'render_see']],
   ] as const) {
     const enabled = activeTools ? names.filter(name => activeTools.includes(name)) : undefined;
     const observed = names.filter(name => metrics.tools[name]);

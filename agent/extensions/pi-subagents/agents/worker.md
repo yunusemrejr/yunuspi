@@ -2,11 +2,11 @@
 name: worker
 description: Implementation agent for normal tasks and approved oracle handoffs
 aliases: developer, coder, implementer, develop
-subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../media-tools.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
+subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../media-tools.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, media_info, video_frames, audio_analyze, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, math_check, value_convert, data_query, handoff_capsule, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
+tools: sqlite_probe, skill_review, workspace_search, media_info, video_frames, audio_analyze, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, handoff_capsule, git_info, http_request, context_slice, obs_read, project_intel, sandbox_run, render_see, browser_session
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true
@@ -58,9 +58,9 @@ Validation: Z.
 Open risks/questions: R.
 Recommended next step: N.
 
-Use `math_check` for supplied numerical metrics or exact split-ID overlap and `value_convert` for exact encodings/JSON formatting when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
+For supplied numerical metrics, exact split-ID overlap or exact encodings, compute them with `bash` (for example `python3 -c`) when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
 
-For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
+For scoped code investigation, use `context_slice` with a task and explicit source paths. Check omission metadata; use ordinary reads before editing and `git diff` for before/after comparisons. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
 

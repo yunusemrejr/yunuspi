@@ -52,7 +52,7 @@ The native `read` tool decodes every non-image file as UTF-8, so a PDF, Word or 
 | PDF | Text by page with `--- page n ---` markers, 25 pages at a time. `offset` is the page to start from, and the footer says `Use offset=26 to continue`. A PDF without a text layer says it is scanned and how to render its pages; an encrypted or damaged PDF says so. Needs poppler (`pdftotext`, `pdfinfo`). |
 | Office (docx, xlsx, pptx, odt, ods, odp) | The same structured text as `office_doc read`, bounded, with the errors found while opening it. |
 | Legacy Office (doc, dot, xls, xlt, ppt, pps, rtf) | Converted by LibreOffice to its modern twin in a private folder and shown as the structured text above, with a note that the original is unchanged and `office_doc convert` makes an editable copy. Without LibreOffice the read says what is needed. |
-| ZIP | Entry names and sizes, `archive_probe` for members, and the reminder to extract into a new folder. |
+| ZIP | Entry names and sizes, `unzip -l` or `tar -tf` for members, and the reminder to extract into a new folder. |
 | SQLite | The schema (read-only `sqlite3`) and `sqlite_probe` for queries. |
 | Audio and video | Container, duration and streams from `ffprobe`, and which tool looks at it. |
 | Anything else | What it is, the first bytes in hex, and the shell command that inspects it. |

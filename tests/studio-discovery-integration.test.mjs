@@ -12,7 +12,7 @@ import {registerToolDiscovery} from '../agent/extensions/lib/tool-discovery.ts';
 import {capabilityGroup} from '../agent/extensions/lib/capability-groups.ts';
 
 const root=path.resolve(import.meta.dirname,'..');
-const names=['audio_mix','web_asset_check','sys_probe'];
+const names=['audio_mix'];
 const call=(name,args,id=name)=>({type:'toolCall',name,id,arguments:args});
 
 // Only model transport is simulated. Real file extension loading, SDK, discovery
@@ -28,15 +28,12 @@ test('real SDK lazy discovery activates all studio/preflight tools and preserves
  try {
   const settingsManager=SettingsManager.inMemory({compaction:{enabled:false},retry:{enabled:false}});
   const loader=new DefaultResourceLoader({cwd,agentDir:cwd,settingsManager,noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true,
-   additionalExtensionPaths:['media-tools.ts','render-and-wait.ts','utility-tools.ts','sys-probe.ts'].map(file=>path.join(root,'agent/extensions',file)),extensionFactories:[registerToolDiscovery]});
+   additionalExtensionPaths:['media-tools.ts','render-and-wait.ts','utility-tools.ts'].map(file=>path.join(root,'agent/extensions',file)),extensionFactories:[registerToolDiscovery]});
   await loader.reload();assert.deepEqual(loader.getExtensions().errors,[]);
   const model={id:'studio-fixture',name:'Fixture',api:'openai-completions',provider:'fixture',baseUrl:'https://invalid.example',reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:131072,maxTokens:8192};
   const plans=[
-   [call('tool_search',{group:'media',names:['audio_mix'],enable:false},'media-preview'),call('tool_search',{group:'web',names:['web_asset_check'],enable:false},'web-preview'),
-    ...['creative-studio','rendered-design-review','delivery-preflight'].map(id=>call('tool_search',{kind:'capabilities',id,enable:true},id))],
+   [call('tool_search',{group:'media',names:['audio_mix'],enable:false},'media-preview'),    ...['creative-studio','rendered-design-review'].map(id=>call('tool_search',{kind:'capabilities',id,enable:true},id))],
    names.map((name,index)=>call(name,[{tracks:[]},{files:'not-an-array'},{action:'restart'}][index],`invalid-${name}`)),
-   [call('web_asset_check',{files:['index.html']},'assets'),
-    call('sys_probe',{action:'service_detail',unit:'--all'},'unit-validation'),call('sys_probe',{action:'journal',unit:'fixture.service',cursor:'bad\n--all'},'cursor-validation')],
    [call('audio_mix',{tracks:[{path:'missing.wav'}]},'audio-dispatch')],
   ];
   const contexts=[],errors=[];let turn=0;
@@ -50,22 +47,17 @@ test('real SDK lazy discovery activates all studio/preflight tools and preserves
   const catalog=new Map(session.getAllTools().map(tool=>[tool.name,tool]));
   for(const name of names)assert.ok(catalog.has(name),`${name} loads from its real extension`);
   assert.equal(capabilityGroup('audio_mix',catalog.get('audio_mix').description),'media');
-  assert.equal(capabilityGroup('web_asset_check',catalog.get('web_asset_check').description),'web');
-  assert.equal(capabilityGroup('sys_probe',catalog.get('sys_probe').description),'operations');
   await session.bindExtensions({onError:error=>errors.push(error)});
   assert.ok(names.every(name=>!session.getActiveToolNames().includes(name)),'specialized schemas begin off wire');
   await session.prompt('Inspect the synthetic workflow and web assets, validate tool contracts and author one local scene.',{source:'rpc'});
-  assert.equal(contexts.length,5);assert.deepEqual(errors,[]);
+  assert.equal(contexts.length,4);assert.deepEqual(errors,[]);
   assert.ok(names.every(name=>!contexts[0].tools.some(tool=>tool.name===name)));
   assert.ok(names.every(name=>contexts[1].tools.some(tool=>tool.name===name)),'discovered bundles join the next model turn of the same request');
   for(const name of names)assert.deepEqual(contexts[1].tools.find(tool=>tool.name===name).parameters,JSON.parse(JSON.stringify(catalog.get(name).parameters)));
   const results=new Map(session.messages.filter(message=>message.role==='toolResult').map(message=>[message.toolCallId,message]));
-  for(const id of ['media-preview','web-preview','creative-studio','rendered-design-review','delivery-preflight'])assert.equal(results.get(id).isError,false,id);
+  for(const id of ['media-preview','creative-studio','rendered-design-review'])assert.equal(results.get(id).isError,false,id);
   for(const name of names){const result=results.get(`invalid-${name}`);assert.equal(result.isError,true,name);assert.match(JSON.stringify(result.content),/validation|required|allowed|must|expected|schema/i,name);}
-  assert.equal(results.get('assets').isError,false);assert.equal(JSON.parse(results.get('assets').content[0].text).counts.present,1);
-  for(const id of ['unit-validation','cursor-validation','audio-dispatch'])assert.equal(results.get(id).isError,true,id);
-  assert.match(JSON.stringify(results.get('unit-validation').content),/exact systemd unit/);
-  assert.match(JSON.stringify(results.get('cursor-validation').content),/Invalid journal cursor/);
+  for(const id of ['audio-dispatch'])assert.equal(results.get(id).isError,true,id);
   assert.ok(!session.getAllTools().some(tool=>/restart|publish|upload/.test(tool.name)));
  }finally{
   if(session){await emitSessionShutdownEvent(session.extensionRunner,{type:'session_shutdown',reason:'exit'});session.dispose();}

@@ -4,9 +4,6 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-const execFileAsync=promisify(execFile);
 import { parserFor } from './semantic-radar/extract.mjs';
 const MAX_FILE = 262144, MAX_TOTAL = 1048576;
 const kinds = new Set(['variable_declarator','function_signature','function_declaration','generator_function_declaration','function_expression','arrow_function','method_definition','function_definition','class_declaration','class_definition','interface_declaration','type_alias_declaration']);
@@ -152,76 +149,4 @@ export async function contextSlice({cwd,paths,task,maxChars,signal}) {
     files:data.files.map(f=>({path:f.path,digest:f.digest,bytes:f.bytes,supported:f.supported,parseErrors:f.parseErrors,symbols:f.symbols.length,reason:f.reason})),errors:data.errors,
     candidateCount:candidates.length,slices:chosen.map(({file,symbol,score})=>({path:file.path,score,...publicSymbol(symbol),imports:file.imports.slice(0,12),omittedImports:Math.max(0,file.imports.length-12),source:symbol.source.slice(0,4000),sourceComplete:symbol.source.length<=4000,omittedSourceChars:Math.max(0,symbol.source.length-4000)})),
     omittedCandidates:Math.max(0,candidates.length-chosen.length)},maxChars);
-}
-export async function symbolExpand({cwd,paths,symbol,maxHops,maxNodes,maxChars,signal}) {
-  if(typeof symbol!=='string'||!symbol.trim()||symbol.length>256) throw new Error('Provide a symbol name of 1–256 characters');
-  const data=await loadSources(cwd,paths,signal);
-  if(signal?.aborted)throw new Error('Cancelled');
-  const all=data.files.flatMap(file=>file.symbols.map(item=>({file,...item,id:`${file.path}:${item.startLine}:${item.name}`})));
-  const roots=all.filter(n=>n.name===symbol||n.shortName===symbol), nodes=[],edges=[],seen=new Set();
-  let omittedEdges=0,queueTruncated=false;
-  const queue=roots.map(node=>({node,hop:0})); const hops=bounds(maxHops,1,0,3), cap=bounds(maxNodes,12,1,40);
-  while(queue.length&&nodes.length<cap) {
-    const {node,hop}=queue.shift(); if(seen.has(node.id))continue;seen.add(node.id);
-    nodes.push({id:node.id,path:node.file.path,hop,...publicSymbol(node),source:node.source.slice(0,4000),sourceComplete:node.source.length<=4000,omittedSourceChars:Math.max(0,node.source.length-4000)});
-    if(hop>=hops)continue;
-    for(const other of all) {
-      if(node.id===other.id)continue;
-      const outgoing=node.calls.some(c=>c.name===other.shortName||c.name===other.name);
-      const incoming=other.calls.some(c=>c.name===node.shortName||c.name===node.name);
-      const typeRef=node.references.includes(other.shortName)&&/class|interface|type_alias/.test(other.kind);
-      if(!outgoing&&!incoming&&!typeRef)continue;
-      const addEdge=(from,to,kind)=>{if(edges.length<160)edges.push({from,to,kind,resolution:'name-match; may be shadowed or unrelated'});else omittedEdges++;};
-      if(incoming)addEdge(other.id,node.id,'possible-caller');
-      if(outgoing)addEdge(node.id,other.id,'possible-callee');
-      if(typeRef)addEdge(node.id,other.id,'syntactic-type-reference');
-      if(queue.length<200)queue.push({node:other,hop:hop+1});else queueTruncated=true;
-    }
-  }
-  const truncatedEvidence={calls:all.reduce((n,item)=>n+item.omittedCalls,0),references:all.reduce((n,item)=>n+item.omittedReferences,0)};
-  return boundResult({kind:'symbol_expand',scope:'Only explicit files; syntactic candidates, no resolved bindings',roots:roots.map(r=>r.id).slice(0,40),ambiguous:roots.length>1,
-    lsp:{used:false,next:'Use existing lsp_navigation operations references/definition at the source position for exact language-server resolution'},
-    files:data.files.map(f=>({path:f.path,digest:f.digest,supported:f.supported,parseErrors:f.parseErrors})),errors:data.errors,nodes,edges,omittedEdges,queueTruncated,truncatedEvidence,incomplete:queue.length>0||queueTruncated||omittedEdges>0||truncatedEvidence.calls>0||truncatedEvidence.references>0},maxChars);
-}
-export async function astDiff({cwd,path:filename,before,after,base,maxChars,signal}) {
-  if(signal?.aborted)throw new Error('Cancelled');
-  let provenance;
-  if(base!==undefined) {
-    if(before!==undefined||after!==undefined)throw new Error('Use either base Git mode or supplied before/after, not both');
-    if(typeof base!=='string'||base.length>128||!(/^(?:HEAD(?:[~^]\d{1,3})?|[a-f0-9]{7,64}|[A-Za-z][A-Za-z0-9_./-]*)$/.test(base))||base.includes('..')||base.includes('//'))throw new Error('Invalid Git base ref');
-    const loaded=await loadSources(cwd,[filename],signal);
-    if(loaded.errors.length||!loaded.files.length)throw new Error(loaded.errors[0]?.error??'Current file unavailable');
-    const current=loaded.files[0];
-    const git=async args=>(await execFileAsync('git',['--no-pager','-c','core.hooksPath=/dev/null',...args],{cwd,encoding:'utf8',timeout:1500,maxBuffer:MAX_FILE+1,signal,env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}})).stdout;
-    let repository;
-    try {
-      repository=(await git(['rev-parse','--show-toplevel'])).trim();
-      const relative=path.relative(repository,path.resolve(cwd,current.path)).split(path.sep).join('/');
-      if(relative.startsWith('../'))throw new Error('File outside Git work tree');
-      const resolvedBase=(await git(['rev-parse','--verify',base+'^{commit}'])).trim();
-      before=await git(['show',resolvedBase+':'+relative]);
-      after=current.source;
-      provenance={mode:'git',base:resolvedBase,path:relative,workingDigest:current.digest};
-    } catch(error) {throw new Error('Cannot read Git base blob: '+String(error.message).slice(0,400));}
-  }
-
-  if(typeof filename!=='string'||filename.length>4096)throw new Error('Provide a source path/extension');
-  const left=await inspectSource(filename,before),right=await inspectSource(filename,after);
-  if(signal?.aborted)throw new Error('Cancelled');
-  if(!left.supported||!right.supported||left.parseErrors||right.parseErrors) return {kind:'ast_diff',available:false,reason:'Unsupported grammar or syntax errors; use raw diff/diagnostics',beforeDigest:left.digest,afterDigest:right.digest};
-  const keys=items=> {const seen=new Map();return new Map(items.map(s=>{const base=`${s.kind}:${s.name}`,ordinal=seen.get(base)??0;seen.set(base,ordinal+1);return [`${base}#${ordinal}`,s];}));};
-  const a=keys(left.symbols),b=keys(right.symbols),changes=[];
-  for(const [key,s]of a) {
-    const t=b.get(key);
-    if(!t){changes.push({change:'removed',before:publicSymbol(s)});continue;}
-    if(s.digest===t.digest)continue;
-    const delta=(x,y)=>({added:y.filter(v=>!x.includes(v)),removed:x.filter(v=>!y.includes(v))});
-    changes.push({change:'modified',before:publicSymbol(s),after:publicSymbol(t),signatureChanged:s.signature!==t.signature,
-      parameters:delta(s.parameters,t.parameters),calls:{...delta([...new Set(s.calls.map(c=>c.name))],[...new Set(t.calls.map(c=>c.name))]),incomplete:s.omittedCalls>0||t.omittedCalls>0},
-      branches:{before:s.branchCount,after:t.branchCount,changed:s.branchDigest!==t.branchDigest}});
-  }
-  for(const[key,t]of b)if(!a.has(key))changes.push({change:'added',after:publicSymbol(t)});
-  const importDelta={added:right.imports.map(x=>x.source).filter(x=>!left.imports.some(y=>y.source===x)),removed:left.imports.map(x=>x.source).filter(x=>!right.imports.some(y=>y.source===x))};
-  return boundResult({kind:'ast_diff',available:true,provenance,method:'Structural summary; no equivalence or call-site binding proof; duplicate declarations paired by occurrence',beforeDigest:left.digest,afterDigest:right.digest,
-    imports:importDelta,changes,totalChanges:changes.length,nonSymbolChangesPossible:left.digest!==right.digest},maxChars);
 }

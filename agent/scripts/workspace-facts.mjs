@@ -195,7 +195,7 @@ export async function workspaceFacts(cwd, signal) {
     result.environmentGuidance = [
       "Markers suggest configuration to inspect, not a live target, installed toolchain or successful build. Reuse existing scripts after checking their side effects; builds can run hooks or upload targets.",
       ...(result.environmentEvidence.some((e) => e.kind === "deployment") ? ["Before deployment or synchronization, establish source/destination and preserve secrets, databases and user uploads. Review excludes, rollback and a supported dry run; do not equate repository contents with production state."] : []),
-      ...(result.environmentEvidence.some((e) => e.kind === "embedded") ? ["Use sys_probe host/devices for local capability and port metadata. Confirm board/port, target firmware, power/pin compatibility and recovery before flash/reset/write; compile-only checks must remain separate from upload/monitor."] : []),
+      ...(result.environmentEvidence.some((e) => e.kind === "embedded") ? ["Use ls /dev, lsusb and ss -tlnp for local device and port metadata. Confirm board/port, target firmware, power/pin compatibility and recovery before flash/reset/write; compile-only checks must remain separate from upload/monitor."] : []),
     ];
   if (result.manifests.some((m) => m.path === "package.json")) {
     let handle;

@@ -5,7 +5,7 @@ title: Modern web design patterns
 summary: Contemporary patterns and when they fit: landing page anatomy, bento grids, hero sections, sticky and command navigation, cards, micro-interactions, scroll storytelling, glass and gradients, design tokens and view transitions.
 terms: landing page landing hero section bento grid cards card sticky navbar command palette micro-interaction micro-interactions scroll storytelling parallax glassmorphism gradient gradients blur modern website site homepage marketing page saas portfolio tailwind shadcn tokens view transitions animation section layout necessity slop leakage meta theater
 files: .html .css .scss .tsx .jsx .vue .svelte .astro
-tools: browser_session render_see web_asset_check
+tools: browser_session render_see
 skills: frontend web-motion
 ---
 

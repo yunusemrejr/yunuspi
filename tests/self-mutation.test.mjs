@@ -532,34 +532,3 @@ test("native guards distinguish protected inode aliases from ordinary project ha
  }
 });
 
-test("bulk apply cannot use an ancestor workspace to acquire maintenance authority", () => {
- const f = fixture();
- try {
-  const lib = path.join(f.protectedDir, "agent/extensions/lib");
-  fs.mkdirSync(lib, { recursive: true });
-  fs.copyFileSync(
-   path.join(agent, "extensions/lib/self-mutation-guard.ts"),
-   path.join(lib, "self-mutation-guard.ts"),
-  );
-  const guard = pathToFileURL(path.join(lib, "self-mutation-guard.ts")).href;
-  const helper = pathToFileURL(
-   path.join(agent, "extensions/lib/bulk-edit.ts"),
-  ).href;
-  const bulk = path.join(agent, "extensions/bulk-edit.ts");
-  const result = node(
-   f.root,
-   `import fs from 'node:fs';import assert from 'node:assert/strict';import {stripTypeScriptTypes} from 'node:module';
-let source=fs.readFileSync(${JSON.stringify(bulk)},'utf8').replace('import { Type } from "typebox";','const Type=new Proxy({},{get:()=>()=>({})});').replace('import { Minimatch } from "minimatch";','class Minimatch {constructor(){throw Error("explicit files only");}}').replace('"./lib/self-mutation-guard.ts"',${JSON.stringify(JSON.stringify(guard))}).replace('"./lib/bulk-edit.ts"',${JSON.stringify(JSON.stringify(helper))});
-const m=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(source)).toString('base64'));let tool;m.default({registerTool:t=>tool=t});const params={pattern:'unchanged',replacement:'bad',files:['harness/original']};
-const preview=await tool.execute('preview',{...params,action:'preview'},undefined,undefined,{cwd:process.cwd()});assert.equal(preview.isError,undefined);
-const apply=await tool.execute('apply',{...params,action:'apply',token:preview.details.token},undefined,undefined,{cwd:process.cwd()});assert.equal(apply.isError,true);assert.match(apply.content[0].text,/launched outside/);`,
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-   fs.readFileSync(path.join(f.protectedDir, "original"), "utf8"),
-   "unchanged",
-  );
- } finally {
-  f.close();
- }
-});

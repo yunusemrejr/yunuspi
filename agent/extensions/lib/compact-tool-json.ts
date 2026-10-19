@@ -4,11 +4,11 @@ const STRUCTURED_TOOLS = new Set([
   'project_report', 'module_report', 'symbol_search', 'symbol_references',
   'session_self', 'checkpoint_read', 'todo', 'subagent', 'bg_status', 'bg_list',
   'memory_search', 'memory_read', 'web_probe', 'web_search',
-  'handoff_capsule', 'data_query',
-  'math_check', 'value_convert', 'quality_review',
+  'handoff_capsule', 
+  'quality_review',
   'skill_review',
-  'sqlite_probe', 'package_probe', 'net_probe', 'archive_probe',
-  'http_request', 'sys_probe', 'blender', 'agentmail', 'project_memory',
+  'sqlite_probe', 
+  'http_request', 'blender', 'agentmail', 'project_memory',
 ]);
 export function compactJsonWhitespace(text: string, minimumSavings = 128): string {
   if (text.length < (minimumSavings === 0 ? 0 : 512) || text.length > 1_000_000 || !/^\s*[\[{]/.test(text)) return text;

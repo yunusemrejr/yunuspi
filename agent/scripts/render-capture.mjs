@@ -918,7 +918,7 @@ async function renderCaptureOnce(p, output, signal) {
 }
 const WEBGL_REJECTION = /unsupported gpu\/webgl/i;
 const RETRY_MIN_MS = 4000;
-/** Every capture tool (render_see, ui_explore, visual_diff, visual_review, motion_inspect, creative_compare)
+/** Every capture tool (render_see, ui_explore, visual_diff, visual_review)
  * goes through here. A page that touches WebGL is not a verification dead end: it is captured once more with
  * software WebGL, inside the same sandbox and the same time budget. WebGPU, workers and everything else the
  * first pass rejects stay rejected, and `webgl: "software"` can also be requested up front. */

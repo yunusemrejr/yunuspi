@@ -18,7 +18,6 @@ const { registerAsset, inspectAsset, readRegistry } = await load('extensions/lib
 const { videoMotion, analyzeDecodedMotion } = await load('extensions/lib/video-motion.ts');
 const { videoAssets } = await load('extensions/lib/video-assets.ts');
 const { videoProject } = await load('extensions/lib/video-studio.ts');
-const { motionInspectRun } = await load('extensions/lib/motion-inspect.ts');
 const temporary = async fn => { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-preflight-')); try { return await fn(dir); } finally { await fs.rm(dir, { recursive: true, force: true }); } };
 function fixture() {
   const bytes = Buffer.alloc(76);
@@ -108,90 +107,3 @@ test('timestamp and loop evidence distinguish a bad boundary from normal adjacen
   assert.throws(() => analyzeDecodedMotion([0, .1], Buffer.alloc(1)), /matching/);
 });
 
-test('actual CSS frames verify reduced-motion changes and known-period endpoint parity', { timeout: 120000 }, async t => temporary(async dir => {
-  const { renderCapture } = await load('scripts/render-capture.mjs');
-  const capture = (p, dest, cwd, signal) => renderCapture({ ...p, source: path.resolve(cwd, p.source), output: 'image' }, dest, signal);
-  const source = path.join(dir, 'motion.html');
-  const html = reduce => `<!doctype html><style>body{margin:0;background:#000}.orb{width:70px;height:70px;background:#fff;animation:move 1s infinite linear}@keyframes move{from{transform:translateX(0)}to{transform:translateX(100px)}}${reduce ? '@media(prefers-reduced-motion:reduce){.orb{animation:none;transform:translateX(50px)}}' : ''}</style><div class="orb"></div>`;
-  await fs.writeFile(source, html(false));
-  let moving;
-  try { moving = await motionInspectRun({ source, width: 200, height: 200, durationMs: 600, samples: 2 }, dir, undefined, capture); }
-  catch (error) { if (process.env.PI_REQUIRE_MEDIA_TEST !== '1' && /Executable doesn't exist|distribution.*not found|not installed/i.test(error.message)) { t.skip('Browser unavailable'); return; } throw error; }
-  assert.ok(moving.reducedPixels.meanDelta > .4); assert.ok(moving.findings.some(f => f.id === 'reduced-motion-moving-loop' && f.severity === 'FAIL'));
-  assert.equal(moving.loopBoundary.periodMs, 1000, 'endpoint check uses the actual period, not requested duration 600ms');
-  assert.ok(!moving.findings.some(f => f.id === 'loop-seam'));
-  await fs.writeFile(source, html(true));
-  const calm = await motionInspectRun({ source, width: 200, height: 200, durationMs: 600, samples: 2 }, dir, undefined, capture);
-  assert.equal(calm.reducedPixels.meanDelta, 0); assert.equal(calm.blocking, 0); assert.equal(calm.reducedPass, 'checked');
-  assert.ok(Buffer.byteLength(JSON.stringify(calm)) < 7000, 'rendered motion report stays below 7KB');
-  await fs.writeFile(source, html(false).replace('</style>', '@media(prefers-reduced-motion:reduce){.orb{animation-play-state:paused}}</style>'));
-  const paused = await motionInspectRun({ source, width: 200, height: 200, durationMs: 600, samples: 2 }, dir, undefined, capture);
-  assert.equal(paused.blocking, 0, 'forced seek movement does not turn an actually paused alternative into a failure');
-}));
-
-
-test('actual VFR timestamps remain visible and high-frame windows fail at the work bound', { skip: !hasFfmpeg, timeout: 120000 }, async () => temporary(async dir => {
-  const variable = path.join(dir, 'variable.mp4');
-  await exec('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x64:rate=10', '-vf', 'setpts=if(lt(N\\,10)\\,N\\,2*N-10)/(10*TB)', '-fps_mode', 'vfr', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', variable]);
-  const report = await videoMotion({ path: variable, duration: 3, expectedFps: 10 }, dir);
-  assert.equal(report.frames, 20); assert.ok(report.timing.irregularIntervals >= 8); assert.ok(report.timing.largestGaps[0].seconds >= .19);
-  const fast = path.join(dir, 'fast.mp4');
-  await exec('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-f', 'lavfi', '-i', 'color=red:duration=16:size=64x64:rate=120', '-c:v', 'libx264', '-threads', '2', '-pix_fmt', 'yuv420p', fast]);
-  await assert.rejects(videoMotion({ path: fast, duration: 16 }, dir), /exceeds 1800 frames/);
-}));
-
-test('glTF JSON/file budgets and compressed-loader limits are explicit', async () => temporary(async dir => {
-  const file = path.join(dir, 'oversized.gltf'); await fs.writeFile(file, ' '.repeat(2 * 1024 * 1024 + 1));
-  await assert.rejects(inspectGltf(file), /at most 2 MiB/);
-  const { document, bytes } = fixture(); document.extensionsRequired = ['KHR_draco_mesh_compression'];
-  document.meshes[0].primitives[0].extensions = { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: 0 } } };
-  delete document.accessors[0].bufferView;
-  const compressed = await put(dir, document, bytes); const report = await inspectGltf(compressed);
-  assert.equal(report.boundsComplete, false); assert.equal(report.meshLocalBounds.length, 0); assert.ok(report.warnings.some(s => s.includes('plain GLTFLoader')));
-}));
-
-
-test('model deduplication includes resource fingerprints rather than only the glTF JSON', async () => temporary(async dir => {
-  const file = await put(dir); const first = await registerAsset({ path: file }, dir);
-  const bytes = fixture().bytes; bytes.writeFloatLE(4, 12); await fs.writeFile(path.join(dir, 'geometry.bin'), bytes);
-  const changed = await registerAsset({ path: file }, dir); assert.equal(changed.duplicateOf, null); assert.notEqual(changed.record.hash, first.record.hash);
-  assert.equal((await readRegistry(dir)).assets.length, 2);
-}));
-
-
-test('authored GLB fixture loads through the existing Three.js GLTFLoader and produces real WebGL geometry pixels', { timeout: 60000 }, async t => temporary(async dir => {
-  const require = createRequire(path.join(agent, 'npm/package.json'));
-  const { chromium } = require('playwright'), build = path.dirname(require.resolve('three'));
-  const { document, bytes } = fixture(), binary = glb(document, bytes);
-  const file = path.join(dir, 'render.glb'); await fs.writeFile(file, binary); const preflight = await inspectGltf(file);
-  const modules = new Map([
-    ['/three.module.js', await fs.readFile(path.join(build, 'three.module.js'))],
-    ['/three.core.js', await fs.readFile(path.join(build, 'three.core.js'))],
-    ['/loaders/GLTFLoader.js', await fs.readFile(path.join(build, '../examples/jsm/loaders/GLTFLoader.js'))],
-    ['/utils/BufferGeometryUtils.js', await fs.readFile(path.join(build, '../examples/jsm/utils/BufferGeometryUtils.js'))],
-    ['/model.glb', binary],
-  ]);
-  const html = `<!doctype html><body style="margin:0"><script type="importmap">{"imports":{"three":"/three.module.js"}}</script><script type="module">
-    import * as THREE from 'three'; import {GLTFLoader} from '/loaders/GLTFLoader.js';
-    new GLTFLoader().load('/model.glb', gltf => {
-      const renderer = new THREE.WebGLRenderer({preserveDrawingBuffer:true}); renderer.setSize(160,96); renderer.outputColorSpace=THREE.SRGBColorSpace; document.body.append(renderer.domElement);
-      const scene=new THREE.Scene(); scene.background=new THREE.Color('#101010'); scene.add(gltf.scene);
-      gltf.scene.traverse(o => {if(o.isMesh) o.material=new THREE.MeshBasicMaterial({color:'#ff7733',side:THREE.DoubleSide});});
-      const camera=new THREE.PerspectiveCamera(45,160/96,.1,100); camera.position.set(1,1.5,6); camera.lookAt(1,1.5,0); renderer.render(scene,camera);
-      const gl=renderer.getContext(), pixels=new Uint8Array(160*96*4); gl.readPixels(0,0,160,96,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
-      let visible=0; for(let i=0;i<pixels.length;i+=4) if(pixels[i]>200&&pixels[i+1]>40&&pixels[i+1]<170&&pixels[i+2]<100) visible++;
-      window.evidence={triangles:renderer.info.render.triangles,calls:renderer.info.render.calls,visiblePixels:visible};
-    },undefined,error => {window.failure=String(error);});
-  </script>`;
-  let browser;
-  try {
-    try { browser = await chromium.launch({ channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=swiftshader'] }); }
-    catch (error) { if (process.env.PI_REQUIRE_MEDIA_TEST !== '1' && /Executable doesn't exist|distribution.*not found|not installed/i.test(error.message)) { t.skip('Browser unavailable'); return; } throw error; }
-    const context = await browser.newContext({ viewport: { width: 160, height: 96 }, serviceWorkers: 'block', acceptDownloads: false, permissions: [] });
-    await context.route('**/*', route => { const url = new URL(route.request().url()); if (url.hostname !== 'fixture.invalid') return route.abort(); if (url.pathname === '/') return route.fulfill({status:200,contentType:'text/html',body:html}); const body=modules.get(url.pathname); return body ? route.fulfill({status:200,contentType:url.pathname.endsWith('.glb')?'model/gltf-binary':'text/javascript',body}) : route.abort(); });
-    const page=await context.newPage(); await page.goto('http://fixture.invalid/'); await page.waitForFunction(() => window.evidence || window.failure);
-    assert.equal(await page.evaluate(() => window.failure), undefined);
-    const rendered=await page.evaluate(() => window.evidence); assert.equal(rendered.triangles, preflight.counts.triangles); assert.equal(rendered.calls, 1); assert.ok(rendered.visiblePixels>100, 'glTF geometry paints actual framebuffer pixels');
-    const poster=await page.locator('canvas').screenshot(); assert.equal(poster.readUInt32BE(16),160); assert.equal(poster.readUInt32BE(20),96);
-  } finally { await browser?.close(); }
-}));

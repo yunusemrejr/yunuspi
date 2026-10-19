@@ -73,7 +73,6 @@ test("capability inventory is deterministic, complete, and generated from public
 		),
 	);
 	for (const name of [
-		"data_query",
 		"sqlite_probe",
 		"video_frames",
 		"todo",

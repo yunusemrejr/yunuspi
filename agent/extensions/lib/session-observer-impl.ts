@@ -664,7 +664,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   pi.on('tool_result', (event: any, context: any) => {
     if (!owns(context)) return;
     if (userRequest && true) agentResponded = true;
-    if (!event.isError && ['edit', 'write', 'bulk_edit'].includes(event.toolName)) parentEditsThisTask++;
+    if (!event.isError && ['edit', 'write'].includes(event.toolName)) parentEditsThisTask++;
     if (event.isError) urgent++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     const startedAt = runningTools.get(event.toolCallId)?.startedAt;

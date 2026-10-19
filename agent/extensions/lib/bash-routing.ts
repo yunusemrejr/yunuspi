@@ -2,8 +2,8 @@
  * Bash routing classifier — pure, I/O-free policy for the bash-router hook.
  *
  * Goal: route common *simple* shell forms to the structured tools that already
- * exist (read/grep/find) or that ship with this change (data_query/git_info/
- * http_request), so small models avoid quoting, escaping and flag recall.
+ * exist (read/grep/find/git_info/http_request), so small models avoid quoting,
+ * escaping and flag recall.
  *
  * Safety contract:
  *  - Only single, simple commands are classified. Anything with an unquoted
@@ -99,34 +99,6 @@ function countFlag(tokens: string[], start: number): { count?: number; rest: str
 
 const SIMPLE_GREP_FLAG = /^-(?:r|R|i|n|l|w|E|F|h|s|q)+$/;
 const SIMPLE_RG_FLAG = /^-(?:n|i|w|E|F|l|h|s|q)+$/;
-const SIMPLE_JQ_FLAG = /^-(?:r|c|e|S|M|j|a)+$/;
-
-/** A jq-style filter that maps onto a data_query path: `.a.b[0]`, `.`, `.[2]` */
-function toDataPath(filter: string): string | null {
-  if (filter === ".") return "";
-  let out = "";
-  let i = 0;
-  if (filter[i] === ".") i++;
-  while (i < filter.length) {
-    const c = filter[i];
-    if (c === ".") { out += "."; i++; continue; }
-    if (c === "[") {
-      const end = filter.indexOf("]", i);
-      if (end < 0) return null;
-      const inside = filter.slice(i + 1, end);
-      if (!/^\d+$/.test(inside)) return null;
-      out += `[${inside}]`;
-      i = end + 1;
-      continue;
-    }
-    const m = /^[A-Za-z0-9_$-]+/.exec(filter.slice(i));
-    if (!m) return null;
-    out += m[0];
-    i += m[0].length;
-    if (i < filter.length && filter[i] !== "." && filter[i] !== "[") return null;
-  }
-  return out;
-}
 
 const REPO_READ_ACTIONS: Record<string, string> = { status: "status", diff: "diff", log: "log", show: "show", branch: "branch" };
 
@@ -186,59 +158,6 @@ function classifySimple(raw: string): BashRoute | null {
     if (schema) return utility("utility-sqlite", "sqlite_probe", "with action schema", { path: file, action: "schema", ...(schema[1] ? { table: schema[1] } : {}) });
     if (/^(?:SELECT|WITH|EXPLAIN|PRAGMA)\b/i.test(sql.trim())) return utility("utility-sqlite", "sqlite_probe", "with action query or explain for read-only SQL and bounded rows");
   }
-  const packageName = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9_][A-Za-z0-9._-]*$/;
-  if (["npm", "pnpm", "yarn"].includes(head) && ["ls", "list", "explain", "why"].includes(args[0]) && args.length >= 2 && packageName.test(args[1]) && args.slice(2).every(a => /^(?:--json|--depth=\d+)$/.test(a)))
-    return utility("utility-package", "package_probe", "for the installed version, exact location and lock resolution", { package: args[1] });
-  if (head === "cat" && args.length === 1) {
-    const pkg = /^(.*?)(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\/package\.json$/.exec(args[0]);
-    if (pkg && packageName.test(pkg[2])) return utility("utility-package", "package_probe", "for installed dependency metadata", { package: pkg[2], project: pkg[1].replace(/\/$/, "") || "." });
-  }
-  if (head === "node" && args.length === 2 && ["-p", "--print"].includes(args[0])) {
-    const pkg = /^require\(['"]((?:@[^/'"]+\/)?[^/'"]+)\/package\.json['"]\)(?:\.(?:version|exports|types|bin|peerDependencies))?$/.exec(args[1]);
-    if (pkg && packageName.test(pkg[1])) return utility("utility-package", "package_probe", "for installed dependency metadata", { package: pkg[1] });
-  }
-  if (head === "dig") {
-    const parts = args.filter(a => a !== "+short");
-    if (parts.length >= 1 && parts.length <= 2 && /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(parts[0]) && (parts.length === 1 || /^(?:A|AAAA|CNAME|MX|TXT|NS|SOA|SRV|CAA)$/.test(parts[1])))
-      return utility("utility-dns", "net_probe", "with action dns", { action: "dns", host: parts[0], ...(parts[1] ? { record_type: parts[1] } : {}) });
-  }
-  if (["nc", "netcat"].includes(head) && ["-z", "-zv", "-vz"].includes(args[0]) && args.length === 3 && /^\d+$/.test(args[2]) && +args[2] >= 1 && +args[2] <= 65535 && !args[1].startsWith("-"))
-    return utility("utility-tcp", "net_probe", "with action tcp for a single bounded connection", { action: "tcp", host: args[1], port: +args[2] });
-  if (head === "openssl" && args[0] === "s_client" && args[1] === "-connect" && (args.length === 3 || args.length === 5 && args[3] === "-servername")) {
-    const target = /^(?:\[([0-9a-f:]+)\]|([A-Za-z0-9.-]+)):(\d+)$/i.exec(args[2]);
-    if (target && +target[3] >= 1 && +target[3] <= 65535) return utility("utility-tls", "net_probe", "with action tls for certificate and validation details", { action: "tls", host: target[1] ?? target[2], port: +target[3], ...(args[4] ? { servername: args[4] } : {}) });
-  }
-  if (head === "unzip" && args.length === 2 && args[0] === "-l" || head === "tar" && args.length === 2 && /^-?(?:t[zgJj]?f|[zgJj]tf)$/.test(args[0]))
-    return utility("utility-archive", "archive_probe", "to list archive members without extraction", { action: "list", path: args[1] });
-
-	// Read-only system inspection has a structured replacement. Keep these
-	// advisory because flags such as `ps aux` and `ss -ltnp` do not have a
-	// byte-for-byte equivalent in sys_probe; the native rows are still easier
-	// for an agent to consume than reparsing shell columns.
-	if (head === "ps" && (args.length === 0 || (args.length === 1 && /^(?:aux|-?ef|-?eF|-e|-f)$/.test(args[0])))) {
-		return {
-			ruleId: "sys-ps",
-			tool: "sys_probe",
-			severity: "annotate",
-			hint: "Use the sys_probe tool with action `processes` for bounded structured process rows instead of parsing `ps` output.",
-		};
-	}
-	if (head === "ss" && args.length >= 1 && args.length <= 2 && args.some((arg) => /^-[A-Za-z]+$/.test(arg) && arg.includes("l")) && args.every((arg) => /^-[A-Za-z]+$/.test(arg))) {
-		return {
-			ruleId: "sys-ss",
-			tool: "sys_probe",
-			severity: "annotate",
-			hint: "Use the sys_probe tool with action `listeners` for bounded structured sockets instead of parsing `ss` output.",
-		};
-	}
-	if (head === "systemctl" && args.length >= 1 && args[0] === "list-units" && args.slice(1).every((arg) => /^--(?:type|state)=\S+$/.test(arg) || arg === "--no-pager" || arg === "--no-legend")) {
-		return {
-			ruleId: "sys-systemctl",
-			tool: "sys_probe",
-			severity: "annotate",
-			hint: "Use the sys_probe tool with action `services` for bounded structured service rows instead of parsing `systemctl` output.",
-		};
-	}
 
 	if (tokens.length < 2) return null;
 
@@ -316,40 +235,6 @@ function classifySimple(raw: string): BashRoute | null {
       tool: "find",
       severity: "annotate",
       hint: "Use the find tool for glob searches; the result is bounded and gitignore-aware.",
-    };
-  }
-
-  if ((head === "jq" || head === "yq") && args.length >= 2) {
-    let i = 0;
-    while (i < args.length && (SIMPLE_JQ_FLAG.test(args[i]) || args[i] === "--raw-output" || args[i] === "--compact-output")) i++;
-    if (i + 1 <= args.length - 1 && !args[i].startsWith("-")) {
-      const filter = args[i];
-      const file = args[args.length - 1];
-      const path = toDataPath(filter);
-      if (path !== null && file !== filter && !file.startsWith("-")) {
-        return {
-          ruleId: "data-jq",
-          tool: "data_query",
-          severity: "escalate",
-          hint: "Use the data_query tool instead of `jq` for JSON/YAML reads.",
-          replacement: call("data_query", { op: "get", file, path }),
-        };
-      }
-      return {
-        ruleId: "data-jq-complex",
-        tool: "data_query",
-        severity: "annotate",
-        hint: "Use the data_query tool for simple JSON/YAML reads; keep `jq` only for complex transforms.",
-      };
-    }
-  }
-
-  if ((head === "python" || head === "python3") && args.includes("-c") && /\bjson\b/.test(raw)) {
-    return {
-      ruleId: "data-pyjson",
-      tool: "data_query",
-      severity: "annotate",
-      hint: "Use the data_query tool instead of `python -c` for JSON reads.",
     };
   }
 

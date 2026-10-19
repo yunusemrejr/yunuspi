@@ -725,7 +725,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		for (const call of calls) {
 			const name = String(call?.name ?? "");
 			const args = call?.arguments && typeof call.arguments === "object" ? call.arguments : {};
-			if (name === "edit" || name === "write" || name === "bulk_edit") {
+			if (name === "edit" || name === "write") {
 				if (typeof args.path === "string") paths.add(args.path);
 				if (Array.isArray(args.files)) for (const file of args.files) if (typeof file === "string") paths.add(file);
 				if (Array.isArray(args.edits)) for (const edit of args.edits) if (typeof edit?.path === "string") paths.add(edit.path);

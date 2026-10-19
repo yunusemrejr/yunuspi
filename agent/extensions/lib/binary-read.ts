@@ -104,7 +104,7 @@ function zipView(file: string): Pick<BinaryView, "text" | "opened" | "facts"> {
   try {
     const entries = openZip(fs.readFileSync(file)).entries.filter(entry => !entry.directory);
     const rows = entries.slice(0, 60).map(entry => `${entry.name} (${size(entry.size)})`);
-    return { text: `${entries.length} files:\n${rows.join("\n")}${entries.length > rows.length ? `\n… ${entries.length - rows.length} more` : ""}\narchive_probe lists, stats and reads one member without extracting. To extract, use a new folder (unzip -d <new folder> file.zip), never the folder it came from.`, opened: true, facts: { entries: entries.length } };
+    return { text: `${entries.length} files:\n${rows.join("\n")}${entries.length > rows.length ? `\n… ${entries.length - rows.length} more` : ""}\nList members with unzip -l or tar -tf and read one member with unzip -p or tar -xOf. To extract, use a new folder (unzip -d <new folder> file.zip), never the folder it came from.`, opened: true, facts: { entries: entries.length } };
   } catch (error: any) { return { text: `Not a readable ZIP (${String(error?.message ?? error).slice(0, 140)}).`, opened: false, facts: {} }; }
 }
 
@@ -135,7 +135,7 @@ export async function describeBinary(file: string, options: { offset?: number; m
   else if (kind === "sqlite") part = await sqliteView(file, options.signal);
   else if (kind === "media") part = await mediaView(file, options.signal);
   else {
-    const extra = kind === "archive" ? "archive_probe lists ZIP and TAR (also gzip, bzip2, xz) without extracting; for 7z and RAR use 7z l. Extract into a new folder." : kind === "font" ? "Use fc-scan or fonts tooling to inspect glyphs and metrics." : kind === "executable" ? "Inspect with file, ldd or strings through bash if that is really needed." : "Use file, xxd -l 256 or strings through bash if the bytes matter.";
+    const extra = kind === "archive" ? "List ZIP and TAR (also gzip, bzip2, xz) members with unzip -l or tar -tf without extracting; for 7z and RAR use 7z l. Extract into a new folder." : kind === "font" ? "Use fc-scan or fonts tooling to inspect glyphs and metrics." : kind === "executable" ? "Inspect with file, ldd or strings through bash if that is really needed." : "Use file, xxd -l 256 or strings through bash if the bytes matter.";
     part = { text: `${extra}\nFirst bytes: ${hex(head)}`, opened: false, facts: {} };
   }
   return { kind, label, text: `[read: ${label}, not text] ${path.basename(file)} (${size(stat.size)})\nThe file is binary, so it is shown as what it contains instead of raw bytes.\n\n${part.text}`, opened: part.opened, facts: { kind, label, bytes: stat.size, ...part.facts } };

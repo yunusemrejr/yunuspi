@@ -108,13 +108,6 @@ test("creativeVerificationLines gate only newest blocking receipts", () => {
   assert.deepEqual(qa.creativeVerificationLines([]), []);
 });
 
-test("planCompare needs 2..4 distinct variants", () => {
-  const plan = qa.planCompare({ sources: ["a.html", "b.html", "a.html"] });
-  assert.deepEqual(plan.sources, ["a.html", "b.html"]);
-  assert.deepEqual(qa.planCompare({ variants: ["a.html", "b.html"] }).sources, ["a.html", "b.html"]);
-  assert.throws(() => qa.planCompare({ sources: ["a.html"] }), /2\.\.4/);
-  assert.throws(() => qa.planCompare({}), /2\.\.4/);
-});
 
 test("sourceRevision hashes files and marks live sources", async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "qa-rev-"));

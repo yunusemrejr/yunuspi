@@ -5,7 +5,7 @@ title: Design to code
 summary: Turning mockups, screenshots and references into working interfaces: decompose before coding, decide CSS versus SVG versus raster per region, extract tokens, cut assets cleanly, build structure first, and compare renders to the reference.
 terms: mockup mockups figma design screenshot reference image picture png jpg recreate replicate clone convert turn into website page implement pixel perfect match look like similar asset assets slice crop export svg icon icons illustration image to code design to code
 files: .png .jpg .jpeg .webp .svg .fig
-tools: image_crop render_see browser_session web_asset_check
+tools: image_crop render_see browser_session
 skills: frontend svg-images ui-design
 ---
 

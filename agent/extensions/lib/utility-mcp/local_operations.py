@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import re
 import stat
-from html.parser import HTMLParser
 
 SCAN_ENTRIES = 5000
 SCAN_BYTES = 16 * 1024 * 1024
@@ -164,23 +163,3 @@ def workspace_search(root, args, regular):
                   evidence_note='Literal matches within the reported scope; omitted or unscanned content is not evidence of absence.')
     return result
 
-
-class VisibleText(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.hidden = 0
-        self.parts = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag in ('script', 'style', 'head'):
-            self.hidden += 1
-        elif tag in ('br', 'p', 'div', 'li', 'tr') and not self.hidden:
-            self.parts.append('\n')
-
-    def handle_endtag(self, tag):
-        if tag in ('script', 'style', 'head') and self.hidden:
-            self.hidden -= 1
-
-    def handle_data(self, data):
-        if not self.hidden:
-            self.parts.append(data)
