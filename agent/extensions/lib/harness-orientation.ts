@@ -89,22 +89,18 @@ export function buildHarnessOrientation(
 ): string | undefined {
 	if (userOptedOut(prompt)) return undefined;
 	const tools = new Set(activeTools);
+	// One instruction and the discovery names. The longer note told the model to
+	// survey tools, skills and workflows before starting, which spent turns on
+	// every request before any work began.
 	let discovery = "";
 	if (tools.has("tool_search") && tools.has("skill_review")) {
-		discovery =
-			" If useful, browse tool_search for optional tools or skill_review for optional workflows.";
+		discovery = " tool_search lists optional tools and skill_review optional workflows, when you need one.";
 	} else if (tools.has("tool_search")) {
-		discovery = " If useful, browse tool_search for optional tools.";
+		discovery = " tool_search lists optional tools when you need one.";
 	} else if (tools.has("skill_review")) {
-		discovery = " If useful, browse skill_review for optional workflows.";
+		discovery = " skill_review lists optional workflows when you need one.";
 	}
-	return (
-		"Quick orientation: briefly inspect relevant harness tools, skills, or workflows that may help; " +
-		"understand the options, then focus promptly on the user's request." +
-		discovery +
-		" No deep exploration or forced call is required; user and project instructions win." +
-		" Use existing harness tools first — do not reimplement with shell what the harness already provides; bounded reviews, councils, swarms and fusion exist for genuinely hard or broad work."
-	);
+	return "Quick orientation: use the harness tools before shell equivalents." + discovery + " User and project instructions win.";
 }
 
 export const HARNESS_ORIENTATION_RECEIPT_PREFIX = RECEIPT_PREFIX;
