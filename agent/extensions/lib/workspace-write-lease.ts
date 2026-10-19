@@ -74,10 +74,12 @@ function inside(root: string, candidate: string): boolean {
 
 export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
 	try {
-		const root = path.resolve(git(cwd, ["rev-parse", "--show-toplevel"]));
-		const commonRaw = git(cwd, ["rev-parse", "--git-common-dir"]);
+		// One rev-parse answers root, common dir and HEAD; each spawn costs
+		// milliseconds that repeat for every file a tool result touches.
+		const [rootRaw, commonRaw, head] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "HEAD"]).split("\n");
+		if (!rootRaw || !commonRaw || !head) return undefined;
+		const root = path.resolve(rootRaw);
 		const commonDir = path.resolve(cwd, commonRaw);
-		const head = git(cwd, ["rev-parse", "HEAD"]);
 		const branch = optionalGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "(detached)";
 		const upstream = optionalGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
 		const upstreamHead = upstream ? optionalGit(cwd, ["rev-parse", upstream]) : undefined;
@@ -85,6 +87,22 @@ export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefine
 	} catch {
 		return undefined;
 	}
+}
+
+// Lease bookkeeping needs the checkout identity, not a fresh drift reading. One
+// tool result used to cost up to ~30 git spawns across its lease, path and
+// attribution lookups; a short-lived memo serves the burst. Drift detection
+// keeps calling readWorkspaceGitState directly so it never sees stale refs.
+const GIT_STATE_TTL_MS = 1500;
+const gitStateMemo = new Map<string, { at: number; state: WorkspaceGitState | undefined }>();
+function recentWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
+	const hit = gitStateMemo.get(cwd);
+	const now = Date.now();
+	if (hit && now - hit.at < GIT_STATE_TTL_MS) return hit.state;
+	const state = readWorkspaceGitState(cwd);
+	if (gitStateMemo.size > 32) gitStateMemo.clear();
+	gitStateMemo.set(cwd, { at: now, state });
+	return state;
 }
 
 export function workspaceGitDrift(before: WorkspaceGitState | undefined, after: WorkspaceGitState | undefined): string[] {
@@ -161,7 +179,7 @@ function writeLease(file: string, lease: WorkspaceWriterLease): void {
 }
 
 export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { state?: WorkspaceGitState; lease?: WorkspaceWriterLease; conflicts: WorkspaceLeaseOwner[] } {
-	const state = readWorkspaceGitState(cwd);
+	const state = recentWorkspaceGitState(cwd);
 	if (!state || !sessionId) return { conflicts: [] };
 	try { fs.mkdirSync(leaseDir(state), { recursive: true, mode: 0o700 }); } catch { return { state, conflicts: [] }; }
 	const file = leaseFile(state, sessionId);
@@ -185,7 +203,7 @@ export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { s
 }
 
 export function releaseWorkspaceWriterLease(cwd: string, sessionId: string): void {
-	const state = readWorkspaceGitState(cwd);
+	const state = recentWorkspaceGitState(cwd);
 	if (!state || !sessionId) return;
 	try { fs.rmSync(leaseFile(state, sessionId), { force: true }); } catch { /* advisory only */ }
 }
@@ -195,7 +213,7 @@ function toOwner(lease: WorkspaceWriterLease): WorkspaceLeaseOwner {
 }
 
 export function workspacePath(cwd: string, rawPath: string): { state?: WorkspaceGitState; absolute: string; relative: string } {
-	const state = readWorkspaceGitState(cwd);
+	const state = recentWorkspaceGitState(cwd);
 	const absolute = path.resolve(cwd, rawPath);
 	const relative = state && inside(state.root, absolute) ? path.relative(state.root, absolute) || "." : absolute;
 	return { ...(state ? { state } : {}), absolute, relative };
@@ -237,7 +255,7 @@ export function recordWorkspaceMutation(cwd: string, sessionId: string, rawPath:
 }
 
 export function attributeWorkspacePath(cwd: string, sessionId: string, relativePath: string): { status: "current_session" | "another_session" | "unattributed"; sessionId?: string; detail?: string } {
-	const state = readWorkspaceGitState(cwd);
+	const state = recentWorkspaceGitState(cwd);
 	if (!state) return { status: "unattributed", detail: "not a Git checkout" };
 	const leases = activeLeases(state);
 	// A foreign lease wins over the current session: concurrent ownership is

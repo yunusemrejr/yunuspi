@@ -13,6 +13,13 @@ import { fileURLToPath } from "node:url";
 
 const baseDir = dirname(fileURLToPath(import.meta.url));
 
+// A session must not download toolchains while it works: measured, a hello-world
+// project made pi-lens run `npm install types-registry@latest` and start five
+// language servers on the first write. Tools already under ~/.pi-lens keep
+// working; set either variable to 0 to allow on-demand installs again.
+process.env.PI_LENS_DISABLE_TOOL_INSTALL ??= "1";
+process.env.PI_LENS_DISABLE_LSP_INSTALL ??= "1";
+
 const SKILLS = [
 	"pi-lens-ast-grep",
 	"pi-lens-lsp-navigation",
