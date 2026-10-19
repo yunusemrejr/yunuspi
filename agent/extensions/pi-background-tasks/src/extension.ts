@@ -697,7 +697,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     promptSnippet:
       "Start named background work; finite completion can wake once, while persistent services default to UI-only status",
     promptGuidelines: [
-      "Use bash for short commands; bg_run for long tests/builds/servers. Give bg_run a short name; isAgent is true only for LLM processes. Keep completion notifications enabled; finite tasks request one coalesced wake by default, while recognized persistent services stay UI/receipt-only unless triggerOnCompletion:true is explicit. Do other work or yield rather than poll. A terminal notification is authoritative; inspect its logs when needed, then report the result—not success before completion.",
+      "Use bash for short commands and bg_run for long tests, builds and servers (isAgent only for LLM processes). A finished task notifies you once: do other work instead of polling, and report its result only after that notification.",
     ],
     parameters: BgRunParams,
     prepareArguments: prepareBgRunArguments,
