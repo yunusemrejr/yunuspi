@@ -4931,6 +4931,10 @@ function withInstanceRegistryLockSync(target, op) {
     } catch (error) {
       if (!isLockContention(error))
         throw error;
+      // The holder is an async registry write in this same process; it cannot finish while this
+      // synchronous call blocks the event loop, so waiting would only burn the whole LOCK_WAIT_MS at shutdown.
+      if (ownsLock(lock))
+        return op();
       takeOverStale(lock);
       if (Date.now() <= deadline)
         backoff();
@@ -10230,6 +10234,7 @@ function isAvailable(pm, onTransient) {
   return shared.promise.then(reportIfTransient);
 }
 function _resetPackageManagerCache() {
+  globalBinDirMemo.clear();
   availabilityLatches.clear();
   packageManagerProbeFlights.clear();
 }
@@ -10265,7 +10270,18 @@ function updateArgs(pm, pkg, options = {}) {
   args.push(pkg);
   return args;
 }
-async function globalBinDirsFor(pm) {
+// Package-manager global bin directories do not move within a session, yet each lookup spawns the
+// manager (0.4-0.7 s apiece under nvm). Remember them, failures included, for ten minutes.
+var globalBinDirMemo = /* @__PURE__ */ new Map();
+function globalBinDirsFor(pm) {
+  const hit = globalBinDirMemo.get(pm);
+  if (hit && Date.now() - hit.at < 6e5)
+    return hit.promise;
+  const promise = globalBinDirsForUncached(pm);
+  globalBinDirMemo.set(pm, { at: Date.now(), promise });
+  return promise;
+}
+async function globalBinDirsForUncached(pm) {
   if (pm === "bun") {
     const base = process.env.BUN_INSTALL || path23.join(os6.homedir(), ".bun");
     return [path23.join(base, "bin")];
@@ -10285,10 +10301,9 @@ async function globalBinDirsFor(pm) {
 async function allAvailableGlobalBinDirs(onTransient) {
   const dirs = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const pm of PREFERENCE) {
-    if (!await isAvailable(pm, onTransient))
-      continue;
-    for (const dir of await globalBinDirsFor(pm)) {
+  const perManager = await Promise.all(PREFERENCE.map(async (pm) => await isAvailable(pm, onTransient) ? await globalBinDirsFor(pm) : []));
+  for (const managerDirs of perManager) {
+    for (const dir of managerDirs) {
       const normalized = path23.resolve(dir);
       if (seen.has(normalized))
         continue;
@@ -10301,6 +10316,14 @@ async function allAvailableGlobalBinDirs(onTransient) {
 async function findGlobalBinary(command, windowsExt = ".cmd") {
   const candidates = onWindows() ? [`${command}${windowsExt}`, `${command}.exe`, command] : [command];
   try {
+    // pi-lens installs a tool here only when no global copy answered, so check it before
+    // spawning every package manager to ask where globals live.
+    const managedBin = path23.join(getGlobalPiLensDir(), "tools", "node_modules", ".bin");
+    for (const name of candidates) {
+      const full = path23.join(managedBin, name);
+      if (fs17.existsSync(full))
+        return full;
+    }
     for (const binDir of await allAvailableGlobalBinDirs()) {
       for (const name of candidates) {
         const full = path23.join(binDir, name);
