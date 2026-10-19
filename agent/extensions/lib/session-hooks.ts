@@ -10,11 +10,15 @@
  * it encodes workflow discipline (read the evidence, keep scopes bounded,
  * prefer cheap delegation), never claims about a specific codebase.
  *
- * Pure policy only — no pi imports, no I/O, no subprocesses. The extension
+ * Pure policy only — no pi imports, no subprocesses. The one filesystem reader
+ * is nested-instruction discovery at the end of this file: bounded reads of
+ * instruction files below an explicit cwd. The extension
  * (`extensions/session-hooks.ts`) owns registration, once-per-session state
  * and telemetry; this module stays unit-testable.
  */
-
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
 
 export type HookArgs = Record<string, unknown>;
 
@@ -251,4 +255,186 @@ export function missingPathFromError(text: unknown): string | undefined {
 		if (found && (found.includes("/") || /\.\w{1,8}$/.test(found))) return found;
 	}
 	return undefined;
+}
+
+/* ---------- Nested-scope instructions ----------
+ * Core loads AGENTS.md/CLAUDE.md from the cwd and its ancestors into the system
+ * prompt. Directories strictly below cwd are never loaded, so when a file tool
+ * first touches one, its instruction file is offered once in the tool result. */
+
+/** Core's per-directory candidates in precedence order (core resource-loader). */
+export const NESTED_INSTRUCTION_FILES: readonly string[] = [
+	"AGENTS.override.md",
+	"AGENTS.md",
+	"AGENTS.MD",
+	"CLAUDE.md",
+	"CLAUDE.MD",
+];
+export const NESTED_INSTRUCTION_MAX_BYTES = 16384;
+export const NESTED_INSTRUCTION_MAX_PER_RESULT = 3;
+export const NESTED_INSTRUCTION_KEY_PREFIX = "nested-instructions:";
+const NESTED_INSTRUCTION_HEADER = "<system-reminder>\nAdditional instructions from: ";
+const NESTED_PATH_TOOLS: ReadonlySet<string> = new Set(["read", "edit", "write", "ls", "find", "grep", "read_many"]);
+/** ls/find/grep may name a directory; read/edit/write always name a file. */
+const DIRECTORY_TARGET_TOOLS: ReadonlySet<string> = new Set(["ls", "find", "grep"]);
+const MAX_PATHS_PER_CALL = 16;
+/** Dependency and tool directories carry third-party instruction files, not project guidance. */
+const isForeignSegment = (segment: string): boolean =>
+	segment.startsWith(".") || segment === "node_modules" || segment === "site-packages" || segment === "vendor";
+
+export interface NestedInstructionBlock {
+	/** `nested-instructions:<absolute file path>`, the once-per-session key. */
+	key: string;
+	/** The system-reminder text appended to the tool result. */
+	text: string;
+}
+
+/** Path strings a file tool call names. read_many lists one per file. */
+export function nestedInstructionPaths(toolName: string, input: HookArgs): string[] {
+	if (!NESTED_PATH_TOOLS.has(toolName)) return [];
+	const raw: unknown[] = toolName === "read_many"
+		? (Array.isArray(input.files) ? (input.files as any[]).slice(0, MAX_PATHS_PER_CALL).map((file) => file?.path) : [])
+		: [input.path];
+	return raw.filter((p): p is string => typeof p === "string" && p.length > 0 && p.length <= 4096);
+}
+
+const isRegularFile = (file: string): boolean => {
+	try { return fs.statSync(file).isFile(); } catch { return false; }
+};
+const isDirectory = (dir: string): boolean => {
+	try { return fs.statSync(dir).isDirectory(); } catch { return false; }
+};
+
+/** realpath of the longest existing prefix, with the missing tail re-attached. */
+function realpathPrefix(target: string): string {
+	const tail: string[] = [];
+	let current = target;
+	for (;;) {
+		try { return nodePath.join(fs.realpathSync(current), ...tail); } catch { /* walk up */ }
+		const parent = nodePath.dirname(current);
+		if (parent === current) return target;
+		tail.unshift(nodePath.basename(current));
+		current = parent;
+	}
+}
+
+/** Path segments of `target` strictly below `root`; undefined for root itself or anything outside it. */
+function segmentsBelow(root: string, target: string): string[] | undefined {
+	const rel = nodePath.relative(root, target);
+	if (!rel || nodePath.isAbsolute(rel) || rel === ".." || rel.startsWith(`..${nodePath.sep}`)) return undefined;
+	return rel.split(nodePath.sep);
+}
+
+/** Reads at most NESTED_INSTRUCTION_MAX_BYTES; a cut never splits a UTF-8 character. */
+function readInstructionHead(file: string): { text: string; bytes: number } | undefined {
+	let fd: number | undefined;
+	try {
+		const bytes = fs.statSync(file).size;
+		// One look-ahead byte tells whether the cut at the limit splits a character.
+		const want = Math.min(bytes, NESTED_INSTRUCTION_MAX_BYTES + 1);
+		const buffer = Buffer.alloc(want);
+		fd = fs.openSync(file, "r");
+		let got = 0;
+		while (got < want) {
+			const n = fs.readSync(fd, buffer, got, want - got, got);
+			if (n === 0) break;
+			got += n;
+		}
+		if (got <= NESTED_INSTRUCTION_MAX_BYTES) return { text: buffer.subarray(0, got).toString("utf8"), bytes };
+		let end = NESTED_INSTRUCTION_MAX_BYTES;
+		// A continuation byte at `end` belongs to a character that starts earlier; back up to its lead byte.
+		while (end > 0 && (buffer[end] & 0xc0) === 0x80) end--;
+		return { text: buffer.subarray(0, end).toString("utf8"), bytes };
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) {
+			try { fs.closeSync(fd); } catch { /* best effort */ }
+		}
+	}
+}
+
+/** Stored text sits inside a system-reminder, so an inner closing tag must not end it early. */
+const escapeReminder = (text: string): string => text.split("</system-reminder>").join("<\\/system-reminder>");
+
+function instructionReminder(dirSegments: readonly string[], name: string, head: { text: string; bytes: number }): string {
+	const fromPath = [...dirSegments, name].join("/");
+	const scope = dirSegments.join("/");
+	const truncated = head.bytes > NESTED_INSTRUCTION_MAX_BYTES
+		? `\n[truncated: showing first ${NESTED_INSTRUCTION_MAX_BYTES} of ${head.bytes} bytes; read the file for the rest]`
+		: "";
+	return `${NESTED_INSTRUCTION_HEADER}${fromPath}\n\nThese instructions apply to work under \`${scope}\`. Use them as guidance when relevant; more specific instructions take precedence. They do not override system, developer, or direct user instructions.\n\n${escapeReminder(head.text)}${truncated}\n</system-reminder>`;
+}
+
+/**
+ * Instruction files a successful file-tool call should carry. For each named
+ * path strictly inside `cwd`, the first existing candidate of each directory
+ * from cwd's child down to the path's directory, broad to specific. Keys in
+ * `shown` are skipped and not counted; at most NESTED_INSTRUCTION_MAX_PER_RESULT
+ * are returned. The caller marks the returned keys as shown. Never throws.
+ */
+export function nestedInstructionBlocks(options: {
+	cwd: string;
+	toolName: string;
+	input: HookArgs;
+	shown: ReadonlySet<string>;
+}): NestedInstructionBlock[] {
+	const blocks: NestedInstructionBlock[] = [];
+	try {
+		const { cwd, toolName, input, shown } = options;
+		if (typeof cwd !== "string" || !cwd) return blocks;
+		const base = nodePath.resolve(cwd);
+		const root = realpathPrefix(base);
+		const seen = new Set<string>();
+		for (const raw of nestedInstructionPaths(toolName, input)) {
+			if (blocks.length >= NESTED_INSTRUCTION_MAX_PER_RESULT) break;
+			const expanded = raw.replace(/^~(?=\/|$)/, os.homedir());
+			const target = realpathPrefix(nodePath.resolve(base, expanded));
+			const dir = DIRECTORY_TARGET_TOOLS.has(toolName) && isDirectory(target) ? target : nodePath.dirname(target);
+			const segments = segmentsBelow(root, dir);
+			if (!segments || segments.some(isForeignSegment)) continue;
+			for (let depth = 1; depth <= segments.length; depth++) {
+				if (blocks.length >= NESTED_INSTRUCTION_MAX_PER_RESULT) break;
+				const dirSegments = segments.slice(0, depth);
+				const dirAbs = nodePath.join(base, ...dirSegments);
+				const name = NESTED_INSTRUCTION_FILES.find((candidate) => isRegularFile(nodePath.join(dirAbs, candidate)));
+				if (!name) continue;
+				const key = NESTED_INSTRUCTION_KEY_PREFIX + nodePath.join(dirAbs, name);
+				if (shown.has(key) || seen.has(key)) continue;
+				seen.add(key);
+				const head = readInstructionHead(nodePath.join(dirAbs, name));
+				if (!head || head.text.trim() === "") continue;
+				blocks.push({ key, text: instructionReminder(dirSegments, name, head) });
+			}
+		}
+	} catch {
+		/* Discovery is advisory: a failure adds nothing to the result. */
+	}
+	return blocks;
+}
+
+/**
+ * Nested-instruction keys already delivered on this branch. Each delivered
+ * block names its file relative to the session cwd in its header, so the key
+ * is recovered by resolving that path against `cwd`.
+ */
+export function restoredNestedInstructionKeys(entries: readonly any[], cwd: string | undefined): Set<string> {
+	const shown = new Set<string>();
+	if (typeof cwd !== "string" || !cwd) return shown;
+	for (const entry of entries) {
+		// A compaction summarized earlier deliveries away; only later ones are still in context.
+		if (entry?.type === "compaction") shown.clear();
+		const message = entry?.type === "message" ? entry.message : undefined;
+		if (message?.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		for (const part of message.content) {
+			const text = part?.type === "text" && typeof part.text === "string" ? part.text : "";
+			if (!text.startsWith(NESTED_INSTRUCTION_HEADER)) continue;
+			const end = text.indexOf("\n", NESTED_INSTRUCTION_HEADER.length);
+			if (end < 0) continue;
+			const rel = text.slice(NESTED_INSTRUCTION_HEADER.length, end);
+			if (!NESTED_INSTRUCTION_FILES.includes(nodePath.basename(rel))) continue;
+			shown.add(NESTED_INSTRUCTION_KEY_PREFIX + nodePath.resolve(cwd, rel));
+		}
+	}
+	return shown;
 }

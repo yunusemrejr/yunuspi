@@ -118,3 +118,103 @@ test('native reminder hooks share one nudge and reset cycle enforcement on user/
     fs.rmSync(home,{recursive:true,force:true});
   }
 });
+
+const GENTLE_REPEAT = '[repeat-check] You are repeating the exact same tool call with identical arguments. Carefully analyze the previous result before calling again: if the task is not complete, try a different approach or different arguments instead of repeating the call.';
+const repeatCall = (toolName, input, text='ok', isError=false) => ({toolName, input, isError, content:[{type:'text', text}]});
+
+test('consecutive identical calls: gentle at 3, detailed at 5 and 8, silent otherwise', () => {
+  const tracker = createLoopTracker();
+  const out = Array.from({length:9}, () => tracker.repeatNotice(repeatCall('read', {path:'a.txt'})));
+  assert.deepEqual(out.slice(0,2), [undefined, undefined]);
+  assert.equal(out[2], GENTLE_REPEAT);
+  assert.equal(out[3], undefined);
+  assert.match(out[4], /^\[repeat-check\] Repeated tool call detected:\n- tool: read\n- consecutive_calls: 5\n- arguments: \{"path":"a\.txt"\}\nThe repeated calls are not making progress\. /);
+  assert.equal(out[5], undefined);
+  assert.equal(out[6], undefined);
+  assert.match(out[7], /^\[repeat-check\] Repeated tool call detected:\n- tool: read\n- consecutive_calls: 8\n/);
+  assert.equal(out[8], undefined);
+});
+
+test('repeat identity ignores object key order but respects array order', () => {
+  const tracker = createLoopTracker();
+  assert.equal(tracker.repeatNotice(repeatCall('edit', {a:1, b:{x:1, y:2}})), undefined);
+  assert.equal(tracker.repeatNotice(repeatCall('edit', {b:{y:2, x:1}, a:1})), undefined);
+  assert.equal(tracker.repeatNotice(repeatCall('edit', {a:1, b:{x:1, y:2}})), GENTLE_REPEAT);
+  const arrays = createLoopTracker();
+  assert.equal(arrays.repeatNotice(repeatCall('edit', {list:[1, 2]})), undefined);
+  assert.equal(arrays.repeatNotice(repeatCall('edit', {list:[2, 1]})), undefined);
+});
+
+test('an intervening different call resets the repeat chain', () => {
+  const tracker = createLoopTracker();
+  const A = repeatCall('read', {path:'a'}), B = repeatCall('read', {path:'b'});
+  assert.deepEqual([A, A, B, A, A].map((event) => tracker.repeatNotice(event)), [undefined, undefined, undefined, undefined, undefined]);
+  assert.equal(tracker.repeatNotice(A), GENTLE_REPEAT);
+});
+
+test('repeat chain counts bash and error results; the result is not part of identity', () => {
+  const tracker = createLoopTracker();
+  const out = [0, 1, 2].map((i) => tracker.repeatNotice(repeatCall('bash', {command:'npm test'}, `FAIL ${i}`, true)));
+  assert.deepEqual(out, [undefined, undefined, GENTLE_REPEAT]);
+  const sameName = createLoopTracker();
+  assert.equal(sameName.repeatNotice(repeatCall('bash', {command:'ls'})), undefined);
+  assert.equal(sameName.repeatNotice(repeatCall('edit', {command:'ls'})), undefined, 'tool name is part of identity');
+});
+
+test('passive waits and status polls neither count toward nor break the repeat chain', () => {
+  const tracker = createLoopTracker();
+  for (let i = 0; i < 4; i++) assert.equal(tracker.repeatNotice(repeatCall('bg_wait', {id:'build'})), undefined);
+  for (let i = 0; i < 4; i++) assert.equal(tracker.repeatNotice(repeatCall('research_job', {action:'wait', id:'r1'})), undefined);
+  const A = repeatCall('read', {path:'a'});
+  assert.equal(tracker.repeatNotice(A), undefined);
+  assert.equal(tracker.repeatNotice(repeatCall('bg_wait', {id:'build'})), undefined);
+  assert.equal(tracker.repeatNotice(A), undefined);
+  assert.equal(tracker.repeatNotice(A), GENTLE_REPEAT, 'the wait in between did not reset the chain');
+});
+
+test('repeat preview is capped at 500 characters with a remaining-length suffix', () => {
+  const tracker = createLoopTracker();
+  const input = {command:'x'.repeat(600)};
+  const canonical = JSON.stringify(input);
+  const more = canonical.length - 500;
+  let notice;
+  for (let i = 0; i < 5; i++) notice = tracker.repeatNotice(repeatCall('bash', input));
+  assert.ok(notice.includes(`- arguments: ${canonical.slice(0, 500)}… (+${more} more chars)\n`));
+  assert.ok(!notice.includes(canonical));
+});
+
+test('uncanonicalizable input (cyclic or over 64 KB) abstains and resets the chain', () => {
+  const tracker = createLoopTracker();
+  const A = repeatCall('read', {path:'a'});
+  assert.equal(tracker.repeatNotice(A), undefined);
+  assert.equal(tracker.repeatNotice(A), undefined);
+  const cyclic = {a:1}; cyclic.self = cyclic;
+  assert.equal(tracker.repeatNotice(repeatCall('read', cyclic)), undefined);
+  assert.equal(tracker.repeatNotice(A), undefined, 'cyclic call reset the chain');
+  assert.equal(tracker.repeatNotice(A), undefined);
+  assert.equal(tracker.repeatNotice(A), GENTLE_REPEAT);
+  assert.equal(tracker.repeatNotice(repeatCall('write', {data:'x'.repeat(70_000)})), undefined);
+  assert.equal(tracker.repeatNotice(A), undefined, 'oversized call reset the chain');
+});
+
+test('tool_result hook appends the repeat-check text to the third identical result', async () => {
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'pi-loop-cycle-repeat-'));
+  const priorHome=process.env.HOME; process.env.HOME=home;
+  try {
+    const {default:register}=await import(pathToFileURL(path.join(agent,'extensions/reminders.ts')));
+    const hooks=new Map();
+    const ctx={cwd:home,sessionManager:{getSessionId:()=> 'loop-cycle-repeat',getBranch:()=> []},ui:{notify(){}}};
+    register({on:(name,fn)=>{const list=hooks.get(name)??[];list.push(fn);hooks.set(name,list);},registerCommand(){},sendMessage(){}});
+    const emit=async(name,event={})=>{let result;for(const fn of hooks.get(name)??[])result=await fn(event,ctx)??result;return result;};
+    await emit('session_start',{reason:'startup'}); await emit('agent_start');
+    const results=[];
+    for(let i=0;i<3;i++) results.push(await emit('tool_result', repeatCall('read', {path:'same'}, `same ${i}`)));
+    assert.equal(results[0], undefined);
+    assert.equal(results[1], undefined);
+    assert.deepEqual(results[2].content.slice(0,1), [{type:'text', text:'same 2'}]);
+    assert.deepEqual(results[2].content.at(-1), {type:'text', text:GENTLE_REPEAT});
+  } finally {
+    if(priorHome===undefined)delete process.env.HOME;else process.env.HOME=priorHome;
+    fs.rmSync(home,{recursive:true,force:true});
+  }
+});

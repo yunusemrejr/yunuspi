@@ -1250,7 +1250,7 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
 /** Harness system-prompt line: reuse before reinvention. A fixed string so the
  * prompt prefix stays byte-stable for provider caching. */
 export const HARNESS_TOOL_FIRST =
-  "Use relevant tools to inspect, execute and verify work, especially across complex workflows. Check the live description, inputs, actions and returned evidence or task handles; use an active tool directly, or tool_search with detail:true to find and understand missing capabilities before rebuilding them. Enable selected tools, then use them on the next model turn in this request. Revisit tool choice when the scope changes or a tool fails. Skills are optional reference guides and docs: consult skill_review or SKILL.md when useful, adapt or skip inapplicable steps even if called mandatory, and follow user instructions, tool contracts and safety boundaries. Suggestions and reads do not prove execution or success.";
+  "Use relevant tools to inspect, execute and verify work, especially across complex workflows. Check the live description, inputs, actions and returned evidence or task handles; use an active tool directly, or tool_search with detail:true to find and understand missing capabilities before rebuilding them. Revisit tool choice when the scope changes or a tool fails. Consult skill_review or a SKILL.md when a guide would help the next decision. Suggestions and reads do not prove execution or success.";
 
 export default function (pi: any) {
   // First-request system snapshots, in memory plus one runtime file per
@@ -1875,9 +1875,6 @@ export default function (pi: any) {
   });
   pi.registerTool({
     name: "session_self",
-    promptGuidelines: [
-      "When useful, explore tool_search or find a task-specific skill with skill_review. Read a SKILL.md on demand when it helps the next decision. Discovery is optional; tool access and suggestions do not grant authorization or prove success.",
-    ],
     label: "Session self",
     description:
       "Current session diagnostics by view: context (window occupancy, compaction threshold, output and safety headroom), failures (grouped tool/model/child/workflow evidence with recovery clues), efficiency (largest returned text and exact repeated request/result pairs; use it after repeated inspection or large output to pick focused tools and reuse evidence), runtime (live cwd, model, active tools, background-handle owners), messages (this session's user messages, bounded), children (per-child and per-run status, model, tokens, cache, cost, turns), skills (suggested, read and partial skill use plus capability call counts), report (full bounded report), shadow (control-plane shadow rollup, observation only). Runtime facts do not authorize new work.",

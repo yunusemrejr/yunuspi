@@ -4,7 +4,7 @@
  * Extends the base AgentMessage type with coding-agent specific message types,
  * and provides a transformer to convert them to LLM-compatible messages.
  */
-export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
+export const COMPACTION_SUMMARY_PREFIX = `This is an automatically generated checkpoint condensing the earlier conversation to free up context. Treat it as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.
 
 <summary>
 `;

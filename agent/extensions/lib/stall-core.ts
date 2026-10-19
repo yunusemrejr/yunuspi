@@ -44,7 +44,12 @@ function loopFingerprint(value: unknown): string | undefined {
 }
 
 const GUARD_PREFIX = "[strategy-change-required]";
-const PASSIVE_TOOLS = new Set(["process", "wait", "wait_agent", "sleep", "clock", "subagent"]);
+const PASSIVE_TOOLS = new Set(["process", "wait", "wait_agent", "sleep", "clock", "subagent", "bg_wait"]);
+/** Waiting and status polls repeat legitimately while work runs elsewhere. */
+const isPassiveCall = (event: Pick<ToolResultEvent, "toolName" | "input">): boolean => {
+	const action = event.input?.action;
+	return PASSIVE_TOOLS.has(event.toolName) || action === "status" || action === "wait" || action === "poll";
+};
 
 function queryShape(event: Pick<ToolResultEvent, "toolName" | "input">) {
 	const input = event.input;
@@ -85,8 +90,7 @@ function createStrategyGuard() {
 			const key = loopFingerprint([event.toolName, event.input]);
 			if (key && refused.has(key) && event.isError && event.content.some(c => c.type === "text" && c.text.includes(GUARD_PREFIX))) return;
 			const action = event.input?.action;
-			const passive = PASSIVE_TOOLS.has(event.toolName) || action === "status" || action === "wait" || action === "poll";
-			const eligible = !passive && (event.isError || OBSERVATION_TOOLS.has(event.toolName) || event.toolName === "todo" && (action === "get" || action === "list"));
+			const eligible = !isPassiveCall(event) && (event.isError || OBSERVATION_TOOLS.has(event.toolName) || event.toolName === "todo" && (action === "get" || action === "list"));
 			const evidenceHash = event.details?.piObservation?.resultHash ?? event.details?.observationResultHash;
 			const result = key && eligible && event.content.every(c => c.type === "text")
 				? typeof evidenceHash === "string" && /^[a-f0-9]{64}$/.test(evidenceHash)
@@ -148,6 +152,67 @@ function createStrategyGuard() {
 	};
 }
 
+// Consecutive identical-call chain (dsh-style repeat-check). Independent of the
+// result-aware loop evidence above: any tool counts, results are not identity.
+const REPEAT_GENTLE_AT = 3;
+const REPEAT_DETAILED_AT = new Set([5, 8]);
+const REPEAT_MAX_CANONICAL_CHARS = 64 * 1024;
+const REPEAT_PREVIEW_CHARS = 500;
+
+/** Canonical JSON with object keys sorted recursively; arrays keep order. */
+function canonicalInput(input: unknown): string | undefined {
+	let budget = REPEAT_MAX_CANONICAL_CHARS;
+	const spend = (n: number) => {
+		budget -= n;
+		if (budget < 0) throw new Error("repeat input too large");
+	};
+	const active = new Set<object>();
+	const canon = (value: unknown): unknown => {
+		if (!value || typeof value !== "object") {
+			spend(typeof value === "string" ? value.length + 2 : 1);
+			return value;
+		}
+		if (active.has(value)) throw new Error("repeat input is cyclic");
+		spend(2);
+		active.add(value);
+		try {
+			if (Array.isArray(value)) return value.map((item) => canon(item));
+			return Object.fromEntries(
+				Object.keys(value).sort().map((key) => {
+					spend(key.length + 3);
+					return [key, canon((value as Record<string, unknown>)[key])];
+				}),
+			);
+		} finally {
+			active.delete(value);
+		}
+	};
+	try {
+		const text = JSON.stringify(canon(input ?? null));
+		return text !== undefined && text.length <= REPEAT_MAX_CANONICAL_CHARS ? text : undefined;
+	} catch {
+		return undefined; // Cyclic, oversize, or non-JSON input: abstain.
+	}
+}
+
+function repeatNoticeText(toolName: string, canonical: string, count: number): string | undefined {
+	if (count === REPEAT_GENTLE_AT) {
+		return "[repeat-check] You are repeating the exact same tool call with identical arguments. " +
+			"Carefully analyze the previous result before calling again: if the task is not complete, " +
+			"try a different approach or different arguments instead of repeating the call.";
+	}
+	if (!REPEAT_DETAILED_AT.has(count)) return undefined;
+	const preview = canonical.length > REPEAT_PREVIEW_CHARS
+		? `${canonical.slice(0, REPEAT_PREVIEW_CHARS)}… (+${canonical.length - REPEAT_PREVIEW_CHARS} more chars)`
+		: canonical;
+	return "[repeat-check] Repeated tool call detected:\n" +
+		`- tool: ${toolName}\n` +
+		`- consecutive_calls: ${count}\n` +
+		`- arguments: ${preview}\n` +
+		"The repeated calls are not making progress. Do not call this tool with these exact arguments again. " +
+		"Inspect the latest result and choose a different action, different arguments, or finish the task if enough evidence has been gathered.";
+}
+
 export function createLoopTracker() {
 	const strategy = createStrategyGuard();
 	type Sample = { key: string; result: string; name: string; error: boolean };
@@ -155,6 +220,7 @@ export function createLoopTracker() {
 	const recent = new Map<string, Sample & { count: number; turn: number }>();
 	let turn = 0;
 	let progressed = false;
+	let repeatChain: { name: string; canonical: string; count: number } | undefined;
 	return {
 		nudged: false,
 		block: (event: Pick<ToolResultEvent, "toolName" | "input">) => strategy.block(event),
@@ -180,6 +246,20 @@ export function createLoopTracker() {
 			pending.set(key, { key, result, name: event.toolName, error: event.isError });
 			const oldest = pending.keys().next().value;
 			if (pending.size > LOOP_MAX_CALLS && oldest !== undefined) pending.delete(oldest);
+		},
+		/** Updates the consecutive identical-call chain; returns a [repeat-check] text at 3, 5 and 8.
+		 * Passive waits and status polls neither count nor break the chain. */
+		repeatNotice(event: Pick<ToolResultEvent, "toolName" | "input">): string | undefined {
+			if (isPassiveCall(event)) return undefined;
+			const canonical = canonicalInput(event.input);
+			if (canonical === undefined) {
+				repeatChain = undefined;
+				return undefined;
+			}
+			const prev = repeatChain;
+			const count = prev && prev.name === event.toolName && prev.canonical === canonical ? prev.count + 1 : 1;
+			repeatChain = { name: event.toolName, canonical, count };
+			return repeatNoticeText(event.toolName, canonical, count);
 		},
 		finishTurn(): string | undefined {
 			strategy.finishTurn();

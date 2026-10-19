@@ -81,13 +81,14 @@ Coordinate a child with its supervisor through explicit decision, interview or p
 
 #### hook-guidance
 
-Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.
+Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority. The first file-tool touch of a subdirectory with its own AGENTS.md or CLAUDE.md appends that file once.
 
-**Entrypoints:** `tool_call`, `tool_result`, `session_start`, `session_switch`
+**Entrypoints:** `tool_call`, `tool_result`, `session_start`, `session_switch`, `session_compact`
 
 **Options:**
 
 - `PI_SESSION_HOOKS`: Disable this annotation surface when set to off. Values: `on`, `off`.
+- `PI_NESTED_INSTRUCTIONS`: Disable only the subdirectory AGENTS.md/CLAUDE.md delivery when set to off. Values: `on`, `off`.
 - `tool_call`: Match the tool name and input before execution.
 - `tool_result`: Annotate the corresponding success or failure once.
 
@@ -1426,7 +1427,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 258)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 485)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1229)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1237)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 872)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3494)
 - /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1736)

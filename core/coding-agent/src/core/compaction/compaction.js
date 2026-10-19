@@ -382,15 +382,23 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
 // ============================================================================
 // Summarization
 // ============================================================================
+// Ported from DeepSeek Harness compaction-basic: keep every section, quote
+// corrections faithfully, and never let the checkpoint narrate itself.
+const SUMMARY_RULES = `Rules:
+- Use terse bullets. Keep every section in order; write "(none)" for an empty one.
+- Preserve exact file paths, commands, identifiers, error strings, numeric values and function names.
+- Capture user feedback and explicit instructions faithfully, especially corrections.
+- Do not mention this summarization request or that the context was compacted.
+- Output only the summary text: do not call any tool or take any other action.`;
 const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
 Use this EXACT format:
 
 ## Goal
-[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks. Quote the user verbatim where the exact wording matters.]
 
 ## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned by user]
+- [Any constraints, preferences, requirements and corrections stated by the user, captured faithfully]
 - [Or "(none)" if none were mentioned]
 
 ## Progress
@@ -406,14 +414,18 @@ Use this EXACT format:
 ## Key Decisions
 - **[Decision]**: [Brief rationale]
 
+## Errors and Fixes
+- [Error: how it was resolved, or that it is still open]
+- [Or "(none)"]
+
 ## Next Steps
-1. [Ordered list of what should happen next]
+1. [Ordered list of what should happen next, directly in line with the most recent request]
 
 ## Critical Context
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+${SUMMARY_RULES}`;
 const UPDATE_SUMMARIZATION_INSTRUCTIONS = `Update the existing structured summary with new information. RULES:
 - PRESERVE all existing information from the previous summary
 - ADD new progress, decisions, and context from the new messages
@@ -443,13 +455,16 @@ Use this EXACT format:
 ## Key Decisions
 - **[Decision]**: [Brief rationale] (preserve all previous, add new)
 
+## Errors and Fixes
+- [Preserve still-relevant errors and their resolutions, add new ones]
+
 ## Next Steps
-1. [Update based on current state]
+1. [Update based on current state and the most recent request]
 
 ## Critical Context
 - [Preserve important context, add new if needed]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+${SUMMARY_RULES}`;
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
 ${UPDATE_SUMMARIZATION_INSTRUCTIONS}`;

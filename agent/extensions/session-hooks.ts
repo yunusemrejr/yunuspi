@@ -11,6 +11,10 @@ import { sessionObservability } from './lib/session-observability.ts';
  *     same non-blocking contract bash-router uses;
  *   - nothing is ever blocked; errors only receive a matching recovery hint;
  *   - `PI_SESSION_HOOKS=off` disables the whole surface.
+ *   - nested-scope instructions: the first successful file-tool touch of a
+ *     subdirectory below cwd that has AGENTS.md/CLAUDE.md appends that file once
+ *     (cleared on compaction, restored on resume). `PI_NESTED_INSTRUCTIONS=off`
+ *     disables only this part.
  *
  * Telemetry (health sink, allowlisted fields only):
  *   session_hook.decision { hook: <rule key>, decision: "annotate", tool, count: 1 }
@@ -25,6 +29,9 @@ import {
 	isLiveByteVerification,
 	matchHook,
 	restoredHookKeys,
+	restoredNestedInstructionKeys,
+	nestedInstructionBlocks,
+	NESTED_INSTRUCTION_KEY_PREFIX,
 	missingPathFromError,
 } from "./lib/session-hooks.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
@@ -47,6 +54,8 @@ export default function (pi: any) {
 
 	const enabled = (): boolean =>
 		(process.env.PI_SESSION_HOOKS ?? "on").toLowerCase() !== "off";
+	const nestedEnabled = (): boolean =>
+		enabled() && (process.env.PI_NESTED_INSTRUCTIONS ?? "on").toLowerCase() !== "off";
 
 	/** Nearest-folder and spelling hint for a path an extension tool or bash reports missing, as core read/ls/grep/find/edit give. */
 	const missingPathNote = (event: any, cwd: string): string => {
@@ -59,6 +68,14 @@ export default function (pi: any) {
 			if (fs.existsSync(resolved)) return "";
 			return missingPathHint(requested, resolved, cwd);
 		} catch { return ""; }
+	};
+
+	/** Nested instruction blocks for a successful file-tool result; never throws. */
+	const nestedNote = (event: any, cwd: string): ReturnType<typeof nestedInstructionBlocks> => {
+		if (event.isError === true || !nestedEnabled()) return [];
+		try {
+			return nestedInstructionBlocks({ cwd, toolName: event.toolName, input: event.input ?? {}, shown });
+		} catch { return []; }
 	};
 
 	const reset = () => {
@@ -74,7 +91,9 @@ export default function (pi: any) {
 	const restore = (_event: any, ctx: any) => {
 		reset();
 		try {
-			for (const key of restoredHookKeys(ctx?.sessionManager?.getBranch?.() ?? [])) shown.add(key);
+			const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+			for (const key of restoredHookKeys(branch)) shown.add(key);
+			for (const key of restoredNestedInstructionKeys(branch, ctx?.cwd)) shown.add(key);
 		} catch { /* Missing history leaves ordinary first-use guidance intact. */ }
 	};
 	pi.on("session_start", restore);
@@ -83,6 +102,10 @@ export default function (pi: any) {
 	pi.on("session_fork", restore);
 	pi.on("session_shutdown", reset);
 	pi.on("agent_end", () => { pending.clear(); deployCalls.clear(); });
+	// A summary may drop earlier instruction text, so the next touch offers it again.
+	pi.on("session_compact", () => {
+		for (const key of [...shown]) if (key.startsWith(NESTED_INSTRUCTION_KEY_PREFIX)) shown.delete(key);
+	});
 
 	pi.on("tool_call", (event: any) => {
 		if (!enabled()) return;
@@ -141,7 +164,14 @@ export default function (pi: any) {
 		if (!enabled()) return;
 		const content = Array.isArray(event.content) ? event.content : [];
 		const pathHint = missingPathNote(event, ctx?.cwd ?? process.cwd());
-		const hinted = pathHint ? { content: [...content, { type: "text", text: pathHint }] } : undefined;
+		const nested = nestedNote(event, ctx?.cwd ?? process.cwd());
+		for (const block of nested) shown.add(block.key);
+		// Every return below carries these, so no appended text is dropped.
+		const extras = [
+			...(pathHint ? [{ type: "text", text: pathHint }] : []),
+			...nested.map((block) => ({ type: "text", text: block.text })),
+		];
+		const hinted = extras.length ? { content: [...content, ...extras] } : undefined;
 		if (!queued) return hinted;
 		// Structured browser failures already carry the precise recovery step.
 		if (event.isError && ['browser_session', 'render_see'].includes(event.toolName) && typeof event.details?.failure?.nextStep === 'string') return hinted;
@@ -167,7 +197,7 @@ export default function (pi: any) {
 		return {
 			content: [
 				...content,
-				...(pathHint ? [{ type: "text", text: pathHint }] : []),
+				...extras,
 				{ type: "text", text: `[session-hooks] ${rule.line}` },
 			],
 		};

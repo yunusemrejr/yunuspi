@@ -6,7 +6,7 @@
  */
 import type { AgentMessage } from "@yunuspi/agent-core";
 import type { ImageContent, Message, TextContent } from "@yunuspi/ai";
-export declare const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
+export declare const COMPACTION_SUMMARY_PREFIX = "This is an automatically generated checkpoint condensing the earlier conversation to free up context. Treat it as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.\n\n<summary>\n";
 export declare const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
 export declare const BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
 export declare const BRANCH_SUMMARY_SUFFIX = "</summary>";

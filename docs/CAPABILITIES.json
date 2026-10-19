@@ -115,12 +115,13 @@
     {
       "id": "hook-guidance",
       "group": "commands",
-      "summary": "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.",
+      "summary": "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority. The first file-tool touch of a subdirectory with its own AGENTS.md or CLAUDE.md appends that file once.",
       "entrypoints": [
         "tool_call",
         "tool_result",
         "session_start",
-        "session_switch"
+        "session_switch",
+        "session_compact"
       ],
       "options": [
         {
@@ -130,6 +131,14 @@
             "off"
           ],
           "summary": "Disable this annotation surface when set to off."
+        },
+        {
+          "name": "PI_NESTED_INSTRUCTIONS",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Disable only the subdirectory AGENTS.md/CLAUDE.md delivery when set to off."
         },
         {
           "name": "tool_call",
@@ -3582,7 +3591,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1229
+        "line": 1237
       },
       {
         "name": "run",

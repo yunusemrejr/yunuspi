@@ -177,10 +177,11 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "hook-guidance",
 		group: "commands",
-		summary: "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.",
-		entrypoints: ["tool_call", "tool_result", "session_start", "session_switch"],
+		summary: "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority. The first file-tool touch of a subdirectory with its own AGENTS.md or CLAUDE.md appends that file once.",
+		entrypoints: ["tool_call", "tool_result", "session_start", "session_switch", "session_compact"],
 		options: [
 			option("PI_SESSION_HOOKS", "Disable this annotation surface when set to off.", ["on", "off"]),
+			option("PI_NESTED_INSTRUCTIONS", "Disable only the subdirectory AGENTS.md/CLAUDE.md delivery when set to off.", ["on", "off"]),
 			option("tool_call", "Match the tool name and input before execution."),
 			option("tool_result", "Annotate the corresponding success or failure once."),
 		],

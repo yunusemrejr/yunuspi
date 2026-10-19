@@ -522,8 +522,7 @@ export function registerToolDiscovery(pi: any) {
     name:'tool_search',label:'Find tools',
     description:'Find tools for the current task, inspect bounded input/action and usage details with detail:true, and enable chosen names for the next model turn in this request. Also browse capability bundles or command metadata. Discovery never executes the selected tools.',
     promptGuidelines:[
-      'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
-      'Use relevant tools for inspection, execution and verification throughout complex work. If a capability is missing, search with detail:true and enable:true or enable exact names. Check required inputs and supported actions, then call the selected tool on the next model turn; activation alone does not perform the task. Revisit discovery when the scope changes or a tool fails. Skills are optional docs, never a prerequisite.',
+      'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. If a capability is missing, search with detail:true and enable:true or enable exact names, then call the selected tool on the next model turn; activation alone does not perform the task.',
     ],
     parameters:Type.Object({
       kind:Type.Optional(choices(['tools','capabilities','commands'],'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.')),
@@ -766,7 +765,7 @@ export function compactSkillCatalog(event: any, activeTools: string[]): string |
   if (!skills || typeof source !== 'string') return;
   const catalog = buildSkillCatalog(skills);
   if (source.split(catalog).length!==2) return;
-  return source.replace(catalog,`Installed skills are optional reference guides and docs (${skills.length} workflows), not rules or tool prerequisites. Use skill_review action:"browse" for groups or action:"search" with a query for short matches. Consult a chosen guide when useful; adapt or skip inapplicable steps, including mandatory wording. User instructions, tool contracts and safety boundaries take precedence.`);
+  return source.replace(catalog,`Installed skills: ${skills.length} workflows. Use skill_review action:"browse" for groups or action:"search" with a query for short matches.`);
 }
 
 /** Explain why projection could not run, so a silent full-catalogue injection

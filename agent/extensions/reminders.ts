@@ -764,8 +764,15 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	// machine-readable, no text parsing. Inert when rpiv-todo is not loaded.
 	// Completed tool results also feed loop evidence and arm mutation caution.
 	pi.on("tool_result", async (event, ctx) => {
+		// The identical-call reminder rides on this result; every exit below returns it.
+		let repeatText: string | undefined;
+		const withRepeat = () =>
+			repeatText
+				? { content: [...(event.content ?? []), { type: "text" as const, text: repeatText }] }
+				: undefined;
 		try {
 			loop.record(event);
+			repeatText = loop.repeatNotice(event);
 			guidance.record(event);
 			const sid = sidOf(ctx);
 			const st = sid ? load(sid) : undefined;
@@ -793,12 +800,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					}
 					writeState(sid, st);
 				}
-				return;
+				return withRepeat();
 			}
 			// Caution arm: a completed mutating action nudges the NEXT check-in.
 			// (isError excluded — a failed rm taught nothing and needs no nudge.)
 			if (!event.isError && isMutatingToolResult(event.toolName, event.input)) {
-				if (!sid || !st) return;
+				if (!sid || !st) return withRepeat();
 				const rawPath = event.details?.fileMutation?.resolved ?? event.input?.path;
 				const audit = typeof rawPath === "string"
 					? recordWorkspaceMutation(ctx.cwd, sid, rawPath, event.toolName)
@@ -823,6 +830,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		} catch (err) {
 			logReminderErr("tool_result", err);
 		}
+		return withRepeat();
 	});
 
 	// One combined check-in per user submission: todo/drift/caution +
