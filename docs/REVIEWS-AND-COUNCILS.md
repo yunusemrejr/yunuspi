@@ -116,9 +116,8 @@ or cleanup work; expected transient failures (rate limits, quota, budget);
 repeated successful commands; harmless iteration. Deliberate invocation
 always stays available regardless of these gates.
 
-Model and thinking choices for every kind follow
-[llm_preferences.json](LLM-PREFERENCES.md) first and the autonomous selector
-second. See [Model routing](MODEL-ROUTING.md) for budgets and quality gates.
+Reviewers, councils and other children run on the session model; the effort
+controller chooses their thinking level. See [Model routing](MODEL-ROUTING.md).
 
 Short follow-ups such as “keep going” retain the current task. A model,
 provider or thinking change is not a new project objective; a genuine task

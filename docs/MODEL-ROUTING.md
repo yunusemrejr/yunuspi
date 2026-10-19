@@ -4,39 +4,13 @@ LongCat is discovered through its [authenticated OpenAI-compatible catalog](http
 
 The main session keeps the model you selected, and every subagent runs on that same session model. Agent definitions carry no model, fallback or thinking selection; a child's thinking level is chosen per run by the effort controller, up to the ceiling in `subagents.maxThinking`.
 
-Optional `~/.pi/settings/llm_preferences.json` preferences guide selection per role (subagents, councils, fan-out, quality/project/error reviews) with explicit thinking levels and OpenRouter backend control. The session observer and prompt analysis run on the session model only and read no preference role. Preferences are validated against the live registry, exclusions, cooldowns and capabilities, tried in order, and skipped when unusable; missing or exhausted preferences fall back to the autonomous logic below. See [Model preferences](LLM-PREFERENCES.md) and [Session recovery](RECOVERY-AND-TESTING.md).
+There is no automatic model selection, ranking, benchmark-based choice or price cap. Subagents, reviewers, councils and the session observer run on the session model; the harness never switches models for you. Change the model with `/model`.
 
 `/models` no longer edits language-model routes. It opens a local browser window for image, speech, music and sound-effect choices only (see [Video studio](VIDEO-STUDIO.md)).
 
-Search ranks matching configured, available routes before temporarily blocked routes and unconfigured catalog entries. Availability labels describe the session registry and recorded exclusions/cooldowns; they do not claim a successful inference probe. Exact `provider/model` queries stay within that provider, including regional IDs. The main TUI puts registered matches before unlisted session-only IDs and labels the latter unverified.
+Search ranks matching configured, available routes before temporarily blocked routes and unconfigured catalog entries. Availability labels describe the session registry and recorded cooldowns; they do not claim a successful inference probe. Exact `provider/model` queries stay within that provider, including regional IDs. The main TUI puts registered matches before unlisted session-only IDs and labels the latter unverified.
 
 The collapsed Routing diagnostics section reports bounded process-local samples for config load/save and actual HTTP model-search latency, plus child-route attempts. Samples reset with the harness process and do not include task text or credentials.
-
-## Quality before price
-
-Selection first checks capacity, modalities, exclusions, quota/cooldowns, and recent operational failures. Benchmarks describe the model; provider reliability and response speed describe the serving route. Neither a paid price, provider reputation, context window, nor successful HTTP response establishes intelligence.
-
-Benchmarks are compared only for exact model identities and matching suite/evaluation protocols. Different scales are never averaged. The weakest comparable result is retained. Standard work requires at least 90% of the reference scores; critical work requires 97% and at least two independent benchmark measures, excluding composite indices that would double-count components. Missing reference benchmark coverage fails the comparison. These are conservative admission thresholds, not probabilities of task success.
-
-The selected parent's model identity remains an explicit quality baseline. Without comparable evidence, unfamiliar models can provide bounded advisory input for the parent to verify. They cannot replace the baseline for implementation just because they are cheaper. If no affordable model passes, the child is not launched and the parent can do the work itself. Quality gates never raise the price ceiling.
-
-Among eligible routes, verified free models are preferred. Free candidates with comparable evidence rank by performance bands, evidence-supported version progression, continuity, route reliability and observed speed. Paid alternatives stay within the configured caps and favor low cost, with speed breaking close price comparisons. A newer version is preferred only when comparable measurements show no regression; version numbers, model popularity and catalog addition dates are not quality evidence. Different sizes and variants do not inherit sibling scores.
-
-## Evidence refresh and speed
-
-The existing `cache/subagents-model-rank.json` cache accepts its legacy v1 format and v2 observations with model identity, benchmark, protocol, domain, source, observation time and source authority. Legacy unqualified scores remain advisory; they do not pass the new quality gates. Benchmark evidence expires after seven days.
-
-After live catalog refresh, the root session starts bounded research in the background. Selection makes no network requests. Research coalesces within the process, coordinates across sessions, and negatively caches failed lookups for six hours. Each cycle examines at most four public model identities, performs at most one web search, and has an eight-second deadline. Only public model identifiers are sent; task text, project paths and source code are excluded. Cancellation cannot publish a fresh-looking partial snapshot.
-
-The structured sources are:
-
-- [Artificial Analysis](https://artificialanalysis.ai/api-reference): its optional free data API uses `ARTIFICIAL_ANALYSIS_API_KEY`. Exact creator/slug matches and documented numeric units are required. Ambiguous names, variants and missing values stay unknown. Data attribution: [Artificial Analysis](https://artificialanalysis.ai/).
-- [Hugging Face model cards](https://huggingface.co/docs/hub/model-cards): exact repository identities and structured metrics with explicit units. These are publisher-reported measurements and alone cannot pass the critical-work gate.
-- Web search: discovers references for unfamiliar models. Search snippets and marketing claims never become executable benchmark scores. Many models do not publish suitable structured evidence, so unknown quality is expected and remains visible in the model listing.
-
-Free billing evidence still belongs to the live catalog: [OpenRouter](https://openrouter.ai/docs/guides/routing/provider-selection) receives zero price caps for a proven-free request; [OrcaRouter](https://docs.orcarouter.ai/introduction) depends on its official pricing evidence. Catalog availability does not prove that a quota remains available or that inference will succeed.
-
-Set `PI_MODEL_RESEARCH=off` to disable background research. No paid inference probes are run. The 500-route test records cached selector latency, with a 150 ms regression ceiling; this is a local fixture measurement, not a service latency guarantee.
 
 ## Provider capability updates
 
@@ -65,7 +39,7 @@ planning respawns. An exhausted budget cannot become a fresh attempt merely
 because the child also returned `ok:false`; ordinary retryable failures retain
 their existing bounded recovery policy.
 
-Terminal `length` stops caused by a child output limit are treated as budget/output-limit faults, not evidence that the underlying model or serving route is unhealthy, so that stop alone does not add a model exclusion or provider cooldown. Likewise, a `not found` response for a harness-composed thinking-suffixed model ID is attributed to the composed ID rather than the healthy base route; a bare-model `not found` response can still be route-health evidence.
+Terminal `length` stops caused by a child output limit are treated as budget/output-limit faults, not evidence that the underlying model or serving route is unhealthy, so that stop alone does not add a provider cooldown. Likewise, a `not found` response for a harness-composed thinking-suffixed model ID is attributed to the composed ID rather than the healthy base route; a bare-model `not found` response can still be route-health evidence.
 
 Provider errors that identify an invalid request, invalid parameters or an
 unsupported parameter fail without resending the same payload, including router
@@ -75,7 +49,7 @@ transient overloads keep their retry policy. The original diagnostic remains
 available so the request can be corrected. This prevents wasted retries without
 claiming to repair every provider-specific payload mismatch.
 
-Model listings distinguish capability metadata, price status and cached benchmark coverage.
+Model listings distinguish capability metadata and price status.
 
 ## Local preprocessing reuse
 

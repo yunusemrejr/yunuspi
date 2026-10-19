@@ -3108,7 +3108,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1762
+        "line": 1645
       },
       {
         "name": "claude-cache",
@@ -3882,7 +3882,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 783,
+        "line": 781,
         "kind": "definition"
       },
       {
@@ -4444,7 +4444,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          834
+          832
         ],
         "knownNames": [
           "subagent"
@@ -4557,7 +4557,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 697,
+      "sourceFiles": 687,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -5128,10 +5128,6 @@
       },
       {
         "path": "agent/extensions/lib/model-routing-metrics.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/model-routing-store.ts",
         "exists": true
       },
       {
@@ -6095,6 +6091,11 @@
         "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
       },
       {
+        "name": "config/llm_preferences.example.json",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
         "name": "context-composition.json",
         "retired": "2026-08-31",
         "why": "orphan of deleted pi-context-router; no writer/reader since 2026-08-12"
@@ -6113,6 +6114,11 @@
         "name": "desktop-session.ts",
         "retired": "2026-10-10",
         "why": "1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate"
+      },
+      {
+        "name": "docs/LLM-PREFERENCES.md",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
         "name": "DOCTRINE.md",
@@ -6188,6 +6194,11 @@
         "name": "lib/micro-intelligence/router-shadow.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/model-routing-store.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
         "name": "lib/observer-model-evidence.ts",
@@ -6333,6 +6344,51 @@
         "name": "pi-subagents.ts",
         "retired": "2026-08-12",
         "why": "extension file superseded by npm:pi-subagents (the package name stays live)"
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/child-route-requirements.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/free-route-evidence.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/llm-preferences.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-economy.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-exclusions.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-quality.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-research.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-selection.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/route-decision-record.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
         "name": "pi-tinyfish.ts",
@@ -6801,12 +6857,6 @@
         ]
       },
       {
-        "source": "agent/extensions/pi-subagents/src/runs/shared/model-research.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
         "source": "agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts",
         "signals": [
           "MCP"
@@ -7155,10 +7205,6 @@
       {
         "name": "ISOLATION-AND-WEB.md",
         "path": "docs/ISOLATION-AND-WEB.md"
-      },
-      {
-        "name": "LLM-PREFERENCES.md",
-        "path": "docs/LLM-PREFERENCES.md"
       },
       {
         "name": "LOCAL-INTELLIGENCE.md",

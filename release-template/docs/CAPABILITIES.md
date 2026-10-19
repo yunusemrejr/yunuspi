@@ -1235,7 +1235,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 887; literal)
 - `studio` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 172; factory)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
-- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 783; definition)
+- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 781; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
 - `svg_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 475; factory)
 - `svg_render` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 470; factory)
@@ -1274,7 +1274,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `media_info`, `music_compose`, `studio`, `video_frames` (lines 149)
 - [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
-- [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 834)
+- [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 832)
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
 - [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 592)
@@ -1292,7 +1292,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
 - /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 903)
-- /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1762)
+- /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1645)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1833)
 - /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1383)
@@ -1415,7 +1415,6 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts`](../../agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts) — `MCP`
-- [`agent/extensions/pi-subagents/src/runs/shared/model-research.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-research.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts`](../../agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/runs/shared/pi-args.ts`](../../agent/extensions/pi-subagents/src/runs/shared/pi-args.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/runs/shared/session-model.ts`](../../agent/extensions/pi-subagents/src/runs/shared/session-model.ts) — `MCP`
@@ -1583,7 +1582,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/model-competence.ts`](../../agent/extensions/lib/model-competence.ts)
 - [`agent/extensions/lib/model-facts.ts`](../../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/model-routing-metrics.ts`](../../agent/extensions/lib/model-routing-metrics.ts)
-- [`agent/extensions/lib/model-routing-store.ts`](../../agent/extensions/lib/model-routing-store.ts)
 - [`agent/extensions/lib/motion-inspect.ts`](../../agent/extensions/lib/motion-inspect.ts)
 - [`agent/extensions/lib/motion-library.ts`](../../agent/extensions/lib/motion-library.ts)
 - [`agent/extensions/lib/music-score.ts`](../../agent/extensions/lib/music-score.ts)
@@ -1914,7 +1912,6 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/INSTALL.md`](INSTALL.md)
 - [`docs/INTENT.md`](INTENT.md)
 - [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
-- [`docs/LLM-PREFERENCES.md`](LLM-PREFERENCES.md)
 - [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 - [`docs/MEDIA-CREATION.md`](MEDIA-CREATION.md)
 - [`docs/MEDIA-PREFLIGHT.md`](MEDIA-PREFLIGHT.md)
@@ -1961,10 +1958,12 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `auto-update-extensions.mjs` — retired 2026-09-01: dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/
 - `bash-router.ts` — retired 2026-10-10: annotation hook that nudged bash commands toward dedicated tools; the nudges duplicated tool descriptions and tool_search. The pure classifier stays in lib/bash-routing.ts for guidance and test detection. Do not recreate
 - `capabilities.ts` — retired 2026-09-02: user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate
+- `config/llm_preferences.example.json` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
 - `context-composition.json` — retired 2026-08-31: orphan of deleted pi-context-router; no writer/reader since 2026-08-12
 - `context-mode` — retired 2026-09-01: user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate
 - `context-profile.ts` — retired 2026-10-10: 0 uses in 45 days of sessions; context diagnostics live in session_self. Do not recreate
 - `desktop-session.ts` — retired 2026-10-10: 1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate
+- `docs/LLM-PREFERENCES.md` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
 - `DOCTRINE.md` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `expert-director.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `fs-organize.ts` — retired 2026-10-10: 0 uses; file organization is plain bash guidance in the linux-ops skill. Do not recreate
@@ -1980,6 +1979,7 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/expert-domains.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/expert-taste.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/micro-intelligence/router-shadow.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/model-routing-store.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
 - `lib/observer-model-evidence.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/scope-deliberation.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/skill-discovery-controller.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
@@ -2009,6 +2009,15 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `pi-orchestrator.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `pi-smol-preprocessor.service` — retired 2026-09-25: SmolLM2-135M-Instruct (Q2_K) chose lines at chance level on harness data (skill-relevance AUC 0.53) and almost never ran (eligibility gates rejected nearly every offer; its 250ms take-wait missed ~1s inference). Replaced by the shared local language model Qwen3.5-0.8B (pi-local-lm.service, lib/local-lm.ts, lib/local-lm-assets.mjs): AUC 0.88. local-lm-assets.mjs install retires the old unit and weights. Do not recreate
 - `pi-subagents.ts` — retired 2026-08-12: extension file superseded by npm:pi-subagents (the package name stays live)
+- `pi-subagents/src/runs/shared/child-route-requirements.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/free-route-evidence.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/llm-preferences.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/model-economy.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/model-exclusions.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/model-quality.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/model-research.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/model-selection.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `pi-subagents/src/runs/shared/route-decision-record.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
 - `pi-tinyfish.ts` — retired 2026-08-31: web_search/web_fetch overlap with npm:pi-web-access; moved to backups/retired-extensions/
 - `pi-ux.ts` — retired 2026-09-01: user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate
 - `ponytail` — retired 2026-08-31: pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename "pilot" deliberately NOT tombstoned — too generic a token for word-boundary matching.)

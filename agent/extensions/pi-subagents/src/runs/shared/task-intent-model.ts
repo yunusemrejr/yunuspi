@@ -452,19 +452,3 @@ function requiredEvidenceFrom(
 	if (!evidence.length) evidence.push("final-answer");
 	return evidence;
 }
-
-/** Advisory/standard/critical level for model-quality gating, from segments. */
-export function intentQualityLevel(intent: TaskIntent): "advisory" | "standard" | "critical" {
-	return intent.decisionCriticality;
-}
-
-/** Domain for model-quality gating, from requested (never prohibited) verbs. */
-export function intentDomain(intent: TaskIntent): "coding" | "reasoning" | "general" {
-	if (intent.requestedAction === "operate") return "general";
-	const verbs = intent.segments.requestedVerbs;
-	if (verbs.includes("implement") || verbs.includes("review")) return "coding";
-	if (verbs.includes("plan") || verbs.includes("investigate")) {
-		return intent.segments.safetyCriticalDomain ? "reasoning" : "coding";
-	}
-	return "general";
-}

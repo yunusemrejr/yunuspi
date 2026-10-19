@@ -10,11 +10,9 @@ process.env.PI_CODING_AGENT_DIR = root;
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, "health.json");
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "exclusions.json");
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(root, "economy.json");
-process.env.PI_LLM_PREFERENCES_FILE = path.join(root, "settings", "llm_preferences.json");
 process.env.HOME = root;
 delete process.env.PI_AUTONOMOUS_MODEL_FALLBACK;
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, "{}");
-fs.mkdirSync(path.dirname(process.env.PI_LLM_PREFERENCES_FILE), { recursive: true });
 
 const repo = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find(p =>
@@ -22,7 +20,6 @@ const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find(p =>
 );
 assert.ok(agent, "pi-subagents source must exist");
 const shared = pathToFileURL(path.join(agent, "extensions/pi-subagents/src/runs/shared/")).href;
-const prefs = await import(shared + "llm-preferences.ts");
 const piArgs = await import(shared + "pi-args.ts");
 const promptRuntime = await import(shared + "subagent-prompt-runtime.ts");
 const modelRoute = await import(shared + "../../shared/model-route.ts");
@@ -97,13 +94,11 @@ test('first dispatch requires the exact parent candidate and a refusal never ope
 
 test("valid large provider constraints survive child transport and oversized values fail before launch", () => {
   const slugs = Array.from({ length: 32 }, (_, index) => `provider-${index}-` + "x".repeat(108));
-  const providerOptions = { routing: "custom", order: slugs, only: slugs, ignore: slugs.map(slug => slug + "-old"), allow_fallbacks: false };
+  const providerRouting = { order: slugs, only: slugs, ignore: slugs.map(slug => slug + "-old"), allow_fallbacks: false };
   const longModel = "vendor/" + "m".repeat(400);
-  const doc = { models: {}, preferences: { subagents: { models: [{ provider: "openrouter", model: longModel, provider_options: providerOptions }] } } };
-  assert.equal(prefs.validateLlmPreferencesDocumentForWrite(doc).ok, true);
-  const candidate = { route: `openrouter/${longModel}`, providerRouting: prefs.providerOptionsToRouting(providerOptions, "openrouter").routing };
+  const candidate = { route: `openrouter/${longModel}`, providerRouting };
   const encoded = modelRoute.encodeSubagentModelRouteCandidate(candidate);
-  assert.ok(encoded, "a schema-valid preference must be transportable");
+  assert.ok(encoded, "a large provider routing constraint must be transportable");
   assert.deepEqual(modelRoute.decodeSubagentModelRouteCandidate(encoded), candidate);
   assert.deepEqual(promptRuntime.rewriteSubagentModelRouteRequest({ payload: {} }, { model: { provider: "openrouter", id: longModel } }, candidate).provider, candidate.providerRouting);
   assert.throws(() => piArgs.buildPiArgs({

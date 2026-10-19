@@ -11,7 +11,6 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find((p) =>
 assert.ok(agent, 'agent tree with task-intent-model.ts is present');
 const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/')).href;
 const { extractTaskIntent } = await import(shared + 'task-intent-model.ts');
-const { taskQuality } = await import(shared + 'model-quality.ts');
 const { classifyTaskMutationIntent, taskMayMutate } = await import(shared + 'task-intent.ts');
 
 test('prohibitions constrain execution, never retype the task', () => {
@@ -62,12 +61,6 @@ test('quoted and example text is never intent', () => {
   assert.equal(intent.requestedAction, 'review');
   assert.equal(intent.mutationPermission, 'forbidden');
   assert.ok(intent.segments.quotedSpans.length > 0);
-});
-
-test('taskQuality delegates to structured intent', () => {
-  assert.deepEqual(taskQuality('Review the auth module. Never deploy; do not modify production.'), { domain: 'coding', level: 'advisory' });
-  assert.deepEqual(taskQuality('Deploy the new build to production now.'), { domain: 'general', level: 'critical' });
-  assert.deepEqual(taskQuality('Implement the fix for the login bug and add tests.'), { domain: 'coding', level: 'critical' });
 });
 
 test('mutation classifier masks quoted spans before cue matching', () => {

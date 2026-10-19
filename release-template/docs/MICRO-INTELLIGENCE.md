@@ -400,8 +400,8 @@ bounded `input`. Measures the session model with three synthetic
 qualification checks, without receiving the task input, before it is used.
 Failed qualification cannot produce task advice.
 
-Native `run` and `qualify` use the session model only. No configured route,
-alternate model or economy selector applies. Native registry dispatch preserves
+Native `run` and `qualify` use the session model only. No configured route
+or alternate model applies. Native registry dispatch preserves
 provider authentication; the shared auxiliary ledger records each completion.
 Admission checks health, expiring quality evidence and the output capacity the
 role needs. Price and per-call dollar caps do not apply: the session model's

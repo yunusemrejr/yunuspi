@@ -127,7 +127,7 @@ quarantine state; status reports each loaded kernel's actual state.
 
 ## Prompt-intent analysis
 
-The auxiliary prompt analysis described in [LLM-PREFERENCES.md](LLM-PREFERENCES.md) is advisory.
+The auxiliary prompt analysis is advisory.
 The literal user prompt always reaches the main model unmodified; the analysis is injected as a
 separate, clearly labelled custom message. Guardian consumes only its *verified* part: literal
 constraint spans that it re-checks against the original prompt, with model provenance and high

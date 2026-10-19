@@ -2,8 +2,6 @@ import { acquireCatalogCacheLock } from "./lib/catalog-cache-lock.ts";
 import { MODEL_FACTS, currentModelFacts, directDeepseekCost } from "./lib/model-facts.ts";
 import {boundedContextLimit,normalizeModelLimits} from "./lib/context-limits.ts";
 import { registerLocalModels } from "./lib/local-models.ts";
-import { refreshModelResearch } from "./pi-subagents/src/runs/shared/model-research.ts";
-import { toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
 /**
  * Live Model Catalog — auto-lists provider models that the native pi.dev
  * catalog does not carry yet.
@@ -44,16 +42,9 @@ import type {
 	ProviderConfig,
 	ProviderModelConfig,
 } from "@yunuspi/coding-agent";
-import type { FreeRouteCapabilities } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-	publishFreeEvidence,
-	publishProviderFreeEvidence,
-	FREE_CATALOG_URL,
-	ORCA_PRICING_URL,
-} from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
 
 const AGENT_DIR: string =
 	process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -501,39 +492,6 @@ function openRouterCost(
 	return cost;
 }
 
-/** Catalog-derived capability facts for the free-route evidence row. */
-function catalogAddedAt(created: unknown): { catalogAddedAt?: number } {
-	return typeof created === "number" && Number.isSafeInteger(created) && created > 0 && created * 1000 <= Date.now()
-		? { catalogAddedAt: created * 1000 } : {};
-}
-
-function openRouterCapabilities(m: OpenRouterLiveModel): FreeRouteCapabilities {
-	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
-	return {
-		...catalogAddedAt(m.created),
-		...(typeof m.top_provider?.context_length === "number" ||
-		typeof m.context_length === "number"
-			? { contextWindow: boundedContextLimit(m.top_provider?.context_length, m.context_length) }
-			: {}),
-		...(typeof m.top_provider?.max_completion_tokens === "number"
-			? { maxTokens: m.top_provider.max_completion_tokens }
-			: {}),
-		...(m.architecture?.input_modalities?.length
-			? { inputModalities: [...m.architecture.input_modalities] }
-			: {}),
-		...(params.includes("tools") ? { toolCalling: true } : {}),
-		...(params.includes("response_format") ||
-		params.includes("structured_outputs")
-			? { structuredOutput: true }
-			: {}),
-		...(params.includes("reasoning") ||
-		m.reasoning?.mandatory === true ||
-		m.reasoning?.default_enabled === true
-			? { reasoning: true }
-			: {}),
-	};
-}
-
 function mapOpenRouterModel(m: OpenRouterLiveModel, fallback?: LiveCatalogModel): LiveCatalogModel {
 	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
 	const liveReasoning =
@@ -601,17 +559,6 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 	});
 	const effortsById = new Map<string, string[] | undefined>(
 		models.map((m) => [m.id, m.reasoning?.supported_efforts]),
-	);
-	// Free-route evidence rows carry the raw pricing plus catalog capability
-	// facts, so consumers can match requirements without guessing from names.
-	publishFreeEvidence(
-		models.map((m) => ({
-			id: m.id,
-			pricing: m.pricing ?? {},
-			capabilities: openRouterCapabilities(m),
-		})),
-		FREE_CATALOG_URL,
-		now,
 	);
 	return { models, effortsById, unavailable: unavailableRecord(dropped) };
 }
@@ -741,67 +688,6 @@ function orcaThinkingLevels(): Record<string, string | null> {
 	};
 }
 
-/**
- * Publish OrcaRouter free-route evidence. Proof = OrcaRouter's own pricing
- * catalog (authoritative): is_free_tier === true with zero model/completion
- * ratios and zero per-request price — corroborated by the ratio math that
- * drives mapOrcaModel's cost. Rows are limited to models the live /v1/models
- * list actually serves (catalog presence alone is not a route). Names are
- * never proof: router models (orcarouter/free, orcarouter/auto, …) have no
- * pricing entry and are therefore NOT published.
- */
-function publishOrcaFreeEvidence(
-	live: OrcaLiveModel[],
-	catalogById: Map<string, OrcaCatalogEntry>,
-	authoritativePricing = true,
-): void {
-	if (!authoritativePricing) return; // Failed fetch may retain bounded prior evidence.
-	const rows = live.flatMap((m) => {
-		const c = catalogById.get(m.id);
-		if (!c) return [];
-		if (c.is_free_tier !== true) return [];
-		// An exact live charge contradicts an older free-tier catalog row.
-		// Never keep calling such a route free merely because its name/flag says so.
-		if (m.pricing && Object.values(m.pricing).some(value =>
-			!(typeof value === "number" && value === 0 || typeof value === "string" && /^0+(?:\.0+)?$/.test(value)))) return [];
-		if (
-			(c.model_ratio ?? 1) !== 0 ||
-			(c.completion_ratio ?? 1) !== 0 ||
-			(c.model_price ?? 0) !== 0
-		)
-			return [];
-		const params = c.supported_parameters ?? [];
-		return [
-			{
-				provider: "orcarouter",
-				id: m.id,
-				pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				capabilities: {
-					...(typeof c.context_length === "number" ||
-					typeof m.context_length === "number"
-						? { contextWindow: c.context_length ?? m.context_length }
-						: {}),
-					...(typeof c.max_completion_tokens === "number" ||
-					typeof m.max_completion_tokens === "number"
-						? { maxTokens: c.max_completion_tokens ?? m.max_completion_tokens }
-						: {}),
-					...(c.input_modalities?.length
-						? { inputModalities: [...c.input_modalities] }
-						: {}),
-					...(params.includes("tools") ? { toolCalling: true } : {}),
-					...(params.includes("response_format") ||
-					params.includes("structured_outputs")
-						? { structuredOutput: true }
-						: {}),
-					...(params.includes("reasoning") ? { reasoning: true } : {}),
-				} satisfies FreeRouteCapabilities,
-			},
-		];
-	});
-	// A successful authoritative empty/repriced catalog revokes old free evidence.
-	publishProviderFreeEvidence("orcarouter", rows, ORCA_PRICING_URL, Date.now());
-}
-
 function mapOrcaModel(
 	live: OrcaLiveModel,
 	catalog: OrcaCatalogEntry | undefined,
@@ -880,7 +766,6 @@ async function refreshOrcaRouter(
 	// Public pricing catalog: reasoning flags, ratios, display names.
 	let catalogById = new Map<string, OrcaCatalogEntry>();
 	let groupRatio = 1;
-	let authoritativePricing = false;
 	try {
 		const pricing = (await fetchJson(
 			"https://www.orcarouter.ai/api/pricing",
@@ -891,12 +776,10 @@ async function refreshOrcaRouter(
 		};
 		if (!Array.isArray(pricing.data)) throw new Error("Orca pricing catalog has no data array");
 		catalogById = new Map(pricing.data.map((e) => [e.model_name, e]));
-		authoritativePricing = true;
 		groupRatio = pricing.effective_group_ratio ?? 1;
 	} catch {
 		// catalog is enrichment; live list alone remains valid
 	}
-	publishOrcaFreeEvidence(live, catalogById, authoritativePricing);
 	return { models: live.map((m) => mapOrcaModel(m, catalogById.get(m.id), groupRatio)) };
 }
 
@@ -1806,7 +1689,7 @@ export default async function registerLiveModels(
         ...(ctx.model ? [ctx.model.provider] : []),
     ])];
 	let sessionGeneration = 0;
- let researchController = new AbortController();
+ let refreshController = new AbortController();
 	let lastRouterRefresh = 0;
 	let routerRefreshPending = false;
 	const failedRegistryRefresh = (ctx: ExtensionContext) => {
@@ -1818,15 +1701,15 @@ export default async function registerLiveModels(
 		catalogStatus(ctx);
 	};
 	pi.on("session_start", (_event, ctx) => {
-  researchController.abort(); researchController = new AbortController();
+  refreshController.abort(); refreshController = new AbortController();
 		const generation = ++sessionGeneration;
 		routerRefreshPending = false;
 		lastRouterRefresh = Date.now();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		routerRefreshPending = true;
 		void ctx.modelRegistry
-			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: researchController.signal })
-			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
+			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal })
+			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
 			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });
 		outputLimitStatus(ctx);
@@ -1840,13 +1723,13 @@ export default async function registerLiveModels(
 		lastRouterRefresh = timestamp;
 		routerRefreshPending = true;
 		const generation = sessionGeneration;
-		void ctx.modelRegistry.refresh({allowNetwork: true, providers: refreshScope(ctx), signal: researchController.signal})
-			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
+		void ctx.modelRegistry.refresh({allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal})
+			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
 			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });
 	};
 	pi.on("before_agent_start", refreshDuringSession);
 	pi.on("turn_end", refreshDuringSession);
 	pi.on("model_select", (_event, ctx) => outputLimitStatus(ctx));
-	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; researchController.abort(); if (ctx.hasUI) { ctx.ui.setStatus("model-output-limit", undefined); ctx.ui.setStatus("model-catalog", undefined); } });
+	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; refreshController.abort(); if (ctx.hasUI) { ctx.ui.setStatus("model-output-limit", undefined); ctx.ui.setStatus("model-catalog", undefined); } });
 }
