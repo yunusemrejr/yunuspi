@@ -27,7 +27,6 @@ const { createSessionObserver, buildObserverPacket } = await import(lib('session
 const { displayText } = await import(lib('harness-notice.ts'));
 const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/')).href;
 const { isHarnessOwnedChild, reduceChildEvents, projectTranscriptChildren } = await import(shared + 'child-ledger.ts');
-const { publishFreeEvidence, FREE_BASE_URL, FREE_CATALOG_URL } = await import(shared + 'free-route-evidence.ts');
 const { resetSharedControl } = await import(lib('intervention-shared.ts'));
 
 const complete = { status: 'complete', proposals: [{ role: 'preservation', text: 'Keep the typography.' }, { role: 'change', text: 'Rework the motion.' }], discussion: 'Rework the motion substantially and verify the rendered result.', gap: '' };

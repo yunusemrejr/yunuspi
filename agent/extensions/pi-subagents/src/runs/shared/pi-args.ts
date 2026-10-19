@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { operationalAdmissionRoutes, OPERATIONAL_ECONOMY_ROUTES_ENV } from "./model-economy.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -857,7 +856,6 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	}
 
 	const env: Record<string, string | undefined> = {};
-	env[OPERATIONAL_ECONOMY_ROUTES_ENV] = operationalAdmissionRoutes([...(input.model ? [input.model] : []), ...(input.modelCandidates ?? [])]);
 	env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV] = encodedRouteCandidate;
 	// An isolated child still needs the selected provider's cached model data.
 	// Never inherit this flag into an ordinary child with ambient extensions.

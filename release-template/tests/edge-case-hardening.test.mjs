@@ -54,7 +54,6 @@ const { default: registerSignals } = await import(url(path.join(agent, "extensio
 const { default: registerReminders } = await import(url(path.join(agent, "extensions/reminders.ts")));
 const { default: registerSiblings } = await import(url(path.join(agent, "extensions/siblings.ts")));
 const { default: registerSessionHooks } = await import(url(path.join(agent, "extensions/session-hooks.ts")));
-const economy = await import(url(path.join(agent, "extensions/pi-subagents/src/runs/shared/model-economy.ts")));
 const history = await import(url(path.join(agent, "extensions/pi-subagents/src/runs/shared/run-history.ts")));
 const { evaluateRoute } = await import(
   url(path.join(agent, "extensions/pi-subagents/src/runs/shared/provider-health.ts"))
@@ -296,43 +295,6 @@ test("reminder terminate tracking tolerates missing results", async () => {
   await pi.emit("tool_execution_end", { toolCallId: "t1", toolName: "read" });
   await pi.emit("tool_execution_end", { toolCallId: "t2", toolName: "bash", result: { terminate: true } });
   await pi.emit("turn_start", {});
-});
-
-test("economy config fails closed to last-good on corrupt files", (t) => {
-  const {
-    loadModelEconomyConfig,
-    clearModelEconomyConfigCache,
-    lastModelEconomyConfigError,
-    ECONOMY_CONFIG_ENV,
-  } = economy;
-  const file = path.join(scratchRoot, "economy.json");
-  process.env[ECONOMY_CONFIG_ENV] = file;
-  t.after(() => {
-    delete process.env[ECONOMY_CONFIG_ENV];
-    clearModelEconomyConfigCache();
-    try {
-      fs.unlinkSync(file);
-    } catch {}
-  });
-  fs.writeFileSync(file, "{corrupt");
-  clearModelEconomyConfigCache();
-  const first = loadModelEconomyConfig();
-  assert.equal(first.maxInputPerMillion, 50, "first load falls back to defaults");
-  assert.ok(lastModelEconomyConfigError(), "failure is flagged");
-  fs.writeFileSync(file, JSON.stringify({ maxInputPerMillion: 1, maxOutputPerMillion: 2 }));
-  clearModelEconomyConfigCache();
-  assert.equal(loadModelEconomyConfig().maxInputPerMillion, 1);
-  assert.equal(lastModelEconomyConfigError(), undefined, "recovery clears the flag");
-  fs.writeFileSync(file, "{corrupt again");
-  // No cache clear: production keeps the cached config across the file
-  // change (the size/mtime stamp differs), which is what last-good needs.
-  const held = loadModelEconomyConfig();
-  assert.equal(held.maxInputPerMillion, 1, "keeps last-good ceilings");
-  assert.equal(held.maxOutputPerMillion, 2);
-  assert.equal(lastModelEconomyConfigError()?.filePath, file);
-  fs.writeFileSync(file, JSON.stringify({ maxInputPerMillion: "cheap" }));
-  clearModelEconomyConfigCache();
-  assert.throws(() => loadModelEconomyConfig(), /positive finite number/, "invalid values still throw");
 });
 
 test("memory recall failure is flagged distinctly from empty results", async (t) => {

@@ -89,7 +89,7 @@ function readModelsJson(): ModelsJson {
 
 function writeModelsJson(json: ModelsJson): void {
 	// PID-scoped temp name: a fixed name lets two sessions rename the same
-	// half-written file over models.json (radar/model-exclusions use pid too).
+	// half-written file over models.json (radar uses pid too).
 	const tmp = `${MODELS_JSON}.${process.pid}.provider-tmp`;
 	writeFileSync(tmp, JSON.stringify(json, null, 2), { mode: 0o600 });
 	// writeFileSync's mode applies only on create; harden a stale temp file too.

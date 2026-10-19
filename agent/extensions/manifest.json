@@ -125,7 +125,6 @@
     "model-competence.ts",
     "model-facts.ts",
     "model-routing-metrics.ts",
-    "model-routing-store.ts",
     "motion-inspect.ts",
     "music-score.ts",
     "needle-assets.mjs",
@@ -766,6 +765,66 @@
       "name": "lib/double.ts",
       "retired": "2026-10-19",
       "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
+    },
+    {
+      "name": "lib/model-routing-store.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/model-selection.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/model-research.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/model-quality.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/route-decision-record.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/child-route-requirements.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/model-economy.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/free-route-evidence.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/llm-preferences.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "pi-subagents/src/runs/shared/model-exclusions.ts",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "config/llm_preferences.example.json",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "docs/LLM-PREFERENCES.md",
+      "retired": "2026-10-19",
+      "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
     }
   ],
   "supportFiles": [

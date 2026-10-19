@@ -1,5 +1,5 @@
 // Micro-intelligence calibration benchmark. Deterministic contracts assert
-// hard floors (CI must hold them); model-quality numbers print for review
+// hard floors (CI must hold them); model accuracy numbers print for review
 // and assert only structural validity, since model behavior legitimately
 // varies by deployment. Needle sections run only when assets verify;
 // everything else always runs.

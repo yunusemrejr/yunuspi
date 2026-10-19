@@ -8,17 +8,14 @@ import { pathToFileURL } from "node:url";
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "executor-routing-"));
 process.env.PI_CODING_AGENT_DIR = root;
 process.env.PI_SUBAGENTS_TEMP_ROOT = path.join(root, "runs");
-process.env.PI_LLM_PREFERENCES_FILE = path.join(root, "llm_preferences.json");
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, "health.json");
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "exclusions.json");
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(root, "economy.json");
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, "{}");
-fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, "{}");
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 const repo = path.resolve(import.meta.dirname, "..");
 const base = path.join(repo, "agent/extensions/pi-subagents/src");
 const { createSubagentExecutor } = await import(pathToFileURL(path.join(base, "runs/foreground/subagent-executor.ts")).href);
-const { clearExclusions } = await import(pathToFileURL(path.join(base, "runs/shared/model-exclusions.ts")).href);
 const { SessionManager } = await import("../core/coding-agent/src/core/session-manager.js");
 const { createEventBus } = await import("../core/coding-agent/src/core/event-bus.js");
 const { failureOf, projectRunEvidence } = await import(pathToFileURL(path.join(base, "runs/shared/run-history.ts")).href);
@@ -36,7 +33,6 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
 function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking } = {}) {
-  clearExclusions();
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
   const fakePi = path.join(cwd, "fixture-pi.mjs");

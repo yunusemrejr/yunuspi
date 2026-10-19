@@ -85,8 +85,7 @@ return bounded failure categories. Search fallback retains provider diagnostics;
 HTTP requests enforce byte limits and distinguish caller cancellation from a
 retryable timeout. A successful browser-launch handoff is not visual evidence.
 
-Economy settings refresh when the settings file changes; authorization updates
-share Pi's bundled settings lock and replace the document atomically. Fan-out
+Fan-out
 provenance uses indexed lookups, background diagnostics preserve the original
 failure cause within their output cap, and sibling cleanup reaches stale
 heartbeats beyond the discovery display limit.

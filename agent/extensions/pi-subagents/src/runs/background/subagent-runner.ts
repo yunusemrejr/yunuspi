@@ -4173,7 +4173,7 @@ async function runSubagent(
 	);
 
 	// Pre-spawn preflight: resolve the launch picture (route, credentials,
-	// provider health, economy, budget) BEFORE any child process exists, record
+	// provider health, budget) BEFORE any child process exists, record
 	// it on the status, and refuse to burn slots on a definitively dead launch.
 	// Checks the runner cannot perform report "unknown", never "fail".
 	const spawnPreflight = (() => {
@@ -4183,13 +4183,6 @@ async function runSubagent(
 		const slash = requested?.indexOf("/") ?? -1;
 		const provider = slash > 0 && requested ? requested.slice(0, slash) : undefined;
 		const model = slash > 0 && requested ? requested.slice(slash + 1) : requested;
-		let rates: { input?: number; output?: number } | undefined;
-		try {
-			const info = findModelInfo(requested, first?.modelVerificationRegistry);
-			if (info?.cost) rates = { ...(typeof info.cost.input === "number" ? { input: info.cost.input } : {}), ...(typeof info.cost.output === "number" ? { output: info.cost.output } : {}) };
-		} catch {
-		// Unknown rates are an honest unknown, not a failure.
-		}
 		let health: { allowed: boolean; waitMs: number; kind?: string; boundBy?: string } | undefined;
 		try {
 			if (provider) {
@@ -4203,9 +4196,7 @@ async function runSubagent(
 		}
 		return assembleRunnerSpawnPreflight({
 			...(requested ? { requestedModel: requested } : {}),
-			origin: requested ? "explicit" : "automatic",
 			...(requested ? { selected: requested } : {}),
-			...(rates ? { rates } : {}),
 			...(health ? { health } : {}),
 			hasUsageBudgetConfig: config.usageBudget !== undefined,
 			usageBudgetAlreadyExhausted: false,
@@ -4223,7 +4214,7 @@ async function runSubagent(
 		// its diagnostic — visible in the counters, never "still waiting".
 		const preflightCause = spawnPreflight.blockers.some((blocker) => blocker.startsWith("provider_health"))
 			? "provider_failure" as const
-				: spawnPreflight.blockers.some((blocker) => blocker.startsWith("economy") || blocker.startsWith("budget"))
+				: spawnPreflight.blockers.some((blocker) => blocker.startsWith("budget"))
 				? "budget_exhausted" as const
 					: "unknown" as const;
 		for (const step of statusPayload.steps) {

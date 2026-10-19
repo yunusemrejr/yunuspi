@@ -16,7 +16,7 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
 process.env.PI_CODING_AGENT_DIR = configDir;
 process.env.PI_PROVIDER_STATE_FILE = path.join(configDir, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(configDir, 'exclusions.json');
-process.env.PI_LLM_PREFERENCES_FILE = path.join(configDir, 'llm_preferences.json');
+process.env.PI_LLM_PREFERENCES_FILE = path.join(configDir, 'preferences.json');
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(configDir, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_SUBAGENT_CHILD;

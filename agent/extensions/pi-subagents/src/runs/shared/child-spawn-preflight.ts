@@ -2,8 +2,7 @@
  * Pre-spawn preflight: decide whether a child may be launched, and record why.
  *
  * Before this module the checks existed but were scattered and invisible: route
- * resolution ran in the fallback planner, economy ran at selection time,
- * provider health ran at the request gate, and budgets ran at admission — none
+ * resolution ran in the fallback planner, provider health ran at the request gate, and budgets ran at admission — none
  * of them were recorded together, and a group could be launched into a route
  * that had no credentials or was in cooldown, with the failure only visible
  * after the child had burned a slot.
@@ -28,9 +27,9 @@ export interface PreflightCheck {
 	detail?: string;
 }
 
-export type PreflightCheckName = "route" | "credentials" | "provider_health" | "economy" | "budget" | "tool_wire";
+export type PreflightCheckName = "route" | "credentials" | "provider_health" | "budget" | "tool_wire";
 
-export const PREFLIGHT_CHECK_NAMES: readonly PreflightCheckName[] = ["route", "credentials", "provider_health", "economy", "budget", "tool_wire"];
+export const PREFLIGHT_CHECK_NAMES: readonly PreflightCheckName[] = ["route", "credentials", "provider_health", "budget", "tool_wire"];
 
 export interface ChildSpawnPreflight {
 	version: 1;
@@ -53,7 +52,6 @@ export interface SpawnPreflightProbes {
 	route?: (input: { requestedModel?: string }) => PreflightCheck & { provider?: string; model?: string };
 	credentials?: (input: { provider?: string; model?: string }) => PreflightCheck;
 	providerHealth?: (input: { provider?: string; model?: string }) => PreflightCheck;
-	economy?: (input: { provider?: string; model?: string }) => PreflightCheck;
 	budget?: (input: { requestedModel?: string }) => PreflightCheck;
 	/**
 	 * Tool-wire compatibility for {model, backend, active child tools,
@@ -100,7 +98,6 @@ export function runChildSpawnPreflight(input: SpawnPreflightInput = {}): ChildSp
 		route: routeCheck,
 		credentials: checkOrUnknown(probes.credentials, UNKNOWN_DETAIL),
 		provider_health: checkOrUnknown(probes.providerHealth, UNKNOWN_DETAIL),
-		economy: checkOrUnknown(probes.economy, UNKNOWN_DETAIL),
 		budget: probes.budget
 			? (() => {
 				const result = probes.budget!({ requestedModel: input.requestedModel });
@@ -177,20 +174,12 @@ export function toolWirePreflightProbe(input: {
 	return { state: "pass", detail: `all ${report.results.length} tool schema(s) wire-compatible with ${report.backend}` };
 }
 
-/** Default automatic-budget caps ($/1M tokens) used when the selection-time policy is unavailable at the spawn seam. */
-export const PREFLIGHT_DEFAULT_MAX_INPUT_PER_MILLION = 1;
-export const PREFLIGHT_DEFAULT_MAX_OUTPUT_PER_MILLION = 1;
-
 export interface RunnerSpawnPreflightInput {
 	requestedModel?: string;
-	/** Caller-declared origin of the request; defaults to explicit when a concrete model was named. */
-	origin?: "explicit" | "inherited" | "configured" | "automatic";
 	/** Route the child will use (first resolved candidate). */
 	selected?: string;
 	/** Remaining candidates to fall back to. */
 	fallbacks?: string[];
-	/** USD/1M rates for the selected route, when the model catalog knows them. */
-	rates?: { input?: number; output?: number };
 	/** Provider-health verdict evaluated by the caller (read-only, no gate taken here). */
 	health?: { allowed: boolean; waitMs: number; kind?: string; boundBy?: string };
 	hasUsageBudgetConfig?: boolean;
@@ -219,15 +208,14 @@ function readModelsJsonApiKey(agentDir: string | undefined, provider: string): {
 /**
  * Assemble the runner-side preflight record. Decisive where the runner has
  * first-hand facts (resolved route, provider cooldown, configured budgets);
- * honest "unknown" where the fact lives upstream (selection-time economy when
- * rates are missing, runtime-owned credentials). Never throws.
+ * honest "unknown" where the fact lives upstream (runtime-owned credentials).
+ * Never throws.
  */
 export function assembleRunnerSpawnPreflight(input: RunnerSpawnPreflightInput): ChildSpawnPreflight {
 	const now = input.now ?? Date.now();
 	const env = input.env ?? process.env;
 	const selected = input.selected ?? input.requestedModel;
 	const fallbacks = (input.fallbacks ?? []).filter((route): route is string => typeof route === "string" && route.length > 0);
-	const origin = input.origin ?? (input.requestedModel ? "explicit" : "automatic");
 	const slash = selected?.indexOf("/") ?? -1;
 	const provider = slash > 0 ? selected!.slice(0, slash) : undefined;
 	const model = slash > 0 ? selected!.slice(slash + 1) : selected;
@@ -265,23 +253,6 @@ export function assembleRunnerSpawnPreflight(input: RunnerSpawnPreflightInput): 
 		providerHealth = { state: "fail", detail: `${provider ?? "route"} is cooling for ~${Math.ceil(input.health.waitMs / 1000)}s${input.health.kind ? ` (${input.health.kind})` : ""} with no fallback; launching would burn the slot` };
 	}
 
-	let economy: PreflightCheck;
-	const rates = input.rates;
-	const freeRoute = typeof model === "string" && model.endsWith(":free");
-	if (origin === "explicit" || origin === "configured") {
-		economy = { state: "pass", detail: `${origin} route ${selected ?? "(default)"}; cost authorized by the caller, automatic budget does not apply` };
-	} else if (freeRoute) {
-		economy = { state: "pass", detail: `${selected} is a zero-price route` };
-	} else if (rates && Number.isFinite(rates.input) && Number.isFinite(rates.output)) {
-		const maxInput = Number(env.PI_SUBAGENT_AUTO_MAX_INPUT_PER_M) > 0 ? Number(env.PI_SUBAGENT_AUTO_MAX_INPUT_PER_M) : PREFLIGHT_DEFAULT_MAX_INPUT_PER_MILLION;
-		const maxOutput = Number(env.PI_SUBAGENT_AUTO_MAX_OUTPUT_PER_M) > 0 ? Number(env.PI_SUBAGENT_AUTO_MAX_OUTPUT_PER_M) : PREFLIGHT_DEFAULT_MAX_OUTPUT_PER_MILLION;
-		economy = rates.input! <= maxInput && rates.output! <= maxOutput
-			? { state: "pass", detail: `${selected} rates $${rates.input}/$${rates.output} per 1M within the automatic budget ($${maxInput}/$${maxOutput})` }
-			: { state: "fail", detail: `${selected} rates $${rates.input}/$${rates.output} per 1M exceed the automatic budget ($${maxInput}/$${maxOutput}); authorize the route or pick an affordable one` };
-	} else {
-		economy = { state: "unknown", detail: "no catalog rates for the selected route; selection-time admission is authoritative" };
-	}
-
 	const budget: PreflightCheck = !input.hasUsageBudgetConfig
 		? { state: "warn", detail: "no per-run usage budget configured; run-wide deadline is the only bound" }
 		: input.usageBudgetAlreadyExhausted
@@ -296,7 +267,6 @@ export function assembleRunnerSpawnPreflight(input: RunnerSpawnPreflightInput): 
 			route: () => ({ ...route, ...(provider ? { provider } : {}), ...(model ? { model } : {}) }),
 			credentials: () => credentials,
 			providerHealth: () => providerHealth,
-			economy: () => economy,
 			budget: () => budget,
 		},
 	});

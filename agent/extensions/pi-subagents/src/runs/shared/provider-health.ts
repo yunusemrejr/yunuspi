@@ -1043,7 +1043,7 @@ export function recoveryPerformance(health: ModelHealth | undefined, model: {cos
  const speeds:number[]=[];
  for(const s of samples) {
   // Whole-response speed is comparable only for useful sized output, and is
-  // deliberately a small tie-break, not TTFT or a model-quality estimate.
+  // deliberately a small tie-break, not TTFT or a quality estimate.
   if(s.ok && Number.isFinite(s.elapsedMs) && s.elapsedMs!>0 && s.elapsedMs!<=600_000 && Number.isSafeInteger(s.outputTokens) && s.outputTokens!>=32 && s.outputTokens!<=100_000_000) speeds.push(s.elapsedMs!/s.outputTokens!);
  }
  speeds.sort((a,b)=>a-b);

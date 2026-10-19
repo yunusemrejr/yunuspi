@@ -760,7 +760,7 @@ const reviewSkip = (part) =>
 const REVIEW_RUNTIME_DIR =
   /^(?:reminders?|checkpoints?|sibling-bridge|tasks?|memory|missions?|project-intelligence|npm|cache|inference-slots?)$/i;
 const REVIEW_RUNTIME_STATE =
-  /^(?:provider-health|free-route-evidence|live-model-catalog|models-store|run-history|session-report|notification-state)\.(?:json|jsonl)$/i;
+  /^(?:provider-health|live-model-catalog|models-store|run-history|session-report|notification-state)\.(?:json|jsonl)$/i;
 const REVIEW_CONFIG =
   /\.(?:json|ya?ml|toml|xml|ini|cfg|conf|properties|txt|env)$/i;
 const PRIVATE_REVIEW_CONFIG =

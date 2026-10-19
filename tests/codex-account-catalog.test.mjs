@@ -8,7 +8,6 @@ import { ModelRuntime } from '../core/coding-agent/src/core/model-runtime.js';
 import { AuthStorage } from '../core/coding-agent/src/core/auth-storage.js';
 import { InMemoryCodingAgentModelsStore } from '../core/coding-agent/src/core/models-store.js';
 import { toModelInfo } from '../agent/extensions/pi-subagents/src/shared/model-info.ts';
-import { isProvenFreeRoute } from '../agent/extensions/pi-subagents/src/runs/shared/free-route-evidence.ts';
 import { getSupportedThinkingLevels, clampThinkingLevel } from '../core/ai/src/models.js';
 import { getSupportedThinkingLevels as childLevels } from '../agent/extensions/pi-subagents/src/shared/model-info.ts';
 import { parseArgs } from '../core/coding-agent/src/cli/args.js';
@@ -44,7 +43,7 @@ test('official account catalog adds exact visible IDs without inventing price or
     const known=provider.getModels()[0], luna=provider.getModels()[1];
     assert.equal(known.maxTokens,32000);assert.deepEqual(known.cost,base.cost);assert.equal(known.compat.supportsToolSearch,true);
     assert.equal(luna.maxTokens,16384);assert.equal(luna.outputLimitEstimated,true);assert.ok(luna.cost.missing.includes('input'));
-    assert.deepEqual(toModelInfo(luna).cost.missing,luna.cost.missing);assert.equal(isProvenFreeRoute(toModelInfo(luna)),false);
+    assert.deepEqual(toModelInfo(luna).cost.missing,luna.cost.missing);
     assert.equal(luna.thinkingLevelMap.off,null);assert.equal(luna.thinkingLevelMap.max,'max');
     assert.ok(!JSON.stringify(state.stored).includes('synthetic-access-token'));assert.ok(!JSON.stringify(state.stored).includes('account-A'));
     await refresh(provider,state,{force:false});assert.equal(calls,1,'fresh cache avoids another network request');
