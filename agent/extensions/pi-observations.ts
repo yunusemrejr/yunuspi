@@ -533,15 +533,6 @@ export default function piObservationsExtension(
 			const ref = message.details?.piObservation as Reference | undefined;
 			if (ref?.version !== 1 || !ref.operation || !TOOLS.has(message.toolName))
 				return message;
-			const raw = textOf(message.content);
-			if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return message;
-			// The transcript itself is authoritative for small results. Keep the
-			// original message and seal a null projection so later context passes
-			// cannot introduce a summary after a cache becomes ready.
-			if (raw.length < RAW_PASSTHROUGH_CHARS && !message.isError) {
-				sealFirstRender(ref.id, ref.resultHash, null, []);
-				return message;
-			}
 			// Carry all foreign status/provenance details verbatim into the visible
 			// receipt as well as retaining them on the original toolResult object.
 			const {
@@ -556,6 +547,12 @@ export default function piObservationsExtension(
 				return message;
 			}
 			if (status.length > 2000) return message;
+			// Seal check before joining the full output text: on every request
+			// after the first, most eligible results are already sealed, and
+			// textOf() over the whole history's tool output was paid per
+			// request only to be discarded here. A matching seal implies the
+			// size/NUL guards below already passed for this exact content
+			// (resultHash covers it), so replaying first changes no outcome.
 			const sealed = sealedRenders.get(ref.id);
 			if (sealed && sealed.resultHash === ref.resultHash) {
 				// The first rendering is authoritative for the branch lifetime.
@@ -572,6 +569,15 @@ export default function piObservationsExtension(
 					return message;
 				changed = true;
 				return { ...message, content: sealed.content };
+			}
+			const raw = textOf(message.content);
+			if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return message;
+			// The transcript itself is authoritative for small results. Keep the
+			// original message and seal a null projection so later context passes
+			// cannot introduce a summary after a cache becomes ready.
+			if (raw.length < RAW_PASSTHROUGH_CHARS && !message.isError) {
+				sealFirstRender(ref.id, ref.resultHash, null, []);
+				return message;
 			}
 			// Failure matching only adds a retrieval cue. Existing deterministic
 			// distillation still applies and originals remain recoverable.

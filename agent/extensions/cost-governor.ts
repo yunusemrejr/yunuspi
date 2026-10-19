@@ -43,6 +43,7 @@ import { Type } from "typebox";
 import {
 	classifyEffortRequest,
 	createEffortController,
+	EFFORT_SWITCH_BUDGET_TOKENS,
 	effortLevelForTier,
 	effortMissTokens,
 	gateEffortSwitch,
@@ -641,11 +642,27 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		try { current = String(pi.getThinkingLevel()); } catch { return; }
 		if (levelRank(current) < 0) return;
 		effortLevelUsed = current;
+		// Restoring the ceiling is a level change like any other: on routes where
+		// a thinking change re-bills the cached prefix (DeepSeek, Anthropic,
+		// Qwen templates) an ungated step back up pays the full re-read the
+		// step-down gate exists to avoid, so the same miss budget applies. On
+		// other routes the level travels outside the cached prefix and quality
+		// wins immediately. A held restore is retried every turn and lands as
+		// soon as the prefix is cold or the growth since the ceiling mark is
+		// small; the tool-error burst restore stays immediate (work is failing).
+		const cacheBreaking = thinkingChangeBreaksPromptCache(ctx?.model);
+		const restoreCeiling = (message: string): void => {
+			if (current === effortCeiling) return;
+			if (cacheBreaking && !effortCacheCold) {
+				const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);
+				const miss = effortMissTokens(effortCeiling, effortMarks, Math.max(totals.lastPromptTokens, promptTokens));
+				if (miss > EFFORT_SWITCH_BUDGET_TOKENS) return;
+			}
+			applyEffort(effortCeiling, ctx, message, "jev");
+		};
 		const classification = classifyEffortRequest(prompt);
 		if (classification.kind === "ceiling") {
-			// A complex turn after an automatic step-down restores the ceiling;
-			// stepping up is always allowed because quality outranks cache.
-			if (current !== effortCeiling) applyEffort(effortCeiling, ctx, `jev effort kept at the ceiling · ${classification.reasons[0] ?? "no easy evidence"}`, "jev");
+			restoreCeiling(`jev effort kept at the ceiling · ${classification.reasons[0] ?? "no easy evidence"}`);
 			return;
 		}
 		if (classification.kind === "inherit") return;
@@ -667,7 +684,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		const verdictTier = judged.verdict?.tier;
 		const tier = judged.ok && (verdictTier === "easy" || verdictTier === "moderate") ? verdictTier : undefined;
 		if (!tier) {
-			if (current !== effortCeiling) applyEffort(effortCeiling, ctx, `jev effort ${String(judged.reason ?? "abstained")}; configured level kept`, "jev");
+			restoreCeiling(`jev effort ${String(judged.reason ?? "abstained")}; configured level kept`);
 			return;
 		}
 		const target = effortLevelForTier(tier, effortCeiling, { shortPlain });

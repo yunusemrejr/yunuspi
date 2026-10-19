@@ -168,9 +168,23 @@ export function estimateMessageTokens(message: GovernedMessage | undefined): num
 	return Math.ceil(bodyChars(message) / 4);
 }
 
+// Estimated per request over the whole history; messages are immutable once
+// appended (folds and projections replace objects), so identity memoization
+// keeps repeat estimates O(1) per already-seen message.
+const messageTokenMemo = new WeakMap<GovernedMessage, number>();
+
 export function estimateMessagesTokens(messages: readonly GovernedMessage[]): number {
 	let tokens = 0;
-	for (const message of messages) tokens += estimateMessageTokens(message);
+	for (const message of messages) {
+		const hit = messageTokenMemo.get(message);
+		if (hit !== undefined) {
+			tokens += hit;
+			continue;
+		}
+		const estimate = estimateMessageTokens(message);
+		messageTokenMemo.set(message, estimate);
+		tokens += estimate;
+	}
 	return tokens;
 }
 

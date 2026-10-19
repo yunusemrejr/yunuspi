@@ -72,11 +72,88 @@ function inside(root: string, candidate: string): boolean {
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+// This runs on tool-result paths, so it must not spawn git per call (the old
+// form ran up to six `git rev-parse` processes, ~40-120ms per tool step).
+// Repository identity (root/commonDir/gitDir) cannot move for a live cwd, so
+// it is resolved once per cwd; HEAD, branch and ref values are then read
+// straight from the .git files, which are always fresh. Any filesystem miss
+// falls back to the spawning form below.
+const repoIdentityCache = new Map<string, { root: string; commonDir: string; gitDir: string }>();
+
+function readRefSha(commonDir: string, gitDir: string, ref: string): string | undefined {
+	for (const base of [gitDir, commonDir]) {
+		try {
+			const sha = fs.readFileSync(path.join(base, ref), "utf8").trim();
+			if (/^[0-9a-f]{40,64}$/i.test(sha)) return sha;
+		} catch { /* fall through to packed-refs */ }
+	}
+	try {
+		for (const line of fs.readFileSync(path.join(commonDir, "packed-refs"), "utf8").split("\n")) {
+			const match = /^([0-9a-f]{40,64}) (.+)$/i.exec(line.trim());
+			if (match && match[2] === ref) return match[1];
+		}
+	} catch { /* no packed-refs */ }
+	return undefined;
+}
+
+function readUpstreamRef(commonDir: string, branch: string): string | undefined {
+	// Minimal config read: locate [branch "<name>"] remote + merge entries.
+	let config: string;
+	try {
+		config = fs.readFileSync(path.join(commonDir, "config"), "utf8");
+	} catch {
+		return undefined;
+	}
+	let inSection = false, remote: string | undefined, merge: string | undefined;
+	for (const rawLine of config.split("\n")) {
+		const line = rawLine.trim();
+		const section = /^\[branch "(.+)"\]$/.exec(line);
+		if (section) { inSection = section[1] === branch; continue; }
+		if (line.startsWith("[")) { inSection = false; continue; }
+		if (!inSection) continue;
+		const kv = /^(\w+)\s*=\s*(.+)$/.exec(line);
+		if (kv?.[1] === "remote") remote = kv[2].trim();
+		if (kv?.[1] === "merge") merge = kv[2].trim();
+	}
+	if (!remote || !merge?.startsWith("refs/heads/")) return undefined;
+	return `${remote}/${merge.slice("refs/heads/".length)}`;
+}
+
+function readWorkspaceGitStateFromFiles(cwd: string): WorkspaceGitState | undefined {
+	const identity = repoIdentityCache.get(cwd);
+	if (!identity) return undefined;
+	const { root, commonDir, gitDir } = identity;
+	let headFile: string;
+	try {
+		headFile = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+	} catch {
+		return undefined;
+	}
+	let head: string | undefined, branch = "(detached)";
+	const refMatch = /^ref:\s*(refs\/heads\/.+)$/.exec(headFile);
+	if (refMatch) {
+		branch = refMatch[1].slice("refs/heads/".length);
+		head = readRefSha(commonDir, gitDir, refMatch[1]);
+	} else if (/^[0-9a-f]{40,64}$/i.test(headFile)) {
+		head = headFile;
+	}
+	if (!head) return undefined;
+	const upstream = branch === "(detached)" ? undefined : readUpstreamRef(commonDir, branch);
+	const upstreamHead = upstream ? readRefSha(commonDir, gitDir, `refs/remotes/${upstream}`) : undefined;
+	return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
+}
+
 export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
+	const fromFiles = readWorkspaceGitStateFromFiles(cwd);
+	if (fromFiles) return fromFiles;
 	try {
 		const root = path.resolve(git(cwd, ["rev-parse", "--show-toplevel"]));
 		const commonRaw = git(cwd, ["rev-parse", "--git-common-dir"]);
 		const commonDir = path.resolve(cwd, commonRaw);
+		const gitDir = path.resolve(cwd, git(cwd, ["rev-parse", "--git-dir"]));
+		repoIdentityCache.set(cwd, { root, commonDir, gitDir });
+		const viaFiles = readWorkspaceGitStateFromFiles(cwd);
+		if (viaFiles) return viaFiles;
 		const head = git(cwd, ["rev-parse", "HEAD"]);
 		const branch = optionalGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "(detached)";
 		const upstream = optionalGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);

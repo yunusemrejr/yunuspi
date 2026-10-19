@@ -54,6 +54,22 @@ const HIT_FRACTION = 0.6;
 
 const sha = (text: string): string => createHash("sha1").update(text).digest("base64url").slice(0, 16);
 
+// Per-object digest memo: several provider paths hand the same message/tool
+// objects to before_provider_request on every request, and re-stringifying +
+// re-hashing the whole history per request grows linearly with session size
+// (~18ms at 800 messages). Identity-keyed, so a replaced object re-hashes; a
+// mutated-in-place object would keep its old digest (payloads are built, not
+// mutated, after this hook).
+const digestMemo = new WeakMap<object, string>();
+function digestOf(value: unknown): string {
+	if (!value || typeof value !== "object") return sha(JSON.stringify(value) ?? "");
+	const hit = digestMemo.get(value);
+	if (hit !== undefined) return hit;
+	const digest = sha(JSON.stringify(value) ?? "");
+	digestMemo.set(value, digest);
+	return digest;
+}
+
 export function fingerprintPayload(payload: any): Fingerprint | undefined {
 	if (!payload || typeof payload !== "object") return undefined;
 	const key = MESSAGE_KEYS.find((candidate) => Array.isArray(payload[candidate]));
@@ -72,7 +88,7 @@ export function fingerprintPayload(payload: any): Fingerprint | undefined {
 		tools: sha(JSON.stringify(tools)),
 		system: sha(JSON.stringify(system)),
 		toolNames,
-		messages: list.map((message) => sha(JSON.stringify(message))),
+		messages: list.map((message) => digestOf(message)),
 		roles: list.map((message) => String(message?.role ?? message?.type ?? "")),
 	};
 }
