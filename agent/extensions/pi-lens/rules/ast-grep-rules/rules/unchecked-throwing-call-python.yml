@@ -1,6 +1,6 @@
 id: unchecked-throwing-call-python
 language: Python
-severity: error
+severity: warning
 message: "Call without try/except — throws on invalid input or missing file"
 note: |
   These Python calls raise exceptions that must be handled.

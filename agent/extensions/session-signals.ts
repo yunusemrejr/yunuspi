@@ -20,7 +20,7 @@ import {
   type LogicalChildTask,
 } from "./pi-subagents/src/runs/shared/child-ledger.ts";
 
-import { collectSessionErrors, type SessionErrorsReport } from "./lib/session-errors.ts";
+import { collectSessionErrors, toolOwners, type SessionErrorsReport } from "./lib/session-errors.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
 import { StringEnum } from "@yunuspi/ai";
@@ -1837,7 +1837,9 @@ export default function (pi: any) {
         } catch {
           live = undefined;
         }
-        const report = collectSessionErrors(list, { ledgerTasks, live });
+        let owners;
+        try { owners = toolOwners(pi.getAllTools?.()); } catch { owners = undefined; }
+        const report = collectSessionErrors(list, { ledgerTasks, live, toolOwners: owners });
         const file = await openHtmlPopup("errors", "Session errors", errorsHtml(report), ctx);
         ctx.ui?.notify?.(`Detailed session errors ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("errors", error, ctx));

@@ -37,7 +37,7 @@ export function failureCategory(error: string) {
   // budgets, and structured-output cut-offs are neither provider-health nor
   // acceptance failures. Framed reports only — bare "length" or "budget"
   // nouns in data never match.
-  if (/finish.{0,24}reason.{0,12}length|stop.{0,24}reason.{0,12}length|\bmax_tokens\b.{0,48}(?:exceeded|reached|exhausted)|response.{0,24}truncat|answer.{0,24}budget.{0,24}exhaust|output.{0,24}(?:cut off|truncat)/i.test(error))
+  if (/finish.{0,24}reason.{0,12}length|stop.{0,24}reason.{0,12}length|\bmax_tokens\b.{0,48}(?:exceeded|reached|exhausted)|response.{0,24}truncat|answer.{0,24}budget.{0,24}exhaust|output.{0,24}(?:cut off|truncat)|spent its whole output allowance/i.test(error))
     return {category:"truncated",recovery:"Resume the retained session and synthesize only the missing output; do not restart the investigation. Without retained state, split the work or narrow the scope."};
   // Framed reports only below: bare nouns ("budget", "quota", "contract",
   // "timeout", "deadline") also appear in SQL columns, filenames, and quoted
@@ -53,7 +53,8 @@ export function failureCategory(error: string) {
     return { category: "context", recovery: "Reduce the failed request's payload or compact retained evidence before retrying that scope." };
   if (/timed?\s+out|timedout|deadline exceeded|exceeded.{0,24}timeout|timeout.{0,24}(?:exceeded|after|reached)/i.test(error))
     return { category: "timeout", recovery: "Inspect the owned task status and partial artifacts before retrying; do not duplicate work that may still be running." };
-  if (/Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND|ENOENT|command not found/i.test(error))
+  // "X is not installed/configured" is how media and speech tools refuse before doing any work.
+  if (/Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND|ENOENT|command not found|\b(?:is|are) not (?:installed|configured)\b/i.test(error))
     return { category: "dependency", recovery: "Check the exact missing path or executable and its loader environment before relaunching." };
   if (/acceptance.{0,32}(?:failed|rejected|missing|required|unresolved|not met)|verification.{0,32}(?:failed|missing|required|unresolved)|outside.{0,20}file|contract.{0,32}(?:violation|breach|failed|mismatch|required|not met)/i.test(error))
     return { category: "verification", recovery: "Inspect the changed files and failed acceptance condition; repair the specific result before treating the child as complete." };

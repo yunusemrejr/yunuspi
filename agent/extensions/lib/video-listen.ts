@@ -2,13 +2,14 @@
  * recognition (faster-whisper through agent/scripts/asr-listen.py) proves the
  * narration is intelligible and measures how far it sits above the music; EBU
  * R128 measures loudness and true peak. Machine listening stands in for a human
- * ear: it does not judge voice timbre or music taste. Nothing is installed or
- * downloaded here. */
+ * ear: it does not judge voice timbre or music taste. The first listen creates
+ * the pinned ASR venv (binary wheels only, like narration_tts install) unless
+ * PI_ASR_AUTO_INSTALL=0; speech models are never downloaded here. */
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { FFMPEG_FLAGS, inputArgs, inputFile, number, probe, run } from "./media-process.ts";
@@ -41,6 +42,7 @@ const LISTEN_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), ".
 const PROGRESS_PREFIX = "LISTEN_PROGRESS ";
 const RESULT_PREFIX = "LISTEN_RESULT ";
 const ERROR_PREFIX = "LISTEN_ERROR ";
+const ASR_PACKAGES = ["faster-whisper==1.2.1"];
 const INSTALL_HINT = "Speech recognition is not installed. Create it once with: python3 -m venv ~/.pi/agent/local-models/asr/venv && ~/.pi/agent/local-models/asr/venv/bin/pip install faster-whisper==1.2.1 (or set PI_ASR_PYTHON to a Python that has faster_whisper).";
 
 export type ListenFinding = { severity: "error" | "warning"; message: string };
@@ -263,7 +265,7 @@ export async function frameMeanSquare(file: string, signal?: AbortSignal, timeou
   });
 }
 
-// Python resolution: an explicit interpreter, then the local ASR venv. Nothing is installed.
+// Python resolution: an explicit interpreter, then the local ASR venv, created on first use.
 const probeCache = new Map<string, Promise<boolean>>();
 /** Forget cached import probes (tests, or after installing faster-whisper in a running session). */
 export function resetListenProbeCache() { probeCache.clear(); }
@@ -280,15 +282,40 @@ function canImportFasterWhisper(python: string, cwd: string): Promise<boolean> {
   return cached;
 }
 
-export async function listenPython(cwd: string): Promise<string> {
+export async function listenPython(cwd: string, signal?: AbortSignal, progress?: Progress): Promise<string> {
   const candidates = [process.env.PI_ASR_PYTHON, asrVenvPython()].filter((p): p is string => Boolean(p));
   for (const candidate of candidates) {
     if (await canImportFasterWhisper(candidate, cwd)) return candidate;
   }
-  throw new Error(INSTALL_HINT);
+  if (process.env.PI_ASR_AUTO_INSTALL === "0") throw new Error(`${INSTALL_HINT} Automatic setup is off (PI_ASR_AUTO_INSTALL=0).`);
+  // Models handed the install command searched the disk instead and skipped
+  // the listen check, so the harness provisions it once, as Piper's install does.
+  const python = asrVenvPython(), venv = path.dirname(path.dirname(python)), home = path.dirname(venv);
+  try {
+    await fs.mkdir(home, { recursive: true, mode: 0o700 });
+    if (!existsSync(python)) {
+      progress?.("Creating the speech recognition environment (first listen only)…");
+      await runGuarded("python3", ["-m", "venv", venv], { cwd: home, signal, timeoutMs: 120_000, guard: false });
+    }
+    progress?.(`Installing ${ASR_PACKAGES.join(" ")} (binary wheels only, first listen only)…`);
+    // Wheels only: no package build scripts run during installation.
+    await runGuarded(python, ["-m", "pip", "install", "--quiet", "--only-binary=:all:", ...ASR_PACKAGES], { cwd: home, signal, timeoutMs: 600_000, guard: false });
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw new Error(`${INSTALL_HINT} Automatic setup failed: ${String((error as Error)?.message ?? error).slice(0, 400)}`);
+  }
+  probeCache.delete(python);
+  if (await canImportFasterWhisper(python, cwd)) return python;
+  throw new Error(`${INSTALL_HINT} Automatic setup finished, but faster_whisper still does not import in ${python}.`);
 }
 
 const transcriptText = (raw: any) => String(raw?.text ?? "");
+
+/** Spoken text rather than a path: several words, no script extension, and no such file. */
+export function isInlineScript(value: string, cwd: string): boolean {
+  const text = value.trim();
+  return /\s/.test(text) && !/\.(?:txt|md|json)$/i.test(text) && normalizeWords(text).length >= 3 && !existsSync(path.resolve(cwd, text));
+}
 
 export async function videoListen(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   signal?.throwIfAborted();
@@ -302,8 +329,12 @@ export async function videoListen(params: any, cwd: string, signal?: AbortSignal
   if (language !== null && !(typeof language === "string" && /^[a-z]{2,3}$/.test(language))) throw new Error("language must be a two or three letter code such as \"en\", or null");
   const targetLufs = number(params.targetLufs, -16, -40, -5, "targetLufs");
 
-  let script: { file: string; words: string[]; sha256: string } | undefined;
-  if (params.script) {
+  let script: { file: string | null; words: string[]; sha256: string } | undefined;
+  if (typeof params.script === "string" && isInlineScript(params.script, cwd)) {
+    // Models pass the spoken lines themselves as often as a file path.
+    const words = normalizeWords(params.script);
+    script = { file: null, words, sha256: createHash("sha256").update(params.script).digest("hex") };
+  } else if (params.script) {
     const scriptFile = await inputFile(params.script, cwd);
     if (!/\.(txt|md|json)$/i.test(scriptFile)) throw new Error("script must be a .txt, .md or narration .json file");
     const words = scriptWords(await fs.readFile(scriptFile, "utf8"), scriptFile);
@@ -311,7 +342,7 @@ export async function videoListen(params: any, cwd: string, signal?: AbortSignal
     script = { file: scriptFile, words, sha256: await fileDigest(scriptFile, signal) };
   }
 
-  const python = await listenPython(cwd);
+  const python = await listenPython(cwd, signal, progress);
   const info = await probe(file, signal);
   if (!info.streams?.some((s: any) => s.codec_type === "audio")) throw new Error("Input has no audio stream; there is nothing to listen to");
   const duration = Number(info.format?.duration);

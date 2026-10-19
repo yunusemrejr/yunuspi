@@ -371,6 +371,28 @@ test('errors collector captures deep tool failure with payload, module and stabl
   assert.equal(item.incident, diag.failures[0].incident);
 });
 
+test('errors collector names tool owners from the registry and keeps numeric settings under secret-like keys', () => {
+  const branch = [
+    toolCall('v1', 'video_qa', { action: 'listen', path: 'film.mp4', maxTokens: 4096, apiToken: 'TEST_SYNTHETIC_TOKEN_VALUE' }),
+    errorResult('v1', 'video_qa', 'Speech recognition is not installed.'),
+    toolCall('v2', 'mystery_tool', {}),
+    errorResult('v2', 'mystery_tool', 'failed'),
+  ];
+  const owners = errorsLib.toolOwners([
+    { name: 'video_qa', sourceInfo: { path: '/srv/yunuspi/agent/extensions/video-studio.ts' } },
+    { name: 'nameless', sourceInfo: {} },
+  ]);
+  assert.deepEqual([...owners], [['video_qa', 'agent/extensions/video-studio.ts']]);
+  const report = errorsLib.collectSessionErrors(branch, { toolOwners: owners });
+  const [listen, mystery] = report.errors.sort((a, b) => a.callId.localeCompare(b.callId));
+  assert.equal(listen.module, 'agent/extensions/video-studio.ts');
+  assert.equal(listen.category, 'dependency');
+  assert.equal(listen.payload.maxTokens, 4096, 'a token count is not a credential');
+  assert.equal(listen.payload.apiToken, '[redacted]');
+  assert.equal(mystery.module, 'unknown (unmapped tool owner)');
+  assert.equal(errorsLib.moduleForTool('bash', owners), 'core (native)', 'the static table still wins');
+});
+
 test('errors collector captures model failure with route, usage and status code', () => {
   const branch = [
     { type: 'message', message: { role: 'assistant', provider: 'friendli', model: 'mixtral-x', stopReason: 'error', errorMessage: 'request failed with status 429: quota exceeded for quota group', content: [], usage: { input: 100, output: 5 } } },

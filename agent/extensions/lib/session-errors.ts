@@ -112,7 +112,8 @@ function contentText(content: unknown): string {
 
 /** Redacted bounded clone for JSON payloads. Strings cap at 500 chars, objects at 20 keys, arrays at 10 items, depth at 4. */
 function boundValue(value: unknown, key = "", depth = 0, flag = { truncated: false }): unknown {
-  if (SECRET_KEY.test(key)) {
+  // A number or boolean under a secret-like key (maxTokens, tokenCount) is a setting, not a credential.
+  if (SECRET_KEY.test(key) && typeof value !== "number" && typeof value !== "boolean") {
     flag.truncated = true;
     return "[redacted]";
   }
@@ -195,18 +196,31 @@ const TOOL_MODULES: [string, string][] = [
   ["structured_output", "core (native)"],
 ];
 
-/** Owning module for a tool name. Prefix match; unknown tools stay explicitly unknown. */
-export function moduleForTool(tool: string): string {
+/** Owning module for a tool name. Prefix match, then the live registry's
+ * registering extension (`owners`); unknown tools stay explicitly unknown. */
+export function moduleForTool(tool: string, owners?: ReadonlyMap<string, string>): string {
   const name = String(tool ?? "");
   for (const [prefix, module] of TOOL_MODULES) {
     if (name === prefix || name.startsWith(prefix)) return module;
   }
-  return "unknown (unmapped tool owner)";
+  return owners?.get(name) ?? "unknown (unmapped tool owner)";
+}
+
+/** Tool name → registering extension path (from the agent directory on) for moduleForTool. */
+export function toolOwners(tools: ReadonlyArray<{ name?: unknown; sourceInfo?: { path?: unknown } }> | undefined): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const tool of tools ?? []) {
+    const file = typeof tool?.sourceInfo?.path === "string" ? tool.sourceInfo.path : "";
+    if (typeof tool?.name !== "string" || !file) continue;
+    const at = file.replaceAll("\\", "/").lastIndexOf("/extensions/");
+    owners.set(tool.name, at >= 0 ? `agent${file.replaceAll("\\", "/").slice(at)}` : file);
+  }
+  return owners;
 }
 
 export function collectSessionErrors(
   allEntries: unknown,
-  options: { limit?: number; errorChars?: number; ledgerTasks?: LogicalChildTask[]; live?: unknown } = {},
+  options: { limit?: number; errorChars?: number; ledgerTasks?: LogicalChildTask[]; live?: unknown; toolOwners?: ReadonlyMap<string, string> } = {},
 ): SessionErrorsReport {
   const limit = Number.isSafeInteger(options.limit) && (options.limit as number) > 0 ? Math.min(options.limit as number, 200) : DEFAULT_ERROR_LIMIT;
   const errorChars = Number.isSafeInteger(options.errorChars) && (options.errorChars as number) > 0 ? Math.min(options.errorChars as number, 8000) : ERROR_CHARS;
@@ -377,7 +391,7 @@ export function collectSessionErrors(
         signature: errorSignature("tool", tool, classification.category, causeText || raw),
         kind: "tool",
         tool,
-        module: moduleForTool(tool),
+        module: moduleForTool(tool, options.toolOwners),
         category: classification.category,
         recovery: classification.recovery,
         why: raw.trim()

@@ -311,7 +311,9 @@ export function createShellToolDefinition(cwd, config, options) {
                     }
                     if (err instanceof Error && err.message.startsWith("timeout:")) {
                         const timeoutSecs = err.message.split(":")[1];
-                        throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds`));
+                        // Renders and builds were rerun in the foreground with a guessed timeout and
+                        // killed near the end; say the process is gone and where long work belongs.
+                        throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds and was stopped. Check its partial output files before rerunning; run renders, builds and other long jobs with bg_run, which reports back when they finish.`));
                     }
                     throw err;
                 }

@@ -248,7 +248,8 @@ export default function registerSourceCheck(pi: any) {
       try {
         const others = await neighborSources(ctx.cwd,file.path,edited.slice(-20));
         if (owner !== generation) return;
-        const report = findDuplicates([{path:file.path,source:file.source},...others],{minTokens:45,minLines:5,focus:new Set([file.path]),focusLines:new Map([[file.path,span]]),limit:2});
+        // Automatic hints need a function-sized copy (8+ lines): 5-line renamed repeats in scene and material code were noise. The duplicates tool keeps the fine-grained scan.
+        const report = findDuplicates([{path:file.path,source:file.source},...others],{minTokens:60,minLines:8,focus:new Set([file.path]),focusLines:new Map([[file.path,span]]),limit:2});
         clones = report.clones.slice(0,2);
       } catch { /* Duplicate hints are optional evidence. */ }
       if (!edited.includes(file.path)) edited.push(file.path);
