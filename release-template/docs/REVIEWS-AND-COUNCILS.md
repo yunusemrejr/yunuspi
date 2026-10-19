@@ -11,75 +11,11 @@ and the main agent remains responsible for the session in every case.
 | Error review | Likely faults, root causes, failed assumptions, debugging leads | One bounded advisory helper via the native subagent executor | `subagent` worker with an error-review brief |
 | Council | Multi-perspective reasoning for genuinely hard questions | Supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
 | Fan-out | Separable parallel investigations in one broad task, or competing approaches merged with provenance | Native subagent executor with bounded respawns; merged fragments keep their provenance | `subagent({tasks:[...],async:true})`, then `runs.fuse` to merge competing results |
-| Double | Two independent streams (the current model twice) reconciled into one decision | Double runner with the native subagent executor | `/double`, then work normally |
 
 Findings come back concise: bounded reports with evidence and explicit gaps,
 never raw reasoning dumps. The parent verifies, decides and owns changes.
 
 Interface review reads current implementation before inspecting at most three representative captures. A test log does not qualify as an implementation read. Large native edits and current files changed through commands receive bounded source checks; rendered label dots, icon tiles and accent rails feed the same checkpoint. Unaddressed standing UI policy cues appear as `policyFindings` separately from independent reports and prevent acceptance until repaired/reviewed or explicitly dismissed with evidence. These obligations survive session resume and do not create additional review rounds. New rendered findings invalidate earlier acceptance; source edits invalidate stale rendered cues.
-
-## Double mode
-
-`/double` toggles a session mode in which every request is first analyzed by
-two independent streams of the currently selected model — same provider,
-same model, same thinking, same forked session context — and then
-reconciled into one directive the normal turn executes. The streams are
-peer-aware but never see each other's reasoning; a lightweight
-reconciliation pass compares, challenges and commits their conclusions,
-proposals, risks and disagreements into a single plan. The streams
-investigate read-only and propose actions; only the parent executes, so no
-state-changing operation runs twice.
-
-**The user's words stay in charge.** The directive is planning advice for the
-request that precedes it, never an instruction from the user: its header
-states that the user's own messages (this prompt, earlier prompts and any
-active goal) and explicit constraints outrank it. The requirements the
-harness extracts from the prompt (`extractRequirements`, the same owner the
-requirement ledger uses) are listed verbatim to both streams, the
-reconciliation and the directive, and the reconciliation is told to reject any
-proposal that conflicts with them. The list leads the directive so a bounded
-directive never loses it. A deterministic note also tells the reconciler how
-many files each stream names in common, so disagreement is visible as a fact.
-
-**Cache order.** Cached prompt prefixes depend on byte order, so the two
-stream prompts share everything (framing, request, requirements, context,
-rules) and differ only in a closing identity and angle. Stream B starts when A
-reports its first progress, which means A's request is accepted and the shared
-prefix (system prompt, forked transcript and this prompt) has been processed;
-a route that stays silent until it finishes costs at most a 6 s wait, and a
-stream that fails or finishes opens the gate at once. The directive is added
-as a message and the system prompt is never modified: an override that
-alternates with harness wakes (which are not doubled) would invalidate the
-whole cached conversation each time it flipped.
-
-**What is not doubled.** A bare acknowledgement ("ok", "thanks", "looks good")
-carries no request, so that turn continues single and says so once. Approvals
-and directives ("do it", "continue") still authorize work and are doubled, as
-are all real requests.
-
-While the mode is on, a footer chip (`Double ON · glm-5.3-flash ×2`) stays visible between prompts and
-after a resume, because every prompt costs three model passes and a persistent mode
-should never be forgotten silently. Progress rows show each stream and the reconciliation starting and
-finishing; a degraded run (a stream failed, a route substituted, no
-reconciliation) stays visible in the directive and the transcript instead
-of failing the turn. Both streams account through the shared subagent cost
-and lifecycle ledgers, so `/cost` and `/used` reflect the doubled
-inference. `PI_DOUBLE=off` disables the mode; children never re-double.
-
-### One board for every planner and reviewer
-
-Double now says what it told the agent on the same in-process board the
-Guardian and the session observer already used, and reads it back. The
-reviewers see "Double mode already told the agent …" beside each other's notes,
-so a note that merely restates a directive is suppressed instead of delivered
-twice.
-While Double is on, both reviewers get one evidence row naming the mode and the
-two routes, so they do not recommend repeating a deliberation the harness
-already runs before every prompt. In the other direction, both Double streams
-receive the reviewers' most recent notes (identically, so the shared prefix stays
-byte-identical) as evidence the forked transcript does not carry. Double's own
-streams and reconciliation are counted as harness-owned runs, never as children
-the agent launched.
 
 ## Session-start disclosure
 
@@ -100,7 +36,7 @@ it:
   re-reviews only the aspects the files changed since the last review would
   select, plus any that did not pass cleanly; a clean pass whose files did not
   change carries forward with a note naming the revision it came from.
-- Harness-owned runs (Double streams, automatic review) are
+- Harness-owned runs (automatic review) are
   not the agent's children: `subagent` status on their ids explains that their
   results arrive in context by themselves, and the background reviewers count
   them separately from agent-launched children.

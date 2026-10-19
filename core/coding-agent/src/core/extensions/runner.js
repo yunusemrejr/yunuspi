@@ -961,7 +961,7 @@ export class ExtensionRunner {
         if (requestSignal) {
             // The agent signal does not exist until the run starts, so a Stop
             // during this preflight would otherwise leave extension children
-            // (e.g. Double's model streams) running. Bind them to the request.
+            // (e.g. an extension's model streams) running. Bind them to the request.
             const agentSignalOf = Object.getOwnPropertyDescriptor(ctx, "signal")?.get;
             Object.defineProperty(ctx, "signal", {
                 configurable: true,

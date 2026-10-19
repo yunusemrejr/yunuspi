@@ -6,7 +6,7 @@ import { InMemoryCodingAgentModelsStore } from '../core/coding-agent/src/core/mo
 
 // A dynamic catalog that publishes outside a refresh the runtime awaited
 // (superseded or overlapping passes) must still reach the available list:
-// subagents and /double resolve the session's own route against it.
+// subagents resolve the session's own route against it.
 test('models published outside an awaited refresh reach the available snapshot', async () => {
   let catalog = [];
   const runtime = await ModelRuntime.create({

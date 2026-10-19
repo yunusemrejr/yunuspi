@@ -188,7 +188,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // review) are not the agent's delegation and need no harvesting.
       const own = ledger.tasks.filter(task => !isHarnessOwnedChild(task)), harness = ledger.tasks.length - own.length;
       childSummary = { total: own.length, failed: own.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
-      if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery, automatic review or Double streams) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
+      if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery or automatic review) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
       const planners = plannerStatusText();
       if (planners) rows.push({ id: 'planner-state', kind: 'current state', text: planners });
       if (own.length) {

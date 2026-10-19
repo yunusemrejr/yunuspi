@@ -9,7 +9,7 @@ import { SessionManager } from "../core/coding-agent/dist/core/session-manager.j
 import { SettingsManager } from "../core/coding-agent/dist/core/settings-manager.js";
 
 // Real SDK + AgentSession; only the provider transport is simulated. The
-// extension stands in for Double: it launches child work inside
+// extension stands in for a pre-turn planner: it launches child work inside
 // before_agent_start from ctx.signal and leaves it pending.
 test("Stop during before_agent_start aborts extension preflight children and frees the next prompt", async (t) => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-stop-"));
@@ -18,7 +18,7 @@ test("Stop during before_agent_start aborts extension preflight children and fre
 	const children = [];
 	const extension = (pi) => {
 		pi.on("before_agent_start", async (event, ctx) => {
-			// What Double does: bind children to ctx.signal, then wait for them.
+			// Bind children to ctx.signal, then wait for them.
 			const signals = [ctx.signal, event.signal];
 			assert.ok(signals[0] && signals[1], "an idle-started prompt still has a request-owned signal");
 			const child = { signal: ctx.signal, aborted: false };

@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
 /** Everything that can put a note on the board. The three reviewers observe the
- * session; Double and the scope council deliberate before it, and say what they
- * told the agent through the same board so no one repeats or contradicts them. */
-export type ReviewerSource = 'guardian' | 'observer' | 'double' | 'council' | 'assist';
+ * session; the scope council deliberates before it and says what it told the
+ * agent through the same board, so no one repeats or contradicts it. */
+export type ReviewerSource = 'guardian' | 'observer' | 'council' | 'assist';
 const REVIEWER_LABELS: Record<ReviewerSource, string> = {
-  guardian: 'Guardian', observer: 'Observer', double: 'Double mode', council: 'Scope council', assist: 'Automatic helpers',
+  guardian: 'Guardian', observer: 'Observer', council: 'Scope council', assist: 'Automatic helpers',
 };
 export const reviewerLabel = (reviewer: string): string => REVIEWER_LABELS[reviewer as ReviewerSource] ?? 'A peer';
 
-/** Shared note board for one session. Each source (the reviewers, Guardian, Double,
+/** Shared note board for one session. Each source (the reviewers, Guardian,
  * the scope council, the automatic helper team) publishes its latest delivered note; the others see it as
  * evidence and suppress a restatement, so the agent is not told the same thing
  * twice or pulled in opposite directions by sources blind to each other.
@@ -43,7 +43,7 @@ export function peerReviewerNotes(session: string, reviewer: string, now = Date.
   return [...(peerBoard().get(session)?.values() ?? [])].filter(row => row.reviewer !== reviewer && now - row.at <= maxAgeMs).sort((a, b) => b.at - a.at);
 }
 
-/** What the pre-turn planners are doing right now (for example "Double mode is ON"),
+/** What the pre-turn planners are doing right now,
  * as short facts the reviewers add to their evidence. A planner registers a reader
  * and returns its disposer; a reader returns nothing while it has nothing to say.
  * Reviewers never import a planner, so a planner can come and go. */
@@ -65,7 +65,7 @@ export function plannerStatusText(): string | undefined {
   }
   return facts.length ? facts.join(' ') : undefined;
 }
-/** True while the planner is registered and reporting (for example Double mode is on). */
+/** True while the planner is registered and reporting. */
 export function plannerActive(source: ReviewerSource): boolean {
   try { return Boolean(plannerReaders().get(source)?.()); } catch { return false; }
 }

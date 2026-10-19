@@ -20,7 +20,4 @@ It can investigate with bounded read-only tools (`session_detail`, `session_sear
 ## Delivery
 
 An accepted note (at most 150 words) appears in the TUI and rides the main agent's next normal model request with a delivery receipt; it is never pushed into an idle session. Unknown evidence ids, tools and skills are removed rather than voiding a paid note, a long copy of the user's words is cut out, and a note whose premise has vanished (a cited command has finished) is withheld. Accepted user input, session replacement and model changes invalidate old observations.
-
-While Double mode is on, one `planner-state` row names the mode and its routes, and Double's directive appears as a peer note beside Guardian's: the observer does not restate it or advise repeating the deliberation.
-
 Usage is counted as auxiliary model work, never as a spawned child agent. Child sessions cannot register an observer.

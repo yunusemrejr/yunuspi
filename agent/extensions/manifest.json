@@ -90,7 +90,6 @@
     "design-studio.ts",
     "diagnostic-provenance.ts",
     "disk-guard.ts",
-    "double.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
     "git-authority.ts",
@@ -762,6 +761,11 @@
       "name": "lib/micro-intelligence/micro-worker.ts",
       "retired": "2026-10-19",
       "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+    },
+    {
+      "name": "lib/double.ts",
+      "retired": "2026-10-19",
+      "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
     }
   ],
   "supportFiles": [

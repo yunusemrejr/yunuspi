@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import observerExtension from '../agent/extensions/lib/session-observer-impl.ts';
-import { publishReviewerNote, registerPlannerStatus, reviewerSessionKey } from '../agent/extensions/lib/reviewer-board.ts';
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 
 const GUARDIAN_META = Symbol.for('yunuspi.guardian.request-meta.v1');
@@ -70,22 +69,7 @@ async function firstPacket(t, extension, beforeReview) {
   return packets[0];
 }
 
-test("the observer sees Double's mode and what its directive told the agent", async (t) => {
-  const dispose = registerPlannerStatus('double', () => 'ON (the session model, twice): every user prompt is analyzed by two independent streams and reconciled into one planning directive before the agent starts. Do not advise repeating that deliberation.');
-  t.after(dispose);
-  const packet = await firstPacket(t, observerExtension, (ctx) => {
-    publishReviewerNote(reviewerSessionKey(ctx), 'double', 'Double mode directive: read src/login.ts first, then fix the redirect and run the tests.', [], 0);
-    publishReviewerNote(reviewerSessionKey(ctx), 'council', 'Scope council (complete, advisory): keep the existing login copy; change only the redirect target.', [], 0);
-  });
-  assert.match(packet, /planner-state|Double mode: ON/);
-  assert.match(packet, /Double mode: ON \(the session model, twice\)/);
-  assert.match(packet, /Do not advise repeating that deliberation/);
-  assert.match(packet, /Double mode already told the agent \d+s ago: Double mode directive: read src\/login\.ts first/);
-  assert.match(packet, /Scope council already told the agent \d+s ago: Scope council \(complete, advisory\): keep the existing login copy/);
-});
-
 test('the observer adds nothing about planners that are not running', async (t) => {
   const packet = await firstPacket(t, observerExtension, () => {});
-  assert.doesNotMatch(packet, /Double mode/);
   assert.doesNotMatch(packet, /already told the agent \d+s ago/);
 });
