@@ -24,10 +24,10 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
     return { ok: true, answers, usage };
   };
 
-test("registry names all fourteen decision types with owners", () => {
+test("registry names all fifteen decision types with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
-    "claim-verification", "delegation-topology", "evidence-relevance",
+    "claim-verification", "delegation-topology", "effort-tier", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "requirement-closure", "review-aspects",
     "scope-council-need", "tool-intent-alignment", "tool-skill-shortlist", "ui-work",

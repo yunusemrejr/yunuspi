@@ -628,7 +628,8 @@ export default function colabExtension(pi: any): void {
           const adcFile = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json");
           add("gcloud", gcloud ? true : undefined, gcloud ? `gcloud at ${gcloud}` : "gcloud not installed", gcloud ? undefined : "Only needed for ADC sign-in; the browser OAuth flow does not require it.");
           add("adc", adcFile && fs.existsSync(adcFile) ? true : undefined, adcFile && fs.existsSync(adcFile) ? `ADC credentials present at ${adcFile}` : "no ADC credential file found", adcFile && fs.existsSync(adcFile) ? undefined : adcInstructions());
-          add("display", Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY), process.env.DISPLAY || process.env.WAYLAND_DISPLAY ? "desktop display present" : "no display; browser sign-in falls back to manual code or ADC");
+          // Headless hosts are supported: sign-in falls back to a pasted code or ADC.
+          add("display", process.env.DISPLAY || process.env.WAYLAND_DISPLAY ? true : undefined, process.env.DISPLAY || process.env.WAYLAND_DISPLAY ? "desktop display present" : "no display; browser sign-in falls back to manual code or ADC");
           const configDir = path.join(os.homedir(), ".config", "colab-cli");
           try { fs.mkdirSync(configDir, { recursive: true }); fs.accessSync(configDir, fs.constants.W_OK); add("config_writable", true, configDir); }
           catch { add("config_writable", false, `${configDir} is not writable`, "The official CLI stores its token and log here; run in an environment where your home is writable, or use ADC."); }

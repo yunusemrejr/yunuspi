@@ -60,7 +60,7 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
     assert.deepEqual(result.badEnums, []);
-    assert.equal(result.extensions, 52);
+    assert.equal(result.extensions, 53);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

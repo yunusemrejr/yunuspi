@@ -279,9 +279,15 @@ test("download refuses to overwrite a local file unless overwrite is explicit", 
 
 test("doctor reports a healthy authenticated install without claiming remote GPU access", async () => {
   configure(true);
-  const result = await call({ action: "doctor" });
+  // A headless host (SSH, CI, cloud VM) is healthy: sign-in falls back to a code or ADC.
+  const display = { DISPLAY: process.env.DISPLAY, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY };
+  delete process.env.DISPLAY; delete process.env.WAYLAND_DISPLAY;
+  let result;
+  try { result = await call({ action: "doctor" }); }
+  finally { for (const [key, value] of Object.entries(display)) if (value !== undefined) process.env[key] = value; }
   assert.equal(result.details.ok, true);
-  assert.equal(result.details.healthy, true);
+  assert.equal(result.details.healthy, true, JSON.stringify(result.details.checks.filter((check) => check.ok === false)));
+  assert.equal(result.details.checks.find((check) => check.name === "display")?.ok, undefined);
   assert.ok(result.details.checks.some((check) => check.name === "auth" && check.ok === true));
   assert.ok(result.details.checks.some((check) => check.name === "compute_units" && check.ok === true));
   assert.ok(result.details.checks.some((check) => check.name === "uv"));
