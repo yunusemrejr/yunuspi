@@ -139,4 +139,10 @@ export function wantsPlanOrientation(prompt: unknown, hasPlan: boolean, mode: st
 	return listed >= 3;
 }
 
+/**
+ * Always-on system-prompt rule for the todo tool. The detailed orientation below
+ * is sent only with prompts that qualify (see wantsPlanOrientation); this one
+ * line keeps the tool from being demanded for every short request.
+ */
+export const PLAN_USE_RULE = 'Use todo for work with several dependent steps or one that will outlast a handful of tool calls; a short single-purpose request needs no plan. Mark a step in_progress before acting, record evidence when it is done, and use batch for related edits.';
 export const PLAN_GUIDANCE = 'For each actionable user request, create or revise the todo plan autonomously: outcomes → executable steps, parentId, dependencies and acceptance checks. Preserve open work across follow-ups; revise affected nodes, not the whole goal. Choose self/subagent/fanout per step and record files, owner/runId and project/evidence refs. Mark steps in_progress with activeForm before acting. Modes describe intent, never dispatch or grant permission. Use native orchestration tools, inspect results, record evidence, then complete. Use batch for related edits; list view=frontier for next work.';

@@ -13,7 +13,7 @@
  */
 
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
-import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
+import { PLAN_USE_RULE, renderPlan } from "./state/plan.ts";
 import { loadConfig, validateGuidanceFields } from "./config.js";
 import { t } from "./state/i18n-bridge.js";
 import { selectVisibleTasks } from "./state/selectors.js";
@@ -63,7 +63,7 @@ export { TOOL_NAME } from "./tool/types.js";
 
 export const DEFAULT_PROMPT_SNIPPET =
 	"Maintain an actionable hierarchical plan";
-export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_GUIDANCE];
+export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_USE_RULE];
 
 /** Recover only unambiguous batch shapes before schema validation. Measured:
  * 7 of 9 recorded todo validation failures were batches whose operations
