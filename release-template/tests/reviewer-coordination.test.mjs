@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import observerExtension from '../agent/extensions/session-observer.ts';
+import observerExtension from '../agent/extensions/lib/session-observer-impl.ts';
 import { publishReviewerNote, registerPlannerStatus, reviewerSessionKey } from '../agent/extensions/lib/reviewer-board.ts';
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 

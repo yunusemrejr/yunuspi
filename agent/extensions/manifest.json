@@ -193,6 +193,7 @@
     "session-metrics.ts",
     "session-observability.ts",
     "session-observer.ts",
+    "session-observer-impl.ts",
     "session-report.ts",
     "session-signals.ts",
     "session-stop.ts",
@@ -234,6 +235,7 @@
     "workspace-write-lease.ts",
     "worktree-checkpoint.ts",
     "adaptive-execution.ts",
+    "adaptive-workflows-impl.ts",
     "task-pipelines.ts",
     "audio-studio.ts",
     "assurance-output.ts",
@@ -252,7 +254,8 @@
     "video-segments.ts",
     "video-listen.ts",
     "research-evidence.ts",
-    "wire-warmth.ts"
+    "wire-warmth.ts",
+    "project-intelligence-impl.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

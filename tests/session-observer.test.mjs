@@ -20,7 +20,7 @@ delete process.env.PI_SESSION_OBSERVER;
 delete process.env.PI_SUBAGENT_CHILD;
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, observerAdviceText, createSessionObserver, observerDispatch, observerUsage, observerEvidenceBytes, OBSERVER_DEADLINE_MS, OBSERVER_PACKET_MAX_BYTES } = await import('../agent/extensions/lib/session-observer.ts');
-const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
+const { default: observerExtension } = await import('../agent/extensions/lib/session-observer-impl.ts');
 
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
 function clock() {

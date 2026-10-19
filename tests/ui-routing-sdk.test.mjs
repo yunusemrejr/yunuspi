@@ -9,7 +9,7 @@ import {SessionManager} from '../core/coding-agent/src/core/session-manager.js';
 import {SettingsManager} from '../core/coding-agent/src/core/settings-manager.js';
 import {emitSessionShutdownEvent} from '../core/coding-agent/src/core/extensions/runner.js';
 import {registerToolDiscovery} from '../agent/extensions/lib/tool-discovery.ts';
-import registerWorkflows from '../agent/extensions/adaptive-workflows.ts';
+import registerWorkflows from '../agent/extensions/lib/adaptive-workflows-impl.ts';
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 
 // Real owned SDK, file-loaded tools and hooks; the simulated transport cannot

@@ -21,7 +21,7 @@ delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
 const { default: microIntelligence, settleMicroAnalyses } = await import('../agent/extensions/micro-intelligence.ts');
 const { clearLlmPreferencesCache } = await import('../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
-const { default: adaptiveWorkflows } = await import('../agent/extensions/adaptive-workflows.ts');
+const { default: adaptiveWorkflows } = await import('../agent/extensions/lib/adaptive-workflows-impl.ts');
 
 const model = (id) => ({ id, provider: 'audit-fixture', name: id, api: 'openai-completions', baseUrl: 'http://localhost:1',
   contextWindow: 65_536, maxTokens: 4096, reasoning: false, input: ['text'],

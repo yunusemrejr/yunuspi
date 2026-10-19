@@ -3396,7 +3396,7 @@
       },
       {
         "name": "graph",
-        "source": "agent/extensions/project-intelligence.ts",
+        "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "line": 921
       },
       {
@@ -3506,7 +3506,7 @@
       },
       {
         "name": "observer-book",
-        "source": "agent/extensions/session-observer.ts",
+        "source": "agent/extensions/lib/session-observer-impl.ts",
         "line": 573
       },
       {
@@ -3977,7 +3977,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 498,
+        "line": 501,
         "kind": "literal"
       },
       {
@@ -4042,7 +4042,7 @@
       },
       {
         "name": "project_intel",
-        "source": "agent/extensions/project-intelligence.ts",
+        "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "line": 805,
         "kind": "literal"
       },
@@ -4181,7 +4181,7 @@
       },
       {
         "name": "task_pipeline",
-        "source": "agent/extensions/adaptive-workflows.ts",
+        "source": "agent/extensions/lib/adaptive-workflows-impl.ts",
         "line": 580,
         "kind": "literal"
       },
@@ -4431,7 +4431,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 498,
+        "line": 501,
         "kind": "literal"
       },
       {
@@ -4460,7 +4460,7 @@
       },
       {
         "name": "project_intel",
-        "source": "agent/extensions/project-intelligence.ts",
+        "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "line": 805,
         "kind": "literal"
       },
@@ -4538,7 +4538,7 @@
       },
       {
         "name": "task_pipeline",
-        "source": "agent/extensions/adaptive-workflows.ts",
+        "source": "agent/extensions/lib/adaptive-workflows-impl.ts",
         "line": 580,
         "kind": "literal"
       },
@@ -4821,7 +4821,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 710,
+      "sourceFiles": 713,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -5016,6 +5016,10 @@
       },
       {
         "path": "agent/extensions/lib/adaptive-execution.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/adaptive-workflows-impl.ts",
         "exists": true
       },
       {
@@ -5503,6 +5507,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/project-intelligence-impl.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/project-memory-context.ts",
         "exists": true
       },
@@ -5644,6 +5652,10 @@
       },
       {
         "path": "agent/extensions/lib/session-observability.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-observer-impl.ts",
         "exists": true
       },
       {
@@ -6784,6 +6796,12 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/project-intelligence-impl.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/project-intelligence/client.mjs",
         "signals": [
           "wrapper/adapter"
@@ -7138,12 +7156,6 @@
       },
       {
         "source": "agent/extensions/pi-web-access/web-probe.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/project-intelligence.ts",
         "signals": [
           "wrapper/adapter"
         ]

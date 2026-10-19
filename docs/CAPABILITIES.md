@@ -1281,7 +1281,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2846; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 3001; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2116; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 498; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 501; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 156; factory)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 444; factory)
@@ -1292,7 +1292,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
-- `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 805; literal)
+- `project_intel` — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 805; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 811; literal)
 - `read_many` — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 257; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 242; literal)
@@ -1315,7 +1315,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 470; factory)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 258; literal)
-- `task_pipeline` — [`agent/extensions/adaptive-workflows.ts`](../agent/extensions/adaptive-workflows.ts) (line 580; literal)
+- `task_pipeline` — [`agent/extensions/lib/adaptive-workflows-impl.ts`](../agent/extensions/lib/adaptive-workflows-impl.ts) (line 580; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 521; literal)
@@ -1378,7 +1378,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
 - /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 362)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3446)
-- /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 921)
+- /graph — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 921)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 78)
 - /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 648)
@@ -1400,7 +1400,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /nobug — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 380)
 - /noslop — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 373)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 792)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 573)
+- /observer-book — [`agent/extensions/lib/session-observer-impl.ts`](../agent/extensions/lib/session-observer-impl.ts) (line 573)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 614)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 258)
@@ -1453,6 +1453,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
 - [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
@@ -1512,7 +1513,6 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts`](../agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts) — `MCP`
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) — `wrapper/adapter`
-- [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) — `wrapper/adapter`
 - [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) — `wrapper/adapter`
 - [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) — `MCP`, `wrapper/adapter`
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
@@ -1571,6 +1571,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 - [`agent/extensions/lib/activity-indicators.ts`](../agent/extensions/lib/activity-indicators.ts)
 - [`agent/extensions/lib/adaptive-execution.ts`](../agent/extensions/lib/adaptive-execution.ts)
+- [`agent/extensions/lib/adaptive-workflows-impl.ts`](../agent/extensions/lib/adaptive-workflows-impl.ts)
 - [`agent/extensions/lib/artifact-checks.ts`](../agent/extensions/lib/artifact-checks.ts)
 - [`agent/extensions/lib/asset-registry.ts`](../agent/extensions/lib/asset-registry.ts)
 - [`agent/extensions/lib/assurance-output.ts`](../agent/extensions/lib/assurance-output.ts)
@@ -1692,6 +1693,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/prior-art.ts`](../agent/extensions/lib/prior-art.ts)
 - [`agent/extensions/lib/process-owner.ts`](../agent/extensions/lib/process-owner.ts)
 - [`agent/extensions/lib/project-identity.ts`](../agent/extensions/lib/project-identity.ts)
+- [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts)
 - [`agent/extensions/lib/project-memory-context.ts`](../agent/extensions/lib/project-memory-context.ts)
 - [`agent/extensions/lib/project-memory-embedder.ts`](../agent/extensions/lib/project-memory-embedder.ts)
 - [`agent/extensions/lib/project-memory-index.ts`](../agent/extensions/lib/project-memory-index.ts)
@@ -1728,6 +1730,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-hooks.ts`](../agent/extensions/lib/session-hooks.ts)
 - [`agent/extensions/lib/session-metrics.ts`](../agent/extensions/lib/session-metrics.ts)
 - [`agent/extensions/lib/session-observability.ts`](../agent/extensions/lib/session-observability.ts)
+- [`agent/extensions/lib/session-observer-impl.ts`](../agent/extensions/lib/session-observer-impl.ts)
 - [`agent/extensions/lib/session-observer.ts`](../agent/extensions/lib/session-observer.ts)
 - [`agent/extensions/lib/session-report.ts`](../agent/extensions/lib/session-report.ts)
 - [`agent/extensions/lib/session-signals.ts`](../agent/extensions/lib/session-signals.ts)
