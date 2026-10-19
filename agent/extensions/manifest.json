@@ -192,18 +192,10 @@
     "tool-schema.ts",
     "ui-doctrine.ts",
     "utility-client.ts",
-    "motion-library.ts",
     "video-art.ts",
-    "video-assets.ts",
-    "video-derive.ts",
-    "video-looks.ts",
-    "video-publish.ts",
-    "video-shot.ts",
     "media-model-routing.ts",
-    "video-compose.ts",
     "video-review-evidence.ts",
     "video-color-evidence.ts",
-    "shot-scene.ts",
     "video-studio.ts",
     "workspace-write-lease.ts",
     "worktree-checkpoint.ts",
@@ -215,19 +207,19 @@
     "gltf-inspect.ts",
     "quality-refinement.ts",
     "video-motion.ts",
-    "video-production-flow.ts",
     "blender-studio.ts",
     "guarded-process.ts",
     "xml-lite.ts",
     "image-understand.ts",
     "elevenlabs.ts",
-    "media-sync.ts",
     "video-browser.ts",
     "video-segments.ts",
     "video-listen.ts",
     "research-evidence.ts",
     "wire-warmth.ts",
-    "project-intelligence-impl.ts"
+    "project-intelligence-impl.ts",
+    "film.ts",
+    "captions.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -984,6 +976,76 @@
       "name": "scripts/compatibility/atomic-edit-preflight-test.mjs",
       "retired": "2026-10-19",
       "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "lib/video-compose.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-derive.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-looks.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-publish.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-production-flow.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-shot.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/shot-scene.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/video-assets.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/media-sync.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "lib/motion-library.ts",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "skills/remotion-video",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "skills/code-first-video",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "skills/motion-approaches",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+    },
+    {
+      "name": "skills/video-editing",
+      "retired": "2026-10-19",
+      "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
     }
   ],
   "supportFiles": [
@@ -1069,6 +1131,7 @@
     "scripts/blender-studio.py",
     "scripts/music-soundfont.py",
     "scripts/asr-listen.py",
-    "scripts/video-browser.mjs"
+    "scripts/video-browser.mjs",
+    "scripts/narrate.py"
   ]
 }

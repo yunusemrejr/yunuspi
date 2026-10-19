@@ -5,6 +5,8 @@ import { constants } from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 const exec = promisify(execFile);
 const MARKERS = [
   "package.json",
@@ -110,6 +112,65 @@ function publicRemote(line) {
     contacted: false,
   };
 }
+// Workflow and deploy-script discovery. Reads are bounded and never follow links or block on FIFOs.
+const WORKFLOW_MAX_BYTES = 256 * 1024;
+const WORKFLOW_LIMITS = { triggers: 16, jobs: 12, name: 60 };
+const SCRIPT_EXTENSION = /\.(?:sh|bash|mjs|cjs|js|ts|py|rb|ya?ml|toml)$/i;
+const DEPLOY_SEGMENT = /(?:^|[-_.])(?:deployments?|deploy|release|publish|ship|rollout|upload|sync|provision)(?=$|[-_.])/i;
+const isMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const cleanNames = (items, limit) =>
+  items
+    .filter((item) => typeof item === "string")
+    .map((item) => item.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, WORKFLOW_LIMITS.name))
+    .filter(Boolean)
+    .slice(0, limit);
+function deployScriptName(name) {
+  if (/\.(?:test|spec)\./i.test(name)) return false;
+  if (!SCRIPT_EXTENSION.test(name) && !/^[\w-]+$/.test(name)) return false;
+  return DEPLOY_SEGMENT.test(name);
+}
+// lstat rejects symlinks, FIFOs and oversize entries before opening. O_NOFOLLOW and O_NONBLOCK keep a
+// swap between lstat and open from being followed or blocking; the fstat and bounded read re-check it.
+async function readBoundedFile(absolute, maxBytes) {
+  const info = await fs.lstat(absolute).catch(() => null);
+  if (!info?.isFile() || info.size > maxBytes) return null;
+  let handle;
+  try {
+    handle = await fs.open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    if (!(await handle.stat()).isFile()) return null;
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead <= maxBytes ? buffer.toString("utf8", 0, bytesRead) : null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+// Returns { triggers, jobs } from real YAML parsing, or null when the text does not parse.
+async function workflowShape(text) {
+  let data;
+  try {
+    // Installed scripts reach the runtime packages through ../npm (linked to runtime/node_modules), as other scripts do.
+    const { parseDocument } = await import(pathToFileURL(createRequire(new URL("../npm/package.json", import.meta.url)).resolve("yaml")).href);
+    const doc = parseDocument(text, { logLevel: "silent" });
+    if (doc.errors.length) return null;
+    data = doc.toJS();
+  } catch {
+    return null;
+  }
+  if (!isMap(data)) return null;
+  // YAML 1.1 readers turn an unquoted `on` key into boolean true, which reaches JS as the key "true".
+  const onKey = Object.hasOwn(data, "on") ? "on" : Object.hasOwn(data, "true") ? "true" : null;
+  const source = onKey === null ? null : data[onKey];
+  const triggerItems =
+    typeof source === "string" ? [source] : Array.isArray(source) ? source : isMap(source) ? Object.keys(source) : [];
+  return {
+    triggers: cleanNames(triggerItems, WORKFLOW_LIMITS.triggers),
+    jobs: cleanNames(isMap(data.jobs) ? Object.keys(data.jobs) : [], WORKFLOW_LIMITS.jobs),
+  };
+}
+
 export async function workspaceFacts(cwd, signal) {
   signal?.throwIfAborted();
   const started = Date.now();
@@ -191,7 +252,33 @@ export async function workspaceFacts(cwd, signal) {
     if (evidence.length)
       result.environmentEvidence.push({ kind, candidate, evidence, source: "local filenames only", verified: false });
   }
-  if (result.environmentEvidence.length)
+  // Where code goes: each CI workflow's triggers and jobs, and deploy-shaped scripts, so a project
+  // with several targets (servers, hosting, a local test server) is mapped before anything ships.
+  if (result.directories.includes(".github/workflows")) {
+    const workflowDir = path.join(root, ".github/workflows");
+    const files = (await fs.readdir(workflowDir).catch(() => [])).filter((f) => /\.ya?ml$/i.test(f)).sort().slice(0, 20);
+    for (const file of files) {
+      operationSignal.throwIfAborted();
+      const text = await readBoundedFile(path.join(workflowDir, file), WORKFLOW_MAX_BYTES);
+      if (text === null) continue;
+      const rel = `.github/workflows/${file}`;
+      const shape = await workflowShape(text);
+      (result.workflows ??= []).push(shape ? { file: rel, ...shape, source: "file text, not run" } : { file: rel, error: "unparsed" });
+    }
+  }
+  const scripts = [];
+  for (const dir of [".", "scripts", "bin", "deploy", "ops", "infra"]) {
+    const dirPath = path.join(root, dir);
+    if (dir !== "." && !(await fs.lstat(dirPath).catch(() => null))?.isDirectory()) continue;
+    for (const name of (await fs.readdir(dirPath).catch(() => [])).sort()) {
+      if (!deployScriptName(name)) continue;
+      operationSignal.throwIfAborted();
+      const entry = await fs.lstat(path.join(dirPath, name)).catch(() => null);
+      if (entry && !entry.isSymbolicLink() && (entry.isFile() || entry.isDirectory())) scripts.push(dir === "." ? name : `${dir}/${name}`);
+    }
+  }
+  if (scripts.length) result.deployScripts = scripts.slice(0, 20);
+  if (result.environmentEvidence.length || result.workflows?.length || scripts.length)
     result.environmentGuidance = [
       "Markers suggest configuration to inspect, not a live target, installed toolchain or successful build. Reuse existing scripts after checking their side effects; builds can run hooks or upload targets.",
       ...(result.environmentEvidence.some((e) => e.kind === "deployment") ? ["Before deployment or synchronization, establish source/destination and preserve secrets, databases and user uploads. Review excludes, rollback and a supported dry run; do not equate repository contents with production state."] : []),

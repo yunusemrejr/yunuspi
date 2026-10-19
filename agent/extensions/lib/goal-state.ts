@@ -9,6 +9,7 @@
  * and stop at the first continuation that produces no new evidence.
  */
 import { extractRequirements } from "./requirement-ledger.ts";
+import { promptRequestFocus } from "./prompt-interpretation.ts";
 import { completionGateReceipts, type GateDecision, type GateReceipt } from "./completion-gate.ts";
 
 export type CriterionStatus = "open" | "met" | "waived";
@@ -48,6 +49,8 @@ export const MAX_NUDGES = 6;
 export const MAX_STALLS = 2;
 const MAX_TEXT = 600;
 const MIN_EVIDENCE = 12;
+/** Up to this many sentences, every sentence of a goal is a criterion. */
+const SHORT_GOAL_SENTENCES = 8;
 const LIST_ITEM = /^\s*(?:[-*•]|\d{1,2}[.)])\s+(.{4,})$/;
 const VERIFY_ID = "V";
 const VERIFY_TEXT = "Result checked end to end against the real artifact (tests run, app launched, output inspected, diff read), not only asserted.";
@@ -68,9 +71,20 @@ const verbatim = (text: string) => {
 /** A new goal with criteria seeded from the user's own words plus a mandatory verification criterion. */
 export function createGoal(text: string, now = Date.now()): GoalState {
 	const goalText = verbatim(text);
-	const listed = String(text ?? "").split(/\r?\n/).map((line) => LIST_ITEM.exec(line)?.[1]).filter((item): item is string => !!item);
-	const prose = String(text ?? "").split(/\r?\n/).filter((line) => !LIST_ITEM.test(line)).join(" ");
-	const extracted = [...(prose.trim() ? extractRequirements(prose).items : []), ...listed].slice(0, MAX_CRITERIA - 2);
+	// Quoted logs, code fences, pasted content and injected guidance are context, not requirements.
+	const focus = promptRequestFocus(String(text ?? "")).replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\s*>/gi, " ");
+	const listed = focus.split(/\r?\n/).map((line) => LIST_ITEM.exec(line)?.[1]).filter((item): item is string => !!item);
+	const prose = focus.split(/\r?\n/).filter((line) => !LIST_ITEM.test(line)).join(" ");
+	// A short goal is all requirement: "TTS narration elevenlabs." or "ends on example.com" carry no verb but are
+	// as binding as the sentence that does. Longer prose keeps only its directive sentences.
+	const sentences = prose.split(/(?<=[.!?;])(?<!\b(?:e\.g|i\.e|etc|vs|cf)\.)\s+/i).map((sentence) => sentence.trim()).filter((sentence) => sentence.length >= 4);
+	const short = sentences.length <= SHORT_GOAL_SENTENCES && (sentences.length > 1 || sentences.length === 1 && listed.length > 0);
+	const own = short ? sentences : prose.trim() ? extractRequirements(prose).items : [];
+	// Listed items keep their slots; repeats count once.
+	const seen = new Set<string>();
+	const extracted = [...own.slice(0, Math.max(0, MAX_CRITERIA - 2 - listed.length)), ...listed]
+		.filter((item) => { const key = item.toLowerCase().replace(/\s+/g, " ").replace(/[.!?;\s]+$/, ""); return !seen.has(key) && !!seen.add(key); })
+		.slice(0, MAX_CRITERIA - 2);
 	const items = extracted.length ? extracted : [clip(goalText, 240)];
 	const criteria: GoalCriterion[] = items.map((item, index) => ({ id: `C${index + 1}`, text: clip(item, 240), status: "open" }));
 	criteria.push({ id: VERIFY_ID, text: VERIFY_TEXT, status: "open" });

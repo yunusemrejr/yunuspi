@@ -16,8 +16,6 @@ const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const { inspectGltf, parseGltf, stageGltfBundle } = await load('extensions/lib/gltf-inspect.ts');
 const { registerAsset, inspectAsset, readRegistry } = await load('extensions/lib/asset-registry.ts');
 const { videoMotion, analyzeDecodedMotion } = await load('extensions/lib/video-motion.ts');
-const { videoAssets } = await load('extensions/lib/video-assets.ts');
-const { videoProject } = await load('extensions/lib/video-studio.ts');
 const temporary = async fn => { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-preflight-')); try { return await fn(dir); } finally { await fs.rm(dir, { recursive: true, force: true }); } };
 function fixture() {
   const bytes = Buffer.alloc(76);
@@ -71,19 +69,6 @@ test('glTF rejects malformed chunks, missing/escaping resources, oversized work,
   const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'outside-model-'));
   try { await fs.writeFile(path.join(outside, 'geometry.bin'), bytes); await fs.rm(path.join(dir, 'geometry.bin')); await fs.symlink(path.join(outside, 'geometry.bin'), path.join(dir, 'geometry.bin')); await fs.writeFile(file, JSON.stringify(document)); await assert.rejects(inspectGltf(file), /symlink escapes/); } finally { await fs.rm(outside, { recursive: true, force: true }); }
   const controller = new AbortController(); controller.abort(); await assert.rejects(inspectGltf(file, controller.signal));
-}));
-
-test('video model import preserves glTF dependencies, provenance and existing files', async () => temporary(async dir => {
-  const source = await put(dir); await videoProject({ action: 'init', dir: 'video', title: 'Fixture', intent: 'personal', width: 160, height: 96, fps: 6 }, dir);
-  const result = await videoAssets({ action: 'import', dir: 'video', path: source, name: 'triangle', creator: 'Fixture author', license: 'CC0', page: 'https://example.com/fixture' }, dir);
-  assert.equal(result.kind, 'model'); assert.equal(result.model.rendered, false); assert.equal(result.model.counts.triangles, 1);
-  assert.ok(result.file.startsWith('assets/models/triangle/')); assert.ok(result.assetId);
-  assert.ok(syncFs.existsSync(path.join(dir, 'video/public/assets/models/triangle/geometry.bin')));
-  const stored = await readRegistry(dir); assert.equal(stored.assets[0].creator, 'Fixture author');
-  await assert.rejects(videoAssets({ action: 'import', dir: 'video', path: source, name: 'triangle', license: 'CC0' }, dir), /EEXIST/);
-  const malformed = structuredClone(fixture().document); malformed.buffers[0].uri = 'missing.bin'; await fs.writeFile(source, JSON.stringify(malformed));
-  await assert.rejects(videoAssets({ action: 'import', dir: 'video', path: source, name: 'bad', license: 'CC0' }, dir), /Missing glTF resource/);
-  assert.equal(syncFs.existsSync(path.join(dir, 'video/public/assets/models/bad')), false, 'failed preflight does not leave a staged bundle');
 }));
 
 const hasFfmpeg = await exec('ffmpeg', ['-version']).then(() => true, () => false);

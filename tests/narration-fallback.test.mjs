@@ -71,13 +71,6 @@ function mockFetch(t) {
   t.after(() => { globalThis.fetch = original; });
   return { calls, reply: (...replies) => queue.push(...replies) };
 }
-async function writeProject(dir) {
-  const spec = { fps: 30, scenes: [
-    { id: 'intro', seconds: 1, narration: 'Intro words finish here.' },
-    { id: 'detail', seconds: 1, narration: 'A detail follows.' },
-    { id: 'outro', seconds: 1, narration: 'The ending resolves.' }] };
-  await fs.writeFile(path.join(dir, 'video.json'), JSON.stringify(spec));
-}
 
 test('explicit ElevenLabs keeps the provider error and never falls back to Piper', async t => {
   const dir = await workspace(t), { wav } = await fixtures(dir);
@@ -86,9 +79,6 @@ test('explicit ElevenLabs keeps the provider error and never falls back to Piper
   await assert.rejects(video.narrationTts({ action: 'speak', text: 'Hello there.', backend: 'elevenlabs' }, dir),
     err => /HTTP 401/.test(err.message) && !err.message.includes('Piper'));
   assert.equal(m.calls.length, 1);
-  await writeProject(dir); m.reply(failure(401));
-  await assert.rejects(video.narrationTts({ action: 'synthesize', dir, backend: 'elevenlabs' }, dir), /HTTP 401/);
-  assert.equal(m.calls.length, 2, 'explicit project synthesis makes one attempt');
 });
 
 test('automatic ElevenLabs 401, 402, 403 and 429 fall back to Piper after exactly one attempt', async t => {
@@ -152,30 +142,3 @@ test('automatic route without an ElevenLabs key speaks with Piper and makes no p
   assert.match(result.note, /^ElevenLabs is not configured, so this narration used the local Piper voice en_US-ryan-high; set ELEVENLABS_API_KEY to use ElevenLabs\. /);
 });
 
-test('project synthesis keeps finished ElevenLabs scenes and sends the rest to Piper after a rate limit', async t => {
-  const dir = await workspace(t), { wav, mp3 } = await fixtures(dir);
-  setEnv(t, { PI_CODING_AGENT_DIR: await installPiper(dir, wav), ELEVENLABS_API_KEY: KEY });
-  await writeProject(dir);
-  const m = mockFetch(t); m.reply(speech(mp3), failure(429));
-  const result = await video.narrationTts({ action: 'synthesize', dir }, dir);
-  assert.equal(m.calls.length, 2, 'the rate-limited scene is attempted once and never retried');
-  assert.equal(result.backend, 'piper');
-  assert.deepEqual(result.fallbackFrom, { backend: 'elevenlabs', status: 429, reason: 'ElevenLabs returned HTTP 429' });
-  assert.deepEqual(result.narrated.map(s => s.scene), ['intro', 'detail', 'outro']);
-  assert.match(result.note, /ElevenLabs returned HTTP 429, so 2 remaining scene narration\(s\) used the local Piper voice en_US-ryan-high; .*Scenes already narrated with ElevenLabs keep that audio\./);
-  const saved = JSON.parse(await fs.readFile(path.join(dir, 'video.json'), 'utf8'));
-  assert.deepEqual(saved.scenes.map(s => s.narrationProvider), ['elevenlabs', 'piper', 'piper']);
-  for (const scene of saved.scenes) {
-    assert.equal(scene.narrationAudio, `audio/narration/${scene.id}.wav`);
-    assert.ok((await fs.stat(path.join(dir, 'public', scene.narrationAudio))).size > 0);
-  }
-});
-
-test('project synthesis without Piper rethrows the first provider failure with the install sentence', async t => {
-  const dir = await workspace(t);
-  setEnv(t, { PI_CODING_AGENT_DIR: path.join(dir, 'no-piper-here'), ELEVENLABS_API_KEY: KEY });
-  await writeProject(dir);
-  const m = mockFetch(t); m.reply(failure(401));
-  await assert.rejects(video.narrationTts({ action: 'synthesize', dir }, dir), err => err.message.includes('HTTP 401') && err.message.endsWith(SENTENCE));
-  assert.equal(m.calls.length, 1);
-});

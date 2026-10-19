@@ -66,7 +66,7 @@ const EDIT_MISS = /Could not find (?:the exact text|edits?\[)|did not match|must
 const READ_FIRST = /No verified read-tool coverage|Read the current file with read before editing|Before edit on|must read (?:the )?file/i;
 const MISSING_PATH = /\bENOENT\b|no such file or directory|does not exist|source not found|not found:?\s*["'`/~.]/i;
 const GUARD = /\bBlocked:|protected path|not allowed|\brefus(?:ed|al)\b|permission denied|\bdenied\b|requires? (?:a )?new human-started session|outside the harness maintenance/i;
-const GATE = /refused: verification is unresolved|must be resolved|unresolved|Resolve these first|run or complete the current review|not accepted|Independent review (?:unavailable|pending)|Complete dependencies before|Reopen the parent before/i;
+const GATE = /refused: verification is unresolved|must be resolved|unresolved|Resolve these first|run or complete the current review|not accepted|Independent review (?:unavailable|pending)|Complete dependencies before|Complete or remove unfinished children before/i;
 const SHELL_SLIP = /command not found|syntax error|unexpected (?:token|EOF)|unrecognized (?:option|arguments?)|invalid option|unknown option|usage:|bad substitution|No such file or directory/i;
 
 /** Classify one finished tool call. Heuristic on purpose: weights are small for

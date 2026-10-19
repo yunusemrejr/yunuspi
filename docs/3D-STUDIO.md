@@ -1,6 +1,6 @@
 # 3D studio: headless Blender
 
-Agents build, render and inspect 3D work with Blender, entirely headless and on ordinary hardware (integrated AMD/Intel graphics included). The `blender` tool runs the binary guarded (harness read-only, GPU render nodes bound in), niced, memory-watched and under a deadline, and parses the engine output into structured results. The harness stages the tool automatically when a prompt or file reads as 3D work (skill route `3d-cad`); `tool_search` finds it otherwise. `/3d <assignment>` (see [GOAL.md](GOAL.md#3d-video-and-chaining)) turns a whole 3D job — Blender, three.js/WebGL or hybrid — into a goal judged on grounding, real assets, multi-angle rendered craft, performance and a clean end-to-end run; it chains with `/video` and `/noslop`.
+Agents build, render and inspect 3D work with Blender, entirely headless and on ordinary hardware (integrated AMD/Intel graphics included). The `blender` tool runs the binary guarded (harness read-only, GPU render nodes bound in), niced, memory-watched and under a deadline, and parses the engine output into structured results. The harness stages the tool automatically when a prompt or file reads as 3D work (skill route `3d-cad`); `tool_search` finds it otherwise. `/3d <assignment>` (see [GOAL.md](GOAL.md#3d-video-anatomy-and-chaining)) turns a whole 3D job — Blender, three.js/WebGL or hybrid — into a goal judged on grounding, real assets, multi-angle rendered craft, performance and a clean end-to-end run; it chains with `/video` and `/noslop`.
 
 ## The `blender` tool
 
@@ -22,14 +22,17 @@ blender({ action: "render", blend: "scene.blend", mode: "preview" })            
 blender({ action: "render", blend: "scene.blend", mode: "animation", from: 1, to: 120 })
 ```
 
-## Blender in a video
+## Blender in a film
 
-`video_shot` renders a camera move around a `.blend`, an imported model or extruded 3D title text into a video project as a transparent RGBA image sequence, lit in the project's palette, with named anchors projected to screen space per frame so 2D annotations follow 3D features. The editable scene (with the rig) is saved in the project's `blender/` folder. See [the video studio](VIDEO-STUDIO.md#looks-blender-shots-and-motion-examples). `motion_examples` provides Blender starting points (product hero with anchors, procedural materials, camera rigs, geometry-node terrain, an HTML sequence as a device screen) and the merges with HTML and FFmpeg.
+Blender models and renders with the `blender` tool; the film does the rest. Two outputs go into a film:
+
+- **Footage.** `blender` with `action:"render"` and `mode:"animation"` writes a PNG sequence, `animation.mp4` and a labelled contact sheet. Place the footage in the film's `public/` folder and use it on the timeline.
+- **GLB for three.js.** A `run` script exports the scene as GLB with Blender's own exporters. Inside the film, mount a `<ThreeCanvas>` scene in an act and drive its transforms from `useCurrentFrame()`. `video_project init` installs three.js, `@remotion/three` and `@react-three/fiber`. Inspect the file with `asset_register` `inspect` first; see [motion and model preflight](MEDIA-PREFLIGHT.md).
+
+Use Blender for photoreal or heavy scenes. Designed 3D subjects, type and motion graphics can live in the film's three.js scene instead. The [video studio](VIDEO-STUDIO.md) covers the film workflow.
 
 ## Boundaries
 
 - Blender processes run through the shared guarded runner (`agent/extensions/lib/guarded-process.ts`): harness directories are read-only, `/dev/dri` is bound for this GPU engine only (other guarded commands keep the minimal `/dev`), the process group is killed on abort or when it exceeds the memory budget, and output tails are bounded.
 - Renders and scene output write under the workspace (`.pi/blender` by default) and never modify the source `.blend`.
 - A successful render run is not approval: open the frames and judge them, as the skills require.
-
-Native video shots now support alpha image cards, shared arrays, per-key easing, staggered animation and editable camera/target/lens paths. `video_shot action:"plan"` validates render work and source inputs before creating output. See [advanced motion contracts](VIDEO-STUDIO.md#image-cards-arrays-and-camera-flythroughs) for examples and bounds.

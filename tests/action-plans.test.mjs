@@ -179,8 +179,15 @@ test('todo dependency and child refusals name the blocking tasks',()=>{
  assert.equal(withChild.op.kind,'create');
  const done=applyTaskMutation(withChild.state,'update',{id:3,status:'completed'});
  assert.equal(done.op.kind,'error');
- assert.match(done.op.message,/Reopen the parent before adding or reopening unfinished children/);
+ assert.match(done.op.message,/Complete or remove unfinished children before completing their parent/);
  assert.match(done.op.message,/#3 "Verify: build and run" \(completed\) still has unfinished #4 "Sub-verify" \(pending\)/);
+ // Adding work under a finished parent reopens it instead of refusing.
+ const closed=applyTaskMutation(applyTaskMutation(withChild.state,'update',{id:4,status:'completed'}).state,'update',{id:3,status:'completed'});
+ assert.equal(closed.op.kind,'update');
+ const more=applyTaskMutation(closed.state,'create',{subject:'Late fix',parentId:3});
+ assert.equal(more.op.kind,'create');
+ assert.equal(more.state.tasks.find(t=>t.id===3).status,'pending');
+ assert.deepEqual(more.op.reopened,[3],'the reopen is reported, not silent');
 });
 test('a batch completing a dependency later in the same batch applies in dependency order',()=>{
  const base=applyTaskMutation({tasks:[],nextId:1},'batch',{operations:[{action:'create',id:-1,subject:'Outcome'},{action:'create',id:-2,parentId:-1,subject:'Build'},{action:'create',parentId:-1,subject:'Verify',blockedBy:[-2]}]}).state;

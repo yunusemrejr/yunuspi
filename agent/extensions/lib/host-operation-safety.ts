@@ -19,6 +19,15 @@ export function sessionAncestorPids(): number[] {
   return [...pids];
 }
 
+/** A separate harness installed beside YunusPi (stock Pi as `ogpi` in ~/.ogpi): its sessions are
+ * never YunusPi's to stop. Only the script path (argv[1]) is compared; nothing is kept or shown. */
+export function separateHarnessPid(pid: number): boolean {
+  try {
+    const script = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[1] ?? '';
+    return /\/\.ogpi\//.test(script);
+  } catch { return false; }
+}
+
 /** The session's own running background tasks, published by
  * pi-background-tasks, so a blocked kill names the one-call safe path. */
 const OWNED_TASKS = Symbol.for('yunus-pi.bg-owned-tasks.v1');
@@ -146,6 +155,8 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     const protectedPids = ancestors ?? sessionAncestorPids();
     if (targets.some(arg => !/^\d+$/.test(arg) || Number(arg) === 0 || protectedPids.includes(Number(arg))))
       return risk(`This signal may terminate the harness, an ancestor or a process group. Inspect the process list (ps) and target an exact unrelated PID; use process/bg tools to stop their own managed jobs${ownedTaskHint()}`);
+    if (targets.some(arg => separateHarnessPid(Number(arg))))
+      return risk('This PID is a session of the separate stock Pi harness (ogpi, ~/.ogpi), not YunusPi: leave it running unless the user asked to stop that session.');
   }
   if (name === 'pkill' || name === 'killall') {
     // pkill -s selects a session; only killall uses -s for a signal. A probe

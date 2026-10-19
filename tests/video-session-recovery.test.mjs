@@ -13,9 +13,9 @@ const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const { classifyExecution } = await load('extensions/lib/adaptive-execution.ts');
 const { blenderInspectionView, blenderInspect, blenderRun, blenderBinary } = await load('extensions/lib/blender-studio.ts');
 const { default: registerBlender } = await load('extensions/blender-studio.ts');
-const { videoReviewRouting } = await load('extensions/lib/video-production-flow.ts');
+const { videoReviewRouting } = await load('extensions/lib/video-review-evidence.ts');
 const { audioGenerate } = await load('extensions/lib/elevenlabs.ts');
-const { selectTaskPipelines, buildPipelineContext, createPipelineLedger } = await load('extensions/lib/task-pipelines.ts');
+const { selectTaskPipelines, automaticPipelineTools, buildPipelineContext, createPipelineLedger } = await load('extensions/lib/task-pipelines.ts');
 const production = 'Remake the music video from scratch in Blender. Compose a soundtrack and animate moving clouds. Acceptance must be checked, not only asserted.';
 async function workspace(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-recovery-'));
@@ -29,7 +29,7 @@ const scene = () => ({ render: { camera: 'Camera', engine: 'BLENDER_EEVEE_NEXT' 
 test('small pipeline budgets retain early Blender proof and the text-only vision handoff', () => {
   const selection = selectTaskPipelines({ prompt: production });
   const text = buildPipelineContext(selection, createPipelineLedger(), { scope: 'task', revision: 'fixture', maxChars: 2400 });
-  assert.ok(text.length <= 2400); assert.match(text, /Before long renders/); assert.match(text, /blender render preview/); assert.match(text, /image_understand/);
+  assert.ok(text.length <= 2400); assert.match(text, /before long renders/); assert.match(text, /Render a short draft before finals/); assert.ok(automaticPipelineTools(selection, { prompt: production }).includes('image_understand'));
 });
 
 test('large Blender evidence is bounded, pageable, precise and explicit about omitted detail', () => {

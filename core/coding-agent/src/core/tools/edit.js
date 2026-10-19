@@ -144,7 +144,7 @@ export function createEditToolDefinition(cwd, options) {
                     content: [
                         {
                             type: "text",
-                            text: `Successfully replaced ${edits.length} block(s) in ${path}. Content hash now: ${afterHash}. Pass expectedHash=${afterHash} for the next edit of this file.`,
+                            text: `Successfully replaced ${edits.length} block(s) in ${path} (hash ${afterHash}).`,
                         },
                     ],
                     details: { diff: diffResult.diff, patch, optimisticConcurrency: { before: beforeHash, after: afterHash }, firstChangedLine: diffResult.firstChangedLine, documentMutation: documentMutationEvidence(absolutePath, rawContent, finalContent) },

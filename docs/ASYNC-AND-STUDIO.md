@@ -28,7 +28,7 @@ For independent long-running project commands, use existing `bg_run`; keep depen
 
 ## Sound and motion
 
-For complete narrated videos built from code (storyboard, master timeline, Remotion scenes, local narration, procedural audio and a visual QA loop), see [code-first video studio](VIDEO-STUDIO.md). The `audio_mix` tool below remains the quick path for local audio mixes.
+For complete films built from code (cinetic's Remotion pipeline with three.js, narration, sound and a frame and listen QA loop), see the [video studio](VIDEO-STUDIO.md). The `audio_mix` tool below remains the quick path for local audio mixes.
 
 | Tool | Produces |
 | --- | --- |

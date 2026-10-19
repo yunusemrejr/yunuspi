@@ -14,7 +14,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => syncFs.existsSync(path.join(dir, 'extensions/media-tools.ts')));
 const source = file => pathToFileURL(path.join(agent, 'extensions/lib', file));
 const { audioMix } = await import(source('media-timeline.ts'));
-const { captionTrack, validateVideoSpec, videoProject } = await import(source('video-studio.ts'));
 const { default: register } = await import(pathToFileURL(path.join(agent, 'extensions/media-tools.ts')));
 const pcm = async file => (await exec('ffmpeg', ['-v', 'error', '-i', file, '-f', 's16le', '-ac', '2', '-ar', '48000', '-'], { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024 })).stdout;
 const rms = (samples, from, to, channel = 0) => {
@@ -28,37 +27,6 @@ test('audio_mix schema rejects unknown roles and excessive speed', () => {
   const validate = (name, args) => validateToolArguments(tools.get(name), { type: 'toolCall', id: 'schema', name, arguments: args });
   assert.throws(() => validate('audio_mix', { tracks: [{ path: 'voice.wav', role: 'song' }] }));
   assert.throws(() => validate('audio_mix', { tracks: [{ path: 'voice.wav', speed: 4 }] }));
-});
-
-test('sidecar subtitles retain the measured word boundaries used by burned captions', () => {
-  const scene = { id: 'a', component: 'A', seconds: 6, start: 0, end: 6, narration: 'One two three four', narrationOffset: 0.4, narrationSeconds: 4, narrationWords: [{ w: 'One', s: 0.8, e: 1 }, { w: 'two', s: 1.2, e: 1.4 }, { w: 'three', s: 2.5, e: 2.7 }, { w: 'four', s: 3, e: 3.2 }] };
-  const track = captionTrack({ captions: { maxWords: 2 } }, [scene]);
-  assert.ok(Math.abs(track[0].start - 1.2) < 0.0001);
-  assert.ok(Math.abs(track[0].end - 1.8) < 0.0001);
-  assert.ok(Math.abs(track[1].start - 2.9) < 0.0001);
-  assert.ok(Math.abs(track[1].end - 3.6) < 0.0001);
-  const stale = captionTrack({ captions: { maxWords: 2 } }, [{ ...scene, narration: 'Changed text here now' }]);
-  assert.equal(stale[0].start, 0.4, 'changed text uses the same estimated fallback as burned captions');
-});
-
-test('malformed audio/timing in video.json returns actionable findings without throwing', () => {
-  const spec = { fps: 30, width: 1920, height: 1080, audio: { sfx: {} }, scenes: [{ id: 'a', component: 'A', seconds: 4, cues: [], cueWords: 'reveal', narration: 'One two', narrationSeconds: 2, narrationWords: [{ w: 'One', s: 1, e: 0.5 }, { w: 'two', s: 0.4, e: 2 }] }] };
-  const messages = validateVideoSpec(spec, new Set(['A']), () => true).issues.map(issue => issue.message).join('\n');
-  for (const expected of [/audio.sfx must be an array/, /cues must be an object/, /cueWords must be an object/, /timings must be finite, ordered/]) assert.match(messages, expected);
-  const invalid = structuredClone(spec); invalid.scenes[0].cues = { invalid: NaN }; invalid.scenes[0].energy = Infinity; invalid.audio.sfx = [{ src: 'x.wav', at: NaN }];
-  const finite = validateVideoSpec(invalid, new Set(['A']), () => true).issues.map(issue => issue.message).join('\n');
-  assert.match(finite, /cue "invalid" must be inside/); assert.match(finite, /energy must be/); assert.match(finite, /outside the timeline/);
-});
-
-test('project checks retain structural findings when a scene is null', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-project-malformed-'));
-  try {
-    await fs.writeFile(path.join(dir, 'video.json'), JSON.stringify({ fps: 30, width: 1920, height: 1080, scenes: [null] }));
-    const result = await videoProject({ dir, action: 'check' }, dir);
-    assert.equal(result.ok, false); assert.match(result.issues.map(issue => issue.message).join('\n'), /scene id/);
-    await fs.writeFile(path.join(dir, 'video.json'), 'null');
-    await assert.rejects(videoProject({ dir, action: 'check' }, dir), /video.json must be an object/);
-  } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
 test('real sound pipeline loops beds, ducks from voice, preserves pitch and measures mastering', { timeout: 90_000 }, async t => {

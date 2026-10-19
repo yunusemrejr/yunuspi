@@ -2115,95 +2115,60 @@
     {
       "id": "video-studio",
       "group": "web_media",
-      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/speech/music/SFX choices, capability-aware image plans, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and fixed-camera RGB atmosphere over approved detailed plates, and revision-bound visual/playback/listening review alongside technical QA.",
+      "summary": "One film engine and the tools around any footage: video_project scaffolds, checks and equips cinetic's Remotion starter (one timeline.ts for picture, cues and sound; three.js ready), video_render renders stills, previews and the motion-blurred master through its scripts, narration_tts speaks with ElevenLabs, a configured speech model or local Piper, audio_generate makes music and effects, video_browser records real website takes, and video_qa checks a master's picture, loudness, sync and transcript.",
       "entrypoints": [
         "video_project",
         "video_render",
-        "video_shot",
-        "motion_examples",
         "video_qa",
         "narration_tts",
-        "audio_synth",
         "video_browser",
-        "image_generate",
         "audio_generate"
       ],
       "tools": [
         "video_project",
         "video_render",
-        "video_shot",
-        "motion_examples",
-        "video_assets",
         "video_qa",
         "narration_tts",
-        "audio_synth",
+        "video_browser",
+        "audio_generate",
         "video_frames",
         "media_info",
         "audio_analyze",
-        "video_browser",
-        "image_generate",
-        "audio_generate",
-        "media_sync"
+        "audio_mix",
+        "music_compose"
       ],
       "options": [
         {
-          "name": "dir",
-          "summary": "Video project directory inside the workspace (video.json + src/)."
+          "name": "action",
+          "values": [
+            "status",
+            "install",
+            "init",
+            "check"
+          ],
+          "summary": "video_project: status, install (Python tools for render and QA scripts), init (scaffold and install a film), check (TypeScript, lint-film, beat grid)."
         },
         {
           "name": "mode",
           "values": [
             "stills",
-            "review",
             "preview",
-            "segments",
-            "final",
-            "thumbnail"
+            "final"
           ],
-          "summary": "stills with contact sheet, review with critical stills plus bounded playback in one browser, preview of a scene or seconds range, resumable segments, final or thumbnail."
+          "summary": "video_render: stills with a contact sheet, preview through render.sh, or the motion-blurred final."
         },
         {
-          "name": "action",
-          "summary": "Project init/compose/plan/check/install or narration status/install/synthesize."
+          "name": "dir",
+          "summary": "Film folder inside the workspace (src/timeline.ts)."
         },
         {
-          "name": "flow|phase|beat",
-          "summary": "Job-specific production plans with current blockers and exact next calls; storyboard beat role/claim/visualAction preserves the visual argument. Plans neither spend nor approve art."
-        },
-        {
-          "name": "kind",
+          "name": "backend",
           "values": [
-            "music",
-            "sfx"
+            "auto",
+            "elevenlabs",
+            "piper"
           ],
-          "summary": "Procedural audio music bed or sound effect."
-        },
-        {
-          "name": "look",
-          "summary": "derive (default) builds the look from the subject, suggest lists curated looks; variation and accent re-roll or anchor it."
-        },
-        {
-          "name": "model|maxCostUsd",
-          "summary": "Media tool override; /models preferences stay independent of the LLM. Plans reject unknown pricing units and incompatible capabilities. Quotes are estimates, not provider spending limits."
-        },
-        {
-          "name": "cameraPath|scene.objects.instances",
-          "summary": "Editable camera target/lens keys and shared line/grid/radial instances with bounded staggering; video_shot action:plan creates no output."
-        },
-        {
-          "name": "rig|lights|material|shadow|anchors",
-          "summary": "video_shot: Blender camera move, lighting, material, ground shadow and named 3D anchors for pinned annotations."
-        },
-        {
-          "name": "approach|query",
-          "values": [
-            "html",
-            "blender",
-            "merge",
-            "ffmpeg",
-            "python"
-          ],
-          "summary": "motion_examples: search, get or copy worked examples (html, blender, merge, ffmpeg, python)."
+          "summary": "narration_tts: auto, elevenlabs or piper."
         }
       ],
       "related": [
@@ -2214,20 +2179,14 @@
       ],
       "sourceFiles": [
         "agent/extensions/video-studio.ts",
+        "agent/extensions/lib/film.ts",
         "agent/extensions/lib/video-studio.ts",
-        "agent/extensions/lib/video-production-flow.ts",
         "agent/extensions/lib/video-review-evidence.ts",
         "agent/extensions/lib/video-color-evidence.ts",
-        "agent/extensions/lib/video-looks.ts",
-        "agent/extensions/lib/video-derive.ts",
-        "agent/extensions/lib/video-shot.ts",
         "agent/extensions/lib/media-model-routing.ts",
-        "agent/extensions/model-routing-config.ts",
-        "core/coding-agent/src/core/media-models.js",
-        "core/coding-agent/src/modes/interactive/components/scoped-models-selector.js",
-        "agent/extensions/lib/motion-library.ts",
+        "agent/extensions/lib/video-browser.ts",
         "agent/scripts/video-render.mjs",
-        "agent/skills/motion-approaches/SKILL.md"
+        "agent/skills/cinetic/SKILL.md"
       ],
       "doc": "docs/VIDEO-STUDIO.md",
       "commands": []
@@ -2241,7 +2200,6 @@
       ],
       "tools": [
         "blender",
-        "video_shot",
         "video_frames",
         "media_info"
       ],
@@ -3140,19 +3098,13 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 132,
+        "line": 76,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
         "line": 169,
-        "kind": "factory"
-      },
-      {
-        "name": "audio_synth",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 144,
         "kind": "factory"
       },
       {
@@ -3321,12 +3273,6 @@
         "kind": "factory"
       },
       {
-        "name": "media_sync",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 140,
-        "kind": "factory"
-      },
-      {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
         "line": 2572,
@@ -3369,12 +3315,6 @@
         "kind": "literal"
       },
       {
-        "name": "motion_examples",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 156,
-        "kind": "factory"
-      },
-      {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
         "line": 166,
@@ -3383,7 +3323,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 128,
+        "line": 72,
         "kind": "factory"
       },
       {
@@ -3534,7 +3474,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 515,
+        "line": 517,
         "kind": "literal"
       },
       {
@@ -3544,15 +3484,9 @@
         "kind": "factory"
       },
       {
-        "name": "video_assets",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 122,
-        "kind": "factory"
-      },
-      {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 142,
+        "line": 84,
         "kind": "factory"
       },
       {
@@ -3564,25 +3498,19 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 68,
+        "line": 52,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 118,
+        "line": 68,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 114,
-        "kind": "factory"
-      },
-      {
-        "name": "video_shot",
-        "source": "agent/extensions/video-studio.ts",
-        "line": 91,
+        "line": 61,
         "kind": "factory"
       },
       {
@@ -3837,7 +3765,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 515,
+        "line": 517,
         "kind": "literal"
       },
       {
@@ -4057,29 +3985,24 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          36
+          20
         ],
         "knownNames": [
           "audio_generate",
-          "audio_synth",
-          "media_sync",
-          "motion_examples",
           "narration_tts",
-          "video_assets",
           "video_browser",
           "video_project",
           "video_qa",
-          "video_render",
-          "video_shot"
+          "video_render"
         ]
       }
     ],
     "coverage": {
-      "sourceFiles": 655,
+      "sourceFiles": 647,
       "registrationSites": 59,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 81,
-      "uniqueStableTools": 80,
+      "stableRegistrationRows": 76,
+      "uniqueStableTools": 75,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4305,6 +4228,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/captions.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/catalog-cache-lock.ts",
         "exists": true
       },
@@ -4433,6 +4360,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/film.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/git-authority.ts",
         "exists": true
       },
@@ -4545,10 +4476,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/media-sync.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/media-timeline.ts",
         "exists": true
       },
@@ -4582,10 +4509,6 @@
       },
       {
         "path": "agent/extensions/lib/model-routing-metrics.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/motion-library.ts",
         "exists": true
       },
       {
@@ -4837,10 +4760,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/shot-scene.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/skill-relevance.ts",
         "exists": true
       },
@@ -4921,10 +4840,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/video-assets.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/video-browser.ts",
         "exists": true
       },
@@ -4933,31 +4848,11 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/video-compose.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/video-derive.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/video-listen.ts",
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/video-looks.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/video-motion.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/video-production-flow.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/video-publish.ts",
         "exists": true
       },
       {
@@ -4966,10 +4861,6 @@
       },
       {
         "path": "agent/extensions/lib/video-segments.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/video-shot.ts",
         "exists": true
       },
       {
@@ -5292,6 +5183,10 @@
       },
       {
         "path": "agent/scripts/music-soundfont.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/narrate.py",
         "exists": true
       },
       {
@@ -5619,6 +5514,11 @@
         "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
       },
       {
+        "name": "lib/media-sync.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
         "name": "lib/micro-intelligence/micro-task.ts",
         "retired": "2026-10-19",
         "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
@@ -5647,6 +5547,11 @@
         "name": "lib/motion-inspect.ts",
         "retired": "2026-10-19",
         "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). motion_inspect helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+      },
+      {
+        "name": "lib/motion-library.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
       },
       {
         "name": "lib/noslop.ts",
@@ -5682,6 +5587,11 @@
         "name": "lib/service-probe.ts",
         "retired": "2026-10-19",
         "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). service-detail helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate."
+      },
+      {
+        "name": "lib/shot-scene.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
       },
       {
         "name": "lib/skill-discovery-controller.ts",
@@ -5727,6 +5637,41 @@
         "name": "lib/utility-mcp/web-assets.mjs",
         "retired": "2026-10-19",
         "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). web_asset_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+      },
+      {
+        "name": "lib/video-assets.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-compose.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-derive.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-looks.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-production-flow.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-publish.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "lib/video-shot.ts",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
       },
       {
         "name": "lichtfeld-studio.ts",
@@ -6044,6 +5989,26 @@
         "why": "merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate"
       },
       {
+        "name": "skills/code-first-video",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "skills/motion-approaches",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "skills/remotion-video",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
+        "name": "skills/video-editing",
+        "retired": "2026-10-19",
+        "why": "The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it."
+      },
+      {
         "name": "smol-extraction.ts",
         "retired": "2026-10-14",
         "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
@@ -6211,12 +6176,6 @@
         "source": "agent/extensions/lib/utility-mcp/worker.mjs",
         "signals": [
           "MCP"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/video-assets.ts",
-        "signals": [
-          "wrapper/adapter"
         ]
       },
       {
@@ -6517,10 +6476,6 @@
         "path": "agent/skills/cinetic/SKILL.md"
       },
       {
-        "name": "code-first-video",
-        "path": "agent/skills/code-first-video/SKILL.md"
-      },
-      {
         "name": "create",
         "path": "agent/skills/create/SKILL.md"
       },
@@ -6561,10 +6516,6 @@
         "path": "agent/skills/ml/SKILL.md"
       },
       {
-        "name": "motion-approaches",
-        "path": "agent/skills/motion-approaches/SKILL.md"
-      },
-      {
         "name": "networking",
         "path": "agent/skills/networking/SKILL.md"
       },
@@ -6575,10 +6526,6 @@
       {
         "name": "operate",
         "path": "agent/skills/operate/SKILL.md"
-      },
-      {
-        "name": "remotion-video",
-        "path": "agent/skills/remotion-video/SKILL.md"
       },
       {
         "name": "research",
@@ -6603,10 +6550,6 @@
       {
         "name": "ui-design",
         "path": "agent/skills/ui-design/SKILL.md"
-      },
-      {
-        "name": "video-editing",
-        "path": "agent/skills/video-editing/SKILL.md"
       },
       {
         "name": "web-motion",

@@ -15,8 +15,9 @@ import { memoryBudgetMb } from "./memory-guard.ts";
 import { FFMPEG_FLAGS, produced, run, inputArgs, probe, integer, number } from "./media-process.ts";
 import { contactSheetFilter } from "./video-studio.ts";
 import { inspectGltf } from './gltf-inspect.ts';
+import { fileURLToPath } from "node:url";
 
-const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const AGENT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const BLENDER_WORKER = path.join(AGENT_ROOT, "scripts/blender-studio.py");
 const agentDir = () => process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 export const blenderHome = () => path.join(agentDir(), "local-tools", "blender");

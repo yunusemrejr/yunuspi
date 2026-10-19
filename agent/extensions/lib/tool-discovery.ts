@@ -116,9 +116,8 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'frontend', tools: ['image_understand', 'image_crop', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_understand', 'blender'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'image_understand', 'video_assets'] },
-  { skill: '3d-cad', tools: ['blender', 'video_shot', 'video_frames'] },
+  { skill: 'cinetic', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_generate', 'video_frames', 'media_info', 'audio_mix', 'image_understand'] },
+  { skill: '3d-cad', tools: ['blender', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
 ];
@@ -129,17 +128,19 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[]; acting?: boolean }> = [
   // Producing a finished file (document, PDF, video, audio) stages the check that opens it: a script printing "Saved x" proves nothing about x.
   { pattern: /\b(?:create|make|generate|produce|export|render|build|prepare|save|convert)\b[^.\n]{0,70}\b(?:pdf|docx|xlsx|pptx|mp4|webm|mov|wav|mp3|video|audio (?:file|track)|podcast|spreadsheet|slide deck|invoice|resume|r[eé]sum[eé])\b/i, tools: ['deliverable_check'] },
+  // Documents have one owner that builds, converts and renders them (docx to PDF included).
+  { pattern: /\b(?:create|make|generate|produce|export|build|prepare|save|convert)\b[^.\n]{0,70}\b(?:as|to|into|an?|the)\s+(?:pdf|docx|xlsx|pptx|word document|slide deck)s?\b(?!\s*(?:parser|component|exporter|counter|library|reader|viewer|generator|renderer))/i, tools: ['office_doc'] },
   // SEO is technical (crawl, canonical, structured data) and research (queries, competitors, SERPs): stage both.
   { pattern: /\b(?:seo|search engine optimization|indexability|canonical|hreflang|robots\.txt|structured data)\b/i, tools: ['seo_toolkit', 'web_probe', 'web_search', 'fetch_content'] },
   // Work whose answer lives on the web stages search and page reading with the first turn instead of
   // relying on a discovery round trip the agent may not make (an SEO session ran 190 calls without one search).
-  { pattern: /\b(?:search (?:the )?(?:web|internet)|(?:web|online|market|competitor|competitive|keyword|literature|user) research|research (?:the )?(?:competitors?|market|competition|alternatives|options|vendors|prices|pricing|trends|topic|history|news)|competitors?|competitive (?:analysis|landscape)|serp|look ?up (?:online|on the web)|google (?:it|this|for)|latest\b[^.\n]{0,30}\b(?:version|release|news|changes|lts)\b|find out (?:what|which|who|when|how many|whether)|what(?:'s| is) new in|state of the art|literature review)\b/i, tools: ['web_search', 'fetch_content', 'get_search_content'] },
+  { pattern: /\b(?:find|look|search|dig|gather|collect|research)\b[^.\n]{0,60}\b(?:(?:on|from|across) the (?:internet|web)|online (?:sources?|research|reviews?|prices?|articles?))\b|\b(?:search (?:the )?(?:web|internet)|(?:web|online|market|competitor|competitive|keyword|literature|user) research|research (?:the )?(?:competitors?|market|competition|alternatives|options|vendors|prices|pricing|trends|topic|history|news)|competitors?|competitive (?:analysis|landscape)|serp|look ?up (?:online|on the web)|google (?:it|this|for)|latest\b[^.\n]{0,30}\b(?:version|release|news|changes|lts)\b|find out (?:what|which|who|when|how many|whether)|what(?:'s| is) new in|state of the art|literature review)\b/i, tools: ['web_search', 'fetch_content', 'get_search_content'] },
   // Mailbox actions (not HTML email templates) stage the inbox tools.
   { pattern: /\b(?:send|draft|write|compose|check|read|triage|answer|search|summari[sz]e|follow up (?:on|with)|reply to)\b(?![^.\n]{0,40}\b(?:templates?|html|mjml|css)\b)[^.\n]{0,60}\b(?:e-?mails?|inbox|mailbox|newsletter subscribers?)\b|\b(?:inbox|mailbox|agentmail|cold (?:e-?mail|outreach)|e-?mail (?:campaign|outreach|list))\b/i, tools: ['agentmail'] },
   { pattern: /\b(?:promote|promotion|launch (?:post|announcement|campaign)|social media|reddit|hacker news|product hunt|linkedin post|tweet|marketing (?:campaign|plan|copy))\b/i, tools: ['web_search', 'fetch_content', 'browser_session'] },
   { pattern: /\b(?:call|hit|query|poll|test|curl|fetch)\b[^.\n]{0,50}\b(?:(?:rest|graphql|http|json|public) api|api endpoints?|endpoints?|webhooks?)\b|\bhttp requests?\b|\bapi (?:call|request)s?\b/i, tools: ['http_request'] },
   { pattern: /\b(?:scrape|crawl|browse (?:to|the web)|log in(?:to)?\b|sign ?(?:in|up) (?:to|for|on)\b|fill (?:in|out) (?:the |a )?(?:form|application)|submit (?:the |a )?form|go to (?:https?:\/\/|www\.))/i, tools: ['browser_session', 'fetch_content'], acting: true },
-  { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'video_assets'] },
+  { pattern: /\b(?:gltf|glb|3d (?:assets?|models?))\b/i, tools: ['asset_register', 'blender'] },
   { pattern: /\b(?:motion|animation|video)\b[^.\n]{0,60}\b(?:inspect|quality|qa|jitter|freeze|loop seam|reduced motion)\b|\b(?:inspect|qa)\b[^.\n]{0,60}\b(?:motion|animation|video)\b/i, tools: ['media_info'] },
   { pattern: /\b(?:image editing|image generation|image converting|image understanding|edit (?:an? |the |this )?(?:image|photo)|generate (?:an? |the |this )?image|convert (?:an? |the |this )?image)\b/i, tools: ['image_generate', 'image_understand'] },
   // The /goal command marks its own kickoff and continuation messages.
@@ -173,8 +174,9 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
   if (!text.trim() || NO_TOOLS.test(skillTaskText(text))) return [];
   const segments = skillActionSegments(text), clauses = skillIntentSegments(text), out = new Set<string>();
   for (const bundle of INTENT_BUNDLES) {
-    const route = skillRoutes.find(candidate => candidate.name === bundle.skill);
-    const routed = !!route && segments.some(part => route.intent.test(route.pathIntent ? part : part.replace(/(?:\S*\/)+\S*/g, ' ')));
+    // Several routes can share one skill (cinetic covers films, Remotion and motion approaches): any of them stages its tools.
+    const routed = skillRoutes.filter(candidate => candidate.name === bundle.skill)
+      .some(route => segments.some(part => route.intent.test(route.pathIntent ? part : part.replace(/(?:\S*\/)+\S*/g, ' '))));
     const pictured = bundle.skill === 'frontend' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
@@ -184,7 +186,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
   for (const part of clauses) {
     if (/\b(?:compose|create|make)\b[^\n]{0,60}\b(?:music|soundtrack)\b/i.test(part)) out.add('music_compose');
     if (/\b(?:mix|denoise|time[- ]stretch)\b[^\n]{0,60}\b(?:audio|sound|music|tracks?)\b/i.test(part)) out.add('audio_mix');
-    if (/\b(?:create|make|generate|synthesize)\b[^\n]{0,60}\b(?:sound effects?|sfx)\b/i.test(part)) out.add('audio_synth');
+    if (/\b(?:create|make|generate|synthesize)\b[^\n]{0,60}\b(?:sound effects?|sfx)\b/i.test(part)) out.add('audio_generate');
   }
   const pipeline = selectTaskPipelines({ prompt: !adaptiveExecutionEnabled() ? '' : text });
   for (const name of automaticPipelineTools(pipeline, { prompt: text })) out.add(name);

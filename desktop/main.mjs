@@ -21,14 +21,27 @@ const workers = new Map(), starting = new Map(), closing = new Map();
 const pendingLaunches = [];
 const launchContext = { project: process.env.YUNUSPI_OPEN_PROJECT || process.cwd(), prompt: process.env.YUNUSPI_INITIAL_PROMPT || '' };
 let window, store, quitting = false, quitReady = false;
-// A dock or menu launch inherits the desktop session's PATH, which lacks what a
-// login shell adds (nvm, bun, cargo, npm globals). Tools installed there then
-// look missing inside sessions. Merge the login shell's PATH once, bounded.
+// A dock or menu launch inherits the desktop session's environment, which lacks what a
+// login shell adds: PATH entries (nvm, bun, cargo, npm globals) and the API keys the
+// user exports in ~/.bashrc or ~/.profile (an ElevenLabs key there never reached desktop
+// sessions, so narration fell back to a local voice). Merge both once, bounded; values
+// the app already has win.
+export const SHELL_KEYS = /^(?:[A-Z][A-Z0-9_]*_API_KEY|ELEVENLABS_[A-Z0-9_]+)$/;
+export function shellKeys(output, marker, env) {
+  for (const entry of String(output).slice(String(output).lastIndexOf(marker) + marker.length).split('\0')) {
+    const name = entry.slice(0, entry.indexOf('='));
+    if (SHELL_KEYS.test(name) && !env[name]) env[name] = entry.slice(name.length + 1);
+  }
+}
 const loginPath = process.platform === 'win32' ? Promise.resolve() : new Promise(resolve => {
   const marker = '__YUNUSPI_PATH__';
-  execFile(process.env.SHELL || '/bin/bash', ['-ilc', `printf '${marker}%s${marker}' "$PATH"`], { timeout: 6000, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' } }, (_error, stdout) => {
-    const found = new RegExp(`${marker}(.*?)${marker}`).exec(String(stdout ?? ''))?.[1];
-    if (found) process.env.PATH = [...new Set([...found.split(path.delimiter), ...(process.env.PATH ?? '').split(path.delimiter)].filter(Boolean))].join(path.delimiter);
+  execFile(process.env.SHELL || '/bin/bash', ['-ilc', `printf '${marker}%s${marker}' "$PATH"; env -0`], { timeout: 6000, encoding: 'utf8', maxBuffer: 1024 * 1024, env: { ...process.env, TERM: 'dumb' } }, (_error, stdout) => {
+    const output = String(stdout ?? '');
+    const found = new RegExp(`${marker}(.*?)${marker}`).exec(output)?.[1];
+    if (found) {
+      process.env.PATH = [...new Set([...found.split(path.delimiter), ...(process.env.PATH ?? '').split(path.delimiter)].filter(Boolean))].join(path.delimiter);
+      shellKeys(output, marker, process.env);
+    }
     resolve();
   });
 });

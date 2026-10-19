@@ -4,7 +4,7 @@
 import { Type } from "typebox";
 import fs from 'node:fs/promises';
 import { IMAGE_FORMATS, INSPECTION_VIEWS, RENDER_ENGINES, blenderInspect, blenderRender, blenderRun, blenderSetup } from "./lib/blender-studio.ts";
-import { videoReviewRouting } from './lib/video-production-flow.ts';
+import { videoReviewRouting } from './lib/video-review-evidence.ts';
 import { actionTool, choices } from "./lib/tool-schema.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });

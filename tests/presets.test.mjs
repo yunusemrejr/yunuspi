@@ -46,6 +46,12 @@ test('preset tokens count anywhere in text, in written order, and never inside p
   const fenced = ps.extractPresetTokens('build it\n```\n/3d /video\n```\nthen /noslop');
   assert.deepEqual([fenced.presets, fenced.task], [['noslop'], 'build it\n```\n/3d /video\n```']);
   assert.equal(ps.extractPresetTokens('make\n  a  site /noslop').literal, 'make a site /noslop');
+  const glued = ps.extractPresetTokens('/goal /3d /anatom,y/noslop /nobug /video make a penguin film');
+  assert.deepEqual([glued.presets, glued.goal, glued.task], [['3d', 'anatomy', 'noslop', 'nobug', 'video'], true, 'make a penguin film'], 'glued and comma-garbled tokens are read');
+  assert.deepEqual(ps.extractPresetTokens('copy /3d/models and /video/x.mp4').presets, [], 'paths whose pieces are not all tokens stay text');
+  const penguin = ps.createBoostedGoal(glued.task.replace('make a penguin film', 'make a video using threejs, about types of penguins. TTS narration elevenlabs. at the end says example.com'), glued.presets);
+  for (const said of ['TTS narration elevenlabs.', 'at the end says example.com']) assert.ok(penguin.criteria.some((c) => c.text === said), `a verbless requirement stays a criterion: ${said}`);
+  assert.ok(penguin.criteria.some((c) => /^Anatomy: the subject's parts/.test(c.text)), 'anatomy in a film judges the picture, not a kit build');
 });
 
 test('connector words a removed token strands at an edge go; mid-text ones stay', () => {
@@ -98,11 +104,12 @@ test('a video chain judges the picture and the file; a code chain keeps the code
   assert.match(film.text, /Noslop on the picture/);
   assert.match(film.text, /Nobug on the output: check the encoded file/);
   assert.doesNotMatch(film.text, /Desloppify:|Baseline first|360px/, 'no codebase audit during a film');
-  assert.match(film.text, /Lead skill: cinetic/);
-  assert.match(film.text, /never stand in for the 3D picture/);
-  assert.equal((film.text.match(/Lead skill:/g) ?? []).length, 1, 'one film paragraph');
-  assert.match(ps.filmDirective('an exploded view of a camera'), /Lead skill: anatomy-reveal/);
-  assert.match(ps.filmDirective('how a gearbox works'), /Lead skill: anatomy \(/);
+  assert.match(film.text, /Lead guide: cinetic/);
+  assert.match(film.text, /never a generated or stock photo with 3D decoration/);
+  assert.match(film.text, /the user named is the one to use/, 'explicit tool choices win over the options');
+  assert.equal((film.text.match(/Lead guide:/g) ?? []).length, 1, 'one film paragraph');
+  assert.match(ps.filmDirective('an exploded view of a camera'), /Lead guide: anatomy-reveal/);
+  assert.match(ps.filmDirective('how a gearbox works'), /Lead guide: anatomy \(/);
   const code = ps.createBoostedGoal('clean up the dashboard', ['noslop', 'nobug']);
   assert.match(code.text, /Desloppify:[\s\S]*Debug:/);
   assert.doesNotMatch(code.text, /Film:|on the picture/);

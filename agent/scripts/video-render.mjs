@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Remotion render runner for video_render. Runs inside the video project
+// Remotion stills and render runner for video_render. Runs inside the film
 // (guarded by the harness), resolves Remotion from the project's own
 // node_modules, reuses a content-addressed bundle, and prints one JSON result
 // line prefixed with VIDEO_RENDER_RESULT. Progress lines use VIDEO_RENDER_PROGRESS.
@@ -85,7 +85,9 @@ async function main() {
     if (request.mode === "stills" || request.mode === 'review') {
       const stills = [];
       const layout = [];
-      for (const frame of request.frames) {
+      const count = Math.max(1, Math.min(24, Number(request.count) || 6));
+      const frames = request.frames ?? Array.from({ length: count }, (_, i) => Math.min(composition.durationInFrames - 1, Math.round((i + 0.5) * composition.durationInFrames / count)));
+      for (const frame of frames) {
         if (frame < 0 || frame >= composition.durationInFrames) throw new Error(`Frame ${frame} is outside ${composition.id} (0..${composition.durationInFrames - 1})`);
         const output = path.join(out, `frame-${String(frame).padStart(6, "0")}.png`);
         await renderer.renderStill({ ...common, scale: request.stillScale ?? request.scale ?? 1, frame, output, imageFormat: "png", inputProps:{reviewLayout:true},
@@ -94,7 +96,7 @@ async function main() {
             try { layout.push({...JSON.parse(log.text.slice(15)),deliveredFrame:frame}); } catch { /* an unknown project log cannot approve layout */ }
           } });
         stills.push({ frame, seconds: frame / composition.fps, path: output });
-        emit("VIDEO_RENDER_PROGRESS", { stage: "stills", done: stills.length, total: request.frames.length });
+        emit("VIDEO_RENDER_PROGRESS", { stage: "stills", done: stills.length, total: frames.length });
       }
       Object.assign(result, { stills, layout });
       if (request.mode === 'stills') {

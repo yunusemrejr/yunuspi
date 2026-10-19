@@ -48,7 +48,7 @@ const VERIFY_TOOLS = new Set([
 	"render_see", "video_qa", "video_render",
 	"ui_explore", 
 	"deliverable_check", "svg_inspect", 
-	"media_sync", "sandbox_run", "lsp_diagnostics", "lens_diagnostics",
+	"sandbox_run", "lsp_diagnostics", "lens_diagnostics",
 ]);
 function isVerificationToolResult(name: string, input?: Record<string, unknown>): boolean {
 	const action = String(input?.action ?? "");

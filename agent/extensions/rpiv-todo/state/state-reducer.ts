@@ -19,14 +19,15 @@ import { detectCycle } from "./task-graph.js";
  * `op.kind === "error"` without a side-channel boolean.
  */
 export type Op =
-	| { kind: "create"; taskId: number }
-	| { kind: "batch"; ids: Record<string, number>; count: number }
+	| { kind: "create"; taskId: number; reopened?: number[] }
+	| { kind: "batch"; ids: Record<string, number>; count: number; reopened?: number[] }
 	| {
 			kind: "update";
 			id: number;
 			fromStatus: TaskStatus;
 			toStatus: TaskStatus;
 			changed: boolean;
+			reopened?: number[];
 	  }
 	| { kind: "delete"; id: number; subject: string }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean; view?: "tree" | "frontier" }
@@ -285,7 +286,7 @@ function reduceTaskMutation(
 	}
 }
 
-const ORDER_GATED = /^(?:Complete dependencies before|Complete or explicitly remove unfinished children|Reopen the parent before adding or reopening unfinished children)/;
+const ORDER_GATED = /^(?:Complete dependencies before|Complete or explicitly remove unfinished children|Complete or remove unfinished children before completing)/;
 
 /** Atomic plan edits use the existing reducer and persisted snapshot. */
 export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
@@ -298,7 +299,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
  }
  if (action === "batch") {
   if (!Array.isArray(params.operations) || !params.operations.length || params.operations.length > 32) return errorResult(state, "batch requires 1..32 operations");
-  let next = state; const ids: Record<string, number> = {};
+  let next = state; const ids: Record<string, number> = {}; const reopenedAll: number[] = [];
   // A negative id that matches no alias declared earlier in this batch is a
   // caller error, not a positive-id violation: say which alias is missing and
   // how to declare it instead of failing later with a contradictory message.
@@ -339,6 +340,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
     return errorResult(state, `batch operation ${index+1}: ${result.op.message}`);
    }
    next = result.state;
+   if ("reopened" in result.op && result.op.reopened) reopenedAll.push(...result.op.reopened);
   }
   while (deferred.length) {
    const waiting = deferred.splice(0);
@@ -349,17 +351,21 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
    }
    if (deferred.length === waiting.length) return errorResult(state, `batch operation ${deferred[0].index+1}: ${deferred[0].message}`);
   }
-  return {state:next, op:{kind:"batch", ids, count:params.operations.length}};
+  return {state:next, op:{kind:"batch", ids, count:params.operations.length, ...(reopenedAll.length ? {reopened: [...new Set(reopenedAll)]} : {})}};
  }
  const invalid = planFieldError(params); if (invalid) return errorResult(state, invalid);
- const result = reduceTaskMutation(state, action, params);
- if (result.op.kind === "error" || result.state === state) return result;
- const graphError = planGraphError(result.state.tasks); if (graphError) return errorResult(state, graphError);
+ const reduced = reduceTaskMutation(state, action, params);
+ if (reduced.op.kind === "error" || reduced.state === state) return reduced;
  // Creates land appended, so the new task is last; updates resolve by id.
+ const changed = action === "create" ? reduced.state.tasks[reduced.state.tasks.length - 1] : reduced.state.tasks.find(t => t.id === params.id);
+ // Adding or reopening work under a finished parent reopens that parent instead of refusing the call.
+ const reopened = changed && !["completed", "deleted"].includes(changed.status) ? reopenAncestors(reduced.state.tasks, changed) : undefined;
+ const result: ApplyResult = reopened?.ids.length ? {state: {...reduced.state, tasks: reopened.tasks}, op: {...reduced.op, reopened: reopened.ids} as Op} : reduced;
+ const graphError = planGraphError(result.state.tasks); if (graphError) return errorResult(state, graphError);
  // Starting/completing gates (dependencies, unfinished children, acceptance
  // evidence) apply to an initial status exactly as to a transition — a
  // create must not bypass what an update would refuse.
- const task = action === "create" ? result.state.tasks[result.state.tasks.length - 1] : result.state.tasks.find(t => t.id === params.id);
+ const task = changed && result.state.tasks.find(t => t.id === changed.id);
  if ((action === "update" || action === "create") && task && ["in_progress", "completed"].includes(task.status)) {
   if (blockers(task, result.state.tasks).length) return errorResult(state, `Complete dependencies before starting or completing this task: blocked by ${describeBlockers(task, result.state.tasks)}`);
   if (task.status === "completed") {
@@ -373,4 +379,13 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
   }
  }
  return result;
+}
+
+/** Completed ancestors of an unfinished task go back to pending; their recorded evidence is kept and the
+ * reopened ids are reported in the result, so nothing changes without the caller being told. */
+function reopenAncestors(tasks: Task[], task: Task): { tasks: Task[]; ids: number[] } {
+ const byId = new Map(tasks.map(t => [t.id, t]));
+ const reopen = new Set<number>();
+ for (let parent = byId.get(task.parentId!); parent?.status === "completed" && !reopen.has(parent.id); parent = byId.get(parent.parentId!)) reopen.add(parent.id);
+ return { tasks: reopen.size ? tasks.map(t => reopen.has(t.id) ? {...t, status: "pending" as const} : t) : tasks, ids: [...reopen] };
 }

@@ -111962,7 +111962,7 @@ function createProjectReportTool(getProjectRoot) {
   return {
     name: "project_report",
     label: "Project Report",
-    description: "Orient in a project. view:workspace works without an index: fresh local/Git state, remote host names, hooks path, manifest/script names and protected-data hints (12k characters); no remote access or mutation, authority remains unresolved. Otherwise use the cached import graph: compact text by default (16k), view:default for JSON; cold cache starts one background build. Reports facts, not intent. Drill into files with module_report.",
+    description: "Orient in a project. view:workspace works without an index: fresh local/Git state, remote host names, CI workflow triggers and jobs, deploy-shaped scripts, hooks path, manifest/script names and protected-data hints (12k characters); no remote access or mutation, authority remains unresolved. Otherwise use the cached import graph: compact text by default (16k), view:default for JSON; cold cache starts one background build. Reports facts, not intent. Drill into files with module_report.",
     promptSnippet: "Project-level orientation from the review graph",
     renderResult: compactRenderResult(({ details, isError }) => {
       if (isError || details?.available === false) {

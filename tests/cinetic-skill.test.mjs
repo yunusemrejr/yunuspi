@@ -28,7 +28,7 @@ test('cinetic ships pinned MIT upstream files with only SKILL.md adapted', () =>
   assert.match(fs.readFileSync(path.join(skillDir, 'LICENSE.txt'), 'utf8'), /MIT License[\s\S]*Copyright \(c\) 2026 Leonxlnx/);
   const skill = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
   assert.equal(parse(skill.split('---')[1]).name, 'cinetic');
-  assert.match(skill, /## YunusPi integration[\s\S]*names one lead skill for the film/);
+  assert.match(skill, /## YunusPi integration[\s\S]*Choose the engine for the film in front of you/);
   assert.match(skill, /does not install packages the user has not approved|do not install packages the user has not approved/);
   assert.match(fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), /cinetic by Leonxlnx — MIT/);
 });

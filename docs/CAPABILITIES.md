@@ -923,28 +923,22 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 #### video-studio
 
-Produce code-first videos: Remotion projects driven by one master video.json timeline, a look derived from the subject (palette, type pair, backdrop, voice and music that avoid the stock looks) with design and source lint, reusable SVG/Canvas primitives, Blender shots (RGBA sequences with 3D-tracked annotations, alpha image cards, shared arrays, staggered object motion and editable camera/lens paths) and vanilla HTML/WebGL motion pages in the timeline, a library of worked motion examples to search and copy, independent /models image/speech/music/SFX choices, capability-aware image plans, local Piper or selected ElevenLabs narration with measured durations, seeded procedural music/sfx, license-tracked media, stills contact sheets, scene previews, decode-verified finals and fixed-camera RGB atmosphere over approved detailed plates, and revision-bound visual/playback/listening review alongside technical QA.
+One film engine and the tools around any footage: video_project scaffolds, checks and equips cinetic's Remotion starter (one timeline.ts for picture, cues and sound; three.js ready), video_render renders stills, previews and the motion-blurred master through its scripts, narration_tts speaks with ElevenLabs, a configured speech model or local Piper, audio_generate makes music and effects, video_browser records real website takes, and video_qa checks a master's picture, loudness, sync and transcript.
 
-**Entrypoints:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_qa`, `narration_tts`, `audio_synth`, `video_browser`, `image_generate`, `audio_generate`
+**Entrypoints:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `video_browser`, `audio_generate`
 
-**Catalog tool pointers:** `video_project`, `video_render`, `video_shot`, `motion_examples`, `video_assets`, `video_qa`, `narration_tts`, `audio_synth`, `video_frames`, `media_info`, `audio_analyze`, `video_browser`, `image_generate`, `audio_generate`, `media_sync`
+**Catalog tool pointers:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `video_browser`, `audio_generate`, `video_frames`, `media_info`, `audio_analyze`, `audio_mix`, `music_compose`
 
 **Options:**
 
-- `dir`: Video project directory inside the workspace (video.json + src/).
-- `mode`: stills with contact sheet, review with critical stills plus bounded playback in one browser, preview of a scene or seconds range, resumable segments, final or thumbnail. Values: `stills`, `review`, `preview`, `segments`, `final`, `thumbnail`.
-- `action`: Project init/compose/plan/check/install or narration status/install/synthesize.
-- `flow|phase|beat`: Job-specific production plans with current blockers and exact next calls; storyboard beat role/claim/visualAction preserves the visual argument. Plans neither spend nor approve art.
-- `kind`: Procedural audio music bed or sound effect. Values: `music`, `sfx`.
-- `look`: derive (default) builds the look from the subject, suggest lists curated looks; variation and accent re-roll or anchor it.
-- `model|maxCostUsd`: Media tool override; /models preferences stay independent of the LLM. Plans reject unknown pricing units and incompatible capabilities. Quotes are estimates, not provider spending limits.
-- `cameraPath|scene.objects.instances`: Editable camera target/lens keys and shared line/grid/radial instances with bounded staggering; video_shot action:plan creates no output.
-- `rig|lights|material|shadow|anchors`: video_shot: Blender camera move, lighting, material, ground shadow and named 3D anchors for pinned annotations.
-- `approach|query`: motion_examples: search, get or copy worked examples (html, blender, merge, ffmpeg, python). Values: `html`, `blender`, `merge`, `ffmpeg`, `python`.
+- `action`: video_project: status, install (Python tools for render and QA scripts), init (scaffold and install a film), check (TypeScript, lint-film, beat grid). Values: `status`, `install`, `init`, `check`.
+- `mode`: video_render: stills with a contact sheet, preview through render.sh, or the motion-blurred final. Values: `stills`, `preview`, `final`.
+- `dir`: Film folder inside the workspace (src/timeline.ts).
+- `backend`: narration_tts: auto, elevenlabs or piper. Values: `auto`, `elevenlabs`, `piper`.
 
 **Related records:** `creative-studio`, `web-and-media`, `background-tasks`, `3d-studio`
 
-**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-production-flow.ts`](../agent/extensions/lib/video-production-flow.ts), [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts), [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts), [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts), [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts), [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts), [`core/coding-agent/src/core/media-models.js`](../core/coding-agent/src/core/media-models.js), [`core/coding-agent/src/modes/interactive/components/scoped-models-selector.js`](../core/coding-agent/src/modes/interactive/components/scoped-models-selector.js), [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
+**Source:** [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts), [`agent/extensions/lib/film.ts`](../agent/extensions/lib/film.ts), [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts), [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts), [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts), [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts), [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts), [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs), [`agent/skills/cinetic/SKILL.md`](../agent/skills/cinetic/SKILL.md)
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
@@ -954,7 +948,7 @@ Headless Blender as one tool with actions: setup (pinned local 5.2.2 LTS install
 
 **Entrypoints:** `blender`
 
-**Catalog tool pointers:** `blender`, `video_shot`, `video_frames`, `media_info`
+**Catalog tool pointers:** `blender`, `video_frames`, `media_info`
 
 **Options:**
 
@@ -1074,9 +1068,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 - `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 465; factory)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 161; factory)
-- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 132; factory)
+- `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 76; factory)
 - `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 169; factory)
-- `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 144; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 586; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 823; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 780; literal)
@@ -1104,7 +1097,6 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `image_generate` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 511; factory)
 - `image_understand` — [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) (line 29; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 159; factory)
-- `media_sync` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 140; factory)
 - `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2572; literal)
 - `memory_read` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2432; literal)
 - `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2715; literal)
@@ -1112,9 +1104,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2969; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2084; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 414; literal)
-- `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 156; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 166; factory)
-- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 128; factory)
+- `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 72; factory)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 650; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
@@ -1139,15 +1130,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/lib/adaptive-workflows-impl.ts`](../agent/extensions/lib/adaptive-workflows-impl.ts) (line 550; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 515; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 517; literal)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 402; factory)
-- `video_assets` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 122; factory)
-- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 142; factory)
+- `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 84; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
-- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 68; factory)
-- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 118; factory)
-- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 114; factory)
-- `video_shot` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 91; factory)
+- `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 52; factory)
+- `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 68; factory)
+- `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 61; factory)
 - `visual_review` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 352; factory)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 275; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 73; literal)
@@ -1171,7 +1160,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1572, 2151, 2305, 2694)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `sqlite_probe`, `workspace_search` (lines 30)
-- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `audio_synth`, `media_sync`, `motion_examples`, `narration_tts`, `video_assets`, `video_browser`, `video_project`, `video_qa`, `video_render`, `video_shot` (lines 36)
+- [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `narration_tts`, `video_browser`, `video_project`, `video_qa`, `video_render` (lines 20)
 
 ### Literal slash commands
 
@@ -1263,7 +1252,6 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs) — `MCP`
-- [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts) — `wrapper/adapter`
 - [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) — `wrapper/adapter`
 - [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) — `wrapper/adapter`
 - [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) — `wrapper/adapter`
@@ -1370,6 +1358,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/cache-sentinel.ts`](../agent/extensions/lib/cache-sentinel.ts)
 - [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
 - [`agent/extensions/lib/capability-health.ts`](../agent/extensions/lib/capability-health.ts)
+- [`agent/extensions/lib/captions.ts`](../agent/extensions/lib/captions.ts)
 - [`agent/extensions/lib/catalog-cache-lock.ts`](../agent/extensions/lib/catalog-cache-lock.ts)
 - [`agent/extensions/lib/checkpoint-files.ts`](../agent/extensions/lib/checkpoint-files.ts)
 - [`agent/extensions/lib/ci-awareness.ts`](../agent/extensions/lib/ci-awareness.ts)
@@ -1402,6 +1391,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/elevenlabs.ts`](../agent/extensions/lib/elevenlabs.ts)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
+- [`agent/extensions/lib/film.ts`](../agent/extensions/lib/film.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
@@ -1430,7 +1420,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/local-models.ts`](../agent/extensions/lib/local-models.ts)
 - [`agent/extensions/lib/media-model-routing.ts`](../agent/extensions/lib/media-model-routing.ts)
 - [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
-- [`agent/extensions/lib/media-sync.ts`](../agent/extensions/lib/media-sync.ts)
 - [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts)
 - [`agent/extensions/lib/media-work.ts`](../agent/extensions/lib/media-work.ts)
 - [`agent/extensions/lib/memory-guard.ts`](../agent/extensions/lib/memory-guard.ts)
@@ -1440,7 +1429,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/model-competence.ts`](../agent/extensions/lib/model-competence.ts)
 - [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
-- [`agent/extensions/lib/motion-library.ts`](../agent/extensions/lib/motion-library.ts)
 - [`agent/extensions/lib/music-score.ts`](../agent/extensions/lib/music-score.ts)
 - [`agent/extensions/lib/needle-assets.mjs`](../agent/extensions/lib/needle-assets.mjs)
 - [`agent/extensions/lib/needle-embedding-cache.mjs`](../agent/extensions/lib/needle-embedding-cache.mjs)
@@ -1503,7 +1491,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-stop.ts`](../agent/extensions/lib/session-stop.ts)
 - [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts)
 - [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts)
-- [`agent/extensions/lib/shot-scene.ts`](../agent/extensions/lib/shot-scene.ts)
 - [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts)
 - [`agent/extensions/lib/skill-review.ts`](../agent/extensions/lib/skill-review.ts)
 - [`agent/extensions/lib/skill-routing.ts`](../agent/extensions/lib/skill-routing.ts)
@@ -1524,19 +1511,12 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/ui-doctrine.ts`](../agent/extensions/lib/ui-doctrine.ts)
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts)
 - [`agent/extensions/lib/video-art.ts`](../agent/extensions/lib/video-art.ts)
-- [`agent/extensions/lib/video-assets.ts`](../agent/extensions/lib/video-assets.ts)
 - [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts)
 - [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts)
-- [`agent/extensions/lib/video-compose.ts`](../agent/extensions/lib/video-compose.ts)
-- [`agent/extensions/lib/video-derive.ts`](../agent/extensions/lib/video-derive.ts)
 - [`agent/extensions/lib/video-listen.ts`](../agent/extensions/lib/video-listen.ts)
-- [`agent/extensions/lib/video-looks.ts`](../agent/extensions/lib/video-looks.ts)
 - [`agent/extensions/lib/video-motion.ts`](../agent/extensions/lib/video-motion.ts)
-- [`agent/extensions/lib/video-production-flow.ts`](../agent/extensions/lib/video-production-flow.ts)
-- [`agent/extensions/lib/video-publish.ts`](../agent/extensions/lib/video-publish.ts)
 - [`agent/extensions/lib/video-review-evidence.ts`](../agent/extensions/lib/video-review-evidence.ts)
 - [`agent/extensions/lib/video-segments.ts`](../agent/extensions/lib/video-segments.ts)
-- [`agent/extensions/lib/video-shot.ts`](../agent/extensions/lib/video-shot.ts)
 - [`agent/extensions/lib/video-studio.ts`](../agent/extensions/lib/video-studio.ts)
 - [`agent/extensions/lib/wire-warmth.ts`](../agent/extensions/lib/wire-warmth.ts)
 - [`agent/extensions/lib/workspace-write-lease.ts`](../agent/extensions/lib/workspace-write-lease.ts)
@@ -1621,6 +1601,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/lib/paragraph_selector.py`](../agent/scripts/lib/paragraph_selector.py)
 - [`agent/scripts/mini-preprocessor.py`](../agent/scripts/mini-preprocessor.py)
 - [`agent/scripts/music-soundfont.py`](../agent/scripts/music-soundfont.py)
+- [`agent/scripts/narrate.py`](../agent/scripts/narrate.py)
 - [`agent/scripts/pi-launch.sh`](../agent/scripts/pi-launch.sh)
 - [`agent/scripts/process-owner.sh`](../agent/scripts/process-owner.sh)
 - [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs)
@@ -1676,7 +1657,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 32 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 28 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1686,7 +1667,6 @@ The exporter includes 32 public skill directories. This list is a path inventory
 - `browser` — [`agent/skills/browser/SKILL.md`](../agent/skills/browser/SKILL.md)
 - `build` — [`agent/skills/build/SKILL.md`](../agent/skills/build/SKILL.md)
 - `cinetic` — [`agent/skills/cinetic/SKILL.md`](../agent/skills/cinetic/SKILL.md)
-- `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../agent/skills/code-first-video/SKILL.md)
 - `create` — [`agent/skills/create/SKILL.md`](../agent/skills/create/SKILL.md)
 - `data-science` — [`agent/skills/data-science/SKILL.md`](../agent/skills/data-science/SKILL.md)
 - `engineering` — [`agent/skills/engineering/SKILL.md`](../agent/skills/engineering/SKILL.md)
@@ -1697,18 +1677,15 @@ The exporter includes 32 public skill directories. This list is a path inventory
 - `linux-ops` — [`agent/skills/linux-ops/SKILL.md`](../agent/skills/linux-ops/SKILL.md)
 - `media` — [`agent/skills/media/SKILL.md`](../agent/skills/media/SKILL.md)
 - `ml` — [`agent/skills/ml/SKILL.md`](../agent/skills/ml/SKILL.md)
-- `motion-approaches` — [`agent/skills/motion-approaches/SKILL.md`](../agent/skills/motion-approaches/SKILL.md)
 - `networking` — [`agent/skills/networking/SKILL.md`](../agent/skills/networking/SKILL.md)
 - `office-documents` — [`agent/skills/office-documents/SKILL.md`](../agent/skills/office-documents/SKILL.md)
 - `operate` — [`agent/skills/operate/SKILL.md`](../agent/skills/operate/SKILL.md)
-- `remotion-video` — [`agent/skills/remotion-video/SKILL.md`](../agent/skills/remotion-video/SKILL.md)
 - `research` — [`agent/skills/research/SKILL.md`](../agent/skills/research/SKILL.md)
 - `research-writing` — [`agent/skills/research-writing/SKILL.md`](../agent/skills/research-writing/SKILL.md)
 - `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../agent/skills/signature-experience/SKILL.md)
 - `svg-images` — [`agent/skills/svg-images/SKILL.md`](../agent/skills/svg-images/SKILL.md)
 - `systems-languages` — [`agent/skills/systems-languages/SKILL.md`](../agent/skills/systems-languages/SKILL.md)
 - `ui-design` — [`agent/skills/ui-design/SKILL.md`](../agent/skills/ui-design/SKILL.md)
-- `video-editing` — [`agent/skills/video-editing/SKILL.md`](../agent/skills/video-editing/SKILL.md)
 - `web-motion` — [`agent/skills/web-motion/SKILL.md`](../agent/skills/web-motion/SKILL.md)
 
 ## Migration test fixtures
@@ -1823,12 +1800,14 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/guidance-topics-systems.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
 - `lib/guidance-topics.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
 - `lib/harness-orientation.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
+- `lib/media-sync.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
 - `lib/micro-intelligence/micro-task.ts` — retired 2026-10-19: micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed.
 - `lib/micro-intelligence/micro-worker.ts` — retired 2026-10-19: micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed.
 - `lib/micro-intelligence/model-qual-lab.ts` — retired 2026-10-19: Model qualification for helper roles (micro-worker, skill router, coding child, observer, reviewer, fallback) removed with role routing: every role runs on the session model.
 - `lib/micro-intelligence/router-shadow.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/model-routing-store.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
 - `lib/motion-inspect.ts` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). motion_inspect helper removed: tool had no real use in 30 days (636 session logs). Do not recreate.
+- `lib/motion-library.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
 - `lib/noslop.ts` — retired 2026-10-19: Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew.
 - `lib/numeric-checks.ts` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). math_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate.
 - `lib/observer-model-evidence.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
@@ -1836,6 +1815,7 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/scope-deliberation.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/scoped-snapshots.ts` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). snapshot store removed with workdir_snapshot (0 calls in 30 days). Do not recreate.
 - `lib/service-probe.ts` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). service-detail helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate.
+- `lib/shot-scene.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
 - `lib/skill-discovery-controller.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/skill-discovery.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/svg-render.ts` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). svg_render helper removed: tool had no real use in 30 days (636 session logs). Do not recreate.
@@ -1845,6 +1825,13 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/utility-mcp/package.mjs` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). package_probe helper removed: tool had no real use in 30 days (636 session logs). Do not recreate.
 - `lib/utility-mcp/system-probe.mjs` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). local system diagnosis helper removed with sys_probe (0 calls in 30 days). Do not recreate.
 - `lib/utility-mcp/web-assets.mjs` — retired 2026-10-19: user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). web_asset_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate.
+- `lib/video-assets.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-compose.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-derive.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-looks.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-production-flow.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-publish.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `lib/video-shot.ts` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
 - `lichtfeld-studio.ts` — retired 2026-10-02: LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate
 - `local-lm-assets.mjs` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
 - `local-lm.ts` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
@@ -1908,6 +1895,10 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `session-bridge.ts` — retired 2026-08-31: cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations
 - `session-reviewer.ts` — retired 2026-08-31: review channel superseded by checkpoints; references scrubbed
 - `session-watchmaker.ts` — retired 2026-10-10: merged into session-observer.ts: one background reviewer now judges quality, intent and time (time-ledger row); the watchmaker role, scratchpad memos, /watchmaker command and its model role were removed. Do not recreate
+- `skills/code-first-video` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `skills/motion-approaches` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `skills/remotion-video` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
+- `skills/video-editing` — retired 2026-10-19: The two video pipelines were merged: cinetic's Remotion starter is the one film engine behind video_project and video_render; the video.json compositor, its looks, Blender shot plates, stock asset search, sync audit, scene synthesis and motion example library went with it.
 - `smol-extraction.ts` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
 - `smol-preprocessor.ts` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
 - `subagent-tool-description.md` — retired 2026-09-02: runtime-orphaned custom tool-description file (its toolDescriptionMode: 'custom' loader retired with the tool-desc-overrides seam 2026-09-02). Delegation posture folded into the pi-subagents fork's DEFAULT_SUBAGENT_TOOL_DESCRIPTION + SUBAGENT_TOOL_PROMPT_GUIDELINES (src/extension/tool-description.ts), which now own the subagent tool prompt; file moved to backups/retired-extensions/. Do not recreate

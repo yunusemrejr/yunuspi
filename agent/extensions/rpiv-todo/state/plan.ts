@@ -32,7 +32,7 @@ export function planGraphError(tasks: readonly Task[]): string | undefined {
     const parent = byId.get(task.parentId);
     if (!parent || parent.id === task.id) return 'parentId must name another existing task';
     if (task.status !== 'deleted' && parent.status === 'deleted') return 'Reparent or delete children before deleting their parent';
-    if (task.status !== 'deleted' && task.status !== 'completed' && parent.status === 'completed') return `Reopen the parent before adding or reopening unfinished children: ${taskLabel(parent)} still has unfinished ${taskLabel(task)}`;
+    if (task.status !== 'deleted' && task.status !== 'completed' && parent.status === 'completed') return `Complete or remove unfinished children before completing their parent: ${taskLabel(parent)} still has unfinished ${taskLabel(task)}`;
     if (task.status !== 'deleted') edges.get(parent.id)!.push(task.id);
   }
   // Starting a child inherits the parent's prerequisites. Include those edges

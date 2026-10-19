@@ -1,6 +1,6 @@
 # Motion and model preflight
 
-Use the existing owners: encoded video uses `media_info`; imported 3D models use `video_assets` and the existing `Model3D`/Three.js renderer. A preflight receipt is technical evidence. Appearance, easing and storytelling still require actual pixels and playback.
+Use the existing owners: encoded video uses `media_info`; 3D models are registered and inspected with `asset_register` and then loaded into a film's three.js scene. A preflight receipt is technical evidence. Appearance, easing and storytelling still require actual pixels and playback.
 
 ## Inspect the delivery clock
 
@@ -24,8 +24,8 @@ Limits: JSON 2 MiB, any resource 40 MiB, bundle 96 MiB, 128 resource files, 4096
 
 Registration accepts `sourceUrl`, `creator` and `licenseUrl` alongside existing license/description fields. Model records keep a compact advisory summary. Model deduplication includes local resource hashes so equal JSON referencing changed geometry is not treated as the same content. Search terms `3d`, `model`, `gltf` and `glb` find registered models. Cached registrations are not current-file evidence; run inspect again after edits.
 
-`video_assets import` copies a validated local model together with its relative dependencies into a fresh `public/assets/models/<name>/` folder, preserves the existing provenance manifest and adds the model to the same workspace asset registry. Existing files are preserved; supply another name to make a separate import. Fetched Poly Haven models receive the same structural inspection, provenance and registry summary. The `Model3D` primitive uses the existing plain `GLTFLoader`; required Draco, Meshopt or KTX2 decoding must be configured before rendering such assets. Render representative stills and preview playback through the existing video project before delivery.
+A model that a film loads should keep its relative resource files beside it, in the film's `public/` folder, so the loader can resolve them. The plain three.js `GLTFLoader` does not decode Draco, Meshopt or KTX2 payloads; configure those decoders before rendering such assets. Render representative stills with `video_render` `mode:"stills"`, and preview playback, before delivery.
 
 ## Verification
 
-`tests/media-preflight.test.mjs` builds authored glTF/GLB fixtures in temporary directories, validates decoded bounds/times and provenance, rejects malformed/resource-escaping inputs, checks dependency-preserving import, and renders actual FFmpeg video, browser CSS motion and a GLB through the existing Three.js GLTFLoader to actual WebGL framebuffer pixels. It covers VFR timing, the frame work bound, cancellation, static holds, loop boundary evidence, reduced-motion pixels and compact receipt sizes. No binary fixtures are downloaded or committed. `PI_REQUIRE_MEDIA_TEST=1` makes missing browser prerequisites fail rather than skip.
+`tests/media-preflight.test.mjs` builds authored glTF/GLB fixtures in temporary directories and has four cases. glTF/GLB inspection reads decoded positions and timing and caches provenance in the asset registry. Malformed chunks, missing or escaping resources, oversized work, invalid indices and node cycles are rejected. Motion checks run on rendered FFmpeg frames and report frame timing, intentional holds, the loop boundary and compact receipts; that case is skipped when FFmpeg is absent. Timestamp and loop evidence are checked so that a bad boundary is told apart from normal adjacent motion. No binary fixtures are downloaded or committed.

@@ -58,6 +58,11 @@ function formatGetLines(task: Task, state: TaskState): string {
  * reducer output.
  */
 export function formatContent(op: Op, state: TaskState): string {
+	const reopened = "reopened" in op && op.reopened?.length ? `\nReopened completed parent ${op.reopened.map((id) => `#${id}`).join(", ")}: it has unfinished work again.` : "";
+	return formatOp(op, state) + reopened;
+}
+
+function formatOp(op: Op, state: TaskState): string {
 	switch (op.kind) {
 		case "batch": return `Applied ${op.count} operations; ids=${JSON.stringify(op.ids)}\n${renderPlan(state.tasks, "frontier")}`;
 		case "create": {

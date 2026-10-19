@@ -1,6 +1,6 @@
 ---
 name: audio
-description: "Process, measure, mix, narrate, compose and synthesize audio: FFmpeg/SoX filtering, loudness and sync, LUFS/true-peak/spectrum analysis, audio_mix, narration, MIDI scores via music_compose, and seeded procedural beds and SFX via audio_synth."
+description: "Process, measure, mix, narrate, compose and synthesize audio: FFmpeg/SoX filtering, loudness and sync, LUFS/true-peak/spectrum analysis, audio_mix, narration, MIDI scores via music_compose, and seeded procedural beds and SFX via audio_generate."
 disable-model-invocation: true
 ---
 

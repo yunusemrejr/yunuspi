@@ -49,7 +49,7 @@ test('debugging keeps reproduction before repair and exposes source navigation t
 test('audio intents stage tools that can perform the requested operation', () => {
   assert.ok(intentBundleTools('Denoise the audio track').includes('audio_mix'));
   assert.ok(intentBundleTools('Time-stretch the music track').includes('audio_mix'));
-  assert.ok(intentBundleTools('Create a sound effect for the transition').includes('audio_synth'));
+  assert.ok(intentBundleTools('Create a sound effect for the transition').includes('audio_generate'));
 });
 
 test('web-answer, mailbox, marketing, API and browser-action intents stage their tools on turn one', () => {

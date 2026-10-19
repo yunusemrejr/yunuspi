@@ -3,8 +3,8 @@
  *
  * Each preset is a /goal with a short standard and the few fronts it is judged
  * on. Chained, the standards share one assignment: a chain that makes a video
- * turns noslop and nobug into checks on the picture and the file instead of a
- * codebase audit, and video with 3d or anatomy adds one film paragraph naming
+ * turns noslop, nobug and anatomy into checks on the picture and the file instead
+ * of a codebase audit or a kit build, and video with 3d or anatomy adds one film paragraph naming
  * the lead skill. Pure, so the wording and the chaining grammar are testable.
  */
 import path from "node:path";
@@ -54,6 +54,20 @@ function trimConnectors(text: string, lead: boolean, tail: boolean): string {
 	return out;
 }
 
+/** Typed chains glue or garble tokens: "/anatom,y/noslop" is "/anatomy /noslop". A chunk is split only when
+ * every piece, commas dropped, is a token name; a slash-only chunk such as "/video/3d" is split only in the
+ * leading run of commands, so the same text later in a sentence stays a path. */
+function unglue(text: string): string {
+	const code = [...text.matchAll(CODE)].map((match) => [match.index ?? 0, (match.index ?? 0) + match[0].length]);
+	const lead = /^(?:\s*\/[A-Za-z0-9,/]+(?=\s|$))*/.exec(text)?.[0].length ?? 0;
+	return text.replace(/(?<=^|\s)\/(?=[A-Za-z0-9,/]*[,/])[A-Za-z0-9,/]*(?=$|\s)/g, (chunk, offset: number) => {
+		if (code.some(([start, end]) => offset >= start && offset < end)) return chunk;
+		if (!chunk.includes(",") && offset >= lead) return chunk;
+		const names = chunk.replace(/,/g, "").split("/").slice(1).map((name) => name.toLowerCase());
+		return names.length && names.every((name) => name === "goal" || (PRESET_IDS as readonly string[]).includes(name)) ? names.map((name) => `/${name}`).join(" ") : chunk;
+	});
+}
+
 /**
  * Every preset and /goal token in a text, wherever it stands. The task is the
  * text with the tokens removed: the spacing they leave closes up, and a
@@ -62,8 +76,8 @@ function trimConnectors(text: string, lead: boolean, tail: boolean): string {
  * back trimmed and otherwise untouched.
  */
 export function extractPresetTokens(text: string): PresetTokens {
-	const raw = String(text ?? "");
-	const literal = raw.replace(/\s+/g, " ").trim();
+	const literal = String(text ?? "").replace(/\s+/g, " ").trim();
+	const raw = unglue(String(text ?? ""));
 	const masked = raw.replace(CODE, (code) => "\u0000".repeat(code.length));
 	const presets: PresetId[] = [];
 	const spans: [number, number][] = [];
@@ -141,7 +155,9 @@ export function presetUserText(presets: readonly PresetId[], task: string): stri
 const skill = (name: string) => path.resolve(import.meta.dirname, "../../skills", name, "SKILL.md");
 
 /** A generated photo with 3D decoration on top once shipped as a "3D film"; every picture-making boost says so. */
-const NO_IMAGE_STANDIN = "Generated or stock images never stand in for the 3D picture: no photo plate with 3D decoration laid over it. Use image_generate only when the user asks for an image, or for a texture or reference the scene itself uses.";
+const NO_IMAGE_STANDIN = "Images support the 3D at most (a texture, a backdrop, a reference); the subject is never a generated or stock photo with 3D decoration laid over it.";
+/** Every making boost weighs its tools instead of following a fixed recipe; the user's explicit choices are not options. */
+const CHOOSE = "a tool, engine or provider the user named is the one to use";
 
 interface Boost {
 	/** The standard this boost holds the work to. */
@@ -150,7 +166,7 @@ interface Boost {
 	kind: string;
 	/** Fronts, most important first; a chain keeps fewer. */
 	fronts: readonly string[];
-	/** In a chain that makes a video, noslop and nobug judge the picture and the file instead of a codebase. */
+	/** In a chain that makes a video, noslop, nobug and anatomy judge the picture and the file instead of a codebase or a kit. */
 	media?: { standard: string; front: string };
 }
 
@@ -195,7 +211,7 @@ const BOOSTS: Record<PresetId, Boost> = {
 		},
 	},
 	"3d": {
-		standard: `3D: build the picture from real geometry, materials and motivated light. Pick the route and read its guide first: Blender (the blender tool and the 3d-cad skill) to model assets, three.js for browser and real-time scenes, the anatomy skills for a figure made of real parts. Ground proportions and materials in real references. Render stills from several angles, look at them, fix what is weak and look again. ${NO_IMAGE_STANDIN} Placeholder primitives are scaffolding, not the delivery. It runs from a clean start with every asset resolving.`,
+		standard: `3D: build the picture from real geometry, materials and motivated light. Choose the route from the subject, the deliverable and this machine (Blender through the blender tool and the 3d-cad skill, three.js in code, the anatomy kit for an object made of real parts, or a mix such as a Blender-built GLB in three.js); ${CHOOSE}. Ground proportions and materials in references. Render stills from several angles, look at them, fix what is weak and look again. ${NO_IMAGE_STANDIN} Placeholder primitives are scaffolding, not the delivery. It runs from a clean start with every asset resolving.`,
 		kind: "3D (Blender scenes, three.js or WebGL code, models, shaders)",
 		fronts: [
 			"Purpose-built geometry, materials and light grounded in references; no placeholder primitives and no generated or stock image standing in for the 3D.",
@@ -204,12 +220,12 @@ const BOOSTS: Record<PresetId, Boost> = {
 		],
 	},
 	video: {
-		standard: `Video: a finished film on every track. Write PRODUCTION.md first: script lines with target times, a shot list saying what each shot shows and why, the look, and the audio plan; facts the film states come from real sources. Build on one pipeline and read its guide first: cinetic (${skill("cinetic")}) for motion design, ads and launch films; media (${skill("media")}) for narrated explainers and editing existing footage. Look at a hero still before any long render, a contact sheet of every shot, and frames from the final MP4 (read returns images; on a text-only model use image_understand); fix what a director would reject. Sound: narration timed to the picture it describes, music ducked under speech, effects only on visible motion; measure the master with video_qa listen and analyze (about -16 LUFS, true peak under -1 dBTP). Render previews small and the final once; deliver one file at the asked length, size and frame rate.`,
+		standard: `Video: a finished film on every track, at a standard a viewer would rank. Plan it before building: the script with timings, what each shot shows and why, the look and the sound; facts the film states come from real sources. Choose the engine from the subject, this machine and the user's words: cinetic (${skill("cinetic")}, Remotion with three.js for 3D, through video_project) for designed films of any kind, Blender for photoreal scenes, the media guide (${skill("media")}) for editing supplied footage; ${CHOOSE}. Choose the voice the same way: the provider the user named, else the best one available here (ElevenLabs with a key, a /models speech route, local Piper). Look at a hero still before any long render, a contact sheet of every shot and frames from the final file (read returns images; a text-only model uses image_understand); fix what a director would reject. Sound: narration on the picture it describes, music ducked under speech, effects on visible motion, the master measured (video_qa listen; about -16 LUFS, true peak under -1 dBTP). Previews small, the final once; one file at the asked length, size and frame rate.`,
 		kind: "video (timelines, render scripts, narration and music, exports)",
 		fronts: [
 			"Every shot is purposeful in stills you looked at, transitions follow motion, and no placeholder or mistimed frames survive.",
-			"Narration intelligible and in sync, music under speech, nothing clipped; video_qa listen and analyze pass on the delivered file.",
-			"PRODUCTION.md holds the script with timings, the shot list and the audio plan before the render.",
+			"Narration intelligible and in sync, music under speech, nothing clipped, measured on the delivered file.",
+			"The script with timings, the shots and the sound were planned before the render, and the film delivers that plan.",
 		],
 	},
 	anatomy: {
@@ -220,6 +236,10 @@ const BOOSTS: Record<PresetId, Boost> = {
 			"Stills, frames and the page in a real browser were looked at.",
 			"Anatomy for how it works, anatomy-reveal for one object taken apart; the choice and its reason are stated.",
 		],
+		media: {
+			standard: `Anatomy in a film: the subject's real parts, proportions and motion, taken from references, and shots that show how it is built or how it works. The anatomy guides (${skill("anatomy")}, ${skill("anatomy-reveal")}) supply technique where they fit the film's engine; no traced or embedded images.`,
+			front: "the subject's parts, proportions and motion match real references, and the shots show how it is built or works.",
+		},
 	},
 };
 
@@ -247,7 +267,7 @@ const FILM_LEADS: readonly [RegExp, string][] = [
 /** Video with 3D or Anatomy: one film, one lead skill, one clock. */
 export function filmDirective(task: string): string {
 	const lead = FILM_LEADS.find(([pattern]) => pattern.test(task))?.[1] ?? "cinetic";
-	return `Film: one film whose hero in every shot is the real 3D subject. Lead skill: ${lead} (${skill(lead)}); other guides only where it lacks something. Drive the 3D scene from the film's one timeline (the three.js or anatomy scene mounted in the composition as a function of the frame) so picture, cues and sound share a clock; Blender only builds GLB assets for it. Transitions follow motion: match cuts, whips, a part becoming the next shot, never default crossfades.`;
+	return `Film: one film whose hero in every shot is the subject built in 3D. Lead guide: ${lead} (${skill(lead)}); read others only where it lacks something. Keep picture, cues and sound on one clock: a three.js or anatomy scene mounted in the composition as a function of the frame, or Blender renders cut to the timeline. Transitions follow motion (match cuts, whips, a part becoming the next shot) rather than default crossfades.`;
 }
 
 function chainText(task: string, ids: readonly PresetId[]): string {

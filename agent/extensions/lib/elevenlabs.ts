@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { FFMPEG_FLAGS, inputArgs, inputFile, number, outputFolder, probe, produced, requireStream, run } from './media-process.ts';
-import { captionChunks, toSrt, toVtt } from '../../skills/remotion-video/assets/template/src/captions.ts';
+import { captionChunks, toSrt, toVtt } from './captions.ts';
 import { acquireCatalogCacheLock } from './catalog-cache-lock.ts';
 
 type Env = Record<string, string | undefined>;
@@ -278,7 +278,7 @@ export async function audioGenerate(params: any, cwd: string, signal?: AbortSign
     : { text: params.prompt, duration_seconds: seconds, loop: params.loop === true, model_id: params.model ?? 'eleven_text_to_sound_v2', prompt_influence: number(params.influence, 0.3, 0, 1, 'influence') };
   if (music && !['music_v1', 'music_v2', 'music_v2_5'].includes(body.model_id)) throw Error('Unsupported ElevenLabs music model');
   if (!music && !['eleven_text_to_sound_v2'].includes(body.model_id)) throw Error('Unsupported ElevenLabs sound model');
-  if (!keyOf(env)) throw Object.assign(new Error('Audio was not submitted: ElevenLabs is not configured. Inspect music_compose for local music or audio_synth for local procedural sounds; preserve the selected hosted route if required.'), { submissionNotSent: true });
+  if (!keyOf(env)) throw Object.assign(new Error('Audio was not submitted: ElevenLabs is not configured. Inspect music_compose for local music or audio_generate with a local selection for procedural sounds; preserve the selected hosted route if required.'), { submissionNotSent: true });
   const dir = await outputFolder(params.outputDir, cwd), file = path.join(dir, 'generated.mp3');
   let saved = false;
   let pending: any = { provider: 'elevenlabs', kind: params.kind, model: body.model_id, requestedSeconds: seconds, decodeVerified: false, status: 'submitting', prompt: params.prompt, submittedAt: new Date().toISOString() };

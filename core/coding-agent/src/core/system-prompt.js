@@ -75,6 +75,7 @@ export function buildSystemPrompt(options) {
     }
     // Always include these
     addGuideline("Identify the requested outcome, constraints and completion evidence before acting. Preserve earlier requirements unless the current user explicitly cancels or replaces them; questions and status checks alone do not cancel ongoing work.");
+    addGuideline("Before choosing an approach, weigh the tools, languages, engines and providers that fit the task on this machine and its real targets (servers, repositories, deploy paths); what the user named explicitly is decided, not an option.");
     addGuideline("Use existing owners and the smallest complete change. Reuse fresh evidence, test affected behavior and failure paths, and report remaining gaps precisely.");
     addGuideline("Batch up to four independent reads, searches or verification commands in one assistant turn; chain dependent inspection steps into one shell command instead of one command per turn.");
     addGuideline("Do not repeat a file read or command whose result is already in context unless the file changed or a different range is needed.");

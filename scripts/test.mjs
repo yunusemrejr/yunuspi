@@ -51,8 +51,8 @@ export function testConcurrency(value, cores = os.availableParallelism(), ci = B
 /** Files that dominate a run (measured standalone, 2026-10-19) start first so the pool never ends waiting on one
  *  of them; everything else follows largest first, the same size proxy the shards use. */
 export const SLOW_FIRST = [
-  'shared-skill-boundary', 'self-mutation', 'subagent-executor-routing', 'motion-library', 'creative-delivery',
-  'isolated-child-catalog', 'video-production', 'video-choreography', 'needle-runtime', 'motion-production-quality',
+  'shared-skill-boundary', 'self-mutation', 'subagent-executor-routing', 'creative-delivery',
+  'isolated-child-catalog', 'video-production', 'needle-runtime',
 ].map(name => `tests/${name}.test.mjs`);
 export function orderForRun(selected, sizeOf = file => fs.statSync(path.join(root, file)).size) {
   const rank = new Map(SLOW_FIRST.map((file, index) => [file, index]));

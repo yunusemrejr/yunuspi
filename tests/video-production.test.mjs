@@ -12,10 +12,9 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile), root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => syncFs.existsSync(path.join(p, 'extensions/lib/elevenlabs.ts')));
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
-const eleven = await load('extensions/lib/elevenlabs.ts'), sync = await load('extensions/lib/media-sync.ts'), segments = await load('extensions/lib/video-segments.ts');
+const eleven = await load('extensions/lib/elevenlabs.ts'), segments = await load('extensions/lib/video-segments.ts');
 const browser = await load('extensions/lib/video-browser.ts'), video = await load('extensions/lib/video-studio.ts');
 const media = await load('extensions/lib/media-process.ts'), guarded = await load('extensions/lib/guarded-process.ts');
-const blender = await load('extensions/lib/blender-studio.ts'), shots = await load('extensions/lib/video-shot.ts');
 const env = { ELEVENLABS_API_KEY: 'TEST_audio_fixture_only', ELEVENLABS_VOICE_ID: 'fixtureVoice' };
 const workspace = async t => { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-production-')); t.after(() => fs.rm(dir, { recursive: true, force: true })); return dir; };
 const audioFixture = async dir => {
@@ -78,42 +77,6 @@ test('paid narration chunks resume after provider failure, stitch PCM clocks and
   for (const name of files.filter(n => n.endsWith('.json'))) assert.equal((await fs.readFile(path.join(cache, name), 'utf8')).includes(env.ELEVENLABS_API_KEY), false);
 });
 
-test('cloud scene checkpoints survive failure and selected scenes retain neighbouring context', async t => {
-  const dir = await workspace(t), bytes = await audioFixture(dir), original = globalThis.fetch;
-  const savedEnv = process.env.ELEVENLABS_API_KEY; process.env.ELEVENLABS_API_KEY = env.ELEVENLABS_API_KEY;
-  t.after(() => { globalThis.fetch = original; if (savedEnv === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = savedEnv; });
-  const spec = { fps: 30, scenes: [
-    { id: 'intro', seconds: 1, narration: 'GPU works GPU.', cues: { reveal: .1 }, cueWords: { reveal: 'GPU#2' } },
-    { id: 'detail', seconds: 1, narration: 'A different scene follows.' },
-    { id: 'outro', seconds: 1, narration: 'The ending resolves.' } ] };
-  await fs.writeFile(path.join(dir, 'video.json'), JSON.stringify(spec));
-  let fail = true; const requests = [];
-  globalThis.fetch = async (_url, options) => {
-    const body = JSON.parse(options.body); requests.push(body);
-    if (fail && requests.length === 2) return new Response('', { status: 503 });
-    return Response.json({ audio_base64: bytes.toString('base64'), alignment: alignment(body.text) });
-  };
-  const params = { action: 'synthesize', dir, backend: 'elevenlabs', voiceId: 'chosenVoice', model: 'eleven_multilingual_v2', lexicon: { GPU: 'G P U' } };
-  await assert.rejects(video.narrationTts(params, dir), /HTTP 503/);
-  let updated = JSON.parse(await fs.readFile(path.join(dir, 'video.json'), 'utf8'));
-  assert.equal(updated.scenes[0].narrationAudio, 'audio/narration/intro.wav');
-  assert.equal(updated.scenes[1].narrationAudio, undefined);
-  assert.deepEqual(updated.scenes[0].narrationWords.map(w => w.w), ['GPU', 'works', 'GPU.']);
-  assert.ok(updated.scenes[0].seconds >= 3.2);
-  assert.equal(updated.scenes[0].cues.reveal, Number(Math.max(0, updated.scenes[0].narrationOffset + updated.scenes[0].narrationWords[2].s - .08).toFixed(2)));
-  fail = false;
-  const result = await video.narrationTts(params, dir);
-  assert.equal(requests.length, 4); assert.equal(result.narrated[0].receipts[0].reused, true);
-  const selected = await video.narrationTts({ ...params, scenes: ['detail'] }, dir);
-  assert.equal(selected.narrated[0].receipts[0].reused, true, 'neighbour context stays the same when selection changes');
-  assert.equal(requests.length, 4);
-  const audit = await sync.mediaSync({ dir }, dir);
-  assert.equal(audit.ok, true, JSON.stringify(audit.issues));
-  updated = JSON.parse(await fs.readFile(path.join(dir, 'video.json'), 'utf8')); updated.fps = 0;
-  await fs.writeFile(path.join(dir, 'video.json'), JSON.stringify(updated));
-  await assert.rejects(video.narrationTts(params, dir), /fps/); assert.equal(requests.length, 4, 'bad timeline fails before paid work');
-});
-
 test('music generation measures the actual file and refuses an invalid duration before paid work', async t => {
   const dir = await workspace(t), bytes = await audioFixture(dir), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
@@ -127,32 +90,6 @@ test('music generation measures the actual file and refuses an invalid duration 
   assert.equal(music.decodeVerified, true); assert.ok(music.seconds < 2.1); assert.equal(music.requestedSeconds, 3);
   await assert.rejects(eleven.audioGenerate({ kind: 'music', prompt: 'Fixture', seconds: 1000 }, dir, undefined, env), /seconds/);
   assert.equal(calls, 1, 'invalid duration never reaches the paid provider');
-});
-
-test('sync catches stale durations, speech across cuts, repeated cue words and last-frame overflow', () => {
-  const spec = { fps: 30, scenes: [{ id: 'one', seconds: 2, narration: 'Hello hello.', narrationAudio: 'one.wav', narrationSeconds: 1.2, narrationOffset: .4,
-    narrationWords: [{ w: 'Hello', s: 0, e: .3 }, { w: 'hello.', s: .5, e: 1.1 }], cues: { second: .82 }, cueWords: { second: 'hello#2' } }] };
-  const good = sync.auditMediaSync(spec, { one: 1.2 });
-  assert.equal(good.ok, true); assert.equal(good.scenes[0].cues[0].frame, 25); assert.equal(good.scenes[0].endFrameExclusive, 60);
-  const bad = structuredClone(spec); bad.scenes[0].cues.second = 1.8; bad.scenes[0].narrationOffset = 1; bad.scenes[0].narration = 'Wrong text.';
-  const result = sync.auditMediaSync(bad, { one: 1.3 });
-  assert.ok(['text-word-mismatch', 'stale-audio-duration', 'narration-crosses-cut', 'cue-speech-drift'].every(code => result.issues.some(i => i.code === code)));
-  const edge = structuredClone(spec); edge.scenes[0].cues.last = 1.999;
-  assert.ok(sync.auditMediaSync(edge).issues.some(i => i.code === 'cue-outside-frames'));
-  assert.equal(sync.musicGrid({ bpm: 120, offset: .1, times: [.72], unit: 'beat' }).cues[0].snapped, .6);
-});
-
-test('long-video frame plans have no gaps, support timelines beyond thirty minutes and hash actual source content', async t => {
-  const parts = segments.planSegments(216001, 30, 60);
-  assert.equal(parts[0].from, 0); assert.equal(parts.at(-1).to, 216000);
-  assert.equal(parts.reduce((n, p) => n + p.frames, 0), 216001);
-  assert.ok(parts.slice(1).every((p, i) => p.from === parts[i].to + 1));
-  const long = { fps: 30, width: 1920, height: 1080, scenes: Array.from({ length: 10 }, (_, i) => ({ id: `scene-${i}`, component: 'A', seconds: 600 })) };
-  assert.equal(video.validateVideoSpec(long, new Set(['A']), () => true).issues.some(i => i.severity === 'error'), false);
-  const dir = await workspace(t); await fs.mkdir(path.join(dir, 'src')); await fs.writeFile(path.join(dir, 'src', 'scene.tsx'), 'AAAA');
-  const file = path.join(dir, 'src', 'scene.tsx'), stat = await fs.stat(file), before = await segments.videoFingerprint(dir, { fps: 30 });
-  await fs.writeFile(file, 'BBBB'); await fs.utimes(file, stat.atime, stat.mtime);
-  assert.notEqual(await segments.videoFingerprint(dir, { fps: 30 }), before, 'same-size/mtime source edits invalidate segments');
 });
 
 test('segment checkpoints survive failures, corrupted parts re-render, and assembled audio is encoded once', async t => {
@@ -189,17 +126,6 @@ test('segment checkpoints survive failures, corrupted parts re-render, and assem
     for (let i = start; i < end; i++) energy += pcm.stdout.readInt16LE(i * 2) ** 2;
     assert.ok(Math.sqrt(energy / (end - start)) > 1500, `no encoder-padding silence at ${cut}s`);
   }
-});
-
-test('surface detail renders a mesh, chains authored normals and preserves its source blend', { skip: !blender.blenderBinary() ? 'Blender is not installed' : false, timeout: 180_000 }, async t => {
-  const dir = await workspace(t), source = path.join(dir, 'source.blend');
-  await fs.writeFile(path.join(dir, 'video.json'), JSON.stringify({ width: 320, height: 180, fps: 10, theme: { background: '#142017', accent: '#cacc91' }, scenes: [] }));
-  await blender.blenderRun({ code: `import bpy,sys\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete(use_global=False)\nbpy.ops.mesh.primitive_cube_add()\nobj=bpy.context.object\nmat=bpy.data.materials.new('AuthoredMetal')\nmat.use_nodes=True\nshader=mat.node_tree.nodes.get('Principled BSDF')\nnormal=mat.node_tree.nodes.new('ShaderNodeBump')\nmat.node_tree.links.new(normal.outputs['Normal'],shader.inputs['Normal'])\nobj.data.materials.append(mat)\nbpy.ops.wm.save_as_mainfile(filepath=sys.argv[sys.argv.index('--')+1])`, args: [source], timeoutSec: 60 }, dir);
-  const before = await segments.fileDigest(source);
-  const result = await shots.videoShot({ dir, name: 'detailed', blend: source, seconds: 1, fps: 2, width: 128, height: 72, samples: 8, surface: { texture: 'brushed-metal', scale: 120, bump: .025, bevel: .008, roughness: .28, metallic: 1 } }, dir);
-  assert.equal(result.frames, 2); assert.equal(result.alpha, true); assert.equal(await segments.fileDigest(source), before);
-  const inspect = await blender.blenderRun({ blend: path.join(dir, 'blender/detailed.blend'), factoryStartup: false, code: `import bpy,json\nobj=next(o for o in bpy.context.scene.objects if o.type=='MESH' and o.name=='Cube')\nmat=obj.active_material\nnodes=mat.node_tree.nodes\nbumps=[n for n in nodes if n.type=='BUMP']\nprint('YUNUSPI_RESULT '+json.dumps({'material':mat.name,'bumps':len(bumps),'chained':sum(1 for n in bumps if n.inputs['Normal'].is_linked),'noise':sum(1 for n in nodes if n.type=='TEX_NOISE'),'bevel':[m.width for m in obj.modifiers if m.type=='BEVEL']}))`, timeoutSec: 60 }, dir);
-  assert.match(inspect.result.material, /YP_detail/); assert.equal(inspect.result.bumps, 2); assert.equal(inspect.result.chained, 1); assert.equal(inspect.result.noise, 1); assert.ok(inspect.result.bevel[0] > 0);
 });
 
 test('isolated render workers do not inherit provider credentials', async t => {

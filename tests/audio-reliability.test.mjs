@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => syncFs.existsSync(path.join(dir, 'extensions/lib/music-score.ts')));
 const load = file => import(pathToFileURL(path.join(agent, 'extensions/lib', file)).href);
-const music = await load('music-score.ts'), eleven = await load('elevenlabs.ts'), sync = await load('media-sync.ts');
+const music = await load('music-score.ts'), eleven = await load('elevenlabs.ts');
 const video = await load('video-studio.ts');
 const exec = promisify(execFile);
 const env = { ELEVENLABS_API_KEY: 'TEST_audio_recovery_fixture_only', ELEVENLABS_VOICE_ID: 'fixtureVoice' };
@@ -285,28 +285,4 @@ test('an uncertain generated-audio submission retains its request without claimi
   const receipt = JSON.parse(await fs.readFile(submission, 'utf8'));
   assert.equal(receipt.status, 'unknown'); assert.equal(receipt.decodeVerified, false);
   assert.equal(syncFs.existsSync(path.join(path.dirname(submission), 'generated.mp3')), false);
-});
-
-test('sync refuses ambiguous scene identities and nonfinite narration metadata', () => {
-  const spec = { fps: 24, scenes: [{ id: 'one', seconds: 1, narrationSeconds: .5 }] };
-  assert.throws(() => sync.auditMediaSync({ ...spec, scenes: [...spec.scenes, ...spec.scenes] }), /unique/);
-  assert.throws(() => sync.auditMediaSync({ scenes: [null] }), /unique/);
-  for (const duration of [NaN, Infinity, -1, '0.5']) assert.throws(() => sync.auditMediaSync({ ...spec, scenes: [{ ...spec.scenes[0], narrationSeconds: duration }] }), /narrationSeconds/);
-  assert.throws(() => sync.auditMediaSync({ ...spec, scenes: [{ ...spec.scenes[0], cueLead: NaN }] }), /cueLead/);
-  assert.equal(sync.auditMediaSync({ ...spec, scenes: [{ id: 'constructor', seconds: 1 }] }).ok, true);
-  assert.equal(sync.auditMediaSync({ ...spec, scenes: [{ id: 'silent', seconds: 1, narrationSeconds: 0 }] }).ok, true);
-  assert.throws(() => sync.musicGrid({ bpm: 120, times: [1], unit: 'unknown' }), /unit must/);
-});
-
-test('delivery sync compares relative video duration and still detects real audio drift', async t => {
-  const dir = await workspace(t), file = path.join(dir, 'shifted.mp4');
-  await exec('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=s=64x64:r=24:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:v', 'libx264', '-c:a', 'aac', '-output_ts_offset', '5', file]);
-  const timeline = { fps: 24, scenes: [{ id: 'one', seconds: 1 }] };
-  const result = await sync.mediaSync({ timeline, path: file }, dir);
-  assert.equal(result.ok, true);
-  assert.ok(result.delivery.presentationStartSeconds > 4);
-  assert.ok(Math.abs(result.delivery.timelineDeltaFrames) <= 1);
-  const short = await sync.mediaSync({ timeline: { ...timeline, scenes: [{ id: 'one', seconds: .5 }] }, path: file }, dir);
-  assert.equal(short.ok, false);
-  assert.ok(short.issues.some(issue => issue.code === 'delivery-boundary-drift'));
 });

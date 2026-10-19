@@ -20,13 +20,13 @@ export function builtinMediaModels() {
     const row = (kind, id, name, description) => ({ kind, id, name, description, source: "bundled", configured: undefined });
     return [
         row("image", "openrouter/auto", "Automatic image choice", "Match reference, alpha, aspect and resolution capabilities, then choose within the explicit cost limit. Preview uses a bounded single image."),
-        row("video", "local/native", "Native motion graphics", "Use video_project, video_browser and video_shot for precise typography, 3D, browser demonstrations and editing. No generation API charge."),
+        row("video", "local/native", "Native motion graphics", "Code-rendered film (Remotion, three.js, Blender) and browser takes via video_project, video_render and video_browser. No generation API charge."),
         row("video", "openrouter/auto", "Automatic video choice", "Choose a compatible clip model within the per-job cost limit. Native composition is preferable for exact text and interaction."),
         row("speech", "local/piper", "Piper local speech", "Local narration with estimated word timing. Free API usage; use alignment when exact spoken cues are required."),
         ...[["eleven_flash_v2_5", "Flash v2.5", "Fast economical speech"], ["eleven_multilingual_v2", "Multilingual v2", "Long-form speech"], ["eleven_v3", "Eleven v3", "Expressive performance"]].map(([id, name, purpose]) => row("speech", `elevenlabs/${id}`, name, `${purpose}; private ElevenLabs credentials required. Measured provider word timings; no paid retry.`)),
-        row("music", "local/procedural", "Local arranged music", "Seeded, editable instruments and rhythmic cues via audio_synth. No generation API charge."),
+        row("music", "local/procedural", "Local arranged music", "Seeded, editable instruments and rhythmic cues via audio_generate or music_compose. No generation API charge."),
         ...["music_v2", "music_v2_5"].map(id => row("music", `elevenlabs/${id}`, id, "Prompt-directed music; private ElevenLabs credentials required. Generate short sections and reuse accepted takes.")),
-        row("sfx", "local/procedural", "Local sound design", "Seeded whoosh, impact, tick, pop and chime via audio_synth. No generation API charge."),
+        row("sfx", "local/procedural", "Local sound design", "Seeded whoosh, impact, tick, pop and chime via audio_generate. No generation API charge."),
         row("sfx", "elevenlabs/eleven_text_to_sound_v2", "ElevenLabs Sound v2", "Prompt-directed sound effects; private ElevenLabs credentials required. Duration and loop intent are explicit."),
     ];
 }

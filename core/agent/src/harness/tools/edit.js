@@ -103,7 +103,7 @@ export function createEditTool() {
                     throw new Error("Operation aborted");
                 const diffResult = generateDiffString(baseContent, newContent);
                 return {
-                    content: [{ type: "text", text: `Successfully replaced ${edits.length} block(s) in ${path}. Content hash now: ${afterHash}. Pass expectedHash=${afterHash} for the next edit of this file.` }],
+                    content: [{ type: "text", text: `Successfully replaced ${edits.length} block(s) in ${path} (hash ${afterHash}).` }],
                     details: {
                         diff: diffResult.diff,
                         patch: generateUnifiedPatch(path, baseContent, newContent),

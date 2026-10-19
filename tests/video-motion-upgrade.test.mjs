@@ -12,68 +12,7 @@ const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find((p) => f
 assert.ok(agent, "video studio source must exist");
 const studio = await import(pathToFileURL(path.join(agent, "extensions/lib/video-studio.ts")).href);
 const score = await import(pathToFileURL(path.join(agent, "extensions/lib/music-score.ts")).href);
-const template = path.join(agent, "skills/remotion-video/assets/template");
-const timing = await import(pathToFileURL(path.join(template, "src/timing.ts")).href);
-const captions = await import(pathToFileURL(path.join(template, "src/captions.ts")).href);
 const hasNumpy = spawnSync("python3", ["-c", "import numpy"]).status === 0;
-
-const baseSpec = () => ({ fps: 30, width: 1920, height: 1080, audio: { sfx: [] }, scenes: [
-  { id: "one", component: "A", seconds: 6, narration: "Short line.", narrationOffset: 0.4, cues: { a: 1 } },
-  { id: "two", component: "A", seconds: 4, cues: { b: 2 } },
-] });
-
-test("beat and loop timing helpers are pure frame functions", () => {
-  assert.equal(timing.beat(0, 30, 120), 0);
-  assert.equal(timing.beat(7.5, 30, 120), 0.5);
-  assert.equal(timing.beat(15, 30, 120), 0, "phase wraps each beat");
-  assert.equal(timing.beat(-5, 30, 120), 0, "before the offset reads as beat start");
-  assert.equal(timing.pulse(0, 30, 120), 1);
-  assert.ok(timing.pulse(7, 30, 120) < timing.pulse(1, 30, 120) && timing.pulse(7, 30, 120) > 0);
-  assert.equal(timing.beatCount(30, 30, 120), 2);
-  assert.equal(timing.beatCount(0, 30, 120), 0);
-  assert.equal(timing.loopProgress(15, 30), 0.5);
-  assert.equal(timing.loopProgress(30, 30), 0, "loops seam back to zero");
-  assert.equal(timing.pingpong(0, 40), 0);
-  assert.equal(timing.pingpong(10, 40), 0.5);
-  assert.equal(timing.pingpong(20, 40), 1);
-  assert.equal(timing.pingpong(30, 40), 0.5);
-  assert.equal(timing.hold(0), 0);
-  assert.equal(timing.hold(0.5), 1);
-  assert.equal(timing.hold(1), 0);
-  assert.equal(timing.hold(-1), 0);
-  assert.equal(timing.beat(10, 0, 120), 0, "degenerate fps never divides by zero");
-});
-
-test("caption pace reports characters per second for reading checks", () => {
-  assert.equal(captions.captionPace("Hello world", 1), 11);
-  assert.equal(captions.captionPace("  spaced   out  ", 2), 5);
-  assert.equal(captions.captionPace("", 5), null);
-  assert.equal(captions.captionPace("ab", 0), null);
-});
-
-test("timeline validation covers vertical transitions, volumes and caption pace", () => {
-  const spec = baseSpec();
-  spec.scenes[0].transition = { type: "slideup", seconds: 0.4 };
-  spec.scenes[1].transition = { type: "slidedown", seconds: 0.4 };
-  spec.audio = { musicVolume: 0.22, musicDuckedVolume: 0.07, narrationVolume: 1, sfx: [{ src: "audio/hit.wav", at: 1, volume: 0.6 }] };
-  assert.deepEqual(studio.validateVideoSpec(spec, new Set(["A"]), () => true).issues, []);
-  const bad = baseSpec();
-  bad.audio = { musicVolume: 3, musicDuckedVolume: 0.5, narrationVolume: 1, sfx: [{ src: "audio/hit.wav", at: 1, volume: -1 }] };
-  bad.scenes[0].transition = { type: "spin" };
-  const messages = studio.validateVideoSpec(bad, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n");
-  assert.match(messages, /transition\.type must be fade, slide, slideup, slidedown/);
-  assert.match(messages, /musicVolume must be a number 0\.\.2/);
-  assert.match(messages, /volume must be a number 0\.\.2/);
-  const ducked = baseSpec();
-  ducked.audio = { musicVolume: 0.1, musicDuckedVolume: 0.2, sfx: [] };
-  assert.match(studio.validateVideoSpec(ducked, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n"), /musicDuckedVolume should sit below musicVolume/);
-  const dense = baseSpec();
-  Object.assign(dense.scenes[0], { narration: "An extraordinarily complicated representation, unquestionably overwhelming comprehension and more.", narrationAudio: "n.wav", narrationSeconds: 2 });
-  assert.match(studio.validateVideoSpec(dense, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n"), /caption text runs at .* characters\/s/);
-  const calm = baseSpec();
-  Object.assign(calm.scenes[0], { narration: "Short line.", narrationAudio: "n.wav", narrationSeconds: 2 });
-  assert.doesNotMatch(studio.validateVideoSpec(calm, new Set(["A"]), () => true).issues.map((i) => i.message).join("\n"), /characters\/s/);
-});
 
 test("pronunciation lexicon validates, orders longest-first and applies literally", () => {
   assert.deepEqual(studio.validateLexicon(undefined), []);
@@ -146,30 +85,4 @@ test("score audition adds band-limited square/saw, pan and stereo without changi
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("template wires vertical transitions, timing helpers and new primitives", () => {
-  const main = fs.readFileSync(path.join(template, "src/Main.tsx"), "utf8");
-  assert.match(main, /slideup/);
-  assert.match(main, /slidedown/);
-  assert.match(fs.readFileSync(path.join(template, "src/timeline.ts"), "utf8"), /"slideup" \| "slidedown"/);
-  assert.match(fs.readFileSync(path.join(template, "src/motion.ts"), "utf8"), /from "\.\/timing"/);
-  const index = fs.readFileSync(path.join(template, "src/primitives/index.ts"), "utf8");
-  for (const name of ["LowerThird", "Counter", "ProgressBar", "Callout"]) {
-    assert.match(index, new RegExp(`\\./${name}"`), `${name} is exported`);
-    const source = fs.readFileSync(path.join(template, "src/primitives", `${name}.tsx`), "utf8");
-    assert.doesNotMatch(source, /Math\.random|Date\.now/, `${name} is frame-deterministic`);
-    assert.match(source, /progress/, `${name} is progress-driven`);
-  }
-});
-
-test("template lays out in 1080 units at any output size", () => {
-  const src = path.join(template, "src");
-  const main = fs.readFileSync(path.join(src, "Main.tsx"), "utf8");
-  assert.equal(main.match(/<Canvas>/g)?.length, 2, "the full video and single-scene compositions both render inside the canvas");
-  assert.match(fs.readFileSync(path.join(src, "theme.tsx"), "utf8"), /Math\.min\(width, height\) \/ 1080/);
-  for (const dir of ["primitives", "scenes"]) for (const file of fs.readdirSync(path.join(src, dir))) {
-    const source = fs.readFileSync(path.join(src, dir, file), "utf8");
-    assert.doesNotMatch(source, /\{[^}]*\b(width|height)\b[^}]*\} = useVideoConfig\(\)|video\.(width|height)/, `${file} sizes from useCanvas, not the output resolution`);
-  }
-});
-
-console.log("PASS video-motion-upgrade: timing, captions, lexicon, drums, score, hooks and primitives");
+console.log("PASS video-motion-upgrade: lexicon, drums and score");

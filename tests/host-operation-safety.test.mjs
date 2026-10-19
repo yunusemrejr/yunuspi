@@ -169,3 +169,19 @@ test('bash and background hooks enforce the same preflight without executing or 
   }
   assert.equal(confirmations,0,'host connectivity disruption is not made safe by an in-session click');
 });
+
+test('a session of the separate stock Pi harness (ogpi) is not YunusPi\'s to kill', async t => {
+  const dir = fs.mkdtempSync(path.join((await import('node:os')).tmpdir(), 'ogpi-fixture-'));
+  fs.mkdirSync(path.join(dir, '.ogpi'));
+  fs.writeFileSync(path.join(dir, '.ogpi', 'cli.js'), 'setTimeout(() => {}, 60000);\n');
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [path.join(dir, '.ogpi', 'cli.js')], { stdio: 'ignore' });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(dir, { recursive: true, force: true }); });
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const risk = assess(`kill ${child.pid}`);
+  assert.equal(risk?.level, 'block');
+  assert.match(risk?.reason ?? '', /separate stock Pi harness \(ogpi/);
+  const plain = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  t.after(() => plain.kill('SIGKILL'));
+  assert.equal(assess(`kill ${plain.pid}`), undefined, 'an unrelated exact PID stays allowed');
+});
