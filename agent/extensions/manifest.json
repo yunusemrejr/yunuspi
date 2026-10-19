@@ -929,6 +929,61 @@
       "name": "lib/utility-mcp/local-reference.mjs",
       "retired": "2026-10-19",
       "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). reference evidence helper for web_asset_check removed with it. Do not recreate."
+    },
+    {
+      "name": "scripts/compatibility/harness-load-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/live-models-refresh-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/provider-cache-wire-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/retry-lifecycle-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/summary-recovery-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/automatic-compaction-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/tool-integrity-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/skill-pack-routing-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/utility-mcp-loader-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/session-recovery-guidance-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
+    },
+    {
+      "name": "scripts/compatibility/atomic-edit-preflight-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Offline compatibility scripts that no runner executed after the core updater became a stub; three had failed unnoticed since the skill consolidation. The one a unit test runs (hook-lifecycle-integrity-test.mjs) stays."
     }
   ],
   "supportFiles": [
@@ -990,22 +1045,13 @@
     "scripts/lib/effort-audit.mjs",
     "scripts/effort-audit.mjs",
     "scripts/transaction.mjs",
-    "scripts/compatibility/harness-load-test.mjs",
-    "scripts/compatibility/retry-lifecycle-test.mjs",
-    "scripts/compatibility/summary-recovery-test.mjs",
-    "scripts/compatibility/automatic-compaction-test.mjs",
     "scripts/compatibility/hook-lifecycle-integrity-test.mjs",
-    "scripts/compatibility/tool-integrity-test.mjs",
-    "scripts/compatibility/skill-pack-routing-test.mjs",
-    "scripts/compatibility/session-recovery-guidance-test.mjs",
-    "scripts/compatibility/atomic-edit-preflight-test.mjs",
     "extensions/lib/utility-mcp/catalog.mjs",
     "extensions/lib/utility-mcp/files.mjs",
     "extensions/lib/utility-mcp/probe.py",
     "extensions/lib/utility-mcp/local_operations.py",
     "extensions/lib/utility-mcp/server.mjs",
     "extensions/lib/utility-mcp/worker.mjs",
-    "scripts/compatibility/utility-mcp-loader-test.mjs",
     "extensions/lib/micro-intelligence/metrics.ts",
     "extensions/lib/micro-intelligence/health.ts",
     "extensions/lib/micro-intelligence/retrieval.ts",
