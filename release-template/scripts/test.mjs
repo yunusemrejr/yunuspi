@@ -9,10 +9,8 @@ import { createDistributionTempRoot } from '../agent/scripts/publish-public.mjs'
 
 const root = path.resolve(import.meta.dirname, '..');
 export const QUICK_TESTS = [
-  'command-dispatch', 'core-robustness', 'preflight-stop-cancellation', 'autonomous-triage-cancellation',
-  'provider-gate', 'provider-health-admission', 'provider-health-stall',
-  'double-runner', 'quality-review', 'scope-deliberation',
-  'project-vector-memory', 'memory-embedding-coverage', 'jev-client',
+  'command-dispatch', 'core-robustness', 'preflight-stop-cancellation', 'provider-gate', 'provider-health-admission', 'provider-health-stall',
+  'double-runner', 'quality-review', 'project-vector-memory', 'memory-embedding-coverage', 'jev-client',
   'stream-lifecycle', 'rpc-client-lifecycle', 'guarded-process',
   'needle-embedding-cache', 'memory-guard', 'creative-evidence', 'creative-qa',
   'ui-doctrine', 'goal-state', 'completion-gate', 'motion-routing-sdk',
@@ -42,10 +40,24 @@ export function shardFiles(selected, index, count, sizeOf = file => fs.statSync(
   return bins[index - 1].files.sort();
 }
 
-export function testConcurrency(value, cores = os.availableParallelism()) {
-  if (value === undefined) return Math.max(1, Math.min(4, cores));
-  if (!/^(?:[1-9]|1[0-6])$/.test(value)) throw Error('PI_PUBLIC_TEST_CONCURRENCY must be 1-16 (default capped at 4)');
+/** Local machines run as many files at once as they can carry; CI runners stay at their own small core count.
+ *  PI_PUBLIC_TEST_CONCURRENCY (1-16) always wins. */
+export function testConcurrency(value, cores = os.availableParallelism(), ci = Boolean(process.env.CI)) {
+  if (value === undefined) return Math.max(1, Math.min(ci ? 4 : 8, ci ? cores : cores - 2));
+  if (!/^(?:[1-9]|1[0-6])$/.test(value)) throw Error('PI_PUBLIC_TEST_CONCURRENCY must be 1-16 (default: 8 locally, 4 on CI, never more than the core count)');
   return Number(value);
+}
+
+/** Files that dominate a run (measured standalone, 2026-10-19) start first so the pool never ends waiting on one
+ *  of them; everything else follows largest first, the same size proxy the shards use. */
+export const SLOW_FIRST = [
+  'shared-skill-boundary', 'self-mutation', 'subagent-executor-routing', 'motion-library', 'creative-delivery',
+  'isolated-child-catalog', 'video-production', 'video-choreography', 'needle-runtime', 'motion-production-quality',
+].map(name => `tests/${name}.test.mjs`);
+export function orderForRun(selected, sizeOf = file => fs.statSync(path.join(root, file)).size) {
+  const rank = new Map(SLOW_FIRST.map((file, index) => [file, index]));
+  return [...selected].sort((a, b) => (rank.get(a) ?? SLOW_FIRST.length) - (rank.get(b) ?? SLOW_FIRST.length)
+    || sizeOf(b) - sizeOf(a) || a.localeCompare(b));
 }
 
 function main(args) {
@@ -96,9 +108,16 @@ function main(args) {
     const reporter = path.join(root, 'scripts/ci-failure-reporter.mjs');
     const reporters = process.env.GITHUB_ACTIONS === 'true' && fs.existsSync(reporter) && !native.some(arg => arg.startsWith('--test-reporter'))
       ? ['--test-reporter=spec', '--test-reporter-destination=stdout', `--test-reporter=${reporter}`, '--test-reporter-destination=stdout'] : [];
-    const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...plan.selected], {
+    // Real LibreOffice conversions take 10-20 s each and CI never installs it, so they are opt-in here
+    // (PI_TEST_OFFICE=1). The compile cache lets the several hundred test processes share compiled modules.
+    const compileCache = process.env.NODE_COMPILE_CACHE ?? (fs.existsSync(path.join(root, 'node_modules')) ? path.join(root, 'node_modules', '.cache', 'yunuspi-tests') : undefined);
+    const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...orderForRun(plan.selected)], {
       cwd: root, stdio: 'inherit', timeout: 15 * 60_000,
-      env: { ...process.env, NODE_TEST_CONTEXT: undefined, PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot },
+      env: {
+        ...process.env, NODE_TEST_CONTEXT: undefined, PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot,
+        ...(process.env.PI_TEST_OFFICE === '1' ? {} : { YUNUSPI_SKIP_OFFICE_RENDER: process.env.YUNUSPI_SKIP_OFFICE_RENDER ?? '1' }),
+        ...(compileCache ? { NODE_COMPILE_CACHE: compileCache } : {}),
+      },
     });
     if (run.error) throw run.error;
     process.exitCode = run.status ?? 1;

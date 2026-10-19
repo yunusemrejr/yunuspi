@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
-import { QUICK_TESTS, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
+import { QUICK_TESTS, SLOW_FIRST, orderForRun, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
 import { annotation } from '../scripts/ci-failure-reporter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -32,8 +32,12 @@ test('release, shared safety, dependency, test infrastructure and unknown-base c
 });
 
 test('test concurrency cannot silently turn a typo into unbounded process spawning', () => {
-  assert.equal(testConcurrency(undefined, 64), 4);
-  assert.equal(testConcurrency(undefined, 1), 1);
+  assert.equal(testConcurrency(undefined, 64, true), 4, 'CI runners stay at four');
+  assert.equal(testConcurrency(undefined, 1, true), 1);
+  assert.equal(testConcurrency(undefined, 64, false), 8, 'a local machine is capped at eight');
+  assert.equal(testConcurrency(undefined, 12, false), 8);
+  assert.equal(testConcurrency(undefined, 6, false), 4, 'two cores stay free for the machine');
+  assert.equal(testConcurrency(undefined, 1, false), 1);
   assert.equal(testConcurrency('2'), 2);
   for (const value of ['0', '99', '-1', '2oops', '']) assert.throws(() => testConcurrency(value), /CONCURRENCY/);
 });
@@ -110,4 +114,12 @@ test('CI plans first, runs the complete suite as parallel shards and keeps one s
 test('a failed test becomes one escaped GitHub annotation naming its file', () => {
   const line = annotation({ name: 'handles: odd, names\n100%', file: path.join(root, 'tests/x.test.mjs'), details: { error: { cause: { message: 'expected 1, got 2\nstack' } } } }, root);
   assert.equal(line, '::error file=tests/x.test.mjs,title=handles%3A odd%2C names%0A100%25::expected 1%2C got 2\n');
+});
+
+test('known slow files start first and every registered slow file exists', () => {
+  const all = ['tests/a.test.mjs', ...SLOW_FIRST.slice(0, 2).reverse(), 'tests/b.test.mjs'];
+  const ordered = orderForRun(all, file => file === 'tests/b.test.mjs' ? 10 : 1);
+  assert.deepEqual(ordered.slice(0, 2), SLOW_FIRST.slice(0, 2), 'slow files lead, in their listed order');
+  assert.deepEqual(ordered.slice(2), ['tests/b.test.mjs', 'tests/a.test.mjs'], 'the rest follows largest first');
+  for (const file of SLOW_FIRST) assert.ok(fs.existsSync(path.join(root, file)), `${file} must exist so a rename updates the list`);
 });
