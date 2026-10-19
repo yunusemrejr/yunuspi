@@ -71,7 +71,6 @@ export interface ReminderState {
 	mutationAudit: MutationAudit[]; // bounded actual target/path receipts
 	workspaceWarnings: string[]; // bounded Git drift/overlap warnings
 	manual: ManualReminder[];
-	shownCtx: string[]; // contextual rule tags already injected (once per session each)
 }
 
 export function remindersStateFile(sid: string): string {
@@ -103,7 +102,6 @@ export function defaultRemindersState(): ReminderState {
 		mutationAudit: [],
 		workspaceWarnings: [],
 		manual: [],
-		shownCtx: [],
 	};
 }
 
@@ -134,7 +132,6 @@ function readValidatedRemindersState(sidOrEmpty: string): ReminderState {
 	// Defensive: a hand-edited or legacy-corrupted state file must not break
 	// the next check-in. Atomic tmp+rename already prevents partial writes.
 	if (!Array.isArray(st.manual)) st.manual = [];
-	if (!Array.isArray(st.shownCtx)) st.shownCtx = [];
 	if (!Array.isArray(st.mutationAudit)) st.mutationAudit = [];
 	if (!Array.isArray(st.workspaceWarnings)) st.workspaceWarnings = [];
 	st.mutationAudit = st.mutationAudit.filter((entry) =>

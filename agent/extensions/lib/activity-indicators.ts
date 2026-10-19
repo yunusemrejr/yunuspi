@@ -59,9 +59,6 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "skill.read": "all",
   "skill.resolve": "all",
   "skill.discovery": "error",
-  "guidance.delivered": "all",
-  // Skill hints withheld by the lexical gate: what was filtered and why.
-  "skill.gate": "all",
   "model.mix": "all",
   // Routine preference-chain skips (excluded/cooling/unresolved) fire per
   // dispatch and would spam a line per skipped route; they stay in the
@@ -244,11 +241,6 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
       const verdict = decision === "intervened" ? "guidance sent to agent" : decision === "deferred" ? "deferred (one per window)" : "no intervention";
       return { label: check, status: decision === "intervened" ? "ok" : "skip", detail: [score, verdict].filter(Boolean).join(" · ") };
     }
-    if (kind === "skill.gate") {
-      // Every gate decision withholds a session-context hint; the lexical gate has no kept verdict.
-      const verdict = decision === "generic-terms" ? "generic match ignored" : decision === "unread-budget" ? "unread-offer budget reached" : decision === "ungrounded" ? "no task overlap" : "hint withheld";
-      return { label: clean(skill || "skill", 60), status: "skip", detail: verdict };
-    }
     if (kind === "hook.fired") {
       return { label: clean(String(data.hook ?? "hook").replaceAll("-", " "), 48), status: "ok", detail: clean(`${data.tool ? `on ${data.tool} · ` : ""}${data.decision === "recovery" ? "recovery guidance" : "workflow guidance"} added to the result`, 80) };
     }
@@ -276,11 +268,6 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
         status: decision === "failed" || isError ? "error" : decision === "completed" ? "ok" : "skip",
         detail: clean(failure || route || decision || "", 60) || undefined,
       };
-    }
-    if (kind === "guidance.delivered") {
-      const label = decision === "skill-or-tool" ? "skill/tool suggestion sent to agent"
-        : decision.startsWith("signal:") ? `${decision.slice(7).replaceAll("-", " ")} guidance sent to agent` : decision || "hint";
-      return { label: clean(label, 60), status: "ok" };
     }
     if (kind === "ml.mini.select") {
       const ok = decision === "selected" || decision === "cache-hit";
@@ -334,12 +321,12 @@ export interface ActivityIndicators {
 
 /** Live one-line summary of background harness work for the footer. */
 export interface ActivityPulse { set(text: string | undefined): void; available(): boolean }
-interface PulseCounts { guardianChecks: number; guardianWasm: number; guardianVerdicts: number; guardianInterventions: number; needle: number; jev: number; fuzzy: number; ranker: number; hooks: number; hints: number; skills: number }
-const emptyPulse = (): PulseCounts => ({ guardianChecks: 0, guardianWasm: 0, guardianVerdicts: 0, guardianInterventions: 0, needle: 0, jev: 0, fuzzy: 0, ranker: 0, hooks: 0, hints: 0, skills: 0 });
+interface PulseCounts { guardianChecks: number; guardianWasm: number; guardianVerdicts: number; guardianInterventions: number; needle: number; jev: number; fuzzy: number; ranker: number; hooks: number; skills: number }
+const emptyPulse = (): PulseCounts => ({ guardianChecks: 0, guardianWasm: 0, guardianVerdicts: 0, guardianInterventions: 0, needle: 0, jev: 0, fuzzy: 0, ranker: 0, hooks: 0, skills: 0 });
 export function renderActivityPulse(counts: PulseCounts): string | undefined {
   const parts: string[] = [];
   if (counts.guardianChecks || counts.guardianVerdicts) parts.push(`Guardian ${counts.guardianChecks} checks${counts.guardianWasm ? ` · ${counts.guardianWasm} WASM` : ""}${counts.guardianInterventions ? ` · ${counts.guardianInterventions} sent` : ""}`);
-  const named: Array<[number, string]> = [[counts.needle, "Needle3"], [counts.jev, "JEV"], [counts.fuzzy, "fuzzy"], [counts.ranker, "ranker"], [counts.hooks, "hooks"], [counts.hints, "hints"], [counts.skills, "skill matches"]];
+  const named: Array<[number, string]> = [[counts.needle, "Needle3"], [counts.jev, "JEV"], [counts.fuzzy, "fuzzy"], [counts.ranker, "ranker"], [counts.hooks, "hooks"], [counts.skills, "skill matches"]];
   for (const [count, name] of named) if (count) parts.push(`${name} ${count}`);
   return parts.length ? `harness · ${parts.join(" · ")}` : undefined;
 }
@@ -374,7 +361,6 @@ export function createActivityIndicators(send: ActivitySender, pulse?: ActivityP
     else if (kind === "ml.fuzzy.used") pulseCounts.fuzzy++;
     else if (kind === "ml.radar.rank" && data.decision === "on") pulseCounts.ranker++;
     else if (kind === "hook.fired") pulseCounts.hooks++;
-    else if (kind === "guidance.delivered") pulseCounts.hints++;
     else if (kind === "skill.route") pulseCounts.skills++;
     else return;
     touchPulse();
@@ -594,13 +580,11 @@ export const ACTIVITY_TAGS: Record<string, string> = {
   "guardian.evaluated": "Guardian",
   "guardian.decision": "Guardian",
   "hook.fired": "Hook",
-  "skill.gate": "skill gate",
   "skill.route": "skill",
   "skill.read": "skill",
   "skill.resolve": "skill",
   "skill.rank": "skill",
   "skill.discovery": "skill",
-  "guidance.delivered": "hint",
   "ml.intent": "intent",
   "ml.mini.select": "mini",
   "model.mix": "model",

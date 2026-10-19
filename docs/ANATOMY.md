@@ -6,9 +6,8 @@ references and eight complete examples. It is MIT licensed; `LICENSE` and
 `UPSTREAM.json` in that directory retain attribution, the pinned upstream commit
 and hashes. Installation is offline and needs no Claude account or plugin.
 
-The standard skill catalogue and relevant-guidance hooks expose it to the
-selected model and native child agents. Relevant requests automatically offer
-its local workflow, without requiring a slash command or changing the model:
+The standard skill catalogue exposes it to the selected model and native child
+agents, so relevant requests can use its local workflow without a slash command:
 
 - “Make a 3D animation of a mechanical watch.”
 - “Explain how an LRU cache evicts entries, interactive.”

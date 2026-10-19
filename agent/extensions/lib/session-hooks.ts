@@ -1,14 +1,9 @@
 /**
  * Deterministic, topic-agnostic session hooks.
  *
- * One pre-written line of operational guidance the first time a session
- * touches a recurring workflow surface: web research, browser inspection,
- * test runs, linters, mutating git, CI, dependency installs, delegated
- * children, fan-outs, and literal searches that found nothing.
- *
- * The guidance is deliberately independent of project, language and task:
- * it encodes workflow discipline (read the evidence, keep scopes bounded,
- * prefer cheap delegation), never claims about a specific codebase.
+ * One pre-written line the first time a session hits a surface where the
+ * next step is easy to get wrong: an uncertain browser action that failed,
+ * and a production deploy that still has to be checked against live bytes.
  *
  * Pure policy only — no pi imports, no subprocesses. The one filesystem reader
  * is nested-instruction discovery at the end of this file: bounded reads of
@@ -31,64 +26,25 @@ export interface HookRule {
 	line: string;
 	/** Extra predicate over the call arguments (tool_call time). */
 	when?: (args: HookArgs) => boolean;
-	/**
-	 * When true the rule fires only if the tool result carries no matches.
-	 * Used for literal-search rules where the useful moment is the miss.
-	 */
-	needsEmptyResult?: boolean;
 	/** Failure recovery has separate receipts from successful first use. */
 	onError?: boolean;
 }
 
-const TEST_RUNNER =
-	/\b(?:npm (?:run )?test\b|npm t\b|npx (?:vitest|jest)\b|pytest\b|python3? -m pytest\b|cargo test\b|go test\b|node --test\b|dotnet test\b|mvn test\b|gradle test\b)/;
-const GIT_WRITE =
-	/\bgit\s+(?:commit|push|merge|rebase|reset|cherry-pick|tag|revert)\b/;
-const CI = /\bgh (?:run|workflow)\b/;
 /** Pushes to production-like remotes and hosted deploy commands. */
 const DEPLOY =
 	/\bgit\s+push\s+(?:-\S+\s+)*(?:prod\w*|live|deploy\w*|namecheap|heroku|dokku|server|origin\s+(?:prod\w*|live|deploy\w*))\b|\brsync\b[^\n]*\s[\w.-]+@?[\w.-]+:[^\s]|\bscp\b[^\n]*\s[\w.-]+@?[\w.-]+:|\b(?:vercel(?:\s+--prod)?|netlify\s+deploy|fly\s+deploy|wrangler\s+(?:deploy|publish)|firebase\s+deploy|gcloud\s+app\s+deploy|kubectl\s+apply|helm\s+upgrade|docker\s+push)\b/;
-/** Interface source files whose first write deserves a rendered look. */
-const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|php|twig|erb|hbs)$/i;
 
 const bashCommand = (args: HookArgs): string =>
 	typeof args.command === "string" ? args.command : "";
 
 const contains = (pattern: RegExp) => (args: HookArgs) =>
 	pattern.test(bashCommand(args));
-const isExecution = (args: HookArgs) => !args.action;
 const isBrowserMutation = (args: HookArgs) =>
 	["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(String(args.action)) ||
 	(args.action === "wait" && args.kind === "function");
 
-/**
- * Ordered most-specific-first: the fan-out rule must win over the generic
- * delegation rule, and literal-search guidance is keyed on a result property.
- */
+/** First match wins. */
 export const HOOK_RULES: readonly HookRule[] = [
-	{
-		// First interface file of the session: judge the design as rendered,
-		// not as source. Open briefs also deserve a deliberate direction.
-		key: "ui-first-render",
-		tools: ["write", "edit"],
-		line: "Use ui_explore early for 320px/mobile/tablet/desktop pixels and measurements; visual_review run then record its runId and every rubric section on the current revision. Check the actual keyboard task with browser_session. Judge hierarchy, type, color, spacing, content and states against this product's identity. Text-only models need permitted vision evidence; source code cannot approve appearance. For public website pages/routes also use seo_toolkit to establish page purpose, inspect raw HTML and verify canonical/crawl/discovery consistency; preserve private app exclusion.",
-		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
-	},
-	{
-		key: "visual-review-receipt",
-		tools: ["visual_review"],
-		when: (args) => args.action === 'run',
-		line: "Judge every needsVision section from delivered pixels or permitted image_understand on this capture, then record every rubric section with this runId. UNKNOWN stays open. Changed dependencies invalidate the run; measured FAILs require repair or a specific dismissal. Reuse current evidence instead of repeating unchanged captures.",
-	},
-	{
-		key: "video-render-review", tools: ["video_render"],
-		line: "Stills return measured text-fit evidence; open full-size hero/detail frames and compare silhouette, material/light, spacing and typography to the brief and references. Previews judge continuous pacing, easing and transitions. Finals need video_qa analyze then explicit art-direction/composition/typography/playback/listening verdicts. A successful render never approves itself.",
-	},
-	{
-		key: "video-qa-review", tools: ["video_qa"],
-		when: (args) => args.action === undefined || args.action === 'analyze',
-		line: "Fix technical errors, then inspect full-size hero/detail pixels against the stored brief and references, inspect continuous playback and listen to the final encoding. Record separate art-direction, composition, typography, motion, sync and audio verdicts with concrete observations and comparedReferences. Missing vision/playback/listening remains unreviewed; technical passes do not approve design.",
-	},
 	{
 		key: "browser-session-recovery", tools: ["browser_session"], onError: true,
 		when: isBrowserMutation,
@@ -99,53 +55,12 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: "Use the reported stage and nextStep. For navigation failures check the server task and URL; for inspection failures check current selectors and state before retrying.",
 	},
 	{
-		key: "subagent-recover-evidence",
-		tools: ["subagent"],
-		onError: true,
-		line: "Inspect each child's structured outcome; preserve successful siblings and retry only the failed scope after correcting its cause. Status and retained artifacts can resolve uncertainty without relaunching.",
-	},
-	{
-		key: "background-completion",
-		tools: ["bg_run"],
-		line: "Keep the returned task ID and continue independent work. Completion normally notifies; inspect that task's status or output if needed instead of repeated shell polling or duplicate launches.",
-	},
-	{
-		key: "tests-first-failure",
-		tools: ["bash"],
-		line: "Read the first failure verbatim before editing; re-run the narrowed test after the change and never report a failing check as passed.",
-		when: contains(TEST_RUNNER),
-	},
-	{
 		// Production deploys (live session 2026-09-24 pushed to a production
 		// remote) are where "done" must be checked against the real site.
 		key: "deploy-verify-live",
 		tools: ["bash"],
 		line: "After this deploy, verify the LIVE bytes, not the push: fetch each changed asset from the production URL and compare its sha256 with the local file (curl -s URL | sha256sum). A replaced image/CSS/JS served with a long Cache-Control max-age needs a new URL (?v=hash) or a cache purge, or returning visitors keep the old bytes. Keep the previous revision reachable for rollback. For public pages re-run seo_toolkit audit on the production canonical origin for status/robots/canonical/sitemap/schema/links/discovery/cache parity.",
 		when: contains(DEPLOY),
-	},
-	{
-		key: "git-write-verify",
-		tools: ["bash"],
-		line: "Run the project's checks before committing; never commit credentials or runtime state, and push only verified changes.",
-		when: contains(GIT_WRITE),
-	},
-	{
-		key: "ci-failing-job",
-		tools: ["bash"],
-		line: "Inspect the failing job log before re-running (gh run view --log-failed); a re-run alone is not a fix.",
-		when: contains(CI),
-	},
-	{
-		key: "subagent-contract",
-		tools: ["subagent"],
-		line: "Declare each child's file scope, required tools, relevant skills and acceptance up front. Keep one writer per file; retain native result handles and use completion notifications for queued work.",
-		when: isExecution,
-	},
-	{
-		key: "search-fuzzy",
-		tools: ["grep", "find"],
-		line: "No literal match here. If code intelligence is available, try identifier-ranked symbol_search with a shorter identifier; first confirm the search path and pattern.",
-		needsEmptyResult: true,
 	},
 ];
 
@@ -216,20 +131,6 @@ export function isLiveByteVerification(toolName: string, args: HookArgs): boolea
 	const command = bashCommand(args);
 	const remote = [...command.matchAll(REMOTE_FETCH)].some((match) => !LOCAL_URL.test(match[1]));
 	return remote && BYTE_COMPARISON.test(command);
-}
-
-export function isEmptySearchResult(content: unknown): boolean {
-	if (!Array.isArray(content)) return false;
-	const text = content
-		.filter(
-			(part): part is { type?: string; text?: string } =>
-				!!part && typeof part === "object",
-		)
-		.map((part) => (typeof part.text === "string" ? part.text : ""))
-		.join("\n")
-		.trim();
-	if (text.length === 0) return true;
-	return /^(?:no (?:matches|files|results)\b|found 0\b)/i.test(text);
 }
 
 /** Core read/ls/grep/find/edit attach their own nearest-folder hint (core/tools/path-hints.js). */

@@ -128,7 +128,7 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
       const split = (kind: string) => Object.entries(dec[kind] ?? {}).map(([k, v]) => `${k} ${v}`).join(', ');
       const routed = ev['skill.route'] ?? 0, resolved = ev['skill.resolve'] ?? 0;
       lines.push(`Skills: routed ${number(routed)} suggestion${routed === 1 ? '' : 's'} (${metrics.skillsRouted.slice(0, 8).join(', ') || 'none recorded'}); fully read ${metrics.skillsRead.length} (${metrics.skillsRead.slice(0, 8).join(', ') || 'none recorded'}); spawn-resolved ${number(resolved)}${split('skill.resolve') ? ` (${split('skill.resolve')})` : ''}.`);
-      lines.push(`Local helpers: intent ${number(ev['ml.intent'] ?? 0)} · mini select ${number(ev['ml.mini.select'] ?? 0)}${split('ml.mini.select') ? ` (${split('ml.mini.select')})` : ''} · guidance delivered ${number(ev['guidance.delivered'] ?? 0)}.`);
+      lines.push(`Local helpers: intent ${number(ev['ml.intent'] ?? 0)} · mini select ${number(ev['ml.mini.select'] ?? 0)}${split('ml.mini.select') ? ` (${split('ml.mini.select')})` : ''}.`);
       const localRows = Object.entries(activity.local).map(([k, v]) => `${k}: ${v.outcome} ×${v.count}`);
       const picks = ev['model.mix'] ?? 0, skipped = ev['model.skip'] ?? 0;
       lines.push(`Local providers: ${localRows.join(' · ') || 'no refresh observed yet'}. Historical mixed routing: ${number(picks)} pick${picks === 1 ? '' : 's'}${split('model.mix') ? ` (${split('model.mix')})` : ''}; ${number(skipped)} preferred skip${skipped === 1 ? '' : 's'}${Object.entries(activity.skips).map(([k, v]) => ` ${k} ${v}`).join(',') || ''}.`);

@@ -1,6 +1,7 @@
 import { sessionObservability } from './lib/session-observability.ts';
 /**
- * session-hooks — deterministic first-use guidance for recurring workflows.
+ * session-hooks — deploy verification, browser-failure recovery lines, missing-path
+ * hints and nested AGENTS.md instructions.
  *
  * The rule catalogue lives in `lib/session-hooks.ts` (pure, unit-tested).
  * This extension owns only the pi wiring:
@@ -25,7 +26,6 @@ import { missingPathHint } from "@yunuspi/coding-agent";
 import {
 	CORE_PATH_HINT_TOOLS,
 	isDeployCommand,
-	isEmptySearchResult,
 	isLiveByteVerification,
 	matchHook,
 	restoredHookKeys,
@@ -177,7 +177,6 @@ export default function (pi: any) {
 		if (event.isError && ['browser_session', 'render_see'].includes(event.toolName) && typeof event.details?.failure?.nextStep === 'string') return hinted;
 		const rule = event.isError ? matchHook(event.toolName, queued.input, true, event) : queued.success;
 		if (!rule || shown.has(rule.key)) return hinted;
-		if (rule.needsEmptyResult && !isEmptySearchResult(event.content)) return hinted;
 		shown.add(rule.key);
 
 		const sink = sessionObservability()[HEALTH_SINK];

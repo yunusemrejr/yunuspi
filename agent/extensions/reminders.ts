@@ -79,9 +79,8 @@ import { sessionObservability } from './lib/session-observability.ts';
  * Successful actions reset the evidence. No inference, timers, reasoning-token
  * guesses, forced edits, or automatic thinking-level changes.
  *
- * Cost: one tiny state file (~/.pi/reminders/state-<sid>.json) plus a
- * metadata-only first-prompt orientation receipt; ambient-only injections are
- * display:false; manual-bearing ones are also shown in the TUI/export. Delete
+ * Cost: one tiny state file (~/.pi/reminders/state-<sid>.json); ambient-only
+ * injections are display:false; manual-bearing ones are also shown in the TUI/export. Delete
  * the state file to remove scheduled reminders.
  *
  * 2026-09-16 compliance evidence: two recent sessions showed 19/20 manual
@@ -108,12 +107,6 @@ import {
 	compactSkillCatalog,
 	skillCatalogProjectionMiss,
 } from "./lib/tool-discovery.ts";
-import { createRelevantGuidance } from "./lib/relevant-guidance.ts";
-import { SuggestionBudget } from "./lib/lean-policy.ts";
-// Lean harness: soft capability hints are budgeted to at most two per session,
-// with rising relevance thresholds and growing gaps (see SuggestionBudget).
-const hintBudget = new SuggestionBudget(2);
-let hintTurn = 0;
 import {
 	createLoopTracker,
 	repeatedReasoningNotice,
@@ -128,16 +121,6 @@ import {
 	type ReminderState,
 	writeRemindersState,
 } from "./lib/reminders-state.ts";
-import {
-	COOLDOWN_MS,
-	WINDOW_MS,
-} from "./lib/retry-policy.ts";
-import {
-	buildHarnessOrientation,
-	hasOrientationReceipt,
-	markOrientationDelivered,
-} from "./lib/harness-orientation.ts";
-import { isDirectReplyPrompt } from "./lib/intent-context.ts";
 import {
 	acquireWorkspaceWriterLease,
 	readWorkspaceGitState,
@@ -169,34 +152,6 @@ const CUSTOM_MAX = 4000; // max chars of a registered reminder text (long remind
 // Bound whole reminder lines, not a truncated tail marked as delivered.
 const MANUAL_TEXT_MAX = 2 * (CUSTOM_MAX + 20);
 
-// Contextual safety one-liners — injected only when the prompt touches the
-// topic, each at most once per session.
-const CONTEXT_RULES: Array<{ tag: string; match: RegExp; text: string }> = [
-	{
-		tag: "harness",
-		match:
-			/\b(?:Yunus Pi|Pi harness|harness)\b|verify-harness|scripts\/patches|\.pi\/agent/i,
-		text:
-			"Preservation: harness edits go in ~/.pi/agent/extensions/*.ts or owned runtime/core/*/src; never hand-edit node_modules.",
-	},
-	{
-		tag: "rateLimit",
-		match:
-			/^(?=[\s\S]*\b(?:pi|harness|llm|inference|openrouter|cerebras|deepseek|friendli|orcarouter|runinfra|together)\b)(?=[\s\S]*(?:\b(?:429|503)\b|rate[- ]?limit|service unavailable|upstream_unavailable|backoff|cooldown|retry every))/i,
-		// WHY templated: retry-429-policy.mjs is the policy authority; restating
-		// its constants here drifted once (audit F7). Derived, never duplicated.
-		text: `Cooldown-class provider errors (429 / provider-unavailable 503 / gateway or upstream stream failure): retry every ${Math.round(COOLDOWN_MS / 1000)}s (no exponential backoff); ~${Math.round(WINDOW_MS / 60000)} min continuous failure -> pause until the user's next message.`,
-	},
-	{
-		tag: "providers",
-		match:
-			/^(?=[\s\S]*\b(?:pi|harness|llm|inference|openrouter|cerebras|deepseek|friendli|orcarouter|runinfra|together)\b)(?=[\s\S]*\b(?:providers?|failover|outage)\b)/i,
-		// Provider list mirrors live-models.ts REFRESHER_IDS (baseten/lmstudio
-		// removed 2026-09-01 — no longer registered).
-		text:
-			"Providers: provider outage != model failure — fail over to a compatible provider for the same model.",
-	},
-];
 // Conservative destructive-bash heuristic for the caution reminder. False
 // negatives are fine (we merely skip a nudge); false positives would nag on
 // every benign command, so the list stays short: write/append redirects
@@ -519,7 +474,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	registerToolDiscovery(pi);
 	if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
 	// The user's own reminders read as reminders; the harness check-in that
-	// carries them (orientation, hints, trajectory question) stays expandable.
+	// carries them (trajectory question) stays expandable.
 	if (process.env.PI_SUBAGENT_CHILD !== "1") pi.registerMessageRenderer?.("reminders", (message: any, options: any, theme: any) => {
 		const text = messageText(message);
 		const own = text.split("\n").filter((line) => line.startsWith("[custom-reminder] ")).map((line) => line.slice(18));
@@ -527,45 +482,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		return renderHarnessNotice({ icon: "⏰", tone: "warning", title: own.length === 1 ? "Reminder sent to the agent" : `${own.length} reminders sent to the agent`,
 			summary: "repeats about every 5 min · /reminder list", body: own.map((line) => `• ${line}`).join("\n"), detail: text }, options, theme);
 	});
-	// Children share skill routing/read receipts without inheriting the parent's
-	// manual reminder timers, todo nudges or continuation messages.
-	if (process.env.PI_SUBAGENT_CHILD === "1") {
-		const guidance = createRelevantGuidance(pi);
-		for (const hook of [
-			"session_start",
-			"session_switch",
-			"session_compact",
-		] as const)
-			pi.on(hook, (_event, ctx) => {
-				guidance.restore(ctx);
-			});
-		pi.on("input", (event) => {
-			if (event.source !== "extension") guidance.userInput();
-		});
-		pi.on("before_agent_start", (event, ctx) => {
-			guidance.start(event, ctx);
-			const hints = guidance.candidates();
-			if (!hints.length) return;
-			hintTurn += 1;
-			if (!hintBudget.shouldShow(hintTurn, 0.9)) return;
-			hintBudget.record(hintTurn);
-			// A child has no parent reminder loop to deliver its pending hints.
-			// Offer the same bounded references without manual timers or nudges.
-			guidance.commit(hints);
-			return { message: {
-				customType: "reminders",
-				content: hints.map(hint => `[capability hint] ${hint.text}`).join("\n"),
-				display: false,
-			} };
-		});
-		pi.on("tool_call", (event, ctx) => {
-			if (!ctx.signal?.aborted) return guidance.beforeToolCall(event);
-		});
-		pi.on("tool_result", (event) => {
-			guidance.record(event);
-		});
-		return;
-	}
+	// Children get no reminder timers, todo nudges or continuation messages.
+	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 	// Per-session live state; sid "" (unknown) is tolerated.
 	const live = new Map<string, ReminderState>();
 	const workspaceBaselines = new Map<string, WorkspaceGitState | undefined>();
@@ -579,7 +497,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			blockedBy?: number[];
 		}>
 	>();
-	const guidance = createRelevantGuidance(pi);
 	let loop = createLoopTracker();
 	let recoveryRoute: { provider: string; model: string } | undefined;
 	let thinkingChars = 0,
@@ -588,10 +505,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		streamingSteerInFlight = false,
 		turnSteerInFlight = false;
 	const terminatingTools = new Set<string>();
-	// before_agent_start does not carry the input source. Track the real human
-	// input event so an extension wake before the first prompt cannot consume
-	// the one orientation opportunity, while continuation wakes stay silent.
-	const pendingHumanPrompts = new Set<string>();
 	// Manual-reminder compliance watch: armed per delivery, finalized after 2
 	// assistant messages, 8 tool calls, a new human prompt, or agent end —
 	// whichever comes first. Bounded scans only; evidence goes to the health
@@ -706,7 +619,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		recoveryRoute = undefined;
 		loop = createLoopTracker();
 		try {
-			guidance.restore(ctx);
 			const sid = sidOf(ctx);
 			if (event.reason === "startup" || event.reason === "new") cleanupStale(sid);
 			const st = load(sid);
@@ -743,14 +655,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", (_event, ctx) => {
 		recoveryRoute = undefined;
 		loop = createLoopTracker();
-		guidance.restore(ctx);
 	});
 
 	pi.on("session_tree", (_event, ctx) => {
 		recoveryRoute = undefined;
 		loop = createLoopTracker();
 		try {
-			guidance.restore(ctx);
 			const sid = sidOf(ctx);
 			const st = load(sid);
 			restoreTodos(ctx, st);
@@ -773,7 +683,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		try {
 			loop.record(event);
 			repeatText = loop.repeatNotice(event);
-			guidance.record(event);
 			const sid = sidOf(ctx);
 			const st = sid ? load(sid) : undefined;
 			if (sid && st) observeWorkspace(sid, ctx, st);
@@ -839,41 +748,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		try {
 			const sid = sidOf(ctx);
 			if (!sid) return undefined;
-			guidance.start(_event, ctx);
-			const rawHints = guidance.candidates();
 			const st = load(sid);
-			// Budget soft hints: at most two deliveries per session, spaced by prompts.
-			const hints = rawHints.length && hintBudget.shouldShow(st.promptCount, 0.9)
-				? (hintBudget.record(st.promptCount), rawHints)
-				: [];
 			st.promptCount += 1;
 			const now = Date.now();
-			// A single fixed orientation belongs beside the human's first prompt.
-			// It is optional, capability-grounded, and persisted independently of
-			// the reminder schema so reload/resume cannot repeat it. Children and
-			// extension-generated continuations never receive this note.
-			const activeTools = pi.getActiveTools?.() ?? [];
-			const humanFirstPrompt =
-				process.env.PI_SUBAGENT_CHILD !== "1" &&
-				pendingHumanPrompts.has(sid) &&
-				!isDirectReplyPrompt(_event.prompt) &&
-				!hasOrientationReceipt(sid);
-			if (pendingHumanPrompts.has(sid)) pendingHumanPrompts.delete(sid);
-			const orientation =
-				humanFirstPrompt && buildHarnessOrientation(activeTools, _event.prompt);
-			// An explicit opt-out consumes the first-prompt opportunity too.
-			if (humanFirstPrompt && !orientation) markOrientationDelivered(sid);
 			const fire = shouldFire(st, now);
 			const dueManual = dueManualReminders(st, now);
-			// Contextual safety rules: inject only the slices whose topic the
-			// prompt actually touches, each at most once per session.
-			const ctxMatches = CONTEXT_RULES.filter(
-				(r) => !st.shownCtx.includes(r.tag) && r.match.test(_event.prompt ?? ""),
-			);
 			if (
-				hints.length === 0 &&
-				!orientation &&
-				ctxMatches.length === 0 &&
 				!fire.todo &&
 				!fire.drift &&
 				!fire.caution &&
@@ -890,11 +770,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				now,
 				fire,
 				dueManual,
-				[
-					...(orientation ? [orientation] : []),
-					...ctxMatches.map((r) => r.text),
-					...hints.map((h) => `[capability hint] ${h.text}`),
-				],
+				[],
 				todoSnapshots.get(st),
 				traj,
 			);
@@ -906,9 +782,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			// Advance schedules BEFORE returning: a delivered occurrence cannot
 			// re-fire from a later lifecycle event (structural dedup).
 			for (const r of dueManual) advanceDelivered(r, now);
-			for (const r of ctxMatches) st.shownCtx.push(r.tag);
-			if (orientation) markOrientationDelivered(sid);
-			guidance.commit(hints);
 			if (fire.todo) {
 				st.todoReminders += 1;
 				st.lastTodoRemindAt = now;
@@ -962,8 +835,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	};
 	pi.on("before_agent_start", async (event, ctx) => {
 		const result = await prepareReminderStart(event, ctx);
-		// Local guidance captures the full inventory before its wire projection;
-		// re-read ctx.getSystemPrompt() in case prepareReminderStart staged tools.
+		// Re-read ctx.getSystemPrompt() in case prepareReminderStart staged tools.
 		const latestSystemPrompt = typeof ctx?.getSystemPrompt === "function" ? ctx.getSystemPrompt() : undefined;
 		const latestEvent =
 			typeof latestSystemPrompt === "string" && latestSystemPrompt.length > 0
@@ -1057,13 +929,11 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		if (event.source !== "extension") {
 			try {
 				const sid = sidOf(ctx);
-				if (sid) pendingHumanPrompts.add(sid);
 				if (sid) finalizeCompliance(sid);
 			} catch {
-				/* a closing session has no orientation opportunity */
+				/* a closing session has no compliance watch */
 			}
 			loop = createLoopTracker();
-			guidance.userInput();
 		}
 	});
 	pi.on("tool_call", (event, ctx) => {
@@ -1078,8 +948,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				if (watch.tools >= 8) finalizeCompliance(sid);
 			}
 		} catch { /* telemetry never breaks tool calls */ }
-		const review = guidance.beforeToolCall(event);
-		if (review) return review;
 		const reason = loop.block(event);
 		if (reason) return { block: true, reason };
 	});
@@ -1164,8 +1032,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					? candidate
 					: undefined;
 			const dueManual = dueManualReminders(st, now);
-			const hints = guidance.candidates();
-			if (!nudge && !hints.length && dueManual.length === 0) return;
+			if (!nudge && dueManual.length === 0) return;
 			if (turnSteerInFlight) return;
 			turnSteerInFlight = true;
 			try {
@@ -1181,7 +1048,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 							dueManual,
 							[
 								...(nudge ? [nudge] : []),
-								...hints.map((h) => `[capability hint] ${h.text}`),
 							],
 							[],
 							traj,
@@ -1196,7 +1062,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				// occurrences immediately: a later step throwing must not leave a
 				// delivered occurrence still due and re-fire it on the next turn.
 				for (const r of dueManual) advanceDelivered(r, now);
-				guidance.commit(hints);
 				if (nudge) {
 					loop.nudged = true;
 					if (reasoning && ctx.model)

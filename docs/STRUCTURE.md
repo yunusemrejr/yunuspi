@@ -11,7 +11,7 @@ owner and keeping a compatibility fallback.
 | --- | --- | --- |
 | `agent/` | installer | Installed public tree: `extensions/`, `scripts/`, `skills/`, plus live `settings.json`, `models.json`, caches and runtime state. Never edited in place for public changes; see [Public release](PUBLISHING.md). |
 | `settings/` | user + harness | User configuration. `llm_preferences.json` lives here (see [Model preferences](LLM-PREFERENCES.md)). Created on demand; absent files mean defaults. |
-| `reminders/` | reminders extension | Per-session reminder/scheduling state (`state-<sid>.json`) and once-per-session orientation receipts. Hardcoded in `lib/reminders-state.ts` and `lib/harness-orientation.ts`. |
+| `reminders/` | reminders extension | Per-session reminder/scheduling state (`state-<sid>.json`). Hardcoded in `lib/reminders-state.ts` and `lib/harness-orientation.ts`. |
 | `checkpoints/` | checkpoints extension | Conversation recovery state. Hardcoded in `extensions/checkpoints.ts`. |
 | `tasks/`, `work/`, `backups/` | various | Historical task records, maintenance logs and private backups. Runtime artifacts, not loading paths; never published. |
 | `sibling-bridge/`, `inference-slots/`, `web-search-*` | various | Coordination and cache state. Runtime artifacts. |
