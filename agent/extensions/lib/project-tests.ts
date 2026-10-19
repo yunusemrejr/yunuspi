@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
 import { tokenizeSimple } from './bash-routing.ts';
+import { commandArgv, joinCheckBody, peelCheckPrefix, PIPED_FILTER } from './task-state/ingest.ts';
 import { registerContinuationSource, resumesElsewhere } from './continuation-notice.ts';
 import { isSessionStopped } from './session-stop.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
@@ -131,9 +132,12 @@ function checkSegments(command: string): string[] {
 function checkCommandInner(command: unknown, cwd: string, declared: boolean): CheckVerdict {
   if (typeof command !== 'string' || !command.trim()) return { reason: 'empty command' };
   if (command.length > 2000) return { reason: 'over 2000 characters' };
-  if (/[$`\r\n]/.test(command)) return { reason: 'uses $expansion, backticks or newlines; pass literal values' };
-  let directory = path.resolve(cwd), bodyCommand = command.trim();
-  const parts = checkSegments(command);
+  // Harmless leading `cd`, `export`, `set -o pipefail` and inline assignments are
+  // peeled first; the command left behind must contain no expansion at all.
+  const peeled = peelCheckPrefix(command);
+  if (!peeled || /[$`]/.test(peeled.command)) return { reason: 'uses $expansion, backticks or newlines; pass literal values' };
+  let directory = path.resolve(cwd), bodyCommand = joinCheckBody(peeled);
+  const parts = checkSegments(bodyCommand);
   if (parts.length === 2) {
     const prefix = tokenizeSimple(parts[0].trim());
     if (prefix?.length !== 2 || prefix[0] !== 'cd') return { reason: 'only `cd <dir> && <command>` composition is supported (no pipes, ;, || or trailing echo)' };
@@ -148,7 +152,7 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
       if (error?.code !== 'ENOENT') return { reason: 'cd directory cannot be inspected; establish its scope before declaring the check' };
     }
   }
-  const commandTokens = tokenizeSimple(bodyCommand);
+  const commandTokens = commandArgv(bodyCommand);
   if (!commandTokens?.length) {
     // A trailing parenthetical is almost always a natural-language
     // annotation ("cmd (why)"), not shell composition. Name it so the
@@ -205,26 +209,30 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
 
 /** Output shaping that leaves the check's exit observable: a trailing
  * `2>&1`, a redirect into a file (such as build/verify/*.txt) and, when run
- * with pipefail, `| tail|head [-n] N`. Returns the bare check plus whether the
- * run needs pipefail to report the check's exit instead of the filter's. */
-export function checkInvocation(command: unknown): { body: string; pipefail: boolean } | undefined {
-  if (typeof command !== 'string' || /[$`\r\n;]/.test(command)) return undefined;
-  let body = command.trim(), pipefail = false;
-  const tail = /\s*\|\s*(?:tail|head)(?:\s+-n)?\s+-?\d+\s*$/.exec(body);
-  if (tail) { body = body.slice(0, tail.index); pipefail = true; }
+ * with pipefail, `| tail|head [-n] N`. Returns the bare check body plus whether
+ * the run needs pipefail (`pipefail`) and whether its own prefix already sets
+ * it (`pipefailSet`); callers inject `set -o pipefail;` only when it is needed
+ * and not already set. */
+export function checkInvocation(command: unknown): { body: string; pipefail: boolean; pipefailSet: boolean } | undefined {
+  if (typeof command !== 'string') return undefined;
+  const peeled = peelCheckPrefix(command);
+  if (!peeled || /[$`;]/.test(peeled.command)) return undefined;
+  let remainder = peeled.command, pipefail = false;
+  const tail = PIPED_FILTER.exec(remainder);
+  if (tail) { remainder = remainder.slice(0, tail.index); pipefail = true; }
   let previous = '';
-  while (previous !== body) {
-    previous = body;
-    body = body.replace(/\s+2>&1\s*$/, '').replace(/\s+(?:1|2|&)?>>?\s*[\w./@-]+\s*$/, '').trim();
+  while (previous !== remainder) {
+    previous = remainder;
+    remainder = remainder.replace(/\s+2>&1\s*$/, '').replace(/\s+(?:1|2|&)?>>?\s*[\w./@-]+\s*$/, '').trim();
   }
-  return body && body !== command.trim() ? { body, pipefail } : undefined;
+  const body = joinCheckBody(peeled, remainder);
+  return body && body !== command.trim() ? { body, pipefail, pipefailSet: peeled.pipefail } : undefined;
 }
 /** Read-only reconnaissance proves nothing about behavior: never evidence. */
 const RECON = /^(?:ls|ll|cat|head|tail|less|more|find|fd|grep|rg|ag|wc|stat|file|du|df|tree|pwd|which|type|whereis|realpath|readlink|basename|dirname|date|whoami|uname|id|env|printenv|sed|awk|sort|uniq|cut|tr|diff|cmp|md5sum|sha256sum|jq|curl|wget|ps|pgrep|lsof|ss|netstat)$/;
 function reconCommand(command: string): boolean {
-  const segments = checkSegments(command);
-  const body = segments.length === 2 && segments[0].trim().startsWith('cd ') ? segments[1] : command;
-  const tokens = body.trim().split(/\s+/).filter(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
+  const peeled = peelCheckPrefix(command);
+  const tokens = (peeled ? peeled.command : command).trim().split(/\s+/).filter(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
   const exe = path.basename(tokens[0] ?? '');
   if (exe === 'git') return /^(?:log|status|diff|show|branch|remote|rev-parse|ls-files|describe|blame)$/.test(tokens[1] ?? '');
   return RECON.test(exe);
@@ -593,7 +601,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         const bare = projectCheckCommand(shaped.body, ctx.cwd, true);
         if (bare && (state.assessment?.checks.some(c => c.key === bare.key) || projectCheckCommand(shaped.body, ctx.cwd))) {
           candidate = bare;
-          if (shaped.pipefail && typeof event.input?.command === 'string' && !/^\s*set -o pipefail;/.test(event.input.command)) event.input.command = `set -o pipefail; ${event.input.command}`;
+          if (shaped.pipefail && !shaped.pipefailSet && typeof event.input?.command === 'string') event.input.command = `set -o pipefail; ${event.input.command}`;
         }
       }
       const check = candidate && (state.assessment?.checks.some(c => c.key === candidate!.key) ? candidate : projectCheckCommand(shaped && candidate ? shaped.body : event.input?.command, ctx.cwd));

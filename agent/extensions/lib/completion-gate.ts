@@ -76,7 +76,7 @@ export function completionGateReceipts(moment: "deploy" | "plan-complete", recei
 		block: true,
 		waived: false,
 		key,
-		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\n${protectedReview ? 'Review the current delivered media and record honest video_qa verdicts. A repeated completion call cannot approve unreviewed or failed media. Keep unavailable playback/listening review explicit; only the human user can waive it.' : "Resolve these first (run the project's real test suites; run quality_review review and assess it). If the user explicitly wants to proceed anyway, repeat the same call: it will proceed as a recorded waiver, and the final report must name each unresolved item."}`,
+		reason: `${what} refused: verification is unresolved.\n${receipts.map((receipt) => `- ${receipt.line}`).join("\n")}\n${protectedReview ? 'Review the current delivered media and record honest video_qa verdicts: frames from the export for the picture, video_qa action:"listen" for narration and mix. A repeated completion call cannot approve unreviewed or failed media.' : "Resolve these first: run the project's real checks (a passing run of its test or build command counts automatically) and settle open reviews. Do not resend this call just to get past the check. Only when the user explicitly told you to proceed anyway does the same call again record a waiver; the final report must then name each unresolved item."}`,
 	};
 }
 

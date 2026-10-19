@@ -3356,12 +3356,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 376
+        "line": 387
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 390
+        "line": 401
       },
       {
         "name": "bg",
@@ -3441,7 +3441,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 351
+        "line": 362
       },
       {
         "name": "google-account",
@@ -3546,12 +3546,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 369
+        "line": 380
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 362
+        "line": 373
       },
       {
         "name": "obs",
@@ -3711,7 +3711,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 383
+        "line": 394
       },
       {
         "name": "websearch",
@@ -3947,7 +3947,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 399,
+        "line": 410,
         "kind": "literal"
       },
       {
@@ -4443,7 +4443,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 399,
+        "line": 410,
         "kind": "literal"
       },
       {
@@ -4887,7 +4887,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 716,
+      "sourceFiles": 717,
       "registrationSites": 66,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 102,
@@ -5881,6 +5881,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/video-listen.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/video-looks.ts",
         "exists": true
       },
@@ -6188,6 +6192,10 @@
       },
       {
         "path": "agent/extensions/rpiv-todo/state/plan.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/asr-listen.py",
         "exists": true
       },
       {

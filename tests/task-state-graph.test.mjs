@@ -414,3 +414,29 @@ test('a launched background suite is an attempt, not yet a passing check', () =>
   const red = ingest.bashResultEvents({ ...ctx(), ts: 3000 }, { command: 'pnpm test', toolCallId: 'bg3', failed: true, excerpt: 'TypeError: boom' });
   assert.equal(kinds(red).filter((k) => k === 'failure').length, 1);
 });
+
+test('harmless prefixes count as the same evidence check; a filtered run counts only with its own pipefail', () => {
+  for (const command of [
+    'PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH npm test',
+    'export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"; npm test',
+    'export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" && npm test',
+    'export PATH="$HOME/x/bin:$PATH" && cd /path/to/proj && npm test',
+    'cd /srv/proj && set -o pipefail; python3 -m pytest tests/ -q | tail -n 30',
+    'set -o pipefail; npm test 2>&1 | tail -20',
+    'set -euo pipefail; npm test | head -5',
+    'set -eo pipefail && npm test 2>&1 | tail -20',
+    'npm test 2>&1',
+  ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
+  for (const command of [
+    'npm test 2>&1 | tail -20',
+    'npm test > /dev/null',
+    'PATH=$(which node) npm test',
+    'PATH=`which node` npm test',
+    'export A=$(x); npm test',
+    'echo $HOME; npm test',
+    'PATH=$HOME/bin npm test $FLAGS',
+    'set -o pipefail; npm test | tee out.log',
+    'set -o pipefail; npm test 2>&1 | grep ok',
+    'export A=1; export B=2; export C=3; export D=4; export E=5; npm test',
+  ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
+});

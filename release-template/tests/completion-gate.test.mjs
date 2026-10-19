@@ -25,7 +25,7 @@ test('unresolved receipts refuse once; the identical retry is a recorded waiver'
   const lines = ['quality review: Independent review pending: current changes have not been accepted', 'project tests: Current checks unresolved (no checks)'];
   const first = completionGate('deploy', lines, refused);
   assert.equal(first.block, true);
-  assert.match(first.reason, /Deploy refused[\s\S]*quality review[\s\S]*repeat the same call/);
+  assert.match(first.reason, /Deploy refused[\s\S]*quality review[\s\S]*Do not resend this call[\s\S]*same call again record a waiver/);
   refused.add(first.key);
   const retry = completionGate('deploy', lines, refused);
   assert.deepEqual([retry.block, retry.waived], [false, true]);

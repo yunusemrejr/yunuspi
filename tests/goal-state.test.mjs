@@ -21,6 +21,7 @@ const gs=await jiti.import('../agent/extensions/lib/goal-state.ts');
 const {intentBundleTools}=await jiti.import('../agent/extensions/lib/tool-discovery.ts');
 const {default:goalExtension}=await jiti.import('../agent/extensions/goal.ts');
 const {registerContinuationSource}=await jiti.import('../agent/extensions/lib/continuation-notice.ts');
+const {isSessionStopped}=await jiti.import('../agent/extensions/lib/session-stop.ts');
 
 const met=(goal,id,evidence='npm test: 12 passed, exit 0')=>{
  const out=gs.recordEvidence(goal,id,'met',evidence);
@@ -183,8 +184,10 @@ test('persisted snapshots restore the latest goal on a branch',()=>{
  assert.equal(gs.restoreGoal([{type:'custom',customType:'other',data:a}]),undefined);
 });
 
+let harnessCount=0;
 function harness({failSend=false}={}){
- const handlers={},commands={},tools={},entries=[],sent=[],sentOptions=[],notes=[];
+ const sessionId=`goal-fixture-${++harnessCount}`;
+ const handlers={},commands={},tools={},entries=[],sent=[],sentOptions=[],notes=[],emitted=[];
  const pi={
   on:(name,fn)=>{(handlers[name]??=[]).push(fn);},
   registerCommand:(name,options)=>{commands[name]=options;},
@@ -192,12 +195,13 @@ function harness({failSend=false}={}){
   appendEntry:(customType,data)=>{entries.push({type:'custom',customType,data});},
   sendUserMessage:async(text,options)=>{if(failSend)throw new Error('input queue closed');sent.push(text);sentOptions.push(options);},
   getActiveTools:()=>['read'],setActiveTools:()=>{},
+  events:{emit:(name,event)=>emitted.push({name,event})},
  };
- const ctx={cwd:cleanRepo,ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries},hasPendingMessages:()=>false};
+ const ctx={cwd:cleanRepo,ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries,getSessionId:()=>sessionId},hasPendingMessages:()=>false};
  goalExtension(pi);
  const emit=async(name,event={})=>{for(const fn of handlers[name]??[])await fn(event,ctx);};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
- return {commands,entries,sent,sentOptions,notes,emit,call,ctx};
+ return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted};
 }
 
 test('an earlier background verification cannot clear later edits',async()=>{
@@ -316,16 +320,39 @@ test('a background run settles its own debt: starting one verifies nothing, fini
  assert.match(await settled('pnpm test',{status:'completed',exitCode:0,command:'pnpm test'}),/Goal achieved/);
 });
 
+test('an unfinished goal keeps its tool; a settled goal silences follow-ups until it is active again',async()=>{
+ const h=harness();
+ const pin=async()=>{h.emitted.length=0;await h.emit('before_agent_start');return h.emitted.find(e=>e.name==='adaptive-pipeline-selection')?.event;};
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ assert.equal((await pin()).persistent,true);
+ assert.match(await h.call({action:'blocked',reason:'Needs the production API key from the user.'}),/blocked/);
+ assert.equal(isSessionStopped(h.ctx),true,'a blocked goal stops automatic follow-ups');
+ const blocked=await pin();
+ assert.deepEqual([blocked.names,blocked.persistent],[['goal'],true],'"go on" after a block can still close the goal');
+ await h.commands.goal.handler('resume',h.ctx);
+ assert.equal(isSessionStopped(h.ctx),false,'resuming lifts the stop');
+ for(const criterion of h.entries.at(-1).data.criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ assert.match(await h.call({action:'complete'}),/^Goal achieved\./);
+ assert.equal(isSessionStopped(h.ctx),true,'an achieved goal stops test, review and delivery follow-ups');
+ assert.equal((await pin()).persistent,false,'an achieved goal releases its tool');
+ await h.commands.goal.handler('Ship the importer',h.ctx);
+ assert.equal(isSessionStopped(h.ctx),false,'a new goal starts unstopped');
+});
+
 test('a spent waiver does not carry over to a later, unrelated gap',async()=>{
  const h=harness();
  await h.commands.goal.handler('Ship the exporter',h.ctx);
  const state=()=>h.entries.at(-1).data;
  for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
- // One edit, refused, then deliberately waived: the documented "repeat the call" path.
+ // One edit, refused, then deliberately waived. A bare repeat no longer waives:
+ // the waiver needs the reason each gap cannot close, and that reason is recorded.
  await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
  assert.match(await h.call({action:'complete'}),/1 file change/);
- assert.match(await h.call({action:'complete'}),/recorded waiver/);
+ assert.match(await h.call({action:'complete'}),/still unresolved[\s\S]*call complete again with reason/);
+ assert.equal(state().status,'active','a reasonless repeat leaves the goal open');
+ assert.match(await h.call({action:'complete',reason:'The user said to ship without re-running tests.'}),/recorded waiver/);
  assert.equal(state().status,'achieved');
+ assert.match(state().note,/recorded waiver: The user said to ship without re-running tests\./);
  // A later goal in the same session must refuse a fresh unverified edit, not inherit it.
  await h.commands.goal.handler('Ship the importer',h.ctx);
  for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
@@ -337,7 +364,7 @@ test('a spent waiver does not carry over to a later, unrelated gap',async()=>{
  for(const criterion of h2.entries.at(-1).data.criteria)await h2.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
  await h2.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
  assert.match(await h2.call({action:'complete'}),/1 file change/);
- assert.match(await h2.call({action:'complete'}),/recorded waiver/);
+ assert.match(await h2.call({action:'complete',reason:'No test runner exists in this fixture project.'}),/recorded waiver/);
  // Resume re-arms the same goal; a fresh unverified edit must refuse again rather
  // than inherit the waiver that closed it.
  await h2.commands.goal.handler('resume',h2.ctx);

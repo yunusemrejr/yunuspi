@@ -257,6 +257,7 @@
     "media-sync.ts",
     "video-browser.ts",
     "video-segments.ts",
+    "video-listen.ts",
     "research-evidence.ts",
     "wire-warmth.ts"
   ],
@@ -768,6 +769,7 @@
     "scripts/video-render.mjs",
     "scripts/blender-studio.py",
     "scripts/music-soundfont.py",
+    "scripts/asr-listen.py",
     "scripts/video-browser.mjs"
   ]
 }

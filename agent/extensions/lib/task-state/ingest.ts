@@ -323,10 +323,113 @@ const RUNNER = /^(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|ph
 const CHECK_TASK = /^(?:test|tests|check|lint|typecheck|build|verify)(?::[\w.-]+)?$/;
 const NON_VERIFY_FLAG = /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|--if-present|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/;
 
+/** Output filter that keeps a check's exit observable only with pipefail. */
+export const PIPED_FILTER = /\s*\|\s*(?:tail|head)(?:\s+-n)?\s+-?\d+\s*$/;
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const PREFIX_LIMIT = 4;
+const SHELL_OPERATORS = "|&;<>()`";
+export type CheckPrefix = { cd?: string; env: string[]; command: string; pipefail: boolean };
+
+/** Quote-aware words from the start of a command, stopping before the first
+ * unquoted operator (`rest` is that offset). `$` and `~` stay literal text.
+ * Null on an unbalanced quote. */
+function scanWords(text: string): { words: { value: string; start: number; end: number }[]; rest: number } | null {
+	const words: { value: string; start: number; end: number }[] = [];
+	let value = "", start = -1, quote: string | null = null, i = 0;
+	for (; i < text.length; i++) {
+		const c = text[i];
+		if (quote) {
+			if (c === quote) quote = null;
+			else if (c === "\\" && quote === '"' && i + 1 < text.length) value += text[++i];
+			else value += c;
+			continue;
+		}
+		if (c === " " || c === "\t") {
+			if (start >= 0) words.push({ value, start, end: i });
+			value = ""; start = -1; continue;
+		}
+		if (SHELL_OPERATORS.includes(c)) break;
+		if (start < 0) start = i;
+		if (c === "'" || c === '"') quote = c;
+		else if (c === "\\" && i + 1 < text.length) value += text[++i];
+		else value += c;
+	}
+	if (quote) return null;
+	if (start >= 0) words.push({ value, start, end: i });
+	return { words, rest: i };
+}
+
+/** Argv of one simple command. Leading NAME=VALUE words may carry `$`, `~` and
+ * quotes (values are literal, never expanded); the command itself must still
+ * pass tokenizeSimple, which rejects expansion and every operator. */
+export function commandArgv(text: string): string[] | null {
+	const trimmed = text.trim();
+	const scan = scanWords(trimmed);
+	if (!scan) return null;
+	const k = scan.words.findIndex(w => !ASSIGNMENT.test(w.value));
+	if (k < 0) return scan.rest < trimmed.length ? null : scan.words.map(w => w.value);
+	const command = tokenizeSimple(trimmed.slice(scan.words[k].start));
+	if (!command) return null;
+	return [...scan.words.slice(0, k).map(w => w.value), ...command];
+}
+
+/** Split on unquoted `&&` and `;`, keeping each separator and part offset. */
+function splitSequence(command: string): { parts: string[]; seps: string[]; starts: number[] } {
+	const parts: string[] = [], seps: string[] = [], starts = [0];
+	let start = 0;
+	for (const match of command.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&|;/g)) {
+		if (match[0] !== "&&" && match[0] !== ";") continue;
+		parts.push(command.slice(start, match.index)); seps.push(match[0]);
+		start = match.index! + match[0].length; starts.push(start);
+	}
+	parts.push(command.slice(start));
+	return { parts, seps, starts };
+}
+
+/** Peels the harmless prefixes a model writes before a check, at most four
+ * `cd DIR &&`, `export NAME=VALUE` (then `;` or `&&`) and `set -[eu]*o
+ * pipefail` segments, plus leading inline `NAME=VALUE` words. Assignment values
+ * are kept as literal text in `env`, in order, so they still key the receipt.
+ * Null when the command holds `$(`, a backtick or a newline anywhere. */
+export function peelCheckPrefix(command: string): CheckPrefix | null {
+	if (/[`\r\n]|\$\(/.test(command)) return null;
+	const { parts, seps, starts } = splitSequence(command);
+	const env: string[] = [];
+	let cd: string | undefined, pipefail = false, index = 0, peeled = 0;
+	for (; index < parts.length - 1 && peeled < PREFIX_LIMIT; index++) {
+		const scan = scanWords(parts[index]);
+		if (!scan?.words.length || scan.rest < parts[index].length) break;
+		const argv = scan.words.map(w => w.value);
+		const raw = scan.words.map(w => parts[index].slice(w.start, w.end));
+		const sep = seps[index];
+		if (argv[0] === "cd" && argv.length === 2 && sep === "&&" && cd === undefined && !parts[index].includes("$")) cd = parts[index].trim();
+		else if (argv[0] === "export" && argv.length > 1 && argv.slice(1).every(a => ASSIGNMENT.test(a))) env.push(...raw.slice(1));
+		else if (argv.length === 3 && argv[0] === "set" && /^-[eu]*o$/.test(argv[1]) && argv[2] === "pipefail") pipefail = true;
+		else break;
+		peeled++;
+	}
+	let remainder = command.slice(starts[index]).trim();
+	const scan = scanWords(remainder);
+	const k = scan ? scan.words.findIndex(w => !ASSIGNMENT.test(w.value)) : -1;
+	if (scan && k > 0) {
+		env.push(...scan.words.slice(0, k).map(w => remainder.slice(w.start, w.end)));
+		remainder = remainder.slice(scan.words[k].start);
+	}
+	return { cd, env, command: remainder, pipefail };
+}
+
+/** Rebuilds the peeled command as `cd DIR && NAME=VALUE... command`, the shape
+ * the receipt key is computed from. `command` overrides the peeled remainder.
+ * PATH only locates the runner, so `PATH=... npm test` is the same check as a
+ * planned `npm test`; other assignments (APP_TEST_MODE=2) stay in the identity. */
+export function joinCheckBody(prefix: CheckPrefix, command = prefix.command): string {
+	return [...(prefix.cd ? [`${prefix.cd} &&`] : []), ...prefix.env.filter(assignment => !assignment.startsWith("PATH=")), command].join(" ").trim();
+}
+
 function isSingleTestStep(step: string): boolean {
-	const argv = tokenizeSimple(step.trim());
+	const argv = commandArgv(step.trim());
 	if (!argv?.length) return false;
-	const index = argv.findIndex(token => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
+	const index = argv.findIndex(token => !ASSIGNMENT.test(token));
 	if (index < 0) return false;
 	const tokens = argv.slice(index);
 	if (tokens.some(token => NON_VERIFY_FLAG.test(token))) return false;
@@ -354,13 +457,24 @@ function isSingleTestStep(step: string): boolean {
 export function isTestLikeCommand(command: string): boolean {
 	const raw = String(command ?? "").trim();
 	if (!raw || raw.length > 2000) return false;
+	const peeled = peelCheckPrefix(raw);
+	if (!peeled) return false;
+	// `2>&1` never masks the exit. A `| tail|head N` filter does, unless the
+	// same command sets pipefail in its own prefix.
+	let remainder = peeled.command;
+	const filter = PIPED_FILTER.exec(remainder);
+	if (filter) {
+		if (!peeled.pipefail) return false;
+		remainder = remainder.slice(0, filter.index);
+	}
+	const body = joinCheckBody(peeled, remainder.replace(/\s+2>&1\s*$/, "").trim());
 	const parts: string[] = [];
 	let start = 0;
-	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
+	for (const match of body.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
 		if (match[0] !== "&&") continue;
-		parts.push(raw.slice(start, match.index)); start = match.index! + 2;
+		parts.push(body.slice(start, match.index)); start = match.index! + 2;
 	}
-	parts.push(raw.slice(start));
+	parts.push(body.slice(start));
 	if (parts.length > 4) return false;
 	for (let i = 0; i < parts.length - 1; i++) {
 		const prefix = tokenizeSimple(parts[i].trim());

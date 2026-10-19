@@ -906,6 +906,17 @@ export function criticalReviewTimes(scene: TimedScene, raw: any, fps: number): n
 }
 
 const QA_CRITERIA=['art-direction','composition','typography','motion','sync','audio'];
+/** Evidence each verdict may rest on. playback and listening are human senses; a model
+ * proves motion with decoded frame sequences it looked at, and sync and audio with a
+ * current listen report (measured). */
+const QA_EVIDENCE: Record<string, string[]> = {'art-direction':['frames','sequence','playback'],composition:['frames','sequence','playback'],typography:['frames','sequence','playback'],motion:['sequence','playback'],sync:['measured','playback'],audio:['measured','listening']};
+/** The listen report for these exact video bytes, or undefined when missing or stale. */
+async function currentListen(file: string, sha256: string) {
+  try {
+    const report = JSON.parse(await fs.readFile(path.join(path.dirname(file), `${path.basename(file)}.listen.json`), 'utf8'));
+    return report?.format === 'yunuspi-listen-v1' && report.path === file && report.sha256 === sha256 ? report : undefined;
+  } catch { return undefined; }
+}
 async function ambientRecipe(file: string) {
   const recipePath = path.join(path.dirname(file),'ambient.json');
   try {
@@ -949,10 +960,17 @@ async function qaReview(params: any, cwd: string, signal?: AbortSignal) {
   const denial=selfMutationDenial(reportPath,await fs.realpath(cwd));if(denial)throw Error(denial);
   if(!Array.isArray(params.reviews) || !params.reviews.length || params.reviews.length>6)throw Error('record needs 1..6 explicit review verdicts');
   const seen=new Set(), reviews=new Map<string,any>((report.reviews ?? []).map((r: any)=>[r.criterion,r]));
+  const listen=params.reviews.some((r:any)=>r?.evidence==='measured') ? await currentListen(file,identity.video) : undefined;
   for(const review of params.reviews) {
     if(!review || !QA_CRITERIA.includes(review.criterion) || seen.has(review.criterion) || !['pass','fail','unreviewed'].includes(review.verdict) || typeof review.note!=='string' || !review.note.trim() || review.note.length>1200)throw Error('Reviews need distinct known criteria, verdicts and concrete notes');
     if(review.comparedReferences !== undefined && (!Array.isArray(review.comparedReferences) || review.comparedReferences.length>8 || review.comparedReferences.some((r:any)=>typeof r!=='string' || r.length>4096)))throw Error('comparedReferences needs at most 8 reference paths/URLs');
-    if(!['frames','playback','listening'].includes(review.evidence) || (['motion','sync'].includes(review.criterion) && review.evidence!=='playback') || (review.criterion==='audio' && review.evidence!=='listening') || (['art-direction','composition','typography'].includes(review.criterion) && review.evidence==='listening'))throw Error('Art direction/composition/typography need frames or playback, motion/sync need playback, audio needs listening');
+    if(!QA_EVIDENCE[review.criterion]?.includes(review.evidence))throw Error('Art direction, composition and typography need frames, sequence or playback; motion needs sequence (decoded frame sequences you looked at) or playback; sync needs measured or playback; audio needs measured (a current video_qa action:"listen" report) or listening');
+    if(review.evidence==='measured') {
+      // A model cannot listen: a current listen report on these exact bytes is the evidence.
+      if(!listen)throw Error('measured evidence needs a current video_qa action:"listen" report for this exact file; run listen on it first');
+      if(review.verdict==='pass' && review.criterion==='audio' && listen.verdicts?.passed!==true)throw Error(`The listen check did not pass: ${(listen.findings ?? []).filter((f:any)=>f.severity==='error').map((f:any)=>f.message).join(' ') || 'see its report'} Fix the mix and listen again, or record audio as fail.`);
+      if(review.verdict==='pass' && review.criterion==='sync' && listen.verdicts?.intelligible!==true)throw Error('Sync cannot pass on measured evidence while the listen report finds the narration unintelligible.');
+    }
     if(review.criterion==='art-direction' && review.verdict==='pass' && (report.references ?? []).some((r:any)=>r.unavailable || !review.comparedReferences?.includes(r.source)))throw Error('An art-direction pass must name every inspected reference in comparedReferences; unavailable references need repair or a revised brief');
     seen.add(review.criterion);reviews.set(review.criterion,{...review,note:review.note.trim(),reviewer:params.reviewer ?? 'model',at:new Date().toISOString()});
   }
@@ -964,8 +982,9 @@ async function qaReview(params: any, cwd: string, signal?: AbortSignal) {
 }
 
 export async function videoQa(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
+  if(params.action==='listen') { const { videoListen } = await import('./video-listen.ts'); return videoListen(params,cwd,signal,progress); }
   if(['record','status','supersede'].includes(params.action))return qaReview(params,cwd,signal);
-  if(params.action!==undefined && params.action!=='analyze')throw Error('action must be analyze, record, status or supersede');
+  if(params.action!==undefined && params.action!=='analyze')throw Error('action must be analyze, listen, record, status or supersede');
   const file = await inputFile(params.path, cwd);
   const info = await probe(file, signal);
   const video = info.streams?.find((s: any) => s.codec_type === "video");
@@ -1129,26 +1148,73 @@ export function planNarration(params: any) {
   return { text, display, spoken, counts: display.split(" ").map(token => spokenWordCount(token, lexicon)), voice, style, speed };
 }
 
+/** Automatic routing may fall back to the local Piper voice for ElevenLabs
+ * credential, quota, rate or pre-connect network failures. An explicit
+ * backend:"elevenlabs" keeps the provider error. */
+const FALLBACK_HTTP = new Set([401, 402, 403, 429]);
+const PRE_CONNECT = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED']);
+const PIPER_HINT = 'Piper is not installed; narration_tts action:install sets it up for a local fallback.';
+type ElevenFallback = { from: { backend: 'elevenlabs'; status?: number; reason: string }; advice: string };
+const automaticBackend = (params: any) => (params.backend ?? 'auto') === 'auto';
+const piperReady = (voice: string) => existsSync(piperPython()) && voiceFiles(voice).every(file => existsSync(file.path));
+function withPiperHint(error: unknown) {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  failure.message = `${failure.message.replace(/\.$/, '')}. ${PIPER_HINT}`;
+  return failure;
+}
+/** Why an automatic ElevenLabs attempt may hand speech to Piper, or undefined.
+ * Paid audio already retained for this cache keeps the provider error for recovery. */
+async function elevenFallback(error: any, dir: string): Promise<ElevenFallback | undefined> {
+  const retained = Boolean(error?.retainedSpeechCache);
+  if (retained && (await fs.readdir(dir).catch(() => [] as string[])).some(file => /^speech-[a-f0-9]{64}\.(?:mp3|json|response\.json)$/.test(file))) return undefined;
+  const cause = retained ? error.cause : error, status = cause?.providerStatus;
+  if (FALLBACK_HTTP.has(status)) return { from: { backend: 'elevenlabs', status, reason: `ElevenLabs returned HTTP ${status}` },
+    advice: status === 402 ? 'restore ElevenLabs credits or billing to use ElevenLabs' : status === 429 ? 'wait for ElevenLabs quota or rate limits to clear to use ElevenLabs' : 'configure a valid ELEVENLABS_API_KEY to use ElevenLabs' };
+  const code = cause?.cause?.code ?? cause?.cause?.errors?.[0]?.code;
+  if (cause instanceof TypeError && PRE_CONNECT.has(code)) return { from: { backend: 'elevenlabs', reason: `ElevenLabs could not be reached (${code})` }, advice: 'restore network access to api.elevenlabs.io to use ElevenLabs' };
+  return undefined;
+}
+async function narrationFallback(params: any, cwd: string, signal: AbortSignal | undefined, progress: Progress | undefined, fallback: ElevenFallback) {
+  const delivery = await narrationPiper({ ...params, backend: 'piper', voiceId: undefined, model: undefined }, cwd, signal, progress);
+  return { ...delivery, backend: 'piper', fallbackFrom: fallback.from, note: `${fallback.from.reason}, so this narration used the local Piper voice ${delivery.voice}; ${fallback.advice}. ${delivery.note}` };
+}
+/** Scenes not yet narrated go to Piper after an automatic ElevenLabs failure; scenes already narrated keep their paid audio. */
+async function narrationFallbackScenes(params: any, cwd: string, signal: AbortSignal | undefined, progress: Progress | undefined, voice: string, fallback: ElevenFallback, cause: unknown, scenes: string[], done: any[]) {
+  if (!piperReady(voice)) throw withPiperHint(cause);
+  const piper = await narrationTts({ ...params, action: 'synthesize', backend: 'piper', voiceId: undefined, model: undefined, scenes }, cwd, signal, progress);
+  return { ...piper, backend: 'piper', fallbackFrom: fallback.from, narrated: [...done, ...piper.narrated],
+    note: `${fallback.from.reason}, so ${scenes.length} remaining scene narration(s) used the local Piper voice ${piper.voice}; ${fallback.advice}. ${done.length ? 'Scenes already narrated with ElevenLabs keep that audio. ' : ''}${piper.note}` };
+}
+
 export async function narrationSpeak(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
-  if (narrationBackend(params) === 'elevenlabs') {
-    const plan = planNarration(params), dir = await studioFolder(params.outputDir, cwd, 'narration');
-    try {
-      const made = await elevenSpeech({ ...params, text: plan.spoken.text }, dir, signal, progress);
-      const file = path.join(dir, 'narration.wav');
-      const mastered = await masterNarration(made.raw, file, signal);
-      const seconds = Number((await probe(file, signal)).format?.duration);
-      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 120) throw Error('Standalone narration exceeds 120 seconds; synthesize project scenes instead');
-      const words = displayWordTiming(plan.display, made.words, plan.counts);
-      const delivery = { ...made, raw: undefined, words, artifact: await produced(file), seconds, captions: await writeSpeechCaptions(dir, plan.display, seconds, words), loudnessLufs: mastered.lufs,
-        note: 'ElevenLabs speech, with provider character alignment. Listen to pronunciation and delivery. Captions and cueWords share these spans; provider alignment is not independent transcription.' };
-      await fs.rm(made.raw, { force: true });
-      await fs.writeFile(path.join(dir, 'narration.json'), JSON.stringify(delivery, null, 2) + '\n'); return delivery;
-    } catch (error) {
-      const retained = await retainedSpeechError(dir, error);
-      if (retained) throw retained;
-      await fs.rm(dir, { recursive: true, force: true }); throw error;
-    }
+  if (narrationBackend(params) !== 'elevenlabs') return narrationPiper(params, cwd, signal, progress);
+  const automatic = automaticBackend(params), voice = params.voice ?? 'en_US-ryan-high';
+  if (automatic && !elevenStatus().configured) {
+    if (!piperReady(voice)) throw withPiperHint(new Error(elevenStatus().setup));
+    return narrationFallback(params, cwd, signal, progress, { from: { backend: 'elevenlabs', reason: 'ElevenLabs is not configured' }, advice: 'set ELEVENLABS_API_KEY to use ElevenLabs' });
   }
+  const plan = planNarration(params), dir = await studioFolder(params.outputDir, cwd, 'narration');
+  try {
+    const made = await elevenSpeech({ ...params, text: plan.spoken.text }, dir, signal, progress);
+    const file = path.join(dir, 'narration.wav');
+    const mastered = await masterNarration(made.raw, file, signal);
+    const seconds = Number((await probe(file, signal)).format?.duration);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 120) throw Error('Standalone narration exceeds 120 seconds; synthesize project scenes instead');
+    const words = displayWordTiming(plan.display, made.words, plan.counts);
+    const delivery = { ...made, raw: undefined, words, artifact: await produced(file), seconds, captions: await writeSpeechCaptions(dir, plan.display, seconds, words), loudnessLufs: mastered.lufs,
+      note: 'ElevenLabs speech, with provider character alignment. Listen to pronunciation and delivery. Captions and cueWords share these spans; provider alignment is not independent transcription.' };
+    await fs.rm(made.raw, { force: true });
+    await fs.writeFile(path.join(dir, 'narration.json'), JSON.stringify(delivery, null, 2) + '\n'); return delivery;
+  } catch (error) {
+    const fallback = automatic ? await elevenFallback(error, dir) : undefined;
+    if (fallback && piperReady(voice)) { await fs.rm(dir, { recursive: true, force: true }); return narrationFallback(params, cwd, signal, progress, fallback); }
+    const retained = await retainedSpeechError(dir, error);
+    if (retained) throw fallback ? withPiperHint(retained) : retained;
+    await fs.rm(dir, { recursive: true, force: true }); throw fallback ? withPiperHint(error) : error;
+  }
+}
+
+async function narrationPiper(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
   const plan = planNarration(params), style = VOICE_STYLES[plan.style];
   signal?.throwIfAborted();
   const dir = await studioFolder(params.outputDir, cwd, "narration"), requestPath = path.join(dir, "request.json");
@@ -1230,8 +1296,11 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
   if (narrationBackend(params) === 'elevenlabs') {
     // Scene-local checkpoints avoid repeating successful API work when a
     // later request fails. Save the timeline after every completed scene.
-    if (!elevenStatus().configured) throw Error(elevenStatus().setup);
-    const jobs = selected.filter((scene: any) => typeof scene.narration === 'string' && scene.narration.trim());
+    const automatic = automaticBackend(params), jobs = selected.filter((scene: any) => typeof scene.narration === 'string' && scene.narration.trim());
+    if (!elevenStatus().configured) {
+      if (!automatic) throw Error(elevenStatus().setup);
+      return narrationFallbackScenes(params, cwd, signal, progress, voice, { from: { backend: 'elevenlabs', reason: 'ElevenLabs is not configured' }, advice: 'set ELEVENLABS_API_KEY to use ElevenLabs' }, new Error(elevenStatus().setup), jobs.map((job: any) => job.id), []);
+    }
     if (!Number.isInteger(spec.fps) || spec.fps < 1 || spec.fps > 60) throw Error('fps must be an integer 1..60 before narration');
     number(params.tailSeconds, 0.8, 0.25, 5, 'tailSeconds');
     number(params.cueLead, 0.08, 0, 0.5, 'cueLead');
@@ -1246,7 +1315,13 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
       const counts = display.split(' ').map(token => spokenWordCount(token, lexicon));
       const cache = projectWritePath(dir, '.video-cache', 'speech', scene.id);
       const index = spec.scenes.indexOf(scene);
-      const made = await elevenSpeech({ ...params, text: spoken.text, previousText: spec.scenes[index - 1]?.narration?.slice(-700), nextText: spec.scenes[index + 1]?.narration?.slice(0, 700) }, cache, signal, progress);
+      let made: any;
+      try { made = await elevenSpeech({ ...params, text: spoken.text, previousText: spec.scenes[index - 1]?.narration?.slice(-700), nextText: spec.scenes[index + 1]?.narration?.slice(0, 700) }, cache, signal, progress); }
+      catch (error) {
+        const fallback = automatic ? await elevenFallback(error, cache) : undefined;
+        if (!fallback) throw error;
+        return narrationFallbackScenes(params, cwd, signal, progress, voice, fallback, error, jobs.slice(i).map((job: any) => job.id), narrated);
+      }
       await fs.mkdir(outDir, { recursive: true });
       const staging = projectWritePath(dir, 'public', 'audio', 'narration', `${scene.id}-${randomBytes(4).toString('hex')}.wav`);
       const wav = projectWritePath(dir, 'public', 'audio', 'narration', `${scene.id}.wav`);
@@ -1305,6 +1380,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     scene.narrationAudio = `audio/narration/${scene.id}.wav`;
     scene.narrationWords = made.words;
     scene.narrationTiming = made.exact ? 'measured' : 'estimated';
+    scene.narrationProvider = 'piper';
     scene.cueLead = lead;
     const needed = Number((offset + seconds + (params.tailSeconds ?? 0.8)).toFixed(2));
     let adjusted: number | undefined;

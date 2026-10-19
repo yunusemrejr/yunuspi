@@ -149,12 +149,35 @@ test('video QA binds perceptual attestations to current files and does not appro
   const last=report.frames.at(-1);assert.ok(Math.abs(last.seconds-59/60)<1e-6);
   const pixel=await exec('ffmpeg',['-v','error','-i',last.path,'-vf','crop=1:1:80:45','-pix_fmt','rgb24','-f','rawvideo','-'],{encoding:'buffer'});
   assert.ok(pixel.stdout[2]>200&&pixel.stdout[0]<40,'the actual final blue frame is sampled, not the earlier red frame');
-  await assert.rejects(video.videoQa({action:'record',path:file,report:report.report,reviews:[{criterion:'motion',verdict:'pass',evidence:'frames',note:'Looks fine'}]},dir),/need playback/);
+  await assert.rejects(video.videoQa({action:'record',path:file,report:report.report,reviews:[{criterion:'motion',verdict:'pass',evidence:'frames',note:'Looks fine'}]},dir),/motion needs sequence/);
   const partial=await video.videoQa({action:'record',path:file,report:report.report,reviews:[{criterion:'composition',verdict:'pass',evidence:'frames',note:'The test frame is visible'}]},dir);
   assert.equal(partial.reviewStatus,'partial');assert.equal(partial.deliveryReady,false);
   await fs.appendFile(path.join(film,'src/scenes/StudioScene.tsx'),'\n// changed revision');
   assert.equal((await video.videoQa({action:'status',path:file,report:report.report},dir)).reviewStatus,'stale');
   await assert.rejects(video.videoQa({action:'record',path:file,report:report.report,reviews:[{criterion:'typography',verdict:'pass',evidence:'frames',note:'old'}]},dir),/stale/);
+});
+
+test('a model proves audio and sync with a current listen report and motion with frame sequences, never by claiming to listen',{timeout:90000},async t=>{
+  try{await exec('ffmpeg',['-version']);}catch{if(process.env.PI_REQUIRE_MEDIA_TEST==='1')throw Error('FFmpeg required');t.skip('FFmpeg unavailable');return;}
+  const dir=await workspace(t),file=path.join(dir,'master.mp4');
+  await exec('ffmpeg',['-y','-v','error','-f','lavfi','-i','color=gray:s=160x90:r=10:d=2','-f','lavfi','-i','sine=frequency=440:duration=2','-shortest','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',file]);
+  const report=await video.videoQa({path:file},dir);
+  const record=(reviews)=>video.videoQa({action:'record',path:file,report:report.report,reviews},dir);
+  const audio={criterion:'audio',verdict:'pass',evidence:'measured',note:'Narration transcribed cleanly, 14 dB over the music'};
+  await assert.rejects(record([audio]),/current video_qa action:"listen" report/,'measured evidence needs a listen report on these bytes');
+  const sha256=(await import('node:crypto')).createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  const listen=(passed,intelligible,digest=sha256)=>fs.writeFile(`${file}.listen.json`,JSON.stringify({format:'yunuspi-listen-v1',path:file,sha256:digest,verdicts:{passed,intelligible},findings:passed?[]:[{severity:'error',message:'Music sits only 3 dB under speech.'}]}));
+  await listen(true,true,'0'.repeat(64));
+  await assert.rejects(record([audio]),/current video_qa action:"listen" report/,'a report on other bytes is stale');
+  await listen(false,true);
+  await assert.rejects(record([audio]),/listen check did not pass: Music sits only 3 dB under speech\./);
+  assert.equal((await record([{...audio,verdict:'fail',note:'Music masks the narration; remix'}])).reviewStatus,'needs-work','a failing listen still allows an honest fail');
+  await listen(true,false);
+  await assert.rejects(record([{criterion:'sync',verdict:'pass',evidence:'measured',note:'Word timings land on the cuts'}]),/unintelligible/);
+  await listen(true,true);
+  const done=await record([audio,{criterion:'sync',verdict:'pass',evidence:'measured',note:'Word timings land on the cuts'},{criterion:'motion',verdict:'pass',evidence:'sequence',note:'Dense contact sheets across both cuts are smooth'}]);
+  assert.deepEqual(done.reviews.filter(r=>['audio','sync','motion'].includes(r.criterion)).map(r=>[r.criterion,r.verdict]).sort(),[['audio','pass'],['motion','pass'],['sync','pass']]);
+  await assert.rejects(record([{criterion:'audio',verdict:'pass',evidence:'frames',note:'Looks loud enough'}]),/audio needs measured/);
 });
 
 test('tool contracts expose the native choreography, safe upgrade and independent review actions',async()=>{
@@ -166,6 +189,8 @@ test('tool contracts expose the native choreography, safe upgrade and independen
   assert.doesNotThrow(()=>valid('video_shot',{dir:'.',name:'a',projection:'orthographic',reuse:true}));
   assert.doesNotThrow(()=>valid('video_shot',{dir:'.',name:'art',scene:{objects:[{id:'cutout',shape:'image-plane',image:'public/assets/art.png',lit:false}]}}));
   assert.doesNotThrow(()=>valid('video_qa',{action:'record',path:'video.mp4',report:'qa.json',reviews:[{criterion:'audio',verdict:'pass',evidence:'listening',note:'Ending heard'}]}));
+  assert.doesNotThrow(()=>valid('video_qa',{action:'record',path:'video.mp4',report:'qa.json',reviews:[{criterion:'audio',verdict:'pass',evidence:'measured',note:'Listen report passed'},{criterion:'motion',verdict:'pass',evidence:'sequence',note:'Dense contact sheet'}]}));
+  assert.doesNotThrow(()=>valid('video_qa',{action:'listen',path:'video.mp4',script:'PRODUCTION.md',narration:'audio/narration.wav',music:'audio/music.wav',model:'small.en',targetLufs:-14}));
 });
 
 test('video projects preserve and refresh the complete creative brief without inventing a second owner',async t=>{

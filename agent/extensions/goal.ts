@@ -22,6 +22,7 @@ import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
 import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
 import { selfVerificationPrompt } from "./lib/lean-policy.ts";
+import { noteSessionStopped, unlockSessionStop } from "./lib/session-stop.ts";
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalRestoreNotice, goalStatusText, goalSummary,
 	parseGoalArgs, GOAL_USAGE, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalState,
@@ -78,6 +79,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// accepted: `/goal clear` said "Goal cleared." while reopening the session
 	// brought the goal back. Report it, and retry at the next turn boundary.
 	const persist = (next: GoalState | undefined, ctx?: ExtensionContext) => {
+		// A finished or blocked goal silences automatic follow-ups; a goal that
+		// becomes active again (new, resumed, retried, reopened) lifts that.
+		if (next?.status === "active" && goal?.status !== "active" && ctx) unlockSessionStop(ctx);
 		goal = next;
 		if (next) {
 			try { pi.appendEntry(ENTRY, next); unsaved = undefined; }
@@ -126,12 +130,15 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	});
 
 	// A resumed session with a live goal must be able to record evidence even
-	// though tool discovery starts from the small default tool set.
+	// though tool discovery starts from the small default tool set. A blocked
+	// goal keeps the tool too: "go on" after a budget stop must be able to close
+	// it, and releasing the schema then made the closing call "not found".
 	pi.on("before_agent_start", (_event, ctx) => {
 		lastStop = undefined;
 		persistPending();
 		try {
-			pi.events?.emit('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['goal'], persistent: goalIsLive(goal), beforeStart: true });
+			const unfinished = !!goal && ["active", "paused", "blocked"].includes(goal.status);
+			pi.events?.emit('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['goal'], persistent: unfinished, beforeStart: true });
 		} catch { /* discovery still stages the tool from the kickoff marker */ }
 	});
 
@@ -210,6 +217,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				const checked = goalCompletionGate(goal, { unverifiedWrites: 0, refused: new Set(), verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...verification] });
 				if (!checked.block) {
 					persist(complete(goal, false), ctx);
+					noteSessionStopped(ctx, `goal:${goal.id}:achieved`);
 					ctx.ui?.notify?.(`Goal ${goal.id} achieved.`, "info");
 					return;
 				}
@@ -217,6 +225,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			const decision = stopGate(goal, { lastStop: stop, hasPendingMessages: ctx.hasPendingMessages() });
 			if (!decision) return;
 			persist(decision.goal, ctx);
+			// A stalled or budget-spent goal waits for the user; automatic test,
+			// review and delivery follow-ups must not keep waking the model.
+			if (decision.goal.status === "blocked") noteSessionStopped(ctx, `goal:${decision.goal.id}:blocked`);
 			if (decision.notice) ctx.ui?.notify?.(decision.notice.text, decision.notice.level);
 			if (decision.nudge) {
 				ctx.ui?.notify?.(`Goal ${decision.goal.id}: continuing (${decision.goal.nudges}) — ${decision.goal.criteria.filter((c) => c.status === "open").length} criteria open.`, "info");
@@ -399,7 +410,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "goal",
 		label: "goal",
-		description: "Track the user's /goal. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker; status shows progress.",
+		description: "Track the user's /goal. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker (credentials, a decision, access) — difficulty, uncertainty or remaining work is not a blocker; status shows progress.",
 		parameters: Type.Object({
 			action: StringEnum(["status", "check", "met", "waive", "criteria", "blocked", "complete"] as const),
 			id: Type.Optional(Type.String({ maxLength: 8, description: "Criterion id such as C1 or V" })),
@@ -412,7 +423,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				status: Type.Optional(StringEnum(["met", "waived"] as const)),
 			}), { maxItems: MAX_CRITERIA, description: "Batch criterion evidence, including V, with met/waive or complete. Each result needs its own observed evidence or waiver reason; the batch validates before any state changes." })),
 			items: Type.Optional(Type.Array(Type.String({ maxLength: 240 * RATIONALE_INTAKE }), { maxItems: (MAX_CRITERIA - 1) * 2 })),
-			reason: Type.Optional(Type.String({ maxLength: 400 * RATIONALE_INTAKE })),
+			reason: Type.Optional(Type.String({ maxLength: 400 * RATIONALE_INTAKE, description: "blocked: the concrete user action needed. complete: only to waive checks that genuinely cannot run here, naming each and why" })),
 			summary: Type.Optional(Type.String({ maxLength: 800 * RATIONALE_INTAKE })),
 		}),
 		async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: ExtensionContext) {
@@ -447,6 +458,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const reason = String(params.reason ?? "").trim();
 					if (reason.length < 8) return text("blocked needs a concrete reason the user can act on.");
 					persist(block(goal, reason), ctx);
+					noteSessionStopped(ctx, `goal:${goal.id}:blocked`);
 					ctx.ui?.notify?.(`Goal blocked: ${reason}`, "warning");
 					return text("Goal marked blocked and shown to the user. Stop and wait for their answer; /goal resume continues afterwards.");
 				}
@@ -465,13 +477,19 @@ export default function goalExtension(pi: ExtensionAPI): void {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");
 					}
+					// A repeated call used to waive silently, and models repeated it on their
+					// own. A waiver now needs the reason each gap cannot close here; it is
+					// recorded on the goal and shown to the user.
+					const why = String(params.reason ?? "").trim();
+					if (decision.waived && why.length < 12) return text("The same checks are still unresolved. Resolve them, or, only if one genuinely cannot be resolved in this environment, call complete again with reason naming each unresolved item and why. That waiver is recorded and shown to the user.");
 					// A waiver is spent by the call that used it. The refusal keys on the
 				// shape of the gaps, so keeping a spent key for the whole session let
 				// any later gap of the same shape auto-waive — a fresh unverified edit
 				// then closed the goal as though the user had approved that one too.
 				if (decision.waived) refused.delete(decision.key);
-				const done = complete(goal, decision.waived);
+				const done = decision.waived ? { ...complete(goal, true), note: `Completed with a recorded waiver: ${why.slice(0, 380)}` } : complete(goal, false);
 					persist(done, ctx);
+					noteSessionStopped(ctx, `goal:${done.id}:achieved`);
 					ctx.ui?.notify?.(`Goal ${done.id} achieved${decision.waived ? " with recorded waiver" : ""}.`, "info");
 					return text(`Goal achieved${decision.waived ? " with a recorded waiver; name each unresolved item in the final report" : ""}. Give the user a short evidence-based summary.`);
 				}

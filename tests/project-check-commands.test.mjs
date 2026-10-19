@@ -63,3 +63,65 @@ test('symlinked check directories cannot certify an outside workspace or reuse a
  fs.unlinkSync(path.join(cwd,'linked'));fs.symlinkSync(path.join(cwd,'two'),path.join(cwd,'linked'));
  assert.notEqual(first.key,projectCheckCommand('cd linked && node --test',cwd).key);
 });
+
+const {checkInvocation}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
+const recognize=(command,cwd)=>{const shaped=checkInvocation(command);return projectCheckCommand(command,cwd)??(shaped?projectCheckCommand(shaped.body,cwd):null);};
+
+test('harmless prefixes (cd, export, set -o pipefail, inline assignments) are recognized as the same check',t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'check-prefix-'));
+ t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
+ for(const command of [
+  'PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH npm test',
+  'PATH=${HOME}/bin:~/.local/bin:/usr/bin:./node_modules/.bin npm test',
+  'export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"; npm test',
+  'export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" && npm test',
+  `export PATH="$HOME/x/bin:$PATH" && cd ${cwd} && npm test`,
+  `export A=1 && cd ${cwd} && set -o pipefail; npm test`,
+  `cd ${cwd} && set -o pipefail; python3 -m pytest tests/ -q | tail -n 30`,
+  'set -o pipefail; npm test 2>&1 | tail -20',
+  'set -euo pipefail; npm test | head -5',
+  'set -eo pipefail && npm test 2>&1 | tail -20',
+  'export A=1; export B=2; export C=3; export D=4; npm test',
+ ]) assert.ok(recognize(command,cwd),command);
+ for(const command of [
+  `cd ${cwd} && npm test 2>&1 | tail -20`,
+  'npm test | tail -20',
+ ]) assert.equal(checkInvocation(command).pipefailSet,false,`no prefix leaves pipefail to the harness: ${command}`);
+ assert.equal(checkInvocation('set -o pipefail; npm test | tail -20').pipefailSet,true);
+ assert.equal(checkInvocation('set -o pipefail; npm test | tail -20').pipefail,true);
+ assert.equal(checkInvocation('set -o pipefail; npm test | tail -20').body,'npm test');
+});
+
+test('receipt identity: pipefail, export spelling and PATH do not change the key, other env values do',t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'check-prefix-key-'));
+ t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
+ const bare=projectCheckCommand('npm test',cwd).key;
+ assert.equal(projectCheckCommand('set -o pipefail; npm test',cwd).key,bare);
+ assert.equal(projectCheckCommand('export PATH="$HOME/x/bin:$PATH"; npm test',cwd).key,projectCheckCommand('PATH=$HOME/x/bin:$PATH npm test',cwd).key);
+ assert.equal(projectCheckCommand('PATH=$HOME/x/bin:$PATH npm test',cwd).key,bare,'a PATH that only locates npm satisfies a planned bare npm test');
+ assert.equal(projectCheckCommand('export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH" && npm test',cwd).key,bare);
+ assert.notEqual(projectCheckCommand('APP_TEST_MODE=1 npm test',cwd).key,projectCheckCommand('APP_TEST_MODE=2 npm test',cwd).key);
+});
+
+test('expansion, substitution, operators and extra prefix items are still rejected',t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'check-prefix-reject-'));
+ t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
+ for(const command of [
+  'PATH=$(which node) npm test',
+  'PATH=`which node` npm test',
+  'export A=$(x); npm test',
+  'export A="$(x)" && npm test',
+  'echo $HOME; npm test',
+  'PATH=$HOME/bin npm test $FLAGS',
+  'npm test; echo done',
+  'npm test || true',
+  'npm test "$X"',
+  'set -o pipefail; npm test | tee out.log',
+  'set -o pipefail; npm test 2>&1 | grep ok',
+  'set -o pipefail; npm test | tail -20 | wc -l',
+  `cd ${cwd} && cd ${cwd} && npm test`,
+  'export A=1; export B=2; export C=3; export D=4; export E=5; npm test',
+ ]) {
+  assert.equal(recognize(command,cwd),null,command);
+ }
+});

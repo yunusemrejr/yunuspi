@@ -31,7 +31,13 @@ async function request(endpoint: string, body: any, signal: AbortSignal | undefi
   if (bounded.aborted) throw Object.assign(new Error('ElevenLabs request cancelled before submission'), { submissionNotSent: true });
   const multipart = body instanceof FormData;
   const response = await fetch(API + endpoint, { method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: bounded,
-    headers: { 'xi-api-key': key, ...(body === undefined || multipart ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : multipart ? body : JSON.stringify(body) });
+    headers: { 'xi-api-key': key, ...(body === undefined || multipart ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : multipart ? body : JSON.stringify(body) })
+    .catch((error: any) => {
+      // DNS and refused connections fail before any byte is sent: nothing was paid for, so no
+      // "outcome unknown" marker may block the next attempt or the local fallback.
+      const code = error?.cause?.code ?? error?.cause?.errors?.[0]?.code;
+      throw ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code) ? Object.assign(error, { submissionNotSent: true }) : error;
+    });
   if (!response.ok) { await response.body?.cancel(); throw Object.assign(new Error(`ElevenLabs returned HTTP ${response.status}; no automatic retry or fallback was attempted`), { providerStatus: response.status }); }
   if (!response.body) throw Error('ElevenLabs returned no body');
   const reader = response.body.getReader(), chunks: Buffer[] = [];
