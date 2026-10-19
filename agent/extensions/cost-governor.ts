@@ -261,7 +261,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		promptSnippet: "Read several independent files in one turn",
 		promptGuidelines: [
 			"Use read_many for two to six independent file inspections; use read for one file or a long specific range.",
-			"Batch independent work in one turn: a single read_many or several parallel tool calls are cheaper than one file per turn.",
 		],
 		parameters: Type.Object({
 			files: Type.Array(Type.Object({

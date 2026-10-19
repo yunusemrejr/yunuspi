@@ -2,7 +2,7 @@ import { sessionObservability } from './session-observability.ts';
 /** Shared TypeSafe Jev judgment client, served through the configured
  * OpenRouter key. Jev answers typed questions (noul/choice/score) over a
  * state — no prose — which makes it a cheap mechanical judge for routing,
- * screening, ranking, verifying, classifying, distilling and triage.
+ * screening, ranking, verifying, classifying and triage.
  *
  * Resilience contract (every consumer keeps its heuristic path; Jev refines,
  * never gates):
@@ -19,7 +19,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { protectedEvidence } from "./local-intelligence.mjs";
 import { microMetrics } from './micro-intelligence/metrics.ts';
 import { beginHarnessActivity } from './harness-activity.ts';
 
@@ -837,110 +836,3 @@ export function tooShort(text: unknown, minChars: number): boolean {
   return typeof text !== "string" || text.trim().length < minChars;
 }
 
-/** Split complete text into bounded line-aware chunks. Empty means the whole
- * source cannot fit; callers must retain the original, never a hidden prefix. */
-export function splitTextChunks(text: string, maxChunks = 8, chunkChars = 2000): string[] {
-  if (!text || !Number.isSafeInteger(maxChunks) || maxChunks < 1 || !Number.isSafeInteger(chunkChars) || chunkChars < 1) return [];
-  const chunks: string[] = [];
-  let current = "";
-  for (const line of text.split("\n")) {
-    if (line.length > chunkChars) return [];
-    if (current && current.length + line.length + 1 > chunkChars) {
-      chunks.push(current);
-      current = "";
-      if (chunks.length >= maxChunks) return [];
-    }
-    current += (current ? "\n" : "") + line;
-  }
-  if (current && chunks.length < maxChunks) chunks.push(current);
-  return chunks;
-}
-
-/** Terminal output keeps chunks that carry outcome signals. The general
- * protection (any digit, path or hedge word) marks every chunk of a real log
- * as required, so Jev was never consulted on terminal output. */
-const terminalSignal = /\b(?:error\w*|fail\w*|warn\w*|exception|traceback|panic|fatal|denied|refused|reject\w*|blocked|abort\w*|cancel\w*|timeout|timed out|assert\w*|exit(?:ed)? (?:code|status)|must|required|deprecated|conflict\w*|not found|missing|unresolved|summary|total|passed|skipped)\b/i;
-
-/** Score text chunks for distillation. First and last chunks are always
- * kept; middle chunks need `keepAt` (0-1). Returns the rendered selection
- * with its TUI mark, or undefined when nothing should change. The `ask`
- * dependency lets tests drive the orchestration without transport. `task`
- * grounds the relevance question; without it Jev judged relevance blind. */
-export async function selectDistillChunks(
-  tool: string,
-  text: string,
-  ask: (
-    site: string,
-    state: unknown,
-    questions: Record<string, unknown>,
-    opts?: { protect?: readonly string[] },
-  ) => Promise<JevAskResult>,
-  keepAt = 0.6,
-  task = "",
-): Promise<string | undefined> {
-  const chunks = splitTextChunks(text, 12, 2000);
-  if (chunks.length < 2) return undefined;
-  const signal = tool === "bash" ? terminalSignal : protectedEvidence;
-  const required = chunks.map((chunk, index) => index === 0 || index === chunks.length - 1 || signal.test(chunk));
-  if (required.every(Boolean)) return undefined;
-  const metrics=microMetrics();metrics.offer('jev');
-  const questions: Record<string, unknown> = {};
-  chunks.forEach((_, index) => {
-    // Code already guarantees these chunks survive. Asking the model about
-    // them costs tokens without changing the selection.
-    if (required[index]) return;
-    questions[`chunk_${index}`] = {
-      type: "noul",
-      instructions: `Does chunk ${index} carry information relevant to the task (errors, results, decisions, data)?`,
-    };
-  });
-  const judged = await ask(
-    "distill",
-    { ...(task ? { task: task.slice(0, 600) } : {}), tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
-    questions,
-    { protect: ["task", "tool"] },
-  );
-  if (!judged.ok) {metrics.skip('jev',judged.skipped);return undefined;}
-  metrics.run('jev',judged.usage.ms,text.length);
-  metrics.jevUsage('distill',chunks.length,judged.usage.inputTokens,judged.usage.costUsd,judged.usage.cached);
-  if(judged.usage.cached)metrics.cacheHit('jev');
-  const kept = chunks.map(
-    (_, index) =>
-      required[index] ||
-      // Missing, mistyped or non-finite judgments cannot authorize omission.
-      judged.answers[`chunk_${index}`]?.type !== "noul" ||
-      !Number.isFinite(judged.answers[`chunk_${index}`]?.noul) ||
-      judged.answers[`chunk_${index}`].noul! < 0 ||
-      judged.answers[`chunk_${index}`].noul! > 1 ||
-      judged.answers[`chunk_${index}`].noul! >= keepAt,
-  );
-  if (kept.every(Boolean)) return undefined;
-  const keptCount = kept.filter(Boolean).length;
-  const rendered = renderKeptChunks(chunks, kept);
-  if (!rendered) return undefined;
-  const projection = `${rendered}\n\n${jevMark("distill", `kept ${keptCount}/${chunks.length}`, judged.usage)}`;
-  if(text.length-projection.length<256)return undefined;
-  metrics.accept('jev',text.length-projection.length,true);
-  return projection;
-}
-
-/** Render kept chunk indexes extractively with omission notes. */
-export function renderKeptChunks(chunks: string[], kept: boolean[], maxChars = 12000): string {
-  const parts: string[] = [];
-  let omitted = 0;
-  chunks.forEach((chunk, index) => {
-    if (kept[index]) {
-      if (omitted > 0) {
-        parts.push(`[...${omitted} chunk(s) omitted...]`);
-        omitted = 0;
-      }
-      parts.push(chunk);
-    } else {
-      omitted++;
-    }
-  });
-  if (omitted > 0) parts.push(`[...${omitted} trailing chunk(s) omitted...]`);
-  const joined = parts.join("\n\n");
-  // A render limit may reject a selection; it must never cut retained facts.
-  return joined.length > maxChars ? "" : joined;
-}

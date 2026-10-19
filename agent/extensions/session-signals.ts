@@ -1228,11 +1228,6 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
   };
 }
 
-/** Harness system-prompt line: reuse before reinvention. A fixed string so the
- * prompt prefix stays byte-stable for provider caching. */
-export const HARNESS_TOOL_FIRST =
-  "Use relevant tools to inspect, execute and verify work, especially across complex workflows. Check the live description, inputs, actions and returned evidence or task handles; use an active tool directly, or tool_search with detail:true to find and understand missing capabilities before rebuilding them. Revisit tool choice when the scope changes or a tool fails. Consult skill_review or a SKILL.md when a guide would help the next decision. Suggestions and reads do not prove execution or success.";
-
 export default function (pi: any) {
   // First-request system snapshots, in memory plus one runtime file per
   // session so /sys-prompt survives a reload. Runtime state, never exported.
@@ -1671,7 +1666,7 @@ export default function (pi: any) {
     if (anchorText === undefined) anchorText = dateAnchor().text;
     // Stable for the whole run, including tool continuations and compaction.
     // Unlike custom messages this is metadata, not a fresh conversational turn.
-    const finalSystemPrompt = `${_e.systemPrompt}\n\n${anchorText}\n\n${HARNESS_TOOL_FIRST}`;
+    const finalSystemPrompt = `${_e.systemPrompt}\n\n${anchorText}`;
     captureSysText(finalSystemPrompt, ctx);
     return {
       systemPrompt: finalSystemPrompt,

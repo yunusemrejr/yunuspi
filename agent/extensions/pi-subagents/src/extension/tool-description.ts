@@ -20,7 +20,7 @@ For scripted orchestration use workflowScript with async:true: await runs.run('k
 
 export const SUBAGENT_TOOL_PROMPT_SNIPPET = "Delegate useful independent work; respect user constraints.";
 export const SUBAGENT_TOOL_PROMPT_GUIDELINES = [
- "Choose useful bounded delegation and reuse native completion handles. Account for announced helpers, preserve disagreements and verify child claims. Skills remain optional.",
+ "Delegate only independent, bounded work, and verify what a child reports before relying on it.",
 ];
 
 // Project sessions can execute declarative children, not the shared-VM script.

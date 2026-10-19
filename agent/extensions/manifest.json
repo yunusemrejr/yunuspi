@@ -93,17 +93,12 @@
     "double.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
-    "film-blend.ts",
     "git-authority.ts",
     "goal-state.ts",
     "lean-policy.ts",
-    "guidance-topics-domains.ts",
-    "guidance-topics-systems.ts",
-    "guidance-topics.ts",
     "harness-activity.ts",
     "harness-capabilities.ts",
     "harness-notice.ts",
-    "harness-orientation.ts",
     "health-log.ts",
     "helper-usage.ts",
     "hook-ledger.ts",
@@ -140,7 +135,6 @@
     "needle-runtime.ts",
     "needle-types.ts",
     "needle-worker.mjs",
-    "noslop.ts",
     "numeric-checks.ts",
     "observation-retrieval.ts",
     "observer-book.ts",
@@ -169,7 +163,6 @@
     "quality-review-owner.ts",
     "quality-review-signals.ts",
     "quality-review.ts",
-    "relevant-guidance.ts",
     "reminders-state.ts",
     "render-queue.ts",
     "request-compat.ts",
@@ -198,6 +191,7 @@
     "session-telemetry.ts",
     "sheet-formula.ts",
     "skill-relevance.ts",
+    "skill-review.ts",
     "skill-routing.ts",
     "skill-telemetry.ts",
     "slop-guidance-signals.ts",
@@ -723,6 +717,51 @@
       "name": "scripts/compatibility/autonomous-recovery-test.mjs",
       "retired": "2026-10-19",
       "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/film-blend.ts",
+      "retired": "2026-10-19",
+      "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
+    },
+    {
+      "name": "lib/noslop.ts",
+      "retired": "2026-10-19",
+      "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
+    },
+    {
+      "name": "lib/relevant-guidance.ts",
+      "retired": "2026-10-19",
+      "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+    },
+    {
+      "name": "lib/harness-orientation.ts",
+      "retired": "2026-10-19",
+      "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+    },
+    {
+      "name": "lib/guidance-topics.ts",
+      "retired": "2026-10-19",
+      "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+    },
+    {
+      "name": "lib/guidance-topics-domains.ts",
+      "retired": "2026-10-19",
+      "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+    },
+    {
+      "name": "lib/guidance-topics-systems.ts",
+      "retired": "2026-10-19",
+      "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+    },
+    {
+      "name": "lib/micro-intelligence/micro-task.ts",
+      "retired": "2026-10-19",
+      "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+    },
+    {
+      "name": "lib/micro-intelligence/micro-worker.ts",
+      "retired": "2026-10-19",
+      "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
     }
   ],
   "supportFiles": [
@@ -814,8 +853,6 @@
     "extensions/lib/micro-intelligence/span-sensor.ts",
     "extensions/lib/micro-intelligence/jev-decisions.ts",
     "extensions/lib/micro-intelligence/route-privacy.ts",
-    "extensions/lib/micro-intelligence/micro-worker.ts",
-    "extensions/lib/micro-intelligence/micro-task.ts",
     "extensions/lib/micro-intelligence/rerank.ts",
     "extensions/lib/micro-intelligence/model-qual-lab.ts",
     "scripts/render-design-state.mjs",

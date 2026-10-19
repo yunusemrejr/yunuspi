@@ -14,7 +14,6 @@ import {
 } from "./lib/micro-intelligence/advisory.ts";
 import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
-import { registerMicroTask } from "./lib/micro-intelligence/micro-task.ts";
 import {
   createSpanTrace,
   sessionSpanScorer,
@@ -346,7 +345,6 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
   let activeSessionId = "";
   let activeOwnerId = "";
   let sessionController = new AbortController();
-  registerMicroTask(pi, { sessionSignal: () => sessionController.signal });
   let initialPromptSeen = false;
   /** Prior-task summary restored from the transcript on resume, so the first
    * post-resume prompt is classified with real context. */

@@ -147,7 +147,6 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		],
 		related: ["tool-catalog", "workflow-orchestration"],
 		sourceFiles: [
-			"agent/extensions/lib/relevant-guidance.ts",
 			"agent/extensions/lib/skill-relevance.ts",
 			"agent/extensions/lib/capability-groups.ts",
 		],
@@ -348,8 +347,8 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		id: "provider-routing",
 		group: "models",
 		summary: "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",
-		entrypoints: ["provider", "or-provider", "models.json providers.openrouter.modelOverrides"],
-		commands: ["provider", "or-provider"],
+		entrypoints: ["provider", "models.json providers.openrouter.modelOverrides"],
+		commands: ["provider"],
 		options: [
 			option("subcommand", "Provider command operation.", ["list", "status", "order", "only", "sort", "clear", "reset", "json"]),
 			option("model", "Optional selected or provider/model target."),
@@ -451,7 +450,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		summary: "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
 		entrypoints: ["pi.getCommands", "registerCommand"],
 		commands: [
-			"cost", "budget", "self", "metrics", "obs", "effort", "reminder", "goal", "graph", "provider", "or-provider", "models",
+			"cost", "budget", "self", "metrics", "obs", "effort", "reminder", "goal", "graph", "provider", "models",
 			"todos", "memory-prime", "bg", "tasks", "bg-tasks", "bg-clear", "bg-update", "jobs", "logs", "kill",
 			"subagents", "run", "subagents-doctor", "subagents-inspect-rpc", "subagents-refine", "subagents-fleet",
 			"subagents-detach", "subagents-stop", "subagents-steer", "subagents-watchdog", "prompt-workflow", "google-account",
@@ -1056,14 +1055,13 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "micro-intelligence",
 		group: "models",
-		summary: "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
-		entrypoints: ["micro_status", "micro_task"],
-		tools: ["micro_status", "micro_task"],
+		summary: "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision; deterministic owners retain safety and completion authority.",
+		entrypoints: ["micro_status"],
+		tools: ["micro_status"],
 		options: [
 			option("PI_MICRO_INTELLIGENCE", "Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners."),
 			option("PI_NEEDLE", "Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying."),
 			option("PI_JEV", "Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter."),
-			option("micro_task.action", "Batch semantic analysis, inspect status, refresh the session model's qualification or run one bounded task on the session model.", ["analyze", "status", "qualify", "run"]),
 			option("PI_RERANK_MODEL|VOYAGE_API_KEY", "Configure remote memory refinement after Needle; unavailable remote inference retains local order."),
 		],
 		related: ["local-intelligence", "tool-catalog", "skill-catalog", "context-diagnostics"],
@@ -1071,7 +1069,6 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"agent/extensions/micro-intelligence.ts",
 			"agent/extensions/lib/needle-runtime.ts",
 			"agent/extensions/lib/jev-client.ts",
-			"agent/extensions/lib/micro-intelligence/micro-task.ts",
 			"agent/extensions/lib/micro-intelligence/metrics.ts",
 		],
 		doc: "agent/public-template/docs/MICRO-INTELLIGENCE.md",

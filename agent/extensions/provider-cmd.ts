@@ -646,10 +646,9 @@ export default async function registerProviderCommand(
 ): Promise<void> {
 	const options = {
 		description:
-			"Select a serving provider for an OpenRouter model (persisted, affects routing). Alias: /or-provider",
+			"Select a serving provider for an OpenRouter model (persisted, affects routing).",
 		getArgumentCompletions: completions,
 		handler: handle,
 	};
 	pi.registerCommand("provider", options);
-	pi.registerCommand("or-provider", options);
 }

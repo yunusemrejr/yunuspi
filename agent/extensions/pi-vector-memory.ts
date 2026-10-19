@@ -552,6 +552,10 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   });
 
   type RecallViews = Awaited<ReturnType<typeof retrieveFamilyViews>>;
+  // Unasked recall stays inside this project and its sub-projects. An ancestor such as
+  // ~/Desktop holds every unrelated project below it: a new film folder there was primed
+  // with another product's promo. Ancestors remain available to an explicit search.
+  const automatic = (family: FamilyStore[]) => family.filter((member) => member.relation !== 'ancestor');
   const recallCache = new Map<string, { at: number; result: Promise<RecallViews>; lexical?: Promise<RecallViews> }>();
   const recall: ProjectMemoryRecall = async (cwd, query, role, signal, background = false) => {
     const store = ensureStore(cwd), owner = current!;
@@ -563,7 +567,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       // The foreground budget limits waiting, not the reusable query vector.
       // Let one bounded owner-scoped request finish and serve later consumers.
       const retrievalSignal = AbortSignal.any([owner.controller.signal, AbortSignal.timeout(8000)]);
-      cached = { at: now(), result: retrieveFamilyViews([{ store, relation: 'self' }, ...owner.family], query, {
+      cached = { at: now(), result: retrieveFamilyViews([{ store, relation: 'self' }, ...automatic(owner.family)], query, {
         embedder: embedder ?? undefined, signal: retrievalSignal, now, types,
       }).catch(() => ({ main: [], observer: [], subagent: [] })) };
       recallCache.set(key, cached);
@@ -579,7 +583,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
     } finally { if (stop) foreground.removeEventListener('abort', stop); }
     if (current !== owner || signal.aborted || owner.controller.signal.aborted) return '';
     if (!views) {
-      cached.lexical ??= retrieveFamilyViews([{ store, relation: 'self' }, ...owner.family], query, { now, types });
+      cached.lexical ??= retrieveFamilyViews([{ store, relation: 'self' }, ...automatic(owner.family)], query, { now, types });
       views = await cached.lexical;
     }
     if (current !== owner || signal.aborted || owner.controller.signal.aborted) return '';

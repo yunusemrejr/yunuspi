@@ -8,7 +8,6 @@ import { jevHealth, jevEnabled, JEV_INPUT_POLICY, JEV_MAX_INPUT_CHARS, JEV_REMOT
 import { microMetrics } from "./metrics.ts";
 import { microHealthSnapshot, needleStatus, jevStatus, type LayerHealth } from "./health.ts";
 import { spanStatus } from "./span-sensor.ts";
-import { microWorkerStatus } from "./micro-worker.ts";
 import { rerankStatus } from "./rerank.ts";
 
 const INSPECT_KEY = Symbol.for("yunus-pi.micro.inspect.v1");
@@ -86,7 +85,6 @@ export function microStatusSnapshot(request?: {
   const kompress = safeInspect("mini");
   const spanLive = safeInspect("span");
   const span = spanStatus();
-  const worker = microWorkerStatus();
   const rerank = rerankStatus();
   const layers: LayerHealth[] = [
     { layer: "deterministic", status: "ready", detail: "local reflexes" },
@@ -107,11 +105,6 @@ export function microStatusSnapshot(request?: {
       layer: "span",
       status: !span.enabled ? "disabled" : "ready",
       detail: span.shadow ? "shadow record-only · session model" : "session model",
-    },
-    {
-      layer: "microworker",
-      status: !worker.enabled ? "disabled" : "on-demand",
-      detail: "micro_task · session model only; measured admission",
     },
     {
       layer: "rerank",
@@ -162,7 +155,6 @@ export function microStatusSnapshot(request?: {
     },
     kompress,
     span: { ...span, live: spanLive },
-    microworker: worker,
     rerank,
     metrics: microMetrics().summaryLines(),
   };

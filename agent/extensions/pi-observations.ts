@@ -34,7 +34,6 @@ import {
 	MAX_OUTPUT_CHARS,
 	isSearchCommand,
 } from "./lib/output-distiller.ts";
-import { askJev, selectDistillChunks, jevEnabled } from "./lib/jev-client.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
@@ -58,8 +57,6 @@ const MAX_ENTRIES = 64;
 // Sealed renderings hold only a receipt or a reference to one, never a copy of
 // the raw output, so the bound can be far larger than the observation index.
 const MAX_SEALED = 2048;
-/** Bounded context-time wait for an in-flight Jev distillation (typically ~0.6s). */
-const JEV_DISTILL_WAIT_MS = 1500;
 const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Needle error-family labels for tool-result triage. A similarity cue only:
@@ -160,21 +157,6 @@ export default function piObservationsExtension(
 	let counter = 0;
 	let visionHintSent = false;
 	let taskSignal = "";
-	// Background Jev selections are offered at tool_result time. The next
-	// provider request usually follows within milliseconds, before a ~0.6s Jev
-	// answer, and the first render is sealed for the branch lifetime; without a
-	// wait, paid selections never reached context. The context pass therefore
-	// waits a bounded JEV_DISTILL_WAIT_MS, only for not-yet-sealed results.
-	const jevDistillPending = new Map<string, {value?:string; settled?:Promise<void>}>();
-	const offerJevDistill = (key: string, tool: string, text: string): void => {
-		if (jevDistillPending.has(key)) return;
-		if (jevDistillPending.size >= 200) jevDistillPending.delete(jevDistillPending.keys().next().value!);
-		const slot: {value?:string; settled?:Promise<void>} = {};
-		jevDistillPending.set(key,slot);
-		slot.settled = selectDistillChunks(tool,text,(site,state,questions,opts)=>askJev(site,state,questions,{pi,...opts}),undefined,taskSignal)
-			.then(value=>{if(jevDistillPending.get(key)===slot)slot.value=value;})
-			.catch(()=>{});
-	};
 	// Provider-visible history is append-only: the first rendering chosen for a
 	// message is sealed and reused verbatim on later requests. A rewritten
 	// earlier message invalidates the provider cache prefix and re-bills the
@@ -221,7 +203,6 @@ export default function piObservationsExtension(
 
 	function restore(ctx: ExtensionContext): void {
 		mini.reset();
-		jevDistillPending.clear();
 		taskSignal = "";
 		observations = new Map();
 		// A replaced branch (new/forks/compaction) re-renders from scratch.
@@ -244,7 +225,6 @@ export default function piObservationsExtension(
 
 	pi.on("session_shutdown", () => {
 		mini.reset();
-		jevDistillPending.clear();
 	});
 	pi.on("agent_end", () => {
 		// Turn boundary keeps validated caches and live inference: an observation
@@ -397,9 +377,8 @@ export default function piObservationsExtension(
 			count: 1,
 		});
 		// Existing deterministic compression wins. Only bounded successful prose
-		// that a selection could actually shorten claims local inference; other
-		// output stays available to Jev below. The original tool body
-		// stays in the transcript.
+		// that a selection could actually shorten claims local inference. The
+		// original tool body stays in the transcript.
 		const smallStatus = () => {
 			try {
 				return JSON.stringify({ isError: false, details: event.details ?? {} }).length <= 80;
@@ -425,22 +404,6 @@ export default function piObservationsExtension(
 			return mini
 				.select(text, ctx?.model?.cost?.input, taskSignal)
 				.then(finish, () => finish());
-		// Jev scores chunks only when every deterministic and local path
-		// misses: large, successful, undistilled prose with no Kompress
-		// coverage. Offered in the background; the context render
-		// below consumes whatever is ready without waiting on slow calls.
-		if (
-			process.env.PI_OUTPUT_DISTILLER !== "off" &&
-			jevEnabled() &&
-			pi.getActiveTools().includes("obs_read") &&
-			!event.isError &&
-			text.length >= 6000 &&
-			text.length <= MAX_OUTPUT_CHARS &&
-			!preserveRaw &&
-			!distilled
-		) {
-			offerJevDistill(`${ref.id}:${ref.signature}`, event.toolName, text);
-		}
 		return finish();
 	});
 
@@ -498,29 +461,7 @@ export default function piObservationsExtension(
 			const visible = entry?.details?.piObservation?.id;
 			if (Number.isSafeInteger(visible)) presentIds.add(visible);
 		}
-		const jevReady = new Map<number, string | undefined>();
-		if (jevEnabled()) {
-			const eligible = (message: any) => {
-				const ref=message.details?.piObservation as Reference|undefined;
-				return message.role==='toolResult'&&ref?.version===1&&ref.operation&&TOOLS.has(message.toolName) ? ref : undefined;
-			};
-			const waits: Array<Promise<void>> = [];
-			for (const message of event.messages) {
-				const ref = eligible(message), slot = ref && jevDistillPending.get(`${ref.id}:${ref.signature}`);
-				const sealed = ref && sealedRenders.get(ref.id);
-				if (slot?.settled && slot.value === undefined && !(sealed && sealed.resultHash === ref.resultHash)) waits.push(slot.settled);
-			}
-			if (waits.length) {
-				let timer: ReturnType<typeof setTimeout> | undefined;
-				await Promise.race([Promise.all(waits), new Promise<void>(resolve => { timer = setTimeout(resolve, JEV_DISTILL_WAIT_MS); })]);
-				clearTimeout(timer);
-			}
-			event.messages.forEach((message,index)=>{
-				const ref=eligible(message);
-				if(ref) jevReady.set(index,jevDistillPending.get(`${ref.id}:${ref.signature}`)?.value);
-			});
-		}
-		const messages = event.messages.map((message, index) => {
+		const messages = event.messages.map((message) => {
 			if (
 				message.role !== "toolResult" ||
 				message.content.some((part) => part.type !== "text")
@@ -644,11 +585,7 @@ export default function piObservationsExtension(
 				!delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off"
 					? miniProjection(raw, selection)
 					: undefined;
-			const jevLines = jevReady.get(index);
-			const selected =
-				!delta && !summary && !message.isError
-					? (miniRendered ?? jevLines)
-					: undefined;
+			const selected = !delta && !summary && !message.isError ? miniRendered : undefined;
 			if (!delta && !summary && !selected) {
 				if (
 					!message.isError &&
@@ -694,7 +631,7 @@ export default function piObservationsExtension(
 				},
 			];
 			if (!sealed) {
-				const helper = selected ? miniRendered ? "kompress" : "jev" : "deterministic";
+				const helper = selected ? "kompress" : "deterministic";
 				const savedChars = Math.max(0, raw.length - textOf(projected).length);
 				microMetrics().rendered(helper, savedChars);
 				noteHealth("ml.evidence.delivered", { helper, savedChars, count: 1 });

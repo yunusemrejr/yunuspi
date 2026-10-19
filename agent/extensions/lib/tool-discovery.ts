@@ -90,13 +90,11 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
 }
 export const CORE_TOOLS = new Set([
   'read','read_many','bash','edit','write','grep','find','ls','tool_search',
-  'session_self','subagent','bg_wait','quality_review','skill_review','micro_task',
+  'session_self','subagent','bg_wait','quality_review','skill_review',
   // These readers are dependencies of existing context/safety hook owners.
   'project_intel','project_tests','obs_read','checkpoint_read','todo',
   'project_report','module_report','symbol_search','context_slice',
-  // Context packaging. The relevant-guidance owner only delivers a utility
-  // hint when the tool is already active, so leaving this to lazy discovery
-  // made its shipped guidance unreachable.
+  // Context packaging.
   'handoff_capsule',
   // The bash tool description unconditionally points at explicit background
   // work through bg_run/bg_status/bg_logs/bg_kill; keep the quartet with bg_wait.
@@ -118,8 +116,8 @@ export const DIRECT_CORE_TOOLS = new Set([
  * image-to-code request. Everything else stays lazily discoverable. */
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'frontend', tools: ['image_understand', 'image_crop', 'render_see'] },
-  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_generate', 'image_understand', 'blender'] },
-  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'svg_render', 'image_generate', 'image_understand', 'video_assets'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'media_sync', 'video_browser', 'narration_tts', 'audio_synth', 'video_assets', 'video_shot', 'motion_examples', 'image_understand', 'blender'] },
+  { skill: 'motion-approaches', tools: ['motion_examples', 'video_shot', 'blender', 'svg_render', 'image_understand', 'video_assets'] },
   { skill: '3d-cad', tools: ['blender', 'video_shot', 'video_frames'] },
   // Office files are read, built and verified through one tool pair instead of hand-written OOXML or a script per file.
   { skill: 'office-documents', tools: ['office_doc', 'deliverable_check'] },
@@ -523,7 +521,7 @@ export function registerToolDiscovery(pi: any) {
     name:'tool_search',label:'Find tools',
     description:'Find tools for the current task, inspect bounded input/action and usage details with detail:true, and enable chosen names for the next model turn in this request. Also browse capability bundles or command metadata. Discovery never executes the selected tools.',
     promptGuidelines:[
-      'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. If a capability is missing, search with detail:true and enable:true or enable exact names, then call the selected tool on the next model turn; activation alone does not perform the task.',
+      'More tools exist than are active: tool_search with a query finds one, enable:true activates it for your next turn.',
     ],
     parameters:Type.Object({
       kind:Type.Optional(choices(['tools','capabilities','commands'],'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.')),

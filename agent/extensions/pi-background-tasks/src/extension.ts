@@ -794,9 +794,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Inspect one explicit bg_run task or list all running/recent tasks in the background-task registry. Managed-bash helper jobs belong to the process tool. This is a point-in-time inspection tool, not a waiting primitive.",
     promptSnippet:
       "Inspect point-in-time status for one or all background tasks; never poll it as a wait loop",
-    promptGuidelines: [
-      "Use bg_status for requested updates, disabled notifications or suspected hangs—not as a wait loop.",
-    ],
     parameters: BgStatusParams,
     execute(_toolCallId, params) {
       const selected = params.taskId
@@ -824,9 +821,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     description: `Read bounded output from an explicit bg_run task for deliberate inspection, not as a waiting primitive; capped at ${formatSize(MAX_LOG_BYTES)}, with a pointer to the full file when truncated. Managed-bash helper output belongs to the process tool.`,
     promptSnippet:
       "Read bounded task output when needed; never tail it repeatedly as a wait loop",
-    promptGuidelines: [
-      "Use bg_logs for needed evidence with a modest maxBytes; do not repeatedly tail it while waiting.",
-    ],
     parameters: BgLogsParams,
     async execute(_toolCallId, params) {
       const task = registry.resolveTask(params.taskId);
@@ -870,9 +864,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     description:
       "Stop a running background task by ID. Fails loudly if the task is unknown; a task that already finished is reported with its terminal state and nothing is signalled.",
     promptSnippet: "Stop a running background task by ID",
-    promptGuidelines: [
-      "Use bg_kill for explicit bg_run tasks on user cancellation or when no longer needed; use managed-bash's process for internal helpers.",
-    ],
     parameters: BgKillParams,
     async execute(_toolCallId, params) {
       const task = registry.resolveTask(params.taskId);
