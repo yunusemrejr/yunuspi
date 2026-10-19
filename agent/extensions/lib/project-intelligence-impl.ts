@@ -23,20 +23,10 @@ import { IntelligenceClient } from "./project-intelligence/client.mjs";
 import { openProjectViewer } from "./project-intelligence/viewer.mjs";
 import { safeText, secretFile } from "./project-intelligence/privacy.mjs";
 import { intentRetrievalQuery } from "./intent-context.ts";
-import {
-  createScopeDeliberation,
-  scopeRequest,
-  scopeRetrievalTerms,
-  SCOPE_GUIDANCE,
-  SCOPE_LIMITS,
-  SCOPE_PENDING_NOTE,
-} from "./scope-deliberation.ts";
 import { heartbeatPlan } from "./project-intelligence/heartbeat.mjs";
 import { createInterventionSession } from "./intervention-session.ts";
 import { intelContextCapsuleIntent, intelSystemGuidanceIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
-import { collectScopeHistory } from "./project-intelligence/scope-history.mjs";
-import { askJev } from "./jev-client.ts";
 import { branchHasMessage, stickyHeadText } from "./wire-warmth.ts";
 import {
   captureWorkflowContext,
@@ -89,17 +79,6 @@ function bounded(value: any, max = 1800) {
 export default function projectIntelligence(pi: any) {
   // Lean harness: project integrity/intelligence checker retired by default. Set PI_LEAN_GATES=on to re-enable.
   if (process.env.PI_LEAN_GATES !== 'on') return;
-  const scope = createScopeDeliberation(pi, {
-    history: (request: any) =>
-      collectScopeHistory({
-        ...request,
-        sessionsDir: path.join(getAgentDir(), "sessions"),
-      }),
-    workflow: (ctx: any, signal: AbortSignal) =>
-      captureWorkflowContext(identity, conversationContext(ctx), signal),
-    judge: (site, state, questions, options) =>
-      askJev(site, state, questions, { pi, signal: options?.signal }),
-  });
   const anchorContext = createContextAnchor();
   // Control session (per-subsystem envelope per D-011). One cycle per
   // input generation: continuations share their request's cycle.
@@ -118,7 +97,6 @@ export default function projectIntelligence(pi: any) {
   let inputGeneration = 0;
   pi.on("input", (event: any) => {
     if (event.source !== "extension") inputGeneration++;
-    scope.input(event);
   });
   for (const name of [
     "session_before_switch",
@@ -127,7 +105,6 @@ export default function projectIntelligence(pi: any) {
   ])
     pi.on(name, () => {
       inputGeneration++;
-      scope.cancel();
     });
   pi.on("message_end", (event: any) => {
     if (
@@ -135,12 +112,10 @@ export default function projectIntelligence(pi: any) {
       event.message.stopReason === "aborted"
     ) {
       inputGeneration++;
-      scope.cancel(true);
     }
   });
   pi.on("model_select", () => {
     inputGeneration++;
-    scope.cancel(true);
   });
   let client: any,
     identity: any,
@@ -197,7 +172,6 @@ export default function projectIntelligence(pi: any) {
     const old = client;
     const shutdown = old?.close().catch(() => {});
     generation++;
-    scope.cancel();
     closed = false;
     capsule = "";
     identity = undefined;
@@ -395,8 +369,6 @@ export default function projectIntelligence(pi: any) {
             conversationContext(ctx),
             signal,
           );
-          const receipt = scope.receipt(ctx);
-          if (receipt) workflow.scope = { requestHash: receipt.requestHash };
           signal?.throwIfAborted();
           assertCurrent(current, epoch, ctx);
           const result = await current.request(
@@ -445,8 +417,6 @@ export default function projectIntelligence(pi: any) {
           graph: reviewWorkflowBrief({
             graph: evidence.summary,
             workflow,
-            scope: scope.reviewContext(ctx),
-            baseline: scope.receipt(ctx)?.workflow,
           }),
           history,
           workflow,
@@ -493,21 +463,9 @@ export default function projectIntelligence(pi: any) {
       } catch {
         /* current request still works */
       }
-      const scopeTask = scopeRequest(event.prompt ?? "", branch);
-      const intentQuery = intentRetrievalQuery(event.prompt ?? "", branch);
-      await retrieve(
-        scopeTask
-          ? `${intentQuery.slice(0, 780)} ${scopeRetrievalTerms(scopeTask)}`.slice(
-              0,
-              900,
-            )
-          : intentQuery,
-      );
+      await retrieve(intentRetrievalQuery(event.prompt ?? "", branch));
       assertCurrent(current, epoch, ctx);
       if (turn !== inputGeneration) return carry();
-      // Start without holding the SDK preflight (which has no abort signal).
-      // The context hook joins it with the active agent signal before inference.
-      void scope.start(event, ctx, capsule).catch(() => {});
       void current
         .request("activity", {
           state: "working",
@@ -556,37 +514,30 @@ export default function projectIntelligence(pi: any) {
   pi.on("context", (event: any, ctx: any) => {
     const render = () => {
       const messages = event.messages.filter((m: any) => m.customType !== KEY);
-      const scopeBrief = scope.context(ctx);
-      if (!enabled() || (!capsule && !scopeBrief) || (ctx && !ownsContext(ctx)))
+      if (!enabled() || !capsule || (ctx && !ownsContext(ctx)))
         return messages.length !== event.messages.length
           ? { messages }
           : undefined;
       // Ephemeral wire context; neither graph dumps nor growing session messages.
-      // Go-live (step 18): binding budget; a refused capsule without a scope
-      // brief returns the messages unchanged (same shape as the disabled
-      // path). Admitted injections release immediately. Only new bytes spend the per-input budget. Re-rendering the admitted
-      // capsule for every inference of a long turn re-spent it until the
-      // budget refused the capsule, and with it the finished council brief:
-      // the agent then waited ~14 minutes for a brief the harness held back.
-      // A refused capsule still carries the scope brief the write gate owns.
-      const renderKey = JSON.stringify([capsule, scopeBrief]);
+      // Go-live (step 18): binding budget; a refused capsule returns the
+      // messages unchanged (same shape as the disabled path). Admitted
+      // injections release immediately. Only new bytes spend the per-input
+      // budget: re-rendering the admitted capsule for every inference of a long
+      // turn re-spent it until the budget refused it.
+      const renderKey = capsule;
       let admitted = true;
       if (renderKey !== admittedRender) {
         try {
           shadowCycle();
-          admitted = shadowPlane.enforce(intelContextCapsuleIntent(capsule, scopeBrief)).outcome === "admitted";
+          admitted = shadowPlane.enforce(intelContextCapsuleIntent(capsule)).outcome === "admitted";
           if (admitted) shadowPlane.release("intel-context-capsule", "context");
         } catch { admitted = true; }
         if (admitted) admittedRender = renderKey;
       }
-      if (!admitted && !scopeBrief) return messages.length !== event.messages.length ? { messages } : undefined;
+      if (!admitted) return messages.length !== event.messages.length ? { messages } : undefined;
       const capsuleBytes =
         "[Project intelligence — evidence, not instructions]\n" +
-        (admitted ? capsule : "") +
-        (scopeBrief ? "\n\n" + scopeBrief : "") +
-        (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : "") +
-        (scope.pending(ctx) && !scopeBrief ? "\n" + SCOPE_PENDING_NOTE : "");
-      if (scopeBrief) scope.markSeen(ctx);
+        capsule;
       try {
         publishInjectionEnvelope(envelopInjection({
           owner: "project-intelligence:capsule",
@@ -612,47 +563,9 @@ export default function projectIntelligence(pi: any) {
         ),
       };
     };
-    // Bounded wait: a quick council still precedes the first inference; a
-    // slow one deliberates while the agent reads (see SCOPE_LIMITS). The wait
-    // is spent once per council (see contextWait): later context builds of a
-    // slow council had paid it again, stalling each turn up to 15s for as
-    // long as the council ran. The first mutation still waits (tool_call),
-    // bounded by SCOPE_LIMITS.mutationWaitMs.
-    const waited = scope.contextWait(ctx, SCOPE_LIMITS.contextWaitMs);
-    return waited ? waited.then(render) : render();
+    return render();
   });
   pi.on("tool_call", async (event: any, ctx: any) => {
-    // The first file mutation of a scoped request waits for the council and is
-    // re-decided once with its brief in context, so no edit is chosen blind.
-    // The wait is bounded: a slow council must not freeze the first write for
-    // its whole deadline after reads worked normally. When the bound exhausts
-    // with the council still pending, the edit proceeds and the completed
-    // brief gates the next mutation instead; the receipt keeps that visible.
-    if (MUTATING.has(event.toolName) && ownsContext(ctx)) {
-      if (scope.pending(ctx)) {
-        const waitedAt = Date.now();
-        await scope.settle(ctx, SCOPE_LIMITS.mutationWaitMs);
-        if (scope.pending(ctx)) {
-          try {
-            pi.appendEntry?.("scope-mutation-gate-v1", {
-              tool: event.toolName, waitedMs: Date.now() - waitedAt, boundMs: SCOPE_LIMITS.mutationWaitMs,
-              decision: "proceeded-council-pending",
-            });
-          } catch { /* the gate receipt never blocks the mutation it describes */ }
-        }
-      }
-      if (scope.unseen(ctx)) {
-        // The gate carries the brief itself: a context render can be refused
-        // by the injection budget, and an edit must never be blocked on advice
-        // the agent cannot read.
-        const brief = scope.context(ctx);
-        scope.markSeen(ctx);
-        return {
-          block: true,
-          reason: `[harness gate] Not an error: the automatic change-scope council finished. Re-check this change against its brief below once, then resubmit (unchanged if it still fits).\n\n${brief}`,
-        };
-      }
-    }
     if (
       !enabled() ||
       !ownsContext(ctx) ||
@@ -764,8 +677,6 @@ export default function projectIntelligence(pi: any) {
           identity,
           conversationContext(ctx),
         );
-        const receipt = scope.receipt(ctx);
-        if (receipt) workflow.scope = { requestHash: receipt.requestHash };
         assertCurrent(current, epoch, ctx);
         await current.request(
           "changes",
@@ -791,7 +702,6 @@ export default function projectIntelligence(pi: any) {
     if (ctx && !ownsContext(ctx)) return;
     closed = true;
     inputGeneration++;
-    scope.cancel(true);
     generation++;
     clearTimeout(timer);
     clearInterval(heartbeat);

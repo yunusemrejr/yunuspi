@@ -11,7 +11,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => existsSync(path.join(p, 'extensions/lib/blender-studio.ts')));
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const { classifyExecution } = await load('extensions/lib/adaptive-execution.ts');
-const { planAssistance } = await load('extensions/pi-subagents/src/runs/shared/assistance-plan.ts');
 const { blenderInspectionView, blenderInspect, blenderRun, blenderBinary } = await load('extensions/lib/blender-studio.ts');
 const { default: registerBlender } = await load('extensions/blender-studio.ts');
 const { videoReviewRouting } = await load('extensions/lib/video-production-flow.ts');
@@ -26,21 +25,6 @@ async function workspace(t) {
 const scene = () => ({ render: { camera: 'Camera', engine: 'BLENDER_EEVEE_NEXT' }, counts: { objects: 400 },
   objects: Array.from({ length: 400 }, (_, i) => ({ name: `Rain${i}`, type: 'MESH', inScene: true, dimensions: [1, 2, 3], animation: { action: 'Fall', curves: 12, keys: 24, channels: Array.from({ length: 12 }, (_, n) => ({ path: 'location', index: n, keys: [[1, 0], [97, 1]] })) } })),
   materialDetails: [{ name: 'Glass', shader: { surfaces: [{ inputs: { Roughness: { default: .12 } } }] } }], sceneLights: ['Key'], warnings: [] });
-
-test('creative production is not demoted by incidental scope words or generated goal acceptance', () => {
-  for (const prefix of ['', 'Just ', 'Only ']) {
-    const p = classifyExecution({ task: prefix + production });
-    assert.equal(p.tier, 'complex'); assert.equal(p.assistance.mode, 'fanout');
-    const plan = planAssistance(prefix + production, true, p);
-    assert.equal(plan.roles.length, 3);
-    assert.match(plan.roles[0], /hero-frame proof/); assert.match(plan.roles[1], /musical arrangement/); assert.match(plan.roles[2], /periodic endpoints/);
-    assert.equal(plan.maxCostUsd, .03);
-  }
-  assert.equal(classifyExecution({ task: 'Just change the animation duration from 2 to 3 seconds in one file' }).tier, 'direct');
-  assert.equal(planAssistance(production + ' Do not spawn helpers.').mode, 'none');
-  assert.equal(classifyExecution({ task: 'Read README.md\n> Remake the music video in Blender and animate clouds' }).tier, 'direct');
-  assert.equal(planAssistance('Create a video showing the process').mode, 'subagent', 'creative verbs enter the useful-work gate');
-});
 
 test('small pipeline budgets retain early Blender proof and the text-only vision handoff', () => {
   const selection = selectTaskPipelines({ prompt: production });

@@ -95,45 +95,6 @@ test('first dispatch requires the exact parent candidate and a refusal never ope
   }
 });
 
-test('an exact initial child dispatch keeps the existing owned recovery transition usable', async () => {
-  const { registerAutonomousRecovery } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/extension/autonomous-recovery.ts')));
-  const health = await import(shared + 'provider-health.ts');
-  const initial = { ...model, reasoning: false }, alternate = { ...initial, provider: 'recovery-fixture', fullId: `recovery-fixture/${model.id}`, baseUrl: 'https://recovery.invalid/v1' };
-  const previous = process.env.PI_SUBAGENT_CHILD;
-  process.env.PI_SUBAGENT_CHILD = '1';
-  process.env[modelRoute.SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV] = modelRoute.encodeSubagentModelRouteCandidate({ route });
-  fs.rmSync(process.env.PI_PROVIDER_STATE_FILE, { force: true });
-  const handlers = new Map(), selected = [];
-  const ctx = { model: initial, scopedModels: [], getContextUsage: () => ({ tokens: 1000 }),
-    modelRegistry: { getAvailable: () => [initial, alternate] }, ui: { setStatus() {} }, abort() {},
-    sessionManager: { getSessionFile: () => path.join(root, 'recovery-fixture.jsonl'), getBranch: () => [] } };
-  const pi = { on: (name, fn) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
-    getActiveTools: () => [], registerCommand() {}, appendEntry() {}, sendMessage() {},
-    setModel: async next => { ctx.model = next; selected.push(next); return true; } };
-  const emit = async (name, event) => { for (const handler of handlers.get(name) ?? []) await handler(event, ctx); };
-  try {
-    promptRuntime.registerSubagentModelRouteOverride(pi);
-    registerAutonomousRecovery(pi, async () => { throw new Error('No child fanout'); }, { childRoutes: [route, alternate.fullId], endpoints: async () => [], wait: async () => {} });
-    await emit('input', { source: 'user', text: 'Continue the existing bounded task and retain observed tool evidence.' });
-    await emit('before_provider_request', { payload: { model: initial.id, max_tokens: 1024 } });
-    for (let attempt = 0; attempt < 3; attempt++) {
-      health.recordFailure({ provider: initial.provider, model: initial.id, errorMessage: '503 unavailable' });
-      await emit('pi_provider_recovery', { message: { role: 'assistant', provider: initial.provider, model: initial.id, stopReason: 'error', content: [], errorMessage: '503 unavailable' }, signal: new AbortController().signal });
-    }
-    assert.equal(ctx.model.provider, alternate.provider, 'the real recovery owner selects the admitted alternative after repeated failure');
-    assert.equal(selected.length, 1);
-    await emit('before_provider_request', { payload: { model: alternate.id, max_tokens: 1024 } });
-    await emit('agent_settled', {});
-    assert.equal(ctx.model.provider, initial.provider);
-    await emit('before_provider_request', { payload: { model: initial.id, max_tokens: 1024 } });
-  } finally {
-    await emit('session_shutdown', {});
-    delete process.env[modelRoute.SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV];
-    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = previous;
-    fs.rmSync(process.env.PI_PROVIDER_STATE_FILE, { force: true });
-  }
-});
-
 test("valid large provider constraints survive child transport and oversized values fail before launch", () => {
   const slugs = Array.from({ length: 32 }, (_, index) => `provider-${index}-` + "x".repeat(108));
   const providerOptions = { routing: "custom", order: slugs, only: slugs, ignore: slugs.map(slug => slug + "-old"), allow_fallbacks: false };
@@ -151,12 +112,10 @@ test("valid large provider constraints survive child transport and oversized val
   }), /cannot be encoded safely/);
 });
 
-test("automatic helpers finalize before crossing the parent's reported-token budget", () => {
+test("a child with a hard token budget finalizes before crossing it", () => {
   const handlers = {}; const steers = []; let active;
   const pi = { on: (event, handler) => { handlers[event] = handler; }, setActiveTools: (tools) => { active = tools; }, sendUserMessage: (text) => steers.push(text) };
-  const previous = process.env.PI_SUBAGENT_CHILD_AGENT;
-  process.env.PI_SUBAGENT_CHILD_AGENT = "automatic-free-assistant";
-  try {
+  {
     promptRuntime.registerTokenBudget(pi, 96000);
     const turn = (input, output, tools = true) => handlers.message_end({ message: { role: "assistant", usage: { input, output }, content: tools ? [{ type: "toolCall" }] : [{ type: "text", text: "done" }] } });
     turn(25000, 1000); turn(25000, 1000);
@@ -169,11 +128,6 @@ test("automatic helpers finalize before crossing the parent's reported-token bud
     promptRuntime.registerTokenBudget({ on: (event, handler) => { quiet[event] = handler; }, setActiveTools: (tools) => { quietActive = tools; } }, 1000);
     quiet.message_end({ message: { role: "assistant", usage: { input: 5000, output: 10 }, content: [{ type: "text", text: "final" }] } });
     assert.equal(quietActive, undefined, "a terminal answer is never interrupted");
-    process.env.PI_SUBAGENT_CHILD_AGENT = "worker";
-    const writer = {}; promptRuntime.registerTokenBudget({ on: (event, handler) => { writer[event] = handler; }, setActiveTools: () => { throw new Error("writers keep tools"); } }, 10);
-    assert.equal(writer.message_end, undefined, "explicit writer budgets stay parent-accounted");
-  } finally {
-    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD_AGENT; else process.env.PI_SUBAGENT_CHILD_AGENT = previous;
   }
 });
 

@@ -94,9 +94,15 @@ test('native tools enforce current visual provenance and actual keyboard/state c
       return { content: [{ type: 'text', text: 'The supplied capture and responsive sheet contain the customer form. Main content remains legible in the narrow column; desktop places the form beside the heading. This fixture transport tests provenance, not aesthetic capability.' }], stopReason: 'stop' };
     },
   };
-  const observed = await f.run('image_understand', { paths: [review.file, matrix.details.preview], provider: vision.provider, model: vision.id, prompt: 'Inspect the current page and every responsive cell.' });
+  // Vision runs on the session model and no other: a text-only session cannot look, and says so.
+  const images = { paths: [review.file, matrix.details.preview], prompt: 'Inspect the current page and every responsive cell.' };
+  await assert.rejects(f.run('image_understand', images), /does not accept images/);
+  assert.equal(visionCalls, 0, 'a text-only session model never reaches a transport');
+  f.ctx.model = vision;
+  const observed = await f.run('image_understand', images);
   assert.equal(observed.details.images.length, 2); assert.equal(visionCalls, 1);
-  assert.equal(f.ctx.model, parentModel); assert.deepEqual(f.ctx.model.input, ['text']);
+  assert.equal(f.ctx.model, vision, 'the session model is used and left unchanged');
+  f.ctx.model = parentModel;
   assert.equal(matrix.details.previewOrder.length, 8, 'all captured states reach the responsive contact sheet');
   assert.ok(matrix.details.previewOrder.some(cell => cell.state === 'reduced-motion' && cell.row === 1));
   const browser = await f.run('browser_session', { action: 'open', url: f.url });

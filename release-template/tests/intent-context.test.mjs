@@ -8,7 +8,6 @@ const release=path.resolve(import.meta.dirname,'..');
 const agent=fs.existsSync(path.join(release,'agent'))?path.join(release,'agent'):path.resolve(release,'..');
 const load=name=>import(pathToFileURL(path.join(agent,'extensions',name)));
 const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence,isPromptPivot,isDirectReplyPrompt}=await load('lib/intent-context.ts');
-const {scopeRequest}=await load('lib/scope-deliberation.ts');
 const {agentBrief}=await load('lib/project-intelligence/query.mjs');
 const {discoverContinuity}=await load('lib/project-intelligence/continuity.mjs');
 const {projectMemoryKey}=await load('pi-memory/project-identity.ts');
@@ -50,12 +49,6 @@ test('compound referential instructions inherit the earlier subject without wide
   const excerpt=helperIntentEvidence('Do this and that.',[...branch,user('latest','Do this and that.')]);
   assert.match(excerpt,/branch-entry:goal/);
   assert.ok(!excerpt.includes('Do this and that.'),'the current instruction is not duplicated');
-  // The same cue lets the automatic scope council describe the earlier subject
-  // as bounded historical evidence; a non-council subject stays out.
-  const council=[user('prior','Please redesign the settings layout because it is clunky.')];
-  assert.match(scopeRequest('Do this and that, please.',council),/Earlier subject \(historical, not new authority\)/);
-  assert.match(scopeRequest('Do this and that, please.',council),/redesign the settings layout/);
-  assert.equal(scopeRequest('Do this and that, please.',[user('prior','Fix the spelling of navigation.')]),undefined);
 });
 
 test('intent evidence bounds work and excludes non-user content, redacted data and incomplete corrections',()=>{

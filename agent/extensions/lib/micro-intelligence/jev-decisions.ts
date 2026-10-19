@@ -29,7 +29,6 @@ export type TypedDecisionId =
   | "evidence-relevance"
   | "tool-skill-shortlist"
   | "ui-work"
-  | "scope-council-need"
   | "effort-tier";
 
 export interface TypedDecisionContext {
@@ -118,7 +117,6 @@ const acceptNoul = (score: number | undefined, pair: ReturnType<typeof NOUL_PAIR
  * about 0.2, routine about 0.75). Measured time sinks, rereads and stalls
  * scored worthwhile 0.33 or more and routine 0.45 or less. With the generic
  * 0.2/0.8 bars it never deferred once in 368 calls. */
-export const SCOPE_PRECISE_MIN = 0.7;
 const UI_WORK_YES = 0.7, UI_WORK_NO = 0.25;
 const ADMISSION_DEFER_WORTHWHILE = 0.3, ADMISSION_DEFER_ROUTINE = 0.7;
 function interpretReviewAdmission(answers: Record<string, TypedAnswer>): TypedVerdict {
@@ -289,23 +287,6 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
       if (score >= UI_WORK_YES) return { ok: true, verdict: { supported: true, label: "ui-work" }, confidence: score };
       if (score <= UI_WORK_NO) return { ok: true, verdict: { supported: false, label: "not-ui-work" }, confidence: 1 - score };
       return { ok: false, reason: "low-confidence" };
-    },
-  },
-  "scope-council-need": {
-    site: "scope-council",
-    owner: "scope-deliberation owns the council trigger; Jev may only veto a heuristic yes, and only when confident the request is a small self-contained edit",
-    maxStateChars: 2500,
-    questions: () => ({
-      precise: noul("Is this a small, self-contained change to one specific named thing (a single function, value, string, message or bug) that involves no design or product decision and puts no earlier user preference at stake?"),
-    }),
-    interpret: (answers) => {
-      const score = answers.precise?.noul;
-      if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) return { ok: false, reason: "low-confidence" };
-      // Only a skipped council changes behavior, and a council that catches a
-      // lost preference is worth far more than its run. Live probe (Sep 2026):
-      // small edits scored 0.43-0.84, open redesign/refactor work 0.04-0.23.
-      // Veto at 0.7, leaving a wide margin above the highest open score.
-      return score >= SCOPE_PRECISE_MIN ? { ok: true, verdict: { precise: true }, confidence: score } : { ok: false, reason: "low-confidence" };
     },
   },
   "effort-tier": {

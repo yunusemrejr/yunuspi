@@ -23,83 +23,14 @@ delete process.env.PI_SUBAGENT_CHILD;
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-const { createScopeDeliberation } = await import(lib('scope-deliberation.ts'));
 const { createSessionObserver, buildObserverPacket } = await import(lib('session-observer.ts'));
 const { displayText } = await import(lib('harness-notice.ts'));
 const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/')).href;
 const { isHarnessOwnedChild, reduceChildEvents, projectTranscriptChildren } = await import(shared + 'child-ledger.ts');
-const { registerScopeCouncilRunner, SCOPE_COUNCIL_RUNNER } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/extension/scope-council-runner.ts')).href);
 const { publishFreeEvidence, FREE_BASE_URL, FREE_CATALOG_URL } = await import(shared + 'free-route-evidence.ts');
 const { resetSharedControl } = await import(lib('intervention-shared.ts'));
 
-const prompt = 'Please redesign the jumping character logic because it is distracting and low quality.';
-const context = () => ({ cwd: '/tmp/synthetic-project', sessionManager: { getSessionId: () => 'current', getBranch: () => [] }, ui: { setStatus() {} } });
-const history = { evidence: [], incomplete: false, coverage: 'None.' };
 const complete = { status: 'complete', proposals: [{ role: 'preservation', text: 'Keep the typography.' }, { role: 'change', text: 'Rework the motion.' }], discussion: 'Rework the motion substantially and verify the rendered result.', gap: '' };
-
-test('the request\'s own user message persisting during deliberation does not discard a finished council', async () => {
-  let captures = 0;
-  const lifecycle = createScopeDeliberation({}, {
-    history: async () => history,
-    runner: async () => complete,
-    // before_agent_start runs before the user message is persisted; the refresh sees it.
-    workflow: async () => ({ projectId: 'p', conversation: { sessionId: 's', latestUserEntry: captures++ ? 'new-user-entry' : 'older-entry' } }),
-  });
-  const ctx = context();
-  await lifecycle.start({ prompt }, ctx, 'graph');
-  assert.match(lifecycle.context(ctx), /Council status: complete/);
-  assert.doesNotMatch(lifecycle.context(ctx), /Version baseline changed/);
-});
-
-test('the first inference waits only briefly; the brief lands later and gates one mutation', async () => {
-  let release;
-  const lifecycle = createScopeDeliberation({}, { history: async () => history, runner: () => new Promise(resolve => { release = resolve; }) });
-  const ctx = context();
-  const started = lifecycle.start({ prompt }, ctx, 'graph');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  const t0 = Date.now();
-  await lifecycle.settle(ctx, 30);
-  assert.ok(Date.now() - t0 < 1000, 'bounded wait returns while the council is still pending');
-  assert.ok(lifecycle.pending(ctx));
-  assert.equal(lifecycle.unseen(ctx), false);
-  release(complete); await started;
-  assert.equal(lifecycle.unseen(ctx), true, 'a finished brief no request has carried gates the first mutation');
-  lifecycle.markSeen(ctx);
-  assert.equal(lifecycle.unseen(ctx), false, 'only once');
-});
-
-test('a partial council is advisory only and never gates a mutation', async () => {
-  const lifecycle = createScopeDeliberation({}, { history: async () => history, runner: async () => ({ status: 'partial', proposals: [complete.proposals[0]], discussion: '', gap: 'critique leg timed out' }) });
-  const ctx = context();
-  await lifecycle.start({ prompt }, ctx, 'graph');
-  assert.match(lifecycle.context(ctx), /Council status: partial/);
-  assert.equal(lifecycle.unseen(ctx), false, 'a 2-of-3 brief must not block the first write');
-});
-
-test('a council whose synthesis misses the deadline keeps its finished perspectives', async () => {
-  resetSharedControl();
-  const ids = ['free/preservation', 'free/change', 'free/synthesis'];
-  publishFreeEvidence(ids.map(id => ({ id, pricing: { prompt: '0', completion: '0' }, capabilities: { toolCalling: true, contextWindow: 65536, maxTokens: 8192 } })), FREE_CATALOG_URL);
-  const model = id => ({ provider: 'openrouter', id, api: 'openai-completions', baseUrl: FREE_BASE_URL, contextWindow: 65536, maxTokens: 8192, input: ['text'], reasoning: false, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
-  const result = text => ({ details: { results: [{ exitCode: 0, output: text, usage: { input: 30, output: 40, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 } }] } });
-  registerScopeCouncilRunner({ getActiveTools: () => ['subagent'], appendEntry() {} }, {
-    available: () => ids.map(model), constraints: () => ({}), rankPerspectives: null,
-    launch: async (_id, params, signal) => {
-      const body = String(params.task);
-      if (body.includes('Peer critique synthesizer')) return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
-      return result(body.includes('Preservation peer') ? 'Preserve the exact title the user named; it is an explicit reference.' : 'Rework the easing substantially; compare a local tweak with a full revision.');
-    },
-  });
-  const ctx = { cwd: root, model: model('parent'), sessionManager: { getSessionId: () => 'session-1', getSessionFile: () => path.join(root, 'session.json') }, ui: { setStatus() {} } };
-  // The council deadline timer is unref'd; keep this test's loop alive.
-  const keeper = setInterval(() => {}, 50);
-  let output;
-  try { output = await globalThis[SCOPE_COUNCIL_RUNNER]({ task: 'Rework the widget easing while preserving the exact title.', limits: { deadlineMs: 200 } }, ctx); }
-  finally { clearInterval(keeper); }
-  assert.equal(output.status, 'partial');
-  assert.equal(output.proposals.length, 2);
-  assert.match(output.gap, /Synthesis did not finish before the council deadline/);
-});
 
 test('harness-owned automatic runs are not the agent\'s children', () => {
   const branch = [

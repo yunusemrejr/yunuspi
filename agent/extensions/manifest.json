@@ -145,7 +145,6 @@
     "observation-retrieval.ts",
     "observer-book.ts",
     "observer-journal.ts",
-    "observer-model-evidence.ts",
     "office-build.ts",
     "office-read.ts",
     "office-render.ts",
@@ -179,7 +178,6 @@
     "review-coordinator.ts",
     "reviewer-board.ts",
     "rpc-report.ts",
-    "scope-deliberation.ts",
     "scoped-snapshots.ts",
     "self-mutation-guard.ts",
     "service-probe.ts",
@@ -199,8 +197,6 @@
     "session-stop.ts",
     "session-telemetry.ts",
     "sheet-formula.ts",
-    "skill-discovery-controller.ts",
-    "skill-discovery.ts",
     "skill-relevance.ts",
     "skill-routing.ts",
     "skill-telemetry.ts",
@@ -697,6 +693,36 @@
       "name": "lib/expert-taste.ts",
       "retired": "2026-10-19",
       "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/observer-model-evidence.ts",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/scope-deliberation.ts",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/skill-discovery-controller.ts",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/skill-discovery.ts",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/micro-intelligence/router-shadow.ts",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "scripts/compatibility/autonomous-recovery-test.mjs",
+      "retired": "2026-10-19",
+      "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
     }
   ],
   "supportFiles": [
@@ -767,7 +793,6 @@
     "scripts/compatibility/tool-integrity-test.mjs",
     "scripts/compatibility/skill-pack-routing-test.mjs",
     "scripts/compatibility/session-recovery-guidance-test.mjs",
-    "scripts/compatibility/autonomous-recovery-test.mjs",
     "scripts/compatibility/atomic-edit-preflight-test.mjs",
     "extensions/lib/utility-mcp/catalog.mjs",
     "extensions/lib/utility-mcp/files.mjs",
@@ -792,7 +817,6 @@
     "extensions/lib/micro-intelligence/micro-worker.ts",
     "extensions/lib/micro-intelligence/micro-task.ts",
     "extensions/lib/micro-intelligence/rerank.ts",
-    "extensions/lib/micro-intelligence/router-shadow.ts",
     "extensions/lib/micro-intelligence/model-qual-lab.ts",
     "scripts/render-design-state.mjs",
     "extensions/lib/utility-mcp/local-reference.mjs",

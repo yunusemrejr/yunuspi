@@ -35,9 +35,6 @@ const {
  FREE_CATALOG_URL,
  ORCA_PRICING_URL,
 } = await import(shared + "free-route-evidence.ts");
-const { planAssistance, selectAssistanceTeam, sessionAssistanceTeam } = await import(
- shared + "assistance-plan.ts"
-);
 const { unreliableRoutes } = await import(shared + "run-history.ts");
 const { artificialAnalysisEvidence, modelCardEvidence, refreshModelResearch } =
  await import(shared + "model-research.ts");
@@ -376,138 +373,7 @@ try {
   ),
  );
  fs.unlinkSync(process.env.PI_PROVIDER_STATE_FILE);
- check(
-  "planner uses a helper for bounded work, fanout for alternatives and for independent project work",
-  () => {
-   assert.equal(
-    planAssistance(
-     "Investigate why the repository test suite fails after startup",
-    ).mode,
-    "subagent",
-   );
-   assert.equal(
-    planAssistance(
-     "Compare architectural alternatives for the API cache implementation",
-    ).mode,
-    "fanout",
-   );
-   const p = planAssistance(
-    "Implement cross-file changes in the frontend and backend with tests",
-    true,
-   );
-   assert.equal(p.mode, "fanout");
-   assert.equal(p.roles.length, 3);
-  },
- );
- check(
-  "planner preserves opt-outs, trivial work, quoted instructions, and free-only assistance",
-  () => {
-   for (const text of [
-    "Fix this typo",
-    "Do not delegate. Investigate the repository failure",
-    "Do not use fanout. Compare architectural alternatives for the API",
-   ])
-    assert.equal(planAssistance(text).mode, "none");
-   assert.equal(
-    planAssistance(
-     "Investigate this failure in the repository. Only use free models.",
-    ).mode,
-    "subagent",
-   );
-   assert.equal(
-    planAssistance("Hello\n> Implement multiple changes across the repository")
-     .mode,
-    "none",
-   );
-  },
- );
- check(
-  "team diversifies model identities and mostly uses free routes within total budget",
-  () => {
-   const p = planAssistance(
-    "Implement cross-file changes in the frontend and backend with tests",
-    true,
-   );
-   const team = selectAssistanceTeam(models, cfg, p, { task: "Review code" });
-   assert.equal(team.length, 3);
-   assert.ok(team.filter((m) => !m.free).length <= 1);
-   assert.ok(new Set(team.map((m) => m.route.split("/")[0])).size >= 2);
-   assert.equal(
-    new Set(
-     team.map((m) => m.route.replace(/^\w+\//, "").replace(/:free$/, "")),
-    ).size,
-    3,
-   );
-   assert.ok(p.maxCostUsd <= 0.03);
-  },
- );
- check("same model behind two routers is not independent consensus", () => {
-  const alias = model(fresh.id, "orcarouter");
-  publishProviderFreeEvidence(
-   "orcarouter",
-   [
-    {
-     id: alias.id,
-     pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-     capabilities: { toolCalling: true },
-    },
-   ],
-   ORCA_PRICING_URL,
-  );
-  assert.equal(
-   selectAssistanceTeam(
-    [fresh, alias],
-    cfg,
-    planAssistance("Compare two implementation approaches in this repository"),
-   ).length,
-   1,
-  );
- });
- check("router alias does not consume an independent team slot", () => {
-  const alias = model(fresh.id, "orcarouter");
-  const plan = planAssistance("Compare two implementation approaches in this repository");
-  const team = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
-  assert.equal(team.length, 2);
-  assert.ok(
-   !(team.some((member) => member.route === fresh.fullId) && team.some((member) => member.route === alias.fullId)),
-   "a router alias of the same model cannot serve as independent critique",
-  );
- });
- check("routes that mostly fail to finish yield their slot to reliable routes", () => {
-  const now = Date.parse("2026-09-26T06:30:00Z"), ts = (minutesAgo) => Math.floor((now - minutesAgo * 60000) / 1000);
-  const run = (model, outcome, minutesAgo, cause) => ({ agent: "automatic-free-assistant", task: "[redacted]", ts: ts(minutesAgo), status: outcome === "completed" ? "ok" : "error", outcome, duration: 1, evidence: { version: 1, model, ...(cause ? { cause } : {}) } });
-  const history = [
-   run("orcarouter/z-ai/slow", "stopped", 1), run("orcarouter/z-ai/slow:high", "timed_out", 2), run("orcarouter/z-ai/slow", "completed", 3), run("orcarouter/z-ai/slow", "stopped", 4),
-   run("meta/fast", "completed", 1), run("meta/fast", "failed", 2, { stage: "execute", category: "acceptance" }), run("meta/fast", "failed", 3, { stage: "launch", category: "internal" }), run("meta/fast", "completed", 4), run("meta/fast", "failed", 5, { stage: "execute", category: "acceptance" }),
-   run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4),
-   run("other/sparse", "stopped", 1), run("other/sparse", "stopped", 2), run("other/sparse", "completed", 3),
-  ];
-  assert.deepEqual([...unreliableRoutes(history, now)], ["orcarouter/z-ai/slow"], "harness verdicts, stale runs and sparse samples demote nothing");
-  const plan = planAssistance("Compare two implementation approaches in this repository");
-  const demoted = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
-  assert.ok(!demoted.some((member) => member.route === other.fullId), "a reliable route fills the slot before a flaky one");
-  const alone = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([fresh.fullId, other.fullId, old.fullId]) });
-  assert.ok(alone.length >= 1, "an all-unreliable pool still serves rather than leaving the role empty");
-  const lastResort = selectAssistanceTeam([fresh, other], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
-  assert.deepEqual(lastResort.map((member) => member.route), [fresh.fullId], "a flaky route serves only when it passes the same quality gate");
- });
- check("team freeOnly never admits a paid route", () => {
-  const p = planAssistance("Migrate the billing and auth subsystems end to end", true);
-  assert.equal(p.mode, "fanout");
-  assert.equal(selectAssistanceTeam([paid], cfg, p, { freeOnly: true, requiresTools: false }).length, 0);
- });
- check("session team runs every reviewer on the parent session model", () => {
-  const p = planAssistance("Compare two implementation approaches in this repository");
-  const session = { provider: fresh.provider, id: fresh.id };
-  const team = sessionAssistanceTeam(models, session, p);
-  assert.equal(team.length, p.roles.length);
-  assert.deepEqual(team.map((member) => member.route), p.roles.map(() => fresh.fullId));
-  assert.deepEqual(team.map((member) => member.role), p.roles);
-  assert.ok(sessionAssistanceTeam([old, other], session, p).every((member) => member.route === fresh.fullId && member.free === false), "an unpriced session model is never proven free");
-  assert.throws(() => sessionAssistanceTeam(models, undefined, p), /no model selected/);
-  assert.deepEqual(sessionAssistanceTeam(models, undefined, { ...p, roles: [] }), []);
- });
- check(
+         check(
   "schema rejects forged sources, corrupt values and future research timestamps",
   () => {},
  );

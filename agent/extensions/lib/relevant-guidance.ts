@@ -754,7 +754,6 @@ export function createRelevantGuidance(pi: any) {
     },
     userInput() {
       cancelSearches();
-      discovery.cancel();
       const hadDeferrals = deferredSkills.size > 0;
       deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
@@ -787,7 +786,6 @@ export function createRelevantGuidance(pi: any) {
     },
     restore(ctx: any) {
       cancelSearches();
-      discovery.cancel(true);
       reviewTargets.clear(); deferredSkills.clear();
       bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
@@ -914,7 +912,6 @@ export function createRelevantGuidance(pi: any) {
       const prompt = skillIntentSegments(taskPrompt).join('\n');
       readOnlyPrompt = narrativeCue.test(prompt) || explicitReadOnlyCue.test(taskPrompt);
       skillReviewDisabled = /\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(taskPrompt);
-      discovery.start(event, ctx);
       utilityHints(taskPrompt);
       if (!/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(taskPrompt) && /\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
         add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
@@ -1069,7 +1066,6 @@ export function createRelevantGuidance(pi: any) {
         && !recentTools.some(t => ["read", "grep", "find", "ls", "data_query", "git_info", "http_request", "sys_probe"].includes(t))) {
         add({ key: "native:bash-heavy", priority: 30, text: "Shell-heavy stretch: which existing tool already does this reliably? One tool_search can name the native owner; keep Bash where it fits." });
       }
-      discovery.observe(event);
       if (name === 'bulk_edit' && input.action === 'preview') {
         // The native preview owns the concrete file set behind its apply token.
         // Route those paths, never infer files from a glob or arbitrary prose.

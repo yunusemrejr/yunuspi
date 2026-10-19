@@ -130,18 +130,17 @@ export function assistanceLaunchIntent(input: {
 }
 
 /** Project-intelligence context-capsule injection (context event). */
-export function intelContextCapsuleIntent(capsule: unknown, scopeBrief: unknown): ShadowIntentInput {
+export function intelContextCapsuleIntent(capsule: unknown): ShadowIntentInput {
   const capsuleText = typeof capsule === "string" ? capsule : "";
-  const briefText = typeof scopeBrief === "string" ? scopeBrief : "";
   return {
     source: "project-intelligence.ts",
     category: "context",
     priority: 50,
     reason: "project-intelligence context capsule",
     stabilityKey: "intel-context-capsule",
-    contentHash: contentHash(`${capsuleText}\n\n${briefText}`),
+    contentHash: contentHash(capsuleText),
     ttlMs: SHADOW_TTL_MS,
-    estimatedChars: capsuleText.length + briefText.length,
+    estimatedChars: capsuleText.length,
     estimatedCost: 0,
     blocking: false,
     evidence: [],

@@ -11,6 +11,5 @@ export const CORE_COMPATIBILITY_TESTS = Object.freeze([
   "skill-pack-routing-test.mjs",
   "utility-mcp-loader-test.mjs",
   "session-recovery-guidance-test.mjs",
-  "autonomous-recovery-test.mjs",
   "atomic-edit-preflight-test.mjs"
 ]);

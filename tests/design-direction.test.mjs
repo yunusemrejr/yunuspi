@@ -12,7 +12,6 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const design = await load('extensions/lib/design-direction.ts');
 const interpretation = await load('extensions/lib/prompt-interpretation.ts');
-const { councilMode, shouldRunScopeCouncil } = await load('extensions/lib/scope-deliberation.ts');
 
 const MUSIC = 'I want you to create this website. It is a music theory blog; the landing page should be elegant and there is no AI slop. It is created by me, so put a link to my personal website yunusemrevurgun.com, and deploy it to musics.name.';
 
@@ -68,14 +67,6 @@ test('the interpretation block says what it is, which message it reads and that 
   assert.match(header, /follow the user/);
   assert.equal(JSON.parse(json).visualDesign, true);
   assert.match(interpretation.buildPromptAnalysisRequest(prompt, 'initial'), /contextReferences lists sites/);
-});
-
-test('the council explores directions for a new open brief and deliberates scope otherwise', () => {
-  assert.equal(councilMode(MUSIC), 'direction');
-  assert.equal(shouldRunScopeCouncil(MUSIC), true);
-  assert.equal(councilMode('Redesign the distracting mascot.'), 'scope');
-  assert.equal(councilMode('Please do not redesign the landing page; only fix the footer link.'), 'scope');
-  assert.equal(shouldRunScopeCouncil('How would you design a new landing page?'), false, 'a question is not a brief');
 });
 
 test('ambition is read from what the brief asks for and what the subject is for', () => {

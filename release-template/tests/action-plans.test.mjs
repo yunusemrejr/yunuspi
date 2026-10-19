@@ -14,7 +14,7 @@ register('data:text/javascript,'+encodeURIComponent(`import fs from 'node:fs';ex
 const load=name=>import(pathToFileURL(path.join(agent,'extensions/rpiv-todo',name)).href);
 const {applyTaskMutation}=await load('state/state-reducer.ts');
 const {replayFromBranch}=await load('state/replay.ts');
-const {renderPlan}=await load('state/plan.ts');
+const {renderPlan,wantsPlanOrientation}=await load('state/plan.ts');
 test('public action plan graph is atomic, recoverable and actionable',()=>{
  const empty={tasks:[],nextId:1};
  const made=applyTaskMutation(empty,'batch',{operations:[{action:'create',id:-1,subject:'Outcome'},{action:'create',id:-2,parentId:-1,subject:'Inspect',execution:'swarm'},{action:'create',parentId:-1,subject:'Verify',blockedBy:[-2],acceptance:'Check behavior'}]});
@@ -198,4 +198,16 @@ test('todo is a sequential barrier so its completion gate sees sibling verificat
  const {registerTodoTool}=await load('todo.ts');const tools={};
  registerTodoTool({registerTool(t){tools[t.name]=t},on(){},events:{on(){return ()=>{}}}});
  assert.equal(tools.todo.executionMode,'sequential');
+});
+
+test('plan orientation is for long, listed or already-planned work, not a short single ask',()=>{
+ const short='Create slugify.js with tests and run them, then report the result.';
+ assert.equal(wantsPlanOrientation(short,false,undefined),false,'a short single-purpose request needs no ledger');
+ assert.equal(wantsPlanOrientation(short,true,undefined),true,'an existing plan keeps its orientation');
+ assert.equal(wantsPlanOrientation('x'.repeat(600),false,undefined),true,'a long brief is planned');
+ assert.equal(wantsPlanOrientation('Do these:\n- fix login\n- add tests\n- update docs',false,undefined),true,'three listed items are planned');
+ assert.equal(wantsPlanOrientation('1) fix login\n2) add tests',false,undefined),false,'two items stay unplanned');
+ assert.equal(wantsPlanOrientation(short,false,'always'),true,'always restores the old behavior');
+ assert.equal(wantsPlanOrientation('x'.repeat(900),true,'off'),false,'off wins');
+ assert.equal(wantsPlanOrientation(undefined,false,undefined),false);
 });

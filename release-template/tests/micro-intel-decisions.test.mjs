@@ -30,7 +30,7 @@ test("registry names all fifteen decision types with owners", () => {
     "claim-verification", "delegation-topology", "effort-tier", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "requirement-closure", "review-aspects",
-    "scope-council-need", "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
+    "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
     "verification-method",
   ]);
   for (const spec of Object.values(TYPED_DECISIONS)) {
@@ -204,16 +204,6 @@ test('review admission needs both novelty and progress evidence; cancelled or un
     assert.equal(result.reason, 'aborted');
     assert.equal(metricsMod.microMetrics().snapshot().helpers.jev.accepted, 0);
   } finally { metricsMod.resetMicroMetrics(); }
-});
-
-test("scope-council-need vetoes only a confident small edit; everything else keeps the council", () => {
-  const interpret = TYPED_DECISIONS["scope-council-need"].interpret;
-  assert.equal(interpret({ precise: { noul: 0.84 } }).verdict.precise, true);
-  assert.equal(interpret({ precise: { noul: 0.7 } }).verdict.precise, true);
-  assert.equal(interpret({ precise: { noul: 0.69 } }).ok, false);
-  assert.equal(interpret({ precise: { noul: 0.23 } }).ok, false, "the highest measured open-work score never vetoes");
-  assert.equal(interpret({ precise: { noul: NaN } }).ok, false);
-  assert.equal(interpret({}).ok, false);
 });
 
 test("ui-work bars fit the measured spread and abstain in between", () => {
