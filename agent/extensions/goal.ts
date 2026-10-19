@@ -9,7 +9,7 @@
  * leaves the session running as if no goal existed.
  *
  * This extension also owns the preset goals /noslop, /nobug, /3d, /video and /anatomy (briefs,
- * fronts and the chaining grammar in lib/presets.ts and lib/noslop.ts) so
+ * fronts and the chaining grammar in lib/presets.ts) so
  * every command shares the one persisted goal state instead of writing
  * competing snapshots. `/3d /video /noslop <task>` stacks their aims onto
  * one goal.
@@ -304,7 +304,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 
 	// A /goal that names boosts: one goal carrying the user's words, each brief and its core fronts.
 	const startBoosted = (found: PresetTokens, ctx: ExtensionContext) => {
-		const next = createBoostedGoal(found.task, found.presets, found.literal);
+		const next = createBoostedGoal(found.task, found.presets);
 		checkStatic = createStaticCompletionCheck();
 		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 		refused.clear();
@@ -472,7 +472,10 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const verification = await checkStatic(ctx.cwd, signal);
 					signal?.throwIfAborted();
 					if (goal !== closing) return text("Goal changed during completion; use its current criteria and verification.");
-					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...verification] });
+					// Unopened intermediate files (stems, previews, QA builds) stay in the user's verification
+					// footer; gating on them paged three at a time through every refusal.
+					const receipts = collectVerificationReceipts(32, ctx.sessionManager).filter((receipt) => receipt.source !== "deliverables");
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: [...receipts, ...verification] });
 					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");

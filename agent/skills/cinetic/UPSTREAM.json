@@ -5,7 +5,7 @@
   "copyright": "Copyright (c) 2026 Leonxlnx",
   "credit": "cinetic by Leonxlnx (https://github.com/Leonxlnx/cinetic), MIT; see THIRD_PARTY_NOTICES.md.",
   "modifiedFiles": {
-    "SKILL.md": "YunusPi integration section (the /video and /3d /video film blend with the anatomy skills, install approval, harness narration and QA tools, render budget); upstream workflow retained."
+    "SKILL.md": "YunusPi integration section (how /video and its chains name one lead skill, install approval, harness narration and QA tools, render budget); upstream workflow retained."
   },
   "omitted": {
     "README.md, CHANGELOG.md, docs/, evals/, .claude-plugin/, .github/": "Repository presentation, brand images, evals and CI; not used by the workflow.",

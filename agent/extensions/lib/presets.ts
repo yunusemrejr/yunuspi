@@ -1,23 +1,14 @@
 /**
  * Preset goals — /noslop, /nobug, /3d, /video and /anatomy, alone or chained.
  *
- * Each preset is a /goal with its aim already written: a working brief plus
- * the fronts it is judged on. The commands live in goal.ts on the shared
- * goal machinery; this module is the pure part (parsing, briefs, criteria
- * assembly) so the wording and the chaining grammar can be tested without
- * loading an extension.
- *
- * Chaining: `/3d /video /noslop make a film about X` starts ONE goal whose
- * brief stacks every named directive set onto the same assignment. The
- * briefs always run in full; the tracked fronts compress to each preset's
- * core subset (fewer per preset as the chain grows) so even a four-way chain
- * fits the goal system's criteria budget. Bare invocations survey the current project for work of their
- * kind, improve what exists, and say so plainly when there is none.
+ * Each preset is a /goal with a short standard and the few fronts it is judged
+ * on. Chained, the standards share one assignment: a chain that makes a video
+ * turns noslop and nobug into checks on the picture and the file instead of a
+ * codebase audit, and video with 3d or anatomy adds one film paragraph naming
+ * the lead skill. Pure, so the wording and the chaining grammar are testable.
  */
 import path from "node:path";
 import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
-import { createNoslopGoal, noslopFocus, noslopGoalText, NOSLOP_CRITERIA } from "./noslop.ts";
-import { planFilmBlend } from "./film-blend.ts";
 
 export type PresetId = "noslop" | "nobug" | "3d" | "video" | "anatomy";
 export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video", "anatomy"];
@@ -147,59 +138,176 @@ export function presetUserText(presets: readonly PresetId[], task: string): stri
 	return `${presets.map((id) => `/${id}`).join(" ")}${flat ? ` ${flat}` : ""}`;
 }
 
-export const NOBUG_CRITERIA: readonly string[] = [
-	"Baseline first: the project's existing checks (build, types, lint, tests) were run and recorded, and the in-scope surfaces (code paths, screens, outputs, pipelines) mapped before hunting.",
-	"Logic and edge cases: every bug fixed was reproduced first (failing test, command or capture) and fixed at its root; empty, huge, malformed, concurrent and failure inputs were exercised.",
-	"Broken code and dependencies: no syntax, type, import or build errors; dependencies declared, used, locked and version-consistent, with no missing, unused, deprecated or conflicting package on the main path.",
-	"Drifting duplicates resolved: copies of one rule that disagree or will drift are unified behind the surviving implementation, callers moved; harmless repetition left alone.",
-	"The interface works wherever it runs: states, keyboard and focus, narrow to wide layouts, and target browsers or terminals checked on the real rendered output; a project without an interface waives this.",
-	"Fixes are honest: nothing masked (swallowed errors, skipped tests, disabled lints, loosened types), no unrelated rewrites; unproven suspicions reported as such and unchecked environments named.",
+const skill = (name: string) => path.resolve(import.meta.dirname, "../../skills", name, "SKILL.md");
+
+/** A generated photo with 3D decoration on top once shipped as a "3D film"; every picture-making boost says so. */
+const NO_IMAGE_STANDIN = "Generated or stock images never stand in for the 3D picture: no photo plate with 3D decoration laid over it. Use image_generate only when the user asks for an image, or for a texture or reference the scene itself uses.";
+
+interface Boost {
+	/** The standard this boost holds the work to. */
+	standard: string;
+	/** What the bare command surveys for; empty means the whole project. */
+	kind: string;
+	/** Fronts, most important first; a chain keeps fewer. */
+	fronts: readonly string[];
+	/** In a chain that makes a video, noslop and nobug judge the picture and the file instead of a codebase. */
+	media?: { standard: string; front: string };
+}
+
+const NOSLOP_STANDARD = [
+	"Desloppify: remove what is there to look finished, designed or smart rather than to serve the user or the code's reader, and replace it plainly only where it did a real job. Test each element: what concretely gets worse if it goes? \"Less flashy\" is not worse.",
+	"Interface: made-up labels and eyebrow pills, decorative pill badges, fake state (LIVE or ACTIVE badges, pulsing or haloed dots), invented colours outside the project's palette, neon, glows, glass and stock gradients (the indigo-to-purple default and its cream-and-terracotta inverse), emoji icons, monospace as a costume, build narration in product copy, boilerplate sections nobody asked for. Swap test: if the logo and headline could be swapped for an unrelated company's and the screen still works, it is not yet about this subject. Density: on every screen keep the few things its user comes for and move or delete the rest (as a calibration, 20 KPIs, 4 charts and a 10-item sidebar become about 4, 2 and 5); count elements before and after. A terminal app's output is its interface: no banners, chatter or decorative colour, and honor NO_COLOR. Where a wall of text explains a mechanism or product, one crafted figure (the anatomy skill) may replace it; never motion or 3D as decoration.",
+	"Copy: no stock phrases (seamless, robust, unlock, elevate), filler, or numbers and endorsements without a source. Code: delete comments that narrate the code, commented-out code, dead code and files, unused dependencies and duplicate implementations; keep only the non-obvious why.",
+	"Subtract first. Real things stay: genuine state, a deliberate brand system, motion that carries meaning, behavior and public interfaces. Match the project's own style and add no abstractions or files. Verify each front on the real artifact: build or tests, rendered screens before and after, the diff.",
+].join("\n\n");
+
+export const NOSLOP_CRITERIA: readonly string[] = [
+	"No made-up labels, decorative pills, fake state, invented colours, neon or glow, emoji icons or boilerplate sections; each screen cut to what its user comes for, element counts recorded before and after.",
+	"No stock phrases or unsourced numbers; narrating comments, dead code, unused dependencies and duplicate implementations removed.",
+	"Behavior, public interfaces and the deliberate design kept; checks pass and rendered screens were compared before and after.",
 ];
 
-export const THREE_D_CRITERIA: readonly string[] = [
-	"Grounding first: the subject is researched with real references (proportions, materials, motion) and the harness's 3D skills/tooling for the chosen route (Blender, three.js/WebGL) are actually loaded and used.",
-	"Real assets and geometry: models, materials/textures and lighting are purpose-built or properly sourced for the subject — no placeholder boxes, primitive-only scenes or flat unlit output passed off as finished.",
-	"Craft at inspection distance: silhouette, proportions, materials and light hold up in rendered stills from multiple angles and distances, not only in code or one screenshot.",
-	"Motion and interaction behave: animation and interaction hold a stable frame rate within sane budgets (geometry, draw calls, texture memory) and degrade honestly instead of stalling.",
-	"Deliverable is real: the scene or app runs end to end from a clean start, with every asset resolving and no errors on the main path.",
-];
-
-export const VIDEO_CRITERIA: readonly string[] = [
-	"Plan before render: PRODUCTION.md settles the script with timings, shot list, art direction and audio plan first, with the harness's video skills/tooling for the chosen route actually used.",
-	"Picture quality: every shot is purposeful (composition, light, legible text) in stills you looked at, effects and transitions serve the cut instead of decorating it, and no placeholder or mistimed frames survive.",
-	"Sound is finished, not attached: narration is intelligible and timed to the picture (video_qa listen transcript matches the script), music and effects sit under speech, levels stay consistent with no clipping or dead air.",
-	"Pacing and sync: cuts, captions and on-screen text line up with what they describe, and the runtime earns its length with no filler stretches.",
-	"Verified master: frames from the final export were inspected and video_qa analyze and listen pass on that exact file at the intended resolution, frame rate and format, and it plays outside the build setup.",
-];
-
-export const ANATOMY_CRITERIA: readonly string[] = [
-	"Right skill, real spec: anatomy (how a system or mechanism works) or anatomy-reveal (one object's dissection page or reveal film) read first; dimensions, features, parts by assembly and moving features written down, guesses named.",
-	"Built from real parts: convex solids at real dimensions and counts, made with the skill's kit from its closest example or template; no traced or embedded images, no placeholder blocks, generic markings unless a replica was asked.",
-	"One truthful model: motion, explode, poses, readouts and captions come from one model, and the skill's checks (kit audit, scan-apart from five views, motion scan) report no parts passing through each other and no forced picks.",
-	"Seen, not assumed: stills and frames from several angles and states were looked at, and the interactive page was driven in a real browser (drag, keys, take-apart, light and dark, reduced motion).",
-	"Deliverable is real: figure pages build and open from a clean start; a film, when asked, is encoded at the asked length and ratio and checked from frames of the MP4 itself; anything unverified is named.",
-];
-
-/**
- * Fronts that stay tracked when presets chain, most important first; a long
- * chain keeps fewer per preset. The briefs themselves never compress.
- */
-const CORE_INDEXES: Record<PresetId, readonly number[]> = {
-	noslop: [1, 2, 6],
-	nobug: [1, 4, 2],
-	"3d": [1, 2, 4],
-	video: [1, 2, 4],
-	anatomy: [2, 1, 3],
+const BOOSTS: Record<PresetId, Boost> = {
+	noslop: {
+		standard: NOSLOP_STANDARD,
+		kind: "",
+		fronts: NOSLOP_CRITERIA,
+		media: {
+			standard: "Noslop on the picture: every element on screen does a job for the viewer. No made-up labels, captions, numbers or interface chrome the subject does not have; no invented colours (the palette comes from the brand or the subject); no neon, glows, lens flares, gradient washes, pill badges, template lower thirds or decorative arrows; little on-screen text.",
+			front: "every on-screen element does a job; no made-up labels or numbers, invented colours, glows, pills, decorative arrows or template graphics.",
+		},
+	},
+	nobug: {
+		standard: [
+			"Debug: find real bugs, prove each, fix it at its root, and leave proof it stays fixed.",
+			"Baseline first: run the project's checks (build, types, lint, tests), record what already fails, and map the entry points and surfaces users touch. Hunt logic errors (conditions, off-by-one, null paths, units and time zones, stale state, races, swallowed errors), edge cases (empty, huge and malformed input, failed network, missing files, first run versus upgrade), broken imports and scripts, and dependency drift. Where there is an interface, test the rendered thing: loading, empty and error states, keyboard and focus, 360px to wide layouts, the target browsers; a terminal app in narrow terminals, piped output and Ctrl-C.",
+			"Each fix: a repro first (a failing test where the project has tests), the smallest root-cause change, then the repro and the existing checks pass. Never mask a bug with swallowed errors, skipped tests, disabled lints or retry loops. Report what you could not prove as suspected and name environments you could not check.",
+		].join("\n\n"),
+		kind: "",
+		fronts: [
+			"Every fix reproduced first, fixed at its root, and the repro and existing checks pass; nothing masked.",
+			"The project's checks were run and the in-scope surfaces mapped before fixing.",
+			"The interface checked where it runs: states, keyboard, narrow to wide layouts and target browsers or terminals checked on the real output; a project without an interface waives this.",
+		],
+		media: {
+			standard: "Nobug on the output: check the encoded file, not the timeline. Picture and sound in sync at every cut, no dropped or duplicated frames, nothing clipped, consistent loudness, correct aspect and colour, and it plays in standard players. In 3D: no z-fighting, flipped normals, missing textures or popping.",
+			front: "the delivered file was checked from its own frames and audio measurements: in sync, no dropped frames, clipping, wrong aspect or 3D artefacts.",
+		},
+	},
+	"3d": {
+		standard: `3D: build the picture from real geometry, materials and motivated light. Pick the route and read its guide first: Blender (the blender tool and the 3d-cad skill) to model assets, three.js for browser and real-time scenes, the anatomy skills for a figure made of real parts. Ground proportions and materials in real references. Render stills from several angles, look at them, fix what is weak and look again. ${NO_IMAGE_STANDIN} Placeholder primitives are scaffolding, not the delivery. It runs from a clean start with every asset resolving.`,
+		kind: "3D (Blender scenes, three.js or WebGL code, models, shaders)",
+		fronts: [
+			"Purpose-built geometry, materials and light grounded in references; no placeholder primitives and no generated or stock image standing in for the 3D.",
+			"Rendered stills from several angles were looked at and the weak ones fixed.",
+			"Runs end to end from a clean start with every asset resolving, at a steady frame rate where interactive.",
+		],
+	},
+	video: {
+		standard: `Video: a finished film on every track. Write PRODUCTION.md first: script lines with target times, a shot list saying what each shot shows and why, the look, and the audio plan; facts the film states come from real sources. Build on one pipeline and read its guide first: cinetic (${skill("cinetic")}) for motion design, ads and launch films; video-editing for cutting existing footage. Look at a hero still before any long render, a contact sheet of every shot, and frames from the final MP4 (read returns images; on a text-only model use image_understand); fix what a director would reject. Sound: narration timed to the picture it describes, music ducked under speech, effects only on visible motion; measure the master with video_qa listen and analyze (about -16 LUFS, true peak under -1 dBTP). Render previews small and the final once; deliver one file at the asked length, size and frame rate.`,
+		kind: "video (timelines, render scripts, narration and music, exports)",
+		fronts: [
+			"Every shot is purposeful in stills you looked at, transitions follow motion, and no placeholder or mistimed frames survive.",
+			"Narration intelligible and in sync, music under speech, nothing clipped; video_qa listen and analyze pass on the delivered file.",
+			"PRODUCTION.md holds the script with timings, the shot list and the audio plan before the render.",
+		],
+	},
+	anatomy: {
+		standard: `Anatomy: show the subject as a real object made of real parts, with motion and numbers from one model. Choose and read the guide first: anatomy (${skill("anatomy")}) to explain how something works; anatomy-reveal (${skill("anatomy-reveal")}) to show one object taken apart, as a page or a reveal film. Start from the closest example, copy the kit into the project and never write into the skill folder. Write a short spec from real references first: dimensions, parts by assembly, the feature that moves. No traced or embedded images. Run the skill's checks (kit audit, scan-apart, motion scan), look at every image they make, and drive pages in a real browser.`,
+		kind: "anatomy (figures built with the anatomy kit, anatomy-reveal projects, exploded views)",
+		fronts: [
+			"Built with the chosen anatomy skill's kit at real dimensions from a written spec; its checks report clean.",
+			"Stills, frames and the page in a real browser were looked at.",
+			"Anatomy for how it works, anatomy-reveal for one object taken apart; the choice and its reason are stated.",
+		],
+	},
 };
-/**
- * In a film chain (Video with 3D or Anatomy) there are no screens to declutter
- * and no interface to test, so Noslop tracks honest on-screen copy and "added no
- * slop" and Nobug tracks defects and dependencies; the briefs carry the rest.
- */
-const FILM_CORE_INDEXES: Partial<Record<PresetId, readonly number[]>> = { noslop: [3, 6, 5], nobug: [1, 2, 5] };
+
+const isMedia = (ids: readonly PresetId[]) => ids.length > 1 && ids.includes("video");
 const isFilm = (ids: readonly PresetId[]) => ids.includes("video") && (ids.includes("3d") || ids.includes("anatomy"));
-const coreIndexes = (id: PresetId, ids: readonly PresetId[]) => (isFilm(ids) && FILM_CORE_INDEXES[id]) || CORE_INDEXES[id];
-const CRITERIA: Record<PresetId, readonly string[]> = { noslop: NOSLOP_CRITERIA, nobug: NOBUG_CRITERIA, "3d": THREE_D_CRITERIA, video: VIDEO_CRITERIA, anatomy: ANATOMY_CRITERIA };
+
+/** The standard a boost contributes in this chain. */
+function standardOf(id: PresetId, ids: readonly PresetId[]): string {
+	const boost = BOOSTS[id];
+	return isMedia(ids) && boost.media ? boost.media.standard : boost.standard;
+}
+
+/** A boost's first `count` fronts for this chain, labelled. */
+function labelledFronts(id: PresetId, count: number, ids: readonly PresetId[]): string[] {
+	const boost = BOOSTS[id];
+	const fronts = isMedia(ids) && boost.media ? [boost.media.front] : boost.fronts;
+	return fronts.slice(0, count).map((text) => `${PRESET_LABELS[id]}: ${text}`);
+}
+
+const FILM_LEADS: readonly [RegExp, string][] = [
+	[/\bexploded\b|\bteardown\b|\btake[- ]apart\b|\bdissect\w*\b|\breveal\w*\b|\bunbox\w*\b|\bparts of\b/i, "anatomy-reveal"],
+	[/\bhow\b[^.\n]{0,60}\bworks?\b|\bmechanisms?\b|\binternals?\b|\bcutaways?\b|\bexplain\w*\b|\bgears?\b|\bengines?\b/i, "anatomy"],
+];
+
+/** Video with 3D or Anatomy: one film, one lead skill, one clock. */
+export function filmDirective(task: string): string {
+	const lead = FILM_LEADS.find(([pattern]) => pattern.test(task))?.[1] ?? "cinetic";
+	return `Film: one film whose hero in every shot is the real 3D subject. Lead skill: ${lead} (${skill(lead)}); other guides only where it lacks something. Drive the 3D scene from the film's one timeline (the three.js or anatomy scene mounted in the composition as a function of the frame) so picture, cues and sound share a clock; Blender only builds GLB assets for it. Transitions follow motion: match cuts, whips, a part becoming the next shot, never default crossfades.`;
+}
+
+function chainText(task: string, ids: readonly PresetId[]): string {
+	const labels = ids.map((id) => PRESET_LABELS[id]).join(" + ");
+	const scope = task
+		? `Boosts in force — ${labels}. Where they pull against each other or against the user's words and brand, the user's words win.`
+		: `Boosts in force — ${labels} — with no assignment: survey this project for work of each kind and improve it; a boost whose kind of work is absent is waived with that reason through the goal tool.`;
+	return [scope, ...(isFilm(ids) ? [filmDirective(task)] : []), ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${standardOf(id, ids)}`)].join("\n\n");
+}
+
+function soloText(id: PresetId, task: string): string {
+	const boost = BOOSTS[id];
+	const scope = task
+		? `Assignment: ${task}`
+		: boost.kind
+			? `No assignment was given: survey this project for existing ${boost.kind} work and improve it. If there is none, say so in one line, waive the fronts with that reason through the goal tool, and stop.`
+			: "Scope: the whole project, starting from what its users run and see.";
+	return `${boost.standard}\n\n${scope}`;
+}
+
+/** The /noslop goal text; a focus narrows it and the fronts it does not touch are waived. */
+export function noslopGoalText(focus: string): string {
+	return focus ? `${NOSLOP_STANDARD}\n\nFocus: ${focus}. Fronts outside it are waived with that reason through the goal tool.` : soloText("noslop", "");
+}
+
+const MAX_FOCUS = 500;
+export function noslopFocus(args: string): string {
+	const flat = String(args ?? "").replace(/\s+/g, " ").trim();
+	return flat.length > MAX_FOCUS ? `${flat.slice(0, MAX_FOCUS - 1)}…` : flat;
+}
+
+/** Fronts per boost: three alone, two in a pair, one in a longer chain. */
+const perBoost = (count: number) => (count === 1 ? 3 : count === 2 ? 2 : 1);
+
+function chainCriteria(task: string, ids: readonly PresetId[], now: number): string[] {
+	const fronts = ids.flatMap((id) => labelledFronts(id, perBoost(ids.length), ids));
+	const own = task ? createGoal(task, now).criteria.filter((criterion) => criterion.id !== VERIFY_ID).map((criterion) => criterion.text) : [];
+	return [...own.slice(0, Math.max(3, MAX_CRITERIA - 1 - fronts.length)), ...fronts];
+}
+
+/**
+ * Build the goal for a parsed chain: a solo preset tracks its own fronts; a
+ * chain tracks the user's requirements first, then each boost's fronts.
+ */
+export function createPresetChainGoal(chain: PresetChain, now = Date.now()): GoalState {
+	const { presets, task } = chain;
+	if (presets.length === 1) {
+		const only = presets[0];
+		const text = only === "noslop" ? noslopGoalText(noslopFocus(task)) : soloText(only, task);
+		return { ...createPresetGoal(text, BOOSTS[only].fronts, now), boosts: [only] };
+	}
+	const text = task ? `Assignment: ${task}\n\n${chainText(task, presets)}` : chainText(task, presets);
+	return { ...createPresetGoal(text, chainCriteria(task, presets, now), now), boosts: [...presets] };
+}
+
+/** /goal with boosts: the user's words open the text, the boosts' standards follow. */
+export function createBoostedGoal(task: string, presets: readonly PresetId[], now = Date.now()): GoalState {
+	const ids = [...new Set(presets)];
+	return { ...createPresetGoal(`${task}\n\n${chainText(task, ids)}`, chainCriteria(task, ids, now), now), boosts: ids };
+}
 
 /** A criterion as createPresetGoal stores it (flattened, clipped), so fronts can be matched against a goal. */
 const fit = (text: string) => {
@@ -207,285 +315,47 @@ const fit = (text: string) => {
 	return flat.length > 240 ? `${flat.slice(0, 239)}…` : flat;
 };
 
-/** A preset's first `count` core fronts for this chain, labelled and in the brief's order. */
-function labelledFronts(id: PresetId, count: number, ids: readonly PresetId[] = [id]): string[] {
-	return coreIndexes(id, ids).slice(0, count).sort((a, b) => a - b).map((index) => `${PRESET_LABELS[id]}: ${CRITERIA[id][index]}`);
-}
-
-function nobugGoalText(task: string): string {
-	const scope = task
-		? `Assignment: ${task}\nHunt bugs in that work and everything it touches, deeply. Fronts it does not touch get waived with that reason through the goal tool — not silently skipped.`
-		: "Scope: the whole codebase of the current project. Start from what its users run and see, then work inward to the code paths behind it.";
-	return [
-		"Debug this work: find the real bugs, prove each one, fix it at its root, and leave proof that it stays fixed.",
-		scope,
-		"Baseline before hunting: learn what the project is and how it runs, run its existing checks (build, type check, lint, tests) and record what already fails, and map the in-scope surfaces — entry points, code paths, screens, outputs, pipelines. A check that is already red is a finding, not background noise.",
-		"Hunt across every front. Logic: wrong conditions and off-by-one, inverted or missing branches, null and undefined paths, unit, time-zone and rounding mistakes, stale or shared state, async races and unawaited promises, errors swallowed or reported wrong. Edge cases: empty, single, huge and malformed input, unicode and whitespace, boundaries, concurrency and retries, slow or failed network, missing files and permissions, first run versus upgrade. Broken code: syntax and type errors, broken imports and references, dead config, scripts that no longer run. Dependencies: missing, unused, duplicated or conflicting packages, lockfile drift, versions that disagree across workspaces, deprecated or vulnerable packages on the main path, code that only works on the author's machine. Duplication that matters: copies of one rule that already disagree or will drift — a DRY violation is a bug when the copies can diverge, and is left alone when it is harmless repetition.",
-		"Where there is an interface, test the real rendered thing, not the code. GUI and web: broken, unreachable or misleading states (loading, empty, error, disabled), keyboard and focus order, forms and validation, layouts from a 360px phone to a wide desktop with no overflow, clipping or horizontal scroll, and the browsers the project targets (Chromium, Firefox and WebKit where available; name any you could not run). Terminal apps: narrow and resized terminals, piped and non-TTY output, NO_COLOR, Ctrl-C and cleanup, long lines and wide characters. Media and 3D, including work from chained boosts: watch and inspect the actual output — for video, audio/picture sync, dropped or duplicated frames, wrong aspect, color or levels, clipping, captions out of time, files that only play in one player; for 3D, z-fighting, inverted normals, missing textures, NaN or exploding transforms, device-pixel-ratio and resize bugs, context loss and frame-rate stalls — and treat weird or low-quality looks as bugs to explain and fix.",
-		"Rules of engagement. Reproduce before fixing: each bug gets a repro first (a failing test where the project has tests, otherwise a recorded command, request or capture), then the smallest root-cause fix, then the repro passes and the surrounding checks still pass. Never mask a bug: no swallowed errors, skipped or deleted tests, disabled lints, loosened types or retry loops around a defect. Do not rewrite working code for taste or add features. A suspicion you could not prove is reported as suspected, with its reasoning, never as fixed; an environment you could not check is named, never implied.",
-		"Order of work: baseline and map; list findings per front with severity and a repro; fix the highest-impact ones first in reviewable steps; rerun the baseline checks after each front and compare. Record each front's evidence through the goal tool as it settles, and finish with what was fixed, what was only suspected, and what could not be checked.",
-	].join("\n\n");
-}
-
-function threeDGoalText(task: string): string {
-	const scope = task
-		? `Assignment: ${task}`
-		: "No assignment was given. Survey the current project for existing 3D work — Blender scenes and scripts, three.js/WebGL code, models, textures, shaders — and improve and fix what is there: quality, correctness, performance. If the project contains no 3D work at all, say so plainly in one line, waive these fronts with that reason through the goal tool, and stop. Do not invent a 3D project nobody asked for.";
-	return [
-		"3D boost in force: do this 3D work at full craft, using the harness's real 3D capability instead of approximating it.",
-		scope,
-		"Choose the route deliberately and use the installed skills and tools for it: Blender (the blender tools and the 3d-cad skill) for real geometry, scenes and offline realism; the anatomy skill for an isometric figure or mechanism that turns in true 3D, and anatomy-reveal for one object built part by part to take apart and film; three.js/WebGL for browser and interactive work; a hybrid — assets modeled in Blender, presented in three.js — when the subject wants both. Read the relevant skill before building; it carries the workflow, this brief carries the standard.",
-		"Ground the subject before modeling: research real references for proportions, materials and motion, and keep them beside the work. Sourced assets and images from the web are legitimate inputs when they fit the subject — prefer own or generated assets, check the license of anything fetched, and never pass a found asset off as modeled. Build real geometry with real materials and motivated lighting; placeholder boxes, primitive-only scenes and flat unlit renders are scaffolding, never the delivery.",
-		"Iterate against renders, not intentions: render stills (render_see where available) from several angles and distances, compare with the references, fix what the comparison exposes. Keep performance honest — sane geometry, draw-call and texture budgets for the target, stable frame rate under interaction, honest degradation instead of stalls. Finish means the scene or app runs end to end from a clean start with every asset resolving.",
-	].join("\n\n");
-}
-
-function videoGoalText(task: string): string {
-	const scope = task
-		? `Assignment: ${task}`
-		: "No assignment was given. Survey the current project for existing video work — timelines and render scripts, narration and music assets, captions, exports — and improve and fix what is there: picture, sound, pacing, export quality. If the project contains no video work at all, say so plainly in one line, waive these fronts with that reason through the goal tool, and stop. Do not invent a video nobody asked for.";
-	return [
-		"Video boost in force: make this video finished on every track — picture, sound and timing — not a silent render with music attached.",
-		scope,
-		`Plan before rendering: write PRODUCTION.md first and keep it the source of truth — the script line by line with target times, the shot list (what each shot shows and why), art direction (palette, type, camera language, references) and the audio plan (voice, music, effects, target levels); facts the film states come from real sources. Then build with the installed video skills and tools for the route (cinetic at ${bundledSkill("cinetic")} for premium motion design — launch, product and feature films, loops, logo stings, kinetic type — with its beat-locked timeline, sound kit and review loop; code-first-video, remotion-video, video-editing, audio; three.js scenes, with Blender only building their assets, when the picture needs real 3D; anatomy-reveal for a product reveal or exploded-view film of one object). Read the relevant skill before building; it carries the workflow, this brief carries the standard.`,
-		"Look at what you render. When your model accepts images, open stills and contact sheets with read (the image comes back to you) at every stage: a hero frame before any long render, every shot of the cut, and frames pulled from the final MP4. Judge them as a director would, fix what is weak and look again; on a text-only model use image_understand instead.",
-		"Sound is a track, not an afterthought. Narration (TTS where no voice exists) must be intelligible, naturally paced and timed to the picture it describes. Music and sound effects are mixed under speech (duck the bed at least 10 dB under narration), levels stay consistent across cuts, nothing clips and no stretch is accidentally silent. You cannot listen, so measure: video_qa action:\"listen\" transcribes the master, compares it with the script and measures speech over music and loudness (about -16 LUFS, true peak under -1 dBTP). Effects and transitions exist to serve the cut — orientation, emphasis, continuity — never as decoration; captions or on-screen text appear where speech carries information, legible and in sync.",
-		"Verify the master, not the timeline: frames from the final export plus video_qa analyze and listen on the exact file you deliver, sync at the joins, and a runtime that earns its length. For a film longer than a minute, give independent parts (3D shots, narration and score) to subagents with separate output folders, and before delivering have a subagent that did not build the film check the master against PRODUCTION.md and report every defect. Deliver at the intended resolution, frame rate and format, as a file that plays outside the build setup.",
-	].join("\n\n");
-}
-
-/** Installed guide of a bundled skill, resolved at run time so the brief names the real file instead of leaving the model to search for it. */
-const bundledSkill = (name: string) => path.resolve(import.meta.dirname, "../../skills", name, "SKILL.md");
-
-function anatomyGoalText(task: string): string {
-	const scope = task
-		? `Assignment: ${task}`
-		: "No assignment was given. Survey the current project for existing anatomy work — figures built with the Anatomy kit (iso-kit, turn, lathe, tube), anatomy-reveal projects (object/geometry.mjs, object/film.mjs, motion/timeline.mjs), isometric or exploded-view figures and their films — and improve and fix what is there: geometry truth, depth order, motion, readouts, film framing. If the project contains no such work at all, say so plainly in one line, waive these fronts with that reason through the goal tool, and stop. Do not invent a figure nobody asked for.";
-	return [
-		"Anatomy boost in force: show this subject as a crafted anatomy figure, a real object of real parts whose motion and numbers come from one truthful model, using the two installed anatomy skills instead of approximating them.",
-		scope,
-		`Choose the skill by what the reader should understand, and read its guide before building: anatomy at ${bundledSkill("anatomy")}, anatomy-reveal at ${bundledSkill("anatomy-reveal")}. anatomy explains how a system, algorithm, machine or component works: an isometric SVG instrument with live readouts, cutaways, dials and gears, an interactive explainer, or parts turning in true 3D (its references/3d.md; references/webgl.md for fire, water or light) — open its closest example first and copy the kit and example into the project. anatomy-reveal shows off one physical object and its parts: scaffold with its scripts/new-project.mjs, then build an interactive dissection page to drag, turn and take apart, and, when asked, a product-reveal film (MP4, 3–60 s, 9:16, 4:5, 1:1 or 16:9) that tumbles in, whips to macro details, works one feature, explodes and snaps back. When the work wants both — an object that is also a working mechanism — say which skill leads and why. Resolve every kit, template and script path against the installed skill directory and never write output into it.`,
-		"Ground it before geometry. From a photo, read silhouette, proportions, materials, controls and moving parts; from a name, research the real product (dimensions in millimetres, materials, every control and port, how it opens and what is inside — teardowns are the best source), pick the common variant of an ambiguous name and say which. Write the short spec first: dimensions, features, parts grouped by assembly, the one or two features that move. The figure is geometry only: no user, web or generated image traced, embedded or mapped into it; real counts of screws and buttons; detail from real parts, never noise; neutral markings unless a faithful replica was asked for.",
-		"Check what the reader sees, not what the code intends. Run the skill's own checks (the kit audit, scan-apart from front, back, top, below and side, the motion scan) until they report clean, and look at every image they make; drive the interactive page in a real browser; for a film, frame poses and timing with stills before the full render, render a short low-cost preview first (the full blur render costs about two minutes per second of film — run it in the background, one browser at a time), then extract frames from the encoded MP4 and look at a contact sheet. The reveal film is silent by design: when /video is also in force, its sound and master checks apply to this film; when /3d is in force, its rendered-proof standard covers these figures too. Deliver the pages, the film and the project folder, and name what was not verified.",
-	].join("\n\n");
-}
-
-/** The user asked for flawless output in so many words: the bar is stated back as binding. */
-const PERFECT = /\b(?:picture|pixel)[\s-]?perfect\b|\bflawless\b|\bperfect\b/i;
-
-/**
- * Directives that exist only when boosts are chained together: what the
- * combination means beyond each brief alone. 3D (or Anatomy) + Video makes a
- * 3D film whose skills are blended for the request (film-blend.ts: anatomy,
- * anatomy-reveal and cinetic in roles, Blender only for assets that three.js
- * renders); Noslop and Nobug then apply to the film's craft and its technical
- * defects. Returns brief sections and at most one tracked front.
- */
-function synergy(ids: readonly PresetId[], task: string): { sections: string[]; fronts: string[] } {
-	const has = (id: PresetId) => ids.includes(id);
-	if (!has("video") || !(has("3d") || has("anatomy"))) return { sections: [], fronts: [] };
-	const paragraphs = [
-		"3D film in force (3D or Anatomy chained with Video): one film whose hero visuals are real 3D, finished on every track, delivered picture perfect.",
-		planFilmBlend(task).text,
-		"Production, not a slideshow. Write any narration for the ear and time it to the picture; score the arc, rising and resolving with the story and ducked under speech; put a sound on every meaningful motion — a whoosh on a whip pan, a click as a part seats, a low hit on an explode. Transitions are motion graphics with a reason: match cuts between parts, whips that follow motion, a part becoming the next shot, kinetic type that lands with the picture. No default crossfades, no stock looks, no placeholder frames.",
-	];
-	if (has("noslop")) paragraphs.push("Noslop applies to the film: a look derived from the subject (video_project look), a type pair and palette this film owns, low on-screen text density, and every element on screen doing a job — no glow halos, gradient washes or template lower thirds.");
-	if (has("nobug")) paragraphs.push("Nobug applies to the film: audio and picture in sync at every join, no dropped or duplicated frames, consistent loudness with nothing clipped, captions on time, correct aspect and colour, and a file that plays in standard players — checked on frames and audio of the encoded master (video_qa, video_frames), not the timeline.");
-	paragraphs.push(`Picture perfect means it.${PERFECT.test(task) ? " The user asked for perfect in their own words: treat it as the acceptance bar, not a figure of speech." : ""} Every frame of the final could be published as a still: open a contact sheet of every shot with read and look at it, measure the full mix with video_qa action:\"listen\", fix each defect you find before delivery, and name honestly anything you could not check. Do not ship a fixable flaw with a caveat.`);
-	return {
-		sections: [`[3D film]\n${paragraphs.join("\n\n")}`],
-		fronts: ["3D film: the skill blend is written into the brief and followed (lead and roles); Blender only builds GLB assets for three.js; sound, narration where asked and motion-graphics transitions are finished and synced; previewed low-cost first."],
-	};
-}
-
-/** Synergy fronts join ahead of V while the criteria budget has room. */
-function withSynergyFronts(goal: GoalState, fronts: readonly string[]): GoalState {
-	const body = goal.criteria.filter((criterion) => criterion.id !== VERIFY_ID);
-	const tail = goal.criteria.filter((criterion) => criterion.id === VERIFY_ID);
-	const missing = fronts.filter((text) => !body.some((criterion) => criterion.text === fit(text)));
-	const room = MAX_CRITERIA - goal.criteria.length;
-	if (room <= 0 || !missing.length) return goal;
-	let counter = body.reduce((max, criterion) => Math.max(max, Number(/^C(\d+)$/.exec(criterion.id)?.[1] ?? 0)), 0);
-	const added = missing.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
-	return { ...goal, criteria: [...body, ...added, ...tail] };
-}
-
-const BRIEFS: Record<PresetId, (task: string, ids?: readonly PresetId[]) => string> = {
-	noslop: (task, ids = []) => noslopGoalText(noslopFocus(task), { film: isFilm(ids) }),
-	nobug: nobugGoalText,
-	"3d": threeDGoalText,
-	video: videoGoalText,
-	anatomy: anatomyGoalText,
-};
-
-/**
- * Keep a chained goal under MAX_GOAL_TEXT without cutting a brief in half: the briefs
- * run in full, the assignment stays once in the header, and the copies passed to the
- * briefs are replaced by a reference first. Only a paste too large for the header
- * itself is shortened, and the header then says so.
- */
-function assembleBraid(head: (assignment: string) => readonly string[], briefs: readonly ((assignment: string) => string)[], task: string): string {
-	const reference = "(the assignment stated at the top of this goal)";
-	const body = (headerTask: string, briefTask: string) => [...head(headerTask), ...briefs.map((brief) => brief(briefTask))].join("\n\n");
-	let text = body(task, task);
-	if (text.length <= MAX_GOAL_TEXT) return text;
-	text = body(task, reference);
-	if (text.length <= MAX_GOAL_TEXT) return text;
-	const shortened = (length: number) => `${task.slice(0, length)}… (assignment shortened to fit the goal text cap)`;
-	const fits = (length: number) => body(length >= task.length ? task : shortened(length), reference).length <= MAX_GOAL_TEXT;
-	let low = 0, high = task.length;
-	while (low < high) {
-		const mid = Math.ceil((low + high) / 2);
-		if (fits(mid)) low = mid; else high = mid - 1;
-	}
-	return body(low >= task.length ? task : shortened(low), reference);
-}
-
-/**
- * Build the goal for a parsed chain. Solo /noslop keeps its shipped goal
- * byte for byte; chains stack full briefs under one header and track each
- * preset's core fronts under its label.
- */
-export function createPresetChainGoal(chain: PresetChain, now = Date.now()): GoalState {
-	const { presets, task } = chain;
-	if (presets.length === 1) {
-		const only = presets[0];
-		if (only === "noslop") return createNoslopGoal(noslopFocus(task), now);
-		return { ...createPresetGoal(BRIEFS[only](task), CRITERIA[only], now), boosts: [only] };
-	}
-	const labels = presets.map((id) => PRESET_LABELS[id]).join(" + ");
-	const header = (assignment: string) => assignment
-		? `Assignment: ${assignment}\n\nBoosts in force — ${labels} — all applied to this same work together. Every directive set below is binding on the result; where they pull against each other, the assignment's purpose wins and the conflict is named in the open, never silently dropped.`
-		: `Boosts in force — ${labels} — with no assignment: survey the current project and apply every directive set below to the work of its kind that exists. A boost whose kind of work does not exist here is waived with that reason, exactly as its own brief says.`;
-	const combined = synergy(presets, task);
-	const text = assembleBraid(
-		(assignment) => [header(assignment), ...combined.sections],
-		presets.map((id) => (brief: string) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](brief, presets)}`),
-		task,
-	);
-	const perPreset = Math.min(3, Math.floor((MAX_CRITERIA - 1) / presets.length));
-	const criteria = presets.flatMap((id) => labelledFronts(id, perPreset, presets));
-	return withSynergyFronts({ ...createPresetGoal(text, criteria, now), boosts: [...presets] }, combined.fronts);
-}
-
-/** The text of a goal with boosts: the user's task first, then the order of the boosts, then each brief. */
-function boostedText(task: string, ids: readonly PresetId[], literal: string): string {
-	const order = ids.map((id) => PRESET_LABELS[id]).join(" → ");
-	const sections = synergy(ids, task).sections;
-	const reference = "(the assignment stated at the top of this goal)";
-	const written = (assignment: string, quoted: string) => `${assignment}\n\nBoosts in force, in the order written — ${order} — all applied to this goal. Where a boost was written next to a particular part of the goal, it applies chiefly to that part; where boosts pull against each other the goal's purpose wins and the conflict is named. The user wrote: «${quoted}»`;
-	const body = (assignment: string, quoted: string, briefTask: string) =>
-		[written(assignment, quoted), ...sections, ...ids.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](briefTask, ids)}`)].join("\n\n");
-	let quoted = literal.length > MAX_TASK ? `${literal.slice(0, MAX_TASK - 1)}…` : literal;
-	let text = body(task, quoted, task);
-	if (text.length > MAX_GOAL_TEXT) text = body(task, quoted, reference);
-	if (text.length > MAX_GOAL_TEXT) {
-		// The quoted invocation repeats words the first paragraph already holds: it gives way first.
-		const smallest = "…";
-		const fits = (length: number) => body(task, length >= quoted.length ? quoted : `${quoted.slice(0, length)}…`, reference).length <= MAX_GOAL_TEXT;
-		let low = 0, high = quoted.length;
-		while (low < high) {
-			const mid = Math.ceil((low + high) / 2);
-			if (fits(mid)) low = mid; else high = mid - 1;
-		}
-		quoted = low >= quoted.length ? quoted : (low ? `${quoted.slice(0, low)}…` : smallest);
-		text = body(task, quoted, reference);
-	}
-	if (text.length > MAX_GOAL_TEXT) {
-		// A paste too large for the header: shorten the assignment itself, and say so.
-		const shortened = (length: number) => `${task.slice(0, length)}… (assignment shortened to fit the goal text cap)`;
-		const fits = (length: number) => body(length >= task.length ? task : shortened(length), "…", reference).length <= MAX_GOAL_TEXT;
-		let low = 0, high = task.length;
-		while (low < high) {
-			const mid = Math.ceil((low + high) / 2);
-			if (fits(mid)) low = mid; else high = mid - 1;
-		}
-		text = body(low >= task.length ? task : shortened(low), "…", reference);
-	}
-	return text;
-}
-
-/**
- * A real goal with boosts: the user's own requirements first (what createGoal
- * extracts from the task), then each boost's core fronts under its label, then
- * V. Every brief joins the text, so each boost applies in full even where only
- * its fronts are tracked. The budget gives the fronts k per boost (3, 2, or 1
- * from one to five boosts); the user's requirements take what is left, at least 3.
- */
-export function createBoostedGoal(task: string, presets: readonly PresetId[], literal: string, now = Date.now()): GoalState {
-	const ids = [...new Set(presets)];
-	const perPreset = ids.length === 1 ? 3 : ids.length === 2 ? 2 : 1;
-	const fronts = ids.flatMap((id) => labelledFronts(id, perPreset, ids));
-	const combined = synergy(ids, task).fronts;
-	const room = Math.max(3, MAX_CRITERIA - 1 - fronts.length - combined.length);
-	const own = createGoal(task, now).criteria.filter((criterion) => criterion.id !== VERIFY_ID).map((criterion) => criterion.text);
-	return withSynergyFronts({ ...createPresetGoal(boostedText(task, ids, literal), [...own.slice(0, room), ...fronts], now), boosts: ids }, combined);
-}
-
-/** Core fronts of a boost that the goal does not track yet (plain or labelled), most important first. */
-function untrackedFronts(goal: GoalState, id: PresetId, ids: readonly PresetId[] = [id]): string[] {
-	return coreIndexes(id, ids)
-		.map((index) => CRITERIA[id][index])
-		.filter((text) => !goal.criteria.some((criterion) => criterion.text === fit(text) || criterion.text === fit(`${PRESET_LABELS[id]}: ${text}`)));
-}
-
-/** The preset briefs a goal text can start with — a goal that opens with one has no user assignment of its own. */
-const PRESET_BRIEF = /^(?:3D boost in force|Video boost in force|Anatomy boost in force|Desloppify this codebase|Debug this work|Boosts in force —)/;
-/** The user's own words in a goal: the Assignment paragraph a preset goal writes, or the text before boosts were appended. */
+/** The user's own words in a goal, without the boost text that follows them. */
 function goalAssignment(text: string): string {
-	const assignment = /(?:^|\n\n)Assignment: ([\s\S]*?)\n\n/.exec(text)?.[1];
+	const assignment = /(?:^|\n\n)Assignment: ([\s\S]*?)(?:\n\n|$)/.exec(text)?.[1];
 	if (assignment !== undefined) return assignment.replace(/\s+/g, " ").trim();
-	const added = text.indexOf("\n\nBoosts added to this goal —");
-	const base = (added >= 0 ? text.slice(0, added) : text).replace(/\s+/g, " ").trim();
-	return PRESET_BRIEF.test(base) ? "" : base;
+	const cut = text.search(/\n\n(?:Boosts in force|Boosts added to this goal)/);
+	const base = (cut >= 0 ? text.slice(0, cut) : text).replace(/\s+/g, " ").trim();
+	return /^(?:Boosts in force|Desloppify:|Debug:|3D:|Video:|Anatomy:)/.test(base) ? "" : base;
 }
 
 /**
- * Bare boosts added to a live goal: each new brief joins the goal text under
- * its label, and its core fronts take the free criteria slots ahead of V. A
- * boost already in force (recorded, or with every front tracked) is skipped;
- * when nothing is new the goal comes back unchanged with `fresh` empty. The
- * continuation budget is re-armed, as a resume does, because the goal has new work.
+ * Bare boosts added to a live goal: each new standard joins the goal text and
+ * its fronts take the free criteria slots ahead of V. A boost already in force
+ * is skipped; when nothing is new the goal comes back unchanged with `fresh`
+ * empty. The continuation budget is re-armed because the goal has new work.
  */
 export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = Date.now()): { goal: GoalState; fresh: PresetId[]; fronts: number; clipped: boolean } {
 	const recorded = goal.boosts ?? [];
 	const requested = [...new Set(presets)];
-	const fresh = requested.filter((id) => !recorded.includes(id) && untrackedFronts(goal, id).length > 0);
-	if (!fresh.length) return { goal, fresh, fronts: 0, clipped: false };
 	const all = [...new Set([...recorded, ...requested])];
-	const total = all.length;
-	const perPreset = total === 1 ? 3 : total === 2 ? 2 : 1;
-	const queued: string[] = [];
-	for (let round = 0; round < perPreset; round++) {
-		for (const id of fresh) {
-			const text = untrackedFronts(goal, id, all)[round];
-			if (text) queued.push(`${PRESET_LABELS[id]}: ${text}`);
-		}
-	}
+	const tracked = (text: string) => goal.criteria.some((criterion) => criterion.text === fit(text));
+	const carried = (id: PresetId) => labelledFronts(id, 3, all).every((text) => tracked(text) || tracked(text.slice(PRESET_LABELS[id].length + 2)));
+	const fresh = requested.filter((id) => !recorded.includes(id) && !carried(id));
+	if (!fresh.length) return { goal, fresh, fronts: 0, clipped: false };
+	const queued = fresh.flatMap((id) => labelledFronts(id, perBoost(all.length), all)).filter((text) => !tracked(text));
 	const body = goal.criteria.filter((criterion) => criterion.id !== VERIFY_ID);
 	const tail = goal.criteria.filter((criterion) => criterion.id === VERIFY_ID);
 	const room = Math.max(0, MAX_CRITERIA - goal.criteria.length);
 	let counter = body.reduce((max, criterion) => Math.max(max, Number(/^C(\d+)$/.exec(criterion.id)?.[1] ?? 0)), 0);
 	const added = queued.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
-	// The new brief and the film blend read the user's own assignment: the whole goal text
-	// starts with the earlier briefs, and scanning those (they name anatomy-reveal, launch,
-	// mechanisms) made a live second boost plan a different film than the same chain typed
-	// once. Quoted back as an "Assignment:" line it read "Assignment: 3D boost in force: …".
-	const assignment = goalAssignment(goal.text);
-	const summary = assignment.length > 600 ? `${assignment.slice(0, 599)}…` : assignment;
-	const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
-	const combined = synergy([...new Set([...recorded, ...requested])], assignment);
+	const film = isFilm(all) && !isFilm(recorded) ? [filmDirective(goalAssignment(goal.text))] : [];
 	const appended = [
-		`Boosts added to this goal — ${labels} — in force from here on, alongside everything above. Where a boost pulls against the goal's purpose, the purpose wins and the conflict is named.`,
-		...combined.sections.filter((section) => !goal.text.includes(section.slice(0, section.indexOf("\n")))),
-		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${BRIEFS[id](summary, all)}`),
+		`Boosts added to this goal — ${fresh.map((id) => PRESET_LABELS[id]).join(" + ")} — in force from here on, alongside everything above.`,
+		...film,
+		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${standardOf(id, all)}`),
 	].join("\n\n");
 	const full = `${goal.text}\n\n${appended}`;
 	const next: GoalState = {
 		...goal,
 		text: full.length > MAX_GOAL_TEXT ? `${full.slice(0, MAX_GOAL_TEXT - 1)}…` : full,
 		criteria: [...body, ...added, ...tail],
-		boosts: [...new Set([...recorded, ...requested])],
+		boosts: all,
 		status: "active", nudges: 0, progressMark: "", stalls: 0, note: undefined, updatedAt: now,
 	};
 	return { goal: next, fresh, fronts: added.length, clipped: full.length > MAX_GOAL_TEXT };
@@ -497,13 +367,9 @@ export function boostedGoalNotice(presets: readonly PresetId[], goal: GoalState)
 	return `Goal ${goal.id} with ${labels} boosts — ${goal.criteria.length} criteria to settle with evidence. /goal shows progress, /goal pause stops it.`;
 }
 
-/** One-line user notice when a preset goal starts; solo /noslop keeps its shipped wording. */
+/** One-line user notice when a preset goal starts. */
 export function presetNotice(chain: PresetChain, goal: GoalState): string {
 	const { presets, task } = chain;
-	if (presets.length === 1 && presets[0] === "noslop") {
-		const focus = noslopFocus(task);
-		return `Desloppifying ${focus ? focus : "this codebase"} — goal ${goal.id}, ${goal.criteria.length} fronts to settle with evidence. /goal shows progress, /goal pause stops it.`;
-	}
 	const labels = presets.map((id) => PRESET_LABELS[id]).join(" + ");
 	return `${labels} boost on${task ? ` — ${task}` : " — surveying this project"} · goal ${goal.id}, ${goal.criteria.length} fronts to settle with evidence. /goal shows progress, /goal pause stops it.`;
 }
