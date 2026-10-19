@@ -433,7 +433,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		entrypoints: ["pi.getCommands", "registerCommand"],
 		commands: [
 			"cost", "budget", "self", "metrics", "obs", "effort", "reminder", "goal", "graph", "provider", "models",
-			"todos", "memory-prime", "bg", "tasks", "bg-tasks", "bg-clear", "bg-update", "jobs", "logs", "kill",
+			"todos", "memory-prime", "bg", "tasks", "bg-clear", "logs", "kill",
 			"subagents", "run", "subagents-doctor", "subagents-inspect-rpc", "subagents-refine", "subagents-fleet",
 			"subagents-detach", "subagents-stop", "subagents-steer", "subagents-watchdog", "prompt-workflow", "google-account",
 			"sys-prompt", "used", "errors", "commands", "guardian", "observer-book",
@@ -559,7 +559,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		summary: "Track explicit shell jobs in the local background registry, receive durable completion notifications and inspect bounded output by task id.",
 		entrypoints: ["bg_run", "bg_status", "bg_logs", "bg_kill", "background-task-notification"],
 		tools: ["bg_run", "bg_status", "bg_logs", "bg_kill"],
-		commands: ["bg", "tasks", "bg-tasks", "bg-clear", "bg-update", "jobs", "logs", "kill"],
+		commands: ["bg", "tasks", "bg-clear", "logs", "kill"],
 		options: [
 			option("name", "Short task name."),
 			option("command", "Shell command to start."),

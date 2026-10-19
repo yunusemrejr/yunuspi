@@ -406,7 +406,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     }
     if (!ctx.hasUI) {
       ctx.ui.notify(
-        "Background task manager requires an interactive Pi UI. Use /jobs, /logs, or the bg_status/bg_logs tools in non-interactive mode.",
+        "Background task manager requires an interactive Pi UI. Use /logs, or the bg_status/bg_logs tools in non-interactive mode.",
         "error",
       );
       return;
@@ -599,33 +599,10 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("bg-tasks", {
-    description: "Open the background task manager UI",
-    handler: async (args, ctx) => {
-      const taskId = optionalTrimmed(args);
-      await openTaskManager(ctx, taskId);
-    },
-  });
-
   pi.registerCommand("bg-clear", {
     description: "Clear finished background task footer notices",
     handler: (_args, ctx) => {
       notifyClearFinishedNotices(ctx);
-      return Promise.resolve();
-    },
-  });
-
-  pi.registerCommand("bg-update", {
-    description:
-      "Show the local-fork update status; never replace the installed extension",
-    handler: (_args, ctx) => {
-      const current = PACKAGE_VERSION ?? "unknown";
-      const lines = [
-        `YunusPi background-task fork ${current} is installed.`,
-        "This source-owned extension changes only with a reviewed YunusPi release.",
-        "No upstream package version checks or automatic replacements are performed.",
-      ];
-      ctx.ui.notify(lines.join("\n"), "info");
       return Promise.resolve();
     },
   });
@@ -642,21 +619,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Clear finished background task footer notices (terminal-dependent fallback for /bg-clear)",
     handler: (ctx) => {
       notifyClearFinishedNotices(ctx);
-    },
-  });
-
-  pi.registerCommand("jobs", {
-    description: "List running and recent background tasks",
-    handler: (_args, ctx) => {
-      currentCtx = ctx;
-      ctx.ui.notify(
-        formatSnapshotList(
-          registry.allTasks().map((task) => registry.snapshot(task)),
-        ),
-        "info",
-      );
-      updateUi(ctx);
-      return Promise.resolve();
     },
   });
 
