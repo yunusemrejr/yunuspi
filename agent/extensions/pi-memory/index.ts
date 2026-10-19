@@ -31,7 +31,7 @@ import { projectMemoryKey } from './project-identity.ts';
 import { acquireMemoryMutation, readMemoryForMutation, replaceMemoryFile } from './mutation.ts';
 import { checkpointWorktree, exitFallbackSummary } from "../lib/worktree-checkpoint.ts";
 import { readRemindersRestore } from "../lib/reminders-state.ts";
-import { type ExecFileOptions, execFile } from "node:child_process";
+import { type ExecFileOptions, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -662,7 +662,7 @@ async function generateExitSummary(
 		const response = await complete(
 			model,
 			{ systemPrompt: EXIT_SUMMARY_SYSTEM_PROMPT, messages: summaryMessages },
-			{ apiKey, reasoningEffort: "low", maxTokens: Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? Math.min(2048, model.maxTokens) : 2048, signal },
+			{ apiKey, ...(model.thinkingLevelMap?.off === null ? { reasoningEffort: "low" as const } : {}), maxTokens: Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? Math.min(2048, model.maxTokens) : 2048, signal },
 		);
 
 		if (signal.aborted || ["error", "aborted", "length"].includes(response.stopReason)) {
@@ -1525,14 +1525,24 @@ export function scheduleQmdUpdate() {
 	}, 500);
 }
 
-async function runQmdUpdateNow() {
-	if (getQmdUpdateMode() !== "background") return;
-	if (!qmdAvailable) return;
-	await new Promise<void>((resolve) => {
-		execFileFn(resolveQmdBinary(), ["update"], { timeout: 30_000 }, () => resolve());
-	});
-	// Embeds for the final writes are picked up by the session_start catch-up
-	// embed; not chained here so shutdown stays fast.
+/**
+ * Index the final memory writes without keeping this process alive for it. The update runs as its own
+ * process after we exit (awaiting it added ~3 s to every session end), and the next session start's
+ * catch-up covers it if it never finishes.
+ */
+function startQmdUpdateDetached(): void {
+	if (getQmdUpdateMode() !== "background" || !qmdAvailable) return;
+	const file = resolveQmdBinary();
+	const launch = isQmdCommand(file) && path.isAbsolute(file) && isNodeScript(file)
+		? { file: process.execPath, args: [file, "update"] }
+		: buildQmdSpawn(file, ["update"], process.platform, process.platform === "win32" && isQmdCommand(file) ? resolveQmdJsPath() : null);
+	try {
+		const child = spawn(launch.file, launch.args, { detached: true, stdio: "ignore", env: buildQmdEnv(process.env), windowsHide: true });
+		child.on("error", () => { /* best effort */ });
+		child.unref();
+	} catch {
+		/* best effort */
+	}
 }
 
 /**
@@ -1896,11 +1906,15 @@ export default function (pi: ExtensionAPI) {
 				// shutdown handlers with no timeout, so a hanging provider would
 				// otherwise block quitting indefinitely. On expiry nothing is
 				// persisted (the late result, if any, is simply dropped).
-				const summaryWork = generateExitSummary(ctx, summaryAbort.signal);
-				const expired = new Promise<null>((resolve) => {
+				// A one-shot (-p) or child run has no person waiting on the memory, only a script or parent
+				// waiting for the process to end. The model summary added ~6 s there; the deterministic one
+				// below records the same demand, todos and worktree facts at once.
+				const headless = !ctx.hasUI || process.env.PI_SUBAGENT_CHILD === "1";
+				const summaryWork = headless ? undefined : generateExitSummary(ctx, summaryAbort.signal);
+				const expired = summaryWork ? new Promise<null>((resolve) => {
 					summaryTimer = setTimeout(() => { summaryAbort.abort(); resolve(null); }, getExitSummaryTimeoutMs());
-				});
-				const modelResult = await Promise.race([summaryWork, expired]);
+				}) : undefined;
+				const modelResult = summaryWork && expired ? await Promise.race([summaryWork, expired]) : undefined;
 				// An expired or failed model summary on a substantive session gets a
 				// deterministic, content-bearing fallback (demand, todos, worktree
 				// snapshot) so a killed run never leaves the next session nothing.
@@ -1936,7 +1950,7 @@ export default function (pi: ExtensionAPI) {
 						catch { /* Memory is saved; unavailable session metadata cannot undo it. */ }
 					}
 					await ensureQmdAvailableForUpdate();
-					await runQmdUpdateNow();
+					startQmdUpdateDetached();
 				}
 			}
 		} finally {

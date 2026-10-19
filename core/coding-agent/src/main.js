@@ -825,6 +825,13 @@ export async function main(args, options) {
         if (exitCode !== 0) {
             process.exitCode = exitCode;
         }
-        return;
+        // The runtime is disposed and stdout flushed; waiting for the event loop to drain only
+        // adds ~1.5 s of idle tail per one-shot run (and lets a stray extension handle keep it alive).
+        for (const stream of [process.stdout, process.stderr]) {
+            if (stream.writableLength > 0) {
+                await new Promise((resolve) => stream.once("drain", resolve));
+            }
+        }
+        process.exit(process.exitCode ?? 0);
     }
 }

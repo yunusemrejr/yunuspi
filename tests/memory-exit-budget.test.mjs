@@ -23,10 +23,10 @@ delete process.env.PI_OFFLINE;
 process.env.PI_MEMORY_EXIT_SUMMARY='1';
 process.env.PI_MEMORY_QMD_UPDATE='off';
 process.env.PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS='20';
-function fixture(branch, model = {provider:"fixture",id:"costly"}, getApiKey = async()=> "fixture-only"){
+function fixture(branch, model = {provider:"fixture",id:"costly"}, getApiKey = async()=> "fixture-only", ui = true){
  const hooks={};memory._setBaseDir(root);
  memory.default({on:(name,fn)=>{hooks[name]=fn},registerTool(){},registerCommand(){},appendEntry:(customType,data)=>branch?.push({type:"custom",customType,data})});
- const ctx={cwd:root,hasUI:false,model,modelRegistry:{getApiKey,find:()=>undefined},sessionManager:{getSessionId:()=> 'fixture',getBranch:()=>branch??Array.from({length:4},()=>({type:'message',message:{role:'user',content:'fixture'}}))}};
+ const ctx={cwd:root,hasUI:ui,model,modelRegistry:{getApiKey,find:()=>undefined},sessionManager:{getSessionId:()=> 'fixture',getBranch:()=>branch??Array.from({length:4},()=>({type:'message',message:{role:'user',content:'fixture'}}))}};
  return (name='session_shutdown')=>hooks[name]({reason:'quit'},ctx);
 }
 test.after(()=>{fs.rmSync(root,{recursive:true,force:true});delete globalThis.__exitBudgetComplete;for(const[k,v]of Object.entries(original))v===undefined?delete process.env[k]:process.env[k]=v;});
@@ -208,4 +208,24 @@ test('an unrelated new request does not inherit the previous session follow-up c
   entries.length=0;hooks.session_start({},ctx);
   assert.equal(await hooks.before_agent_start({prompt},ctx),undefined);
  }
+});
+
+test('a one-shot run ends without a model summary and still records the deterministic one',async()=>{
+ let calls=0;globalThis.__exitBudgetComplete=async()=>{calls++;return{content:[{type:'text',text:'### Decisions\n- MODEL_SUMMARY_SENTINEL'}],stopReason:'stop'}};
+ const branch=Array.from({length:6},(_,i)=>({type:'message',id:`oneshot-${i}`,message:{role:i%2?'assistant':'user',content:[{type:'text',text:i%2?'Fixed the median.':'Fix the failing statistics tests in lib/stats.js'}]}}));
+ const started=Date.now();
+ await fixture(branch,undefined,undefined,false)();
+ assert.equal(calls,0,'no provider request when nobody is waiting for the memory');
+ assert.ok(Date.now()-started<2000,'shutdown does not wait for a model');
+ const files=fs.readdirSync(root,{recursive:true}).filter(f=>String(f).endsWith('.md'));
+ const text=files.map(f=>fs.readFileSync(path.join(root,String(f)),'utf8')).join('\n');
+ assert.equal(text.includes('MODEL_SUMMARY_SENTINEL'),false);
+ assert.ok(branch.some(e=>e.customType==='memory-exit-summary-v1'),'the deterministic summary is recorded against the last message');
+});
+
+test('a child session never makes a model summary request either',async()=>{
+ let calls=0;globalThis.__exitBudgetComplete=async()=>{calls++;return{content:[]}};
+ const before=process.env.PI_SUBAGENT_CHILD;process.env.PI_SUBAGENT_CHILD='1';
+ try{const branch=Array.from({length:6},(_,i)=>({type:'message',id:`child-${i}`,message:{role:'user',content:'child work'}}));await fixture(branch)();assert.equal(calls,0);}
+ finally{if(before===undefined)delete process.env.PI_SUBAGENT_CHILD;else process.env.PI_SUBAGENT_CHILD=before;}
 });
