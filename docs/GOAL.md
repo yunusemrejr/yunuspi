@@ -69,7 +69,7 @@ Three more presets work the same way, and all five chain:
 
 `/3d` asks for real geometry, materials and light: Blender (the `blender` tool and the 3d-cad skill) for assets, three.js for browser and real-time scenes, the anatomy skills for figures made of parts, grounded in references and checked on rendered stills from several angles. A generated or stock image never stands in for the 3D picture.
 
-`/video` asks for a finished film on every track: PRODUCTION.md first (script with timings, shot list, look, audio plan), one pipeline (cinetic for motion design, ads and launch films; video-editing for existing footage), stills and frames from the final MP4 looked at, narration timed to the picture with music ducked under it, and `video_qa` listen and analyze passing on the delivered file.
+`/video` asks for a finished film on every track: PRODUCTION.md first (script with timings, shot list, look, audio plan), one pipeline (cinetic for motion design, ads and launch films; the media skill for narrated explainers and existing footage), stills and frames from the final MP4 looked at, narration timed to the picture with music ducked under it, and `video_qa` listen and analyze passing on the delivered file.
 
 `/anatomy` builds the subject from real parts with one of the two bundled anatomy skills (see [ANATOMY.md](ANATOMY.md)): `anatomy` to explain how something works, `anatomy-reveal` to take one object apart as a page or a reveal film. The skill's own checks (kit audit, scan-apart, motion scan) must report clean.
 
