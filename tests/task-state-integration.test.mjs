@@ -28,7 +28,7 @@ const { completionGate } = await import(path.join(root, 'agent', 'extensions', '
 const { attachTaskStateSlice, attachTaskStateSliceDeep, taskSliceFocus } = await import(path.join(root, 'agent', 'extensions', 'pi-subagents', 'src', 'runs', 'shared', 'common-task.ts'));
 const { default: taskStateExtension } = await import(path.join(root, 'agent', 'extensions', 'task-state.ts'));
 const { tagGuardianRequestMessage } = await import(path.join(root, 'core', 'coding-agent', 'src', 'core', 'guardian', 'guardian-supervisor.js'));
-const { default: observerExtension } = await import(path.join(root, 'agent', 'extensions', 'session-observer.ts'));
+const { default: observerExtension } = await import(path.join(root, 'agent', 'extensions', 'lib', 'session-observer-impl.ts'));
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 function clock() {

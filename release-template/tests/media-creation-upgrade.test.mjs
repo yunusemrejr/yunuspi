@@ -113,7 +113,7 @@ test('vision uses current provider registry, thinking and real cropped attachmen
   const usage = [], calls = [];
   const ctx = { model, thinkingLevel: 'high', modelRegistry: { completeSimple: async (...args) => { calls.push(args); return { stopReason: 'stop', content: [{ type: 'text', text: 'Visible red rectangle.' }], usage: { totalTokens: 12 } }; } } };
   const result = await vision.imageUnderstand({ path: 'ref.png', prompt: 'Describe visible evidence', region: { x: 4, y: 0, width: 8, height: 8 } }, cwd, undefined, ctx, { onUsage: (_, s) => usage.push(s) });
-  assert.equal(calls[0][0], model); assert.equal(calls[0][2].reasoning, 'high'); assert.equal(ctx.model, model);
+  assert.equal(calls[0][0], model); assert.equal(calls[0][2].reasoning, 'low', 'session thinking is clamped: pixel observation does not reason at high/max'); assert.equal(ctx.model, model);
   assert.equal(calls[0][2].maxTokens, 2048, 'a non-reasoning route keeps the requested ceiling');
   const thinker = { ...model, reasoning: true, maxTokens: 65536 }, thinkingCalls = [];
   const lengthOnly = { stopReason: 'length', content: [{ type: 'thinking', thinking: 'long deliberation' }], usage: { totalTokens: 2048 } };
