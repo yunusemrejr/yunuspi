@@ -14,10 +14,13 @@ const PUBLIC_BINARY_SHA256 = {
   // Rendered from desktop/renderer/assets/app-icon.svg at 256px.
   "desktop/renderer/assets/app-icon.png":
     "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
-  "release-template/desktop/renderer/assets/app-icon.png":
-    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
   "docs/assets/metrics-demo.png":
     "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
+  // The next four entries are not mirror handling: the removed release-template/
+  // folder left these exact blobs in reachable Git history, and scanGit() checks
+  // that history. Each is exempt only at its legacy path with its exact digest.
+  "release-template/desktop/renderer/assets/app-icon.png":
+    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
   "release-template/docs/assets/metrics-demo.png":
     "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
   "docs/assets/graph-demo.png":
@@ -133,10 +136,7 @@ export function scanContent(name, data) {
     /["']?(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|access[_-]?key[_-]?id|password|passwd|authorization|bearer|namecheap[_-]?(?:user|username)|godaddy[_-]?(?:user|username))["']?\s*[:=]\s*["']([^"'\r\n]{1,512})["']/gi;
   for (const match of text.matchAll(assignments)) {
     if (
-      [
-        "config/models.example.json",
-        "release-template/config/models.example.json",
-      ].includes(name) &&
+      name === "config/models.example.json" &&
       /^[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET)$/.test(match[1])
     )
       continue;
@@ -166,7 +166,7 @@ export function scanPath(name) {
     normalized.startsWith("/") || normalized.split("/").some((p) => p === "..");
   if (bad || normalized.split("/").includes(".git"))
     return [{ path: name, rule: "unsafe-path" }];
-  const scoped = normalized.replace(/^(?:release-template|public-template)\//i, "");
+  const scoped = normalized.replace(/^public-template\//i, "");
   const packageOnly =
     /^(?:agent\/)?npm(?:\/(?:package\.json|package-lock\.json))?$/.test(
       scoped,

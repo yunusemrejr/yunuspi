@@ -58,7 +58,6 @@
         "workflow-orchestration"
       ],
       "sourceFiles": [
-        "agent/extensions/lib/relevant-guidance.ts",
         "agent/extensions/lib/skill-relevance.ts",
         "agent/extensions/lib/capability-groups.ts"
       ],
@@ -487,44 +486,6 @@
       "commands": []
     },
     {
-      "id": "double-mode",
-      "group": "orchestration",
-      "summary": "Session mode that analyzes every user request twice on the session model before the agent starts and reconciles both into one planning directive. The directive is advice below the user's own words; reviewers see it on a shared note board.",
-      "entrypoints": [
-        "/double",
-        "before_agent_start",
-        "double-directive"
-      ],
-      "commands": [
-        "double"
-      ],
-      "options": [
-        {
-          "name": "PI_DOUBLE",
-          "values": [
-            "on",
-            "off"
-          ],
-          "summary": "Disable Double mode when set to off."
-        },
-        {
-          "name": "/double [on|off|status]",
-          "summary": "Twin mode: the session model runs both streams."
-        }
-      ],
-      "related": [
-        "fanout-execution",
-        "subagent-dispatch"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "agent/extensions/lib/double.ts",
-        "agent/extensions/lib/reviewer-board.ts"
-      ],
-      "doc": "docs/REVIEWS-AND-COUNCILS.md",
-      "tools": []
-    },
-    {
       "id": "agent-model-management",
       "group": "models",
       "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
@@ -602,12 +563,10 @@
       "summary": "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",
       "entrypoints": [
         "provider",
-        "or-provider",
         "models.json providers.openrouter.modelOverrides"
       ],
       "commands": [
-        "provider",
-        "or-provider"
+        "provider"
       ],
       "options": [
         {
@@ -891,16 +850,12 @@
         "goal",
         "graph",
         "provider",
-        "or-provider",
         "models",
         "todos",
         "memory-prime",
         "bg",
         "tasks",
-        "bg-tasks",
         "bg-clear",
-        "bg-update",
-        "jobs",
         "logs",
         "kill",
         "subagents",
@@ -1280,10 +1235,7 @@
       "commands": [
         "bg",
         "tasks",
-        "bg-tasks",
         "bg-clear",
-        "bg-update",
-        "jobs",
         "logs",
         "kill"
       ],
@@ -3014,14 +2966,12 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
+      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision; deterministic owners retain safety and completion authority.",
       "entrypoints": [
-        "micro_status",
-        "micro_task"
+        "micro_status"
       ],
       "tools": [
-        "micro_status",
-        "micro_task"
+        "micro_status"
       ],
       "options": [
         {
@@ -3035,16 +2985,6 @@
         {
           "name": "PI_JEV",
           "summary": "Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter."
-        },
-        {
-          "name": "micro_task.action",
-          "values": [
-            "analyze",
-            "status",
-            "qualify",
-            "run"
-          ],
-          "summary": "Batch semantic analysis, inspect status, refresh the session model's qualification or run one bounded task on the session model."
         },
         {
           "name": "PI_RERANK_MODEL|VOYAGE_API_KEY",
@@ -3061,7 +3001,6 @@
         "agent/extensions/micro-intelligence.ts",
         "agent/extensions/lib/needle-runtime.ts",
         "agent/extensions/lib/jev-client.ts",
-        "agent/extensions/lib/micro-intelligence/micro-task.ts",
         "agent/extensions/lib/micro-intelligence/metrics.ts"
       ],
       "doc": "docs/MICRO-INTELLIGENCE.md",
@@ -3088,22 +3027,12 @@
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 610
-      },
-      {
-        "name": "bg-tasks",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 602
-      },
-      {
-        "name": "bg-update",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 618
       },
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 903
+        "line": 902
       },
       {
         "name": "catalog-status",
@@ -3118,22 +3047,17 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1833
+        "line": 1828
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1383
+        "line": 1378
       },
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 3283
-      },
-      {
-        "name": "double",
-        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 381
       },
       {
         "name": "effort",
@@ -3143,7 +3067,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1797
+        "line": 1792
       },
       {
         "name": "export-json",
@@ -3176,14 +3100,9 @@
         "line": 78
       },
       {
-        "name": "jobs",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 648
-      },
-      {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 695
+        "line": 657
       },
       {
         "name": "lens-allow-edit",
@@ -3238,7 +3157,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 663
+        "line": 625
       },
       {
         "name": "memory-prime",
@@ -3268,22 +3187,17 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 789
+        "line": 726
       },
       {
         "name": "observer-book",
         "source": "agent/extensions/lib/session-observer-impl.ts",
-        "line": 516
-      },
-      {
-        "name": "or-provider",
-        "source": "agent/extensions/provider-cmd.ts",
-        "line": 654
+        "line": 514
       },
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 614
+        "line": 618
       },
       {
         "name": "prompt-workflow",
@@ -3303,7 +3217,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1237
+        "line": 1104
       },
       {
         "name": "run",
@@ -3318,7 +3232,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1721
+        "line": 1716
       },
       {
         "name": "subagent-cost",
@@ -3373,7 +3287,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1746
+        "line": 1741
       },
       {
         "name": "task-state",
@@ -3388,7 +3302,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1765
+        "line": 1760
       },
       {
         "name": "video",
@@ -3483,25 +3397,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 867,
+        "line": 823,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 821,
+        "line": 780,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 731,
+        "line": 693,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 752,
         "kind": "literal"
       },
       {
@@ -3713,13 +3627,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 416,
-        "kind": "literal"
-      },
-      {
-        "name": "micro_task",
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 28,
+        "line": 414,
         "kind": "literal"
       },
       {
@@ -3755,7 +3663,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 713,
+        "line": 650,
         "kind": "literal"
       },
       {
@@ -3827,7 +3735,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1863,
+        "line": 1858,
         "kind": "literal"
       },
       {
@@ -3838,8 +3746,8 @@
       },
       {
         "name": "skill_review",
-        "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 681,
+        "source": "agent/extensions/lib/skill-review.ts",
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -3882,7 +3790,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 781,
+        "line": 779,
         "kind": "definition"
       },
       {
@@ -3936,7 +3844,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 522,
+        "line": 520,
         "kind": "literal"
       },
       {
@@ -4047,25 +3955,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 867,
+        "line": 823,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 821,
+        "line": 780,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 731,
+        "line": 693,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 752,
         "kind": "literal"
       },
       {
@@ -4167,19 +4075,13 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 416,
-        "kind": "literal"
-      },
-      {
-        "name": "micro_task",
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 28,
+        "line": 414,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 713,
+        "line": 650,
         "kind": "literal"
       },
       {
@@ -4245,7 +4147,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1863,
+        "line": 1858,
         "kind": "literal"
       },
       {
@@ -4256,8 +4158,8 @@
       },
       {
         "name": "skill_review",
-        "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 681,
+        "source": "agent/extensions/lib/skill-review.ts",
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -4287,7 +4189,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 522,
+        "line": 520,
         "kind": "literal"
       },
       {
@@ -4444,7 +4346,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          832
+          830
         ],
         "knownNames": [
           "subagent"
@@ -4482,7 +4384,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          592
+          596
         ]
       },
       {
@@ -4557,11 +4459,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 687,
-      "registrationSites": 65,
+      "sourceFiles": 677,
+      "registrationSites": 64,
       "indirectRegistrationSites": 21,
-      "stableRegistrationRows": 101,
-      "uniqueStableTools": 100,
+      "stableRegistrationRows": 100,
+      "uniqueStableTools": 99,
       "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4943,10 +4845,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/double.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/effort-policy.mjs",
         "exists": true
       },
@@ -4956,10 +4854,6 @@
       },
       {
         "path": "agent/extensions/lib/execution-evidence.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/film-blend.ts",
         "exists": true
       },
       {
@@ -4979,18 +4873,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/guidance-topics-domains.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/guidance-topics-systems.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/guidance-topics.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/harness-activity.ts",
         "exists": true
       },
@@ -5000,10 +4882,6 @@
       },
       {
         "path": "agent/extensions/lib/harness-notice.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/harness-orientation.ts",
         "exists": true
       },
       {
@@ -5167,10 +5045,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/noslop.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/numeric-checks.ts",
         "exists": true
       },
@@ -5291,10 +5165,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/relevant-guidance.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/reminders-state.ts",
         "exists": true
       },
@@ -5412,6 +5282,10 @@
       },
       {
         "path": "agent/extensions/lib/skill-relevance.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/skill-review.ts",
         "exists": true
       },
       {
@@ -5622,14 +5496,6 @@
       },
       {
         "path": "agent/extensions/lib/micro-intelligence/metrics.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/micro-intelligence/micro-worker.ts",
         "exists": true
       },
       {
@@ -6161,6 +6027,11 @@
         "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"
       },
       {
+        "name": "lib/double.ts",
+        "retired": "2026-10-19",
+        "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
+      },
+      {
         "name": "lib/expert-brief.ts",
         "retired": "2026-10-19",
         "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
@@ -6191,6 +6062,41 @@
         "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
       },
       {
+        "name": "lib/film-blend.ts",
+        "retired": "2026-10-19",
+        "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
+      },
+      {
+        "name": "lib/guidance-topics-domains.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/guidance-topics-systems.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/guidance-topics.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/harness-orientation.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/micro-intelligence/micro-task.ts",
+        "retired": "2026-10-19",
+        "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+      },
+      {
+        "name": "lib/micro-intelligence/micro-worker.ts",
+        "retired": "2026-10-19",
+        "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+      },
+      {
         "name": "lib/micro-intelligence/router-shadow.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
@@ -6201,9 +6107,19 @@
         "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
+        "name": "lib/noslop.ts",
+        "retired": "2026-10-19",
+        "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
+      },
+      {
         "name": "lib/observer-model-evidence.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+      },
+      {
+        "name": "lib/relevant-guidance.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
       },
       {
         "name": "lib/scope-deliberation.ts",
@@ -6582,12 +6498,6 @@
         ]
       },
       {
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "signals": [
           "wrapper/adapter"
@@ -6595,12 +6505,6 @@
       },
       {
         "source": "agent/extensions/lib/project-intelligence/client.mjs",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/relevant-guidance.ts",
         "signals": [
           "wrapper/adapter"
         ]
@@ -6712,12 +6616,6 @@
         "source": "agent/extensions/pi-lens/dist/index.js",
         "signals": [
           "MCP",
-          "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/pi-observations.ts",
-        "signals": [
           "wrapper/adapter"
         ]
       },

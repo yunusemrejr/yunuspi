@@ -28,13 +28,12 @@ owner and keeping a compatibility fallback.
 | `sessions/`, `memory/`, `logs/`, `cache/`, `artifacts/`, `worktrees/`, `missions/`, `local-models/`, `project-intelligence/`, `competence/` | harness runtime | Live state. Private; never published. |
 | `provider-health.json`, `live-model-catalog.json`, `models-store.json`, `run-history.jsonl`, `auth.json` | harness runtime | Provider and accounting state. Private; never published. |
 
-## Public repository mirrors
+## Public repository layout
 
-The public checkout keeps `docs/`, `config/*.example.json`, `scripts/`,
-`tests/` and root files mirrored under `release-template/` (the export
-scaffolding excludes `agent/`, which the exporter assembles from the live
-tree). When changing any mirrored file, update both copies so subsequent
-exports preserve the safeguards.
+The repository root is the public source: `docs/`, `config/*.example.json`,
+`scripts/`, `tests/` and root files live there directly, with no second copy
+to keep in sync. The export scaffolding excludes `agent/`, which the exporter
+assembles from the live tree.
 
 ## Cleanup rules
 

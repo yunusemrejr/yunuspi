@@ -28,8 +28,7 @@ for(const [file,pkg] of updates){if(!file.startsWith('core/')||!file.endsWith('/
  for(const group of ['dependencies','devDependencies','optionalDependencies','peerDependencies'])for(const dep of Object.keys(entry[group]??{}))if(dep.startsWith('@yunuspi/'))entry[group][dep]=version;
 }
 updates.set('package-lock.json',lock);
-updates.set('release-template/package.json',product);updates.set('release-template/package-lock.json',lock);
-// Validate all inputs, including mirrors, before changing any of them.
+// Validate all inputs before changing any of them.
 const mismatched=[];
 for(const [file,value] of updates){
  if(JSON.stringify(read(file))!==JSON.stringify(value))mismatched.push(file);

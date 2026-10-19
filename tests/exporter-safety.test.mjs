@@ -224,10 +224,8 @@ test("video JSX/TSX source and named public SVG fixtures survive export without 
     const result = f.run();
     assert.equal(result.status, 0, result.stderr);
     for (const file of sources) assert.equal(fs.readFileSync(path.join(f.output, 'agent', file), 'utf8'), video);
-    for (const prefix of ['', 'release-template/']) {
-      for (const quality of ['good', 'mediocre']) assert.equal(fs.readFileSync(path.join(f.output, `${prefix}tests/fixtures/expert-svg-${quality}.svg`), 'utf8'), svg);
-      for (const file of ['tests/fixtures/private-image.svg', 'docs/expert-svg-good.svg']) assert.equal(fs.existsSync(path.join(f.output, prefix, file)), false);
-    }
+    for (const quality of ['good', 'mediocre']) assert.equal(fs.readFileSync(path.join(f.output, `tests/fixtures/expert-svg-${quality}.svg`), 'utf8'), svg);
+    for (const file of ['tests/fixtures/private-image.svg', 'docs/expert-svg-good.svg']) assert.equal(fs.existsSync(path.join(f.output, file)), false);
     assert.equal(fs.existsSync(path.join(f.output, 'agent/skills/remotion-video/assets/expert-svg-good.svg')), false);
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
@@ -365,7 +363,7 @@ test("exporter refuses a hardcoded home path in executable source but sanitizes 
   }
 });
 
-test("template dependency installs are omitted from both exported roots", () => {
+test("template dependency installs are omitted from the exported root", () => {
   const f = fixture();
   try {
     fs.mkdirSync(path.join(f.templates, "node_modules/.bin"), {
@@ -382,10 +380,6 @@ test("template dependency installs are omitted from both exported roots", () => 
     const result = f.run();
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.existsSync(path.join(f.output, "node_modules")), false);
-    assert.equal(
-      fs.existsSync(path.join(f.output, "release-template/node_modules")),
-      false,
-    );
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }

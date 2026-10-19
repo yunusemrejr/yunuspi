@@ -4,7 +4,7 @@ Run `npm ci --ignore-scripts --no-audit --no-fund` once after dependency changes
 
 | Check | Command | Use |
 | --- | --- | --- |
-| Routine | `npm run test:quick` | Short core, cancellation, provider, memory, review, goal, release and mirror checks |
+| Routine | `npm run test:quick` | Short core, cancellation, provider, memory, review, goal, release and source-integrity checks |
 | Focused | `npm test -- tests/goal-state.test.mjs` | One or more explicit regression files |
 | Routine plus focused | `npm run test:quick -- tests/image-generate.test.mjs` | Short catalogue plus the behavior being edited |
 | Complete | `npm test` | Every root `tests/*.test.mjs`, including native integrations and full source parsing |
@@ -16,4 +16,4 @@ Ordinary PRs and main updates run the short catalogue and added/modified test fi
 
 CI starts with a few-second `plan` job that decides whether the change needs the complete suite. The cheap `minimum-node` checks (public history, release consistency, generated capability freshness, changed-source parsing, and the short catalogue plus changed tests on ordinary updates) run beside it; the complete suite runs as six parallel `shard` jobs (`node scripts/test.mjs --shard i/6`, balanced by file size), which install the native browser, media and sandbox prerequisites, and a final `safety` job passes only when every shard passed. Run one shard locally with `node scripts/test.mjs --shard 1/6`. On GitHub Actions every failed test also becomes a check annotation (`scripts/ci-failure-reporter.mjs`), so a red shard names its tests without log access. Full checks run every Sunday at 05:17 Europe/Istanbul and when **Run workflow** is selected; scheduled execution can be delayed by GitHub. Releases accept only the successful aggregate `safety` job on the same main commit, including an explicit manual or recurring run. PR evidence and a skipped full job cannot authorize a release.
 
-Keep the quick catalogue small in `scripts/test.mjs`. Register a regression there only when it protects a broadly shared contract and runs without optional applications. The complete file list is discovered automatically, so new tests cannot fall out of full checks because a list was forgotten. Root tests, scripts, docs and safeguards must match their release-template copies. A missing runtime parser is a failure, not a successful syntax check.
+Keep the quick catalogue small in `scripts/test.mjs`. Register a regression there only when it protects a broadly shared contract and runs without optional applications. The complete file list is discovered automatically, so new tests cannot fall out of full checks because a list was forgotten. A missing runtime parser is a failure, not a successful syntax check.

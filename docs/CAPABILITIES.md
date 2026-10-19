@@ -31,7 +31,7 @@ Track explicit shell jobs in the local background registry, receive durable comp
 
 **Catalog tool pointers:** `bg_run`, `bg_status`, `bg_logs`, `bg_kill`
 
-**Commands:** `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`
+**Commands:** `/bg`, `/tasks`, `/bg-clear`, `/logs`, `/kill`
 
 **Options:**
 
@@ -132,7 +132,7 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/budget`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/goal`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
+**Commands:** `/cost`, `/budget`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/goal`, `/graph`, `/provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-clear`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
 
 **Options:**
 
@@ -254,7 +254,7 @@ Browse and search installed SKILL.md workflows with bounded group and query page
 
 **Related records:** `tool-catalog`, `workflow-orchestration`
 
-**Source:** [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts), [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts), [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
+**Source:** [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts), [`agent/extensions/lib/capability-groups.ts`](../agent/extensions/lib/capability-groups.ts)
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
@@ -558,9 +558,9 @@ List executable agents and their capabilities and inspect or edit scoped definit
 
 Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.
 
-**Entrypoints:** `provider`, `or-provider`, `models.json providers.openrouter.modelOverrides`
+**Entrypoints:** `provider`, `models.json providers.openrouter.modelOverrides`
 
-**Commands:** `/provider`, `/or-provider`
+**Commands:** `/provider`
 
 **Options:**
 
@@ -598,23 +598,22 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 #### micro-intelligence
 
-Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.
+Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision; deterministic owners retain safety and completion authority.
 
-**Entrypoints:** `micro_status`, `micro_task`
+**Entrypoints:** `micro_status`
 
-**Catalog tool pointers:** `micro_status`, `micro_task`
+**Catalog tool pointers:** `micro_status`
 
 **Options:**
 
 - `PI_MICRO_INTELLIGENCE`: Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners.
 - `PI_NEEDLE`: Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying.
 - `PI_JEV`: Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter.
-- `micro_task.action`: Batch semantic analysis, inspect status, refresh the session model's qualification or run one bounded task on the session model. Values: `analyze`, `status`, `qualify`, `run`.
 - `PI_RERANK_MODEL|VOYAGE_API_KEY`: Configure remote memory refinement after Needle; unavailable remote inference retains local order.
 
 **Related records:** `local-intelligence`, `tool-catalog`, `skill-catalog`, `context-diagnostics`
 
-**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
 
 **Documentation:** [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 
@@ -1150,10 +1149,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 169; factory)
 - `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 144; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 586; sdk-factory)
-- `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 867; literal)
-- `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 821; literal)
-- `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 731; literal)
-- `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 790; literal)
+- `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 823; literal)
+- `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 780; literal)
+- `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 693; literal)
+- `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 752; literal)
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
 - `blender_inspect` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 54; factory)
 - `blender_render` — [`agent/extensions/blender-studio.ts`](../agent/extensions/blender-studio.ts) (line 58; factory)
@@ -1188,14 +1187,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2814; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2969; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2084; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 416; literal)
-- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 28; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 414; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 156; factory)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 444; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 166; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 128; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 713; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 650; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 618; literal)
@@ -1207,16 +1205,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2245; literal)
 - `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 824; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1863; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1858; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 681; literal)
+- `skill_review` — [`agent/extensions/lib/skill-review.ts`](../agent/extensions/lib/skill-review.ts) (line 59; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 887; literal)
 - `studio` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 172; factory)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
-- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 781; definition)
+- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 779; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
 - `svg_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 475; factory)
 - `svg_render` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 470; factory)
@@ -1225,7 +1223,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/lib/adaptive-workflows-impl.ts`](../agent/extensions/lib/adaptive-workflows-impl.ts) (line 580; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 522; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 520; literal)
 - `ui_consistency` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 433; factory)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 406; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 115; factory)
@@ -1255,10 +1253,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `media_info`, `music_compose`, `studio`, `video_frames` (lines 149)
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
-- [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 832)
+- [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 830)
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
-- [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 592)
+- [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 596)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1572, 2151, 2305, 2694)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 124)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `net_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workspace_search` (lines 31)
@@ -1269,25 +1267,22 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /3d — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 387)
 - /anatomy — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 401)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 568)
-- /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
-- /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
-- /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
-- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 903)
+- /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
+- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 902)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1645)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1833)
-- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1383)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1828)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1378)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3283)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
-- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1797)
+- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1792)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
 - /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 362)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3325)
 - /graph — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 831)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 78)
-- /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 648)
-- /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 695)
+- /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 657)
 - /lens-allow-edit — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113926)
 - /lens-context-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113630)
 - /lens-drift — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113687)
@@ -1298,23 +1293,22 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /lens-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113623)
 - /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113860)
 - /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113637)
-- /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 663)
+- /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 625)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 221)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 59)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 211)
 - /nobug — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 380)
 - /noslop — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 373)
-- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 789)
-- /observer-book — [`agent/extensions/lib/session-observer-impl.ts`](../agent/extensions/lib/session-observer-impl.ts) (line 516)
-- /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
-- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 614)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 726)
+- /observer-book — [`agent/extensions/lib/session-observer-impl.ts`](../agent/extensions/lib/session-observer-impl.ts) (line 514)
+- /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 618)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 257)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 485)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1237)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1104)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 825)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3373)
-- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1721)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1716)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 865)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 818)
 - /subagents-detach — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 943)
@@ -1325,10 +1319,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1011)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 955)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 221)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1746)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1741)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 594)
-- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1765)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1760)
 - /video — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 394)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3028)
 
@@ -1350,10 +1344,8 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) — `MCP`
 - [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
-- [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
 - [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) — `MCP`
@@ -1372,7 +1364,6 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../agent/extensions/pi-background-tasks/src/core/registry.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) — `MCP`, `wrapper/adapter`
-- [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/agents/agent-serializer.ts`](../agent/extensions/pi-subagents/src/agents/agent-serializer.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/agents/agents.ts`](../agent/extensions/pi-subagents/src/agents/agents.ts) — `MCP`
@@ -1518,18 +1509,13 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/elevenlabs.ts`](../agent/extensions/lib/elevenlabs.ts)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
-- [`agent/extensions/lib/film-blend.ts`](../agent/extensions/lib/film-blend.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)
 - [`agent/extensions/lib/guarded-process.ts`](../agent/extensions/lib/guarded-process.ts)
-- [`agent/extensions/lib/guidance-topics-domains.ts`](../agent/extensions/lib/guidance-topics-domains.ts)
-- [`agent/extensions/lib/guidance-topics-systems.ts`](../agent/extensions/lib/guidance-topics-systems.ts)
-- [`agent/extensions/lib/guidance-topics.ts`](../agent/extensions/lib/guidance-topics.ts)
 - [`agent/extensions/lib/harness-activity.ts`](../agent/extensions/lib/harness-activity.ts)
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts)
 - [`agent/extensions/lib/harness-notice.ts`](../agent/extensions/lib/harness-notice.ts)
-- [`agent/extensions/lib/harness-orientation.ts`](../agent/extensions/lib/harness-orientation.ts)
 - [`agent/extensions/lib/health-log.ts`](../agent/extensions/lib/health-log.ts)
 - [`agent/extensions/lib/helper-usage.ts`](../agent/extensions/lib/helper-usage.ts)
 - [`agent/extensions/lib/hook-ledger.ts`](../agent/extensions/lib/hook-ledger.ts)
@@ -1570,7 +1556,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts)
 - [`agent/extensions/lib/needle-types.ts`](../agent/extensions/lib/needle-types.ts)
 - [`agent/extensions/lib/needle-worker.mjs`](../agent/extensions/lib/needle-worker.mjs)
-- [`agent/extensions/lib/noslop.ts`](../agent/extensions/lib/noslop.ts)
 - [`agent/extensions/lib/numeric-checks.ts`](../agent/extensions/lib/numeric-checks.ts)
 - [`agent/extensions/lib/observation-retrieval.ts`](../agent/extensions/lib/observation-retrieval.ts)
 - [`agent/extensions/lib/observer-book.ts`](../agent/extensions/lib/observer-book.ts)
@@ -1601,7 +1586,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/quality-review-owner.ts`](../agent/extensions/lib/quality-review-owner.ts)
 - [`agent/extensions/lib/quality-review-signals.ts`](../agent/extensions/lib/quality-review-signals.ts)
 - [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts)
-- [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts)
 - [`agent/extensions/lib/reminders-state.ts`](../agent/extensions/lib/reminders-state.ts)
 - [`agent/extensions/lib/render-queue.ts`](../agent/extensions/lib/render-queue.ts)
 - [`agent/extensions/lib/request-compat.ts`](../agent/extensions/lib/request-compat.ts)
@@ -1632,6 +1616,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/sheet-formula.ts`](../agent/extensions/lib/sheet-formula.ts)
 - [`agent/extensions/lib/shot-scene.ts`](../agent/extensions/lib/shot-scene.ts)
 - [`agent/extensions/lib/skill-relevance.ts`](../agent/extensions/lib/skill-relevance.ts)
+- [`agent/extensions/lib/skill-review.ts`](../agent/extensions/lib/skill-review.ts)
 - [`agent/extensions/lib/skill-routing.ts`](../agent/extensions/lib/skill-routing.ts)
 - [`agent/extensions/lib/skill-telemetry.ts`](../agent/extensions/lib/skill-telemetry.ts)
 - [`agent/extensions/lib/slop-guidance-signals.ts`](../agent/extensions/lib/slop-guidance-signals.ts)
@@ -1688,8 +1673,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/micro-intelligence/intent.ts`](../agent/extensions/lib/micro-intelligence/intent.ts)
 - [`agent/extensions/lib/micro-intelligence/jev-decisions.ts`](../agent/extensions/lib/micro-intelligence/jev-decisions.ts)
 - [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
-- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts)
-- [`agent/extensions/lib/micro-intelligence/micro-worker.ts`](../agent/extensions/lib/micro-intelligence/micro-worker.ts)
 - [`agent/extensions/lib/micro-intelligence/model-qual-lab.ts`](../agent/extensions/lib/micro-intelligence/model-qual-lab.ts)
 - [`agent/extensions/lib/micro-intelligence/rerank.ts`](../agent/extensions/lib/micro-intelligence/rerank.ts)
 - [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../agent/extensions/lib/micro-intelligence/retrieval.ts)
@@ -1958,9 +1941,18 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `lib/expert-doctrine.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/expert-domains.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lib/expert-taste.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/film-blend.ts` — retired 2026-10-19: Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew.
+- `lib/guidance-topics-domains.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
+- `lib/guidance-topics-systems.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
+- `lib/guidance-topics.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
+- `lib/harness-orientation.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
+- `lib/micro-intelligence/micro-task.ts` — retired 2026-10-19: micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed.
+- `lib/micro-intelligence/micro-worker.ts` — retired 2026-10-19: micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed.
 - `lib/micro-intelligence/router-shadow.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/model-routing-store.ts` — retired 2026-10-19: Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate.
+- `lib/noslop.ts` — retired 2026-10-19: Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew.
 - `lib/observer-model-evidence.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
+- `lib/relevant-guidance.ts` — retired 2026-10-19: Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects).
 - `lib/scope-deliberation.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/skill-discovery-controller.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.
 - `lib/skill-discovery.ts` — retired 2026-10-19: Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s.

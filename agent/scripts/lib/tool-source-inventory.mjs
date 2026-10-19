@@ -50,7 +50,6 @@ function resolveAgentRoot(inputRoot = process.cwd()) {
 		root,
 		path.join(root, "agent"),
 		path.join(root, "public-template"),
-		path.join(root, "release-template"),
 	];
 	for (const candidate of candidates) {
 		if (fileExists(path.join(candidate, "extensions", "manifest.json"))) return candidate;

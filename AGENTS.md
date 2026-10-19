@@ -2,11 +2,11 @@
 
 This is a public source repository. Never copy private harness configuration, credentials, provider state, sessions, memory, logs, archives or local model environments into it. Do not replace `.gitignore` or bypass the public scanner to admit runtime data.
 
-For changes originating in a private installation, use `agent/scripts/harness-public-export.mjs` with a fresh output directory and these release templates. Inspect the generated diff and run `node scripts/check-public.mjs` and distribution tests before pushing. Preserve licenses and exact binary fingerprints; new binary assets require explicit provenance review.
+Make changes in this repository directly; the repository root is the only source tree. `agent/scripts/harness-public-export.mjs` is only for exporting from a private installation: give it a fresh output directory, inspect the generated diff, and run `node scripts/check-public.mjs` and distribution tests before pushing. Preserve licenses and exact binary fingerprints; new binary assets require explicit provenance review.
 
 Keep credentials and deployment/account examples generic. Provider names and public endpoints are fine; real account names, keys, SSH details, private domains and personal session excerpts are not. A passing pattern scanner is not proof that arbitrary prose is non-sensitive.
 
-Keep release-template copies of public docs, installer, tests and safeguards synchronized with their root counterparts so subsequent private exports retain fixes. Never alter the user's live credentials while preparing a public release.
+Never alter the user's live credentials while preparing a public release.
 
 State tested platform support accurately. Linux is the full target; Windows uses WSL2 and macOS can use a Linux VM. Do not claim native support or successful model inference from static checks or catalog presence.
 

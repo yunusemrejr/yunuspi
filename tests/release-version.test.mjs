@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 test('release metadata check detects lock drift and repairs only owned versions', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-version-'));
   try {
-    for (const file of ['package.json', 'package-lock.json', 'core/identity.json', 'scripts/version-release.mjs', 'release-template/package.json', 'release-template/package-lock.json', ...['agent', 'ai', 'chord', 'coding-agent', 'telemetry', 'tui'].map(name => `core/${name}/package.json`)]) {
+    for (const file of ['package.json', 'package-lock.json', 'core/identity.json', 'scripts/version-release.mjs', ...['agent', 'ai', 'chord', 'coding-agent', 'telemetry', 'tui'].map(name => `core/${name}/package.json`)]) {
       fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
       fs.copyFileSync(path.join(root, file), path.join(dir, file));
     }
@@ -26,13 +26,6 @@ test('release metadata check detects lock drift and repairs only owned versions'
     }
     assert.equal(run('0.0.99').status, 1);
     assert.equal(fs.readFileSync(path.join(dir, 'core/identity.json'), 'utf8'), before);
-    const mirror = path.join(dir, 'release-template/package-lock.json');
-    const mirrorBefore = fs.readFileSync(mirror, 'utf8');
-    fs.writeFileSync(mirror, '{invalid');
-    assert.notEqual(run('0.0.99', '--write').status, 0);
-    assert.equal(fs.readFileSync(path.join(dir, 'core/identity.json'), 'utf8'), before);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'))).version, current);
-    fs.writeFileSync(mirror, mirrorBefore);
     const lockBefore = JSON.parse(fs.readFileSync(path.join(dir, 'package-lock.json')));
     assert.equal(run('0.0.99', '--write').status, 0);
     assert.equal(run('0.0.99').status, 0);

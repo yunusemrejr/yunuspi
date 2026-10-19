@@ -44,15 +44,13 @@ function locateLayout(inputRoot) {
 			? path.join(root, "runtime/release-template")
 			: fs.existsSync(path.join(root, "public-template"))
 			? path.join(root, "public-template")
-			: path.join(root, "release-template");
+			: path.dirname(root);
 		return { projectRoot: path.dirname(root), agentRoot: root, templateRoot };
 	}
 	const agentRoot = path.join(root, "agent");
 	if (fs.existsSync(path.join(agentRoot, "extensions", "manifest.json"))) {
-		const templateRoot = fs.existsSync(path.join(root, "release-template"))
-			? path.join(root, "release-template")
-			: path.join(root, "public-template");
-		return { projectRoot: root, agentRoot, templateRoot };
+		// The repository root is the public documentation root; there is no mirror.
+		return { projectRoot: root, agentRoot, templateRoot: root };
 	}
 	throw new Error(`Cannot find extensions/manifest.json below ${root}`);
 }
@@ -682,21 +680,6 @@ function main() {
 					metadata: defaultOutput.replace(/\.md$/i, ".json"),
 				},
 			];
-	// A release export has two public copies: release-template/ is the mirrored
-	// template and docs/ is the repository-root distribution. Generate both so
-	// neither copy carries stale links or stale catalog data. The live source
-	// tree has only public-template/ and therefore keeps one canonical output.
-	if (
-		!args.output &&
-		path.basename(layout.templateRoot) === "release-template"
-	) {
-		const rootOutput = path.join(layout.projectRoot, "docs", "CAPABILITIES.md");
-		if (!outputs.some((item) => item.output === rootOutput))
-			outputs.push({
-				output: rootOutput,
-				metadata: rootOutput.replace(/\.md$/i, ".json"),
-			});
-	}
 	const generated = [];
 	for (const item of outputs) {
 		const targetLayout = layoutForOutput(layout, item.output);
