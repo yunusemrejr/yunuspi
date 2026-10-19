@@ -133,7 +133,8 @@ class ModelsImpl {
         const stored = await this.modelsStore.read(provider.id, { signal });
         await provider.refreshModels({
             credential,
-            stored: stored ? structuredClone(stored) : undefined,
+            // Every store's `read` returns a private copy; cloning it again doubled this start-up cost.
+            stored,
             publish: (publication) => this.publishProviderModels(provider.id, generation, signal, publication),
             allowNetwork,
             force: allowNetwork ? force : undefined,

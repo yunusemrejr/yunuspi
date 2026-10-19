@@ -331,12 +331,17 @@ function mergeProbes(
 }
 
 /** Native catalog overlay (pi.dev, models-store.json) keyed by id. */
+// The store is ~1.4 MB and publishing a catalog asks for it several times per start-up; parse it once per file revision.
+let storeFileMemo: { signature: string; store: Record<string, { models?: LiveCatalogModel[] }> } | undefined;
 function storeModels(providerId: string): Map<string, LiveCatalogModel> {
 	try {
-		const store = JSON.parse(
-			readFileSync(join(AGENT_DIR, "models-store.json"), "utf-8"),
-		) as Record<string, { models?: LiveCatalogModel[] }>;
-		const models = validModels(store[providerId]?.models);
+		const file = join(AGENT_DIR, "models-store.json");
+		const info = statSync(file);
+		const signature = `${info.ino}:${info.size}:${info.mtimeMs}`;
+		if (storeFileMemo?.signature !== signature)
+			storeFileMemo = { signature, store: JSON.parse(readFileSync(file, "utf-8")) };
+		const rows = storeFileMemo.store[providerId]?.models;
+		const models = validModels(Array.isArray(rows) ? structuredClone(rows) : rows);
 		return new Map(models.map((m) => [m.id, m]));
 	} catch {
 		return new Map();
