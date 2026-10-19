@@ -211,7 +211,7 @@ test("restore recovers delivered keys from branch tool results and resolves them
 	);
 });
 
-test("the tool_result wiring delivers once, keeps other appended text, and resets on compaction and resume", (t) => {
+test("the tool_result wiring delivers once and resets on compaction and resume", (t) => {
 	const saved = { hooks: process.env.PI_SESSION_HOOKS, nested: process.env.PI_NESTED_INSTRUCTIONS };
 	delete process.env.PI_SESSION_HOOKS;
 	delete process.env.PI_NESTED_INSTRUCTIONS;
@@ -247,13 +247,9 @@ test("the tool_result wiring delivers once, keeps other appended text, and reset
 	assert.equal(call("read", { path: "sub/x.ts" }), undefined, "the second touch is quiet");
 	assert.equal(call("read", { path: "sub/x.ts" }, true), undefined, "failed reads never deliver");
 
-	// The write-time UI rule still appends its line after the nested instruction.
 	const edited = call("edit", { path: "ui/Screen.tsx" });
 	assert.equal(reminders(edited).length, 1);
 	assert.match(reminders(edited)[0].text, /ui rules/);
-	const last = edited.content.at(-1).text;
-	assert.ok(last.startsWith("[session-hooks] Use ui_explore"), last.slice(0, 80));
-	assert.ok(edited.content.indexOf(reminders(edited)[0]) < edited.content.length - 1);
 
 	handlers.get("session_compact")({}, ctx);
 	assert.equal(reminders(call("read", { path: "sub/x.ts" })).length, 1, "compaction offers the file again");

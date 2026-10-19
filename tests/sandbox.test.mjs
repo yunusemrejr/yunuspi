@@ -13,7 +13,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")]
   .find(dir => fs.existsSync(path.join(dir, "scripts/sandbox-runner.py")));
 const helper = path.join(agent, "scripts/sandbox-runner.py");
-const { createRelevantGuidance } = await import(pathToFileURL(path.join(agent, "extensions/lib/relevant-guidance.ts")));
 const python = fs.existsSync('/usr/bin/python3') ? '/usr/bin/python3' : 'python3';
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "pi-sandbox-test-"));
 test.after(() => fs.rmSync(work, { recursive: true, force: true }));
@@ -82,37 +81,6 @@ test("requests reject unsafe paths, special files, aliases and oversized inputs 
   const refused = await result;
   assert.equal(refused.code, 126);
   assert.match(refused.stderr, /cgroup|syscall filtering/);
-});
-
-test("manifest, tool-using child allowlists and active-tool guidance expose the capability", () => {
-  const manifest = JSON.parse(fs.readFileSync(path.join(agent, "extensions/manifest.json")));
-  assert.ok(manifest.extensions.includes("sandbox.ts"));
-  assert.ok(manifest.supportFiles.includes("scripts/sandbox-runner.py"));
-  for (const name of fs.readdirSync(path.join(agent, "extensions/pi-subagents/agents")).filter(n => n.endsWith('.md'))) {
-    const body = fs.readFileSync(path.join(agent, "extensions/pi-subagents/agents", name), "utf8");
-    if (name === 'automatic-skill-discovery.md') {
-      assert.match(body, /^tools:[ \t]*$/m, 'discovery is deliberately tool-free');
-      assert.doesNotMatch(body, /^subagentOnlyExtensions:/m);
-      continue;
-    }
-    assert.match(body, /^tools:.*\bsandbox_run\b/m, name);
-    assert.match(body, /^subagentOnlyExtensions:.*\.\.\/\.\.\/sandbox\.ts/m, name);
-  }
-  const hints = (prompt, active) => {
-    const g = createRelevantGuidance({ getActiveTools: () => active, appendEntry() {} });
-    const ctx = { cwd: work, sessionManager: { getBranch: () => [] } };
-    g.restore(ctx); g.start({ prompt, systemPrompt: "" }, ctx); return g;
-  };
-  for (const prompt of ["Run this in a disposable sandbox", "Test this in an isolated experiment", "Run a reproduction without touching the project"]) {
-    const g = hints(prompt, ["sandbox_run"]);
-    assert.ok(g.candidates().some(h => h.tool === "sandbox_run"), prompt);
-    g.record({ toolName: "sandbox_run", input: {}, isError: false });
-    assert.ok(!g.candidates().some(h => h.tool === "sandbox_run"));
-    assert.equal(hints(prompt, []).candidates().length, 0);
-  }
-  for (const prompt of ["Explain disposable sandboxes", "Do not run sandbox experiments", "Run unit tests", "> Run this in a sandbox"]) {
-    assert.ok(!hints(prompt, ["sandbox_run"]).candidates().some(h => h.tool === "sandbox_run"), prompt);
-  }
 });
 
 test("real sandbox runs editable snapshots without host files, credentials, host PIDs or network", async t => {

@@ -12,7 +12,6 @@ const agent = [path.join(repo, "agent"), path.resolve(repo, "..")].find((p) => f
 assert.ok(agent, "video studio source must exist");
 const studio = await import(pathToFileURL(path.join(agent, "extensions/lib/video-studio.ts")).href);
 const score = await import(pathToFileURL(path.join(agent, "extensions/lib/music-score.ts")).href);
-const hooks = await import(pathToFileURL(path.join(agent, "extensions/lib/session-hooks.ts")).href);
 const template = path.join(agent, "skills/remotion-video/assets/template");
 const timing = await import(pathToFileURL(path.join(template, "src/timing.ts")).href);
 const captions = await import(pathToFileURL(path.join(template, "src/captions.ts")).href);
@@ -145,14 +144,6 @@ test("score audition adds band-limited square/saw, pan and stereo without changi
     }
     assert.ok(leftPeak > 1000 && rightPeak < leftPeak / 4, `hard-left pan images left (${leftPeak} vs ${rightPeak})`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
-});
-
-test("video render and QA hooks fire on their tools", () => {
-  for (const key of ["video-render-review", "video-qa-review"]) {
-    assert.ok(hooks.HOOK_RULES.some((rule) => rule.key === key), `${key} is registered`);
-  }
-  assert.equal(hooks.matchHook("video_render", {})?.key, "video-render-review");
-  assert.equal(hooks.matchHook("video_qa", {})?.key, "video-qa-review");
 });
 
 test("template wires vertical transitions, timing helpers and new primitives", () => {

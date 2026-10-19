@@ -36,10 +36,7 @@ test('initial and update summaries keep errors, faithful corrections and a no-na
 test('skill hedging is stated once by the catalog preamble, not repeated by harness lines', async () => {
   const skill = {name: 'fixture-guide', description: 'Inspect a fixture', filePath: '/fixture/SKILL.md'};
   assert.match(formatSkillsForPrompt([skill]), /even if the file calls them mandatory/);
-  const signals = fs.readFileSync(path.join(agent, 'extensions/session-signals.ts'), 'utf8');
-  const toolFirst = /export const HARNESS_TOOL_FIRST =\s*"([^"]+)"/.exec(signals)?.[1];
-  assert.ok(toolFirst?.includes('tool_search') && toolFirst.includes('skill_review'));
-  assert.doesNotMatch(toolFirst, /mandatory|adapt or skip/);
+  assert.doesNotMatch(fs.readFileSync(path.join(agent, 'extensions/session-signals.ts'), 'utf8'), /HARNESS_TOOL_FIRST/, 'no second tool-first line after the preamble');
   const {compactSkillCatalog} = await import(pathToFileURL(path.join(agent, 'extensions/lib/tool-discovery.ts')));
   const block = '<available_skills>\n  <skill>\n    <name>fixture-guide</name>\n    <description>Inspect a fixture</description>\n    <location>/fixture/SKILL.md</location>\n  </skill>\n</available_skills>';
   const projected = compactSkillCatalog({systemPrompt: `A\n${block}\nB`, systemPromptOptions: {skills: [skill]}}, ['skill_review']);

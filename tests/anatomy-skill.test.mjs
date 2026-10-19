@@ -7,11 +7,6 @@ import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {parse} from 'yaml';
 import {routeSkills, routeSkillsPrecise} from '../agent/extensions/lib/skill-routing.ts';
-import {createAgentSession} from '../core/coding-agent/src/core/sdk.js';
-import {DefaultResourceLoader} from '../core/coding-agent/src/core/resource-loader.js';
-import {SessionManager} from '../core/coding-agent/src/core/session-manager.js';
-import {SettingsManager} from '../core/coding-agent/src/core/settings-manager.js';
-import {emitSessionShutdownEvent} from '../core/coding-agent/src/core/extensions/runner.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const skillDir = path.join(root, 'agent/skills/anatomy');
@@ -163,66 +158,4 @@ test('bundled SVG and true 3D examples build offline from a project copy', () =>
       }
     }
   } finally { fs.rmSync(cwd, {recursive: true, force: true}); }
-});
-
-test('the SDK offers Anatomy to text and vision models in parent and native child sessions', {timeout: 60000}, async () => {
-  const keys = ['PI_CODING_AGENT_DIR', 'PI_JEV', 'PI_NEEDLE', 'PI_SUBAGENT_CHILD'];
-  const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  Object.assign(process.env, {PI_JEV: 'off', PI_NEEDLE: 'off'});
-  const cwds = [];
-  try {
-    for (const child of [false, true]) for (const input of [['text'], ['text', 'image']]) {
-      // Each session gets a fresh project directory: guidance delivery
-      // receipts are per-project by design, so reusing one directory would
-      // (correctly) suppress re-offering the same workflow in later sessions.
-      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anatomy-sdk-'));
-      cwds.push(cwd);
-      process.env.PI_CODING_AGENT_DIR = cwd;
-      if (child) process.env.PI_SUBAGENT_CHILD = '1'; else delete process.env.PI_SUBAGENT_CHILD;
-      const settingsManager = SettingsManager.inMemory({compaction: {enabled: false}, retry: {enabled: false}});
-      const loader = new DefaultResourceLoader({cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
-        noPromptTemplates: true, noThemes: true, noContextFiles: true,
-        additionalSkillPaths: child ? [] : [skillDir], additionalExtensionPaths: [path.join(root, 'agent/extensions/reminders.ts')]});
-      await loader.reload();
-      assert.deepEqual(loader.getExtensions().errors, []);
-      if (child) assert.equal(loader.getSkills().skills.length, 0, 'builtin workers inherit no ambient catalogue');
-      else assert.ok(loader.getSkills().skills.some(skill => skill.name === 'anatomy'));
-      const model = {id: 'anatomy-fixture', name: 'Anatomy fixture', api: 'openai-completions', provider: 'fixture',
-        baseUrl: 'https://invalid.example', reasoning: true, input, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: 131072, maxTokens: 8192};
-      const contexts = [], errors = [];
-      const modelRuntime = {getModel: () => model, getAvailable: () => [model], hasConfiguredAuth: () => true, isUsingSubscription: () => false,
-        getAuth: async () => ({auth: {apiKey: 'synthetic-fixture'}}), streamSimple(selected, context, options) {
-          contexts.push({selected, context, thinking: options?.reasoning});
-          const message = {role: 'assistant', api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), content: [{type: 'text', text: 'Fixture complete.'}], stopReason: 'stop',
-            usage: {input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
-          return {async *[Symbol.asyncIterator]() { yield {type: 'done', reason: 'stop', message}; }, result: async () => message};
-        }};
-      const {session} = await createAgentSession({cwd, agentDir: cwd, model, modelRuntime, settingsManager,
-        resourceLoader: loader, sessionManager: SessionManager.inMemory(cwd), thinkingLevel: 'high'});
-      try {
-        await session.bindExtensions({onError: error => errors.push(error)});
-        await session.prompt('Explain how an LRU cache evicts entries, interactive.');
-        assert.equal(contexts.length, 1);
-        assert.equal(contexts[0].selected.id, model.id);
-        assert.equal(contexts[0].thinking, 'high');
-        const supplied = JSON.stringify(contexts[0].context.messages);
-        assert.ok(supplied.includes(skillFile), `${child ? 'child' : 'parent'} ${input}: local workflow path is offered`);
-        assert.match(supplied, /Optional workflow.*anatomy/);
-        if (child) assert.ok(!supplied.includes('Quick orientation'), 'child delivery carries no parent orientation');
-        await session.prompt('No skills. Create an interactive explainer of the cache.');
-        const messages = contexts.at(-1).context.messages;
-        const currentUser = messages.findLastIndex(message => message.role === 'user' && JSON.stringify(message.content).includes('No skills.'));
-        assert.ok(currentUser >= 0);
-        assert.ok(!JSON.stringify(messages.slice(currentUser + 1)).includes(skillFile), 'an explicit skill opt-out suppresses new offers');
-        assert.deepEqual(errors, []);
-      } finally {
-        const runner = session.extensionRunner;
-        if (runner) await emitSessionShutdownEvent(runner, {type: 'session_shutdown', reason: 'exit'});
-        await session.dispose();
-      }
-    }
-  } finally {
-    for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; }
-    for (const dir of cwds) fs.rmSync(dir, {recursive: true, force: true});
-  }
 });

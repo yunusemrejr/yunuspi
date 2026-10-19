@@ -5,7 +5,6 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {skillRoutes, routeSkills} from '../../extensions/lib/skill-routing.ts';
-import {createRelevantGuidance} from '../../extensions/lib/relevant-guidance.ts';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const cases=[
  ['growth-finance','Audit SEO and structured data'],
@@ -60,18 +59,8 @@ for(const prompt of ['Harden the Ubuntu server firewall','Secure the server','Re
 
 assert.ok(routeSkills('Review C++20 code').some(r=>r.name==='systems-languages'));
 assert.ok(routeSkills('Write frontend JS').some(r=>r.name==='frontend'));
-const catalog='<available_skills>'+cases.map(([name])=>`<skill><name>${name}</name><description>fixture</description><location>${root}skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
-function fixture(prompt='',systemPrompt=catalog) {
- const entries=[];const ctx={cwd:'/routing-case',sessionManager:{getBranch:()=>entries}};
- const pi={getActiveTools:()=>['read','write','edit'],appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})};
- const g=createRelevantGuidance(pi);g.restore(ctx);g.start({prompt,systemPrompt},ctx);return {g,ctx,pi};
-}
-const priorityFixture=fixture('Implement PHP Google login SQL');
-priorityFixture.g.record({toolName:'write',input:{path:'api.ts',content:'const input = data as any;'},isError:false});
-assert.equal(priorityFixture.g.candidates()[0].key,'signal:type-bypass','actual code evidence outranks domain routing');
 for(const [name,prompt] of cases) {
  assert.ok(routeSkills(prompt).some(r=>r.name===name),prompt);
- const {g}=fixture(prompt);assert.ok(g.candidates().some(h=>h.skill?.endsWith(`/${name}/SKILL.md`)),`delivered: ${prompt}`);
  const dir=path.join(root,'skills',name), text=fs.readFileSync(path.join(dir,'SKILL.md'),'utf8');
  // Guides vary in length and reference layout. Validate actual local links
  // instead of imposing the former compact-template word and filename quotas.
@@ -93,38 +82,12 @@ for(const prompt of ['Go on','What is Python?','Write a story about where we go'
 assert.equal(routeSkills('What is Python?').length,0);
 assert.ok(!routeSkills('Write an article with wit').some(r=>r.name==='wasm'));
 assert.ok(!routeSkills('Build an Arduino blinking LED').some(r=>r.name==='ml'));
-const noOutputScan=fixture('Fix this');
-noOutputScan.g.record({toolName:'read',input:{path:'notes.txt'},content:[{type:'text',text:'Implement PHP Google login'}],isError:false});
-assert.equal(noOutputScan.g.candidates().length,0,'document prose does not become task intent');
-const failedFile=fixture('Fix this');failedFile.g.record({toolName:'read',input:{path:'missing.php'},isError:true});assert.equal(failedFile.g.candidates().length,0,'failed read is not file evidence');
-for(const [file,name] of [['src/main.c','systems-languages'],['src/a.cpp','systems-languages'],['x.cs','systems-languages'],['x.f90','systems-languages'],['a.rs','systems-languages'],['a.go','systems-languages'],['a.java','systems-languages'],['a.py','engineering'],['a.php','systems-languages'],['a.tsx','engineering'],['a.sql','data-science'],['module.wat','wasm'],['wrangler.toml','api-security']]) {
- const {g}=fixture('Fix this');g.record({toolName:'read',input:{path:file},isError:false});
- assert.ok(g.candidates().some(h=>h.skill?.endsWith(`/${name}/SKILL.md`)),file);
-}
 for(const file of ['common.h','kernel.S','unknown.asm','package.json','generic.js']) assert.equal(routeSkills('',file).length,0,`ambiguous ${file}`);
-assert.equal(fixture('Implement PHP','').g.candidates().length,0,'no invented paths');
-assert.equal(fixture('Fix this').g.candidates().length,0,'no irrelevant loaded catalog flood');
-const {g,ctx,pi}=fixture('Implement PHP Google login SQL');
-assert.match(g.candidates()[0].skill,/google-identity/,'security domain outranks general language');
-let delivered=0;while(g.candidates().length){const h=g.candidates();assert.ok(h.length<=2);delivered+=h.length;g.commit(h);}
-assert.ok(delivered<=3,'per-run budget');
-const readFixture=fixture('Implement PHP');const php=path.join(root,'skills/php-application-engineering/SKILL.md');
-readFixture.g.record({toolName:'read',input:{path:php},isError:true});assert.ok(readFixture.g.candidates().some(h=>h.skill===php));
-readFixture.g.record({toolName:'read',input:{path:php},isError:false});assert.ok(readFixture.g.candidates().every(h=>h.skill!==php));
-const restored=createRelevantGuidance(readFixture.pi);restored.restore(readFixture.ctx);restored.start({prompt:'Implement PHP',systemPrompt:catalog},readFixture.ctx);assert.ok(restored.candidates().every(h=>h.skill!==php));
-const compacted={...readFixture.ctx,sessionManager:{getBranch:()=>[{type:'compaction'}]}};
-restored.restore(compacted);restored.start({prompt:'Implement PHP',systemPrompt:catalog},compacted);assert.ok(restored.candidates().some(h=>h.skill===php),'compaction invalidates read receipt');
-const disabled=process.env.PI_RELEVANT_GUIDANCE;process.env.PI_RELEVANT_GUIDANCE='off';assert.equal(fixture('Implement PHP').g.candidates().length,0);if(disabled===undefined)delete process.env.PI_RELEVANT_GUIDANCE;else process.env.PI_RELEVANT_GUIDANCE=disabled;
 const core=path.join(resolveOwnedCore(),'dist/core/skills.js');
 const {loadSkillsFromDir}=await import(pathToFileURL(core));
 const loaded=loadSkillsFromDir({dir:path.join(root,'skills'),source:'user'});assert.deepEqual(loaded.diagnostics,[]);
 for(const {name} of skillRoutes)assert.ok(loaded.skills.some(s=>s.name===name),`Pi SDK loads ${name}`);
 const threejs=loaded.skills.find(s=>s.name==='web-motion');assert.ok(threejs,'Pi SDK loads threejs');assert.match(threejs.description,/voxel\/low-poly/);
-const voxelCatalog='<available_skills>'+loaded.skills.map(s=>`<skill><name>${s.name}</name><description>${s.description}</description><location>${s.filePath}</location></skill>`).join('')+'</available_skills>';
-const voxelEntries=[];const voxelCtx={cwd:root,sessionManager:{getBranch:()=>voxelEntries}};
-const voxelGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>voxelEntries.push({type:'custom',customType,data})});
-voxelGuidance.restore(voxelCtx);voxelGuidance.start({prompt:'Create a voxel Three.js scene with low-poly composition',systemPrompt:voxelCatalog},voxelCtx);
-assert.ok(voxelGuidance.candidates().some(h=>h.skill===threejs.filePath&&/Voxel and low-poly art/.test(h.text)),'voxel task reaches the loaded threejs section');
 for(const prompt of ['Search old emails about the license renewal','Find Thunderbird inbox messages from last year','Send the newsletter to our subscribers','Triage the support mailbox','Check mail on the IMAP server','Read my gmail inbox'])
  assert.ok(routeSkills(prompt).some(r=>r.name==='research-writing'),`email routes: ${prompt}`);
 for(const prompt of ['Write a spring newsletter','Rewrite this article in my voice','Implement signup with Google','What is email?','Do not send email','Check the installed package version'])
@@ -132,17 +95,12 @@ for(const prompt of ['Write a spring newsletter','Rewrite this article in my voi
 assert.ok(routeSkills('','snap/thunderbird/common/.thunderbird/x/prefs.js').some(r=>r.name==='research-writing'),'thunderbird profile path routes email');
 assert.ok(routeSkills('','mail/Archive.mbox').some(r=>r.name==='research-writing'),'mbox file routes email');
 const emailLoaded=loaded.skills.find(s=>s.name==='research-writing');assert.ok(emailLoaded,'Pi SDK loads email');
-const emailCatalog=`<available_skills><skill><name>email</name><description>${emailLoaded.description}</description><location>${emailLoaded.filePath}</location></skill></available_skills>`;
-const emailEntries=[];const emailCtx={cwd:'/email-case',sessionManager:{getBranch:()=>emailEntries}};
-const emailGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>emailEntries.push({type:'custom',customType,data})});
-emailGuidance.restore(emailCtx);emailGuidance.start({prompt:'Search old emails about the license renewal',systemPrompt:emailCatalog},emailCtx);
-assert.ok(emailGuidance.candidates().some(h=>h.skill===emailLoaded.filePath),'email delivery reaches the loaded skill');
 const emailBody=fs.readFileSync(emailLoaded.filePath,'utf8');
 assert.ok(emailBody.split(/\s+/).length<350,'email: compact entry');
 assert.ok(emailBody.includes('references/mailbox-search.md'),'email: conditional reference');
 const emailRef=fs.readFileSync(path.join(path.dirname(emailLoaded.filePath),'references/mailbox-search.md'),'utf8');
 assert.ok(emailRef.includes('https://'),'email: primary references');
 assert.doesNotMatch(emailBody+'\n'+emailRef,/\[TODO\]|TODO:|TBD/);
-console.log(`PASS: ${cases.length} task fixtures, intent/file routing, ambiguity, priority, limits, receipts, compaction, voxel relevance and real Pi discovery (${loaded.skills.length} total skills)`);
+console.log(`PASS: ${cases.length} task fixtures, intent/file routing, ambiguity and real Pi discovery (${loaded.skills.length} total skills)`);
 
 assert.ok(!routeSkills('sudo cp /etc/sudoers.d/rule ~/backup\nsetfacl: /workspace/lib/Net.cpp.o: Operation not permitted').some(r=>r.name==='systems-languages'));

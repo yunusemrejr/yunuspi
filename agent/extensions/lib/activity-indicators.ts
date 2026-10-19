@@ -109,7 +109,6 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
   switch (kind) {
     case "ml.jev.used": return "JEV";
     case "ml.span.used": return "Span sensor";
-    case "ml.microworker.used": return "Micro worker";
     case "ml.rerank.used": return "Remote rerank";
     case "ml.needle.call": return data.count === undefined || (typeof data.count === "number" && data.count > 0) ? "Needle3" : undefined;
     case "ml.mini.used": return "Kompress";
@@ -125,7 +124,7 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
  * model output, file path or arbitrary payload enters the transcript. A
  * completed call is not proof that its result reached the main model. */
 /** micro-intelligence helper id → display/ledger component label. */
-export const HELPER_LABELS: Readonly<Record<string, string>> = { needle: "Needle3", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection", span: "Span sensor", microworker: "Micro worker", rerank: "Remote rerank" };
+export const HELPER_LABELS: Readonly<Record<string, string>> = { needle: "Needle3", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection", span: "Span sensor", rerank: "Remote rerank" };
 export function describeIntelligenceActivity(kind: string, data: Record<string, unknown>): DescribedActivity | undefined {
   const ms = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? Math.round(data.durationMs) : undefined;
   const helpers = HELPER_LABELS;
@@ -134,10 +133,10 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   const reason = typeof data.reason === "string" && /^[a-z0-9-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
   const status: ActivityStatus = data.isError === true ? "error" : "ok";
   if (data.disabled === true || data.shadow === true || data.isError === true) return;
-  if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped" || kind === "ml.span.skipped" || kind === "ml.microworker.skipped" || kind === "ml.rerank.skipped") {
+  if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped" || kind === "ml.span.skipped" || kind === "ml.rerank.skipped") {
     const failed = ["unavailable", "unhealthy", "timeout", "no-key", "invalid-input", "route-unavailable"].includes(String(data.reason));
     const skipLabel = kind === "ml.jev.skipped" ? "JEV" : kind === "ml.needle.skipped" ? "Needle3"
-      : kind === "ml.span.skipped" ? "Span sensor" : kind === "ml.microworker.skipped" ? "Micro worker" : "Remote rerank";
+      : kind === "ml.span.skipped" ? "Span sensor" : "Remote rerank";
     return { label: skipLabel, status: failed ? "error" : "skip", ms,
       detail: `${failed ? "unavailable; fallback retained" : "skipped"}${reason && !(failed && reason === "unavailable") ? ` · ${reason}` : ""}` };
   }
@@ -167,9 +166,6 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   if (kind === "ml.span.used") {
     const present = amount("present");
     return { label: "Span sensor", status, ms, detail: `${data.cached === true ? "cached scores reused" : "trace scored"}${present === undefined ? "" : ` · ${present} signals above bar`}` };
-  }
-  if (kind === "ml.microworker.used") {
-    return { label: "Micro worker", status, ms, detail: `${data.cached === true ? "cached answer reused" : "bounded helper answered"}${typeof data.op === "string" ? ` · ${data.op}` : ""}` };
   }
   if (kind === "ml.rerank.used") {
     const count = amount("count");

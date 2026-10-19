@@ -48,7 +48,6 @@ test('routine background work updates one live pulse; verdicts, hooks and gating
   activity.note('skill.route', { route: 'systems-languages' });
   activity.note('guardian.decision', { check: 'repeated-identical-failure', decision: 'abstained', score: 0.62, threshold: 0.95, evaluations: 1 });
   activity.note('hook.fired', { hook: 'deploy-verify-live', tool: 'bash', decision: 'guidance' });
-  activity.note('skill.gate', { skill: 'all-about-odoo', decision: 'ungrounded' });
   await new Promise(resolve => setTimeout(resolve, 1300));
   const kinds = lines.map(line => line.details.kind);
   assert.ok(!kinds.includes('guardian.observing'), 'heartbeats are not transcript lines');
@@ -57,7 +56,6 @@ test('routine background work updates one live pulse; verdicts, hooks and gating
   const decision = lines.find(line => line.details.kind === 'guardian.decision');
   assert.match(decision.details.detail, /WASM score 0\.62 < 0\.95 · no intervention/);
   assert.match(lines.find(line => line.details.kind === 'hook.fired').details.detail, /on bash · workflow guidance added/);
-  assert.match(lines.find(line => line.details.kind === 'skill.gate').details.detail, /no task overlap$/);
   const pulse = pulses.at(-1);
   assert.match(pulse, /^harness · Guardian 5 checks · 1 WASM/);
   assert.match(pulse, /Needle3 1/); assert.match(pulse, /fuzzy 4/); assert.match(pulse, /hooks 1/); assert.match(pulse, /skill matches 1/);
@@ -73,12 +71,11 @@ test('without a footer the old transcript lines remain, so nothing becomes invis
   return new Promise(resolve => queueMicrotask(() => { assert.ok(lines.some(line => line.details.label === 'Retrieval intelligence')); activity.dispose(); resolve(); }));
 });
 
-test('deploy and first-interface hooks fire on the right calls only', () => {
+test('the deploy hook fires on deploys only', () => {
   assert.equal(matchHook('bash', { command: 'git push namecheap main' })?.key, 'deploy-verify-live');
   assert.equal(matchHook('bash', { command: 'rsync -az dist/ deploy@example.com:/var/www' })?.key, 'deploy-verify-live');
-  assert.equal(matchHook('bash', { command: 'git push origin feature/x' })?.key, 'git-write-verify');
-  assert.equal(matchHook('write', { path: 'public/index.html' })?.key, 'ui-first-render');
-  assert.equal(matchHook('write', { path: 'src/server.ts' }), null);
+  assert.equal(matchHook('bash', { command: 'git push origin feature/x' }), null);
+  assert.equal(matchHook('write', { path: 'public/index.html' }), null);
 });
 
 test('a multi-line reminder is delivered as one line so every reader keeps it whole', () => {

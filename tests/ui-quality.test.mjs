@@ -10,7 +10,6 @@ const load=p=>import(pathToFileURL(path.join(agent,p)));
 const {slopGuidanceSignals:signals,inspectUiSource}=await load('extensions/lib/slop-guidance-signals.ts');
 const {authoredReviewSnippets,authoredReviewSignals}=await load('extensions/lib/authored-review.ts');
 const {createQualityReviewLifecycle,reviewAspects}=await load('extensions/lib/quality-review.ts');
-const {createRelevantGuidance}=await load('extensions/lib/relevant-guidance.ts');
 const {routeSkills}=await load('extensions/lib/skill-routing.ts');
 const pill='<span className="rounded-full"><span className="animate-ping" />Live</span>';
 const keys=(file,text)=>signals(file,text,12).map(s=>s.key);
@@ -40,27 +39,6 @@ test('source checks identify specific component problems with independent negati
   assert.equal(sheet.windows,2);assert.equal(sheet.findings.filter(f=>f.key==='ui-glow-dot').length,1);assert.match(sheet.scope,/window boundary/);
   const quiet=inspectUiSource('ui.html','<button>Save</button>');
   assert.equal(quiet.status,'inspected');assert.deepEqual(quiet.findings,[]);assert.match(quiet.scope,/No findings does not mean good design/);
-});
-
-test('batch edits share cues between reminders and review checkpoints without joining unrelated replacements',()=>{
-  const input={path:'Status.tsx',edits:[{newText:pill},{newText:'items.forEach(async item => save(item))'}]};
-  const expected=['ui-live-pill','async-foreach'];
-  const snippets=authoredReviewSnippets('edit',input);
-  for(const key of expected) assert.ok(authoredReviewSignals(input.path,snippets).some(s=>s.key===key));
-  assert.equal(authoredReviewSignals('x.ts',authoredReviewSnippets('edit',{edits:[{newText:'node.innerHTML'},{newText:'= untrusted'}]})).length,0);
-  for(const edits of [Array.from({length:65},()=>({newText:pill})),[{newText:'x'.repeat(256001)}]]) assert.deepEqual(authoredReviewSnippets('edit',{edits}),[]);
-  const ctx={cwd:'/quality-case',sessionManager:{getBranch:()=>[]}},pi={registerTool(){},getActiveTools:()=>['read','write','edit','artifact_check'],appendEntry(){}};
-  const g=createRelevantGuidance(pi);g.restore(ctx);g.start({prompt:'Review the UI components',systemPrompt:''},ctx);
-  const lifecycle=createQualityReviewLifecycle(pi,{refresh:async()=>{},tests:()=>({need:null})});lifecycle.restore(ctx);lifecycle.input({source:'interactive',text:'Review UI'});
-  try {
-    const event={toolName:'edit',input,isError:false};g.record(event);lifecycle.result(event,ctx);
-    for(const key of expected){assert.ok(g.candidates().some(h=>h.key==='signal:'+key));assert.ok(lifecycle.snapshot().patterns.some(s=>s.key===key));}
-    lifecycle.result({toolName:'edit',input:{path:'Status.tsx',newText:'const clean = true;'}},ctx);
-    assert.ok(lifecycle.snapshot().patterns.some(s=>s.key==='ui-live-pill'),'unrelated edit retains cue');
-    lifecycle.result({toolName:'write',input:{path:'Status.tsx',content:'<button>Save</button>'}},ctx);
-    assert.deepEqual(lifecycle.snapshot().patterns,[],'complete repair clears cue');
-    lifecycle.result({...event,isError:true},ctx);assert.deepEqual(lifecycle.snapshot().patterns,[],'failed write adds no source evidence');
-  } finally {lifecycle.shutdown();}
 });
 
 test('large authored files retain policy cues ahead of advisory noise without exposing commented examples',()=>{

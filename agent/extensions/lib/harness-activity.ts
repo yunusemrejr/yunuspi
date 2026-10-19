@@ -2,14 +2,14 @@ import { sessionObservability } from './session-observability.ts';
 /** Transient terminal activity only. Never writes messages, model context or
  * session entries, and never inspects tool arguments or result contents. */
 export const HARNESS_ACTIVITY = Symbol.for('yunus-pi.activity.v1');
-export type ActivityLabel = 'skills' | 'browser' | 'project' | 'review' | 'search' | 'tool' | 'jev' | 'needle' | 'kompress' | 'council' | 'fanout' | 'agents' | 'interpretation' | 'span' | 'microworker';
+export type ActivityLabel = 'skills' | 'browser' | 'project' | 'review' | 'search' | 'tool' | 'jev' | 'needle' | 'kompress' | 'council' | 'fanout' | 'agents' | 'interpretation' | 'span';
 export type ActivityOutcome = 'ok' | 'error' | 'cancelled' | 'skipped' | 'cached';
 export type FinishActivity = (outcome?: ActivityOutcome) => void;
 type ActivityRequest = { action: 'start' | 'end'; id: string; label?: ActivityLabel; outcome?: ActivityOutcome };
 type Context = { hasUI?: boolean; signal?: AbortSignal; cwd?: string; sessionManager?: { getSessionId?: () => string }; ui?: { theme?: { fg: (color: any, text: string) => string }; setStatus?: (key: string, text: string | undefined) => void } };
 export type HarnessActivityService = (request: ActivityRequest, ctx?: Context) => FinishActivity | undefined;
-const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', tool: 'Tool', jev: 'JEV', needle: 'Needle', kompress: 'Kompress', council: 'Council', fanout: 'Fan-out', agents: 'Agents', interpretation: 'Interpretation', span: 'Span', microworker: 'Micro worker' };
-const helpers = new Set(['JEV', 'Needle', 'Kompress', 'Span', 'Micro worker']);
+const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', tool: 'Tool', jev: 'JEV', needle: 'Needle', kompress: 'Kompress', council: 'Council', fanout: 'Fan-out', agents: 'Agents', interpretation: 'Interpretation', span: 'Span' };
+const helpers = new Set(['JEV', 'Needle', 'Kompress', 'Span']);
 let sequence = 0;
 /** No payloads, global status handles or model messages escape this boundary. */
 export function beginHarnessActivity(label: ActivityLabel): FinishActivity {

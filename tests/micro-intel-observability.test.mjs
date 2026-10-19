@@ -37,10 +37,8 @@ test("micro_status exposes the new layers without inference", () => {
   const snapshot = statusMod.microStatusSnapshot({ family: "lookup", substantive: true, terms: ["show"] });
   const layers = Object.fromEntries(snapshot.health.layers.map((l) => [l.layer, l.status]));
   assert.ok("span" in layers);
-  assert.ok("microworker" in layers);
   assert.ok("rerank" in layers);
   assert.ok(snapshot.span && typeof snapshot.span.enabled === "boolean" && typeof snapshot.span.shadow === "boolean");
-  assert.ok(snapshot.microworker && typeof snapshot.microworker.enabled === "boolean" && !("candidates" in snapshot.microworker));
   assert.ok(snapshot.rerank && typeof snapshot.rerank.url === "string");
   assert.ok(Array.isArray(snapshot.metrics));
 });
@@ -49,18 +47,13 @@ test("activity and usage ledgers know the new helpers", () => {
   const used = activityMod.describeIntelligenceActivity("ml.span.used", { count: 1, cached: false, present: 2 });
   assert.equal(used.label, "Span sensor");
   assert.equal(activityMod.describeIntelligenceActivity("ml.span.used", { count: 1, shadow: true }), undefined);
-  const skipped = activityMod.describeIntelligenceActivity("ml.microworker.skipped", { count: 1, reason: "no-route" });
-  assert.equal(skipped.label, "Micro worker");
   assert.equal(activityMod.HELPER_LABELS.span, "Span sensor");
-  assert.equal(activityMod.HELPER_LABELS.microworker, "Micro worker");
   assert.equal(activityMod.HELPER_LABELS.rerank, "Remote rerank");
 
   const ledger = helperUsageMod.createHelperUsageLedger();
   ledger.note("ml.span.used", { count: 1, cached: false });
-  ledger.note("ml.microworker.used", { count: 1, cached: true });
   const snap = ledger.snapshot();
   assert.equal(snap.components["Span sensor"].executions, 1);
-  assert.equal(snap.components["Micro worker"].cached, 1);
   const collected = helperUsageMod.collectHarnessUsage([{ id: "h", type: "custom", customType: "helper-usage-v1", data: snap }]);
   assert.ok(collected.components.some((row) => row.name === "Span sensor" && row.measured));
 });

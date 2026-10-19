@@ -360,27 +360,6 @@ The stage is enabled by default and runs once `PI_RERANK_MODEL` and
 remain operator controls. No provider or successful inference is inferred
 from enabled status alone.
 
-## Qualification lab
-
-The model qualification lab (`model-qual-lab.ts`,
-`agent/scripts/run-model-qual-lab.mjs --live --route p/m`) runs a
-bounded fixed battery over newly discovered routes — tool selection,
-structured output, small coding/debugging, repository navigation,
-instruction fidelity, requirement extraction, review quality,
-long-context retrieval, tool-call validity, plus measured
-latency/tokens/cost/reliability and privacy metadata — and records
-expiring (7-day) role-specific eligibility (`micro-worker`,
-`skill-router`, `coding-child`, `observer`, `quality-reviewer`,
-`main-fallback`) in a private store. The lab records evidence; it
-never promotes a route by itself.
-
-Whether code-specific embeddings (e.g. Voyage Code) beat Qwen3 plus
-project intelligence for issue→file retrieval is an open measurement,
-not an assumption: `agent/scripts/benchmark-code-embeddings.mjs`
-compares lexical, Qwen3, and a configured code candidate on the
-synthetic fixture. A separate code embedding space ships only if
-measured gains justify the extra index and complexity.
-
 ## Coordination, metrics, health
 
 `agent/extensions/lib/micro-intelligence/` holds routing, evidence preparation
@@ -458,12 +437,9 @@ keyword baseline; `--live` for the real Span route),
 `agent/scripts/benchmark-code-embeddings.mjs` (`--live` for Qwen3 and
 an optional `PI_CODE_EMBED_MODEL` candidate),
 `agent/scripts/benchmark-rerank.mjs` (lexical vs Needle vs a
-`PI_RERANK_MODEL` remote variant), and
-`agent/scripts/run-model-qual-lab.mjs --live --route p/m` for role
-eligibility. New-layer unit coverage lives in
+`PI_RERANK_MODEL` remote variant). New-layer unit coverage lives in
 `tests/micro-intel-span.test.mjs`,
 `tests/micro-intel-decisions.test.mjs`,
-`tests/micro-intel-microworker.test.mjs`,
 `tests/micro-intel-rerank-router-lab.test.mjs`,
 `tests/micro-intel-consolidation.test.mjs`, and
 `tests/micro-intel-observability.test.mjs`.

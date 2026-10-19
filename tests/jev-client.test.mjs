@@ -61,18 +61,6 @@ test('a valid cached judgment remains usable while both network routes cool down
   assert.equal(cached.ok,true);assert.equal(cached.usage.cached,true);assert.equal(calls,before);
 });
 
-test('distillation asks only about omittable chunks and handles twelve bounded chunks',async()=>{
-  const text=Array.from({length:12},(_,i)=>`${i===5?'ERROR: preserve failure\n':''}${'ordinary progress\n'.repeat(100)}`).join('');
-  let questions;
-  const selected=await jev.selectDistillChunks('bash',text,async(_site,_state,asked)=>{
-    questions=asked;
-    return {ok:true,answers:Object.fromEntries(Object.keys(asked).map(key=>[key,{type:'noul',noul:.01}])),
-      usage:{model:'synthetic',inputTokens:1,costUsd:0,ms:1,cached:false}};
-  });
-  assert.ok(selected);assert.ok(Object.keys(questions).length<12);assert.ok(!Object.hasOwn(questions,'chunk_0'));
-  assert.match(selected,/ERROR: preserve failure/);assert.match(selected,/omitted/);
-});
-
 test("cascade tries tilde latest, then the current dated release, then the previous one, then discovered variations", async () => {
   const seen = [];
   const { pi } = harness(async (url, opts) => {
@@ -384,48 +372,6 @@ test('concurrent identical advisory calls pay once and cached answers cannot be 
   first.answers.ping.noul=0;
   second.answers.ping.noul=0;
   assert.equal((await ask()).answers.ping.noul,.9);
-});
-
-test("chunk split and extractive render stay bounded", () => {
-  assert.deepEqual(jev.splitTextChunks("", 8, 2000), []);
-  const text = Array.from({ length: 20 }, (_, i) => `line ${i} ${"x".repeat(100)}`).join("\n");
-  const chunks = jev.splitTextChunks(text, 4, 500);
-  assert.deepEqual(chunks, [], "oversized input abstains instead of silently losing its tail");
-  assert.ok(chunks.every((chunk) => chunk.length <= 600));
-  const rendered = jev.renderKeptChunks(["a", "b", "c", "d"], [true, false, false, true]);
-  assert.ok(rendered.includes("a") && rendered.includes("d"));
-  assert.ok(!rendered.includes("\nb\n"));
-  assert.ok(rendered.includes("2 chunk(s) omitted"));
-  assert.equal(jev.renderKeptChunks(["x".repeat(200)], [true], 100), "", "render cap cannot cut retained evidence");
-});
-
-test("distill selection keeps edges, drops low-score middles", async () => {
-  const text = ["HEAD", "aaa", "bbb", "ccc", "TAIL"].map((s) => `${s} ${"x".repeat(1400)}`).join("\n");
-  const ask = async () => ({
-    ok: true,
-    answers: {
-      chunk_0: { type: "noul", noul: 0.1 },
-      chunk_1: { type: "noul", noul: 0.9 },
-      chunk_2: { type: "noul", noul: 0.2 },
-      chunk_3: { type: "noul", noul: 0.9 },
-      chunk_4: { type: "noul", noul: 0.1 },
-    },
-    usage: { model: "typesafe/jev-1.13", inputTokens: 5000, costUsd: 0.00021, ms: 100, cached: false },
-  });
-  const selection = await jev.selectDistillChunks("bash", text, ask);
-  assert.ok(selection.includes("HEAD"), "first chunk kept despite low score");
-  assert.ok(selection.includes("TAIL"), "last chunk kept despite low score");
-  assert.ok(!selection.includes("bbb"), "low middle dropped");
-  assert.ok(selection.includes("successfully routed with Jev"));
-  assert.ok(selection.includes("kept 4/5"));
-  const keepAll = await jev.selectDistillChunks("bash", text, async () => ({
-    ok: true,
-    answers: Object.fromEntries([0, 1, 2, 3, 4].map((i) => [`chunk_${i}`, { type: "noul", noul: 0.99 }])),
-    usage: { model: "m", inputTokens: 1, costUsd: 0, ms: 1, cached: false },
-  }));
-  assert.equal(keepAll, undefined, "all-kept returns no selection");
-  assert.equal(await jev.selectDistillChunks("bash", "tiny", ask), undefined);
-  assert.equal(await jev.selectDistillChunks("bash", text, async () => ({ ok: false, skipped: "unhealthy" })), undefined);
 });
 
 test("cost and metrics ledgers treat Jev like any route", async () => {

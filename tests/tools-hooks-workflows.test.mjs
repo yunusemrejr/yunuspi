@@ -77,8 +77,8 @@ test('diagnostics preserve the first actual failure in the middle of long runner
   }
 });
 
-test('UI edits receive render guidance and read-only creative actions stay quiet', () => {
-  assert.equal(matchHook('edit', { path: 'src/Screen.tsx' })?.key, 'ui-first-render');
+test('edits and read-only creative actions stay quiet', () => {
+  assert.equal(matchHook('edit', { path: 'src/Screen.tsx' }), null);
   for (const action of ['get', 'brief', 'status', 'clear']) assert.equal(matchHook('creative_direct', { action }), null);
   assert.equal(matchHook('video_project', { action: 'install' }), null);
   assert.equal(matchHook('narration_tts', { action: 'status' }), null);
@@ -89,14 +89,15 @@ test('hook result ownership prevents an unrelated result from consuming queued g
   const handlers = new Map();
   registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
   const call = handlers.get('tool_call'), result = handlers.get('tool_result');
-  call({ toolCallId: 'same-id', toolName: 'edit', input: { path: 'src/Screen.tsx' } });
+  const deploy = { command: 'vercel --prod' };
+  call({ toolCallId: 'same-id', toolName: 'bash', input: deploy });
   assert.equal(result({ toolCallId: 'same-id', toolName: 'read', content: [], isError: false }, {}), undefined);
-  const owned = result({ toolCallId: 'same-id', toolName: 'edit', content: [], isError: false }, {});
+  const owned = result({ toolCallId: 'same-id', toolName: 'bash', input: deploy, content: [], isError: false }, {});
   assert.ok(owned?.content.some(row => row.text?.startsWith('[session-hooks]')));
-  assert.equal(result({ toolCallId: 'same-id', toolName: 'edit', content: [], isError: false }, {}), undefined);
-  call({ toolCallId: 'late', toolName: 'edit', input: { path: 'src/Screen.tsx' } });
+  assert.equal(result({ toolCallId: 'same-id', toolName: 'bash', input: deploy, content: [], isError: false }, {}), undefined);
+  call({ toolCallId: 'late', toolName: 'bash', input: deploy });
   handlers.get('session_switch')();
-  assert.equal(result({ toolCallId: 'late', toolName: 'edit', content: [], isError: false }, {}), undefined);
+  assert.equal(result({ toolCallId: 'late', toolName: 'bash', input: deploy, content: [], isError: false }, {}), undefined);
 });
 
 test('resumed workers restore delivered guidance from the active native branch only', () => {
@@ -104,18 +105,18 @@ test('resumed workers restore delivered guidance from the active native branch o
   const worker = () => {
     const handlers = new Map();
     registerHooks({ on: (name, fn) => handlers.set(name, fn), events: { emit() {} } });
-    return { handlers, run(id, toolName = 'edit', input = { path: 'src/Screen.tsx' }) {
-      const event = { toolCallId: id, toolName, input, content: [{ type: 'text', text: 'Native result' }] };
+    return { handlers, run(id, toolName = 'bash', input = { command: 'vercel --prod' }, isError = false) {
+      const event = { toolCallId: id, toolName, input, isError, content: [{ type: 'text', text: 'Native result' }] };
       handlers.get('tool_call')(event);
       return handlers.get('tool_result')(event, ctx);
     } };
   };
   const first = worker(); first.handlers.get('session_start')({}, ctx);
   const delivered = first.run('first'); assert.ok(delivered);
-  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'edit', content: delivered.content } });
+  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'bash', content: delivered.content } });
   const resumed = worker(); resumed.handlers.get('session_start')({}, ctx);
   assert.equal(resumed.run('resumed'), undefined, 'reopening a session does not append the same instruction');
-  assert.ok(resumed.run('other', 'bg_run', { command: 'build' }), 'unseen workflow guidance remains available');
+  assert.ok(resumed.run('other', 'browser_session', { action: 'open' }, true), 'unseen recovery guidance remains available');
   resumed.handlers.get('session_fork')({}, ctx);
   assert.equal(resumed.run('fork'), undefined, 'forks retain guidance in their shared branch prefix');
   entries.length = 0;
@@ -123,7 +124,7 @@ test('resumed workers restore delivered guidance from the active native branch o
   assert.ok(resumed.run('rewound'), 'a branch before delivery gets its own first-use guidance');
   entries.push({ type: 'message', message: { role: 'assistant', content: delivered.content } });
   entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'read', content: delivered.content } });
-  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'edit', content: [{ type: 'text', text: delivered.content.at(-1).text + ' outdated' }] } });
+  entries.push({ type: 'message', message: { role: 'toolResult', toolName: 'bash', content: [{ type: 'text', text: delivered.content.at(-1).text + ' outdated' }] } });
   resumed.handlers.get('session_switch')({}, ctx);
   assert.ok(resumed.run('untrusted'), 'assistant claims, other tools and stale lines do not suppress native guidance');
 });

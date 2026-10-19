@@ -104,13 +104,6 @@ test('sys snapshot understands OpenAI, Responses, Anthropic and Google envelopes
   assert.equal(google.toolCount, 2);
 });
 
-test('harness tool-first line is a fixed system-prompt string', () => {
-  assert.equal(typeof signals.HARNESS_TOOL_FIRST, 'string');
-  assert.ok(signals.HARNESS_TOOL_FIRST.includes('tool_search'));
-  assert.ok(signals.HARNESS_TOOL_FIRST.includes('skill_review'));
-  assert.ok(signals.HARNESS_TOOL_FIRST.length > 40);
-});
-
 const toolCall = (id, name, args) => ({
   type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', id, name, arguments: args }] },
 });

@@ -825,6 +825,16 @@
       "name": "docs/LLM-PREFERENCES.md",
       "retired": "2026-10-19",
       "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+    },
+    {
+      "name": "lib/micro-intelligence/model-qual-lab.ts",
+      "retired": "2026-10-19",
+      "why": "Model qualification for helper roles (micro-worker, skill router, coding child, observer, reviewer, fallback) removed with role routing: every role runs on the session model."
+    },
+    {
+      "name": "scripts/run-model-qual-lab.mjs",
+      "retired": "2026-10-19",
+      "why": "Model qualification for helper roles (micro-worker, skill router, coding child, observer, reviewer, fallback) removed with role routing: every role runs on the session model."
     }
   ],
   "supportFiles": [
@@ -917,7 +927,6 @@
     "extensions/lib/micro-intelligence/jev-decisions.ts",
     "extensions/lib/micro-intelligence/route-privacy.ts",
     "extensions/lib/micro-intelligence/rerank.ts",
-    "extensions/lib/micro-intelligence/model-qual-lab.ts",
     "scripts/render-design-state.mjs",
     "extensions/lib/utility-mcp/local-reference.mjs",
     "extensions/lib/utility-mcp/web-assets.mjs",

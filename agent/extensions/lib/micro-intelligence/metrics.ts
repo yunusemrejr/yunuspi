@@ -7,7 +7,7 @@ import { sessionObservability } from '../session-observability.ts';
  */
 const RING_MAX = 128;
 
-export type MicroHelper = "deterministic" | "needle" | "kompress" | "jev" | "llm" | "span" | "microworker" | "rerank";
+export type MicroHelper = "deterministic" | "needle" | "kompress" | "jev" | "llm" | "span" | "rerank";
 
 export interface HelperCounters {
   offers: number;
@@ -76,7 +76,6 @@ export function createMicroMetrics() {
     jev: freshHelper(),
     llm: freshHelper(),
     span: freshHelper(),
-    microworker: freshHelper(),
     rerank: freshHelper(),
   };
   const jevExtra = { questions: 0, tokens: 0, costUsd: 0, unknownCost: 0, bySite: {} as JevCounters["bySite"] };

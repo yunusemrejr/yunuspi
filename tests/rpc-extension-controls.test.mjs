@@ -76,7 +76,7 @@ test('RPC background manager stops only the selected owned task and preserves fo
   const status = async taskId => (await f.tools.get('bg_status').execute('status', { taskId })).details.tasks[0].status;
   assert.equal(await status(owned.id), 'killed'); assert.equal(await status(foreign.id), 'running');
   f.ctx.ui.select = async () => undefined;
-  await f.commands.get('bg-tasks').handler('', f.ctx);
+  await f.commands.get('tasks').handler('', f.ctx);
   await f.commands.get('tasks').handler(foreign.id, f.ctx);
   assert.match(f.notices.at(-1)[0], /belongs to another session/);
   assert.equal(await status(foreign.id), 'running');

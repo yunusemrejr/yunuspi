@@ -322,8 +322,8 @@ test("status snapshot reports health without running inference", async () => {
       advisory: { ok: true, needsVerification: false, reviewWorthy: true, multiPerspective: false, perspectives: ["security"] },
       advisoryFamily: "lookup",
     });
-    assert.equal(snapshot.health.layers.length, 7);
-    assert.deepEqual(snapshot.health.layers.map((layer) => layer.layer).sort(), ["deterministic", "jev", "kompress", "microworker", "needle", "rerank", "span"]);
+    assert.equal(snapshot.health.layers.length, 6);
+    assert.deepEqual(snapshot.health.layers.map((layer) => layer.layer).sort(), ["deterministic", "jev", "kompress", "needle", "rerank", "span"]);
     assert.equal(snapshot.request.family, "implementation");
     assert.equal(snapshot.request.advisoryFamily, "lookup");
     const unstarted = statusMod.microStatusSnapshot({ family: "lookup", substantive: true, terms: ["show"] });

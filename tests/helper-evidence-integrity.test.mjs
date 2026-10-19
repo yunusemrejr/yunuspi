@@ -17,24 +17,6 @@ const usage = { model: 'mock', inputTokens: 10, costUsd: 0, ms: 1, cached: false
 const chunks = labels => labels.map(label => `${label} ${'background '.repeat(125)}`).join('\n');
 const rejectMiddle = async () => ({ ok: true, answers: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`chunk_${i}`, { type: 'noul', noul: 0 }])), usage });
 
-test('Jev cannot discard protected middle facts even with a low keep judgment', async () => {
-  const text = chunks(['HEAD', 'ordinary prose', 'Deployment remains blocked until tests pass.', 'irrelevant prose', 'TAIL']);
-  const selected = await jev.selectDistillChunks('read', text, rejectMiddle);
-  assert.ok(selected);
-  assert.ok(selected.includes('Deployment remains blocked until tests pass.'));
-  assert.ok(!selected.includes('irrelevant prose'));
-});
-
-test('Jev abstains on missing or malformed judgments and oversized sources without paying', async () => {
-  const text = chunks(['HEAD', 'ordinary prose', 'unrelated prose', 'TAIL']);
-  for (const value of [undefined, -1, 2, NaN, '0']) {
-    assert.equal(await jev.selectDistillChunks('read', text, async () => ({ ok: true, answers: Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`chunk_${i}`, { type: 'noul', noul: value }])), usage })), undefined);
-  }
-  let calls = 0;
-  assert.equal(await jev.selectDistillChunks('read', chunks(Array(16).fill('ordinary prose')), async () => { calls++; return rejectMiddle(); }), undefined);
-  assert.equal(calls, 0);
-});
-
 test('a read-only prefix cannot rescue a mutation requested after the embedding limit', async () => {
   const task = `${'Read and explain the implementation. '.repeat(40)}Then modify the implementation to fix the bug.`;
   const classify = async () => ({ ok: true, shadow: false, cached: false, ms: 1, value: { label: 'read-only', score: 0.999, margin: 0.1, accepted: true } });
