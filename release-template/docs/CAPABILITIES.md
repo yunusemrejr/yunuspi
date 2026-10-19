@@ -953,26 +953,6 @@ Coordinate distinct review kinds (quality, project, error) with trivial-work sup
 
 **Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 
-#### expert-director
-
-Domain-excellence coordination: infer excellence domains from a request, load bounded expert doctrine with quality priors, assemble read-only critic lenses, and evaluate improvement-loop convergence. Advisory; the main agent stays the invoker.
-
-**Entrypoints:** `expert_director`
-
-**Catalog tool pointers:** `expert_director`
-
-**Options:**
-
-- `action`: Director operation. Values: `brief`, `critics`, `assess`, `taste`, `status`.
-- `taste.op`: Quality-preference operation (main session only). Values: `record`, `list`, `forget`.
-- `PI_EXPERT`: Set to off to disable the Director tool and prompt-time briefs.
-
-**Related records:** `quality-review`, `review-coordination`, `session-observer`, `micro-intelligence`
-
-**Source:** [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts), [`agent/extensions/lib/expert-brief.ts`](../../agent/extensions/lib/expert-brief.ts), [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts), [`agent/extensions/lib/expert-doctrine.ts`](../../agent/extensions/lib/expert-doctrine.ts), [`agent/extensions/lib/expert-critics.ts`](../../agent/extensions/lib/expert-critics.ts), [`agent/extensions/lib/expert-convergence.ts`](../../agent/extensions/lib/expert-convergence.ts), [`agent/extensions/lib/expert-taste.ts`](../../agent/extensions/lib/expert-taste.ts)
-
-**Documentation:** [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
-
 #### session-observer
 
 Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.
@@ -1282,7 +1262,6 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `creative_direct` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 314; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 119; factory)
 - `deliverable_check` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 135; literal)
-- `expert_director` — [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts) (line 65; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 198; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 199; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 397; literal)
@@ -1302,26 +1281,26 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2846; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 3001; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2116; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 501; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 498; literal)
 - `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 46; literal)
 - `motion_examples` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 156; factory)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 444; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 166; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) (line 128; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 710; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 716; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts) (line 170; literal)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 618; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 805; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 811; literal)
-- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 256; literal)
+- `read_many` — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 257; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2277; literal)
 - `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 824; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1876; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1857; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 377; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 690; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
@@ -1386,16 +1365,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 610)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 602)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 618)
-- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 884)
+- /budget — [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts) (line 901)
 - /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1731)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1846)
-- /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1398)
+- /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1827)
+- /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1379)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3404)
 - /custom-double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 488)
 - /double — [`agent/extensions/pi-subagents/src/extension/double-runner.ts`](../../agent/extensions/pi-subagents/src/extension/double-runner.ts) (line 468)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 49)
-- /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1812)
+- /errors — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1793)
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 72)
 - /goal — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 362)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3446)
@@ -1420,8 +1399,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 494)
 - /nobug — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 380)
 - /noslop — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 373)
-- /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 786)
-- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 577)
+- /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 792)
+- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 573)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../../agent/extensions/pi-vector-memory.ts) (line 614)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 258)
@@ -1430,7 +1409,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /reminder — [`agent/extensions/reminders.ts`](../../agent/extensions/reminders.ts) (line 1237)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 872)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3494)
-- /self — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1736)
+- /self — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1717)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 912)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 865)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1284)
@@ -1447,10 +1426,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1058)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1002)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1761)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1742)
 - /task-state — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 594)
-- /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1780)
+- /used — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1761)
 - /video — [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) (line 394)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3143)
 
@@ -1469,7 +1448,6 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/code-audit.ts`](../../agent/extensions/lib/code-audit.ts) — `wrapper/adapter`
-- [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts) — `MCP`
 - [`agent/extensions/lib/harness-capabilities.ts`](../../agent/extensions/lib/harness-capabilities.ts) — `MCP`
 - [`agent/extensions/lib/image-generate.ts`](../../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/jev-client.ts`](../../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
@@ -1557,7 +1535,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/cost-governor.ts`](../../agent/extensions/cost-governor.ts)
 - [`agent/extensions/deliverables.ts`](../../agent/extensions/deliverables.ts)
 - [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts)
-- [`agent/extensions/expert-director.ts`](../../agent/extensions/expert-director.ts)
 - [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts)
 - [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
 - [`agent/extensions/goal.ts`](../../agent/extensions/goal.ts)
@@ -1644,12 +1621,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/effort-policy.mjs`](../../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/elevenlabs.ts`](../../agent/extensions/lib/elevenlabs.ts)
 - [`agent/extensions/lib/execution-evidence.ts`](../../agent/extensions/lib/execution-evidence.ts)
-- [`agent/extensions/lib/expert-brief.ts`](../../agent/extensions/lib/expert-brief.ts)
-- [`agent/extensions/lib/expert-convergence.ts`](../../agent/extensions/lib/expert-convergence.ts)
-- [`agent/extensions/lib/expert-critics.ts`](../../agent/extensions/lib/expert-critics.ts)
-- [`agent/extensions/lib/expert-doctrine.ts`](../../agent/extensions/lib/expert-doctrine.ts)
-- [`agent/extensions/lib/expert-domains.ts`](../../agent/extensions/lib/expert-domains.ts)
-- [`agent/extensions/lib/expert-taste.ts`](../../agent/extensions/lib/expert-taste.ts)
 - [`agent/extensions/lib/film-blend.ts`](../../agent/extensions/lib/film-blend.ts)
 - [`agent/extensions/lib/git-authority.ts`](../../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../../agent/extensions/lib/gltf-inspect.ts)
@@ -2021,7 +1992,6 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/DESKTOP.md`](DESKTOP.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/ENGINEERING-RELIABILITY.md`](ENGINEERING-RELIABILITY.md)
-- [`docs/EXPERT-DIRECTOR.md`](EXPERT-DIRECTOR.md)
 - [`docs/GOAL.md`](GOAL.md)
 - [`docs/GOOGLE-COLAB.md`](GOOGLE-COLAB.md)
 - [`docs/GUARDIAN-INTELLIGENCE.md`](GUARDIAN-INTELLIGENCE.md)
@@ -2082,12 +2052,19 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `context-profile.ts` — retired 2026-10-10: 0 uses in 45 days of sessions; context diagnostics live in session_self. Do not recreate
 - `desktop-session.ts` — retired 2026-10-10: 1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate
 - `DOCTRINE.md` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `expert-director.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `fs-organize.ts` — retired 2026-10-10: 0 uses; file organization is plain bash guidance in the linux-ops skill. Do not recreate
 - `governor-core.ts` — retired 2026-09-02: user direction: governor policy core removed with governor.ts (see that tombstone) — no broker remains; each extension owns its own injection gating. Do not recreate
 - `governor.ts` — retired 2026-09-02: user direction: injection-budget broker removed permanently (no backup) — governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate
 - `greybeard` — retired 2026-09-01: user direction: Greybeard standards engine removed entirely — fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate
 - `harness-config.json` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `last-model.ts` — retired 2026-10-10: merged into model-config.ts (one model bookkeeping extension). Do not recreate
+- `lib/expert-brief.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/expert-convergence.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/expert-critics.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/expert-doctrine.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/expert-domains.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
+- `lib/expert-taste.ts` — retired 2026-10-19: Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills.
 - `lichtfeld-studio.ts` — retired 2026-10-02: LichtFeld Studio needs an NVIDIA GPU (CUDA 12.8+, compute 7.5+) and could not run on the AMD-only development machine; replaced by lib/splat-studio.ts driving Brush (Apache-2.0, wgpu/Vulkan, works on integrated AMD/Intel GPUs) with splat_setup/splat_train/splat_preview. Do not recreate
 - `local-lm-assets.mjs` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate
 - `local-lm.ts` — retired 2026-10-14: user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate

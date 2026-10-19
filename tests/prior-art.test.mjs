@@ -8,7 +8,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((dir) => fs.existsSync(path.join(dir, "extensions/lib/prior-art.ts")));
 const load = (relative) => import(pathToFileURL(path.join(agent, relative)));
 const { priorArtIntent, priorArtDirective, PRIOR_ART_TOOLS } = await load("extensions/lib/prior-art.ts");
-const { buildExpertBrief } = await load("extensions/lib/expert-brief.ts");
 const { intentBundleTools } = await load("extensions/lib/tool-discovery.ts");
 
 const modeOf = (prompt) => priorArtIntent(prompt)?.mode;
@@ -86,17 +85,6 @@ test("the directive names the workflow tools, stays bounded and treats outside t
   }
   assert.match(priorArtDirective({ mode: "improve", reason: "x" }), /project_intel/);
   assert.match(priorArtDirective({ mode: "compare", reason: "x" }), /project_intel/);
-});
-
-test("the Expert Director adds the directive even when no excellence domain qualifies, and not otherwise", () => {
-  const brief = buildExpertBrief({ prompt: "Compare our harness with other agent harnesses and tell me what we are missing" });
-  assert.match(brief.text, /Prior art \(advisory/);
-  assert.match(brief.summary, /prior art/i);
-  const none = buildExpertBrief({ prompt: "fix a typo in the README" });
-  assert.equal(none.text, "");
-  const domain = buildExpertBrief({ prompt: "Build me a small terminal note taking app with sync, with a REST backend and a sqlite database" });
-  assert.match(domain.text, /Prior art \(advisory/);
-  assert.match(domain.text, /Critics for this task/, "the domain guidance and critics survive next to the directive");
 });
 
 test("a qualifying prompt stages the scouting tools with the first turn; an ordinary one does not", () => {

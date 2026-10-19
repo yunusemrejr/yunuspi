@@ -28,7 +28,7 @@ settles it deterministically, and the demand then rides the context until the
 skill is read: a reminder message, plus at most two refused UI writes per
 request so an agent that ignores it cannot loop. One read clears it for the
 session. Subagents launched without a skill catalog still learn the installed
-path. The expert-director web-design pack lists the skill, and the pre-build
+path. The pre-build
 design-direction guidance names the cream/terracotta default among the tells.
 The rest of this checklist stays the most specific rule set for websites.
 

@@ -977,60 +977,6 @@
       "commands": []
     },
     {
-      "id": "expert-director",
-      "group": "review",
-      "summary": "Domain-excellence coordination: infer excellence domains from a request, load bounded expert doctrine with quality priors, assemble read-only critic lenses, and evaluate improvement-loop convergence. Advisory; the main agent stays the invoker.",
-      "entrypoints": [
-        "expert_director"
-      ],
-      "tools": [
-        "expert_director"
-      ],
-      "options": [
-        {
-          "name": "action",
-          "values": [
-            "brief",
-            "critics",
-            "assess",
-            "taste",
-            "status"
-          ],
-          "summary": "Director operation."
-        },
-        {
-          "name": "taste.op",
-          "values": [
-            "record",
-            "list",
-            "forget"
-          ],
-          "summary": "Quality-preference operation (main session only)."
-        },
-        {
-          "name": "PI_EXPERT",
-          "summary": "Set to off to disable the Director tool and prompt-time briefs."
-        }
-      ],
-      "related": [
-        "quality-review",
-        "review-coordination",
-        "session-observer",
-        "micro-intelligence"
-      ],
-      "sourceFiles": [
-        "agent/extensions/expert-director.ts",
-        "agent/extensions/lib/expert-brief.ts",
-        "agent/extensions/lib/expert-domains.ts",
-        "agent/extensions/lib/expert-doctrine.ts",
-        "agent/extensions/lib/expert-critics.ts",
-        "agent/extensions/lib/expert-convergence.ts",
-        "agent/extensions/lib/expert-taste.ts"
-      ],
-      "doc": "docs/EXPERT-DIRECTOR.md",
-      "commands": []
-    },
-    {
       "id": "session-observer",
       "group": "review",
       "summary": "Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.",
@@ -3386,7 +3332,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 884
+        "line": 901
       },
       {
         "name": "catalog-status",
@@ -3401,12 +3347,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1846
+        "line": 1827
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1398
+        "line": 1379
       },
       {
         "name": "curator",
@@ -3431,7 +3377,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1812
+        "line": 1793
       },
       {
         "name": "export-json",
@@ -3556,12 +3502,12 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 786
+        "line": 792
       },
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 577
+        "line": 573
       },
       {
         "name": "or-provider",
@@ -3606,7 +3552,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1736
+        "line": 1717
       },
       {
         "name": "subagent-cost",
@@ -3691,7 +3637,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1761
+        "line": 1742
       },
       {
         "name": "task-state",
@@ -3706,7 +3652,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1780
+        "line": 1761
       },
       {
         "name": "video",
@@ -3913,12 +3859,6 @@
         "kind": "literal"
       },
       {
-        "name": "expert_director",
-        "source": "agent/extensions/expert-director.ts",
-        "line": 65,
-        "kind": "literal"
-      },
-      {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 198,
@@ -4037,7 +3977,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 501,
+        "line": 498,
         "kind": "literal"
       },
       {
@@ -4079,7 +4019,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 710,
+        "line": 716,
         "kind": "literal"
       },
       {
@@ -4115,7 +4055,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 256,
+        "line": 257,
         "kind": "literal"
       },
       {
@@ -4151,7 +4091,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1876,
+        "line": 1857,
         "kind": "literal"
       },
       {
@@ -4423,12 +4363,6 @@
         "kind": "literal"
       },
       {
-        "name": "expert_director",
-        "source": "agent/extensions/expert-director.ts",
-        "line": 65,
-        "kind": "literal"
-      },
-      {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
         "line": 397,
@@ -4497,7 +4431,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 501,
+        "line": 498,
         "kind": "literal"
       },
       {
@@ -4509,7 +4443,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 710,
+        "line": 716,
         "kind": "literal"
       },
       {
@@ -4539,7 +4473,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 256,
+        "line": 257,
         "kind": "literal"
       },
       {
@@ -4575,7 +4509,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1876,
+        "line": 1857,
         "kind": "literal"
       },
       {
@@ -4887,11 +4821,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 717,
-      "registrationSites": 66,
+      "sourceFiles": 710,
+      "registrationSites": 65,
       "indirectRegistrationSites": 21,
-      "stableRegistrationRows": 102,
-      "uniqueStableTools": 101,
+      "stableRegistrationRows": 101,
+      "uniqueStableTools": 100,
       "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4948,10 +4882,6 @@
       },
       {
         "path": "agent/extensions/design-studio.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/expert-director.ts",
         "exists": true
       },
       {
@@ -5286,30 +5216,6 @@
       },
       {
         "path": "agent/extensions/lib/execution-evidence.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-brief.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-convergence.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-critics.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-doctrine.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-domains.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/expert-taste.ts",
         "exists": true
       },
       {
@@ -6490,6 +6396,11 @@
         "why": "2026-08-12 refactor — do not recreate"
       },
       {
+        "name": "expert-director.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
         "name": "fs-organize.ts",
         "retired": "2026-10-10",
         "why": "0 uses; file organization is plain bash guidance in the linux-ops skill. Do not recreate"
@@ -6518,6 +6429,36 @@
         "name": "last-model.ts",
         "retired": "2026-10-10",
         "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"
+      },
+      {
+        "name": "lib/expert-brief.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
+        "name": "lib/expert-convergence.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
+        "name": "lib/expert-critics.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
+        "name": "lib/expert-doctrine.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
+        "name": "lib/expert-domains.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+      },
+      {
+        "name": "lib/expert-taste.ts",
+        "retired": "2026-10-19",
+        "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
       },
       {
         "name": "lichtfeld-studio.ts",
@@ -6810,12 +6751,6 @@
         "source": "agent/extensions/lib/code-audit.ts",
         "signals": [
           "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/expert-domains.ts",
-        "signals": [
-          "MCP"
         ]
       },
       {
@@ -7444,10 +7379,6 @@
       {
         "name": "ENGINEERING-RELIABILITY.md",
         "path": "docs/ENGINEERING-RELIABILITY.md"
-      },
-      {
-        "name": "EXPERT-DIRECTOR.md",
-        "path": "docs/EXPERT-DIRECTOR.md"
       },
       {
         "name": "GOAL.md",

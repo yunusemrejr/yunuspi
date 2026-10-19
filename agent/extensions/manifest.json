@@ -38,7 +38,6 @@
     "pi-vector-memory.ts",
     "design-studio.ts",
     "video-studio.ts",
-    "expert-director.ts",
     "task-state.ts",
     "art-direction.ts",
     "goal.ts",
@@ -94,12 +93,6 @@
     "double.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
-    "expert-brief.ts",
-    "expert-convergence.ts",
-    "expert-critics.ts",
-    "expert-doctrine.ts",
-    "expert-domains.ts",
-    "expert-taste.ts",
     "film-blend.ts",
     "git-authority.ts",
     "goal-state.ts",
@@ -666,6 +659,41 @@
       "name": "pi-local-lm.service",
       "retired": "2026-10-14",
       "why": "user direction 2026-10-14: no automatic local language model. Removed the Qwen3.5-0.8B llama.cpp service and every caller (Smol line selection, skill-relevance gate, mutation pre-screen step, discovery chooser); Kompress, Needle and Jev remain. scripts/install.mjs stops the unit and deletes local-models/qwen3.5-0.8b. Do not recreate"
+    },
+    {
+      "name": "expert-director.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-brief.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-convergence.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-critics.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-doctrine.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-domains.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
+    },
+    {
+      "name": "lib/expert-taste.ts",
+      "retired": "2026-10-19",
+      "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
     }
   ],
   "supportFiles": [
