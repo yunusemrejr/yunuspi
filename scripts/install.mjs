@@ -257,7 +257,10 @@ try {
   const managedFiles = sourceInventory(source);
   const managedCoreFiles = sourceInventory(path.join(repo, 'core'), true);
   const managedDesktopFiles = fs.existsSync(path.join(repo, 'desktop')) ? sourceInventory(path.join(repo, 'desktop')) : {};
-  fs.cpSync(source, stage, { recursive: true, force: false, errorOnExist: true, filter: file => !path.relative(source, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
+  // `stage` already exists (private, from mkdtemp). Newer Node releases make cpSync's errorOnExist reject an existing
+  // destination directory itself, so copy the children: the same tree, with per-entry exist checks, on every release.
+  const keepSource = file => !path.relative(source, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part));
+  for (const name of fs.readdirSync(source)) if (keepSource(path.join(source, name))) fs.cpSync(path.join(source, name), path.join(stage, name), { recursive: true, force: false, errorOnExist: true, filter: keepSource });
   fs.chmodSync(stage, 0o700);
   for (const name of ['settings', 'models']) {
     const sample = path.join(repo, 'config', `${name}.example.json`);
