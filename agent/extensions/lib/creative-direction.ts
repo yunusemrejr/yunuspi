@@ -6,7 +6,7 @@
  * page plus purple light leaks plus springy entrances). A single validated
  * direction gives every creative tool the same intent, hierarchy, visual
  * bounds, avoid-list, motion character and audio character to read; QA tools
- * (visual_review, ui_explore, motion_inspect) check conformance against it
+ * (visual_review, ui_explore) check conformance against it
  * and the completion gate refuses to close creative work with open findings.
  *
  * Pure policy plus small file helpers. The extension owns session state and

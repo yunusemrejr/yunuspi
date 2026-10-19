@@ -6,11 +6,9 @@ import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.t
  *   creative_direct  set/get/brief the structured task direction
  *   visual_review    capture + rubric review with recorded verdicts
  *   ui_explore       viewport/state capture matrix with DOM facts
- *   motion_inspect   animation inventory + sampled temporal QA
  *   svg_inspect      SVG geometry, set consistency, size matrix
  *   asset_register   asset provenance, roles and reuse search
  *   image_generate   provider-agnostic generation/editing with briefs
- *   creative_compare side-by-side direction variants for design fusion
  * Blocking visual verdicts and unreviewed directions feed the completion
  * gate through the "creative" continuation source. */
 import fs from "node:fs/promises";
@@ -21,8 +19,7 @@ import {
   directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
   type CreativeDirection,
 } from "./lib/creative-direction.ts";
-import { creativeCompareRun, creativeVerificationLines, planCompare, sourceRevision, uiExploreRun, uiConsistencyRun, visualReviewRun, compactQAResult, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
-import { motionInspectRun } from "./lib/motion-inspect.ts";
+import { creativeVerificationLines, sourceRevision, uiExploreRun, visualReviewRun, compactQAResult, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
 import { normalizeAssetInput, inspectAsset, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
@@ -35,7 +32,6 @@ import { isSessionStopped } from "./lib/session-stop.ts";
 import { captureToFile } from "./render-and-wait.ts";
 import { sniffImage } from "./lib/design-studio.ts";
 import { choices } from "./lib/tool-schema.ts";
-import { svgRender } from "./lib/svg-render.ts";
 import { branchHasMessage, stickyHeadText } from "./lib/wire-warmth.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
@@ -312,7 +308,7 @@ export default function artDirection(pi: any) {
 
   // ── creative_direct ──
   register("creative_direct",
-    "Own the task's structured creative direction: intent, ambition (restrained, balanced or immersive), the one signature element, focal hierarchy, visual bounds, avoid-list, motion and audio character, references. Every creative subsystem reads it; visual_review, ui_explore and motion_inspect check conformance against it. set validates and stores (scope session default, project persists to .pi/creative-direction.json); get reads session then project; brief renders the compact context block; status summarizes; clear removes. Parent owns mutation; children stay read-only.",
+    "Own the task's structured creative direction: intent, ambition (restrained, balanced or immersive), the one signature element, focal hierarchy, visual bounds, avoid-list, motion and audio character, references. Every creative subsystem reads it; visual_review and ui_explore check conformance against it. set validates and stores (scope session default, project persists to .pi/creative-direction.json); get reads session then project; brief renders the compact context block; status summarizes; clear removes. Parent owns mutation; children stay read-only.",
     Type.Object({
       action: choices(["set", "get", "brief", "status", "clear"]),
       scope: Type.Optional(choices(["session", "project"])),
@@ -429,47 +425,6 @@ export default function artDirection(pi: any) {
       state.evidence.matrix(surface, result, stamp, hash);
       return { result, pixels: result.preview };
     }, 600_000);
-
-  register("ui_consistency",
-    "Compare shared design tokens and component roles across 2..4 local pages or HTTP(S) routes at the same viewport/theme. Explicit selectorGroups identify shared roles; data-ui-role and body/h1/navigation provide defaults. Declare intentional variants with selectorGroups.variant or data-ui-variant. Optional tokens names CSS custom properties; otherwise bounded style-token names are discovered at :root. Captures, document/source hashes and detailed snapshots use the existing isolated renderer and .pi/ui-review report. Returns measured drift and missing/truncated coverage, never an aesthetic score or interaction approval. Read-only page inspection; no component or token edits.",
-    Type.Object({
-      sources:Type.Array(Type.String({minLength:1,maxLength:4096}),{minItems:2,maxItems:4}),
-      selectorGroups:Type.Optional(Type.Array(Type.Object({name:Type.String({pattern:'^[A-Za-z][A-Za-z0-9_-]{0,63}$'}),selector:Type.String({minLength:1,maxLength:256}),variant:Type.Optional(Type.String({pattern:'^[A-Za-z][A-Za-z0-9_-]{0,63}$'}))}),{minItems:1,maxItems:12})),
-      tokens:Type.Optional(Type.Array(Type.String({pattern:'^--[A-Za-z_][A-Za-z0-9_-]{0,63}$'}),{minItems:1,maxItems:24})),
-      width:Type.Optional(Type.Integer({minimum:200,maximum:2048})),height:Type.Optional(Type.Integer({minimum:200,maximum:2048})),
-      colorScheme:Type.Optional(choices(['light','dark'])),outputDir:Type.Optional(localPath),
-    }),async(params,ctx,signal)=>({result:await uiConsistencyRun(params,ctx.cwd as string,signal,capture)}),180_000);
-
-  // ── motion_inspect ──
-  register("motion_inspect",
-    "Inspect running motion with mode:time (default), scroll or render. time inventories and seeks CSS/WAAPI/SMIL clocks in one loaded document. render explicitly awaits the native video window.renderFrame(seconds) clock to inspect reusable canvas/SVG/web choreography; it never guesses or installs a clock. scroll observes actual progress and backtracking in one live document with JS/rAF and scroll timelines running. Reduced-motion passes, retained screenshots, coverage, source/document changes and runtime errors accompany findings. Incomplete coverage cannot approve motion. Samples are not playback, FPS, GPU cost or appearance proof; encoded-video cadence uses media_info action motion.",
-    Type.Object({
-      source: Type.String({ minLength: 1, maxLength: 4096 }),
-      mode:Type.Optional(choices(['time','scroll','render'])),
-      width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
-      height: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
-      durationMs: Type.Optional(Type.Integer({ minimum: 200, maximum: 60000 })),
-      samples: Type.Optional(Type.Integer({ minimum: 2, maximum: 9 })),
-      reducedMotion: Type.Optional(Type.Boolean({ description: "Run the reduced-motion parity pass (default true)" })),
-      positions:Type.Optional(Type.Array(Type.Number({minimum:0,maximum:1}),{minItems:2,maxItems:8,description:'scroll: strictly increasing normalized document progress'})),
-      backtrack:Type.Optional(Type.Boolean({description:'scroll: return through prior positions in the same document (default true)'})),
-      settleMs:Type.Optional(Type.Integer({minimum:0,maximum:1000,description:'scroll: wait before each observation; frame timing remains unknown'})),
-      selectors:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:256}),{minItems:1,maxItems:12,description:'scroll: observed sticky/pinned/content targets; missing selectors remain unknown'})),
-    }),
-    async (params, ctx, signal) => {
-      const { state } = sessionOf(ctx);
-      const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
-      const report = await motionInspectRun(params, ctx.cwd as string, signal, capture, direction);
-      const key = `motion:${report.source}:${params.mode ?? 'time'}`;
-      if (report.coverage?.complete === false) state.blockingRuns.set(key, `motion: incomplete ${params.mode ?? 'time'} capture on ${report.source} (rev ${report.revision}); inspect coverage, errors and reduced-motion results`.slice(0,280));
-      else if (report.blocking > 0) state.blockingRuns.set(key, `motion: ${report.blocking} blocking finding(s) on ${report.source} (rev ${report.revision}): ${report.findings.filter((f: any) => f.severity === "FAIL").map((f: any) => f.id).join(", ")}`.slice(0, 280));
-      else state.blockingRuns.delete(key);
-      return { result: report };
-    }, 600_000);
-
-  register("svg_render", "Render raw or saved SVG to timestamped PNG frames or deterministic H.264 video. Preflight validates XML, namespaces, IDs, path/affine-transform grammar and bounded keyframes. CSS/WAAPI, SMIL and data tracks share an absolute-time clock; each property needs one owner. No arbitrary JS or external assets. Returns editable source/tracks, samples, contact sheet, grouped approximate clipping observations and decoded-video cadence/loop QA. Audio may attach a local narration/music mix to video. PNG frames support transparency; video requires a matte. Inspect actual pixels/playback before approval.",
-    Type.Object({ path: Type.Optional(localPath), svg: Type.Optional(Type.String({ minLength: 1, maxLength: 65536 })), mode: Type.Optional(choices(["frames", "video"])), times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 30 }), { minItems: 1, maxItems: 12 })), duration: Type.Optional(Type.Number({ minimum: 0.1, maximum: 30 })), fps: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 1080 })), background: Type.Optional(Type.String({ pattern: "^(transparent|#[0-9a-fA-F]{6})$" })), audio: Type.Optional(localPath), reducedMotion: Type.Optional(Type.Boolean()), loop: Type.Optional(Type.Boolean()), tracks: Type.Optional(Type.Array(Type.Object({ target: Type.String({ minLength: 1, maxLength: 128 }), property: choices(["x", "y", "cx", "cy", "r", "rx", "ry", "width", "height", "opacity", "fill", "stroke", "stroke-width", "stroke-dashoffset", "transform", "d", "viewBox"]), keys: Type.Array(Type.Object({ time: Type.Number({ minimum: 0, maximum: 30 }), value: Type.Union([Type.Number(), Type.String({ maxLength: 8192 })]), ease: Type.Optional(choices(["linear", "smooth", "hold"])) }), { minItems: 2, maxItems: 64 }) }), { maxItems: 64 })), outputDir: Type.Optional(localPath) }),
-    async (params, ctx, signal) => { const result = await svgRender(params, ctx.cwd as string, signal); return { result, pixels: result.contactSheet.path }; }, 240000);
 
   // ── svg_inspect ──
   register("svg_inspect",
@@ -608,21 +563,5 @@ export default function artDirection(pi: any) {
       }
       const run = await imageEditRun(params as any, ctx.cwd as string, signal, direction, imageEnv, runtime);
       return { result: run, pixels: run.file };
-    }, 300_000);
-
-  // ── creative_compare ──
-  register("creative_compare",
-    "Compare 2..4 direction variants cheaply for design fusion: render each at the same width, build a side-by-side strip, and report pairwise structural deltas (SSIM, changed share, palette). Deltas measure difference, not quality — judge each variant against the creative brief, synthesize one direction, and record it with creative_direct set before building.",
-    Type.Object({
-      sources: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 2, maxItems: 4 })),
-      variants: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 2, maxItems: 4 })),
-      width: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
-      height: Type.Optional(Type.Integer({ minimum: 200, maximum: 2048 })),
-    }),
-    async (params, ctx, signal) => {
-      const { state } = sessionOf(ctx);
-      const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
-      const run = await creativeCompareRun(planCompare(params), ctx.cwd as string, signal, capture, direction);
-      return { result: run, pixels: run.strip };
     }, 300_000);
 }

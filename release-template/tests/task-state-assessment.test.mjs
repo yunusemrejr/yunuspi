@@ -100,7 +100,7 @@ test('unmapped creative requirements stay advisory at the actual last-todo gate'
   const h = await harness(t, true);
   const prompt = '- Render the diagram as SVG\n- Preserve its typography';
   await h.input(prompt, 'creative'); await h.before(prompt);
-  await h.result({ toolName: 'svg_render', toolCallId: 'render', input: { action: 'render' }, details: { status: 'rendered' } });
+  await h.result({ toolName: 'render_see', toolCallId: 'render', input: { action: 'render' }, details: { status: 'rendered' } });
   const todo = { id: 1, status: 'in_progress', subject: 'Deliver the diagram' };
   h.manager.appendMessage({ role: 'toolResult', toolName: 'todo', toolCallId: 'todo-list', content: [], details: { tasks: [todo] }, isError: false, timestamp: Date.now() });
   await h.result({ toolName: 'todo', toolCallId: 'todo-list', details: { tasks: [todo] } });

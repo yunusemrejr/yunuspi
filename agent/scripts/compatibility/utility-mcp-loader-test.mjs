@@ -18,7 +18,7 @@ try {
   const loader = new sdk.DefaultResourceLoader({ cwd: workspace, agentDir: workspace, settingsManager: sdk.SettingsManager.inMemory({ extensions: [] }), additionalExtensionPaths: [path.join(agent, 'extensions/utility-tools.ts')], noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
   await loader.reload();
   const result = loader.getExtensions(); assert.deepEqual(result.errors, []);
-  [extension] = result.extensions; assert.equal(extension.tools.size, 7);
+  [extension] = result.extensions; assert.equal(extension.tools.size, 3);
   const {buildSystemPrompt} = await import(pathToFileURL(path.join(core, 'dist/core/system-prompt.js')));
   const definitions = [...extension.tools.values()].map(t => t.definition);
   const guidelines = definitions.flatMap(t => t.promptGuidelines);
@@ -34,14 +34,13 @@ try {
   for (const hook of extension.handlers.get('session_start') ?? []) await hook({}, ctx);
   const samples = {
     sqlite_probe: { path: 'db.sqlite', action: 'query', sql: 'SELECT ?', params: [null, 'x', 1, true] },
-    package_probe: { package: 'missing' }, net_probe: { action: 'tcp', host: 'localhost', port: 1234 },
-    archive_probe: { path: 'build.zip', action: 'list' },
+    workspace_search: { root: '.', query: 'package.json', mode: 'path' },
   };
   for (const [name, args] of Object.entries(samples)) validateToolArguments(extension.tools.get(name).definition, { name, arguments: args });
-  const tool = extension.tools.get('package_probe').definition;
-  const response = await tool.execute('fixture', { package: 'missing' }, undefined, undefined, ctx);
+  const tool = extension.tools.get('workspace_search').definition;
+  const response = await tool.execute('fixture', { root: '.', query: 'package.json', mode: 'path' }, undefined, undefined, ctx);
   assert.equal(response.isError, false, JSON.stringify(response));
-  assert.equal(JSON.parse(response.content[0].text).installed, false);
+  JSON.parse(response.content[0].text);
   console.log('PASS SDK utility MCP startup, validated schemas, live bridge calls and shutdown; no inference');
 } finally {
   for (const hook of extension?.handlers.get('session_shutdown') ?? []) await hook({}, { cwd: workspace });

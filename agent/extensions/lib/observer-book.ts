@@ -280,13 +280,13 @@ export function loadObserverBook(options: { shippedDir?: string; userDir?: strin
 
 // ───────────────────────────── session profile ──────────────────────────────
 
-const EDIT_TOOLS = new Set(['edit', 'write', 'bulk_edit', 'multi_edit', 'apply_patch', 'notebook_edit']);
-const READ_TOOLS = new Set(['read', 'obs_read', 'context_slice', 'symbol_expand', 'checkpoint_read', 'memory_read']);
+const EDIT_TOOLS = new Set(['edit', 'write', 'multi_edit', 'apply_patch', 'notebook_edit']);
+const READ_TOOLS = new Set(['read', 'obs_read', 'context_slice', 'checkpoint_read', 'memory_read']);
 const SEARCH_TOOLS = new Set(['grep', 'find', 'ls', 'workspace_search', 'project_intel', 'tool_search', 'skill_review', 'web_search',
   'web_research', 'fetch_content', 'get_search_content', 'memory_search', 'git_info']);
 const RENDER_TOOLS = new Set(['browser_session', 'render_see', 'web_probe', 'video_render', 'video_frames', 'video_qa',
-  'web_asset_check', 'audio_analyze', 'media_info']);
-const VERIFY_TOOLS = new Set(['project_tests', 'quality_review', 'source_check', 'math_check', 'video_qa', 'web_asset_check']);
+  'audio_analyze', 'media_info']);
+const VERIFY_TOOLS = new Set(['project_tests', 'quality_review', 'source_check', 'video_qa']);
 const SHELL_TOOLS = new Set(['bash', 'powershell', 'bg_run', 'sandbox_run']);
 export const VERIFY_COMMAND = /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|lint|typecheck|type-check|check|verify|ci)\b|\bnode\s+--test\b|\b(?:pytest|jest|vitest|mocha|phpunit|rspec|ctest|tox|nox|pyright|mypy|ruff|eslint|tsc|shellcheck)\b|\bcargo\s+(?:test|build|check|clippy|nextest)\b|\bgo\s+(?:test|build|vet)\b|\bmake\s+(?:test|check|build|lint)\b|\bgradlew?\s+(?:test|build|check)\b|\bmvn\s+(?:test|verify|package)\b|\bdotnet\s+(?:test|build)\b|\bplaywright\s+test\b|\bdeno\s+(?:test|check|lint)\b|\bpython3?\s+-m\s+(?:pytest|unittest|compileall|py_compile)\b|\b(?:javac|gcc|g\+\+|clang(?:\+\+)?|rustc|swiftc|kotlinc)\s|\bcmake\s+--build\b|\bswift\s+(?:build|test)\b|\bnode\s+--check\b|\bphp\s+-l\b|\bbash\s+-n\b|\s--(?:self-?test|run-tests|test|verify)\b|(?:^|[\s/])(?:self-?test|tests?|check|verify|ci)(?:[-_.][\w-]+)?\.(?:sh|py|mjs|js)\b/i;
 const CLAIM = /\b(?:all (?:tests|checks) (?:now )?pass(?:ed|es)?|tests? (?:now )?pass(?:es|ed)?|(?:is|are|now) (?:fixed|working|complete|done|resolved)|(?:fixed|implemented|completed|resolved) (?:the|it|this|all)\b|should (?:now )?work|works now|task (?:is )?complete|everything (?:is )?(?:done|working)|ready (?:to|for) (?:merge|ship|review))/i;

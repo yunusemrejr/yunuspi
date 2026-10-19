@@ -7,9 +7,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 const root = path.resolve(import.meta.dirname, '..');
-const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => existsSync(path.join(dir, 'extensions/lib/svg-render.ts')));
+const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => existsSync(path.join(dir, 'extensions/lib/svg-inspect.ts')));
 const load = file => import(pathToFileURL(path.join(agent, 'extensions/lib', file)));
-const { prepareSvgSource, svgRender, svgDiagnosticCollector } = await load('svg-render.ts');
 const { imageGenerateRun, imageEditRun } = await load('image-generate.ts');
 const { encodeImage } = await load('design-studio.ts');
 const { run, outputFolder } = await load('media-process.ts');
@@ -30,57 +29,8 @@ test('a named output folder is created inside the workspace and never outside it
   await assert.rejects(outputFolder('file.txt', cwd));
 });
 
-test('SVG diagnostics preserve late distinct findings without repeating every frame', () => {
-  const collector = svgDiagnosticCollector();
-  const diagnostic = { cssAnimations: 0, smilAnimations: 0, programmaticTracks: 1, ownerCollisions: [], clippingApproximate: true };
-  for (let frame = 0; frame < 300; frame++) collector.add(frame, { ...diagnostic, time: frame / 30, clipped: ['first'] });
-  collector.add(300, { ...diagnostic, time: 10, clipped: ['late'] });
-  const result = collector.result();
-  assert.equal(result.diagnostics.length, 2); assert.equal(result.diagnosticsTruncated, false);
-  assert.equal(result.diagnostics[0].observations, 300); assert.equal(result.diagnostics[0].lastFrame, 299);
-  assert.deepEqual(result.diagnostics[1].clipped, ['late']);
-  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1000, 'repeated diagnostics keep a compact response');
-  const bounded = svgDiagnosticCollector(1); bounded.add(0, { ...diagnostic, time: 0, clipped: [] }); bounded.add(1, { ...diagnostic, time: 1, clipped: ['late'] });
-  assert.equal(bounded.result().diagnosticsTruncated, true); assert.equal(bounded.result().omittedDiagnosticObservations, 1);
-});
 
-test('SVG XML and namespace errors fail source preparation', async t => {
-  const cwd = await workspace(t);
-  const invalid = [
-    source.replace('<path', '<text>R&D</text><path'),
-    source.replace('http://www.w3.org/2000/svg', 'urn:wrong'),
-    source.replace('<path', '<g xmlns="urn:wrong"/><path'),
-    source.replace('<path', '<prefix:rect/><path'),
-    source.replace('<path', '<text>&undefined;</text><path'),
-  ];
-  for (const svg of invalid) await assert.rejects(prepareSvgSource({ svg }, cwd), /XML|namespace/i);
-  await prepareSvgSource({ svg: source.replace('<path', '<text>A &amp; B</text><path') }, cwd);
-  await prepareSvgSource({ svg: source.replace('<path', '<style><![CDATA[path{fill:#336699}]]></style><path') }, cwd);
-});
 
-test('SVG tracks reject ignored transforms, malformed paths and multiple animation owners', async t => {
-  const cwd = await workspace(t);
-  const track = (property, first, last) => ({ target: 'shape', property, keys: [{ time: 0, value: first }, { time: 1, value: last }] });
-  for (const [property, first, last, error] of [
-    ['transform', 'spin(0)', 'spin(90)', /affine/],
-    ['transform', 'matrix(1 0 0 1 0)', 'matrix(1 0 0 1 2)', /affine/],
-    ['transform', ',translate(1)', ',translate(2)', /affine/],
-    ['transform', 'translate(1),', 'translate(2),', /affine/],
-    ['transform', 'translate(1),,rotate(2)', 'translate(2),,rotate(3)', /affine/],
-    ['d', 'M0 0C2 2', 'M1 1C3 3', /valid path/],
-    ['d', 'L0 0L2 2', 'L1 1L3 3', /moveto/],
-    ['d', 'M8 8L56,,56', 'M8 8L48,,48', /valid path/],
-    ['d', 'M8 8L,56 56', 'M8 8L,48 48', /valid path/],
-    ['d', 'M8 8L56 56,', 'M8 8L48 48,', /valid path/],
-  ]) await assert.rejects(prepareSvgSource({ svg: source, tracks: [track(property, first, last)] }, cwd), error);
-  for (const svg of [
-    source.replace('/></svg>', '><animate attributeName="transform" from="translate(0)" to="translate(1)" dur="1s"/></path></svg>'),
-    source.replace('</svg>', '<animate href="#shape" attributeName="transform" from="translate(0)" to="translate(1)" dur="1s"/></svg>'),
-    source.replace('/></svg>', '><animateMotion path="M0 0L2 2" dur="1s"/></path></svg>'),
-  ]) await assert.rejects(prepareSvgSource({ svg, tracks: [track('transform', 'translate(0)', 'translate(1)')] }, cwd), /owner collision/);
-  await prepareSvgSource({ svg: source, tracks: [track('transform', 'translate(0 0) rotate(0)', 'translate(10 2) rotate(90)')] }, cwd);
-  await prepareSvgSource({ svg: source, tracks: [track('d', 'M0 0C0 4 4 4 4 0Z', 'M2 0C2 4 6 4 6 0Z')] }, cwd);
-});
 
 test('received image bytes survive cancellation after provider completion with usage and recovery', async t => {
   const cwd = await workspace(t), bytes = await picture(), original = globalThis.fetch;
@@ -151,8 +101,3 @@ test('media child abort waits for process closure before caller cleanup', { time
   await assert.rejects(run(process.execPath, ['-e', 'process.stderr.write("fixture failure"); process.exit(2)']), /fixture failure/);
 });
 
-test('SVG renders reject CSS and data-track owner collisions', { timeout: 120_000 }, async t => {
-  const cwd = await workspace(t);
-  const collision = source.replace('<path', '<style>@keyframes width{from{stroke-width:1}to{stroke-width:4}}#shape{stroke:#ff0000;animation:width 1s linear forwards}</style><path');
-  await assert.rejects(svgRender({ svg: collision, width: 64, height: 64, duration: 1, tracks: [{ target: 'shape', property: 'stroke-width', keys: [{ time: 0, value: 1 }, { time: 1, value: 4 }] }] }, cwd), /owner collision/);
-});

@@ -17,17 +17,16 @@ export function beginHarnessActivity(label: ActivityLabel): FinishActivity {
   catch { return () => {}; }
 }
 const toolLabels: Record<string, string> = {
-  read: 'Read', write: 'Write', edit: 'Edit', bulk_edit: 'Edit', bash: 'Shell',
+  read: 'Read', write: 'Write', edit: 'Edit', bash: 'Shell',
   skill_review: 'Skills', render_see: 'Browser', web_probe: 'Browser',
   project_intel: 'Project', project_report: 'Project', git_info: 'Git',
   web_search: 'Search', grep: 'Search', find: 'Search', symbol_search: 'Symbols',
-  read_symbol: 'Symbols', symbol_expand: 'Symbols', context_code: 'Code', context_slice: 'Code',
+  read_symbol: 'Symbols', context_code: 'Code', context_slice: 'Code',
   fetch_content: 'Fetch', http_request: 'HTTP', subagent: 'Agents', subagent_wait: 'Agents',
   memory_write: 'Memory', memory_search: 'Memory',
-  package_probe: 'Package probe', sqlite_probe: 'SQLite probe',
+  sqlite_probe: 'SQLite probe',
   json_shape_diff: 'Shape diff',
   quality_review: 'Review', project_review: 'Review', error_review: 'Review',
-  net_probe: 'Network probe', archive_probe: 'Archive probe',
   browser: 'Browser', browser_navigate: 'Browser', browser_snapshot: 'Browser',
   browser_click: 'Browser', browser_screenshot: 'Browser',
 };

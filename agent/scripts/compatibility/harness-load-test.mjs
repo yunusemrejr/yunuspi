@@ -20,7 +20,7 @@ try{
  // A fork directory may deliberately expose multiple entrypoints.
  assert.equal(new Set(loaded.extensions.map(extension=>extension.path)).size,loaded.extensions.length,'extension entrypoints are unique');
  for(const extension of loaded.extensions)assert.ok(paths.some(file=>extension.path===file||extension.path.startsWith(file+path.sep)),`undeclared extension: ${extension.path}`);
- for(const name of ['source_check','sqlite_probe','package_probe','net_probe','archive_probe'])assert.equal(loaded.extensions.filter(extension=>extension.tools.has(name)).length,1,`${name} has one owner`);
+ for(const name of ['source_check','sqlite_probe'])assert.equal(loaded.extensions.filter(extension=>extension.tools.has(name)).length,1,`${name} has one owner`);
  assert.equal(loaded.extensions.filter(extension=>extension.commands.has('models')).length,1,'/models is registered exactly once by the manifest extension graph');
  for(const file of paths)assert.ok(loaded.extensions.some(extension=>extension.path===file||extension.path.startsWith(file+path.sep)),file);
  console.log(`PASS complete harness SDK load: ${loaded.extensions.length} extensions/forks; no provider/session started`);

@@ -58,7 +58,7 @@ export interface ToolOutcomeInput {
 
 // Calls that wait or poll are not decisions: their results say nothing about the model.
 const PASSIVE_TOOLS = new Set(['wait', 'wait_agent', 'sleep', 'clock', 'process', 'bg_status', 'bg_logs', 'bg_kill', 'subagent_wait']);
-const MUTATING_TOOLS = new Set(['edit', 'write', 'bulk_edit']);
+const MUTATING_TOOLS = new Set(['edit', 'write']);
 
 const ENVIRONMENT = /\b(?:ECONN\w*|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|fetch failed|rate[- ]?limit|overloaded|too many requests|service unavailable|bad gateway|gateway time-?out|Provider stream idle|timed? ?out|deadline exceeded|Command aborted|operation was aborted|cancelled by user|session change or shutdown|connection (?:refused|reset)|unreachable|net::ERR_|\b(?:429|502|503|504)\b)/i;
 const SCHEMA = /Validation failed for tool|must have required propert|must not have more than|must be (?:object|array|string|number|integer|equal to constant)|must match a schema|additionalProperties|unknown (?:option|parameter|field|agent)|(?:is|are) not supported\b|Tool \S+ not found|Unknown agent|requires? (?:an? )?(?:HTTP|action|path|url)/i;

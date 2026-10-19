@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // A page that draws with WebGL used to be a verification dead end for render_see, ui_explore,
-// visual_diff, visual_review, motion_inspect and creative_compare: the isolated browser ran with
+// visual_diff and visual_review: the isolated browser ran with
 // WebGL off and rejected the page ("open it in browser_session"). A Three.js hero is exactly the
 // kind of page a rich site is built around. The capture now retries once with software WebGL
 // (SwiftShader: CPU rasterization, still sandboxed, no GPU device access).

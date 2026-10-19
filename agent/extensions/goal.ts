@@ -42,12 +42,12 @@ const GOAL_SUBCOMMANDS: ReadonlyArray<readonly [string, string]> = [
 ];
 const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
-const WRITE_TOOLS = new Set(["edit", "write", "bulk_edit"]);
+const WRITE_TOOLS = new Set(["edit", "write"]);
 /** Tools whose successful run is itself a verification of built output. */
 const VERIFY_TOOLS = new Set([
 	"render_see", "video_qa", "video_render",
-	"ui_explore", "ui_consistency", "motion_inspect",
-	"deliverable_check", "svg_inspect", "svg_render",
+	"ui_explore", 
+	"deliverable_check", "svg_inspect", 
 	"media_sync", "sandbox_run", "lsp_diagnostics", "lens_diagnostics",
 ]);
 function isVerificationToolResult(name: string, input?: Record<string, unknown>): boolean {
@@ -182,7 +182,6 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const name = event.toolName ?? "";
 		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
 		if (WRITE_TOOLS.has(name)) {
-			if (name === "bulk_edit" && (event.input?.action === "preview" || event.details?.bulkEdit?.changedFiles === 0 || event.details?.changedFiles === 0)) return;
 			const file = event.details?.fileMutation?.resolved ?? event.input?.path;
 			// Reading the final documentation diff satisfies V; appending release notes after a green check
 			// must not manufacture another test run. Executable MDX and unknown/batched paths stay conservative.

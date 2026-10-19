@@ -4,7 +4,7 @@ part: engineering
 title: Code quality and static analysis
 summary: Using linters, type checkers, language servers and analyzers as evidence: duplication and the DRY principle, dead code, complexity, formatting, and recognizing generated-looking code slop.
 terms: quality lint linter linting eslint ruff pylint flake8 clippy golangci prettier black format formatter static analysis analyzer lsp language server diagnostics typecheck tsc mypy duplicate duplication duplicated dry copy paste redundant complexity cyclomatic dead unused slop smell smells
-tools: lsp_diagnostics lens_diagnostics quality_review git_info ast_diff symbol_expand
+tools: lsp_diagnostics lens_diagnostics quality_review git_info
 skills: engineering ui-design
 ---
 

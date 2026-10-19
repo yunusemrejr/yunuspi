@@ -8,7 +8,6 @@ const root=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(root,'agent'),path.resolve(root,'..'),path.resolve(root,'../..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/svg-check.ts')));
 const load=p=>import(pathToFileURL(path.join(agent,'extensions/lib',p)));
 const {inspectSvg}=await load('svg-check.ts');
-const {numericCheck:check}=await load('numeric-checks.ts');
 const {default:register}=await load('small-tools.ts');
 const svg=body=>`<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 const keys=result=>result.findings.map(f=>f.key);
@@ -42,44 +41,7 @@ test('SVG checks actual references, malformed source and bounded review cues wit
   for(const source of ['<!DOCTYPE svg SYSTEM "file:///private"><svg/>','<!ENTITY x "value"><svg/>','é'.repeat(32769),'<svg>'+'<g>'.repeat(64)+'</g>'.repeat(64)+'</svg>',svg('<g/>'.repeat(4096))])await assert.rejects(()=>inspectSvg(source));
 });
 
-test('frame statistics use measured milliseconds and rendering memory scales with device-pixel area',()=>{
-  const frame=check({operation:'frame_budget',values:[10,20,30,40],target_fps:50});
-  assert.deepEqual([frame.meanMs,frame.p50Ms,frame.p95Ms,frame.p99Ms,frame.maxMs],[25,20,40,40,40]);
-  assert.equal(frame.budgetMs,20);assert.equal(frame.effectiveFps,40);assert.equal(frame.overBudgetFrames,2);assert.equal(frame.overBudgetFraction,.5);
-  assert.equal(check({operation:'frame_budget',values:[1000/60]}).overBudgetFrames,0);
-  assert.equal(check({operation:'frame_budget',values:Array.from({length:100},(_,i)=>100-i)}).p95Ms,95);
-  const one=check({operation:'render_budget',width:100,height:50});
-  assert.equal(one.attachmentBytes,40000);assert.equal(one.pixelMultiplier,1);
-  const two=check({operation:'render_budget',width:100,height:50,pixel_ratio:2,samples:4,buffers:2,bytes_per_pixel:8});
-  assert.equal(two.attachmentBytes,one.attachmentBytes*32);assert.equal(two.pixelMultiplier,4);
-  assert.equal(two.attachmentMiB,two.attachmentBytes/1048576);
-  const rounded=check({operation:'render_budget',width:3,height:3,pixel_ratio:.5});
-  assert.equal(rounded.pixels,4);assert.equal(rounded.pixelWidth,2);
-  assert.ok(Number.isSafeInteger(check({operation:'render_budget',width:65536,height:65536,pixel_ratio:8,samples:16,buffers:8,bytes_per_pixel:64}).attachmentBytes));
-  assert.match(two.limitations.join(' '),/resolve targets/);
-  for(const input of [
-    {operation:'frame_budget',values:[0]},{operation:'frame_budget',values:[-1]},{operation:'frame_budget',values:[Number.MIN_VALUE]},{operation:'frame_budget',values:[60001]},{operation:'frame_budget',values:[1],target_fps:0},{operation:'frame_budget',values:[1],target_fps:'60'},{operation:'frame_budget',values:[1],target_fps:null},
-    ...[{width:0},{height:1.5},{pixel_ratio:NaN},{pixel_ratio:null},{samples:17},{samples:1.5},{buffers:0},{bytes_per_pixel:65}].map(extra=>({operation:'render_budget',width:10,height:10,...extra})),
-  ])assert.throws(()=>check(input),/numeric_check:/);
-});
 
-test('registered numeric operations preserve cancellation and switches (artifact_check was removed)',async t=>{
-  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'domain-quality-'));t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
-  const envKeys=['PI_SMALL_TOOLS','PI_REASONING_AIDS','PI_SUBAGENT_CHILD'],saved=Object.fromEntries(envKeys.map(k=>[k,process.env[k]]));
-  t.after(()=>{for(const k of envKeys)if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];});
-  for(const k of envKeys)delete process.env[k];
-  fs.mkdirSync(path.join(cwd,'workspace'));const workspace=path.join(cwd,'workspace');
-  const tools=new Map();register({registerTool:t=>tools.set(t.name,t)});
-  const call=(name,input,signal)=>tools.get(name).execute('check',input,signal,undefined,{cwd:workspace});
-  assert.equal(tools.has('artifact_check'),false,'artifact_check is no longer registered');
-  assert.equal((await call('math_check',{operation:'frame_budget',values:[10]})).details.meanMs,10);
-  assert.equal((await call('math_check',{operation:'render_budget',width:10,height:10})).details.attachmentBytes,800);
-  assert.equal((await call('math_check',{operation:'frame_budget',values:[10]},AbortSignal.abort())).isError,true);
-  process.env.PI_SMALL_TOOLS='off';assert.equal((await call('math_check',{operation:'frame_budget',values:[10]})).isError,true);
-  process.env.PI_SUBAGENT_CHILD='1';const child=new Map();register({registerTool:t=>child.set(t.name,t)});
-  assert.ok(child.has('math_check'),'stable definitions in child profiles');
-  assert.equal((await child.get('math_check').execute('disabled',{operation:'frame_budget',values:[10]},undefined,undefined,{cwd:workspace})).isError,true);
-});
 
 test('successful SVG saves run a bounded full-file check while unrelated and failed operations do no I/O',async t=>{
   const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'svg-save-check-'));t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));
@@ -105,7 +67,7 @@ test('successful SVG saves run a bounded full-file check while unrelated and fai
   const originalRealpath=fs.promises.realpath;let reads=0;
   fs.promises.realpath=async()=>{reads++;throw Error('unexpected I/O');};
   try{
-    for(const [file,extra]of [['drawing.svg',{isError:true}],['drawing.svg',{toolName:'read'}],['drawing.svg',{toolName:'math_check'}],['drawing.png',{}],['vendor/drawing.svg',{}],['generated/drawing.svg',{}],['fixtures/drawing.svg',{}]])assert.equal(await call(file,extra),undefined);
+    for(const [file,extra]of [['drawing.svg',{isError:true}],['drawing.svg',{toolName:'read'}],['drawing.png',{}],['vendor/drawing.svg',{}],['generated/drawing.svg',{}],['fixtures/drawing.svg',{}]])assert.equal(await call(file,extra),undefined);
     process.env.PI_SMALL_TOOLS='off';assert.equal(await call('drawing.svg'),undefined);delete process.env.PI_SMALL_TOOLS;
     process.env.PI_REASONING_AIDS='off';assert.equal(await call('drawing.svg'),undefined);delete process.env.PI_REASONING_AIDS;
     assert.equal(reads,0,'failed/disabled/non-SVG/generated inputs never touch filesystem');

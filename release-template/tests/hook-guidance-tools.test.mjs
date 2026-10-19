@@ -29,7 +29,7 @@ function registeredTools() {
 
 test("session-hook rules bind only to registered tools", () => {
 	const known = registeredTools();
-	assert.ok(known.size > 100, "inventory names the tool universe");
+	assert.ok(known.size > 80, "inventory names the tool universe");
 	for (const rule of HOOK_RULES) {
 		assert.ok(rule.key && rule.line, "rule has a key and a line");
 		assert.ok(rule.tools.length, `${rule.key} binds to at least one tool`);

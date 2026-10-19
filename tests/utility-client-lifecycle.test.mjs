@@ -200,8 +200,8 @@ test('a native batch of three real utility requests completes without a capacity
   const { UtilityClient } = await import(pathToFileURL(filename));
   const client = new UtilityClient(template);
   try {
-    const results = await Promise.all(Array.from({length:3},(_,i)=>client.call('package_probe',{
-      package:`missing-batch-${i}`
+    const results = await Promise.all(Array.from({length:3},(_,i)=>client.call('workspace_search',{
+      root:'.',query:`batch-${i}`,mode:'path'
     })));
     for (const result of results) {
       assert.equal(result.isError,false,JSON.stringify(result));

@@ -90,7 +90,7 @@ test('Office, archive and generic binaries are shown as what they contain', asyn
   assert.match((await describeBinary(xlsx)).text, /North/);
   const zip = path.join(dir, 'bundle.zip'); fs.writeFileSync(zip, writeZip([{ name: 'a/one.txt', data: 'one' }, { name: 'two.csv', data: 'x,y\n1,2\n' }]));
   const listed = await describeBinary(zip);
-  assert.match(listed.text, /2 files:\na\/one\.txt \(3 bytes\)\ntwo\.csv/); assert.match(listed.text, /archive_probe lists, stats and reads one member/); assert.match(listed.text, /never the folder it came from/);
+  assert.match(listed.text, /2 files:\na\/one\.txt \(3 bytes\)\ntwo\.csv/); assert.match(listed.text, /List members with unzip -l or tar -tf/); assert.match(listed.text, /never the folder it came from/);
   const broken = path.join(dir, 'broken.docx'); fs.writeFileSync(broken, Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(100, 7)]));
   const bad = await describeBinary(broken);
   assert.match(bad.text, /deliverable_check|damaged|not a/i); 

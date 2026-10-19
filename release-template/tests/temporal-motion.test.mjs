@@ -7,8 +7,7 @@ import {createServer} from 'node:http';
 import {createHash} from 'node:crypto';
 import {renderCapture,normalizeTemporalCapture} from '../agent/scripts/render-capture.mjs';
 import {captureToFile} from '../agent/extensions/render-and-wait.ts';
-import {motionInspectRun} from '../agent/extensions/lib/motion-inspect.ts';
-import {visualReviewRun,creativeCompareRun} from '../agent/extensions/lib/creative-qa.ts';
+import {visualReviewRun} from '../agent/extensions/lib/creative-qa.ts';
 import {encodeImage} from '../agent/extensions/lib/design-studio.ts';
 
 const html = `<!doctype html><title>Shared motion fixture</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css">
@@ -56,19 +55,6 @@ test('CSS and SVG clocks seek in one document; explicit driver failure preserves
   assert.equal(JSON.stringify(partial).includes('private driver diagnostic'),false);assert.ok((await fs.stat(partial.output)).size>0);
 });
 
-test('native motion inspection retains capture errors and changed source instead of recording a clean pass', {timeout:120000},async t => {
-  const dir=await workspace(t),source=path.join(dir,'scene.html');await fs.writeFile(source,html.replace('<link rel="stylesheet" href="/style.css">','<style>body{margin:0}</style>'));
-  let calls=0;
-  const capture=async(params,dest,cwd,signal)=>{calls++;return captureToFile(params,dest,cwd,signal);};
-  const result=await motionInspectRun({source,mode:'render',width:320,height:200,durationMs:1000,samples:3},dir,undefined,capture);
-  assert.equal(calls,4,'inventory and temporal passes replace per-frame browser launches');assert.equal(result.coverage.complete,true);assert.equal(result.reducedPixels.meanDelta,0);assert.equal(result.blocking,0);assert.equal(result.samples.length,3);
-  const changed=await motionInspectRun({source,mode:'render',width:320,height:200,durationMs:1000,samples:2,reducedMotion:false},dir,undefined,async(params,dest,cwd,signal)=>{
-    const receipt=await captureToFile(params,dest,cwd,signal);
-    if(params.temporalCapture){await fs.appendFile(source,'<!-- source revision changed -->');receipt.errors=['page script error (message omitted)'];}
-    return receipt;
-  });
-  assert.equal(changed.sourceChanged,true);assert.equal(changed.coverage.complete,false);assert.ok(changed.errors.length);assert.ok(changed.findings.some(f=>f.id==='temporal-coverage-incomplete'));
-});
 
 test('typography evidence counts reading text, excludes inherited wrapper styles and abstains on taste', {timeout:60000},async t => {
   const dir=await workspace(t),source=path.join(dir,'type.html');
@@ -97,64 +83,5 @@ test('WebGL created by the explicit frame clock uses the existing bounded softwa
 });
 
 // Synthetic pixels isolate the comparison unit contract from browser paint noise.
-test('motion receipts convert pixel percentages into shares before applying thresholds', async t => {
-  const dir=await workspace(t),source=path.join(dir,'units.html');await fs.writeFile(source,'<!doctype html><title>Pixel units</title>');
-  const image=async(file,stripe)=>{
-    const data=Buffer.alloc(200*200*4,255);
-    for(let y=0;y<200;y++)for(let x=0;x<stripe;x++)data.fill(0,(y*200+x)*4,(y*200+x)*4+3);
-    await fs.writeFile(file,await encodeImage({width:200,height:200,data},'png'));
-  };
-  const capture=async(params,dest)=>{
-    await image(dest,0);
-    if(params.temporalCapture){
-      const samples=[];
-      for(const timeMs of params.temporalCapture.timesMs){const file=dest+'.'+timeMs+'.png';await image(file,timeMs===500?2:timeMs===1000?200:0);samples.push({timeMs,file});}
-      return {temporalSequence:{samples,coverage:{complete:true,persistentDocument:true}}};
-    }
-    return {conditions:{animationSample:{descriptors:[]}}};
-  };
-  const temporal=await motionInspectRun({source,width:200,height:200,durationMs:1000,samples:3,reducedMotion:false},dir,undefined,capture);
-  assert.equal(temporal.samples[1].changedShare,.01);assert.equal(temporal.samples[1].flag,'ok');
-  assert.equal(temporal.samples[2].changedShare,.99);assert.equal(temporal.samples[2].flag,'jump');
-  const scrollCapture=stripe=>async(params,dest)=>{
-    const samples=[];
-    for(const [index,progress,pass] of [[0,0,'forward'],[1,1,'forward'],[2,0,'backtrack']]){const file=dest+'.'+index+'.png';await image(file,index===2?stripe:0);samples.push({index,progress,pass,file,actualY:progress*200,maxScroll:200});}
-    return {scrollSequence:{samples,coverage:{complete:true,persistentDocument:true}}};
-  };
-  const small=await motionInspectRun({source,mode:'scroll',width:200,height:200,positions:[0,1],reducedMotion:false},dir,undefined,scrollCapture(2));
-  assert.equal(small.backtrack[0].changedShare,.01);assert.ok(!small.findings.some(f=>f.id==='scroll-backtrack-state'));
-  const visible=await motionInspectRun({source,mode:'scroll',width:200,height:200,positions:[0,1],reducedMotion:false},dir,undefined,scrollCapture(8));
-  assert.equal(visible.backtrack[0].changedShare,.04);assert.ok(visible.findings.some(f=>f.id==='scroll-backtrack-state'));
-});
 
-test('creative variant pixel differences use the same fractional share contract', async t => {
-  const dir=await workspace(t);
-  const report=await creativeCompareRun({sources:['first.html','second.html'],width:200,height:200},dir,undefined,async(params,dest)=>{
-    const data=Buffer.alloc(1280*200*4,255);
-    if(params.source==='second.html')for(let y=0;y<200;y++)for(let x=0;x<640;x++)data.fill(0,(y*1280+x)*4,(y*1280+x)*4+3);
-    await fs.writeFile(dest,await encodeImage({width:1280,height:200,data},'png'));return {};
-  });
-  assert.equal(report.pairs[0].changedShare,.5,'half of the image changes, reported as a share in 0..1');
-});
 
-test('required reduced motion frames cannot be complete when their receipt or pair is missing', async t => {
-  const dir=await workspace(t),source=path.join(dir,'reduced-boundary.html');await fs.writeFile(source,'<!doctype html><title>Reduced evidence</title>');
-  const pixels=await encodeImage({width:200,height:200,data:Buffer.alloc(200*200*4,255)},'png');
-  const adapter=missing=>async(params,dest)=>{
-    await fs.writeFile(dest,pixels);
-    if(!params.temporalCapture)return {conditions:{animationSample:{descriptors:[]}}};
-    if(params.reducedMotion==='reduce'&&missing==='receipt')return {errors:[]};
-    const times=params.reducedMotion==='reduce'&&missing==='pair'?[0]:params.temporalCapture.timesMs;
-    const samples=[];for(const timeMs of times){const file=dest+'.'+timeMs+'.png';await fs.writeFile(file,pixels);samples.push({timeMs,file});}
-    return {temporalSequence:{samples,coverage:{complete:true,persistentDocument:true}}};
-  };
-  for(const missing of ['receipt','pair']){
-    const result=await motionInspectRun({source,mode:'render',width:200,height:200,samples:2},dir,undefined,adapter(missing));
-    assert.equal(result.reducedPass,'checked');assert.equal(result.coverage.reducedComplete,false);assert.equal(result.coverage.complete,false);
-    assert.ok(result.findings.some(f=>f.id==='reduced-motion-incomplete'));assert.ok(result.findings.some(f=>f.id==='temporal-coverage-incomplete'));
-  }
-  const complete=await motionInspectRun({source,mode:'render',width:200,height:200,samples:2},dir,undefined,adapter());
-  assert.equal(complete.coverage.complete,true);assert.equal(complete.coverage.reducedComplete,true);
-  const staticPage=await motionInspectRun({source,mode:'time',width:200,height:200,samples:2},dir,undefined,adapter('receipt'));
-  assert.equal(staticPage.coverage.complete,true,'a static document inventory does not request a reduced temporal pair');
-});

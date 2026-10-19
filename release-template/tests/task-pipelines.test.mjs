@@ -59,11 +59,11 @@ test('recurring stacks and fine-tuning preparation choose their installed skills
   const algorithms = selected('Implement an AI/ML algorithm and benchmark its boundary cases');
   assert.ok(algorithms.ids.includes('algorithms'));
   assert.ok(algorithms.ids.includes('ai-ml'));
-  const prepared = selected('Prepare a Google Colab QLoRA fine-tuning notebook');
-  for (const id of ['colab', 'finetuning', 'ai-ml']) assert.ok(prepared.ids.includes(id));
+  const prepared = selected('Prepare a QLoRA fine-tuning notebook');
+  for (const id of ['finetuning', 'ai-ml']) assert.ok(prepared.ids.includes(id));
   assert.ok(prepared.skills.includes('ml'));
   assert.ok(!prepared.stages.some(stage => stage.id === 'training-smoke'), 'preparing a notebook does not require a paid run');
-  const live = selected('Run Google Colab QLoRA fine-tuning and evaluate the exported model');
+  const live = selected('Run QLoRA fine-tuning and evaluate the exported model');
   assert.ok(live.stages.some(stage => stage.id === 'training-smoke'));
   assert.ok(live.stages.some(stage => stage.id === 'ml'));
 });
@@ -71,7 +71,7 @@ test('recurring stacks and fine-tuning preparation choose their installed skills
 test('shared-host deployment plans cannot turn into claims of a live deployment', () => {
   const plan = selected('Prepare a deployment pipeline through Git and SSH on Namecheap');
   assert.ok(plan.ids.includes('git-ssh-deploy'));
-  assert.ok(plan.tools.includes('ssh_plan'));
+  assert.ok(plan.tools.includes('git_info'));
   assert.ok(!plan.stages.some(stage => stage.id === 'deploy-remote'));
   assert.match(plan.stages[0].check, /actual cPanel\/VPS\/SSH support/);
   const live = selected('Deploy the PHP website through Git and SSH to GoDaddy');
@@ -162,7 +162,7 @@ test('a plain JavaScript function receives runtime discovery without mandatory U
 });
 
 test('every selected skill and tool is actually shipped by the runtime', () => {
-  const selection = selected('Build PHP8+ Node.js frontend vanilla React CDN Go service Rust Java Python Flask Bash C/C++ Linux-native local webapp AI/ML algorithm Colab LoRA fine-tuning UI and deploy through Git SSH on Namecheap');
+  const selection = selected('Build PHP8+ Node.js frontend vanilla React CDN Go service Rust Java Python Flask Bash C/C++ Linux-native local webapp AI/ML algorithm LoRA fine-tuning UI and deploy through Git SSH on Namecheap');
   for (const name of selection.skills) assert.ok(fs.existsSync(path.join(agent, 'skills', name, 'SKILL.md')), name);
   const metadataPath = [path.join(root, 'docs/CAPABILITIES.json'), path.join(agent, 'public-template/docs/CAPABILITIES.json')].find(file => fs.existsSync(file));
   const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
@@ -183,12 +183,6 @@ test('backend-only website fixes do not force unrelated visual reviews', () => {
   assert.ok(!selection.stages.some(stage => stage.id === 'ui-pixels'));
 });
 
-test('inspected training dependencies and notebooks activate local ML preparation without pretending Colab is connected', () => {
-  const selection = selected('Fix checkpoint recovery', { files: ['experiments/train.ipynb'], dependencies: ['torch', 'peft'] });
-  for (const id of ['python', 'ai-ml', 'finetuning']) assert.ok(selection.ids.includes(id));
-  assert.ok(!selection.ids.includes('colab'));
-  assert.ok(!selection.stages.some(stage => stage.id === 'training-smoke'), 'fixing training code does not require a full model-training run');
-});
 
 test('ordinary language fixes retain the complete catalog without eager optional schemas', () => {
   for (const prompt of ['Fix the Node.js parser bug', 'Fix the Python conversion bug', 'Fix the JavaScript function and merge two arrays']) {
@@ -218,7 +212,7 @@ test('required UI and hosting tools are available immediately while explicit wor
   for (const name of ['browser_session', 'render_see', 'quality_review']) assert.ok(ui.includes(name), name);
   assert.ok(!ui.includes('git_info'));
   const deploy = automatic('Deploy the PHP website through Git SSH to GoDaddy');
-  for (const name of ['git_info', 'ssh_plan', 'net_probe', 'browser_session']) assert.ok(deploy.includes(name), name);
+  for (const name of ['git_info', 'browser_session']) assert.ok(deploy.includes(name), name);
   assert.ok(automatic('Prepare a Node.js workflow').includes('task_pipeline'));
   assert.ok(automatic('Fix the Node.js parser and inspect Git history').includes('git_info'));
   assert.ok(automatic('Fix the Node.js parser', { files: ['.git/config'] }).includes('git_info'), 'observed repository metadata is a concrete Git need');
@@ -342,7 +336,7 @@ test('research, reinforcement learning and edge work stage executable evidence w
   for (const id of ['ai-ml', 'reinforcement-learning', 'edge-ml']) assert.ok(local.ids.includes(id));
   assert.ok(local.stages.some(stage => stage.id === 'training-smoke'));
   assert.ok(local.stages.some(stage => stage.id === 'ml'));
-  assert.ok(!selected('Prepare a Colab notebook for training an embedding model').stages.some(stage => stage.id === 'training-smoke'));
+  assert.ok(!selected('Prepare a notebook for training an embedding model').stages.some(stage => stage.id === 'training-smoke'));
   const code = selected('Refactor Python source to remove redundant classes and improve code quality');
   assert.ok(code.stages.some(stage => stage.id === 'source-impact'));
   const ledger = createPipelineLedger();
@@ -359,9 +353,9 @@ test('UI choreography, responsive coverage, consistency and web assets select di
   const ledger = createPipelineLedger();
   const names = () => automaticPipelineTools(selection, { prompt, ledger, coordinate });
   for (const name of ['creative_direct', 'blender', 'image_generate']) assert.ok(names().includes(name), name);
-  for (const name of ['motion_inspect', 'ui_explore', 'ui_consistency']) assert.ok(!names().includes(name), `${name} waits for source artifacts`);
+  for (const name of ['ui_explore']) assert.ok(!names().includes(name), `${name} waits for source artifacts`);
   record(selection, ledger, 'discovery', 'inspection'); record(selection, ledger, 'implementation', 'artifact');
-  for (const name of ['motion_inspect', 'ui_explore', 'ui_consistency']) assert.ok(names().includes(name), name);
+  for (const name of ['ui_explore']) assert.ok(names().includes(name), name);
   assert.throws(() => record(selection, ledger, 'ui-interaction', 'inspection'), /requires interaction/);
   assert.throws(() => record(selection, ledger, 'ui-pixels', 'inspection'), /requires pixels/);
   const film = selected('Create motion graphics for a 30 second explainer video');
@@ -385,7 +379,7 @@ test('authored exclusions defeat file and dependency cues, and later explicit co
   const prompt = 'Build a responsive website without animation, Blender or 3D. Do not use ui_recipe or image generation.';
   const selection = selected(prompt, { files:['src/Hero.tsx','assets/hero.glb'],dependencies:['three','gsap'],signals:['motion','scroll','web3d'] });
   for (const id of ['ui-motion','ui-scroll','web-3d','blender-3d']) assert.ok(!selection.ids.includes(id), id);
-  for (const name of ['image_generate','blender','asset_register','motion_inspect']) assert.ok(!automaticPipelineTools(selection, {prompt}).includes(name), name);
+  for (const name of ['image_generate','blender','asset_register']) assert.ok(!automaticPipelineTools(selection, {prompt}).includes(name), name);
   const first = 'Build an animated UI without Blender or Git.';
   const followup = resolveRoutingTask(first, 'Make its scroll choreography smoother');
   assert.ok(followup.continuing && followup.task.includes(first));
@@ -401,7 +395,7 @@ test('shared code owners require bounded impact discovery before artifact and de
   const prompt = 'Refactor shared UI components and migrate their API contracts across multiple files';
   const selection = selected(prompt), ledger = createPipelineLedger();
   assert.ok(selection.ids.includes('codebase-control'));
-  for (const name of ['project_report','module_report','symbol_search','context_slice','bulk_edit']) assert.ok(automaticPipelineTools(selection,{prompt}).includes(name), name);
+  for (const name of ['project_report','module_report','symbol_search','context_slice']) assert.ok(automaticPipelineTools(selection,{prompt}).includes(name), name);
   record(selection,ledger,'discovery','inspection');
   assert.throws(() => record(selection,ledger,'implementation','artifact'), /unresolved prerequisite/);
   record(selection,ledger,'source-impact','inspection'); record(selection,ledger,'implementation','artifact');

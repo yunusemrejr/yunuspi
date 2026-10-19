@@ -37,7 +37,7 @@ The request formats follow the official [OpenAI generation](https://developers.o
 Up to eight images can be compared with `paths`. Prepared attachments are bounded to 12 MiB, sources to 40 MiB, and each decoded attachment to four million pixels. Crops and pixel coordinates use stored pixel axes; EXIF orientation is not automatically applied.
 ## Raw SVG art and animation
 
-Write the source as an actual SVG, with a meaningful `viewBox`, stable IDs, accessible title/description and explicit paint. `svg_inspect` checks references, source geometry and intended-size render matrices. `svg_render` accepts a local `path` or raw `svg` source and renders real browser frames or an H.264 MP4.
+Write the source as an actual SVG, with a meaningful `viewBox`, stable IDs, accessible title/description and explicit paint. `svg_inspect` checks references, source geometry and intended-size render matrices.
 
 ```json
 {"path":"art.svg","width":640,"height":640,"duration":3,"times":[0,0.75,1.5,2.25,3],"background":"transparent"}
@@ -51,7 +51,7 @@ The renderer seeks CSS/WAAPI animations and SVG SMIL roots to absolute time befo
 
 Track targets must exist. Duplicate owners, unordered times, changed numeric topology, invalid scalar dimensions and unsupported attributes are rejected. Path keys need valid commands beginning with moveto; transform keys need valid affine functions and argument counts. Colors interpolate RGB; numeric path/transform tokens interpolate with linear, smooth or hold easing. Convert arc paths to cubics before morphing `d`; arc flags require another interpolation contract. SMIL/data ownership collisions reject during preflight; CSS/data collisions reject before capture. Use one animation owner per property.
 
-The export preflight parses XML without accepting recovery and rejects scripts, event handlers, external references and foreign namespaces before a pipeline starts narration or music synthesis. Escape text such as `R&amp;D` correctly and declare the SVG namespace. The browser repeats XML/namespace checks before painting. Network and downloads are blocked, CSP forbids page scripts, and the only browser code executed is harness-owned clock logic. Arbitrary JavaScript/RAF and scroll timelines require an independently seekable page workflow. `motion_inspect` now also seeks discoverable SVG SMIL roots in page captures, and reports their sampling scope separately from CSS descriptors.
+The export preflight parses XML without accepting recovery and rejects scripts, event handlers, external references and foreign namespaces before a pipeline starts narration or music synthesis. Escape text such as `R&amp;D` correctly and declare the SVG namespace. The browser repeats XML/namespace checks before painting. Network and downloads are blocked, CSP forbids page scripts, and the only browser code executed is harness-owned clock logic. Arbitrary JavaScript/RAF and scroll timelines require an independently seekable page workflow.
 
 Video uses frame times `i/fps` and excludes the duration endpoint. Frames mode allows up to 12 timestamps and transparent PNG output. H.264 requires an opaque background and even dimensions. Exports are bounded to 30 seconds, 900 frames, 600 million pixel-frames and 512 MiB of frame data, with cancellation and queue limits. Receipts include source/tracks, contact sheets, timestamps, decoded video, cadence and optional loop diagnostics. `reducedMotion:true` selects the CSS preference; authored SMIL/data tracks still need a deliberate stable alternative.
 

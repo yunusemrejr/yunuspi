@@ -15,7 +15,7 @@ import { competenceStoreFile, FLEET_KEY, readCompetenceStore, writeCompetenceDel
 
 /** One targeted sentence per burst: what keeps failing and the cheapest way out. */
 const burstNote = (family: string) => {
-  const advice = ['edit', 'bulk_edit', 'write'].includes(family)
+  const advice = ['edit', 'write'].includes(family)
     ? 'Re-read the exact region with the read tool (offset and limit) and copy oldText verbatim from that output instead of retyping it from memory; if the file changed, read it again first.'
     : family === 'bash' || family === 'bg_run'
       ? 'Check the failing command in one minimal step (syntax, path, flags) before running the full pipeline again.'
@@ -163,17 +163,6 @@ export default function adaptiveWorkflows(pi: any) {
     const paths = new Set<string>();
     const nativePath = event.details?.fileMutation?.resolved ?? event.input?.path;
     if (['edit', 'write'].includes(event.toolName) && (!event.isError || event.details?.fileMutation) && typeof nativePath === 'string') paths.add(nativePath);
-    if (event.toolName === 'bulk_edit' && event.input?.action === 'apply') {
-      // The native bulk tool returns committed paths in its JSON result;
-      // input.files alone is a requested set, not a commit receipt.
-      for (const block of event.content ?? []) if (block.type === 'text') {
-        try {
-          const receipt = JSON.parse(block.text);
-          if (receipt.action === 'apply' && Array.isArray(receipt.files)) for (const file of receipt.files) if (typeof file === 'string') paths.add(file);
-        } catch { /* descriptive output is not a path receipt */ }
-      }
-      if (!paths.size && !event.isError && event.details?.files > 0 && Array.isArray(event.input?.files)) for (const file of event.input.files) if (typeof file === 'string') paths.add(file);
-    }
     const shell = ['bash', 'bg_run'].includes(event.toolName);
     const affected: string[] = [];
     let uncertain = false;
@@ -197,7 +186,6 @@ export default function adaptiveWorkflows(pi: any) {
       // source bytes above prevent that receipt from verifying a stale tree.
       if (!fresh && (observation || !projectCheckCommand(event.input?.command, ctx.cwd))) uncertain = true;
     }
-    if (event.toolName === 'bulk_edit' && event.input?.action === 'apply' && !paths.size && event.details?.files !== 0) uncertain = true;
     if (uncertain) uncertainSource = `unobserved:${++epoch}`;
     const before = revision; refreshRevision();
     return { paths: affected, changed: revision !== before, complete: !uncertain };
@@ -435,24 +423,6 @@ export default function adaptiveWorkflows(pi: any) {
       const identity = fileIdentity(ctx, item.source) ?? fileIdentity(ctx, item.source.replace(/[?#].*$/, ''));
       return Boolean(identity && identity.hash.slice(0, 16) === item.revision);
     };
-    if (call.revision === revision && ['ui_consistency', 'motion_inspect'].includes(event.toolName)) {
-      const data = event.details;
-      const problem = failed || data?.blocking > 0 || data?.findings?.some((finding: any) => finding?.severity === 'FAIL');
-      let stage = '', observed = false;
-      if (event.toolName === 'ui_consistency') {
-        stage = 'ui-consistency';
-        observed = data?.coverage?.complete === true && data.captures?.length >= 2 && data.captures.every((item: any) => item.ok === true && currentSource(item)) && !data.missing?.length && !data.findings?.length
-          && (data.coverage.comparedRoles > 0 || data.coverage.comparedTokens > 0);
-      } else {
-        stage = event.input?.mode === 'scroll' ? 'ui-scroll' : 'ui-motion';
-        observed = currentSource(data) && data.coverage?.complete === true && data.samples?.length >= 2 && data.reducedPass === 'checked' && !data.findings?.length
-          && (stage !== 'ui-scroll' || data.mode === 'scroll' && data.coverage?.complete === true && data.coverage.persistentDocument === true && data.coverage.hasScrollRange === true);
-      }
-      record(stage, 'inspection', source, problem ? 'failed' : observed ? 'passed' : 'blocked');
-      if (problem && !failed) execution.observe({ ok: false, failureKey: call.key });
-      // These are bounded measurement receipts. Appearance and interaction
-      // keep their existing independent review owners and remain open.
-    }
     if (call.revision === revision && event.toolName === 'seo_toolkit' && ['inspect', 'audit'].includes(event.input?.action)) {
       const data = event.details;
       const observed = data?.coverage?.rawHtml === true && (data.sha256 || data.pages?.length > 0);

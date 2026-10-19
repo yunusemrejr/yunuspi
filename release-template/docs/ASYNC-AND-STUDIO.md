@@ -1,6 +1,6 @@
 # Async execution, operations and creative tools
 
-YunusPi keeps its existing agent, session, model-routing, skill, hook and tool-discovery interfaces. Versions 0.2–0.4 strengthen their execution boundaries and add creative, operations and evidence tools, plus `service_detail` and `journal` actions on the existing `sys_probe`. The new tools are discovered with `tool_search`, so their schemas do not expand every initial prompt.
+YunusPi keeps its existing agent, session, model-routing, skill, hook and tool-discovery interfaces. Versions 0.2–0.4 strengthen their execution boundaries and add creative, operations and evidence tools. The new tools are discovered with `tool_search`, so their schemas do not expand every initial prompt.
 
 ## Async execution
 
@@ -46,17 +46,6 @@ Automatic capture receipts return at most six findings. They share a 600-element
 
 The WASM syntax check also returns advisory AST evidence for comments that exactly restate a following return and undocumented empty catches. Successful native `write`/`edit` tools run the same local WASM parser automatically on at most four source files per turn, up to 64 KiB per file, 20,000 AST nodes, 20 ms of traversal and three findings. Edit advice is restricted to an unambiguous replacement span. Explained catches, JSDoc, reasons and quoted source are exempt. Source revisions are deduplicated within the current session; activity notes report actual parser completions. Findings never fail a syntax check, launch another model or impose a repair loop. These narrow checks do not infer authorship or certify overall code/design quality.
 
-```js
-tool_search({ names: ["web_asset_check", "sys_probe"] })
-web_asset_check({ files: ["dist/index.html", "dist/app.css"], asset_root: "dist", public_path: "/" })
-sys_probe({ action: "service_detail", unit: "example.service", user: true })
-sys_probe({ action: "journal", unit: "example.service", user: true, limit: 20 })
-```
-
-`web_asset_check` checks local references in explicit HTML, CSS and web manifests, including case mismatches and hosting prefixes; it does not crawl, execute scripts or emulate a bundler. It uses the existing read-only utility worker and source evidence hashes.
-
-`sys_probe` service and journal actions use fixed read-only systemd commands. Journal responses contain bounded metadata, not arbitrary log message bodies. The first page defaults to the last hour; pass its `next_cursor` as `cursor` to resume after the last returned entry. `lookbackSeconds` selects an explicit window of up to one day. They neither restart services nor invoke sudo. Existing Git, package, environment, source and browser tools remain available for maintenance, deployment and Ubuntu application work.
-
 ## Verification and limits
 
 Regressions exercise real owned SDK dispatch, native tool discovery, persisted-session failure injection, cancellation, exclusive tool barriers, duplicate background launches, UTF-8 truncation, slow output capture, real Chromium pixels and real FFmpeg audio/video decoding. Independent reviews caught and repaired startup cancellation races, capture-file collision cleanup, initialized zero counters misreported as known zero usage, and explicit tool error flags discarded before session hooks and transcript recording.
@@ -76,5 +65,3 @@ After first flush, 500 ordinary append operations through the new write lock too
 `workspace_search` searches an explicit project root by literal path or content, including directories, with bounded scans and paginated source hashes. Narrow the root when a scan is partial; no matches never establishes absence outside the reported scope. Continuation requires the returned snapshot so changed sources cannot silently mix pages.
 
 Mail is handled by the `agentmail` tool, which remains the owner for authorized account operations.
-
-`ssh_plan` prepares inert SSH argv with explicit host/user/port and strict host-key checking. It does not read credentials or run connection configuration. Use `net_probe` with `action: "ssh"` to inspect one explicitly authorized server's identification banner; a banner proves neither identity nor authentication. Execute approved remote operations through the existing shell policy.

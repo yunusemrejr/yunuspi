@@ -1155,7 +1155,6 @@ function sessionSkills(ctx: any) {
     "fetch_content",
     "source_check",
     "lsp_diagnostics",
-    "symbol_expand",
   ];
   return {
     view: "skills",

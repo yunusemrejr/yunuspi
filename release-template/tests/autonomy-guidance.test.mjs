@@ -9,26 +9,13 @@ const load=p=>import(pathToFileURL(path.join(agent,'extensions',p)));
 const {createRelevantGuidance}=await load('lib/relevant-guidance.ts');
 const {matchHook}=await load('lib/session-hooks.ts');
 const {default:registerHooks}=await load('session-hooks.ts');
-function fixture(active=['sys_probe','artifact_check','math_check','read','write']){
+function fixture(active=['read','write']){
   const entries=[],ctx={cwd:'/autonomy/workspace',sessionManager:{getBranch:()=>entries}};
   const g=createRelevantGuidance({getActiveTools:()=>active,appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
   g.restore(ctx);
   return {g,start(prompt){g.userInput();g.start({prompt,systemPrompt:''},ctx);},step(toolName,input,isError=false){g.record({toolName,input,isError});},take(){const hints=g.candidates();assert.ok(hints.length<=2);g.commit(hints);return hints;}};
 }
 
-test('host and frame-budget intent discover concrete operations with bounded hints',()=>{
-  for(const [prompt,tool,expected]of [
-    ['Inspect the host environment','sys_probe',/action:"host"/],
-    ['Configure ESP32 firmware tooling','sys_probe',/action:"devices"/],
-    ['Measure WebGPU frame pacing','math_check',/frame_budget/],
-  ]){
-    const f=fixture();f.start(prompt);const hints=f.take();assert.ok(hints.some(h=>h.tool===tool&&expected.test(h.text)),prompt);
-    assert.ok(hints.every(h=>h.text.length<1000),'no catalog or long checklist');
-    f.step(tool,tool==='sys_probe'?{action:'host'}:{operation:'frame_budget'});
-    assert.ok(!f.g.candidates().some(h=>h.tool===tool),'successful use suppresses general discovery');
-    const unavailable=fixture(['read','write']);unavailable.start(prompt);assert.ok(!unavailable.g.candidates().some(h=>h.tool===tool),'child tool ceiling remains authoritative');
-  }
-});
 
 test('non-actionable, quoted, negated and disabled requests do not acquire domain tool hints',()=>{
   for(const prompt of ['Explain SVG filters','What is WebGPU?','> Inspect the host environment','```\nBuild SVG artwork\n```','Do not inspect SVG','Optimize WebGPU without tools']){

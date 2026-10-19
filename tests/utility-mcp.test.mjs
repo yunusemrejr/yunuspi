@@ -16,7 +16,6 @@ const agent = [path.join(template, 'agent'), path.resolve(template, '..')].find(
 const mod = name => import(pathToFileURL(path.join(agent, 'extensions/lib', name)));
 const { UtilityClient } = await mod('utility-client.ts');
 const { TOOLS, UTILITY_CONCURRENCY } = await mod('utility-mcp/catalog.mjs');
-const { netProbe } = await mod('utility-mcp/net.mjs');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-utility-test-'));
 const client = new UtilityClient(root);
 const write = (name, data) => { const p = path.join(root, name); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, typeof data === 'string' ? data : JSON.stringify(data)); };
@@ -53,11 +52,11 @@ with tarfile.open(p/'bundle.tar.gz','w:gz') as t:
 after(() => { client.close(); fs.rmSync(root, { recursive: true, force: true }); });
 
 test('single MCP exposes all bounded read-only tool schemas', async () => {
-  assert.deepEqual(TOOLS.map(t => t.name), ['workspace_search', 'ssh_plan', 'web_asset_check', 'sqlite_probe', 'package_probe', 'net_probe', 'archive_probe']);
+  assert.deepEqual(TOOLS.map(t => t.name), ['workspace_search', 'sqlite_probe']);
   assert.equal(new Set(TOOLS.map(t => t.name)).size, TOOLS.length);
   for (const tool of TOOLS) assert.equal(tool.annotations.readOnlyHint, true);
   const first = client.child.pid;
-  await call('package_probe', { package: 'demo' });
+  await call('workspace_search', { root: '.', query: 'demo', mode: 'path' });
   assert.equal(client.child.pid, first, 'same MCP process is reused');
 });
 test('SQLite tables/schema/describe/query/explain, pagination and parameter binding', async () => {
@@ -100,62 +99,6 @@ test('SQLite expensive recursion is interrupted and server remains usable', { ti
   assert.ok(Date.now() - start < 7500);
   assert.deepEqual((await call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: 'SELECT 7' })).rows, [[7]]);
 });
-test('package probe reports installed metadata, direct/transitive and exact npm resolution', async () => {
-  const value = await call('package_probe', { package: 'demo' });
-  assert.equal(value.installed_version, '2.3.4'); assert.equal(value.relationship, 'direct');
-  assert.equal(value.lockfile.status, 'exact-resolution'); assert.equal(value.lockfile.matches_installed_version, true);
-  assert.equal(value.exports['.'].types, './index.d.ts'); assert.equal(value.scripts.install, 'THIS_MUST_NEVER_EXECUTE');
-  assert.equal((await call('package_probe', { package: 'transitive' })).relationship, 'transitive');
-  assert.equal((await call('package_probe', { package: 'missing' })).installed, false);
-  await call('package_probe', { package: '../escape' }, true);
-  write('node_modules/demo/package.json', { name: 'demo', version: '9.0.0' });
-  const changed = await call('package_probe', { package: 'demo' });
-  assert.equal(changed.lockfile.matches_installed_version, false); assert.notEqual(changed.input_hash, value.input_hash);
-});
-test('pnpm and Yarn lock candidates do not masquerade as exact installed resolutions', async () => {
-  write('pnpm/package.json', { dependencies: { demo: '^1' } });
-  write('pnpm/node_modules/demo/package.json', { name: 'demo', version: '1.2.0' });
-  write('pnpm/pnpm-lock.yaml', "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      demo: {specifier: '^1', version: 1.2.0}\npackages:\n  demo@1.2.0:\n    resolution: {integrity: sha512-fixture}\n");
-  assert.equal((await call('package_probe', { package: 'demo', project: 'pnpm' })).lockfile.status, 'exact-resolution');
-  write('yarn/package.json', { dependencies: { demo: '^1' } });
-  write('yarn/node_modules/demo/package.json', { name: 'demo', version: '1.2.0' });
-  write('yarn/yarn.lock', '"demo@^1":\n  version "1.2.0"\n  resolved "https://registry.example/demo.tgz"\n');
-  const yarn = await call('package_probe', { package: 'demo', project: 'yarn' });
-  assert.equal(yarn.lockfile.resolution.version, '1.2.0');
-});
-test('ZIP/TAR list, stat, find and bounded text reads never extract members', async () => {
-  assert.equal((await call('archive_probe', { path: 'bundle.zip', action: 'list' })).total, 4);
-  assert.equal((await call('archive_probe', { path: 'bundle.zip', action: 'stat', member: 'hello.txt' })).size, 13);
-  assert.equal((await call('archive_probe', { path: 'bundle.zip', action: 'find', pattern: '*.txt' })).total, 3);
-  assert.equal((await call('archive_probe', { path: 'bundle.zip', action: 'read', member: 'hello.txt' })).text, 'hello archive');
-  assert.equal((await call('archive_probe', { path: 'bundle.tar.gz', action: 'read', member: 'hello.txt' })).text, 'hello');
-  for (const member of ['../escape.txt', 'binary.bin', 'big.txt']) await call('archive_probe', { path: 'bundle.zip', action: 'read', member }, true);
-  await call('archive_probe', { path: 'bundle.tar.gz', action: 'read', member: 'link' }, true);
-  assert.ok(!fs.existsSync(path.join(root, 'hello.txt')));
-});
-test('network accepts one local TCP endpoint, rejects ranges, and returns structured DNS', async () => {
-  const server = net.createServer(socket => socket.end());
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const result = await call('net_probe', { action: 'tcp', host: '127.0.0.1', port: server.address().port });
-    assert.equal(result.connected, true); assert.equal(result.cacheable, false);
-  } finally { await new Promise(resolve => server.close(resolve)); }
-  for (const host of ['127.0.0.0/24', '*.example.com', 'https://example.com', 'host:123']) await call('net_probe', { action: 'tcp', host, port: 123 }, true);
-  const original = dns.resolve;
-  try { dns.resolve = async (host, type) => { assert.equal(host, 'fixture.test'); assert.equal(type, 'MX'); return [{ exchange: 'mx.fixture.test', priority: 10 }]; }; assert.equal((await netProbe({ action: 'dns', host: 'fixture.test', record_type: 'MX' })).records[0].priority, 10); }
-  finally { dns.resolve = original; }
-});
-test('TLS returns certificate details and self-signed chain errors without HTTP traffic', async () => {
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(root, 'tls-key.pem'), '-out', path.join(root, 'tls-cert.pem'), '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost'], { timeout: 5000, stdio: 'ignore' });
-  let bytes = 0;
-  const server = tls.createServer({ key: fs.readFileSync(path.join(root, 'tls-key.pem')), cert: fs.readFileSync(path.join(root, 'tls-cert.pem')) }, socket => socket.on('data', data => { bytes += data.length; }));
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const result = await call('net_probe', { action: 'tls', host: '127.0.0.1', port: server.address().port, servername: 'localhost' });
-    assert.equal(result.connected, true); assert.equal(result.authorized, false); assert.equal(result.chain[0].subject.CN, 'localhost');
-    assert.match(result.chain[0].san, /localhost/); assert.ok(result.chain_errors.length); assert.equal(bytes, 0);
-  } finally { await new Promise(resolve => server.close(resolve)); }
-});
 test('server cancellation and crash recovery require no manual setup', async () => {
   const controller = new AbortController();
   const pending = client.call('sqlite_probe', { path: 'data.sqlite', action: 'query', sql: 'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n' }, controller.signal);
@@ -163,7 +106,7 @@ test('server cancellation and crash recovery require no manual setup', async () 
   await assert.rejects(pending, /cancelled/);
   const old = client.child;
   const exited = new Promise(resolve => old.once('exit', resolve)); old.kill('SIGKILL'); await exited;
-  await call('package_probe', { package: 'demo' });
+  await call('workspace_search', { root: '.', query: 'demo', mode: 'path' });
   assert.notEqual(client.child.pid, old.pid);
 });
 test('output remains valid JSON within cap for large results', async () => {
@@ -176,10 +119,10 @@ test('extension prewarms automatically and closes its MCP process at shutdown', 
   extension({ on: (name, fn) => events.set(name, fn), registerTool: t => registered.set(t.name, t) });
   // The owner also registers the local checks and code-context tools that subagents load through this file.
   for (const spec of TOOLS) assert.ok(registered.has(spec.name), spec.name);
-  for (const name of ['math_check', 'value_convert', 'data_query', 'context_slice', 'symbol_expand', 'ast_diff']) assert.ok(registered.has(name), name);
+  for (const name of ['context_slice']) assert.ok(registered.has(name), name);
   await events.get('session_start')({}, { cwd: root });
   try {
-    const value = await registered.get('package_probe').execute('id', { package: 'demo' }, undefined, undefined, { cwd: root });
+    const value = await registered.get('workspace_search').execute('id', { root: '.', query: 'demo', mode: 'path' }, undefined, undefined, { cwd: root });
     assert.equal(value.isError, false);
     for (const spec of TOOLS) assert.ok(registered.get(spec.name).promptGuidelines.length);
   } finally { events.get('session_shutdown')(); }
@@ -204,9 +147,9 @@ test('late worker callbacks cannot cancel a replacement request reusing its ID',
   const fixture = protocolFixture();
   try {
     fixture.send(1, 'initialize'); fixture.send(undefined, 'notifications/initialized');
-    fixture.send(2, 'tools/call', {name:'package_probe',arguments:{package:'demo'}});
+    fixture.send(2, 'tools/call', {name:'workspace_search',arguments:{root:'.',query:'demo',mode:'path'}});
     const old = fixture.workers[0]; old.emit('message', {content:[]});
-    fixture.send(2, 'tools/call', {name:'package_probe',arguments:{package:'demo'}});
+    fixture.send(2, 'tools/call', {name:'workspace_search',arguments:{root:'.',query:'demo',mode:'path'}});
     const replacement = fixture.workers[1];
     old.emit('exit', 0);
     assert.equal(replacement.terminated, undefined, 'old exit must not kill the new worker');

@@ -1,6 +1,6 @@
 # Motion and model preflight
 
-Use the existing owners: CSS/WAAPI page motion uses `motion_inspect`; encoded video uses `media_info`; imported 3D models use `video_assets` and the existing `Model3D`/Three.js renderer. A preflight receipt is technical evidence. Appearance, easing and storytelling still require actual pixels and playback.
+Use the existing owners: encoded video uses `media_info`; imported 3D models use `video_assets` and the existing `Model3D`/Three.js renderer. A preflight receipt is technical evidence. Appearance, easing and storytelling still require actual pixels and playback.
 
 ## Inspect the delivery clock
 
@@ -11,8 +11,6 @@ Use the existing owners: CSS/WAAPI page motion uses `motion_inspect`; encoded vi
 `media_info` decodes every frame in the window into a 64×64 grayscale proxy without an fps filter. It reports original presentation timestamp cadence, the largest gaps/changes, duplicate frames, low-change stretches of at least 0.5 seconds, and an optional last→first boundary comparison. The default window is 10 seconds; maximum 30 seconds and 1800 frames. A longer/high-fps window fails with a request to shorten it, rather than silently sampling. Temporary proxy files are removed on success, failure and cancellation. The proxy is at most 7,372,800 bytes; the receipt stores summaries, not a per-frame log.
 
 `expectedFps` checks an intended fixed export clock. Cadence differing by more than 50% and a typical interval differing by more than 5% become technical failures. Without a requested clock, variable cadence is advisory. `loop:true` compares the decoded last→first boundary against ordinary adjacent changes; the requested window must span the intended loop. A boundary warning needs playback inspection. Static holds can be intentional and are warnings.
-
-`motion_inspect` samples each discoverable CSS/WAAPI animation at its own local time. Same animation count under reduced-motion never establishes a failure. A blocking finding requires equivalent running infinite transform timing and actual changing reduced-state pixels. Paused alternatives do not fail when forced seek samples move. Reduced capture failure is reported as unknown; a disabled pass is recorded as disabled. Matching known loop periods receive 0/period endpoint comparison, not an arbitrary first/last “seam” claim. Neither endpoint parity nor sparse frames establish velocity continuity or smoothness. JS/rAF, scroll timelines and frames remain outside this clock.
 
 ## Reuse and inspect a model
 

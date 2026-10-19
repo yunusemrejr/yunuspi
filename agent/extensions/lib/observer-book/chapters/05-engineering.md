@@ -4,7 +4,7 @@ part: engineering
 title: Engineering patterns
 summary: Durable software practice: smallest sufficient change, local idioms, boundaries, error handling, ownership of state, abstraction timing and safe refactoring.
 terms: refactor function module class interface abstraction duplicate duplication helper util utility pattern design clean maintain maintainable readable naming name rename error exception handle handling state global config configuration dependency coupling
-tools: edit write bulk_edit source_check
+tools: edit write source_check
 skills: engineering
 ---
 

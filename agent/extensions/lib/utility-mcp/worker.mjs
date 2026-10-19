@@ -1,13 +1,12 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { Files, bounded } from './files.mjs';
+import { bounded } from './files.mjs';
 
 const { root, name, args } = workerData;
 try {
-  const files = new Files(root);
   let result;
-  if (['sqlite_probe', 'archive_probe', 'workspace_search'].includes(name)) {
+  if (['sqlite_probe', 'workspace_search'].includes(name)) {
     result = await new Promise((resolve, reject) => {
       const process = execFile('python3', ['-I', fileURLToPath(new URL('./probe.py', import.meta.url))], { timeout: 5200, killSignal: 'SIGKILL', maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
         if (error) return reject(Error('Inspection process failed or exceeded limits'));
@@ -17,12 +16,6 @@ try {
       process.stdin.end(JSON.stringify({ root, name, args }));
     });
     if (result.error) throw Error(result.error);
-  } else if (name === 'net_probe') result = await (await import('./net.mjs')).netProbe(args);
-  else if (name === 'ssh_plan') result = (await import('./net.mjs')).sshPlan(args);
-  else {
-    const [module, method] = { web_asset_check: ['web-assets','webAssetCheck'], package_probe: ['package', 'packageProbe'] }[name];
-    result = await (await import(`./${module}.mjs`))[method](files, args);
-    result.input_hash = files.fingerprint(name, args);
   }
   parentPort.postMessage({ content: [{ type: 'text', text: bounded(result) }], isError: false });
 } catch (error) {

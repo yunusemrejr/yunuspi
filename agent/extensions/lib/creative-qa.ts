@@ -11,8 +11,7 @@
  * revision-sensitive receipt. ui_explore renders the viewport/state matrix
  * (viewports × theme × reduced-motion × full page) with per-state DOM facts
  * so narrow-width breakage and missing states surface without manual
- * clicking. creative_compare renders 2..4 direction variants side by side
- * for design fusion. Open blocking verdicts feed the completion gate.
+ * clicking. Open blocking verdicts feed the completion gate.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -359,82 +358,6 @@ export async function uiExploreRun(
   return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report };
 }
 
-// ─────────────────────────── ui_consistency ──────────────────────────────
-
-export function planUiConsistency(params: {sources?:unknown;selectorGroups?:unknown;tokens?:unknown;width?:unknown;height?:unknown;colorScheme?:unknown}) {
-  if (!Array.isArray(params.sources) || params.sources.length < 2 || params.sources.length > 4 || params.sources.some(source=>typeof source !== 'string'||!source.trim()||source.length>4096)) throw Error('ui_consistency needs 2..4 source paths or URLs');
-  const sources = [...new Set(params.sources as string[])];
-  if (sources.length < 2) throw Error('ui_consistency needs at least two distinct sources');
-  const width = params.width ?? 1440,height = params.height ?? 900;
-  if (![width,height].every(value=>Number.isInteger(value)&&Number(value)>=200&&Number(value)<=2048)) throw Error('Consistency viewport must be integer 200..2048');
-  if (params.colorScheme !== undefined && !['light','dark'].includes(String(params.colorScheme))) throw Error('colorScheme must be light or dark');
-  return {sources,width:Number(width),height:Number(height),colorScheme:params.colorScheme === 'dark'?'dark':'light',snapshot:normalizeUiSnapshotOptions({groups:params.selectorGroups,tokens:params.tokens})};
-}
-
-/** Same role/variant and media conditions are compared. Different declared
- * variants never become drift merely because their styles differ. */
-export function compareUiSnapshots(captures:any[]) {
-  const findings:any[] = [],missing:any[] = [], variants:any[] = [];
-  const good = captures.filter(c=>c.ok&&c.snapshot);
-  if (good.length < 2) return {findings,findingsTruncated:false,missing:[{reason:'fewer-than-two-captured-sources'}],missingTruncated:false,variants,comparedTokens:0,comparedRoles:0};
-  const tokenNames = new Set<string>(good.flatMap(c=>(c.snapshot.tokens ?? []).map((t:any)=>String(t.name))));
-  const roleKeys = new Set<string>(good.flatMap(c=>(c.snapshot.roles ?? []).map((role:any)=>`${role.name}:${role.variant}`)));
-  let comparedTokens = 0,comparedRoles = 0;
-  for (const name of tokenNames) {
-    const measured = good.map(c=>({source:c.source,token:(c.snapshot.tokens ?? []).find((t:any)=>t.name===name&&t.status==='measured')}));
-    for (const c of measured.filter(c=>!c.token)) missing.push({source:c.source,token:name,reason:'token-unmeasured'});
-    const values = measured.filter(c=>c.token);
-    if (values.length < 2) continue;
-    comparedTokens++;
-    const baseline = values[0];
-    for (const current of values.slice(1)) if (current.token.value !== baseline.token.value)
-      findings.push({kind:'token-drift',severity:'WARN',token:name,baseline:{source:baseline.source,value:baseline.token.value},actual:{source:current.source,value:current.token.value},note:'Resolve against the shared token contract or document the intentional theme/route variant.'});
-  }
-  for (const key of roleKeys) {
-    const [name,variant] = key.split(':');
-    variants.push({name,variant});
-    const measured = good.map(c=>({source:c.source,roles:(c.snapshot.roles ?? []).filter((r:any)=>r.name===name&&r.variant===variant)}));
-    for (const c of measured.filter(c=>!c.roles.length)) missing.push({source:c.source,role:name,variant,reason:'shared-role-unmeasured'});
-    const values = measured.filter(c=>c.roles.length);
-    if (values.length < 2) continue;
-    comparedRoles++;
-    const baseline = values[0],signatures = baseline.roles.map((r:any)=>JSON.stringify(r.styles)).sort().join('|');
-    for (const current of values.slice(1)) {
-      if (current.roles.map((r:any)=>JSON.stringify(r.styles)).sort().join('|')===signatures) continue;
-      const a = baseline.roles[0].styles,b=current.roles[0].styles;
-      const differences = Object.keys(a).filter(property=>a[property]!==b[property]).slice(0,12).map(property=>({property,baseline:a[property],actual:b[property]}));
-      findings.push({kind:'role-drift',severity:'WARN',role:name,variant,baselineSource:baseline.source,actualSource:current.source,differences,styleCounts:[baseline.roles.length,current.roles.length],note:'Same declared role/variant has different computed styles. Confirm the shared component contract; intentional variants can use data-ui-variant or selectorGroups.variant.'});
-    }
-  }
-  for (const capture of good) {
-    for (const item of capture.snapshot.missing ?? []) missing.push({source:capture.source,...item});
-    if (capture.snapshot.truncated) missing.push({source:capture.source,reason:'snapshot-truncated'});
-  }
-  return {findings:findings.slice(0,32),findingsTruncated:findings.length>32,missing:missing.slice(0,48),missingTruncated:missing.length>48,variants:variants.slice(0,24),comparedTokens,comparedRoles};
-}
-
-export async function uiConsistencyRun(params:any,cwd:string,signal:AbortSignal|undefined,capture:QACapture) {
-  const plan = planUiConsistency(params),dir=await qaFolder(params.outputDir,cwd,'ui-review','consistency'),captures:any[]=[];
-  for (const [index,source] of plan.sources.entries()) {
-    signal?.throwIfAborted();
-    const file=path.join(dir,`source-${index}.png`),initialRevision=await sourceRevision(source,cwd);
-    try {
-      const receipt=await capture({source,width:plan.width,height:plan.height,fullPage:false,colorScheme:plan.colorScheme,uiSnapshot:plan.snapshot,timeoutMs:30000},file,cwd,signal);
-      const revision=await sourceRevision(source,cwd);
-      captures.push({source,initialRevision,revision,sourceChanged:revision!==initialRevision,ok:!!receipt.uiSnapshot,file:relative(cwd,file),documentSha256:receipt.conditions?.documentSha256 ?? null,snapshot:receipt.uiSnapshot,
-        captureComplete:!receipt.conditions?.captureFallback?.incomplete,errors:(receipt.errors ?? []).slice(0,6)});
-    } catch (error:any) {if(signal?.aborted)throw error;captures.push({source,initialRevision,revision:await sourceRevision(source,cwd),file:relative(cwd,file),ok:false,error:String(error.message ?? error).slice(0,300)});}
-  }
-  const comparison=compareUiSnapshots(captures);
-  const complete=captures.every(c=>c.ok&&!c.sourceChanged&&c.captureComplete&&!c.snapshot.truncated&&!c.errors?.length)&&!comparison.missing.length&&!comparison.findingsTruncated;
-  const report={at:new Date().toISOString(),conditions:{width:plan.width,height:plan.height,colorScheme:plan.colorScheme},coverage:{requested:plan.sources.length,captured:captures.filter(c=>c.ok).length,complete,comparedTokens:comparison.comparedTokens,comparedRoles:comparison.comparedRoles},captures,...comparison,
-    note:'Read-only computed style and token evidence from the same viewport/theme. Differences can be intentional. Missing/truncated roles, source changes, dynamic state, pseudo-elements, shadow roots and interactions remain unverified. Inspect pixels and compare the actual component contract before changing design.'};
-  const file=path.join(dir,'report.json');await fs.writeFile(file,JSON.stringify(report,null,1)+'\n',{flag:'wx'});
-  return {...report,dir:relative(cwd,dir),report:relative(cwd,file),captures:captures.map(({snapshot,...summary})=>({...summary,roles:snapshot?.roles.length ?? 0,tokens:snapshot?.tokens.length ?? 0,truncated:snapshot?.truncated ?? true}))};
-}
-
-// ─────────────────────────── visual_review ────────────────────────────────
-
 const INK_QUADRANTS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 
 /** Ink distribution across quadrants: a proxy for compositional balance,
@@ -636,76 +559,6 @@ export function creativeVerificationLines(receipts: readonly VisualReceipt[], di
   }
   if (direction && !receipts.length && !mediaReviewed) lines.push(`creative direction "${direction.name}" is set but no visual review is recorded yet`);
   return lines.slice(0, 8);
-}
-
-// ─────────────────────────── creative_compare ────────────────────────────
-
-export interface ComparePlan {
-  sources: string[];
-  width: number;
-  height: number;
-}
-
-/** Validate a variant-comparison plan. Pure. */
-export function planCompare(params: { sources?: unknown; variants?: unknown; width?: unknown; height?: unknown }): ComparePlan {
-  const raw = Array.isArray(params.sources) ? params.sources : Array.isArray(params.variants) ? params.variants : [];
-  const sources = [...new Set(raw.map(String).filter(Boolean))].slice(0, 4);
-  if (sources.length < 2) throw new Error("creative_compare needs 2..4 variant sources (HTML paths or URLs) rendered at the same width");
-  return {
-    sources,
-    width: Math.max(200, Math.min(2048, Math.round(Number(params.width) || 1280))),
-    height: Math.max(200, Math.min(2048, Math.round(Number(params.height) || 800))),
-  };
-}
-
-export async function creativeCompareRun(
-  plan: ComparePlan, cwd: string, signal: AbortSignal | undefined, capture: QACapture, direction?: CreativeDirection,
-) {
-  const dir = await qaFolder(undefined, cwd, "ui-review", "compare");
-  const frames: Array<{ source: string; file: string; img: Rgba }> = [];
-  for (let i = 0; i < plan.sources.length; i++) {
-    signal?.throwIfAborted();
-    const dest = path.join(dir, `variant-${i + 1}.png`);
-    await capture({ source: plan.sources[i], width: plan.width, height: plan.height, fullPage: false, timeoutMs: 30_000 }, dest, cwd, signal);
-    // Exact decode width guarantees the shared comparison canvas; heights
-    // crop to the overlap below.
-    const img = await decodeImage(await fs.readFile(dest), { exactWidth: 1280, maxPixels: 6_000_000 }, signal);
-    frames.push({ source: plan.sources[i], file: relative(cwd, dest), img });
-  }
-  const pairs: any[] = [];
-  for (let a = 0; a < frames.length; a++) for (let b = a + 1; b < frames.length; b++) {
-    const height = Math.min(frames[a].img.height, frames[b].img.height);
-    const left = cropRgba(frames[a].img, { x: 0, y: 0, width: frames[a].img.width, height });
-    const r = cropRgba(frames[b].img, { x: 0, y: 0, width: frames[a].img.width, height });
-    const { comparison } = compareImages(left, r);
-    const paletteA = extractPalette(left, { max: 6 }).map((c) => hex(c.rgb));
-    const paletteB = extractPalette(r, { max: 6 }).map((c) => hex(c.rgb));
-    pairs.push({
-      variants: [plan.sources[a], plan.sources[b]],
-      ssim: Math.round(comparison.ssim * 1000) / 1000,
-      changedShare: Math.round(comparison.changed * 100) / 10_000,
-      meanDelta: Math.round(comparison.meanDelta * 100) / 100,
-      paletteA, paletteB,
-    });
-  }
-  const strip = composeRow(frames.map((f) => f.img), 12);
-  const stripPath = path.join(dir, "compare.png");
-  await fs.writeFile(stripPath, await encodeImage(strip, "png", { maxWidth: 2400 }, signal), { flag: "wx" });
-  const report = {
-    at: new Date().toISOString(), width: plan.width, height: plan.height,
-    variants: frames.map((f, i) => ({ label: `variant-${i + 1}`, source: f.source, file: f.file })),
-    strip: relative(cwd, stripPath), pairs,
-    ...(direction ? { direction: directionSummary(direction) } : {}),
-    note: "Deltas are structural difference, not quality: SSIM near 1 means near-identical variants (weak divergence), near 0 means unrelated concepts. Judge each variant against the creative brief and synthesize one direction; record it with creative_direct set before building.",
-  };
-  await fs.writeFile(path.join(dir, "compare.json"), JSON.stringify(report, null, 1) + "\n", { flag: "wx" });
-  return { dir: relative(cwd, dir), ...report };
-}
-
-/** Palette-similarity helper for direction conformance notes. Pure. */
-export function paletteContrastNote(palette: Array<{ hex: string; role: string; contrastOnBackground: number }>): string {
-  const text = palette.find((c) => c.role === "text");
-  return text ? `text on background ${text.contrastOnBackground}:1` : "no text role measured";
 }
 
 export { contrastRatio };

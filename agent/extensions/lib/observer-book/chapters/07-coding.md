@@ -4,7 +4,7 @@ part: engineering
 title: Coding craft
 summary: Line-level quality: readable control flow, small honest functions, immutability, types as documentation, async correctness, comments that explain why, and idiomatic use of each language.
 terms: code coding function functions readable readability control flow nested nesting early return immutable immutability const mutable type types typescript python go rust javascript async await promise callback comment comments idiom idiomatic lint style
-tools: source_check symbol_expand
+tools: source_check
 skills: engineering systems-languages
 ---
 

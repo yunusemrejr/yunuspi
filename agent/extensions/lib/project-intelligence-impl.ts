@@ -36,11 +36,10 @@ import {
 import { choices } from "./tool-schema.ts";
 const enabled = () => process.env.PI_PROJECT_INTELLIGENCE !== "off";
 const KEY = "project-intelligence-context";
-const MUTATING = new Set(["write", "edit", "bulk_edit"]);
+const MUTATING = new Set(["write", "edit"]);
 const RELEVANT = new Set([
   "write",
   "edit",
-  "bulk_edit",
   "read",
   "grep",
   "find",
@@ -54,7 +53,6 @@ const RELEVANT = new Set([
   "symbol_search",
   "read_symbol",
   "context_slice",
-  "symbol_expand",
   "context_code",
   "project_report",
   "memory_write",
@@ -609,28 +607,6 @@ export default function projectIntelligence(pi: any) {
     if (!enabled() || !client || event.isError) return;
     const tool = event.toolName ?? call?.tool,
       input = event.input ?? call?.input;
-    if (tool === "bulk_edit" && input?.action === "preview") {
-      try {
-        const text = event.content?.find(
-          (part: any) => part.type === "text",
-        )?.text;
-        const result =
-          typeof text === "string" && text.length < 128000
-            ? JSON.parse(text)
-            : undefined;
-        const focus = Array.isArray(result?.files)
-          ? result.files
-              .slice(0, 8)
-              .map((entry: any) => filePath(entry))
-              .filter(Boolean)
-          : [];
-        if (focus.length)
-          await retrieve("", { focus, direction: "both", hops: 2 });
-      } catch {
-        /* only the structured native preview supplies target files */
-      }
-      if (!ownsContext(ctx)) return;
-    }
     if (MUTATING.has(tool)) {
       const file = filePath(input);
       if (file) {
@@ -656,7 +632,7 @@ export default function projectIntelligence(pi: any) {
         )
         .catch(() => {});
     if (
-      ["bash", "git_info", "memory_write", "subagent", "bulk_edit"].includes(
+      ["bash", "git_info", "memory_write", "subagent"].includes(
         tool,
       )
     )

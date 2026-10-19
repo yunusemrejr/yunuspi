@@ -13,7 +13,7 @@ export function failureCategory(error: string) {
   // failed validation itself before words such as acceptance/budget in that echo.
   if (/^\s*Validation failed for tool\b/i.test(error))
     return { category: "input", recovery: "Read the active tool schema and correct the rejected arguments before retrying." };
-  if (/^\s*Before (?:edit|write|bulk_edit|bash)\b[\s\S]*read the matching workflow/i.test(error))
+  if (/^\s*Before (?:edit|write|bash)\b[\s\S]*read the matching workflow/i.test(error))
     return { category: "guard", recovery: "This receipt came from a legacy skill-read checkpoint. Skills are advisory in the current harness; inspect the live tool contract and current guard before retrying, without treating a guide read or deferral as required." };
   if (/Current independent reviews.*missing evidence|Current project test evidence is unresolved/i.test(error))
     return { category: "verification", recovery: "Inspect current review and test evidence. Record unavailable evidence as blocked; do not repeat an accepted assessment while gaps remain." };

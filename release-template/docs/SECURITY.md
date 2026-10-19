@@ -18,7 +18,6 @@ Hardlinks can alias the same inode through a different path. Native writes compa
 
 Public export is separate from mutation protection. Use the sanitized exporter, review the generated diff, and run the public scanner before publishing. Hooks and CI provide defense in depth; no pattern scanner can identify every confidential sentence. Never publish private backup archives or session histories.
 
-
 ## Shared skill sources
 
 Maintenance protection also covers global skill sources: the active `agent/skills`, `~/.agents/skills`, `~/.codex/skills`, and explicit `skills` paths from the harness's global `agent/settings.json` (for example `~/skills`). The guard captures these paths at trusted module startup. Existing skill symlink entries, their parent links, and their physical referents are included; configured destinations remain protected even before they exist. Changing cwd, clearing environment variables, or launching inside a shared skill directory grants no maintenance authority. Project settings and ordinary project-local `.agents/skills` and `.pi/skills` do not enlarge this global scope.
@@ -35,8 +34,6 @@ Definite system/home/temp-root mutations are blocked even from a broadly rooted 
 
 This is bounded accident prevention, not a full shell interpreter or general operating-system sandbox. Complex expansion, sourced scripts, arbitrary Python/JavaScript programs, remote commands and other execution tools are not comprehensively modeled by this hook. The independent harness mount boundary still applies to guarded executable descendants. Concurrent changes by other host processes remain outside its guarantees.
 
-`bulk_edit` applies only a preview issued in the current tool session, bound to the canonical workspace, contents, file identities and modes. Tokens expire after 15 minutes and are consumed on apply. All entries are checked before writing, then checked again at each write; parent symlink escapes are rejected. Writes use exclusive temporary files and per-file atomic replacement. A batch is not an all-or-nothing transaction: cancellation or later I/O failure can leave earlier files changed, and the error reports that count. Use Git or a snapshot for rollback.
-
 Native whole-file writes that would remove over 95% of an existing 16 KiB–2 MB text file require review or an exact-old-text edit. Repetition checks only interrupt large outputs (at least 8 KiB) dominated by one substantive line; ordinary repeated rows and short examples pass. These are contextual error signals, not proof that an edit is incorrect.
 
 ## Disposable experiments
@@ -44,8 +41,6 @@ Native whole-file writes that would remove over 95% of an existing 16 KiB–2 MB
 `sandbox_run` executes supplied code through its dedicated trusted launcher and a separate Bubblewrap namespace with no writable host mounts, no network and no host credentials. A systemd user service bounds the whole process tree, and the launcher verifies actual cgroup v2 limits before running code. Explicit source inputs are copied through no-follow directory descriptors; symlinks, hard links, directories, special files and oversized inputs are refused. The tool does not grant host shell or project-write access to review agents. See [sandbox lifecycle, limits and threat boundary](SANDBOXES.md).
 
 ## Host and device continuity
-
-`sys_probe({action:"host"})` reports bounded OS resources, inherited session indicators, network-interface state/default-route candidates, power status and toolchain presence. `action:"devices"` lists serial, GPIO, I2C, SPI and GPU character-device candidates using metadata only. It never opens a serial port, sends I/O, flashes firmware or starts a stress test. Missing metadata stays unknown; device permissions do not prove identity or authorize a write. Network addresses, gateways, serial numbers and environment values are omitted.
 
 The existing filesystem guard preflights both `bash` and `bg_run`. Recognized connectivity changes, critical service disruption, power/sleep operations, broad process kills, signals to the harness or its ancestors, raw-device destruction and host stress commands are blocked. Diagnostics remain available. Firmware writes and elevated script/test entrypoints require review of the exact invocation. Use compile-only firmware checks, explicit unrelated PIDs or the existing managed-job controls, and bounded `sandbox_run` fixtures where appropriate. An in-session confirmation does not make loss of the active control path safe.
 

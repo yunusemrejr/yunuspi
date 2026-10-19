@@ -116,7 +116,6 @@ export function createRelevantGuidance(pi: any) {
   const releaseAllHints = () => { try { shadowPlane.releaseAll(); } catch { /* hygiene never breaks delivery */ } };
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
-  const bulkFiles = new Map<string, string[]>();
   // Skills remain documentation even in installations with the old required
   // setting. Preserve routing, discovery and honest read status, never a gate.
   const reviewMode = (): 'off' | 'advisory' => {
@@ -479,8 +478,6 @@ export function createRelevantGuidance(pi: any) {
       if (!/\b(test|reproduce|try|check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|group|categori[sz]e|classify|triage|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate|search|find|connect|build|create|implement|optimize|configure|deploy|flash)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
       if (/\b(?:rank|group|categori[sz]e|classify|prioriti[sz]e|triage|consolidate|analy[sz]e|compare|extract)\b/i.test(part) && /\b(?:findings?|errors?|failures?|candidates?|options?|results?|evidence|sources?|requirements?|records?|logs?|reports?|patches|changes|code)\b/i.test(part))
         utilityHint('micro_task','Bounded analysis: batch supplied evidence as micro_task({action:"analyze",input:criterion,items:[{id,text,source}],categories:[...]}) for ranked IDs and category groups. Use run with a supported kind for error hypotheses, finding consolidation, extraction or patch comparison. Prefer one packet over repeated main-model analysis or a full child when no tools are needed; inspect retained sources for the final decision.');
-      if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
-        utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
       if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
         utilityHint('git_info','Git evidence: git_info({action:"scope"}) identifies project/worktree ownership; session history branches and checkpoints are not commits. git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
       if (/\b(browser|website|web page)\b/i.test(part) && /\b(navigate|fill|submit|inspect|use)\b/i.test(part))
@@ -493,20 +490,8 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('sandbox_run','Disposable experiments: sandbox_run runs a bounded script in a fresh environment with explicit copied files or fixtures, no project/home mounts or network, and automatic cleanup. Combine related steps in one call. If isolation cannot start, report it; never silently run the experiment on the host.');
       if (/\b(http|api endpoint|response headers?|status code)\b/i.test(part))
         utilityHint('http_request','HTTP inspection: http_request returns status, headers and a capped body for a bounded request. Reuse it for endpoint diagnostics; preserve authorization and do not repeat an uncertain mutation.');
-      if (/\b(listening ports?|systemd|service status|processes|cpu usage|memory usage)\b/i.test(part))
-        utilityHint('sys_probe','System facts: sys_probe inspects processes, listening ports and systemd state without assembling shell pipelines. Use the narrowest supported operation and the returned current facts.');
-      if (/\b(linux|laptop|host machine|host environment|wifi|wi-fi|network interface|firewall|reboot|poweroff|stress test|raspberry\s*pi|esp32|esp8266|esp-idf|arduino|microcontroller|firmware|gpio|serial port|i2c|spi)\b/i.test(part))
-        utilityHint('sys_probe','Host/device preflight: sys_probe({action:"host"}) reports resources and session dependencies; action:"devices" lists candidate nodes without opening them. Preserve connectivity, parent processes and mounted data. Inspect test/build entrypoints before execution; use bounded sandbox_run for experiments. Board identity, voltage, pins and a recovery route must be verified before device writes.');
       if (/\b(sqlite|sqlite3|database tables?)\b/i.test(part))
         utilityHint('sqlite_probe','SQLite evidence: sqlite_probe inspects an explicit workspace database using tables/schema/describe/query/explain. Use its bounded read-only results instead of Python or sqlite3 shell snippets.');
-      if (/\b(installed (?:package|version|dependency)|package exports|peer dependencies|lockfile|node_modules)\b/i.test(part))
-        utilityHint('package_probe','Dependency evidence: package_probe returns the physically installed Node package and lock resolution. Check this version and exports before reasoning from remembered APIs.');
-      if (/\b(dns|tcp connectivity|tls certificate|certificate expir|connection refused)\b/i.test(part) || /\bconnect(?:ing|ion)? to\b/i.test(part) || /\b(unreachable|refused|timed?\s?out)\b/i.test(part))
-        utilityHint('net_probe','Connection diagnostics: net_probe checks DNS, one TCP host:port or TLS certificate validation. Use one explicit endpoint; no network scanning.');
-      if (/\b(archive contents?|zip contents?|tar contents?|inspect (?:an? )?archive)\b/i.test(part))
-        utilityHint('archive_probe','Archive inspection: archive_probe lists, finds and stats members or reads one bounded text member without extraction.');
-      if (/\b(replace|rename)\b/i.test(part) && /\b(across|multiple|several|all)\b[^.!?]{0,60}\bfiles\b/i.test(part))
-        utilityHint('bulk_edit','Repeated edits: bulk_edit previews a bounded multi-file literal/regex replacement, then applies its preview token. Review the matched files and diff; use semantic rename tooling when identifiers need binding-aware changes.');
       if (/\b(fill|submit|navigate|inspect)\b/i.test(part) && /\b(web|website|browser|login|checkout)\b/i.test(part) && /\b(forms?|login|checkout)\b/i.test(part))
         utilityHint('web_probe','Web forms: web_probe gives read-only page reconnaissance, including visible form field names and browser handoff hints. Use an available interactive browser for filling/submitting and verify the postcondition. The probe has no cookies, login state or submission ability.');
       if (/\b(run|start|launch)\b/i.test(part) && /\b(full test suite|integration tests|build|benchmark|dev server|long.running|background (?:job|task)|queued jobs)\b/i.test(part))
@@ -519,15 +504,6 @@ export function createRelevantGuidance(pi: any) {
         else
           add({key:'delegation-contract',tool:'subagent',priority:79,text:'Independent work: inspect subagent({action:"list",capabilities:true}) to select an executable agent with the needed tools. Use native tasks/chain and commonTask for bounded shared briefs, or the supported workflow helpers for dependencies and recovery. Pass task-relevant skills and acceptance checks to each child, retain successful outputs, and consume completion notifications. Delegate only within the user’s scope and keep one writer per file.'});
       }
-      if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
-        if (/\b(frame time|frame budget|frame pacing|gpu memory|render budget|webgpu|webgl|three\.?js)\b/i.test(part))
-          utilityHint('math_check','Graphics budgets: math_check operation:"frame_budget" summarizes observed frame milliseconds against target_fps; operation:"render_budget" estimates attachment bytes from width/height/pixel_ratio/bytes_per_pixel/samples/buffers. Measure representative hardware and compare visual detail before lowering quality; estimates exclude textures, geometry and driver overhead.');
-        if (/\b(median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part)
-          || /\b(?:calculate|compute|measure|compare|check|verify|estimate)\b[^;.!?]{0,80}\b(?:the |an? )?(?:arithmetic |geometric |harmonic |weighted )?mean\b/i.test(part.replace(/\bI mean\b/gi, ' ')))
-          utilityHint('math_check','Numerical evidence: math_check computes summaries, regression/classification metrics, vector comparisons and exact split-ID overlap. Supply actual observations; undefined metrics remain null and exact-ID checks cannot rule out all leakage.');
-        if (/\b(base64|URL (?:encod|decod)\w*|percent.encod\w*|(?:format|compact|pretty.print) (?:the )?JSON|JSON (?:format|compact)\w*)\b/i.test(part))
-          utilityHint('value_convert','Exact conversion: value_convert handles bounded JSON formatting, strict UTF-8 Base64 and URI components without executing code or writing files. Pass only the value to convert; inspect the returned result before saving it.');
-      }
       if (process.env.PI_CONTEXT_MEMORY!=='off') {
         if (/\b(handoff|hand.off|working state|agent context|compact context)\b/i.test(part))
           utilityHint('handoff_capsule','Small handoff: handoff_capsule packages the goal, constraints, findings, decisions, files, failures and next action. Preserve critical state explicitly; budget overflow means use more space or full context. Pass the capsule to a fresh subagent.');
@@ -535,10 +511,6 @@ export function createRelevantGuidance(pi: any) {
       if (process.env.PI_CONTEXT_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
         if (/\b(code|functions?|symbols?|imports?|codebase|implementation)\b/i.test(part))
           utilityHint('context_slice','Scoped code context: context_slice ranks functions and imports from explicit workspace source files against the task. Inspect hashes, ranges and omissions; use ordinary reads before edits. A slice is not whole-project coverage.');
-        if (/\b(callers?|callees?|references?|dependencies|dependency graph|type definitions?)\b/i.test(part))
-          utilityHint('symbol_expand','Dependency context: symbol_expand follows bounded syntax candidates within explicit files and can augment with an already-running LSP. Read resolution and freshness metadata; names alone do not establish bindings.');
-        if (/\b(diff|changed functions|patch)\b/i.test(part) || /\bchanges\b/i.test(part) && /\b(code|functions?|symbols?|implementation|source)\b/i.test(part))
-          utilityHint('ast_diff','Change context: ast_diff compares supplied before/after source structurally. Keep raw patches for applying or reviewing exact edits, and verify behavior separately.');
       }
       if (/\b(syntax|type errors?|type.check|parse errors?)\b/i.test(part))
         utilityHint('lsp_diagnostics','Fresh code diagnostics: use lsp_diagnostics with explicit changed paths and serverScope:"primary" for a bounded syntax/type check. Missing servers or incomplete results are not evidence of clean code.');
@@ -735,9 +707,9 @@ export function createRelevantGuidance(pi: any) {
     beforeToolCall(event: any) {
       if (!reviewAvailable() || readOnlyPrompt) return;
       const supplied = event.input?.path ?? event.input?.file_path;
-      const mutation = ['edit','write'].includes(event.toolName) || event.toolName === 'bulk_edit' && event.input?.action === 'apply';
+      const mutation = ['edit','write'].includes(event.toolName);
       if (!mutation) return;
-      const suppliedFiles = event.toolName === 'bulk_edit' ? bulkFiles.get(event.input?.token) ?? event.input?.files : event.input?.paths;
+      const suppliedFiles = event.input?.paths;
       const files = [supplied, ...(Array.isArray(suppliedFiles) ? suppliedFiles.slice(0,200) : [])]
         .filter((file): file is string => typeof file === 'string' && file.length <= 4096)
         .map(file => checkpointPath(file,cwd));
@@ -787,7 +759,6 @@ export function createRelevantGuidance(pi: any) {
     restore(ctx: any) {
       cancelSearches();
       reviewTargets.clear(); deferredSkills.clear();
-      bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
       readOnlyPrompt = false;
@@ -1063,22 +1034,8 @@ export function createRelevantGuidance(pi: any) {
       // Shell-heavy stretch with no native inspection tool in the window: one
       // tiny posture nudge, once per session, through the normal hint budget.
       if (name === "bash" && recentTools.filter(t => t === "bash").length >= 6
-        && !recentTools.some(t => ["read", "grep", "find", "ls", "data_query", "git_info", "http_request", "sys_probe"].includes(t))) {
+        && !recentTools.some(t => ["read", "grep", "find", "ls", "git_info", "http_request"].includes(t))) {
         add({ key: "native:bash-heavy", priority: 30, text: "Shell-heavy stretch: which existing tool already does this reliably? One tool_search can name the native owner; keep Bash where it fits." });
-      }
-      if (name === 'bulk_edit' && input.action === 'preview') {
-        // The native preview owns the concrete file set behind its apply token.
-        // Route those paths, never infer files from a glob or arbitrary prose.
-        try {
-          const text = event.content?.find((part: any) => part.type === 'text')?.text;
-          const result = typeof text === 'string' && text.length < 128000 ? JSON.parse(text) : undefined;
-          if (typeof result?.token === 'string' && Array.isArray(result.files)) {
-            const files = result.files.slice(0,200).map((entry: any) => entry.path).filter((file: any) => typeof file === 'string' && file.length <= 4096);
-            if (bulkFiles.size >= 8) bulkFiles.delete(bulkFiles.keys().next().value!);
-            bulkFiles.set(result.token,files);
-            for (const file of files) routedSkills('',checkpointPath(file,cwd));
-          }
-        } catch { /* non-preview or truncated output is not a file receipt */ }
       }
       if (['edit','write'].includes(name)) {
         const changedFile = typeof input.path === 'string' ? checkpointPath(input.path,cwd) : '';
@@ -1153,9 +1110,6 @@ export function createRelevantGuidance(pi: any) {
           skillHint(`${label} work`, [], new RegExp(`^${label}(?:$|[-_ ])`, "i"), true);
         }
         if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["engineering"], /deployment|infrastructure/i); }
-        if (name === 'read' && /\.(?:json|ya?ml)$/i.test(file))
-          add({key:'utility:data_query',tool:'data_query',priority:68,sourceFile:file,
-            text:`Structured file: data_query can query keys, counts, selected fields or filtered rows from ${JSON.stringify(file)} without a parsing script. Use ordinary reads when exact source text matters.`});
       }
       // Recognise shell text search too: bash-driven grep/rg is the common case,
       // and it is exactly when the structural tools would answer faster.
