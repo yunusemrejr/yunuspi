@@ -102,6 +102,7 @@ import type {
 	SessionStartEvent,
 } from "@yunuspi/coding-agent";
 import { registerHarnessActivity } from "./lib/harness-activity.ts";
+import { registerSkillReview } from "./lib/skill-review.ts";
 import {
 	registerToolDiscovery,
 	compactSkillCatalog,
@@ -472,6 +473,7 @@ function logReminderErr(where: string, err: unknown): void {
 
 export default function remindersExtension(pi: ExtensionAPI) {
 	registerToolDiscovery(pi);
+	registerSkillReview(pi);
 	if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
 	// The user's own reminders read as reminders; the harness check-in that
 	// carries them (trajectory question) stays expandable.
