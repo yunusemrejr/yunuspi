@@ -1,7 +1,7 @@
 import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.ts";
 /** Closed-loop creative production: one shared direction, rendered QA, and
  * revision-sensitive receipts. Discovered on demand through tool_search;
- * the design-direction protocol and Expert Director critics own the
+ * the design-direction protocol owns the
  * creative workflow. Tools:
  *   creative_direct  set/get/brief the structured task direction
  *   visual_review    capture + rubric review with recorded verdicts

@@ -24,6 +24,14 @@ if [[ ! -f "$ENTRY" ]]; then
   echo 'YunusPi core is not built. Run npm ci --ignore-scripts and npm run build:core inside agent/runtime, or reinstall with --install-deps.' >&2
   exit 1
 fi
+# Reuse V8 bytecode across launches: core startup is dominated by module
+# compilation (~2.2s cold to ~1.5s warm, measured). Node versions the cache
+# entries itself and invalidates on source change. Respect an explicit
+# user setting, including an empty one that disables the cache.
+if [[ -z "${NODE_COMPILE_CACHE+x}" ]]; then
+  export NODE_COMPILE_CACHE="$AGENT/cache/node-compile-cache"
+  mkdir -p "$NODE_COMPILE_CACHE" 2>/dev/null || unset NODE_COMPILE_CACHE
+fi
 mkdir -p "$AGENT/logs"
 LOCK="$AGENT/logs/harness-session.lock"
 if [[ ! -e "$LOCK" ]]; then (umask 077; touch "$LOCK"); fi

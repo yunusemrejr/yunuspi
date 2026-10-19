@@ -72,14 +72,92 @@ function inside(root: string, candidate: string): boolean {
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
+// This runs on tool-result paths, so it must not spawn git per call (the old
+// form ran up to six `git rev-parse` processes, ~40-120ms per tool step).
+// Repository identity (root/commonDir/gitDir) cannot move for a live cwd, so
+// it is resolved once per cwd; HEAD, branch and ref values are then read
+// straight from the .git files, which are always fresh. Any filesystem miss
+// falls back to the spawning form below.
+const repoIdentityCache = new Map<string, { root: string; commonDir: string; gitDir: string }>();
+
+function readRefSha(commonDir: string, gitDir: string, ref: string): string | undefined {
+	for (const base of [gitDir, commonDir]) {
+		try {
+			const sha = fs.readFileSync(path.join(base, ref), "utf8").trim();
+			if (/^[0-9a-f]{40,64}$/i.test(sha)) return sha;
+		} catch { /* fall through to packed-refs */ }
+	}
 	try {
-		// One rev-parse answers root, common dir and HEAD; each spawn costs
-		// milliseconds that repeat for every file a tool result touches.
-		const [rootRaw, commonRaw, head] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "HEAD"]).split("\n");
-		if (!rootRaw || !commonRaw || !head) return undefined;
+		for (const line of fs.readFileSync(path.join(commonDir, "packed-refs"), "utf8").split("\n")) {
+			const match = /^([0-9a-f]{40,64}) (.+)$/i.exec(line.trim());
+			if (match && match[2] === ref) return match[1];
+		}
+	} catch { /* no packed-refs */ }
+	return undefined;
+}
+
+function readUpstreamRef(commonDir: string, branch: string): string | undefined {
+	// Minimal config read: locate [branch "<name>"] remote + merge entries.
+	let config: string;
+	try {
+		config = fs.readFileSync(path.join(commonDir, "config"), "utf8");
+	} catch {
+		return undefined;
+	}
+	let inSection = false, remote: string | undefined, merge: string | undefined;
+	for (const rawLine of config.split("\n")) {
+		const line = rawLine.trim();
+		const section = /^\[branch "(.+)"\]$/.exec(line);
+		if (section) { inSection = section[1] === branch; continue; }
+		if (line.startsWith("[")) { inSection = false; continue; }
+		if (!inSection) continue;
+		const kv = /^(\w+)\s*=\s*(.+)$/.exec(line);
+		if (kv?.[1] === "remote") remote = kv[2].trim();
+		if (kv?.[1] === "merge") merge = kv[2].trim();
+	}
+	if (!remote || !merge?.startsWith("refs/heads/")) return undefined;
+	return `${remote}/${merge.slice("refs/heads/".length)}`;
+}
+
+function readWorkspaceGitStateFromFiles(cwd: string): WorkspaceGitState | undefined {
+	const identity = repoIdentityCache.get(cwd);
+	if (!identity) return undefined;
+	const { root, commonDir, gitDir } = identity;
+	let headFile: string;
+	try {
+		headFile = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+	} catch {
+		return undefined;
+	}
+	let head: string | undefined, branch = "(detached)";
+	const refMatch = /^ref:\s*(refs\/heads\/.+)$/.exec(headFile);
+	if (refMatch) {
+		branch = refMatch[1].slice("refs/heads/".length);
+		head = readRefSha(commonDir, gitDir, refMatch[1]);
+	} else if (/^[0-9a-f]{40,64}$/i.test(headFile)) {
+		head = headFile;
+	}
+	if (!head) return undefined;
+	const upstream = branch === "(detached)" ? undefined : readUpstreamRef(commonDir, branch);
+	const upstreamHead = upstream ? readRefSha(commonDir, gitDir, `refs/remotes/${upstream}`) : undefined;
+	return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
+}
+
+export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
+	const fromFiles = readWorkspaceGitStateFromFiles(cwd);
+	if (fromFiles) return fromFiles;
+	try {
+		// One rev-parse answers root, common dir, git dir and HEAD; each spawn
+		// costs milliseconds that repeat for every file a tool result touches.
+		// The identity is cached, so later calls read refs from .git files.
+		const [rootRaw, commonRaw, gitDirRaw, head] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "--git-dir", "HEAD"]).split("\n");
+		if (!rootRaw || !commonRaw || !gitDirRaw || !head) return undefined;
 		const root = path.resolve(rootRaw);
 		const commonDir = path.resolve(cwd, commonRaw);
+		const gitDir = path.resolve(cwd, gitDirRaw);
+		repoIdentityCache.set(cwd, { root, commonDir, gitDir });
+		const viaFiles = readWorkspaceGitStateFromFiles(cwd);
+		if (viaFiles) return viaFiles;
 		const branch = optionalGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "(detached)";
 		const upstream = optionalGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
 		const upstreamHead = upstream ? optionalGit(cwd, ["rev-parse", upstream]) : undefined;
@@ -87,22 +165,6 @@ export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefine
 	} catch {
 		return undefined;
 	}
-}
-
-// Lease bookkeeping needs the checkout identity, not a fresh drift reading. One
-// tool result used to cost up to ~30 git spawns across its lease, path and
-// attribution lookups; a short-lived memo serves the burst. Drift detection
-// keeps calling readWorkspaceGitState directly so it never sees stale refs.
-const GIT_STATE_TTL_MS = 1500;
-const gitStateMemo = new Map<string, { at: number; state: WorkspaceGitState | undefined }>();
-function recentWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
-	const hit = gitStateMemo.get(cwd);
-	const now = Date.now();
-	if (hit && now - hit.at < GIT_STATE_TTL_MS) return hit.state;
-	const state = readWorkspaceGitState(cwd);
-	if (gitStateMemo.size > 32) gitStateMemo.clear();
-	gitStateMemo.set(cwd, { at: now, state });
-	return state;
 }
 
 export function workspaceGitDrift(before: WorkspaceGitState | undefined, after: WorkspaceGitState | undefined): string[] {
@@ -179,7 +241,7 @@ function writeLease(file: string, lease: WorkspaceWriterLease): void {
 }
 
 export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { state?: WorkspaceGitState; lease?: WorkspaceWriterLease; conflicts: WorkspaceLeaseOwner[] } {
-	const state = recentWorkspaceGitState(cwd);
+	const state = readWorkspaceGitState(cwd);
 	if (!state || !sessionId) return { conflicts: [] };
 	try { fs.mkdirSync(leaseDir(state), { recursive: true, mode: 0o700 }); } catch { return { state, conflicts: [] }; }
 	const file = leaseFile(state, sessionId);
@@ -203,7 +265,7 @@ export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { s
 }
 
 export function releaseWorkspaceWriterLease(cwd: string, sessionId: string): void {
-	const state = recentWorkspaceGitState(cwd);
+	const state = readWorkspaceGitState(cwd);
 	if (!state || !sessionId) return;
 	try { fs.rmSync(leaseFile(state, sessionId), { force: true }); } catch { /* advisory only */ }
 }
@@ -213,7 +275,7 @@ function toOwner(lease: WorkspaceWriterLease): WorkspaceLeaseOwner {
 }
 
 export function workspacePath(cwd: string, rawPath: string): { state?: WorkspaceGitState; absolute: string; relative: string } {
-	const state = recentWorkspaceGitState(cwd);
+	const state = readWorkspaceGitState(cwd);
 	const absolute = path.resolve(cwd, rawPath);
 	const relative = state && inside(state.root, absolute) ? path.relative(state.root, absolute) || "." : absolute;
 	return { ...(state ? { state } : {}), absolute, relative };
@@ -255,7 +317,7 @@ export function recordWorkspaceMutation(cwd: string, sessionId: string, rawPath:
 }
 
 export function attributeWorkspacePath(cwd: string, sessionId: string, relativePath: string): { status: "current_session" | "another_session" | "unattributed"; sessionId?: string; detail?: string } {
-	const state = recentWorkspaceGitState(cwd);
+	const state = readWorkspaceGitState(cwd);
 	if (!state) return { status: "unattributed", detail: "not a Git checkout" };
 	const leases = activeLeases(state);
 	// A foreign lease wins over the current session: concurrent ownership is

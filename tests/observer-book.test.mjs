@@ -22,7 +22,7 @@ after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 
 const B = await import('../agent/extensions/lib/observer-book.ts');
 const O = await import('../agent/extensions/lib/session-observer.ts');
-const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
+const { default: observerExtension } = await import('../agent/extensions/lib/session-observer-impl.ts');
 const book = B.loadObserverBook({ userDir: false, force: true });
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
 function clock() {

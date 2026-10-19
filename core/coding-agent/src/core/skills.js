@@ -289,6 +289,19 @@ function loadSkillFromFile(filePath, source) {
  * Skills with disableModelInvocation=true are excluded from the prompt
  * (they can only be invoked explicitly via /skill:name commands).
  */
+// Catalog descriptions are selection hints, not the skill body (the model reads
+// SKILL.md on demand). Cap each so a large skill library cannot put tens of
+// thousands of tokens in front of every cold request: 247 live skills with
+// uncapped descriptions produced a ~94k-char block (~25k tokens).
+const SKILL_DESCRIPTION_MAX_CHARS = 200;
+function catalogDescription(description) {
+    const flat = String(description).replace(/\s+/g, " ").trim();
+    if (flat.length <= SKILL_DESCRIPTION_MAX_CHARS)
+        return flat;
+    const cut = flat.slice(0, SKILL_DESCRIPTION_MAX_CHARS);
+    const boundary = cut.lastIndexOf(" ");
+    return `${boundary > 80 ? cut.slice(0, boundary) : cut}…`;
+}
 export function formatSkillsForPrompt(skills, fileReadTool = "read") {
     const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
     if (visibleSkills.length === 0) {
@@ -307,7 +320,7 @@ export function formatSkillsForPrompt(skills, fileReadTool = "read") {
     for (const skill of visibleSkills) {
         lines.push("  <skill>");
         lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-        lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+        lines.push(`    <description>${escapeXml(catalogDescription(skill.description))}</description>`);
         lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
         lines.push("  </skill>");
     }

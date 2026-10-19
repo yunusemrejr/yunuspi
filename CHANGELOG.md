@@ -1,3 +1,21 @@
+## 0.47.0 — Less harness between the model and the work: faster starts, cheaper turns, fewer re-billed prefixes
+
+This release is a measured slimming pass. Baselines from the installed 0.46.0: a cold start spent ~5.6s before the first prompt (2.2s of core module compilation, the rest loading 44 extensions and six forks through fresh transpilers), some sessions carried a 105 KB system prompt of which the skills catalogue alone was ~100 KB (~25k tokens billed fresh on every cold request), and of 96M uncached follow-up tokens in 30 days of recorded sessions, almost all missed within seconds of the previous request — head churn, not idle expiry (only 139 of 3,867 large misses sat near a compaction).
+
+**The prompt head is bounded.** Skill catalogue descriptions are capped at 200 characters in core, so a 247-skill library can no longer put ~94k characters in front of every cold request on the paths where the extension-side catalogue compaction does not run (children, SDK, headless). Each inlined context file (`AGENTS.md`/`CLAUDE.md` per ancestor directory) is capped at 64k characters with a truncation notice instead of being inlined without bound.
+
+**Per-turn bookkeeping stopped re-reading the transcript.** Hook metrics deep-walked the whole history before and after every context handler and stringified it twice to locate a change; sizes are now memoized by object identity and change location skips identity-equal messages. The cache sentinel and the context governor got the same treatment. Sealed observation renders replay before the full tool output is joined. Git state for leases and drift is read from `.git` files after one identity resolution per checkout, replacing up to six synchronous `git` spawns (~40–120ms) on tool-result paths; drift readings stay fresh (no TTL), and the spawning form remains as fallback.
+
+**Effort restores respect the cache they re-bill.** The Jev effort router gated step-downs by a 4,000-token re-read budget but restored the ceiling ungated; on DeepSeek, Anthropic and Qwen-template routes that step back up repaid the warm prefix uncached. Restores now pass the same budget and land as soon as the prefix is cold or the growth is small. The tool-error burst restore stays immediate.
+
+**Retired layers cost nothing at boot, and one is gone.** The Expert Director (domain doctrine, critic lenses, convergence ledger, taste store; 13 tool calls across all recorded sessions, off by default since the lean-gates wave) is removed end to end. Its one live path survives directly: `detectTaskType` moved into `lib/prior-art.ts`, and prompt analysis carries the prior-art scouting paragraph itself. The session observer, adaptive workflows and project intelligence — also retired by default — moved behind six-line dormant entries that import their implementations only with `PI_LEAN_GATES=on`, so a default boot no longer pays their module graphs. Micro-intelligence keeps its entry because pi-subagents reads its state through a synchronous cross-import.
+
+**Starts reuse compiled code.** The launcher defaults `NODE_COMPILE_CACHE` to a per-install cache directory (an explicit user value, including empty, wins): repeat core startup drops from ~2.2s to ~1.5s of module compilation, and Node invalidates entries on source change itself.
+
+Removed: the `expert_director` tool, `PI_EXPERT`, the expert health layer in `micro_status`, and Expert Director rows in `/used` and session reports. Sessions containing historical `expert-director-v1` entries simply no longer summarize them.
+
+**Validation.** Full test suite, `check-syntax`, the public scanner and both `cache-probe` scenarios (basic and ui) pass on this tree; new tests pin the head bounds and the dormant-entry contract (nothing registers with the gate off, delegation with it on). Startup timings were re-measured on the installed build with `PI_TIMING=1`.
+
 ## 0.46.0 — Models keep their footing: qualities ported from DeepSeek Harness, Colab sessions and Jev effort
 
 This release studies the DeepSeek Harness (`@deepseek-ai/dsh` 0.2.1, MIT) and ports the parts that make models behave well there: one clear statement of each rule, direct reminders at the moment a model goes wrong, and context the model needs when it enters a new part of a project. Every port is append-only on the tool result, so the provider prompt cache is untouched.

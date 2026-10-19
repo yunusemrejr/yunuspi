@@ -1,6 +1,6 @@
 # Art direction: the closed creative loop
 
-YunusPi's creative tools share one production loop: a direction steers implementation, real renders are inspected and critiqued, findings are fixed, and completion waits for evidence. The `design-direction` protocol and the Expert Director critics own the workflow; this document owns the machinery. [Autonomous UI engineering](UI-ENGINEERING.md) adds adaptable browser mechanics and current-state responsive, scroll and consistency checks.
+YunusPi's creative tools share one production loop: a direction steers implementation, real renders are inspected and critiqued, findings are fixed, and completion waits for evidence. The `design-direction` protocol owns the workflow; this document owns the machinery. [Autonomous UI engineering](UI-ENGINEERING.md) adds adaptable browser mechanics and current-state responsive, scroll and consistency checks.
 
 ```text
             CREATIVE DIRECTION

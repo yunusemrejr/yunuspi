@@ -8,7 +8,7 @@ import { createAgentSession } from '../core/coding-agent/src/core/sdk.js';
 import { SessionManager } from '../core/coding-agent/src/core/session-manager.js';
 import { SettingsManager } from '../core/coding-agent/src/core/settings-manager.js';
 import { DefaultResourceLoader } from '../core/coding-agent/src/core/resource-loader.js';
-import observerExtension from '../agent/extensions/session-observer.ts';
+import observerExtension from '../agent/extensions/lib/session-observer-impl.ts';
 import {carriedReviewerNoteText} from '../agent/extensions/lib/session-observer.ts';
 
 const note='Have you checked the synthetic parser acceptance condition before declaring the fixture complete?';

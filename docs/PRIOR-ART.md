@@ -8,7 +8,7 @@ Building or improving something without looking at how others solved the same pr
    - `compare`: an explicit request to compare with, learn from or search for other products, competitors, alternatives or similar projects.
    - `improve`: an open-ended improvement of a product-level subject ("make the app much better, what is missing"), not a named defect.
    - `build`: new software the user has not specified exactly ("build me a terminal notes app with sync").
-2. **The Expert Director adds one advisory paragraph** to the brief, naming the workflow for that mode and the `research-writing` skill. It is added even when no excellence domain qualifies, and it is shown in the Director's summary line (`Expert brief: … · prior art (build)`).
+2. **The scouting tools are staged with the first turn** (`github_search`, `web_research`, `fetch_content`), and `priorArtDirective` in `lib/prior-art.ts` holds the bounded workflow text for that mode, naming the `research-writing` skill.
 3. **The scouting tools are staged with the first turn** (`github_search`, `web_research`, `fetch_content`), so the agent does not have to discover them.
 4. **The Observer book carries a passage** (`research › Look at what already exists`) so a reviewer can notice a new product designed without a look at alternatives.
 
@@ -28,7 +28,7 @@ The classifier was tuned on the installation's own history: 1,412 distinct user 
 
 ## Switches and reference providers
 
-`PI_PRIOR_ART=off` (or `0`) makes the classifier return nothing, which removes both the Director paragraph and the first-turn tool staging; `PI_EXPERT=off` also removes the paragraph. The web angles of a prior-art plan run through `web_research` with `fallbackProviders:["hackernews","stackexchange","npm"]`: keyless official indexes (Hacker News via Algolia, Stack Overflow, the npm registry) that stay useful while general web search is cooling down. Measured on the installation's recorded sessions, 3 of 8 `web_search` calls failed completely: the scraped DuckDuckGo route (the only general route for sessions whose model has no hosted search) failed or was cooling down in every one, and the hosted route was cooling down in two. That is why a second, independent source of technical discovery matters.
+`PI_PRIOR_ART=off` (or `0`) makes the classifier return nothing, which removes the first-turn tool staging. The web angles of a prior-art plan run through `web_research` with `fallbackProviders:["hackernews","stackexchange","npm"]`: keyless official indexes (Hacker News via Algolia, Stack Overflow, the npm registry) that stay useful while general web search is cooling down. Measured on the installation's recorded sessions, 3 of 8 `web_search` calls failed completely: the scraped DuckDuckGo route (the only general route for sessions whose model has no hosted search) failed or was cooling down in every one, and the hosted route was cooling down in two. That is why a second, independent source of technical discovery matters.
 
 ## Limits
 

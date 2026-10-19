@@ -8,14 +8,14 @@ import { EventEmitter } from 'node:events';
 import { pathToFileURL } from 'node:url';
 
 const template = path.resolve(import.meta.dirname, '..');
-const agent = [path.join(template, 'agent'), path.join(template, '..', 'agent'), path.resolve(template, '..'), path.resolve(template, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/adaptive-workflows.ts')));
+const agent = [path.join(template, 'agent'), path.join(template, '..', 'agent'), path.resolve(template, '..'), path.resolve(template, '../..')].find(dir => fs.existsSync(path.join(dir, 'extensions/lib/adaptive-workflows-impl.ts')));
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_JEV = 'off';
 process.env.PI_NEEDLE = 'off';
 delete process.env.PI_ADAPTIVE_EXECUTION;
 delete process.env.PI_TOOL_DISCOVERY;
 delete process.env.PI_SUBAGENT_CHILD;
-const { default: registerWorkflows } = await import(pathToFileURL(path.join(agent, 'extensions/adaptive-workflows.ts')));
+const { default: registerWorkflows } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-workflows-impl.ts')));
 const { currentExecutionProfile } = await import(pathToFileURL(path.join(agent, 'extensions/lib/adaptive-execution.ts')));
 const { registerToolDiscovery } = await import(pathToFileURL(path.join(agent, 'extensions/lib/tool-discovery.ts')));
 const { createProjectTestLifecycle } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-tests.ts')));

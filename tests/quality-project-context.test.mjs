@@ -17,7 +17,7 @@ const coreIntervention = pathToFileURL(coreInterventionPath).href;
 // worker, discovery and SQLite store all execute their actual implementations.
 const config = 'data:text/javascript,' + encodeURIComponent(`export const getAgentDir=()=>process.env.PI_CODING_AGENT_DIR; export { createInterventionSession } from ${JSON.stringify(coreIntervention)};`);
 register('data:text/javascript,' + encodeURIComponent(`export function resolve(n,c,next){return n==='@yunuspi/coding-agent'?{url:${JSON.stringify(config)},shortCircuit:true}:next(n,c);}`), import.meta.url);
-const { default: projectIntelligence } = await import(pathToFileURL(path.join(agent, 'extensions/project-intelligence.ts')));
+const { default: projectIntelligence } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence-impl.ts')));
 const { IntelligenceClient } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence/client.mjs')));
 const { openStore } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence/store.mjs')));
 const key = Symbol.for('yunus-pi.quality-project-context.v1');

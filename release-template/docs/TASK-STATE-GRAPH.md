@@ -25,8 +25,8 @@ raw events / evidence
 Task State Graph
         ↓
 ┌────────────┬────────────┬────────────┬────────────┐
-Main Agent   Observer     Expert       Subagents
-Reviews      Guardian     Council      Completion
+Main Agent   Observer     Guardian     Subagents
+Reviews      Council      Completion   Metrics
 ```
 
 Pipeline:
@@ -50,7 +50,7 @@ bounded projections (per-consumer budgets)
   completion-claim, gap.
 - **Provenance** (~16 sources): literal-user, prompt-analysis, main-agent,
   tool-output, source-inspection, test-result, render-inspection, subagent,
-  observer, expert-director, guardian, review-council,
+  observer, guardian, review-council,
   project-memory, project-intelligence, sibling-session, session-history.
   A model claim is not test evidence; a subagent statement is not verified;
   history is not instruction.
@@ -93,7 +93,7 @@ bounded projections (per-consumer budgets)
 | Subagents | per-child slice: goal, relevant requirements/decisions/files/failures/evidence + required output/verification | appended to native briefs at dispatch; results return with subagent provenance, never auto-verified |
 | Completion gate | requirement-level blockers (`task state: R2 implemented but unverified`) | additive to existing receipts; claims recorded as `completion-claim` entities |
 | `/metrics` | entity/link/requirement/stale/failure counts + degraded flags | session-report line |
-| Guardian / Expert | cheap reads via `currentTaskStateService()` (failure families, contradictions, entity attach) | API available; hot paths untouched |
+| Guardian | cheap reads via `currentTaskStateService()` (failure families, contradictions, entity attach) | API available; hot paths untouched |
 
 Writes are automatic from harness events: user input (+ ledger sync),
 prompt-analysis relation (follow-up vs new-task vs correction), todo results,
@@ -240,8 +240,8 @@ requirement coverage.
 - Reviewer-finding targets and requirement↔evidence links are best-effort:
   links whose endpoints are still unknown are dropped with a warning rather
   than invented. Coverage improves as more producers emit typed events.
-- Guardian and Expert Director have read/attach APIs but no hot-path
-  behavior change yet; their existing logic is untouched.
+- Guardian has read/attach APIs but no hot-path behavior change yet;
+  its existing logic is untouched.
 - Sibling-session exchange is represented (`peer` entities, `sibling-session`
   provenance) but no automatic cross-session linking is performed.
 - Durable promotion of task outcomes into project intelligence/memory is a

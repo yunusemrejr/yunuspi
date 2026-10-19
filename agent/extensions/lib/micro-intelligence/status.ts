@@ -55,17 +55,6 @@ function inspectStatus(inspect: unknown): string {
   return "ready";
 }
 
-function expertRunsDetail(inspect: unknown): string {
-  if (!inspect || typeof inspect !== "object") return "";
-  const value = inspect as Record<string, unknown>;
-  if (typeof value.runs !== "number") return "";
-  const last = value.last as Record<string, unknown> | undefined;
-  const what = last && typeof last.action === "string"
-    ? `, last ${last.action}${Array.isArray(last.domains) && last.domains.length ? ` ${last.domains.join("+")}` : ""}${typeof last.reason === "string" ? ` ${last.reason}` : ""}`
-    : "";
-  return `${value.runs} run${value.runs === 1 ? "" : "s"}${what}`.slice(0, 160);
-}
-
 export interface MicroStatusRequest {
   family: string;
   substantive: boolean;
@@ -99,7 +88,6 @@ export function microStatusSnapshot(request?: {
   const span = spanStatus();
   const worker = microWorkerStatus();
   const rerank = rerankStatus();
-  const expert = safeInspect("expert");
   const layers: LayerHealth[] = [
     { layer: "deterministic", status: "ready", detail: "local reflexes" },
     {
@@ -110,7 +98,6 @@ export function microStatusSnapshot(request?: {
         : needle.lastError || needle.state,
     },
     { layer: "kompress", status: inspectStatus(kompress), detail: "" },
-    { layer: "expert", status: inspectStatus(expert), detail: expertRunsDetail(expert) },
     {
       layer: "jev",
       status: jevStatus(jev.state === "open", hasKey),
@@ -177,7 +164,6 @@ export function microStatusSnapshot(request?: {
     span: { ...span, live: spanLive },
     microworker: worker,
     rerank,
-    expert,
     metrics: microMetrics().summaryLines(),
   };
 }

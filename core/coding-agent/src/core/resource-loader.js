@@ -29,6 +29,15 @@ function resolvePromptInput(input, description) {
     }
     return input;
 }
+// Context files are inlined into every request head, per ancestor directory.
+// Cap each file so one oversized AGENTS.md cannot silently tax every request
+// (the full file stays on disk and readable with the read tool).
+const CONTEXT_FILE_MAX_CHARS = 65536;
+function capContextContent(content, filePath) {
+    if (content.length <= CONTEXT_FILE_MAX_CHARS)
+        return content;
+    return `${content.slice(0, CONTEXT_FILE_MAX_CHARS)}\n\n[Truncated: ${filePath} is ${content.length} chars; only the first ${CONTEXT_FILE_MAX_CHARS} are inlined. Read the file for the rest.]`;
+}
 function loadContextFileFromDir(dir) {
     const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
     for (const filename of candidates) {
@@ -40,7 +49,7 @@ function loadContextFileFromDir(dir) {
                 }
                 return {
                     path: filePath,
-                    content: stripBom(readFileSync(filePath, "utf-8")),
+                    content: capContextContent(stripBom(readFileSync(filePath, "utf-8")), filePath),
                 };
             }
             catch (error) {

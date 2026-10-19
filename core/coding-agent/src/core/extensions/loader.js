@@ -292,23 +292,41 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
  }
  if (owner === "health-log.ts" || owner === "session-telemetry.ts")
   return handler;
+ // Memoized by object identity across every wrapped handler (shared via the
+ // same Symbol.for pattern as the dispatch registry): context handlers run
+ // before+after size walks over the same mostly-unchanged message objects on
+ // every request, which was O(handlers x history) per request on long
+ // sessions. Handlers return new arrays/objects instead of mutating messages,
+ // so identity is a sound key; a shared subobject is counted per occurrence
+ // (diagnostic metric only). In-place mutation of a counted object would
+ // leave a stale size until the object is replaced.
+ const sizeMemo =
+  globalThis[Symbol.for("yunus-pi.size-memo.v1")] ||
+  (globalThis[Symbol.for("yunus-pi.size-memo.v1")] = new WeakMap());
  const size = (value) => {
-  let total = 0,
-   nodes = 0;
-  const stack = [value],
-   seen = new Set();
-  while (stack.length) {
-   const x = stack.pop();
-   if (++nodes > 100000) return undefined;
-   if (typeof x === "string") total += x.length;
-   else if (x && typeof x === "object" && !seen.has(x)) {
-    seen.add(x);
-    const values = Array.isArray(x) ? x : Object.values(x);
-    if (values.length + stack.length + nodes > 100000) return undefined;
-    for (const v of values) stack.push(v);
+  let nodes = 0,
+   overflow = false;
+  const inProgress = new Set();
+  const walk = (x, depth) => {
+   if (typeof x === "string") return x.length;
+   if (!x || typeof x !== "object" || depth > 64 || overflow) return 0;
+   const hit = sizeMemo.get(x);
+   if (hit !== undefined) return hit;
+   if (inProgress.has(x)) return 0;
+   if (++nodes > 100000) {
+    overflow = true;
+    return 0;
    }
-  }
-  return total;
+   inProgress.add(x);
+   let total = 0;
+   const values = Array.isArray(x) ? x : Object.values(x);
+   for (const v of values) total += walk(v, depth + 1);
+   inProgress.delete(x);
+   if (!overflow) sizeMemo.set(x, total);
+   return total;
+  };
+  const total = walk(value, 0);
+  return overflow ? undefined : total;
  };
  // Safe diagnostic fingerprints only: fixed-size hashes of a bounded prefix,
  // never payload text. Lets exports retain before/after prefix hashes, changed
@@ -329,6 +347,27 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
  };
  const changedAt = (a, b) => {
   try {
+   // Array histories: skip identity-equal elements with the memoized size
+   // (approximate JSON offset, diagnostic only) and stringify just the first
+   // differing element. The old form stringified the whole history twice on
+   // every changing handler.
+   if (Array.isArray(a) && Array.isArray(b)) {
+    let pos = 1;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+     if (a[i] === b[i]) {
+      pos += (size(a[i]) ?? 0) + 1;
+      if (pos > 20000) return 20000;
+      continue;
+     }
+     const sa = JSON.stringify(a[i]) ?? "", sb = JSON.stringify(b[i]) ?? "";
+     const m = Math.min(sa.length, sb.length);
+     for (let j = 0; j < m; j++) if (sa[j] !== sb[j]) return pos + j;
+     return pos + m;
+    }
+    return a.length === b.length ? -1 : pos;
+   }
+   if ((size(a) ?? 0) > 300000 || (size(b) ?? 0) > 300000) return 20000;
    const sa = JSON.stringify(a), sb = JSON.stringify(b);
    if (typeof sa !== "string" || typeof sb !== "string") return undefined;
    const n = Math.min(sa.length, sb.length, 20000);
