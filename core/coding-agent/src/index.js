@@ -27,7 +27,7 @@ createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool,
 export { buildContextEntries, buildSessionContext, CURRENT_SESSION_VERSION, getLatestCompactionEntry, migrateSessionEntries, parseSessionEntries, SessionManager, sessionEntryToContextMessages, } from "./core/session-manager.js";
 export { SettingsManager, } from "./core/settings-manager.js";
 // Skills
-export { formatSkillsForPrompt, loadSkills, loadSkillsFromDir, } from "./core/skills.js";
+export { formatSkillCatalogBlock, formatSkillsForPrompt, loadSkills, loadSkillsFromDir, } from "./core/skills.js";
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 export { generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.js";
 export { missingPathHint } from "./core/tools/path-hints.js";

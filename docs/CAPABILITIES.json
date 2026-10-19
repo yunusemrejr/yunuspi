@@ -3936,7 +3936,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 521,
+        "line": 522,
         "kind": "literal"
       },
       {
@@ -4287,7 +4287,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 521,
+        "line": 522,
         "kind": "literal"
       },
       {

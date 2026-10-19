@@ -2,6 +2,7 @@
  * capabilities. Discovery changes schema exposure only; it never runs a tool
  * or grants access outside the host's original active/allowed tool set. */
 import { Type } from 'typebox';
+import { formatSkillCatalogBlock } from '@yunuspi/coding-agent';
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from './capability-groups.ts';
 import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
 import { askJev, jevMark, tooShort } from './jev-client.ts';
@@ -739,14 +740,6 @@ export function registerToolDiscovery(pi: any) {
   });
 }
 
-const escapeCatalogText = (value: string) => value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;');
-
-function buildSkillCatalog(skills: any[]): string {
-  return ['<available_skills>',...skills.flatMap((skill: any)=>[
-    '  <skill>',`    <name>${escapeCatalogText(skill.name)}</name>`,`    <description>${escapeCatalogText(skill.description)}</description>`,`    <location>${escapeCatalogText(skill.filePath)}</location>`,'  </skill>',
-  ]),'</available_skills>'].join('\n');
-}
-
 /** Skills eligible for projection, or null when projection does not apply. */
 function projectionSkills(event: any, activeTools: string[]): any[] | null {
   if (process.env.PI_SKILL_CATALOG === 'full') return null;
@@ -764,7 +757,7 @@ export function compactSkillCatalog(event: any, activeTools: string[]): string |
   const skills = projectionSkills(event, activeTools);
   const source = event.systemPrompt;
   if (!skills || typeof source !== 'string') return;
-  const catalog = buildSkillCatalog(skills);
+  const catalog = formatSkillCatalogBlock(skills);
   if (source.split(catalog).length!==2) return;
   const isChild = process.env.PI_SUBAGENT_CHILD === "1";
   const replacement = isChild
@@ -780,7 +773,7 @@ export function skillCatalogProjectionMiss(event: any, activeTools: string[]): s
   const skills = projectionSkills(event, activeTools);
   const source = event.systemPrompt;
   if (!skills || typeof source !== 'string') return null;
-  const occurrences = source.split(buildSkillCatalog(skills)).length - 1;
+  const occurrences = source.split(formatSkillCatalogBlock(skills)).length - 1;
   if (occurrences === 1) return null;
   if (occurrences > 1) return 'duplicate-blocks';
   if (source.includes('<available_skills>')) return 'block-not-exact';

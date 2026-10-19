@@ -302,6 +302,23 @@ function catalogDescription(description) {
     const boundary = cut.lastIndexOf(" ");
     return `${boundary > 80 ? cut.slice(0, boundary) : cut}…`;
 }
+/**
+ * The <available_skills> block alone. The prompt formatter and every extension that recognizes the
+ * block (the catalogue projection replaces it with a one-line pointer) build it here, so what the
+ * prompt shows of a skill has one owner and a capped description cannot make a projection miss.
+ */
+export function formatSkillCatalogBlock(skills) {
+    const lines = ["<available_skills>"];
+    for (const skill of skills.filter((s) => !s.disableModelInvocation)) {
+        lines.push("  <skill>");
+        lines.push(`    <name>${escapeXml(skill.name)}</name>`);
+        lines.push(`    <description>${escapeXml(catalogDescription(skill.description))}</description>`);
+        lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+        lines.push("  </skill>");
+    }
+    lines.push("</available_skills>");
+    return lines.join("\n");
+}
 export function formatSkillsForPrompt(skills, fileReadTool = "read") {
     const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
     if (visibleSkills.length === 0) {
@@ -315,16 +332,8 @@ export function formatSkillsForPrompt(skills, fileReadTool = "read") {
             : "Use bash to consult a skill's file when useful.",
         "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
         "",
-        "<available_skills>",
+        formatSkillCatalogBlock(visibleSkills),
     ];
-    for (const skill of visibleSkills) {
-        lines.push("  <skill>");
-        lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-        lines.push(`    <description>${escapeXml(catalogDescription(skill.description))}</description>`);
-        lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-        lines.push("  </skill>");
-    }
-    lines.push("</available_skills>");
     return lines.join("\n");
 }
 function escapeXml(str) {

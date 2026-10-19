@@ -1244,7 +1244,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/lib/adaptive-workflows-impl.ts`](../../agent/extensions/lib/adaptive-workflows-impl.ts) (line 580; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 521; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 522; literal)
 - `ui_consistency` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 433; factory)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../../agent/extensions/art-direction.ts) (line 406; factory)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 115; factory)
