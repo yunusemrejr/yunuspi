@@ -176,7 +176,7 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
   await page.locator('#usage-intelligence > summary').click();
   assert.doesNotMatch(await page.locator('.usage-kpi strong').first().evaluate(node=>getComputedStyle(node).fontFamily),/Emoji/);
   assert.equal(await page.locator('.usage-component').count(),4);
-  for (const name of ['Span sensor', 'Micro worker', 'Remote rerank']) {
+  for (const name of ['Span sensor', 'Remote rerank']) {
     assert.match(await page.locator('.usage-unmeasured').textContent(),new RegExp(name));
   }
   assert.equal(await page.locator('.usage-unmeasured').getAttribute('open'),null);

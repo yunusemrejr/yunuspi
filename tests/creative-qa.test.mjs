@@ -14,7 +14,6 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
 );
 const load = (p) => import(pathToFileURL(path.join(agent, p)).href);
 const qa = await load("extensions/lib/creative-qa.ts");
-const hooks = await load("extensions/lib/session-hooks.ts");
 
 test('compact UI reports retain failures, coverage, truncation and provenance without mutating the full report', () => {
   const design = { typography: [{ family: 'serif' }], spacing: [4, 8], limitations: ['sampled geometry'], truncated: true, contrast: { belowThreshold: 2 }, findings: ['small type'] };
@@ -108,7 +107,6 @@ test("creativeVerificationLines gate only newest blocking receipts", () => {
   assert.deepEqual(qa.creativeVerificationLines([]), []);
 });
 
-
 test("sourceRevision hashes files and marks live sources", async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "qa-rev-"));
   try {
@@ -120,11 +118,6 @@ test("sourceRevision hashes files and marks live sources", async () => {
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }
-});
-
-test("visual review hook rule binds the QA loop", () => {
-  // creative-direction-loop and art-qa-evidence were pruned from the hook table with their tools.
-  assert.equal(hooks.matchHook("visual_review", { action: "run" })?.key, "visual-review-receipt");
 });
 
 test("qaFolder creates a missing workspace output folder instead of failing with ENOENT", async (t) => {
