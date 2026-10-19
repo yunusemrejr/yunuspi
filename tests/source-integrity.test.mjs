@@ -2,31 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { assertSameBytes } from "./bytes.mjs";
 
 const root = path.resolve(import.meta.dirname, '..');
-function* files(directory) {
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (['node_modules', '__pycache__', '.git'].includes(entry.name)) continue;
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) yield* files(file);
-    else if (entry.isFile()) yield file;
-  }
-}
-
-test('release templates retain current tests, installer, and public safeguards', () => {
-  for (const directory of ['tests', 'scripts', 'desktop', 'config', '.github', '.githooks']) {
-    const source = path.join(root, directory), template = path.join(root, 'release-template', directory);
-    const names = [...files(source)].map(file => path.relative(source, file)).sort();
-    assert.deepEqual([...files(template)].map(file => path.relative(template, file)).sort(), names, directory);
-    for (const name of names)
-      assertSameBytes(fs.readFileSync(path.join(template, name)), fs.readFileSync(path.join(source, name)), `${directory}/${name}`);
-  }
-  for (const name of ['package.json', 'package-lock.json', '.gitignore', 'AGENTS.md'])
-    assertSameBytes(fs.readFileSync(path.join(root, 'release-template', name)), fs.readFileSync(path.join(root, name)), name);
-});
-
-
 test('installed-verifier library inventory matches the shipped TypeScript libraries', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'agent/extensions/manifest.json'), 'utf8'));
   const declared = manifest.lib.filter(file => file.endsWith('.ts')).sort();

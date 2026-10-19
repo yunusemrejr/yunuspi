@@ -6,13 +6,13 @@ The public exporter reads only reusable extensions, skills, runtime scripts, exp
 
 ## Release identity
 
-YunusPi is distributed as source rather than as a published npm package, so Git history and package metadata serve different purposes. The full Git commit SHA is the authoritative identity of a development build; `main`, branch names, dates and words such as "latest" are moving references. The root `package.json` version describes the current compatibility/release line and does not by itself mean a GitHub Release exists. Keep its `package-lock.json` and `release-template` copies synchronized.
+YunusPi is distributed as source rather than as a published npm package, so Git history and package metadata serve different purposes. The full Git commit SHA is the authoritative identity of a development build; `main`, branch names, dates and words such as "latest" are moving references. The root `package.json` version describes the current compatibility/release line and does not by itself mean a GitHub Release exists. Keep its `package-lock.json` synchronized.
 
 The YunusPi core has its own version lineage, starting at `0.1.0`, recorded in the owned workspace package manifests and `core/identity.json`. Its historical origin is Pi `0.85.1`; that attribution is immutable and is not an upgrade target. The product version, owned-core versions and source Git SHA describe different identities. Core changes are reviewed as YunusPi source changes and tested against the maintained harness. Upstream versions never update the lockfile, installed runtime or notifications automatically. See [manual upstream porting](../UPSTREAM-PORTING.md).
 
 Public export must preserve the reviewed `core/` source, root workspace metadata and build script from the YunusPi repository. These cannot be reconstructed from a private installation's upstream packages. Never publish an agent-only export as a complete release.
 
-Normal publication to `main` does not create a formal release. When a release is intentionally cut, update the root package version and lockfile plus their synchronized `release-template` copies in the same reviewed change, place an immutable `vMAJOR.MINOR.PATCH` tag on the exact tested commit, and create the matching GitHub Release with release notes. Never move an existing release tag to different source bytes. Commits after a release remain development revisions until another release is deliberately cut.
+Normal publication to `main` does not create a formal release. When a release is intentionally cut, update the root package version and lockfile in the same reviewed change, place an immutable `vMAJOR.MINOR.PATCH` tag on the exact tested commit, and create the matching GitHub Release with release notes. Never move an existing release tag to different source bytes. Commits after a release remain development revisions until another release is deliberately cut.
 
 Use Semantic Versioning according to intended public behavior, not commit count or calendar age: patch for compatible fixes, documentation/test corrections and internal reliability work with no intentional public-contract change; minor for new user-visible capabilities or meaningful behavior/compatibility changes while the project remains pre-1.0; major only when an explicitly stabilized public contract later receives an incompatible change. Feature branches, PR numbers, CI run numbers, private installation state and generated capability counts are not versions. Mutable counts should remain code-owned rather than copied into prose.
 
@@ -31,7 +31,6 @@ Use a fresh staging directory:
 ```sh
 node /path/to/live-agent/scripts/harness-public-export.mjs \
   --source /path/to/live-agent \
-  --templates /path/to/yunuspi/release-template \
   --output /tmp/yunuspi-next-release
 node /tmp/yunuspi-next-release/scripts/check-public.mjs /tmp/yunuspi-next-release
 ```
@@ -58,7 +57,7 @@ git diff --cached --stat
 
 The pre-push hook blocks detected leaks before upload. Hooks must be enabled in each checkout and can be bypassed; CI runs the same checks after pushes/PRs but cannot retract already disclosed content. Enable GitHub secret scanning/push protection and protected-branch checks where your account supports them. Never use bypass flags to silence a real finding. Remediate the staged release, rerun the checks, and rotate credentials if they ever reached a remote.
 
-Do not commit a personal denylist containing actual secrets. Exact local credential comparison belongs in the private exporter process. Update the clean release templates when improving installation/docs/checks so subsequent exports preserve the safeguards.
+Do not commit a personal denylist containing actual secrets. Exact local credential comparison belongs in the private exporter process. Improve installation, docs and checks directly in this repository; exports read them from the repository root.
 
 ## Automated publication
 

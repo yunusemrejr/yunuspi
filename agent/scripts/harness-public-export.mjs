@@ -34,7 +34,9 @@ templates ??= fs.existsSync(path.join(source, "runtime/release-template"))
  ? path.join(source, "runtime/release-template")
  : fs.existsSync(path.join(source, "public-template"))
  ? path.join(source, "public-template")
- : path.resolve(source, "../release-template");
+ : undefined;
+if (!templates)
+ throw Error("Installation has no runtime/release-template; pass --templates DIRECTORY");
 const within = (p, r) => p === r || p.startsWith(r + path.sep);
 function assertRegularDirectory(dir, label = "Source root") {
  const resolved = path.resolve(dir);
@@ -162,19 +164,19 @@ const allowedExt = new Set([
 const portableCodeExt = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".service", ".cpp", ".h"]);
 // These source-controlled assessment fixtures are public test inputs. Do not
 // admit arbitrary SVG artwork from an installation's skills or template tree.
-const publicSvgFixture = /^(?:release-template\/)?tests\/fixtures\/expert-svg-(?:good|mediocre)\.svg$/;
+const publicSvgFixture = /^tests\/fixtures\/expert-svg-(?:good|mediocre)\.svg$/;
 // The web-probe-seo distribution tests read these two static pages; without
 // an exception the extension allowlist silently drops them and the suite
 // fails in the exported tree while passing in the checkout.
-const publicSeoFixture = /^(?:release-template\/)?tests\/fixtures\/seo\/(?:clean|conflicting)-page\.html$/;
+const publicSeoFixture = /^tests\/fixtures\/seo\/(?:clean|conflicting)-page\.html$/;
 // Four skills ship worked static examples/kits as part of their public
 // contract; tests build and inspect them from the exported tree. Keep this
 // scoped to those skills: HTML under any other skill's assets (for example
 // a saved session page) must never enter a public release.
 const publicSkillStaticAsset = /^agent\/skills\/(?:anatomy\/(?:examples|kit)|anatomy-reveal\/template|cinetic\/(?:assets|scripts\/test\/lint-fixtures)|motion-approaches\/assets)\/.*\.(?:html|css)$/;
 // The desktop shell ships its renderer page, stylesheet and brand mark from
-// the release template; the extension allowlist otherwise drops all three.
-const publicDesktopRenderer = /^(?:release-template\/)?desktop\/renderer\/(?:index\.html|styles\.css|assets\/[^/]+\.svg)$/;
+// the repository desktop tree; the extension allowlist otherwise drops all three.
+const publicDesktopRenderer = /^desktop\/renderer\/(?:index\.html|styles\.css|assets\/[^/]+\.svg)$/;
 const omitted = new Set([
  "node_modules",
  ".git",
@@ -314,7 +316,6 @@ try {
   (p) => !p.startsWith("scripts/systemd/") || shippedUnits.has(p),
  );
  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
- copyTree(templates, "release-template");
  // Copy template root entries while preserving dotfiles and all plain files.
  for (const entry of fs.readdirSync(templates, { withFileTypes: true })) {
   if (omitted.has(entry.name)) continue;
@@ -353,8 +354,8 @@ try {
    for (const name of ["src", "docs"]) if (fs.existsSync(path.join(owned, name))) copyTree(path.join(owned, name), `core/${entry.name}/${name}`);
   }
  }
- // Generate the inventory only after both the sanitized source and mirrored
- // release template exist. The generated files are then included in the
+ // Generate the inventory only after the sanitized source and its template
+ // entries exist. The generated files are then included in the
  // public scan and final exact-secret check.
  const inventoryGenerator = path.join(stage, "agent/scripts/generate-capabilities-doc.mjs");
  // Minimal/older source trees can predate the inventory feature. Once its
@@ -364,8 +365,6 @@ try {
  const generation = spawnSync(process.execPath, [inventoryGenerator, "--root", stage], { stdio: "inherit" });
  if (generation.status !== 0) throw Error("Capability inventory generation failed");
  for (const rel of [
-  "release-template/docs/CAPABILITIES.md",
-  "release-template/docs/CAPABILITIES.json",
   "docs/CAPABILITIES.md",
   "docs/CAPABILITIES.json",
  ]) {

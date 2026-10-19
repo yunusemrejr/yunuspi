@@ -58,7 +58,6 @@
         "workflow-orchestration"
       ],
       "sourceFiles": [
-        "agent/extensions/lib/relevant-guidance.ts",
         "agent/extensions/lib/skill-relevance.ts",
         "agent/extensions/lib/capability-groups.ts"
       ],
@@ -487,44 +486,6 @@
       "commands": []
     },
     {
-      "id": "double-mode",
-      "group": "orchestration",
-      "summary": "Session mode that analyzes every user request twice on the session model before the agent starts and reconciles both into one planning directive. The directive is advice below the user's own words; reviewers see it on a shared note board.",
-      "entrypoints": [
-        "/double",
-        "before_agent_start",
-        "double-directive"
-      ],
-      "commands": [
-        "double"
-      ],
-      "options": [
-        {
-          "name": "PI_DOUBLE",
-          "values": [
-            "on",
-            "off"
-          ],
-          "summary": "Disable Double mode when set to off."
-        },
-        {
-          "name": "/double [on|off|status]",
-          "summary": "Twin mode: the session model runs both streams."
-        }
-      ],
-      "related": [
-        "fanout-execution",
-        "subagent-dispatch"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "agent/extensions/lib/double.ts",
-        "agent/extensions/lib/reviewer-board.ts"
-      ],
-      "doc": "docs/REVIEWS-AND-COUNCILS.md",
-      "tools": []
-    },
-    {
       "id": "agent-model-management",
       "group": "models",
       "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
@@ -602,12 +563,10 @@
       "summary": "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",
       "entrypoints": [
         "provider",
-        "or-provider",
         "models.json providers.openrouter.modelOverrides"
       ],
       "commands": [
-        "provider",
-        "or-provider"
+        "provider"
       ],
       "options": [
         {
@@ -891,16 +850,12 @@
         "goal",
         "graph",
         "provider",
-        "or-provider",
         "models",
         "todos",
         "memory-prime",
         "bg",
         "tasks",
-        "bg-tasks",
         "bg-clear",
-        "bg-update",
-        "jobs",
         "logs",
         "kill",
         "subagents",
@@ -977,17 +932,33 @@
     {
       "id": "safety-bounds",
       "group": "safety",
-      "summary": "Inspect host/session dependencies with bash before guarded operations; run disposable experiments with path, process, resource and authority boundaries. Recognized connectivity, power and session-destructive shell commands are blocked; unavailable isolation fails closed.",
+      "summary": "Inspect host/session dependencies and device candidates before guarded operations; run disposable experiments with path, process, resource and authority boundaries. Recognized connectivity, power and session-destructive shell commands are blocked; unavailable isolation fails closed.",
       "entrypoints": [
+        "sys_probe",
         "sandbox_run",
         "filesystem-safety",
         "harness:mutation-preflight"
       ],
       "tools": [
+        "sys_probe",
         "sandbox_run",
         "git_info"
       ],
       "options": [
+        {
+          "name": "sys_probe.action",
+          "values": [
+            "host",
+            "devices",
+            "listeners",
+            "services",
+            "processes",
+            "service_detail",
+            "journal",
+            "diagnose"
+          ],
+          "summary": "Read host resources, network/power/session metadata or device candidates without opening devices."
+        },
         {
           "name": "command",
           "summary": "Inline sandbox Bash script."
@@ -1033,6 +1004,7 @@
         "agent/extensions/sandbox.ts",
         "agent/extensions/filesystem-safety.ts",
         "agent/extensions/lib/host-operation-safety.ts",
+        "agent/extensions/sys-probe.ts",
         "agent/extensions/siblings.ts"
       ],
       "doc": "docs/SECURITY.md",
@@ -1263,10 +1235,7 @@
       "commands": [
         "bg",
         "tasks",
-        "bg-tasks",
         "bg-clear",
-        "bg-update",
-        "jobs",
         "logs",
         "kill"
       ],
@@ -1759,31 +1728,43 @@
     {
       "id": "source-intelligence",
       "group": "engineering",
-      "summary": "Inspect bounded syntax, advisory code-noise patterns, task-ranked AST context and Git structure without executing project code; output limits and omitted coverage remain visible.",
+      "summary": "Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
       "entrypoints": [
         "context_slice",
+        "symbol_expand",
+        "ast_diff",
         "git_info"
       ],
       "tools": [
         "context_slice",
+        "symbol_expand",
+        "ast_diff",
         "git_info"
       ],
       "options": [
         {
           "name": "paths",
-          "summary": "Explicit source files for context_slice."
+          "summary": "Explicit source files for context_slice or symbol_expand."
         },
         {
           "name": "task",
           "summary": "Task identifiers used to rank context_slice results."
         },
         {
-          "name": "maxChars",
+          "name": "symbol",
+          "summary": "Symbol name for bounded expansion."
+        },
+        {
+          "name": "maxHops|maxNodes|maxChars",
           "summary": "AST and response bounds."
         },
         {
           "name": "path",
           "summary": "Source path for syntax or Git inspection."
+        },
+        {
+          "name": "base|before|after",
+          "summary": "Git base or supplied source pair for ast_diff."
         },
         {
           "name": "action",
@@ -1857,7 +1838,8 @@
       ],
       "related": [
         "source-intelligence",
-        "quality-review"
+        "quality-review",
+        "artifact-numeric-checks"
       ],
       "sourceFiles": [
         "agent/extensions/lib/code-quality.ts",
@@ -1904,6 +1886,7 @@
       ],
       "related": [
         "code-quality",
+        "artifact-numeric-checks",
         "quality-review",
         "design-studio"
       ],
@@ -1915,6 +1898,56 @@
         "agent/extensions/lib/small-tools.ts"
       ],
       "doc": "docs/CODE-AUDIT.md",
+      "commands": []
+    },
+    {
+      "id": "artifact-numeric-checks",
+      "group": "engineering",
+      "summary": "Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.",
+      "entrypoints": [
+        "math_check"
+      ],
+      "tools": [
+        "math_check"
+      ],
+      "options": [
+        {
+          "name": "path|text",
+          "summary": "One workspace path or supported inline source; SVG is bounded to 64 KiB."
+        },
+        {
+          "name": "math_check.operation",
+          "values": [
+            "frame_budget",
+            "render_budget",
+            "summarize",
+            "compare",
+            "classify",
+            "vectors",
+            "split_overlap"
+          ],
+          "summary": "Deterministic numeric calculation."
+        },
+        {
+          "name": "values|target_fps",
+          "summary": "Observed frame durations in milliseconds and target rate."
+        },
+        {
+          "name": "width|height|pixel_ratio|bytes_per_pixel|samples|buffers",
+          "summary": "Explicit render attachment assumptions; excludes other allocations and driver overhead."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "web-and-media",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/small-tools.ts",
+        "agent/extensions/lib/svg-check.ts",
+        "agent/extensions/lib/numeric-checks.ts"
+      ],
+      "doc": "docs/SKILLS-AND-CHECKS.md",
       "commands": []
     },
     {
@@ -2151,6 +2184,7 @@
       ],
       "related": [
         "web-and-media",
+        "artifact-numeric-checks",
         "background-tasks"
       ],
       "sourceFiles": [
@@ -2352,6 +2386,68 @@
       "commands": []
     },
     {
+      "id": "google-colab",
+      "group": "engineering",
+      "summary": "Run ML and general compute on Google Colab through the official google-colab-cli: install and browser-authenticate the CLI, rent CPU, T4/L4/G4/H100/A100 or TPU v5e1/v6e1 runtimes, execute scripts or notebooks, sync files, export session logs, detach long training jobs and release billable sessions. Includes QLoRA/SFT, GRPO/PPO, from-scratch small-model and evaluation workflows with reference scripts.",
+      "entrypoints": [
+        "colab"
+      ],
+      "tools": [
+        "colab"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "summary": "setup, status, auth, new, sessions, exec, run, install_packages, upload, download, ls, rm, log, stop, restart, url, usage, doctor, jobs, job_output or job_kill."
+        },
+        {
+          "name": "gpu|tpu",
+          "summary": "new/run: T4, L4, G4, H100, A100 or TPU v5e1/v6e1. Availability is account-tier gated; unknown GPUs are rejected instead of silently falling back."
+        },
+        {
+          "name": "session",
+          "summary": "Persistent kernel name. Reuse it for iterative exec calls; stop it to release the VM."
+        },
+        {
+          "name": "background",
+          "summary": "Detach a long exec/run after the foreground grace and return a job id; poll jobs/job_output."
+        },
+        {
+          "name": "auth_action",
+          "values": [
+            "status",
+            "login",
+            "complete",
+            "cancel"
+          ],
+          "summary": "status, login (visible browser or manual code), complete with a pasted code, or cancel."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "oauth2",
+            "adc"
+          ],
+          "summary": "oauth2 cached user token or adc Application Default Credentials."
+        }
+      ],
+      "related": [
+        "background-tasks",
+        "web-and-media",
+        "model-routing"
+      ],
+      "sourceFiles": [
+        "agent/extensions/colab.ts",
+        "agent/extensions/lib/colab.ts",
+        "agent/extensions/lib/colab-auth.ts",
+        "agent/extensions/lib/colab-jobs.ts",
+        "agent/scripts/colab-auth-browser.mjs",
+        "agent/skills/colab/SKILL.md"
+      ],
+      "doc": "docs/GOOGLE-COLAB.md",
+      "commands": []
+    },
+    {
       "id": "office-and-deliverables",
       "group": "web_media",
       "summary": "Read, build, verify and render Office files with no office suite, and open any produced file before calling it done. office_doc reads docx, xlsx, pptx and OpenDocument into structured content with findings (damaged packages, unreplaced placeholders, uncalculated or error formulas, post-2007 functions stored without the _xlfn. prefix, numbers stored as text, empty slides), builds docx, xlsx and pptx decks from declarative specs (a deck is laid out and measured for the model: type sizes chosen to fit, long lists and tables continue on numbered follow-on slides) with real styles, list numbering, repeating table headers, frozen panes, number formats and calculated formula results (about 100 functions including SUMIF, COUNTIF, VLOOKUP, INDEX/MATCH, XLOOKUP, TEXT and DATE, checked against LibreOffice), renders PDF and PNG pages through LibreOffice, and converts between formats with LibreOffice (office_doc convert: docx, xlsx, pptx, pdf, odt, csv per sheet, txt, html, and the legacy doc, xls, ppt, rtf, which the read tool and office_doc read also open by converting them). deliverable_check inspects PDFs, images, SVG, video, audio, CSV, JSON, HTML, Markdown and archives for measurable defects. A tracker notices final-product files that scripts wrote, lists unopened ones once in the answer footer and wakes the model at most twice per distinct set to check them. For documents the session itself produced (docx, pptx, odt, odp, pdf) the checks also compare the specifics they state (emails, phone numbers, links, greeting and signature names, rooms and addresses, dates, times, amounts) with the user's words, tool output and the input files the session referenced, and warn about contact data, names and places that appeared nowhere, so a made-up room or phone number is caught instead of delivered. The native read tool no longer returns raw bytes for binary files: a PDF reads as page text (offset is the page), an Office file as structured text, and an archive, SQLite database or media file as its entries, schema or streams.",
@@ -2364,7 +2460,8 @@
         "deliverable_check",
         "render_see",
         "video_frames",
-        "audio_analyze"
+        "audio_analyze",
+        "data_query"
       ],
       "options": [
         {
@@ -2445,13 +2542,17 @@
     {
       "id": "ui-engineering",
       "group": "web_media",
-      "summary": "Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.",
+      "summary": "Autonomous UI engineering through the existing adaptive pipeline and creative direction owners. ui_explore covers touch/DPR/orientation and breakpoint neighbors with explicit bounded coverage. motion_inspect scroll samples forward/backtracking and reduced states in one live document, including JS/scroll-driven effects; ui_consistency compares shared role/token measurements across routes with declared variants and missing coverage. Main prompts, short follow-ups, goals and observed source changes refresh the relevant tools and evidence stages. Prepared code, measured drift and screenshots never establish interaction or artistic approval.",
       "entrypoints": [
-        "ui_explore"
+        "ui_explore",
+        "motion_inspect",
+        "ui_consistency"
       ],
       "tools": [
         "creative_direct",
         "ui_explore",
+        "motion_inspect",
+        "ui_consistency",
         "render_see",
         "visual_review",
         "browser_session",
@@ -2471,6 +2572,7 @@
         "agent/scripts/ui-motion-runtime.mjs",
         "agent/extensions/art-direction.ts",
         "agent/extensions/lib/creative-qa.ts",
+        "agent/extensions/lib/motion-inspect.ts",
         "agent/extensions/adaptive-workflows.ts",
         "agent/extensions/lib/task-pipelines.ts"
       ],
@@ -2534,7 +2636,8 @@
       ],
       "related": [
         "rendered-design-review",
-        "web-and-media"
+        "web-and-media",
+        "artifact-numeric-checks"
       ],
       "sourceFiles": [
         "agent/extensions/design-studio.ts",
@@ -2549,22 +2652,30 @@
     {
       "id": "art-direction",
       "group": "web_media",
-      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; media_info motion measures bounded decoded video frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing. Blocking verdicts hold the completion gate.",
+      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples verified periods without claiming an arbitrary sample is a loop seam; media_info motion measures bounded decoded video frames; svg_render exports authored CSS/SMIL/data-keyframe SVG to sampled PNGs or narrated H.264 with clock/clipping diagnostics; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search and inspects contained glTF/GLB dependencies, meshes and animation metadata; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
       "entrypoints": [
         "creative_direct",
         "visual_review",
         "ui_explore",
+        "ui_consistency",
+        "motion_inspect",
+        "svg_render",
         "svg_inspect",
         "asset_register",
-        "image_generate"
+        "image_generate",
+        "creative_compare"
       ],
       "tools": [
         "creative_direct",
         "visual_review",
         "ui_explore",
+        "ui_consistency",
+        "motion_inspect",
+        "svg_render",
         "svg_inspect",
         "asset_register",
         "image_generate",
+        "creative_compare",
         "render_see"
       ],
       "options": [
@@ -2578,7 +2689,7 @@
         },
         {
           "name": "source|sources",
-          "summary": "Local HTML/SVG path or http(s) URL."
+          "summary": "Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width."
         },
         {
           "name": "viewports|states|devices|breakpoints",
@@ -2595,6 +2706,10 @@
         {
           "name": "PI_UI_VERIFICATION",
           "summary": "Default on: UI edits stage native QA, SVG saves get structural review, missing/stale evidence feeds completion, with at most two automatic follow-ups. off is an explicit opt-out."
+        },
+        {
+          "name": "mode|positions|backtrack",
+          "summary": "Time inventory or live scroll-mode observations, forward/backtracking and reduced-motion frames; continuous smoothness and GPU cost remain unknown."
         },
         {
           "name": "verdict",
@@ -2620,7 +2735,9 @@
         "agent/extensions/lib/creative-direction.ts",
         "agent/extensions/lib/creative-qa.ts",
         "agent/extensions/lib/creative-evidence.ts",
+        "agent/extensions/lib/motion-inspect.ts",
         "agent/extensions/lib/svg-inspect.ts",
+        "agent/extensions/lib/svg-render.ts",
         "agent/extensions/lib/asset-registry.ts",
         "agent/extensions/lib/gltf-inspect.ts",
         "agent/extensions/lib/video-motion.ts",
@@ -2637,7 +2754,8 @@
       "entrypoints": [],
       "tools": [
         "render_see",
-        "browser_session"
+        "browser_session",
+        "web_asset_check"
       ],
       "options": [
         {
@@ -2670,14 +2788,63 @@
       "commands": []
     },
     {
-      "id": "bounded-operations",
+      "id": "delivery-preflight",
       "group": "engineering",
-      "summary": "Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection.",
+      "summary": "Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset references for hosting, and Ubuntu unit/journal metadata without running workflows, publishing sites or mutating services. Source-backed findings with explicit unresolved expressions.",
       "entrypoints": [
-        "workspace_search"
+        "web_asset_check",
+        "sys_probe"
       ],
       "tools": [
-        "workspace_search"
+        "web_asset_check",
+        "sys_probe",
+        "git_info",
+        "package_probe"
+      ],
+      "options": [
+        {
+          "name": "path|project",
+          "summary": "Explicit workflow YAML and project root."
+        },
+        {
+          "name": "files|asset_root|public_path",
+          "summary": "Explicit HTML/CSS/manifest sources and hosting asset boundary."
+        },
+        {
+          "name": "sys_probe.action",
+          "values": [
+            "service_detail",
+            "journal",
+            "diagnose"
+          ],
+          "summary": "Inspect exact units/journals or bounded proc/pressure/cgroup resources plus explicit PID/port diagnosis."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "safety-bounds",
+        "rendered-design-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "agent/extensions/sys-probe.ts"
+      ],
+      "doc": "docs/ASYNC-AND-STUDIO.md",
+      "commands": []
+    },
+    {
+      "id": "bounded-operations",
+      "group": "engineering",
+      "summary": "Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection. Prepare inert SSH argv or inspect one explicit server banner without authenticating or executing remote commands.",
+      "entrypoints": [
+        "workspace_search",
+        "ssh_plan",
+        "net_probe"
+      ],
+      "tools": [
+        "workspace_search",
+        "ssh_plan",
+        "net_probe"
       ],
       "options": [
         {
@@ -2691,6 +2858,10 @@
         {
           "name": "snapshot|message_hash",
           "summary": "Current snapshot identity required for continuation or reading mail."
+        },
+        {
+          "name": "host|port|user",
+          "summary": "One explicit SSH target; no ranges, configuration execution or automatic connection."
         }
       ],
       "related": [
@@ -2700,7 +2871,8 @@
       ],
       "sourceFiles": [
         "agent/extensions/utility-tools.ts",
-        "agent/extensions/lib/utility-mcp/local_operations.py"
+        "agent/extensions/lib/utility-mcp/local_operations.py",
+        "agent/extensions/lib/utility-mcp/net.mjs"
       ],
       "doc": "docs/ASYNC-AND-STUDIO.md",
       "commands": []
@@ -2794,14 +2966,12 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
+      "summary": "Shared Needle3, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis, evidence triage and one conservative per-turn thinking-level decision; deterministic owners retain safety and completion authority.",
       "entrypoints": [
-        "micro_status",
-        "micro_task"
+        "micro_status"
       ],
       "tools": [
-        "micro_status",
-        "micro_task"
+        "micro_status"
       ],
       "options": [
         {
@@ -2815,16 +2985,6 @@
         {
           "name": "PI_JEV",
           "summary": "Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter."
-        },
-        {
-          "name": "micro_task.action",
-          "values": [
-            "analyze",
-            "status",
-            "qualify",
-            "run"
-          ],
-          "summary": "Batch semantic analysis, inspect status, refresh the session model's qualification or run one bounded task on the session model."
         },
         {
           "name": "PI_RERANK_MODEL|VOYAGE_API_KEY",
@@ -2841,7 +3001,6 @@
         "agent/extensions/micro-intelligence.ts",
         "agent/extensions/lib/needle-runtime.ts",
         "agent/extensions/lib/jev-client.ts",
-        "agent/extensions/lib/micro-intelligence/micro-task.ts",
         "agent/extensions/lib/micro-intelligence/metrics.ts"
       ],
       "doc": "docs/MICRO-INTELLIGENCE.md",
@@ -2853,12 +3012,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 386
+        "line": 387
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 400
+        "line": 401
       },
       {
         "name": "bg",
@@ -2868,27 +3027,17 @@
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 610
-      },
-      {
-        "name": "bg-tasks",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 602
-      },
-      {
-        "name": "bg-update",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 618
       },
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 903
+        "line": 902
       },
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1762
+        "line": 1645
       },
       {
         "name": "claude-cache",
@@ -2898,22 +3047,17 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1832
+        "line": 1828
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1382
+        "line": 1378
       },
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 3283
-      },
-      {
-        "name": "double",
-        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 381
       },
       {
         "name": "effort",
@@ -2923,7 +3067,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1796
+        "line": 1792
       },
       {
         "name": "export-json",
@@ -2933,7 +3077,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 361
+        "line": 362
       },
       {
         "name": "google-account",
@@ -2943,7 +3087,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 807
+        "line": 831
       },
       {
         "name": "harness-backup",
@@ -2956,14 +3100,9 @@
         "line": 78
       },
       {
-        "name": "jobs",
-        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 648
-      },
-      {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 695
+        "line": 657
       },
       {
         "name": "lens-allow-edit",
@@ -3018,7 +3157,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 663
+        "line": 625
       },
       {
         "name": "memory-prime",
@@ -3038,32 +3177,27 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 379
+        "line": 380
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 372
+        "line": 373
       },
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 789
+        "line": 726
       },
       {
         "name": "observer-book",
         "source": "agent/extensions/lib/session-observer-impl.ts",
-        "line": 516
-      },
-      {
-        "name": "or-provider",
-        "source": "agent/extensions/provider-cmd.ts",
-        "line": 654
+        "line": 514
       },
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 614
+        "line": 618
       },
       {
         "name": "prompt-workflow",
@@ -3083,7 +3217,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1237
+        "line": 1104
       },
       {
         "name": "run",
@@ -3098,7 +3232,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1720
+        "line": 1716
       },
       {
         "name": "subagent-cost",
@@ -3153,7 +3287,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1745
+        "line": 1741
       },
       {
         "name": "task-state",
@@ -3168,12 +3302,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1764
+        "line": 1760
       },
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 393
+        "line": 394
       },
       {
         "name": "websearch",
@@ -3212,10 +3346,22 @@
     ],
     "stableRegistrations": [
       {
+        "name": "archive_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 24,
+        "kind": "catalog"
+      },
+      {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 465,
+        "line": 510,
         "kind": "factory"
+      },
+      {
+        "name": "ast_diff",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "line": 12,
+        "kind": "definition"
       },
       {
         "name": "audio_analyze",
@@ -3251,25 +3397,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 867,
+        "line": 823,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 821,
+        "line": 780,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 731,
+        "line": 693,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 752,
         "kind": "literal"
       },
       {
@@ -3309,9 +3455,21 @@
         "kind": "literal"
       },
       {
+        "name": "bulk_edit",
+        "source": "agent/extensions/bulk-edit.ts",
+        "line": 217,
+        "kind": "literal"
+      },
+      {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
         "line": 222,
+        "kind": "literal"
+      },
+      {
+        "name": "colab",
+        "source": "agent/extensions/colab.ts",
+        "line": 246,
         "kind": "literal"
       },
       {
@@ -3323,13 +3481,25 @@
       {
         "name": "context_slice",
         "source": "agent/extensions/pi-lens/context-tools.ts",
-        "line": 8,
+        "line": 10,
         "kind": "definition"
+      },
+      {
+        "name": "creative_compare",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 614,
+        "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 310,
+        "line": 314,
+        "kind": "factory"
+      },
+      {
+        "name": "data_query",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 119,
         "kind": "factory"
       },
       {
@@ -3367,7 +3537,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 409,
+        "line": 410,
         "kind": "literal"
       },
       {
@@ -3391,13 +3561,19 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 511,
+        "line": 556,
         "kind": "factory"
       },
       {
         "name": "image_understand",
         "source": "agent/extensions/design-studio.ts",
         "line": 29,
+        "kind": "factory"
+      },
+      {
+        "name": "math_check",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 102,
         "kind": "factory"
       },
       {
@@ -3451,19 +3627,19 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 416,
-        "kind": "literal"
-      },
-      {
-        "name": "micro_task",
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 28,
+        "line": 414,
         "kind": "literal"
       },
       {
         "name": "motion_examples",
         "source": "agent/extensions/video-studio.ts",
         "line": 156,
+        "kind": "factory"
+      },
+      {
+        "name": "motion_inspect",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 444,
         "kind": "factory"
       },
       {
@@ -3479,9 +3655,15 @@
         "kind": "factory"
       },
       {
+        "name": "net_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 22,
+        "kind": "catalog"
+      },
+      {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 713,
+        "line": 650,
         "kind": "literal"
       },
       {
@@ -3489,6 +3671,12 @@
         "source": "agent/extensions/deliverables.ts",
         "line": 170,
         "kind": "literal"
+      },
+      {
+        "name": "package_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 20,
+        "kind": "catalog"
       },
       {
         "name": "process",
@@ -3499,7 +3687,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 691,
+        "line": 715,
         "kind": "literal"
       },
       {
@@ -3547,7 +3735,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1862,
+        "line": 1858,
         "kind": "literal"
       },
       {
@@ -3558,8 +3746,8 @@
       },
       {
         "name": "skill_review",
-        "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 653,
+        "source": "agent/extensions/lib/skill-review.ts",
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -3571,6 +3759,12 @@
       },
       {
         "name": "sqlite_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 18,
+        "kind": "catalog"
+      },
+      {
+        "name": "ssh_plan",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 14,
         "kind": "catalog"
@@ -3596,7 +3790,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 783,
+        "line": 779,
         "kind": "definition"
       },
       {
@@ -3608,13 +3802,31 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 430,
+        "line": 475,
         "kind": "factory"
+      },
+      {
+        "name": "svg_render",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 470,
+        "kind": "factory"
+      },
+      {
+        "name": "symbol_expand",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "line": 11,
+        "kind": "definition"
+      },
+      {
+        "name": "sys_probe",
+        "source": "agent/extensions/sys-probe.ts",
+        "line": 258,
+        "kind": "literal"
       },
       {
         "name": "task_pipeline",
         "source": "agent/extensions/lib/adaptive-workflows-impl.ts",
-        "line": 550,
+        "line": 580,
         "kind": "literal"
       },
       {
@@ -3632,13 +3844,25 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 517,
+        "line": 520,
         "kind": "literal"
+      },
+      {
+        "name": "ui_consistency",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 433,
+        "kind": "factory"
       },
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 402,
+        "line": 406,
+        "kind": "factory"
+      },
+      {
+        "name": "value_convert",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 115,
         "kind": "factory"
       },
       {
@@ -3686,8 +3910,14 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 352,
+        "line": 356,
         "kind": "factory"
+      },
+      {
+        "name": "web_asset_check",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 16,
+        "kind": "catalog"
       },
       {
         "name": "web_probe",
@@ -3709,6 +3939,12 @@
         "configurable": true
       },
       {
+        "name": "workdir_snapshot",
+        "source": "agent/extensions/scoped-snapshots.ts",
+        "line": 12,
+        "kind": "literal"
+      },
+      {
         "name": "workspace_search",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 12,
@@ -3719,25 +3955,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 867,
+        "line": 823,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 821,
+        "line": 780,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 731,
+        "line": 693,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 752,
         "kind": "literal"
       },
       {
@@ -3747,9 +3983,21 @@
         "kind": "literal"
       },
       {
+        "name": "bulk_edit",
+        "source": "agent/extensions/bulk-edit.ts",
+        "line": 217,
+        "kind": "literal"
+      },
+      {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
         "line": 222,
+        "kind": "literal"
+      },
+      {
+        "name": "colab",
+        "source": "agent/extensions/colab.ts",
+        "line": 246,
         "kind": "literal"
       },
       {
@@ -3773,7 +4021,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 409,
+        "line": 410,
         "kind": "literal"
       },
       {
@@ -3827,19 +4075,13 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 416,
-        "kind": "literal"
-      },
-      {
-        "name": "micro_task",
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 28,
+        "line": 414,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 713,
+        "line": 650,
         "kind": "literal"
       },
       {
@@ -3857,7 +4099,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
-        "line": 691,
+        "line": 715,
         "kind": "literal"
       },
       {
@@ -3905,7 +4147,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1862,
+        "line": 1858,
         "kind": "literal"
       },
       {
@@ -3916,8 +4158,8 @@
       },
       {
         "name": "skill_review",
-        "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 653,
+        "source": "agent/extensions/lib/skill-review.ts",
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -3927,9 +4169,15 @@
         "kind": "literal"
       },
       {
+        "name": "sys_probe",
+        "source": "agent/extensions/sys-probe.ts",
+        "line": 258,
+        "kind": "literal"
+      },
+      {
         "name": "task_pipeline",
         "source": "agent/extensions/lib/adaptive-workflows-impl.ts",
-        "line": 550,
+        "line": 580,
         "kind": "literal"
       },
       {
@@ -3941,7 +4189,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 517,
+        "line": 520,
         "kind": "literal"
       },
       {
@@ -3954,6 +4202,12 @@
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
         "line": 73,
+        "kind": "literal"
+      },
+      {
+        "name": "workdir_snapshot",
+        "source": "agent/extensions/scoped-snapshots.ts",
+        "line": 12,
         "kind": "literal"
       }
     ],
@@ -3973,13 +4227,17 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          276
+          280
         ],
         "knownNames": [
           "asset_register",
+          "creative_compare",
           "creative_direct",
           "image_generate",
+          "motion_inspect",
           "svg_inspect",
+          "svg_render",
+          "ui_consistency",
           "ui_explore",
           "visual_review"
         ]
@@ -4010,6 +4268,20 @@
         "knownNames": [
           "image_crop",
           "image_understand"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/small-tools.ts",
+        "signals": [
+          "registration passes names through a local factory; literal factory call sites are enumerated"
+        ],
+        "lines": [
+          85
+        ],
+        "knownNames": [
+          "data_query",
+          "math_check",
+          "value_convert"
         ]
       },
       {
@@ -4048,10 +4320,12 @@
           "registration loops over definitions; literal definition names are enumerated"
         ],
         "lines": [
-          10
+          14
         ],
         "knownNames": [
-          "context_slice"
+          "ast_diff",
+          "context_slice",
+          "symbol_expand"
         ]
       },
       {
@@ -4072,7 +4346,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          834
+          830
         ],
         "knownNames": [
           "subagent"
@@ -4110,7 +4384,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          592
+          596
         ]
       },
       {
@@ -4149,10 +4423,15 @@
           "registration loops over the static TOOLS catalog; catalog names are enumerated"
         ],
         "lines": [
-          30
+          31
         ],
         "knownNames": [
+          "archive_probe",
+          "net_probe",
+          "package_probe",
           "sqlite_probe",
+          "ssh_plan",
+          "web_asset_check",
           "workspace_search"
         ]
       },
@@ -4180,12 +4459,12 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 676,
-      "registrationSites": 60,
-      "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 83,
-      "uniqueStableTools": 82,
-      "dynamicOwnerCount": 16,
+      "sourceFiles": 677,
+      "registrationSites": 64,
+      "indirectRegistrationSites": 21,
+      "stableRegistrationRows": 100,
+      "uniqueStableTools": 99,
+      "dynamicOwnerCount": 17,
       "excludedGeneratedDirectories": [
         "dist",
         "build",
@@ -4216,7 +4495,15 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/bulk-edit.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/checkpoints.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/colab.ts",
         "exists": true
       },
       {
@@ -4316,6 +4603,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/scoped-snapshots.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/session-export-json.ts",
         "exists": true
       },
@@ -4333,6 +4624,10 @@
       },
       {
         "path": "agent/extensions/siblings.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/sys-probe.ts",
         "exists": true
       },
       {
@@ -4366,6 +4661,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/artifact-checks.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/asset-registry.ts",
         "exists": true
       },
@@ -4395,6 +4694,10 @@
       },
       {
         "path": "agent/extensions/lib/browser-session.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/bulk-edit.ts",
         "exists": true
       },
       {
@@ -4439,6 +4742,18 @@
       },
       {
         "path": "agent/extensions/lib/code-structure.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab-auth.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab-jobs.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/colab.ts",
         "exists": true
       },
       {
@@ -4502,6 +4817,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/data-query.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/deliverable-inspect.ts",
         "exists": true
       },
@@ -4526,10 +4845,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/double.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/effort-policy.mjs",
         "exists": true
       },
@@ -4539,10 +4854,6 @@
       },
       {
         "path": "agent/extensions/lib/execution-evidence.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/film-blend.ts",
         "exists": true
       },
       {
@@ -4562,18 +4873,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/guidance-topics-domains.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/guidance-topics-systems.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/guidance-topics.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/harness-activity.ts",
         "exists": true
       },
@@ -4583,10 +4882,6 @@
       },
       {
         "path": "agent/extensions/lib/harness-notice.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/harness-orientation.ts",
         "exists": true
       },
       {
@@ -4714,7 +5009,7 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/model-routing-store.ts",
+        "path": "agent/extensions/lib/motion-inspect.ts",
         "exists": true
       },
       {
@@ -4750,7 +5045,7 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/noslop.ts",
+        "path": "agent/extensions/lib/numeric-checks.ts",
         "exists": true
       },
       {
@@ -4870,10 +5165,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/relevant-guidance.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/reminders-state.ts",
         "exists": true
       },
@@ -4910,11 +5201,19 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/scoped-snapshots.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/self-mutation-guard.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/seo-policy.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/service-probe.ts",
         "exists": true
       },
       {
@@ -4986,6 +5285,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/skill-review.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/skill-routing.ts",
         "exists": true
       },
@@ -5027,6 +5330,14 @@
       },
       {
         "path": "agent/extensions/lib/svg-inspect.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/svg-render.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/sys-probe.ts",
         "exists": true
       },
       {
@@ -5188,14 +5499,6 @@
         "exists": true
       },
       {
-        "path": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/micro-intelligence/micro-worker.ts",
-        "exists": true
-      },
-      {
         "path": "agent/extensions/lib/micro-intelligence/model-qual-lab.ts",
         "exists": true
       },
@@ -5292,11 +5595,27 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/utility-mcp/local-reference.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/net.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/package.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/utility-mcp/probe.py",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/utility-mcp/server.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/web-assets.mjs",
         "exists": true
       },
       {
@@ -5401,6 +5720,10 @@
       },
       {
         "path": "agent/scripts/browser-session-runner.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/colab-auth-browser.mjs",
         "exists": true
       },
       {
@@ -5629,19 +5952,14 @@
         "why": "annotation hook that nudged bash commands toward dedicated tools; the nudges duplicated tool descriptions and tool_search. The pure classifier stays in lib/bash-routing.ts for guidance and test detection. Do not recreate"
       },
       {
-        "name": "bulk-edit.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). bulk_edit tool removed: 4 calls in 30 days; the edit tool with several edits[] entries covers the same work. Do not recreate."
-      },
-      {
         "name": "capabilities.ts",
         "retired": "2026-09-02",
         "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
       },
       {
-        "name": "colab.ts",
+        "name": "config/llm_preferences.example.json",
         "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab tool and google-colab-cli helper removed: 0 calls in 30 days; its helpers, skill folder and pipeline/routing entries deleted with it. Do not recreate."
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
         "name": "context-composition.json",
@@ -5662,6 +5980,11 @@
         "name": "desktop-session.ts",
         "retired": "2026-10-10",
         "why": "1 use in 45 days; Xvfb/xdotool via bash is enough. Do not recreate"
+      },
+      {
+        "name": "docs/LLM-PREFERENCES.md",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
         "name": "DOCTRINE.md",
@@ -5704,34 +6027,9 @@
         "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"
       },
       {
-        "name": "lib/artifact-checks.ts",
+        "name": "lib/double.ts",
         "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). value_convert helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
-      },
-      {
-        "name": "lib/bulk-edit.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). bulk_edit helper removed with the bulk_edit tool (4 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/colab-auth.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab auth helper removed with the colab tool (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/colab-jobs.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab job helper removed with the colab tool (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/colab.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab helper removed with the colab tool (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/data-query.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). data_query helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+        "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
       },
       {
         "name": "lib/expert-brief.ts",
@@ -5764,19 +6062,54 @@
         "why": "Expert Director domain-excellence layer removed 2026-10-19: retired by default since the lean-gates wave, 13 tool calls across all recorded sessions, ~137KB of doctrine/critics/taste code imported on every boot. detectTaskType (its one live consumer path) moved into lib/prior-art.ts. Quality routing stays with quality_review, the design-direction protocol and skills."
       },
       {
+        "name": "lib/film-blend.ts",
+        "retired": "2026-10-19",
+        "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
+      },
+      {
+        "name": "lib/guidance-topics-domains.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/guidance-topics-systems.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/guidance-topics.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/harness-orientation.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
+        "name": "lib/micro-intelligence/micro-task.ts",
+        "retired": "2026-10-19",
+        "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+      },
+      {
+        "name": "lib/micro-intelligence/micro-worker.ts",
+        "retired": "2026-10-19",
+        "why": "micro_task removed: zero calls in 30 days of sessions, yet it was always active and its schema described synthetic qualification runs and Jev/Kev batches the agent never needed."
+      },
+      {
         "name": "lib/micro-intelligence/router-shadow.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
       },
       {
-        "name": "lib/motion-inspect.ts",
+        "name": "lib/model-routing-store.ts",
         "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). motion_inspect helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
       },
       {
-        "name": "lib/numeric-checks.ts",
+        "name": "lib/noslop.ts",
         "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). math_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
+        "why": "Boost briefs cut to short standards in lib/presets.ts: chained boosts produced a 21k-character kickoff whose /noslop and /nobug briefs audited a codebase during a video job and whose film blend cast three skills as a crew."
       },
       {
         "name": "lib/observer-model-evidence.ts",
@@ -5784,19 +6117,14 @@
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
       },
       {
+        "name": "lib/relevant-guidance.ts",
+        "retired": "2026-10-19",
+        "why": "Ambient capability hints, first-prompt orientation and topic routing removed: they injected unrelated advice into the agent context (an alt-text hint during a video render, ui_explore at 320px for a Remotion file, harness-preservation notes in user projects)."
+      },
+      {
         "name": "lib/scope-deliberation.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
-      },
-      {
-        "name": "lib/scoped-snapshots.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). snapshot store removed with workdir_snapshot (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/service-probe.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). service-detail helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate."
       },
       {
         "name": "lib/skill-discovery-controller.ts",
@@ -5807,41 +6135,6 @@
         "name": "lib/skill-discovery.ts",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
-      },
-      {
-        "name": "lib/svg-render.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). svg_render helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
-      },
-      {
-        "name": "lib/sys-probe.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). sys_probe helper removed with the sys_probe tool (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/utility-mcp/local-reference.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). reference evidence helper for web_asset_check removed with it. Do not recreate."
-      },
-      {
-        "name": "lib/utility-mcp/net.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). net_probe and ssh_plan helpers removed: tools had no real use in 30 days (636 session logs). Do not recreate."
-      },
-      {
-        "name": "lib/utility-mcp/package.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). package_probe helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
-      },
-      {
-        "name": "lib/utility-mcp/system-probe.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). local system diagnosis helper removed with sys_probe (0 calls in 30 days). Do not recreate."
-      },
-      {
-        "name": "lib/utility-mcp/web-assets.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). web_asset_check helper removed: tool had no real use in 30 days (636 session logs). Do not recreate."
       },
       {
         "name": "lichtfeld-studio.ts",
@@ -5969,6 +6262,51 @@
         "why": "extension file superseded by npm:pi-subagents (the package name stays live)"
       },
       {
+        "name": "pi-subagents/src/runs/shared/child-route-requirements.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/free-route-evidence.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/llm-preferences.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-economy.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-exclusions.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-quality.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-research.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/model-selection.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
+        "name": "pi-subagents/src/runs/shared/route-decision-record.ts",
+        "retired": "2026-10-19",
+        "why": "Autonomous model selection, model ranking and research, price-capped economy selection and the llm_preferences override removed 2026-10-19: the session model runs everything and subagents always inherit it. Do not recreate."
+      },
+      {
         "name": "pi-tinyfish.ts",
         "retired": "2026-08-31",
         "why": "web_search/web_fetch overlap with npm:pi-web-access; moved to backups/retired-extensions/"
@@ -6024,16 +6362,6 @@
         "why": "scene_create and scene_render tools removed; lib/scene-studio.ts had no production caller left. Do not recreate"
       },
       {
-        "name": "scoped-snapshots.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). workdir_snapshot tool removed: 0 calls in 30 days; edit with explicit paths and Git instead. Do not recreate."
-      },
-      {
-        "name": "scripts/colab-auth-browser.mjs",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). colab browser-auth script removed with the colab tool (0 calls in 30 days). Do not recreate."
-      },
-      {
         "name": "scripts/compatibility/autonomous-recovery-test.mjs",
         "retired": "2026-10-19",
         "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
@@ -6067,11 +6395,6 @@
         "name": "subagent-tool-description.md",
         "retired": "2026-09-02",
         "why": "runtime-orphaned custom tool-description file (its toolDescriptionMode: 'custom' loader retired with the tool-desc-overrides seam 2026-09-02). Delegation posture folded into the pi-subagents fork's DEFAULT_SUBAGENT_TOOL_DESCRIPTION + SUBAGENT_TOOL_PROMPT_GUIDELINES (src/extension/tool-description.ts), which now own the subagent tool prompt; file moved to backups/retired-extensions/. Do not recreate"
-      },
-      {
-        "name": "sys-probe.ts",
-        "retired": "2026-10-19",
-        "why": "user-directed removal of zero or near-zero use tools (2026-10-19 sweep of 636 session logs, last 30 days). sys_probe tool removed: 0 calls in 30 days; bash ps/ss/systemctl remain available. Do not recreate."
       },
       {
         "name": "telemetry.json",
@@ -6175,12 +6498,6 @@
         ]
       },
       {
-        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "signals": [
           "wrapper/adapter"
@@ -6188,12 +6505,6 @@
       },
       {
         "source": "agent/extensions/lib/project-intelligence/client.mjs",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
-        "source": "agent/extensions/lib/relevant-guidance.ts",
         "signals": [
           "wrapper/adapter"
         ]
@@ -6224,7 +6535,37 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/utility-mcp/local-reference.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/net.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/package.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/utility-mcp/server.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/system-probe.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/web-assets.mjs",
         "signals": [
           "MCP"
         ]
@@ -6266,15 +6607,15 @@
         ]
       },
       {
-        "source": "agent/extensions/pi-lens/dist/index.js",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
         "signals": [
-          "MCP",
           "wrapper/adapter"
         ]
       },
       {
-        "source": "agent/extensions/pi-observations.ts",
+        "source": "agent/extensions/pi-lens/dist/index.js",
         "signals": [
+          "MCP",
           "wrapper/adapter"
         ]
       },
@@ -6414,12 +6755,6 @@
         ]
       },
       {
-        "source": "agent/extensions/pi-subagents/src/runs/shared/model-research.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
         "source": "agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts",
         "signals": [
           "MCP"
@@ -6439,6 +6774,12 @@
       },
       {
         "source": "agent/extensions/pi-subagents/src/runs/shared/single-output.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts",
         "signals": [
           "MCP"
         ]
@@ -6510,6 +6851,13 @@
         ]
       },
       {
+        "source": "agent/extensions/sys-probe.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/utility-tools.ts",
         "signals": [
           "MCP",
@@ -6553,6 +6901,10 @@
       {
         "name": "code-first-video",
         "path": "agent/skills/code-first-video/SKILL.md"
+      },
+      {
+        "name": "colab",
+        "path": "agent/skills/colab/SKILL.md"
       },
       {
         "name": "create",
@@ -6725,6 +7077,10 @@
         "path": "docs/GOAL.md"
       },
       {
+        "name": "GOOGLE-COLAB.md",
+        "path": "docs/GOOGLE-COLAB.md"
+      },
+      {
         "name": "GUARDIAN-INTELLIGENCE.md",
         "path": "docs/GUARDIAN-INTELLIGENCE.md"
       },
@@ -6747,10 +7103,6 @@
       {
         "name": "ISOLATION-AND-WEB.md",
         "path": "docs/ISOLATION-AND-WEB.md"
-      },
-      {
-        "name": "LLM-PREFERENCES.md",
-        "path": "docs/LLM-PREFERENCES.md"
       },
       {
         "name": "LOCAL-INTELLIGENCE.md",
@@ -6851,6 +7203,10 @@
       {
         "name": "SUBAGENT-CONTRACTS.md",
         "path": "docs/SUBAGENT-CONTRACTS.md"
+      },
+      {
+        "name": "SYSTEM-NETWORK-DIAGNOSIS.md",
+        "path": "docs/SYSTEM-NETWORK-DIAGNOSIS.md"
       },
       {
         "name": "TASK-PIPELINES.md",

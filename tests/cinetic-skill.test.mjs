@@ -30,8 +30,7 @@ test('cinetic ships pinned MIT upstream files with only SKILL.md adapted', () =>
   assert.equal(parse(skill.split('---')[1]).name, 'cinetic');
   assert.match(skill, /## YunusPi integration[\s\S]*names one lead skill for the film/);
   assert.match(skill, /does not install packages the user has not approved|do not install packages the user has not approved/);
-  for (const notice of ['THIRD_PARTY_NOTICES.md', 'release-template/THIRD_PARTY_NOTICES.md'])
-    assert.match(fs.readFileSync(path.join(root, notice), 'utf8'), /cinetic by Leonxlnx — MIT/);
+  assert.match(fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), /cinetic by Leonxlnx — MIT/);
 });
 
 test('motion-design requests discover cinetic; unrelated work does not', () => {

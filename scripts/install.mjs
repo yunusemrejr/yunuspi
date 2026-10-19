@@ -291,10 +291,10 @@ try {
     fs.cpSync(path.join(repo, 'desktop'), path.join(runtime, 'desktop'), { recursive: true });
     fs.copyFileSync(path.join(repo, 'scripts/setup-desktop.mjs'), path.join(runtime, 'scripts/setup-desktop.mjs'));
   }
-  // Keep installed export safeguards and documentation on the same revision
-  // as the runtime. Older installations may have an unmanaged public-template
-  // directory; it must not silently override these maintained release inputs.
-  const templateRoot = fs.existsSync(path.join(repo, 'release-template')) ? path.join(repo, 'release-template') : repo;
+  // The repository root is the single source for installed export safeguards
+  // and documentation, so the installed copy stays on the same revision as the
+  // runtime. No mirror tree exists to override it.
+  const templateRoot = repo;
   if (!fs.lstatSync(templateRoot).isDirectory() || fs.lstatSync(templateRoot).isSymbolicLink()) throw Error('Release template root must be a regular directory');
   const templateTarget = path.join(runtime, 'release-template');
   fs.mkdirSync(templateTarget);

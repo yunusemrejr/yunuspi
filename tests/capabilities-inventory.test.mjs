@@ -6,48 +6,29 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const templateRoot = path.resolve(import.meta.dirname, "..");
-const agentRoot = [
-	path.join(templateRoot, "agent"),
-	path.resolve(templateRoot, ".."),
-].find((dir) => fs.existsSync(path.join(dir, "extensions", "manifest.json")));
-assert.ok(agentRoot, "public manifest is present");
-const projectRoot =
-	path.basename(agentRoot) === "agent" ? path.dirname(agentRoot) : agentRoot;
+const projectRoot = path.resolve(import.meta.dirname, "..");
+const agentRoot = path.join(projectRoot, "agent");
+assert.ok(
+	fs.existsSync(path.join(agentRoot, "extensions", "manifest.json")),
+	"public manifest is present",
+);
 const generator = path.join(
 	agentRoot,
 	"scripts",
 	"generate-capabilities-doc.mjs",
 );
-const layoutRoot = fs.existsSync(path.join(projectRoot, "release-template"))
-	? projectRoot
-	: agentRoot;
-const output = fs.existsSync(path.join(projectRoot, "release-template"))
-	? path.join(projectRoot, "release-template", "docs", "CAPABILITIES.md")
-	: path.join(agentRoot, "public-template", "docs", "CAPABILITIES.md");
+const output = path.join(projectRoot, "docs", "CAPABILITIES.md");
 const metadataPath = output.replace(/\.md$/i, ".json");
-const distributionOutput = fs.existsSync(
-	path.join(projectRoot, "release-template"),
-)
-	? path.join(projectRoot, "docs", "CAPABILITIES.md")
-	: undefined;
 
 test("capability inventory is deterministic, complete, and generated from public source", async () => {
 	const check = spawnSync(
 		process.execPath,
-		[generator, "--root", layoutRoot, "--check"],
+		[generator, "--root", projectRoot, "--check"],
 		{ encoding: "utf8" },
 	);
 	assert.equal(check.status, 0, check.stderr || check.stdout);
 	assert.ok(fs.existsSync(output));
 	assert.ok(fs.existsSync(metadataPath));
-	if (distributionOutput) {
-		assert.ok(
-			fs.existsSync(distributionOutput),
-			"export root inventory is generated alongside release-template",
-		);
-		assert.ok(fs.existsSync(distributionOutput.replace(/\.md$/i, ".json")));
-	}
 
 	const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 	const catalog = await import(
@@ -131,17 +112,12 @@ test("capability inventory is deterministic, complete, and generated from public
 		/missing from source tree/,
 		"registered source must not be reported missing",
 	);
-	for (const file of [
-		output,
-		...(distributionOutput ? [distributionOutput] : []),
-	]) {
-		const text = fs.readFileSync(file, "utf8");
-		for (const match of text.matchAll(/\]\(([^)#]+)\)/g))
-			assert.ok(
-				fs.existsSync(path.resolve(path.dirname(file), match[1])),
-				`${file}: ${match[1]}`,
-			);
-	}
+	const text = fs.readFileSync(output, "utf8");
+	for (const match of text.matchAll(/\]\(([^)#]+)\)/g))
+		assert.ok(
+			fs.existsSync(path.resolve(path.dirname(output), match[1])),
+			`${output}: ${match[1]}`,
+		);
 });
 
 test("inventory generator does not write outside its requested template", () => {
@@ -149,7 +125,7 @@ test("inventory generator does not write outside its requested template", () => 
 	const customOutput = path.join(temp, "CAPABILITIES.md");
 	const result = spawnSync(
 		process.execPath,
-		[generator, "--root", layoutRoot, "--output", customOutput],
+		[generator, "--root", projectRoot, "--output", customOutput],
 		{ encoding: "utf8" },
 	);
 	assert.equal(result.status, 0, result.stderr || result.stdout);
