@@ -101436,7 +101436,11 @@ ${lines.join("\n")}`;
   });
   const t2 = Date.now();
   let knipMeta = {};
-  if (runtime2.isStartupScanInFlight("knip")) {
+  if (process.env.PI_LENS_TURN_END_KNIP !== "on") {
+    // A dead-code analysis after every edit turn cost 0.7-1.3 s per turn and rarely changed what the agent
+    // did next. The session-start scan and lens_diagnostics still run it; this per-turn pass is opt-in.
+    knipMeta = { skipped: true, reason: "turn-end knip is opt-in (PI_LENS_TURN_END_KNIP=on)" };
+  } else if (runtime2.isStartupScanInFlight("knip")) {
     dbg2("turn_end: skipping knip (startup scan still in flight)");
     knipMeta = { skipped: true };
   } else {

@@ -72,3 +72,12 @@ test("pi-lens no longer prints the unchanged-baseline footer and caps autofix at
     assert.match(fs.readFileSync(path.join(rules, name), "utf8"), /^severity: warning$/m, `${name} is advisory: wrapping every call conflicts with the swallowed-error check`);
   }
 });
+
+test("the per-turn dead-code analysis is opt-in, so edit turns do not pay for it", (t) => {
+  if (!agentRoot) { t.skip("bundled pi-lens dist is unavailable on this host"); return; }
+  const text = fs.readFileSync(path.join(agentRoot, "extensions/pi-lens/dist/index.js"), "utf8");
+  const gate = text.indexOf('process.env.PI_LENS_TURN_END_KNIP !== "on"');
+  assert.ok(gate > 0, "turn_end must consult PI_LENS_TURN_END_KNIP");
+  const analyze = text.indexOf("knipClient.analyze(cwd, getKnipIgnorePatterns()", gate);
+  assert.ok(analyze > gate && analyze - gate < 1200, "the turn-end knip call sits behind that gate");
+});
