@@ -90,7 +90,6 @@
     "design-studio.ts",
     "diagnostic-provenance.ts",
     "disk-guard.ts",
-    "double.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
     "film-blend.ts",
@@ -723,6 +722,11 @@
       "name": "scripts/compatibility/autonomous-recovery-test.mjs",
       "retired": "2026-10-19",
       "why": "Automatic helper and per-role model routing removed 2026-10-19: subagents, reviewers, the observer and prompt analysis run on the session model, and subagents start only when the main model calls the tool. Measured: automatic assist fanout launched 2-3 child sessions on other providers for a five-call task, all of which failed after 40-110 s."
+    },
+    {
+      "name": "lib/double.ts",
+      "retired": "2026-10-19",
+      "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
     }
   ],
   "supportFiles": [

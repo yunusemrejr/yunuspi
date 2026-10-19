@@ -10,7 +10,7 @@ import { createDistributionTempRoot } from '../agent/scripts/publish-public.mjs'
 const root = path.resolve(import.meta.dirname, '..');
 export const QUICK_TESTS = [
   'command-dispatch', 'core-robustness', 'preflight-stop-cancellation', 'provider-gate', 'provider-health-admission', 'provider-health-stall',
-  'double-runner', 'quality-review', 'project-vector-memory', 'memory-embedding-coverage', 'jev-client',
+  'quality-review', 'project-vector-memory', 'memory-embedding-coverage', 'jev-client',
   'stream-lifecycle', 'rpc-client-lifecycle', 'guarded-process',
   'needle-embedding-cache', 'memory-guard', 'creative-evidence', 'creative-qa',
   'ui-doctrine', 'goal-state', 'completion-gate', 'motion-routing-sdk',

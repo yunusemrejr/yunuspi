@@ -304,24 +304,6 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/MODEL-ROUTING.md",
 	}),
 	capability({
-		id: "double-mode",
-		group: "orchestration",
-		summary: "Session mode that analyzes every user request twice on the session model before the agent starts and reconciles both into one planning directive. The directive is advice below the user's own words; reviewers see it on a shared note board.",
-		entrypoints: ["/double", "before_agent_start", "double-directive"],
-		commands: ["double"],
-		options: [
-			option("PI_DOUBLE", "Disable Double mode when set to off.", ["on", "off"]),
-			option("/double [on|off|status]", "Twin mode: the session model runs both streams."),
-		],
-		related: ["fanout-execution", "subagent-dispatch"],
-		sourceFiles: [
-			"agent/extensions/pi-subagents/src/extension/double-runner.ts",
-			"agent/extensions/lib/double.ts",
-			"agent/extensions/lib/reviewer-board.ts",
-		],
-		doc: "agent/public-template/docs/REVIEWS-AND-COUNCILS.md",
-	}),
-	capability({
 		id: "agent-model-management",
 		group: "models",
 		summary: "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",

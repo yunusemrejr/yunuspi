@@ -103,7 +103,7 @@ const TRANSIENT_EXCLUSION_MS = 15 * 60_000;
 /** A transient failure excludes a route for its stated wait (provider-gate
  * cooldowns, Retry-After) or 15 minutes, never the 24h default reserved for
  * account/catalog failures: 2026-09-27 a 595s provider-gate cooldown became a
- * day-long exclusion that failed every explicit same-route child (/double). */
+ * day-long exclusion that failed every explicit same-route child. */
 export function transientExclusionTtlMs(error: string | undefined): number | undefined {
 	if (!error || DURABLE_MODEL_FAILURE.test(error) || !TRANSIENT_MODEL_FAILURE.test(error)) return undefined;
 	const stated = /\((\d+)s; state: provider-health\.json\)/.exec(error)?.[1] ?? /retry[- ]after[:\s]+(\d+)\s*(?:s\b|sec|seconds?\b|$)/i.exec(error)?.[1];

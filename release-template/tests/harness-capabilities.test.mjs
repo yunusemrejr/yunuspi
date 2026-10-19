@@ -82,7 +82,6 @@ test("browse and search return small bounded previews with progressive detail", 
     ["workdir", "subagent-dispatch"],
     ["same checkout", "session-coordination"],
     ["provider selection", "provider-routing"],
-    ["double", "double-mode"],
   ];
   for (const [query, id] of searches) {
     assert.ok(searchCapabilities({ query }).results.some((row) => row.id === id), `${query} finds ${id}`);

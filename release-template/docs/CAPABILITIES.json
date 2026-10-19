@@ -487,44 +487,6 @@
       "commands": []
     },
     {
-      "id": "double-mode",
-      "group": "orchestration",
-      "summary": "Session mode that analyzes every user request twice on the session model before the agent starts and reconciles both into one planning directive. The directive is advice below the user's own words; reviewers see it on a shared note board.",
-      "entrypoints": [
-        "/double",
-        "before_agent_start",
-        "double-directive"
-      ],
-      "commands": [
-        "double"
-      ],
-      "options": [
-        {
-          "name": "PI_DOUBLE",
-          "values": [
-            "on",
-            "off"
-          ],
-          "summary": "Disable Double mode when set to off."
-        },
-        {
-          "name": "/double [on|off|status]",
-          "summary": "Twin mode: the session model runs both streams."
-        }
-      ],
-      "related": [
-        "fanout-execution",
-        "subagent-dispatch"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "agent/extensions/lib/double.ts",
-        "agent/extensions/lib/reviewer-board.ts"
-      ],
-      "doc": "docs/REVIEWS-AND-COUNCILS.md",
-      "tools": []
-    },
-    {
       "id": "agent-model-management",
       "group": "models",
       "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
@@ -3131,11 +3093,6 @@
         "line": 3283
       },
       {
-        "name": "double",
-        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 381
-      },
-      {
         "name": "effort",
         "source": "agent/extensions/thinking.ts",
         "line": 49
@@ -3882,7 +3839,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 783,
+        "line": 781,
         "kind": "definition"
       },
       {
@@ -4444,7 +4401,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          834
+          832
         ],
         "knownNames": [
           "subagent"
@@ -4557,7 +4514,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 697,
+      "sourceFiles": 695,
       "registrationSites": 65,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 101,
@@ -4940,10 +4897,6 @@
       },
       {
         "path": "agent/extensions/lib/disk-guard.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/double.ts",
         "exists": true
       },
       {
@@ -6153,6 +6106,11 @@
         "name": "last-model.ts",
         "retired": "2026-10-10",
         "why": "merged into model-config.ts (one model bookkeeping extension). Do not recreate"
+      },
+      {
+        "name": "lib/double.ts",
+        "retired": "2026-10-19",
+        "why": "Twin-stream reconciliation mode removed 2026-10-19 at the user's direction: it was useless. Its command, environment flag, messages, runner and tests are gone. Do not recreate"
       },
       {
         "name": "lib/expert-brief.ts",

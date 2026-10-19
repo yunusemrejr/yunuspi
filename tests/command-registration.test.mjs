@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 const root = path.resolve(import.meta.dirname, "..");
 const expected = [
   "3d", "anatomy", "bg", "bg-clear", "bg-tasks", "bg-update", "budget", "catalog-status", "claude-cache", "commands", "cost", "curator",
-  "double", "effort", "errors", "export-json", "goal", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
+  "effort", "errors", "export-json", "goal", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
   "logs", "memory-prime", "metrics", "nobug", "noslop", "obs", "observer-book", "or-provider", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
   "models", "subagent-cost", "subagents", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-inspect-rpc",

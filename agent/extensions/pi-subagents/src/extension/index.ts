@@ -16,7 +16,6 @@ import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } fr
 
 import { randomUUID } from "node:crypto";
 import { registerQualityReviewRunner } from "./quality-review-runner.ts";
-import { registerDoubleMode } from "./double-runner.ts";
 import { registerSubagentContinuation } from "./continuation-notice.ts";
 import { noteSessionTurnover, noteUserInput } from "../../../lib/intervention-shared.ts";
 import { ACTIVITY_MESSAGE_TYPE, ACTIVITY_TAGS, type ActivityDetails } from "../../../lib/activity-indicators.ts";
@@ -655,7 +654,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		// Session stop degrades to trigger suppression without run cancellation.
 	}
 	registerQualityReviewRunner(pi, executor.executeDelegated);
-	registerDoubleMode(pi, { launch: executor.executeDelegated });
 
 	pi.registerMessageRenderer<SlashMessageDetails>(SLASH_RESULT_TYPE, (message, options, theme) => {
 		const details = resolveSlashMessageDetails(message.details);
