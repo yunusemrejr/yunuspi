@@ -25,8 +25,6 @@ export interface CuratorServerOptions {
 	availableProviders: ProviderAvailability;
 	defaultProvider: string;
 	searchProvider: string;
-	summaryModels: Array<{ value: string; label: string }>;
-	defaultSummaryModel: string | null;
 }
 
 export interface CuratorSearchEntry {
@@ -50,7 +48,6 @@ export interface CuratorServerCallbacks {
 	onSummarize: (
 		selectedQueryIndices: number[],
 		signal: AbortSignal,
-		model?: string,
 		feedback?: string,
 	) => Promise<{ summary: string; meta: SummaryMeta }>;
 	onRewriteQuery: (query: string, signal: AbortSignal) => Promise<string>;
@@ -217,8 +214,6 @@ export function startCuratorServer(
 		availableProviders,
 		defaultProvider,
 		searchProvider,
-		summaryModels,
-		defaultSummaryModel,
 	} = options;
 	let browserConnected = false;
 	let lastHeartbeatAt = Date.now();
@@ -335,8 +330,6 @@ export function startCuratorServer(
 		availableProviders,
 		defaultProvider,
 		searchProvider,
-		summaryModels,
-		defaultSummaryModel,
 	);
 
 	const server = http.createServer(async (req, res) => {
@@ -534,17 +527,6 @@ export function startCuratorServer(
 					return;
 				}
 
-				let model: string | undefined;
-				const bodyModel = (body as { model?: unknown }).model;
-				if (bodyModel !== undefined) {
-					if (typeof bodyModel !== "string") {
-						sendJson(res, 400, { ok: false, error: "Invalid model" });
-						return;
-					}
-					const trimmedModel = bodyModel.trim();
-					model = trimmedModel.length > 0 ? trimmedModel : undefined;
-				}
-
 				const bodyFeedback = (body as { feedback?: unknown }).feedback;
 				const feedback = typeof bodyFeedback === "string" && bodyFeedback.trim().length > 0
 					? bodyFeedback.trim()
@@ -556,7 +538,7 @@ export function startCuratorServer(
 				const requestId = ++summarizeRequestSeq;
 
 				try {
-					const result = await callbacks.onSummarize(parsed.indices, controller.signal, model, feedback);
+					const result = await callbacks.onSummarize(parsed.indices, controller.signal, feedback);
 					if (requestId !== summarizeRequestSeq || completed) {
 						sendJson(res, 409, { ok: false, error: "Summarize request superseded" });
 						return;

@@ -12,6 +12,7 @@ if (!agent) throw new Error('Double runner source is missing');
 const extension = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/extension/')).href;
 const { registerDoubleMode, DOUBLE_RUNNER, DOUBLE_PROGRESS, DOUBLE_LIMITS } =
   await import(extension + 'double-runner.ts');
+const board = await import(pathToFileURL(path.join(agent, 'extensions/lib/reviewer-board.ts')).href);
 
 const PI_DOUBLE = process.env.PI_DOUBLE;
 // Forking reads the parent session file, so a session with history has one on disk; a brand-new session does not yet.
@@ -666,4 +667,132 @@ test('the first prompt of a new session has no persisted file to fork, so the st
   await fire(pi, 'before_agent_start', { prompt: 'Now add a test.', systemPrompt: 'Be helpful.' }, later);
   assert.ok(calls.slice(3).length >= 2);
   for (const params of calls.slice(3)) assert.equal(params.context, 'fork');
+});
+
+test('the session model runs every stream whatever the window and transcript size: it holds its own transcript', async () => {
+  const pi = makePi();
+  const seen = [];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => { seen.push(kindOf(params)); return okResult(`${kindOf(params)} text`); } });
+  const ctx = makeCtx(pi, { ctx: {
+    modelRegistry: { getAvailable: () => [{ provider: 'openrouter', id: 'glm-5.3-flash', contextWindow: 8_000 }] },
+    getContextUsage: () => ({ tokens: 91_000 }),
+  } });
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Fix it.', systemPrompt: 's' }, ctx);
+  assert.deepEqual(seen.sort(), ['A', 'B', 'reconcile']);
+});
+
+test('an off pin adds no suffix: the executor would reject a literal ":off" route', async () => {
+  const pi = makePi();
+  pi.thinkingLevel = 'off';
+  const seen = [];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => { seen.push(params); return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_A); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  await fire(pi, 'before_agent_start', { prompt: 'Fix the redirect.', systemPrompt: 's' }, ctx);
+  assert.equal(seen.length, 3);
+  for (const params of seen) assert.equal(params.model, 'openrouter/glm-5.3-flash', 'thinking off travels as no suffix');
+});
+
+test('a custom pair saved by an earlier version is ignored: the session model still runs twice', async () => {
+  const pi = makePi();
+  pi.entries.push({ type: 'custom', customType: 'double-mode-v1', data: { enabled: true, pair: {
+    a: { provider: 'deepseek', id: 'deepseek-flash' }, b: { provider: 'zai', id: 'glm-5.3-flash' }, reconcile: 'b',
+  } } });
+  const seen = [];
+  registerDoubleMode(pi, { launch: async (_id, params) => { seen.push(params); return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_A); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'resume' }, ctx);
+  await pi.commands.get('double').handler('status', ctx);
+  assert.equal(pi.notifies.at(-1).text, 'Double mode: ON\nTwin first-pass (A ∥ B) + reconcile · openrouter/glm-5.3-flash');
+  await fire(pi, 'before_agent_start', { prompt: 'Fix the login flow', systemPrompt: 's' }, ctx);
+  assert.equal(seen.length, 3);
+  for (const params of seen) assert.equal(params.model, 'openrouter/glm-5.3-flash:medium');
+});
+
+test('the footer chip follows Double across resumes and clears when it is off or disabled', async () => {
+  const pi = makePi();
+  registerDoubleMode(pi, { launch: async (_id, params) => okResult(`${kindOf(params)} text`) });
+  const ctx = makeCtx(pi);
+  const chip = () => pi.statuses.filter((row) => row.key === 'double').at(-1)?.text;
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  assert.equal(chip(), undefined, 'off at startup: no chip');
+  await pi.commands.get('double').handler('on', ctx);
+  assert.equal(chip(), 'Double ON · glm-5.3-flash ×2');
+  const revived = makePi();
+  revived.entries.push(...pi.entries);
+  registerDoubleMode(revived, { launch: async () => ({}) });
+  await fire(revived, 'session_start', { reason: 'resume' }, makeCtx(revived));
+  assert.equal(revived.statuses.filter((row) => row.key === 'double').at(-1)?.text, 'Double ON · glm-5.3-flash ×2', 'a resumed session shows that Double is still on');
+  await pi.commands.get('double').handler('off', ctx);
+  assert.equal(chip(), undefined);
+  process.env.PI_DOUBLE = 'off';
+  await pi.commands.get('double').handler('on', ctx);
+  assert.equal(chip(), undefined, 'a disabled process never shows the chip');
+});
+
+test('first-turn tool staging cannot switch the explicit mode off: a registered subagent capability is enough', async () => {
+  const pi = makePi();
+  const seen = [];
+  // Direct (small) tasks stage `subagent` out of the active set while it stays registered.
+  pi.activeTools = ['read', 'bash'];
+  pi.getAllTools = () => [{ name: 'read' }, { name: 'bash' }, { name: 'subagent' }];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => { seen.push(kindOf(params)); return okResult(kindOf(params) === 'reconcile' ? RECONCILED : ANALYSIS_A); } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  await pi.commands.get('double').handler('on', ctx);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'What is 17 times 23?', systemPrompt: 's' }, ctx);
+  assert.ok(result, 'the explicit mode still ran');
+  assert.deepEqual(seen.sort(), ['A', 'B', 'reconcile']);
+  assert.equal(pi.notifies.some((row) => /subagent capability/.test(row.text)), false, 'no misleading capability warning');
+  // A genuinely absent capability is still reported, once.
+  const bare = makePi();
+  bare.getAllTools = () => [{ name: 'read' }];
+  registerDoubleMode(bare, { launch: async () => okResult('x') });
+  const bareCtx = makeCtx(bare);
+  await fire(bare, 'session_start', { reason: 'startup' }, bareCtx);
+  await bare.commands.get('double').handler('on', bareCtx);
+  assert.equal((await fire(bare, 'before_agent_start', { prompt: 'Fix it.', systemPrompt: 's' }, bareCtx))[0], undefined);
+  assert.equal(bare.notifies.filter((row) => /needs the subagent capability/.test(row.text)).length, 1);
+});
+
+test('Double and the reviewers share one board: reviewer notes go in, a directive digest comes out, status is visible', async () => {
+  const pi = makePi();
+  const tasks = [];
+  registerDoubleMode(pi, { warmWaitMs: 0, launch: async (_id, params) => {
+    tasks.push(params.task);
+    return okResult(kindOf(params) === 'reconcile' ? 'Directive — read src/a.ts, then fix the redirect. Run the tests.\nReconciliation — agreed.' : 'plan');
+  } });
+  const ctx = makeCtx(pi);
+  await fire(pi, 'session_start', { reason: 'startup' }, ctx);
+  const key = board.reviewerSessionKey(ctx);
+  assert.equal(board.plannerStatusText(), undefined, 'Double is off, so nothing is reported');
+  await pi.commands.get('double').handler('on', ctx);
+  assert.match(board.plannerStatusText(), /^Double mode: ON \(the session model, twice\): every user prompt is analyzed by two independent streams/);
+  assert.match(board.plannerStatusText(), /Do not advise repeating that deliberation/);
+  board.publishReviewerNote(key, 'observer', 'The failing test is test/login.test.ts, not the redirect itself.', [], Date.now() - 90_000);
+  board.publishReviewerNote(key, 'guardian', 'Stop re-reading the router; edit it.', [], Date.now() - 20_000);
+  board.publishReviewerNote(key, 'double', 'an older Double digest', [], Date.now() - 5_000);
+  const [result] = await fire(pi, 'before_agent_start', { prompt: 'Fix the login redirect.', systemPrompt: 's' }, ctx);
+  assert.ok(result);
+  const streamTasks = tasks.filter((task) => /You are Double instance [AB];/.test(task));
+  assert.equal(streamTasks.length, 2);
+  for (const task of streamTasks) {
+    assert.match(task, /Notes other harness reviewers already gave the agent this session/);
+    assert.match(task, /- Guardian, under a minute ago: Stop re-reading the router; edit it\./);
+    assert.match(task, /- Observer, 2 min ago: The failing test is test\/login\.test\.ts/);
+    assert.doesNotMatch(task, /older Double digest/, 'its own earlier digest is not fed back as another reviewer');
+  }
+  let shared = 0;
+  while (shared < streamTasks[0].length && streamTasks[0][shared] === streamTasks[1][shared]) shared++;
+  assert.ok(streamTasks[0].length - shared <= 720, 'the notes are identical in both streams, so cache order holds');
+  const mine = board.peerReviewerNotes(key, 'observer').find((note) => note.reviewer === 'double');
+  assert.match(mine.note, /^Double mode directive: read src\/a\.ts, then fix the redirect\./);
+  assert.doesNotMatch(mine.note, /Reconciliation/);
+  assert.equal(board.reviewerLabel('double'), 'Double mode');
+  assert.equal(board.reviewerLabel('council'), 'Scope council');
+  await pi.commands.get('double').handler('off', ctx);
+  assert.equal(board.plannerStatusText(), undefined, 'turning Double off clears the reviewers\' evidence');
 });

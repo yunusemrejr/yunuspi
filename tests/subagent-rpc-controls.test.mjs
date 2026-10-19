@@ -43,14 +43,14 @@ function fixture(select = async () => undefined) {
   return { pi, ctx, commands, messages, requests, notices, dispose: registration.dispose };
 }
 
-test('RPC agent model and thinking pickers use native dialogs and cancellation preserves definitions', async t => {
+test('RPC agent admin has no model or thinking picker: those arguments open the action menu', async t => {
   for (const action of ['model', 'thinking']) {
     const selections = [], f = fixture(async (title, choices) => { selections.push({ title, choices }); });
     t.after(f.dispose);
     await openSubagentsAdmin(f.pi, f.ctx, `rpc-fixture ${action}`);
     assert.equal(selections.length, 1, action);
-    assert.ok(selections[0].choices.length > 1, action);
-    assert.equal(f.messages.length, 0, 'cancelling a picker does not claim an update');
+    assert.deepEqual(selections[0].choices, ['Edit system prompt', 'Show details', 'Done'], action);
+    assert.equal(f.messages.length, 0, 'cancelling the menu does not claim an update');
     assert.equal(f.notices.length, 0);
     assert.equal(fs.readFileSync(agentFile, 'utf8'), definition);
   }

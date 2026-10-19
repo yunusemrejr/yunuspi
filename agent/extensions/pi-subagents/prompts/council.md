@@ -32,7 +32,7 @@ of convening a council.
 - Use the normal single-oracle loop only when a requested roster or unavailable
   builtins leaves fewer than two advisors. Label the memo as degraded mode.
 
-Profiles provide the model, tools, context, and advisor stance. The council
+Profiles provide the tools, context, and advisor stance; every advisor runs on the session model. The council
 question and scope provide the decision frame. If the user wants a specific lens,
 they should put it in the question, scope, or profile definition. Keep the roster
 at 2–3 and never exceed 4.

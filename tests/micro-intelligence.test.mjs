@@ -385,28 +385,20 @@ test("retrieval rejects Jev choices outside the submitted candidates", async () 
 
 async function promptContextFixture(t, sendMessage) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'micro-context-'));
-  const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_PROVIDER_STATE_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_MICRO_INTELLIGENCE', 'PI_SUBAGENT_CHILD'];
+  const keys = ['PI_CODING_AGENT_DIR', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_PROVIDER_STATE_FILE', 'PI_MICRO_INTELLIGENCE', 'PI_SUBAGENT_CHILD'];
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.PI_CODING_AGENT_DIR = directory;
-  process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'preferences.json');
   process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
   process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
-  process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(directory, 'economy.json');
   delete process.env.PI_MICRO_INTELLIGENCE;
   delete process.env.PI_SUBAGENT_CHILD;
-  fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ version: 1,
-    models: { advisor: { provider: 'micro-fixture', model: 'advisor' } },
-    preferences: { prompt_analysis: { models: ['advisor'] } } }));
-  const { clearLlmPreferencesCache } = await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
   const { default: register, settleMicroAnalyses } = await load('extensions/micro-intelligence.ts');
-  clearLlmPreferencesCache();
   const model = { provider: 'micro-fixture', id: 'advisor', api: 'openai-completions', baseUrl: 'https://synthetic.invalid/v1',
     contextWindow: 65536, maxTokens: 4096, reasoning: false, input: ['text'], cost: { input: .1, output: .1, cacheRead: 0, cacheWrite: 0 } };
   let sessionId = 'micro-session-1';
   const lifecycle = new AbortController();
   const handlers = new Map();
-  const ctx = { cwd: directory, signal: lifecycle.signal, sessionManager: { getSessionId: () => sessionId, getBranch: () => [] },
+  const ctx = { cwd: directory, signal: lifecycle.signal, model, sessionManager: { getSessionId: () => sessionId, getBranch: () => [] },
     modelRegistry: { getAvailable: () => [model], find: () => model, getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'synthetic-key' }) },
     ui: { setStatus() {} } };
   register({ on: (name, handler) => handlers.set(name, handler), registerTool() {}, registerMessageRenderer() {},

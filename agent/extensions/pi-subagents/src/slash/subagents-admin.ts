@@ -13,14 +13,9 @@ import {
 } from "../agents/agents.ts";
 import { serializeAgent } from "../agents/agent-serializer.ts";
 import { editableAgentConfig, preservedAgentFrontmatterFields } from "../agents/agent-management.ts";
-import { findModelInfo, getSupportedThinkingLevels, toModelInfo } from "../shared/model-info.ts";
 import { SelectorComponent, type SelectorItem, type SelectorResult } from "./selector.ts";
 
 const ADMIN_MESSAGE_TYPE = "subagents-admin";
-const INHERIT_MODEL_CHOICE = "Default / inherit session model";
-const INHERIT_THINKING_CHOICE = "Default / inherit session thinking";
-
-type ModelInfo = { provider: string; id: string };
 
 function sourceRank(source: AgentConfig["source"]): number {
 	if (source === "project") return 0;
@@ -37,8 +32,7 @@ function allVisibleAgents(cwd: string): AgentConfig[] {
 }
 
 function agentLabel(agent: AgentConfig): string {
-	const model = agent.model ? ` · ${agent.model}` : "";
-	return `${agent.name} [${agent.source}]${model} — ${agent.description}`;
+	return `${agent.name} [${agent.source}] — ${agent.description}`;
 }
 
 function agentChoices(agents: AgentConfig[]): Map<string, AgentConfig> {
@@ -68,25 +62,8 @@ function sendAdminMessage(pi: ExtensionAPI, content: string): void {
 	});
 }
 
-function modelFullId(model: ModelInfo): string {
-	return `${model.provider}/${model.id}`;
-}
-
-function liveAvailableModels(ctx: ExtensionContext) {
-	try {
-		ctx.modelRegistry.refresh?.();
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(`Could not refresh the model registry; using the last loaded choices. ${message}`, "warning");
-	}
-	return ctx.modelRegistry.getAvailable();
-}
-
 function buildBuiltinBase(agent: AgentConfig): BuiltinAgentOverrideBase {
 	return {
-		...(agent.model !== undefined ? { model: agent.model } : {}),
-		...(agent.fallbackModels !== undefined ? { fallbackModels: [...agent.fallbackModels] } : {}),
-		...(agent.thinking !== undefined ? { thinking: agent.thinking } : {}),
 		systemPromptMode: agent.systemPromptMode,
 		inheritProjectContext: agent.inheritProjectContext,
 		inheritGlobalContext: agent.inheritGlobalContext,
@@ -106,7 +83,7 @@ function buildBuiltinBase(agent: AgentConfig): BuiltinAgentOverrideBase {
 	};
 }
 
-type EditableOverrideField = "model" | "thinking" | "systemPrompt";
+type EditableOverrideField = "systemPrompt";
 
 type AgentSelection =
 	| { kind: "selected"; agent: AgentConfig }
@@ -162,7 +139,7 @@ async function selectAgent(ctx: ExtensionContext, args: string): Promise<AgentSe
 		if (matches.length > 1 && !ctx.hasUI) return { kind: "ambiguous", requestedName, matches };
 		if (matches.length > 1) {
 			const byLabel = agentChoices(matches);
-			const choice = await selectFromList(ctx, `Multiple subagents named '${requestedName}'`, undefined, agentSelectItems(byLabel));
+			const choice = await selectFromList(ctx, `Multiple subagents named '${requestedName}'`, agentSelectItems(byLabel));
 			return choice ? { kind: "selected", agent: byLabel.get(choice)! } : { kind: "cancelled" };
 		}
 		return { kind: "not-found", agents, requestedName };
@@ -170,7 +147,7 @@ async function selectAgent(ctx: ExtensionContext, args: string): Promise<AgentSe
 
 	if (!ctx.hasUI) return { kind: "not-found", agents };
 	const byLabel = agentChoices(agents);
-	const choice = await selectFromList(ctx, "Select subagent", undefined, agentSelectItems(byLabel));
+	const choice = await selectFromList(ctx, "Select subagent", agentSelectItems(byLabel));
 	return choice ? { kind: "selected", agent: byLabel.get(choice)! } : { kind: "cancelled" };
 }
 
@@ -185,9 +162,7 @@ function metadataFor(agent: AgentConfig): string {
 		lines.push(`Local name: ${frontmatterNameForConfig(agent)}`);
 		lines.push(`Package: ${agent.packageName}`);
 	}
-	lines.push(`Model: ${agent.model ?? "default / inherit"}`);
-	if (agent.fallbackModels?.length) lines.push(`Fallback models: ${agent.fallbackModels.join(", ")}`);
-	if (agent.thinking !== undefined) lines.push(`Thinking: ${agent.thinking === false ? "off" : agent.thinking}`);
+	lines.push("Model: session (subagents run on the session model)");
 	if (tools.length) lines.push(`Tools: ${tools.join(", ")}`);
 	if (agent.excludeTools?.length) lines.push(`Excluded tools: ${agent.excludeTools.join(", ")}`);
 	if (agent.skills?.length) lines.push(`Skills: ${agent.skills.join(", ")}`);
@@ -206,53 +181,17 @@ function metadataFor(agent: AgentConfig): string {
 	return lines.join("\n");
 }
 
-async function selectFromList(ctx: ExtensionContext, title: string, subtitle: string | undefined, items: SelectorItem[]): Promise<string | undefined> {
+async function selectFromList(ctx: ExtensionContext, title: string, items: SelectorItem[]): Promise<string | undefined> {
 	if (ctx.mode !== "rpc" && typeof ctx.ui.custom === "function") {
 		const result = await ctx.ui.custom<SelectorResult>(
-			(tui, theme, kb, done) => new SelectorComponent(tui, theme, kb, { title, subtitle, items, done }),
+			(tui, theme, kb, done) => new SelectorComponent(tui, theme, kb, { title, items, done }),
 			{ overlay: false },
 		);
 		return result?.confirmed ? result.value : undefined;
 	}
-	const flatTitle = subtitle ? `${title}\nCurrent: ${subtitle}` : title;
 	const labelToValue = new Map(items.map((item) => [item.label, item.value] as const));
-	const choice = await ctx.ui.select(flatTitle, items.map((item) => item.value));
+	const choice = await ctx.ui.select(title, items.map((item) => item.value));
 	return choice ? (items.find((item) => item.value === choice)?.value ?? labelToValue.get(choice)) : undefined;
-}
-
-async function chooseModel(ctx: ExtensionContext, agent: AgentConfig): Promise<string | undefined | null> {
-	const models = liveAvailableModels(ctx);
-	const current = agent.model ?? INHERIT_MODEL_CHOICE;
-	const items: SelectorItem[] = [{ value: INHERIT_MODEL_CHOICE, label: INHERIT_MODEL_CHOICE, current: !agent.model }];
-	if (agent.model && !models.some((model) => modelFullId(model) === agent.model)) {
-		items.push({ value: agent.model, label: agent.model, current: true });
-	}
-	for (const model of models) {
-		const fullId = modelFullId(model);
-		items.push({ value: fullId, label: model.id, badge: model.provider, current: fullId === agent.model });
-	}
-	const choice = await selectFromList(ctx, `Select model for ${agent.name}`, current, items);
-	if (choice === undefined) return null;
-	return choice === INHERIT_MODEL_CHOICE ? undefined : choice;
-}
-
-async function chooseThinking(ctx: ExtensionContext, agent: AgentConfig): Promise<string | undefined | null> {
-	const availableModels = liveAvailableModels(ctx).map(toModelInfo);
-	const effectiveModel = agent.model ?? (ctx.model ? modelFullId(ctx.model) : undefined);
-	const modelInfo = findModelInfo(effectiveModel, availableModels, ctx.model?.provider);
-	const levels = getSupportedThinkingLevels(modelInfo);
-	const current = agent.thinking === false ? "off" : agent.thinking ?? INHERIT_THINKING_CHOICE;
-	const values: string[] = [INHERIT_THINKING_CHOICE, ...levels];
-	if (current !== INHERIT_THINKING_CHOICE && !values.includes(current)) values.splice(1, 0, current);
-	const modelNote = agent.model
-		? `Model: ${agent.model}`
-		: effectiveModel
-			? `Session model: ${effectiveModel}`
-			: "Model: default / inherit";
-	const items: SelectorItem[] = values.map((value) => ({ value, label: value, current: value === current }));
-	const choice = await selectFromList(ctx, `Select thinking level for ${agent.name}`, `${modelNote} · ${current}`, items);
-	if (choice === undefined) return null;
-	return choice === INHERIT_THINKING_CHOICE ? undefined : choice;
 }
 
 async function chooseOverrideScope(ctx: ExtensionContext, agent: AgentConfig): Promise<"user" | "project" | undefined> {
@@ -281,61 +220,6 @@ function persistSettingsField(
 		filePath: mergeBuiltinAgentOverride(ctx.cwd, agent.name, scope, { [field]: value }),
 		overridden: true,
 	};
-}
-
-async function saveAgentModel(ctx: ExtensionContext, agent: AgentConfig, selectedModel: string | undefined): Promise<string | null> {
-	if (savesThroughSettings(agent, "model")) {
-		const scope = await chooseOverrideScope(ctx, agent);
-		if (!scope) return null;
-		const { filePath, overridden } = persistSettingsField(ctx, agent, scope, "model", selectedModel);
-		return overridden
-			? `Saved ${scope} settings override for '${agent.name}' with model '${selectedModel}' in ${filePath}.`
-			: `Cleared model settings override for '${agent.name}' in ${filePath}.`;
-	}
-
-	const readOnlyMessage = readOnlyAgentMessage(agent, "model");
-	if (readOnlyMessage) return readOnlyMessage;
-	const updated = editableAgentConfig(agent);
-	if (selectedModel === undefined) delete updated.model;
-	else updated.model = selectedModel;
-	fs.writeFileSync(updated.filePath, serializeAgent(updated, {
-		preserveFrontmatterFields: preservedAgentFrontmatterFields(agent, { model: selectedModel }),
-	}), "utf-8");
-	return selectedModel
-		? `Updated '${agent.name}' model to '${selectedModel}' in ${updated.filePath}.`
-		: `Cleared '${agent.name}' model in ${updated.filePath}.`;
-}
-
-async function saveAgentThinking(ctx: ExtensionContext, agent: AgentConfig, selectedThinking: string | undefined): Promise<string | null> {
-	if (savesThroughSettings(agent, "thinking")) {
-		const scope = await chooseOverrideScope(ctx, agent);
-		if (!scope) return null;
-		const { filePath, overridden } = persistSettingsField(ctx, agent, scope, "thinking", selectedThinking);
-		return overridden
-			? `Saved ${scope} settings override for '${agent.name}' with thinking '${selectedThinking}' in ${filePath}.`
-			: `Cleared thinking settings override for '${agent.name}' in ${filePath}.`;
-	}
-
-	const readOnlyMessage = readOnlyAgentMessage(agent, "thinking");
-	if (readOnlyMessage) return readOnlyMessage;
-	const updated = editableAgentConfig(agent);
-	if (selectedThinking === undefined) delete updated.thinking;
-	else updated.thinking = selectedThinking;
-	fs.writeFileSync(updated.filePath, serializeAgent(updated, {
-		preserveFrontmatterFields: preservedAgentFrontmatterFields(agent, { thinking: selectedThinking }),
-	}), "utf-8");
-	return selectedThinking
-		? `Updated '${agent.name}' thinking to '${selectedThinking}' in ${updated.filePath}.`
-		: `Cleared '${agent.name}' thinking in ${updated.filePath}.`;
-}
-
-/** Compact one-line summary shown in the interactive picker (no full system prompt dump). */
-function metadataSummary(agent: AgentConfig): string {
-	return [
-		`Source: ${agent.source}`,
-		`Model: ${agent.model ?? "default / inherit"}`,
-		`Thinking: ${agent.thinking === false ? "off" : agent.thinking ?? "default / inherit"}`,
-	].join(" · ");
 }
 
 async function saveAgentSystemPrompt(ctx: ExtensionContext, agent: AgentConfig, systemPrompt: string): Promise<string | null> {
@@ -394,33 +278,17 @@ export async function openSubagentsAdmin(pi: ExtensionAPI, ctx: ExtensionContext
 
 	const requestedAction = args.trim().split(/\s+/)[1]?.toLowerCase();
 	let action: string | undefined;
-	if (requestedAction === "model") action = "Change model";
-	else if (requestedAction === "thinking") action = "Change thinking level";
-	else if (requestedAction === "prompt" || requestedAction === "system-prompt" || requestedAction === "edit") action = "Edit system prompt";
+	if (requestedAction === "prompt" || requestedAction === "system-prompt" || requestedAction === "edit") action = "Edit system prompt";
 	else if (requestedAction === "details" || requestedAction === "info") action = "Show details";
 	if (!action) {
 		action = await ctx.ui.select(
-			`Administer ${agent.name}\n${metadataSummary(agent)}`,
-			["Change model", "Change thinking level", "Edit system prompt", "Show details", "Done"],
+			`Administer ${agent.name}\nSource: ${agent.source}`,
+			["Edit system prompt", "Show details", "Done"],
 		);
 	}
 
 	try {
-		if (action === "Change model") {
-			const selectedModel = await chooseModel(ctx, agent);
-			if (selectedModel === null) return;
-			const message = await saveAgentModel(ctx, agent, selectedModel);
-			if (message === null) return;
-			ctx.ui.notify(message, "info");
-			sendAdminMessage(pi, message);
-		} else if (action === "Change thinking level") {
-			const selectedThinking = await chooseThinking(ctx, agent);
-			if (selectedThinking === null) return;
-			const message = await saveAgentThinking(ctx, agent, selectedThinking);
-			if (message === null) return;
-			ctx.ui.notify(message, "info");
-			sendAdminMessage(pi, message);
-		} else if (action === "Edit system prompt") {
+		if (action === "Edit system prompt") {
 			const message = await editSystemPrompt(ctx, agent);
 			if (message === null) return;
 			ctx.ui.notify(message, "info");

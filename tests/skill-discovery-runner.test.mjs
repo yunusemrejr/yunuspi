@@ -434,42 +434,6 @@ test('reasoning-only or billed attempts without visible text cannot trigger anot
   }
 });
 
-test('skill discovery preserves configured Friendli routes through dispatch admission', async () => {
-  const prefs = await mod('runs/shared/llm-preferences.ts');
-  const fallback = await mod('runs/shared/model-fallback.ts');
-  const chosen = {...model, provider:'friendli',id:'vendor/preferred',baseUrl:'https://api.friendli.ai/serverless/v1'};
-  const available = [toModelInfo(chosen)];
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({preferences:{subagents:[{provider:chosen.provider,model:chosen.id}]}}));
-  prefs.clearLlmPreferencesCache();
-  try {
-    const f=fixture({models:[chosen],launch:async(_id,params)=>{
-      assert.equal(params.modelOrigin,'configured');
-      const route=fallback.resolveEffectiveSubagentModel(params.model,undefined,undefined,available,undefined,{source:params.modelOrigin==='explicit'?'explicit':'inherited',task:params.task});
-      assert.deepEqual(fallback.buildModelCandidates(route,undefined,available,undefined,{origin:params.modelOrigin,task:params.task}),[params.model]);
-      return result('{"skills":[]}');
-    }});
-    assert.equal(await f.runner({brief:'Select a useful installed skill from the supplied evidence.'},f.ctx),'{"skills":[]}');
-    assert.equal(f.calls.length,1);
-    assert.equal(f.calls[0][1].model,`friendli/${chosen.id}`);
-  } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache(); }
-});
-
-test('skill discovery preserves explicitly configured thinking in the actual native route and provider candidates', async () => {
-  const prefs = await mod('runs/shared/llm-preferences.ts');
-  const thinker = { ...model, id: 'free/thinker', reasoning: true, thinkingLevelMap: { off: 'none', low: 'low', medium: 'medium', high: 'high' } };
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ preferences: { subagents: [{ provider: thinker.provider, model: thinker.id, thinking: 'high' }] } }));
-  prefs.clearLlmPreferencesCache();
-  try {
-    const f = fixture({ models: [thinker], launch: async () => result('{"skills":[]}') });
-    assert.equal(await f.runner({ brief: 'Select a useful installed skill from the supplied evidence.' }, f.ctx), '{"skills":[]}');
-    const [, params] = f.calls[0];
-    assert.equal(params.model, `openrouter/${thinker.id}:high`, 'explicit thinking remains exact for bounded selection');
-    assert.equal(params.thinking, 'high');
-    assert.equal(params.modelOrigin,'configured');
-    assert.deepEqual(params.modelRouteCandidates.map(c => c.route), [`openrouter/${thinker.id}:high`]);
-  } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE, { force: true }); prefs.clearLlmPreferencesCache(); }
-});
-
 test('startup runtime failures retain identity and cause and do not retry providers', async () => {
   const {reduceChildEvents,projectTranscriptChildren}=await mod('runs/shared/child-ledger.ts');
   const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{throw new ReferenceError('fixtureBinding is not defined');}});

@@ -35,17 +35,13 @@ const {
  FREE_CATALOG_URL,
  ORCA_PRICING_URL,
 } = await import(shared + "free-route-evidence.ts");
-const { planAssistance, selectAssistanceTeam } = await import(
+const { planAssistance, selectAssistanceTeam, sessionAssistanceTeam } = await import(
  shared + "assistance-plan.ts"
 );
 const { unreliableRoutes } = await import(shared + "run-history.ts");
 const { artificialAnalysisEvidence, modelCardEvidence, refreshModelResearch } =
  await import(shared + "model-research.ts");
 const { loadModelEconomyConfig } = await import(shared + "model-economy.ts");
-const { buildModelCandidates } = await import(shared + "model-fallback.ts");
-const { clearLlmPreferencesCache } = await import(
- shared + "llm-preferences.ts"
-);
 const cfg = loadModelEconomyConfig(),
  at = Date.now();
 const model = (id, provider = "openrouter", price = 0) => ({
@@ -336,46 +332,6 @@ try {
    undefined,
   ),
  );
- check(
-  "explicit route and free-only restrictions survive task-aware selection",
-  () => {
-   assert.equal(
-    buildModelCandidates(old.fullId, [], models, undefined, {
-     origin: "inherited",
-     task: "Implement code. Do not switch model.",
-     allowAutomaticAlternatives: false,
-    })[0],
-    old.fullId,
-   );
-   assert.throws(
-    () =>
-     buildModelCandidates(paid.fullId, [], [paid], undefined, {
-      origin: "inherited",
-      task: "Review code. Only use free models.",
-     }),
-    /No eligible free route/,
-   );
-  },
- );
- check(
-  "free-only and fixed-route tasks constrain configured fallback members too",
-  () => {
-   assert.deepEqual(
-    buildModelCandidates(fresh.fullId, [paid.fullId], models, undefined, {
-     origin: "inherited",
-     task: "Review code. Only use free models.",
-    }),
-    [fresh.fullId],
-   );
-   assert.deepEqual(
-    buildModelCandidates(old.fullId, [paid.fullId], models, undefined, {
-     origin: "inherited",
-     task: "Implement code. Do not switch model.",
-    }),
-    [old.fullId],
-   );
-  },
- );
  check("a single low score without peers cannot validate itself", () =>
   assert.equal(
    assessModelQuality([fresh], [bench(fresh, 1)], {
@@ -420,26 +376,6 @@ try {
   ),
  );
  fs.unlinkSync(process.env.PI_PROVIDER_STATE_FILE);
- check(
-  "task reaches normal inherited child selection; explicit choice remains exact",
-  () => {
-   assert.equal(
-    buildModelCandidates(old.fullId, [], models, undefined, {
-     origin: "inherited",
-     task: "Implement a function",
-     allowAutomaticAlternatives: false,
-    })[0],
-    fresh.fullId,
-   );
-   assert.equal(
-    buildModelCandidates(old.fullId, [], models, undefined, {
-     origin: "explicit",
-     task: "Implement a function",
-    })[0],
-    old.fullId,
-   );
-  },
- );
  check(
   "planner uses a helper for bounded work, fanout for alternatives and for independent project work",
   () => {
@@ -527,45 +463,17 @@ try {
    1,
   );
  });
- check("configured router aliases do not consume independent team slots", () => {
+ check("router alias does not consume an independent team slot", () => {
   const alias = model(fresh.id, "orcarouter");
-  const prefsFile = path.join(root, "llm-prefs-aliases.json");
-  fs.writeFileSync(prefsFile, JSON.stringify({
-   preferences: { fanout: [
-    { provider: fresh.provider, model: fresh.id },
-    { provider: alias.provider, model: alias.id },
-   ] },
-  }));
-  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
-  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
-  clearLlmPreferencesCache();
-  try {
-   const plan = planAssistance("Compare two implementation approaches in this repository");
-   const team = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
-   assert.equal(team.length, 2);
-   assert.equal(team[0].route, fresh.fullId);
-   assert.equal(team[0].role, plan.roles[0]);
-   assert.equal(team[1].role, plan.roles[1]);
-   assert.notEqual(team[1].route, alias.fullId, "a router alias cannot serve as independent critique");
-   assert.notEqual(team[1].route, fresh.fullId);
-   fs.writeFileSync(prefsFile, JSON.stringify({
-    preferences: { fanout: [
-     { provider: fresh.provider, model: fresh.id },
-     { provider: alias.provider, model: alias.id },
-     { provider: other.provider, model: other.id },
-    ] },
-   }));
-   clearLlmPreferencesCache();
-   const configured = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
-   assert.deepEqual(configured.map(member => member.route), [fresh.fullId, other.fullId]);
-   assert.equal(configured[1].proof, "explicit llm_preferences");
-  } finally {
-   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
-   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
-   clearLlmPreferencesCache();
-  }
+  const plan = planAssistance("Compare two implementation approaches in this repository");
+  const team = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
+  assert.equal(team.length, 2);
+  assert.ok(
+   !(team.some((member) => member.route === fresh.fullId) && team.some((member) => member.route === alias.fullId)),
+   "a router alias of the same model cannot serve as independent critique",
+  );
  });
- check("routes that mostly fail to finish move behind reliable preferences", () => {
+ check("routes that mostly fail to finish yield their slot to reliable routes", () => {
   const now = Date.parse("2026-09-26T06:30:00Z"), ts = (minutesAgo) => Math.floor((now - minutesAgo * 60000) / 1000);
   const run = (model, outcome, minutesAgo, cause) => ({ agent: "automatic-free-assistant", task: "[redacted]", ts: ts(minutesAgo), status: outcome === "completed" ? "ok" : "error", outcome, duration: 1, evidence: { version: 1, model, ...(cause ? { cause } : {}) } });
   const history = [
@@ -575,77 +483,29 @@ try {
    run("other/sparse", "stopped", 1), run("other/sparse", "stopped", 2), run("other/sparse", "completed", 3),
   ];
   assert.deepEqual([...unreliableRoutes(history, now)], ["orcarouter/z-ai/slow"], "harness verdicts, stale runs and sparse samples demote nothing");
-  const prefsFile = path.join(root, "llm-prefs-unreliable.json");
-  fs.writeFileSync(prefsFile, JSON.stringify({ preferences: { fanout: [
-   { provider: fresh.provider, model: fresh.id }, { provider: other.provider, model: other.id }, { provider: old.provider, model: old.id },
-  ] } }));
-  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
-  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
-  clearLlmPreferencesCache();
-  try {
-   const plan = planAssistance("Compare two implementation approaches in this repository");
-   const configured = selectAssistanceTeam(models, cfg, plan, { task: "Review code" });
-   const demoted = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
-   assert.deepEqual(configured.map(member => member.route), [fresh.fullId, other.fullId]);
-   assert.deepEqual(demoted.map(member => member.route), [fresh.fullId, old.fullId], "the configured order stands among reliable routes");
-   const alone = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([fresh.fullId, other.fullId, old.fullId]) });
-   assert.ok(alone.length >= 1, "an all-unreliable chain still serves rather than leaving the role empty");
-   // Council shape: the flaky configured route yields its slot to a reliable autonomous pick.
-   const withoutFlaky = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([old.fullId]) });
-   const flakyOnly = selectAssistanceTeam([fresh, other, old], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
-   assert.ok(!withoutFlaky.some(member => member.route === old.fullId), "a reliable route fills the slot before the flaky one");
-   assert.deepEqual(flakyOnly.map(member => member.route), [fresh.fullId, old.fullId]);
-   const lastResort = selectAssistanceTeam([fresh, other], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
-   assert.deepEqual(lastResort.map(member => member.route), [fresh.fullId, other.fullId], "with nothing reliable left, the configured route still serves");
-   assert.match(lastResort[1].explanation.join(" "), /no reliable route was available/);
-  } finally {
-   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
-   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
-   clearLlmPreferencesCache();
-  }
+  const plan = planAssistance("Compare two implementation approaches in this repository");
+  const demoted = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
+  assert.ok(!demoted.some((member) => member.route === other.fullId), "a reliable route fills the slot before a flaky one");
+  const alone = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([fresh.fullId, other.fullId, old.fullId]) });
+  assert.ok(alone.length >= 1, "an all-unreliable pool still serves rather than leaving the role empty");
+  const lastResort = selectAssistanceTeam([fresh, other], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
+  assert.deepEqual(lastResort.map((member) => member.route), [fresh.fullId], "a flaky route serves only when it passes the same quality gate");
  });
- check("team freeOnly filters paid preferences unless explicitly honored", () => {
-  const prefsFile = path.join(root, "llm-prefs-team-freeonly.json");
-  fs.writeFileSync(
-   prefsFile,
-   JSON.stringify({
-    version: 1,
-    models: {
-     paid_one: {
-      provider: "openrouter",
-      model: "lab/paid-1.0",
-      thinking: "low",
-     },
-    },
-    preferences: { fanout: { models: ["paid_one"] } },
-   }),
-  );
-  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
-  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
-  clearLlmPreferencesCache();
-  try {
-   const p = planAssistance(
-    "Migrate the billing and auth subsystems end to end",
-    true,
-   );
-   assert.equal(p.mode, "fanout");
-   const strict = selectAssistanceTeam([paid], cfg, p, {
-    freeOnly: true,
-    requiresTools: false,
-   });
-   assert.equal(strict.length, 0, "strict freeOnly drops the paid pref");
-   const honored = selectAssistanceTeam([paid], cfg, p, {
-    freeOnly: true,
-    honorPaidPreferences: true,
-    requiresTools: false,
-   });
-   assert.equal(honored.length, 1, "opt-out keeps the configured route");
-   assert.equal(honored[0].proof, "explicit llm_preferences");
-  } finally {
-   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
-   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
-   clearLlmPreferencesCache();
-  }
+ check("team freeOnly never admits a paid route", () => {
+  const p = planAssistance("Migrate the billing and auth subsystems end to end", true);
+  assert.equal(p.mode, "fanout");
+  assert.equal(selectAssistanceTeam([paid], cfg, p, { freeOnly: true, requiresTools: false }).length, 0);
+ });
+ check("session team runs every reviewer on the parent session model", () => {
+  const p = planAssistance("Compare two implementation approaches in this repository");
+  const session = { provider: fresh.provider, id: fresh.id };
+  const team = sessionAssistanceTeam(models, session, p);
+  assert.equal(team.length, p.roles.length);
+  assert.deepEqual(team.map((member) => member.route), p.roles.map(() => fresh.fullId));
+  assert.deepEqual(team.map((member) => member.role), p.roles);
+  assert.ok(sessionAssistanceTeam([old, other], session, p).every((member) => member.route === fresh.fullId && member.free === false), "an unpriced session model is never proven free");
+  assert.throws(() => sessionAssistanceTeam(models, undefined, p), /no model selected/);
+  assert.deepEqual(sessionAssistanceTeam(models, undefined, { ...p, roles: [] }), []);
  });
  check(
   "schema rejects forged sources, corrupt values and future research timestamps",

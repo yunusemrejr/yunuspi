@@ -1,34 +1,28 @@
-/** Micro-worker: a bounded remote role between Jev and a full subagent.
+/** Micro-worker: a bounded helper between Jev and a full subagent.
  *
  * Some tasks are too generative or contextual for a typed Jev judgment but
  * far too small for a full subagent (no tools, no exploration, no writes):
  * error-hypothesis generation, finding consolidation, concise briefs,
  * structured extraction, inspection-target proposals. The micro-worker
- * serves exactly those through cheap remote routes with hard budgets:
+ * serves exactly those on the session model with hard budgets:
  *
  * - no recursive delegation, zero tools, no writes by default;
  * - small structured JSON outputs, validated before use;
- * - tight context/output/time/cost budgets per call;
- * - route eligibility over price, quality evidence, health AND provider
- *   privacy tier — "free" never implies safe for private repositories.
+ * - tight context/output/time budgets per call;
+ * - eligibility over health, cooldown and quality evidence.
  *
- * Routes are never hardcoded as available. Candidates come from
- * PI_MICRO_WORKER_ROUTES (comma "provider/model" slugs) and qualify
- * against caller-supplied live facts plus the qualification lab's
- * expiring eligibility. Unknown quality stays unknown: without evidence
- * the worker abstains rather than guessing on a random cheap route.
+ * The caller supplies the session model as the only route. Quality comes
+ * from the qualification lab's expiring evidence. Unknown quality stays
+ * unknown: without evidence the worker abstains.
  */
 import { createHash } from "node:crypto";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
 import { beginHarnessActivity } from "../harness-activity.ts";
-import { routePrivacyTier } from "./route-privacy.ts";
 
 export const MICRO_WORKER_MAX_INPUT_CHARS = 8000;
 export const MICRO_WORKER_MAX_OUTPUT_TOKENS = 1000;
 export const MICRO_WORKER_TIMEOUT_MS = 60_000;
-export const MICRO_WORKER_COST_CAP_USD = 0.005;
-export const MICRO_WORKER_PRICE_CAP_PER_M_USD = 0.5;
 export const MICRO_WORKER_CACHE_MAX = 64;
 export const MICRO_WORKER_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -45,17 +39,10 @@ export interface MicroWorkerFacts {
   provider: string;
   model: string;
   baseUrl?: string;
-  /** The adapter verified this exact model and endpoint is the user's current
-   * session recipient. Recheck against the effective wire route after auth. */
-  sessionSelected?: boolean;
-  /** Known prompt price USD per 1M tokens; undefined means unknown. */
-  pricePerM?: number;
   /** Quality score 0..1 from benchmarks/qual-lab; undefined means unknown. */
   quality?: number;
   healthy: boolean;
   cooldownUntil?: number;
-  /** True when the input may contain private repository content. */
-  privateInput: boolean;
 }
 
 export interface MicroWorkerEligibility {
@@ -115,17 +102,6 @@ export function microWorkerEnabled(env: Record<string, string | undefined> = pro
     && !["off", "0"].includes((env.PI_MICRO_WORKER ?? "on").toLowerCase());
 }
 
-export function microWorkerCandidates(env: Record<string, string | undefined> = process.env): string[] {
-  const raw = env.PI_MICRO_WORKER_ROUTES ?? "";
-  const out: string[] = [];
-  for (const entry of raw.split(",")) {
-    const clean = entry.trim().replace(/\s+/g, "");
-    if (!clean || clean.length > 160 || !clean.includes("/") || out.length >= 16) continue;
-    if (!out.includes(clean)) out.push(clean);
-  }
-  return out;
-}
-
 function noteHealth(kind: string, data: Record<string, unknown>): void {
   try {
     sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data);
@@ -134,22 +110,10 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
   }
 }
 
-/** Eligibility over price, quality evidence, health, and privacy tier. */
-export function microWorkerEligibility(
-  facts: MicroWorkerFacts,
-  now = Date.now(),
-  env: Record<string, string | undefined> = process.env,
-): MicroWorkerEligibility {
+/** Eligibility over health, cooldown and quality evidence. */
+export function microWorkerEligibility(facts: MicroWorkerFacts, now = Date.now()): MicroWorkerEligibility {
   if (!facts.healthy) return { eligible: false, reason: "unhealthy" };
   if (facts.cooldownUntil !== undefined && now < facts.cooldownUntil) return { eligible: false, reason: "cooldown" };
-  if (facts.privateInput && !facts.sessionSelected && routePrivacyTier(facts.provider, facts.model, env, facts.baseUrl).tier === "unknown") {
-    return { eligible: false, reason: "private-input-unsafe-route" };
-  }
-  if (facts.pricePerM === undefined) return { eligible: false, reason: 'unknown-price' };
-  if (!Number.isFinite(facts.pricePerM) || facts.pricePerM < 0) return { eligible: false, reason: 'invalid-price' };
-  if (facts.pricePerM > MICRO_WORKER_PRICE_CAP_PER_M_USD) {
-    return { eligible: false, reason: "over-price-cap" };
-  }
   if (facts.quality === undefined) return { eligible: false, reason: 'unknown-quality' };
   if (!Number.isFinite(facts.quality) || facts.quality < 0 || facts.quality > 1) return { eligible: false, reason: 'invalid-quality' };
   if (facts.quality < 0.5) return { eligible: false, reason: "quality-floor" };
@@ -177,7 +141,6 @@ export interface MicroWorkerResult {
 export interface MicroWorkerOptions {
   complete: MicroWorkerComplete | undefined;
   facts: MicroWorkerFacts | undefined;
-  privateInput?: boolean;
   timeoutMs?: number;
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
@@ -224,7 +187,7 @@ export async function runMicroWorker(
     noteHealth("ml.microworker.skipped", { count: 1, reason: "no-route", op: kind });
     return { ok: false, ms: 0, cached: false, skipped: "no-route" };
   }
-  const eligibility = microWorkerEligibility({ ...opts.facts, privateInput: opts.privateInput ?? opts.facts.privateInput ?? true }, now(), env);
+  const eligibility = microWorkerEligibility(opts.facts, now());
   if (!eligibility.eligible) {
     metrics.skip("microworker", eligibility.reason);
     noteHealth("ml.microworker.skipped", { count: 1, reason: eligibility.reason, op: kind });
@@ -259,11 +222,6 @@ export async function runMicroWorker(
     }), interrupted]);
     signal.throwIfAborted();
     const ms = Math.max(0, now() - started);
-    if ((answer.costUsd ?? 0) > MICRO_WORKER_COST_CAP_USD) {
-      metrics.skip("microworker", "over-cost-cap");
-      noteHealth("ml.microworker.skipped", { count: 1, reason: "over-cost-cap", op: kind, durationMs: ms });
-      return { ok: false, ms, cached: false, skipped: "over-cost-cap" };
-    }
     let output: Record<string, unknown>;
     try {
       if (typeof answer.text !== 'string' || answer.text.length > 16_384) throw Error('oversized output');
@@ -298,8 +256,7 @@ export async function runMicroWorker(
 
 export function microWorkerStatus(env: Record<string, string | undefined> = process.env): {
   enabled: boolean;
-  candidates: string[];
   cacheEntries: number;
 } {
-  return { enabled: microWorkerEnabled(env), candidates: microWorkerCandidates(env), cacheEntries: workerCache.size };
+  return { enabled: microWorkerEnabled(env), cacheEntries: workerCache.size };
 }

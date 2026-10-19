@@ -9,7 +9,6 @@ export interface FetchContentParams {
 	frames?: unknown;
 	model?: unknown;
 	mode?: unknown;
-	answerModel?: unknown;
 	auth?: unknown;
 	proxy?: unknown;
 }
@@ -23,7 +22,6 @@ export interface NormalizedFetchContentParams {
 		frames?: number;
 		model?: string;
 		mode?: "readable" | "raw" | "answer";
-		answerModel?: string;
 		auth?: true | string;
 		proxy?: string;
 	};
@@ -41,7 +39,6 @@ export function normalizeFetchContentParams(params: FetchContentParams): Normali
 	const forceClone = typeof params.forceClone === "boolean" ? params.forceClone : undefined;
 	const model = normalizeOptionalString(params.model);
 	const mode = normalizeMode(params.mode);
-	const answerModel = normalizeOptionalString(params.answerModel);
 	const auth = normalizeAuth(params.auth);
 	const proxy = normalizeProxy(params.proxy);
 
@@ -54,7 +51,6 @@ export function normalizeFetchContentParams(params: FetchContentParams): Normali
 			...(shouldIncludeFrames ? { frames } : {}),
 			...(model !== undefined ? { model } : {}),
 			...(mode !== undefined ? { mode } : {}),
-			...(answerModel !== undefined ? { answerModel } : {}),
 			...(auth !== undefined ? { auth } : {}),
 			...(proxy !== undefined ? { proxy } : {}),
 		},

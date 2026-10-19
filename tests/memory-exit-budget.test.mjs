@@ -16,10 +16,9 @@ register('data:text/javascript,'+encodeURIComponent(`export function resolve(nam
 }`),import.meta.url);
 const memory=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/index.ts')));
 const {registerPriming}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/priming.ts')));
-const original=Object.fromEntries(['PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY_MODEL','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
+const original=Object.fromEntries(['PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
 // Keep the real schema constructors; only provider completion is intercepted.
 // Isolate host/offline runner settings without weakening the runtime contract.
-delete process.env.PI_MEMORY_EXIT_SUMMARY_MODEL;
 delete process.env.PI_OFFLINE;
 process.env.PI_MEMORY_EXIT_SUMMARY='1';
 process.env.PI_MEMORY_QMD_UPDATE='off';
@@ -37,11 +36,6 @@ test('summary timeout aborts the provider request and bounds output',async()=>{
  await fixture()();
  assert.ok(options.signal.aborted,'timeout must reach provider cancellation');
  assert.equal(options.maxTokens,2048);
-});
-test('missing explicit cheap summary route never falls back to the active model',async()=>{
- let calls=0;globalThis.__exitBudgetComplete=async()=>{calls++;return{content:[]}};
- process.env.PI_MEMORY_EXIT_SUMMARY_MODEL='fixture/missing';
- try{await fixture()();assert.equal(calls,0);}finally{delete process.env.PI_MEMORY_EXIT_SUMMARY_MODEL;}
 });
 test('offline mode makes no automatic summary request',async()=>{
  let calls=0;globalThis.__exitBudgetComplete=async()=>{calls++;return{content:[]}};

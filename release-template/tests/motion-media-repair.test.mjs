@@ -143,11 +143,12 @@ test('direct user rejection invalidates an earlier pass until the delivered byte
   hooks.get('session_shutdown')();
 });
 
-test('vision accepts exact qualified ids, refuses ambiguity and never changes the current model', () => {
-  const a={provider:'vision-a',id:'org/vision',input:['text','image']},b={...a,provider:'vision-b'},current={provider:'text',id:'plain',input:['text']};
-  const ctx={model:current,modelRegistry:{find:()=>undefined,getAvailable:()=>[a,b]}};
-  assert.equal(visionModel({model:'vision-a/org/vision'},ctx),a);
-  assert.throws(()=>visionModel({model:'org/vision'},ctx),/ambiguous/);
+test('vision runs on the session model and never picks another one', () => {
+  const a={provider:'vision-a',id:'org/vision',input:['text','image']},current={provider:'text',id:'plain',input:['text']};
+  assert.equal(visionModel({model:a,modelRegistry:{getAvailable:()=>[current]}}),a);
+  const ctx={model:current,modelRegistry:{find:()=>a,getAvailable:()=>[a]}};
+  assert.throws(()=>visionModel(ctx),/does not accept images, so image understanding is unavailable/);
+  assert.throws(()=>visionModel({}),/no model selected/);
   assert.equal(ctx.model,current);
 });
 

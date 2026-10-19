@@ -7,7 +7,7 @@
  * leaves additionalProperties open, so a field dropped here never rejects a
  * call: the executor still receives it verbatim. Dropping a field only hides
  * its guidance from the model. Kept: fields the harness flows use (delegate,
- * review, resume, steer, missions, scheduling, list/get/models, watchdog),
+ * review, resume, steer, missions, scheduling, list/get, watchdog),
  * each as a one-liner; heavy nested trees became loose objects. Retired
  * fields (lane evidence, calendar schedules, dynamic-parallel specs, share/
  * artifacts/sessionDir/debug knobs) remain functional-but-undocumented.
@@ -49,13 +49,11 @@ const SubagentParamProperties = {
 	agent: Type.Optional(Type.String({ description: "Agent for one-child execution, or target for agent management actions." })),
 	task: Type.Optional(Type.String({ description: "Optional one-child task; requires agent. Cannot combine with action, workflowScript, or workflowScriptPath." })),
 	commonTask: Type.Optional(Type.String({ minLength: 1, maxLength: 48000, description: "Shared brief supplied once for native agent/tasks/chain; injected into every child task. Saves parent request duplication, not child input tokens." })),
-	tasks: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native parallel children: [{agent,task,acceptance?,cwd?,model?},...]. Use commonTask for the shared brief and short branch-specific tasks." })),
+	tasks: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native parallel children: [{agent,task,acceptance?,cwd?},...]. Use commonTask for the shared brief and short branch-specific tasks." })),
 	concurrency: Type.Optional(Type.Integer({ minimum: 1, description: "Native tasks/chain parallel width. Explicit values stay exact; absent defaults adapt to child complexity and configured capacity. All requested children still run." })),
 	chain: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native sequential steps: [{agent,task},...]; {previous} carries prior output. Supports nested parallel groups." })),
-	action: Type.Optional(Type.String({ minLength: 1, description: "Management/control action (list, get, models, status, resume, steer, create/update/delete, mission.*, watchdog.*, schedule.*). Omit for execution." })),
+	action: Type.Optional(Type.String({ minLength: 1, description: "Management/control action (list, get, status, resume, steer, create/update/delete, mission.*, watchdog.*, schedule.*). Omit for execution." })),
 	async: Type.Optional(Type.Boolean({ description: "Run in background (default unless asyncByDefault:false). false only when the parent must block." })),
-	model: Type.Optional(Type.String({ description: "Child model override (provider/id; bare ids resolve only when unique). Thinking suffix on the string, e.g. 'provider/id:high'. With action='models' it filters the registry listing instead." })),
-	thinking: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "Thinking level for action='watchdog.configure' only (off/minimal/low/medium/high/xhigh/max/ultra, inherit, or false). Ignored on dispatch." })),
 	context: Type.Optional(Type.String({ enum: ["fresh", "fork", "profile"], description: "fresh/fork branch from the parent session; profile uses the agent's declared defaultContext. Omitted: config defaultSubagentContext wins." })),
 	cwd: Type.Optional(Type.String({ description: "Execution cwd (or target project directory for project.* actions)." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Managed isolation: each workflow child gets a separate git worktree; per-child override allowed." })),
@@ -87,8 +85,6 @@ const SubagentParamProperties = {
 	at: Type.Optional(Type.String({ description: "schedule.create one-shot trigger: '+10m' or ISO timestamp." })),
 	every: Type.Optional(Type.String({ description: "schedule.create recurring interval: '30m', '6h', '2d', '2w'." })),
 	sessionOnly: Type.Optional(Type.Boolean({ description: "schedule.create: record creating session only." })),
-	scope: Type.Optional(Type.String({ enum: ["session", "user", "project"], description: "watchdog.configure scope (default session)." })),
-	target: Type.Optional(Type.String({ enum: ["main", "children", "child"], description: "watchdog action target." })),
 	additional: Type.Optional(Type.Integer({ minimum: 1, description: "grant-spawn-budget: launches to add (root parent, user-confirmed only)." })),
 	focus: Type.Optional(Type.Boolean({ description: "Focus the new Herdr pane for inspector.open/project.open." })),
 	config: Type.Optional(Type.Unsafe({ anyOf: [{ type: "object", additionalProperties: true }, { type: "string" }], description: "Agent config for create/update: object or JSON string." })),

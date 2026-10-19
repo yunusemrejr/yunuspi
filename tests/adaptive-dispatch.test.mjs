@@ -6,12 +6,9 @@ import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname,'..');
 const agent = [path.join(root,'agent'),path.join(root,'..','agent'),root].find(dir => fs.existsSync(path.join(dir,'extensions/lib/adaptive-execution.ts')));
-const {adaptiveDispatchDefaults,adaptiveChildBrief,adaptiveNativeChildThinking} = await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/adaptive-dispatch.ts')));
-const route = 'fixture/reasoner';
-const model = {provider:'fixture',id:'reasoner',fullId:route,reasoning:true};
+const {adaptiveDispatchDefaults} = await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/adaptive-dispatch.ts')));
 const plain = {agent:'worker',task:'Correct a one-line README typo'};
 const hard = {agent:'worker',task:'Redesign authentication across multiple services'};
-const thinking = (brief,extra={}) => adaptiveNativeChildThinking({brief,model:route,availableModels:[model],...extra});
 delete process.env.PI_ADAPTIVE_EXECUTION;
 delete process.env.PI_SUBAGENT_THINKING_CEILING;
 
@@ -48,43 +45,8 @@ test('chain groups and dynamic templates use independent defaults and explicit g
   assert.equal(adaptiveDispatchDefaults({chain:[{parallel:[plain,hard]}],concurrency:6}).params.chain[0].concurrency,6);
 });
 
-test('thinking follows each authored child and supports count expansion and reserved dynamic indices',()=>{
-  assert.equal(thinking(plain),'minimal');
-  assert.equal(thinking({task:'Investigate an intermittent parser failure'}),'low');
-  assert.equal(thinking(hard),'high');
-  const request={chain:[{parallel:[{...plain,count:2},hard]},{parallel:plain,expand:{maxItems:3}},hard]};
-  assert.equal(adaptiveChildBrief(request,0).task,plain.task);
-  assert.equal(adaptiveChildBrief(request,1).task,plain.task);
-  assert.equal(adaptiveChildBrief(request,2),hard);
-  assert.equal(adaptiveChildBrief(request,5),plain);
-  assert.equal(adaptiveChildBrief(request,6),hard);
-  assert.equal(adaptiveChildBrief(request,7),undefined);
-  assert.equal(adaptiveChildBrief(request,-1),undefined);
-  assert.equal(adaptiveChildBrief({tasks:[{...plain,count:2},hard]},2),hard);
-});
 
-test('thinking settings, model suffixes and configured fallback thinking remain exact',()=>{
-  for(const value of ['off','high',false]){
-    assert.equal(thinking(plain,{agentThinking:value}),undefined);
-    assert.equal(thinking(plain,{requestThinking:value}),undefined);
-    assert.equal(thinking({...plain,thinking:value}),undefined);
-  }
-  assert.equal(thinking(plain,{model:`${route}:high`}),undefined);
-  assert.equal(thinking(plain,{fallbackModels:[`${route}:high`]}),undefined);
-});
 
-test('native default is bounded by agent and inherited ceilings and real model support',()=>{
-  assert.equal(thinking(hard,{maxThinking:'low'}),'low');
-  process.env.PI_SUBAGENT_THINKING_CEILING='off';
-  try { assert.equal(thinking(hard),'off'); } finally { delete process.env.PI_SUBAGENT_THINKING_CEILING; }
-  assert.equal(thinking(plain,{availableModels:[{...model,thinkingLevelMap:{minimal:null,low:null}}]}),'medium');
-  assert.equal(thinking(plain,{maxThinking:'minimal',availableModels:[{...model,thinkingLevelMap:{minimal:null}}]}),'off');
-  assert.equal(thinking(hard,{availableModels:[{...model,reasoning:false}]}),undefined);
-  assert.equal(thinking(hard,{availableModels:[]}),undefined);
-  assert.equal(thinking(hard,{externalRunner:true}),undefined);
-  assert.equal(thinking({task:'{previous}'}),'low','unresolved templates retain proportionate uncertainty');
-  assert.equal(thinking({}),'low');
-});
 
 test('malformed requests retain their native validation owner instead of throwing in optional defaults',()=>{
   for(const request of [{tasks:'bad'},{tasks:[null]},{chain:[null]},{chain:[{parallel:[null]}]},{chain:[{parallel:null}]}]){
@@ -105,7 +67,6 @@ test('rollback disables adaptive defaults without discarding configured capaciti
       const request={tasks:[plain,hard]};
       assert.equal(adaptiveDispatchDefaults(request).params,request);
       assert.equal(adaptiveDispatchDefaults({workflowScript:'...'}).params.globalConcurrencyLimit,undefined);
-      assert.equal(thinking(hard),undefined);
       assert.equal(adaptiveDispatchDefaults(request,{parallel:{concurrency:7}}).params.concurrency,7);
     }finally{delete process.env.PI_ADAPTIVE_EXECUTION;}
   }

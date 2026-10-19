@@ -57,7 +57,7 @@ test('micro_task measures an unknown current route then runs all seven bounded r
   const f = fixture(t);
   assert.equal(f.tool.name, 'micro_task');
   const status = await f.run({ action: 'status' });
-  assert.equal(status.routes.length, 1); assert.equal(status.routes[0].qualification, null); assert.equal(f.calls.length, 0);
+  assert.equal(status.route, 'fixture/small'); assert.equal(status.capable, true); assert.equal(status.qualification, null); assert.equal(f.calls.length, 0);
   for (const kind of Object.keys(answers)) {
     const result = await f.run({ kind, input: 'Inspect this bounded source example' });
     assert.equal(result.ok, true, JSON.stringify(result)); assert.equal(result.advisory, true);
@@ -74,17 +74,13 @@ test('micro_task measures an unknown current route then runs all seven bounded r
   assert.ok(!JSON.stringify(f.entries).includes('Inspect this bounded source example'));
 });
 
-test('micro_task blocks unknown private recipients and unknown/expensive pricing before inference', async t => {
-  const privateRoute = fixture(t, { current: false });
-  const blocked = await privateRoute.run({ kind: 'source-glance', input: 'Inspect private source code' });
-  assert.equal(blocked.skipped, 'no-eligible-route');
-  assert.equal(blocked.rejected[0].reason, 'private-input-unsafe-route'); assert.equal(privateRoute.calls.length, 0);
-  assert.equal((await privateRoute.run({ kind: 'source-glance', input: 'Inspect a public example', privateInput: false })).ok, true);
-  for (const cost of [undefined, { input: .6, output: .2, cacheRead: .1, cacheWrite: .1 }, { input: .1, output: 10, cacheRead: .1, cacheWrite: .1 }]) {
-    const f = fixture(t, { candidate: { ...model(), cost } });
-    assert.equal((await f.run({ kind: 'source-glance', input: 'Inspect source code here' })).skipped, 'no-eligible-route');
-    assert.equal(f.calls.length, 0);
-  }
+test('micro_task refuses without a usable session model and never substitutes another', async t => {
+  const missing = fixture(t, { current: false });
+  const absent = await missing.run({ kind: 'source-glance', input: 'Inspect source code here' });
+  assert.equal(absent.skipped, 'no-eligible-route'); assert.equal(absent.rejected[0].reason, 'no-session-model'); assert.equal(missing.calls.length, 0);
+  const small = fixture(t, { candidate: { ...model(), maxTokens: 512 } });
+  const short = await small.run({ kind: 'source-glance', input: 'Inspect source code here' });
+  assert.equal(short.skipped, 'no-eligible-route'); assert.equal(short.rejected[0].reason, 'output-capacity'); assert.equal(small.calls.length, 0);
 });
 
 test('micro_task does not use incomplete qualification and binds evidence/cache to the endpoint', async t => {
@@ -155,41 +151,15 @@ test('micro_task retains native dispatch admission until an ignored cancellation
   assert.ok(collectAuxiliaryModelUsage(f.entries).rows.some(row => row.status === 'cancelled' && row.tokens === 30));
 });
 
-test('micro_task routing compares a native model suggestion without changing the current route', async t => {
-  const f = fixture(t), alternative = { ...model(), id: 'other' };
-  f.ctx.modelRegistry.getAvailable = () => [f.candidate, alternative];
-  await f.run({ action: 'qualify' });
-  f.ctx.modelRegistry.completeSimple = async (offered, _context, options) => {
-    options.onPayload({ model: offered.id, max_tokens: 9000 }, offered);
-    return { content: [{ type: 'text', text: '{"model":"fixture/other","effort":"low"}' }], stopReason: 'stop' };
-  };
-  const result = await f.run({ action: 'route', input: 'Choose a model for source review', candidates: ['fixture/small', 'fixture/other'] });
-  assert.equal(result.ok, true); assert.equal(result.comparison.router, 'fixture/other');
-  assert.equal(result.comparison.yunuspi, 'fixture/small'); assert.equal(f.ctx.model.id, 'small');
-  assert.equal((await f.run({ action: 'status' })).router.comparisons, 1);
-});
-
-
-test('micro_task rechecks authoritative unit pricing immediately before native dispatch', async t => {
-  for (const price of [undefined, 1]) {
-    const f = fixture(t);
-    f.ctx.modelRegistry.find = () => ({ ...f.candidate, cost: { ...f.candidate.cost, input: price } });
-    assert.equal((await f.run({ action: 'qualify' })).ok, false);
-    assert.equal(f.calls.length, 0, 'stale catalog pricing cannot admit the refreshed expensive route');
-    assert.equal(f.entries.length, 0, 'no physical request was admitted');
-  }
-});
-
-test('micro_task lifecycle invalidates route receipts before clearing the router flight', async t => {
+test('micro_task lifecycle invalidates pending receipts before a replacement session can receive them', async t => {
   for (const event of ['session_start', 'session_tree', 'session_shutdown']) {
-    const f = fixture(t), alternative = { ...model(), id: 'other' };
-    f.ctx.modelRegistry.getAvailable = () => [f.candidate, alternative];
+    const f = fixture(t);
     await f.run({ action: 'qualify' });
     let release;
     f.ctx.modelRegistry.completeSimple = async () => new Promise(resolve => {
-      release = () => resolve({ content: [{ type: 'text', text: '{"model":"fixture/other","effort":"low"}' }], stopReason: 'stop', usage: { input: 20, output: 10 } });
+      release = () => resolve({ content: [{ type: 'text', text: JSON.stringify(answers['source-glance']) }], stopReason: 'stop', usage: { input: 20, output: 10 } });
     });
-    const pending = f.run({ action: 'route', input: 'Choose a model for source review', candidates: ['fixture/small', 'fixture/other'] });
+    const pending = f.run({ kind: 'source-glance', input: 'Read this ownership example' });
     for (let i = 0; i < 10 && !release; i++) await new Promise(resolve => setImmediate(resolve));
     assert.equal(typeof release, 'function');
     const receipts = f.entries.length;
@@ -198,13 +168,12 @@ test('micro_task lifecycle invalidates route receipts before clearing the router
     f.emit(event);
     assert.equal(f.session.signal.aborted, false);
     assert.equal((await pending).ok, false);
-    assert.equal(f.entries.length, receipts, 'synchronous router abort cannot append into the replacement session');
+    assert.equal(f.entries.length, receipts, 'synchronous lifecycle abort cannot append into the replacement session');
     f.session.abort();
     release(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.entries.length, receipts, 'late transport usage belongs to the discarded session');
   }
 });
-
 
 test('micro_task analyzes a whole evidence packet once with stable IDs, categories and no source echo', async t => {
   let calls = 0;
@@ -237,8 +206,6 @@ test('micro_task analyzes a whole evidence packet once with stable IDs, categori
   assert.deepEqual(result.ranked[1].categoryDistribution,[{category:'security',probability:.52},{category:'performance',probability:.48},{category:null,probability:0}]);
   assert.equal(result.ranked[1].categoryMargin,.52-.48);
   assert.ok(!JSON.stringify(result).includes(args.items[0].text), 'the main session receives references, not repeated source text');
-  for (const patch of [{ model: 'fixture/small' }, { privateInput: false }])
-    assert.equal((await f.run({ ...args, ...patch })).skipped, 'incompatible-analysis-options');
   assert.equal((await f.run({ ...args, items: [args.items[0], args.items[0]] })).skipped, 'invalid-analysis');
   assert.equal((await f.run({ ...args, items: Array.from({ length: 16 }, (_, i) => ({ id: String(i), text: 'a'.repeat(1200) })) })).skipped, 'input-budget');
   assert.equal(calls, 1, 'invalid packets never reach the remote judge');

@@ -18,7 +18,7 @@ const fixtures = JSON.parse(fs.readFileSync(path.join(root, "tests/fixtures/micr
 
 const {
   SPAN_CATALOG, SPAN_ADVISE_THRESHOLD, createSpanTrace, spanTraceFingerprint,
-  parseSpanScores, scoreSpanTrace: rawScoreSpanTrace, spanAdvisory, openRouterSpanScorer,
+  parseSpanScores, scoreSpanTrace: rawScoreSpanTrace, spanAdvisory, sessionSpanScorer,
   clearSpanCache, spanEnabled, spanShadow,
 } = spanMod;
 
@@ -159,53 +159,31 @@ test("malformed scorer output degrades to a skip", async () => {
   }
 });
 
-test("Span is asked through the decisions endpoint with one plain noul question per signal", async () => {
-  let request;
-  const fetchImpl = async (url, opts) => {
-    request = { url, body: JSON.parse(opts.body) };
-    return { ok: true, json: async () => ({ answers: Object.fromEntries(SPAN_CATALOG.map((s) => [s.id, { type: "noul", noul: 0.1 }])), usage: { input_tokens: 9, cost: 0 } }) };
-  };
-  const answer = await openRouterSpanScorer({ fetchImpl, key: () => "k" })("- [error] bash failed", {});
-  assert.match(request.url, /\/api\/alpha\/decisions$/, "chat/completions refuses decisions models");
-  assert.equal(request.body.state, "- [error] bash failed");
-  assert.deepEqual(Object.keys(request.body.questions), SPAN_CATALOG.map((s) => s.id));
-  for (const question of Object.values(request.body.questions)) {
-    assert.equal(question.type, "noul");
-    assert.equal(typeof question.instructions, "string");
-    assert.equal(question.criteria, undefined, "Respan rejects non-string criteria");
-  }
+test("Span is scored on the session model through its registry, with one JSON answer", async () => {
+  const seen = [];
+  const session = { provider: "fixture", id: "session-model", baseUrl: "https://fixture.invalid/v1" };
+  const ctx = { model: session, modelRegistry: { completeSimple: async (model, context, options) => {
+    seen.push({ model, prompt: context.messages[0].content[0].text, options });
+    const scores = Object.fromEntries(SPAN_CATALOG.map((signal) => [signal.id, { present: 0.1, absent: 0.8, notObservable: 0.1 }]));
+    return { content: [{ type: "text", text: JSON.stringify(scores) }], stopReason: "stop", usage: { input: 9, cost: { total: 0 } } };
+  } } };
+  const answer = await sessionSpanScorer(ctx)("- [error] bash failed", {});
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].model, session, "the scorer never chooses another model");
+  assert.equal(seen[0].options.maxRetries, 0);
+  assert.match(seen[0].prompt, /- \[error\] bash failed/, "the bounded trace is judged");
+  for (const signal of SPAN_CATALOG) assert.match(seen[0].prompt, new RegExp(`- ${signal.id}: `), signal.id);
+  assert.equal(answer.model, "fixture/session-model");
   assert.equal(Object.keys(parseSpanScores(JSON.parse(answer.text))).length, SPAN_CATALOG.length);
   assert.equal(answer.inputTokens, 9);
   assert.equal(answer.costUsd, 0);
 });
 
-test("paid fallback runs only for a missing Lite route", async () => {
-  const seen = [];
-  const fetchImpl = async (url, opts) => {
-    const model = JSON.parse(opts.body).model;
-    seen.push(model);
-    if (model === "respan/span-01-lite") {
-      return { ok: false, status: 404, text: async () => "model not found" };
-    }
-    return {
-      ok: true,
-      json: async () => ({ answers: { "scope-drift": { type: "noul", noul: 0.25 } }, usage: { input_tokens: 5 } }),
-    };
-  };
-  const scorer = openRouterSpanScorer({ fetchImpl, key: () => "k" });
-  const answer = await scorer("trace", {});
-  assert.equal(answer.model, "respan/span-01");
-  assert.deepEqual(parseSpanScores(JSON.parse(answer.text)), { "scope-drift": { present: 0.25, absent: 0.75, notObservable: 0 } });
-  assert.deepEqual(seen, ["respan/span-01-lite", "respan/span-01"]);
-
-  // Auth failures never trigger the paid fallback.
-  const seenAuth = [];
-  const authFetch = async (url, opts) => {
-    seenAuth.push(JSON.parse(opts.body).model);
-    return { ok: false, status: 401, text: async () => "unauthorized" };
-  };
-  await assert.rejects(openRouterSpanScorer({ fetchImpl: authFetch, key: () => "bad" })("trace", {}), /span 401/);
-  assert.deepEqual(seenAuth, ["respan/span-01-lite"]);
+test("without a session model Span refuses instead of choosing another route", async () => {
+  let calls = 0;
+  const ctx = { model: undefined, modelRegistry: { completeSimple: async () => { calls++; return { content: [], stopReason: "stop" }; } } };
+  await assert.rejects(sessionSpanScorer(ctx)("trace", {}), /no session model/);
+  assert.equal(calls, 0);
 });
 
 test("env gates behave", () => {

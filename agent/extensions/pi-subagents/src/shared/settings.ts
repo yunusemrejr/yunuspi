@@ -39,7 +39,6 @@ export interface SequentialStep {
 	reads?: string[] | false;
 	progress?: boolean;
 	skill?: string | string[] | false;
-	model?: string;
 	fast?: boolean;
 	toolBudget?: ToolBudgetConfig;
 	acceptance?: AcceptanceInput;
@@ -66,7 +65,6 @@ export interface ParallelTaskItem {
 	reads?: string[] | false;
 	progress?: boolean;
 	skill?: string | string[] | false;
-	model?: string;
 	fast?: boolean;
 	toolBudget?: ToolBudgetConfig;
 	acceptance?: AcceptanceInput;
@@ -389,8 +387,7 @@ export function resolveParallelBehaviors(
 		}
 
 		const outputMode = task.outputMode ?? config.outputMode ?? "inline";
-		const model = task.model ?? config.model;
-		return { output, outputMode, reads, progress, skills, model };
+		return { output, outputMode, reads, progress, skills };
 	});
 }
 

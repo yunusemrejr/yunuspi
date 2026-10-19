@@ -666,6 +666,7 @@ async function loadExtensionModule(extensionPath, cacheToken) {
     }
     const jiti = createJiti(import.meta.url, {
         moduleCache: false,
+        fsCache: true,
         // Compiled binaries and the bundled Node distribution use embedded modules.
         // Source TypeScript reuses host modules and root tsconfig paths. Unbundled
         // Node builds use dist aliases.

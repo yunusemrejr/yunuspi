@@ -2,7 +2,7 @@ import { fileVerificationSummary } from "../shared/file-verification.ts";
 import { attachTaskStateSliceDeep, expandCommonTask, taskSliceFocus } from "../shared/common-task.ts";
 import { currentTaskStateService } from "../../../../lib/task-state/service.ts";
 import { currentExecutionProfile } from "../../../../lib/adaptive-execution.ts";
-import { adaptiveDispatchDefaults, adaptiveChildBrief, adaptiveNativeChildThinking } from "../shared/adaptive-dispatch.ts";
+import { adaptiveDispatchDefaults } from "../shared/adaptive-dispatch.ts";
 import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import { persistSubagentActivity } from "../../extension/session-cost.ts";
 import { helperLaunchFailure } from "../../extension/helper-receipt.ts";
@@ -19,6 +19,7 @@ import { createCapacityResilientJsonWriter } from "../../shared/capacity-resilie
 import { isStorageCapacityError } from "../../shared/file-system-retry.ts";
 import { writeGuardedStatus, type RevisionedStatus } from "../shared/status-revision.ts";
 import { resolveEffectiveThinking, toModelInfo, type ModelInfo } from "../../shared/model-info.ts";
+import { sessionThinkingCeiling } from "../../shared/thinking-ceiling.ts";
 import {
 	beginForegroundChild,
 	finishForegroundChild,
@@ -36,9 +37,8 @@ import { normalizePublicSubagentExecution, validateWorkflowCapacityOverrides } f
 import { runSync } from "./execution.ts";
 import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
-import { buildModelCandidates, normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, type ModelOrigin, type ParentModel } from "../shared/model-fallback.ts";
+import { normalizeParentModel, sessionChildModel, type ParentModel } from "../shared/session-model.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
-import { resolveModelScopesForAgent, type ModelScopeConfig } from "../shared/model-scope.ts";
 import { recordRun } from "../shared/run-history.ts";
 import {
 	getStepAgents,
@@ -386,7 +386,6 @@ export interface SubagentParamsLike {
 	/** Internal-only exact route candidates supplied by native helper dispatch. */
 	modelRouteCandidates?: import("../../shared/model-route.ts").ModelRouteCandidate[];
 	/** Internal recovery provenance for a resolved model override. */
-	modelOrigin?: ModelOrigin;
 	fast?: boolean;
 	thinking?: string | false;
 	/** Public named workflow resource. Resolved before entering the workflow sandbox. */
@@ -445,16 +444,16 @@ interface ExecutorDeps {
 	tempArtifactsDir: string;
 	getSubagentSessionRoot: (parentSessionFile: string | null) => string;
 	expandTilde: (p: string) => string;
-	discoverAgents: (cwd: string, scope: AgentScope, preferredModelProvider?: string) => { agents: AgentConfig[]; agentDiagnostics?: AgentDiscoveryDiagnostic[]; modelScope?: ModelScopeConfig; maxThinking?: AgentConfig["maxThinking"]; cwd?: string; scope?: AgentScope; directories?: UnknownAgentDiagnosticContext["directories"] };
+	discoverAgents: (cwd: string, scope: AgentScope, preferredModelProvider?: string) => { agents: AgentConfig[]; agentDiagnostics?: AgentDiscoveryDiagnostic[]; maxThinking?: AgentConfig["maxThinking"]; cwd?: string; scope?: AgentScope; directories?: UnknownAgentDiagnosticContext["directories"] };
 	allowMutatingManagementActions?: boolean;
 	activateSupervisorTransport?: () => void;
 	refreshResultDelivery?: () => void;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 }
 
-type ForkSessionFileForTask = (agentName: string, idx?: number, modelOverride?: string, modelOverrideFromParent?: boolean, modelOrigin?: ModelOrigin) => string | undefined;
-type PrepareForkSessionForTask = (agentName: string, idx?: number, modelOverride?: string, modelOverrideFromParent?: boolean, modelOrigin?: ModelOrigin) => Promise<void>;
-type ForkThinkingOverrideForTask = (agentName: string, idx?: number, modelOverride?: string, modelOverrideFromParent?: boolean, modelOrigin?: ModelOrigin) => AgentConfig["thinking"] | undefined;
+type ForkSessionFileForTask = (agentName: string, idx?: number) => string | undefined;
+type PrepareForkSessionForTask = (agentName: string, idx?: number) => Promise<void>;
+type ForkThinkingOverrideForTask = (agentName: string, idx?: number) => string | false | undefined;
 
 interface ExecutionContextData {
 	/** Set only when a process start or successful background launch is observed. */
@@ -498,7 +497,6 @@ interface ExecutionContextData {
 	allowZeroToolBudget?: boolean;
 	configToolBudget?: ResolvedToolBudget;
 	contextPolicy: AgentDefaultContextPolicy;
-	modelScope?: ModelScopeConfig;
 	parentModel?: ParentModel;
 	parentSessionId: string | null;
 	parentPiSessionId?: string;
@@ -945,7 +943,7 @@ type NestedResumeSourceTarget = {
 	cwd?: string;
 	sessionFile: string;
 	model?: string;
-	thinking?: AgentConfig["thinking"];
+	thinking?: string;
 	launchContractDigest?: string;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	recoveryDescriptor?: SteeringRecoveryDescriptor;
@@ -1316,7 +1314,6 @@ function appendStepToAsyncChain(input: {
 		parentSessionId: input.ctx.sessionManager.getSessionId() ?? undefined,
 		currentModelProvider: parentModel?.provider,
 		currentModel: parentModel,
-		modelScope: discoveredForAppend.modelScope,
 		interactive: input.ctx.hasUI,
 		permissions: input.deps.config.permissions,
 	});
@@ -1624,7 +1621,6 @@ async function resumeExternalJobFollowUp(input: {
 	ctx: ExtensionContext;
 	deps: ExecutorDeps;
 	parentModel?: ParentModel;
-	modelScope?: ModelScopeConfig;
 	intercomBridge: IntercomBridgeState;
 	parentSessionFile: string | null;
 	absoluteDeadlineAt?: number;
@@ -1693,7 +1689,6 @@ async function resumeExternalJobFollowUp(input: {
 			parentSessionId: input.ctx.sessionManager.getSessionId() ?? undefined,
 			currentModelProvider: parentModel?.provider,
 			currentModel: parentModel,
-			modelScope: input.modelScope,
 			interactive: input.ctx.hasUI,
 			permissions: input.deps.config.permissions,
 		}),
@@ -1740,13 +1735,6 @@ async function resumeAsyncRun(input: {
 	if (!followUp && !attachChain) {
 		return {
 			content: [{ type: "text", text: "action='resume' requires message." }],
-			isError: true,
-			details: { mode: "management", results: [] },
-		};
-	}
-	if (input.params.model !== undefined) {
-		return {
-			content: [{ type: "text", text: "action='resume' reuses the persisted child model and does not accept a model override." }],
 			isError: true,
 			details: { mode: "management", results: [] },
 		};
@@ -1826,7 +1814,6 @@ async function resumeAsyncRun(input: {
 	const discovered = input.deps.discoverAgents(effectiveCwd, scope, input.parentModel?.provider);
 	const discoveredAgents = discovered.agents;
 	const unknownAgentDiagnosticContext = diagnosticContextFromDiscovery(discovered, effectiveCwd, scope);
-	const modelScope = discovered.modelScope;
 	const sessionName = resolveIntercomSessionTarget(input.deps.pi.getSessionName(), input.ctx.sessionManager.getSessionId());
 	const recoveryDescriptor = "recoveryDescriptor" in target ? target.recoveryDescriptor : undefined;
 	const recoveryContext = recoveryDescriptor?.context ?? (input.params.context === "profile" ? undefined : input.params.context);
@@ -1877,7 +1864,6 @@ async function resumeAsyncRun(input: {
 			ctx: input.ctx,
 			deps: input.deps,
 			parentModel: input.parentModel,
-			modelScope,
 			intercomBridge,
 			parentSessionFile,
 			absoluteDeadlineAt: input.absoluteDeadlineAt,
@@ -1943,7 +1929,6 @@ async function resumeAsyncRun(input: {
 				parentSessionId: input.ctx.sessionManager.getSessionId() ?? undefined,
 				currentModelProvider: parentModel?.provider,
 				currentModel: parentModel,
-				modelScope,
 				interactive: input.ctx.hasUI,
 		permissions: input.deps.config.permissions,
 			}),
@@ -2044,7 +2029,6 @@ async function resumeAsyncRun(input: {
 			parentSessionId: input.ctx.sessionManager.getSessionId() ?? undefined,
 			currentModelProvider: parentModel?.provider,
 			currentModel: parentModel,
-			modelScope,
 			interactive: input.ctx.hasUI,
 		permissions: input.deps.config.permissions,
 		}),
@@ -2065,8 +2049,6 @@ async function resumeAsyncRun(input: {
 		context: recoveryContext,
 		modelOverride: recoveryDescriptor?.model ?? target.model,
 		fast: recoveryDescriptor?.fast,
-		modelOverrideFromParent: recoveryDescriptor?.modelOverrideFromParent,
-		modelOrigin: recoveryDescriptor?.modelOrigin ?? (recoveryDescriptor?.modelOverrideFromParent ? "inherited" : undefined),
 		modelRouteCandidates: recoveryDescriptor?.modelRouteCandidates,
 		thinkingOverride: recoveryDescriptor?.thinking ?? target.thinking,
 		thinkingCeiling: recoveryDescriptor?.thinkingCeiling ?? ("thinkingCeiling" in target ? target.thinkingCeiling : undefined),
@@ -2913,29 +2895,15 @@ type StaticLaunchSummary = { agent: string; model?: string; thinking?: string };
 function resolveStaticLaunchSummary(input: {
 	agent: string;
 	index: number;
-	explicitModel?: string;
 	agents: AgentConfig[];
 	parentModel?: ParentModel;
-	availableModels: ModelInfo[];
-	currentProvider?: string;
-	modelScope?: ModelScopeConfig;
 	thinkingOverrideForTask: ForkThinkingOverrideForTask;
 }): StaticLaunchSummary {
 	const agentConfig = input.agents.find((agent) => agent.name === input.agent);
 	const externalRunner = agentConfig?.runner?.type === "external-cli" || agentConfig?.runner?.type === "external-job";
-	const modelScopes = resolveModelScopesForAgent(input.modelScope, input.agent, input.parentModel);
-	const model = externalRunner
-		? undefined
-		: resolveEffectiveSubagentModel(
-			input.explicitModel,
-			agentConfig?.model,
-			input.parentModel,
-			input.availableModels,
-			agentConfig?.modelProvider ?? input.currentProvider,
-			modelScopes.length === 0 ? {} : { scope: modelScopes },
-		);
-	const thinkingOverride = externalRunner ? undefined : input.thinkingOverrideForTask(input.agent, input.index, model);
-	const thinking = externalRunner ? undefined : resolveEffectiveThinking(model, thinkingOverride ?? agentConfig?.thinking);
+	const model = externalRunner ? undefined : sessionChildModel(input.parentModel);
+	const thinkingOverride = externalRunner ? undefined : input.thinkingOverrideForTask(input.agent, input.index);
+	const thinking = externalRunner ? undefined : resolveEffectiveThinking(model, thinkingOverride);
 	return {
 		agent: input.agent,
 		...(model ? { model } : {}),
@@ -2947,31 +2915,24 @@ function collectStaticLaunchSummaries(input: {
 	params: SubagentParamsLike;
 	agents: AgentConfig[];
 	parentModel?: ParentModel;
-	availableModels: ModelInfo[];
-	currentProvider?: string;
-	modelScope?: ModelScopeConfig;
 	thinkingOverrideForTask: ForkThinkingOverrideForTask;
 	dynamicFanoutMaxItems?: number;
 }): StaticLaunchSummary[] {
-	const summary = (agent: string, index: number, explicitModel?: string) => resolveStaticLaunchSummary({
+	const summary = (agent: string, index: number) => resolveStaticLaunchSummary({
 		agent,
 		index,
-		explicitModel,
 		agents: input.agents,
 		parentModel: input.parentModel,
-		availableModels: input.availableModels,
-		currentProvider: input.currentProvider,
-		modelScope: input.modelScope,
 		thinkingOverrideForTask: input.thinkingOverrideForTask,
 	});
-	if (input.params.tasks) return input.params.tasks.map((task, index) => summary(task.agent, index, task.model));
+	if (input.params.tasks) return input.params.tasks.map((task, index) => summary(task.agent, index));
 	if (input.params.chain?.length) {
 		const launches: StaticLaunchSummary[] = [];
 		let flatIndex = 0;
 		for (const step of input.params.chain) {
 			if (isParallelStep(step)) {
 				for (const task of step.parallel) {
-					launches.push(summary(task.agent, flatIndex, task.model));
+					launches.push(summary(task.agent, flatIndex));
 					flatIndex++;
 				}
 				continue;
@@ -2979,18 +2940,18 @@ function collectStaticLaunchSummaries(input: {
 			if (isDynamicParallelStep(step)) {
 				const maxItems = step.expand.maxItems ?? input.dynamicFanoutMaxItems ?? 0;
 				for (let itemIndex = 0; itemIndex < maxItems; itemIndex++) {
-					launches.push(summary(step.parallel.agent, flatIndex, step.parallel.model));
+					launches.push(summary(step.parallel.agent, flatIndex));
 					flatIndex++;
 				}
 				continue;
 			}
 			const sequential = step as SequentialStep;
-			launches.push(summary(sequential.agent, flatIndex, sequential.model));
+			launches.push(summary(sequential.agent, flatIndex));
 			flatIndex++;
 		}
 		return launches;
 	}
-	return input.params.agent ? [summary(input.params.agent, 0, input.params.model as string | undefined)] : [];
+	return input.params.agent ? [summary(input.params.agent, 0)] : [];
 }
 
 function firstRawChainTask(chain: ChainStep[]): string | undefined {
@@ -3052,19 +3013,13 @@ async function preflightForkSessionsForStaticTasks(
 	if (!contextPolicy.usesFork) return;
 	if (params.agent) {
 		if (shouldForkAgent(contextPolicy, params.agent)) {
-			await prepareSessionForTask(
-				params.agent,
-				0,
-				params.model,
-				params.modelOrigin === "inherited",
-				params.modelOrigin,
-			);
+			await prepareSessionForTask(params.agent, 0);
 		}
 		return;
 	}
 	if (params.tasks) {
 		for (const [index, task] of params.tasks.entries()) {
-			if (shouldForkAgent(contextPolicy, task.agent)) await prepareSessionForTask(task.agent, index, task.model);
+			if (shouldForkAgent(contextPolicy, task.agent)) await prepareSessionForTask(task.agent, index);
 		}
 		return;
 	}
@@ -3073,7 +3028,7 @@ async function preflightForkSessionsForStaticTasks(
 	for (const step of params.chain) {
 		if (isParallelStep(step)) {
 			for (const task of step.parallel) {
-				if (shouldForkAgent(contextPolicy, task.agent)) await prepareSessionForTask(task.agent, flatIndex, task.model);
+				if (shouldForkAgent(contextPolicy, task.agent)) await prepareSessionForTask(task.agent, flatIndex);
 				flatIndex++;
 			}
 			continue;
@@ -3081,13 +3036,13 @@ async function preflightForkSessionsForStaticTasks(
 		if (isDynamicParallelStep(step)) {
 			const maxItems = step.expand.maxItems ?? dynamicFanoutMaxItems ?? 0;
 			if (shouldForkAgent(contextPolicy, step.parallel.agent)) {
-				for (let itemIndex = 0; itemIndex < maxItems; itemIndex++) await prepareSessionForTask(step.parallel.agent, flatIndex + itemIndex, step.parallel.model);
+				for (let itemIndex = 0; itemIndex < maxItems; itemIndex++) await prepareSessionForTask(step.parallel.agent, flatIndex + itemIndex);
 			}
 			flatIndex += maxItems;
 			continue;
 		}
 		const sequential = step as SequentialStep;
-		if (shouldForkAgent(contextPolicy, sequential.agent)) await prepareSessionForTask(sequential.agent, flatIndex, sequential.model);
+		if (shouldForkAgent(contextPolicy, sequential.agent)) await prepareSessionForTask(sequential.agent, flatIndex);
 		flatIndex++;
 	}
 }
@@ -3204,20 +3159,18 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		parentSessionId: data.parentPiSessionId,
 		currentModelProvider: parentModel?.provider,
 		currentModel: parentModel,
-		modelScope: data.modelScope,
 		interactive: ctx.hasUI,
 		permissions: deps.config.permissions,
 	});
 	const availableModels: ModelInfo[] = ctx.modelRegistry.getAvailable().map(toModelInfo);
 	const currentMaxSubagentDepth = resolveCurrentMaxSubagentDepth(deps.config.maxSubagentDepth);
-	const currentProvider = parentModel?.provider;
 	const controlIntercomTarget = resolveRunLevelIntercomTarget(intercomBridge, contextPolicy);
 	const childIntercomTarget = resolveChildIntercomTargetFactory(intercomBridge, contextPolicy, id);
 
 
 	if (hasChain || hasTasks) {
 		const defaults = <T extends SequentialStep | ParallelTaskItem>(step: T): T => compactOptional<T>({ ...step,
-			model: step.model ?? params.model, acceptance: step.acceptance ?? params.acceptance,
+			acceptance: step.acceptance ?? params.acceptance,
 			output: step.output ?? params.output, outputMode: step.outputMode ?? params.outputMode,
 			gitAuthority: step.gitAuthority ?? params.gitAuthority,
 		});
@@ -3228,14 +3181,14 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 				: isDynamicParallelStep(step) ? { ...step, parallel: defaults(step.parallel) }
 				: { ...defaults(step), worktree: step.worktree ?? params.worktree });
 		const chain = wrapChainTasksForFork(rawChain, contextPolicy);
-		const launches = collectStaticLaunchSummaries({ params: { chain: rawChain }, agents, parentModel, availableModels, currentProvider, modelScope: data.modelScope, thinkingOverrideForTask, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems });
+		const launches = collectStaticLaunchSummaries({ params: { chain: rawChain }, agents, parentModel, thinkingOverrideForTask, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems });
 		const normalizedSkills = normalizeSkillInput(params.skill);
 		return executeAsyncChain(id, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
 			chain, resultMode: hasTasks ? "parallel" : "chain", goal: resolveAsyncEventGoal(undefined, rawChain),
 			agents, unknownAgentDiagnosticContext, ctx: asyncCtx, availableModels, cwd: effectiveCwd,
 			maxOutput: params.maxOutput, artifactsDir: artifactConfig.enabled ? artifactsDir : undefined, artifactConfig, shareEnabled,
-			sessionRoot, sessionFilesByFlatIndex: launches.map((launch, index) => sessionFileForTask(launch.agent, index, launch.model)),
-			thinkingOverridesByFlatIndex: launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index, launch.model)),
+			sessionRoot, sessionFilesByFlatIndex: launches.map((launch, index) => sessionFileForTask(launch.agent, index)),
+			thinkingOverridesByFlatIndex: launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index)),
 			contextForAgent: contextPolicy.contextForAgent, chainSkills: normalizedSkills === false ? [] : normalizedSkills,
 			agentContract: params.agentContract, fast: params.fast, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems,
 			maxSubagentDepth: currentMaxSubagentDepth, waitToolEnabled: deps.waitToolEnabled, waitToolDefaultTimeoutMs: deps.waitToolDefaultTimeoutMs,
@@ -3264,28 +3217,10 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		const normalizedSkills = normalizeSkillInput(params.skill);
 		const skills = normalizedSkills === false ? [] : normalizedSkills;
 		const maxSubagentDepth = resolveChildMaxSubagentDepth(currentMaxSubagentDepth, a.maxSubagentDepth);
-		const externalRunnerWithoutExplicitModel = (a.runner?.type === "external-cli" || a.runner?.type === "external-job")
-			&& params.model === undefined
-			&& (a.model === undefined || (a.modelSource?.type === "subagents.defaultModel" && a.model === a.modelSource.model));
 		if ((a.runner?.type === "external-cli" || a.runner?.type === "external-job") && (params.fast ?? a.fast) === true) {
 			return buildRequestedModeError(params, `Agent '${a.name}' uses runner.type='${a.runner.type}' and does not support fast mode.`);
 		}
-		const modelScopes = resolveModelScopesForAgent(data.modelScope, a.name, parentModel);
-		const modelOrigin = resolveModelOrigin({
-			storedOrigin: params.modelOrigin as ModelOrigin | undefined,
-			explicitModel: params.model as string | undefined,
-			agentModel: a.model,
-			parentModel,
-		});
-		const modelOverride = a.runner?.type === "external-cli" || a.runner?.type === "external-job"
-			? params.model ?? (externalRunnerWithoutExplicitModel ? undefined : a.model)
-			: resolveEffectiveSubagentModel(params.model as string | undefined, a.model, parentModel, availableModels, a.modelProvider ?? currentProvider, {
-				...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
-				task: typeof params.task === "string" ? params.task : undefined,
-				source: modelOrigin === "explicit" ? "explicit" : "inherited",
-				...(data.parentSessionId ? { sessionId: data.parentSessionId } : {}),
-			});
-		const modelOverrideFromParent = modelOrigin === "inherited";
+		const modelOverride = a.runner?.type === "external-cli" || a.runner?.type === "external-job" ? undefined : sessionChildModel(parentModel);
 		const launchOptions = compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
 			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
@@ -3302,7 +3237,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			shareEnabled,
 			activeAsyncCapacity: data.activeAsyncCapacity,
 			sessionRoot,
-			sessionFile: sessionFileForTask(params.agent!, 0, modelOverride, modelOverrideFromParent, modelOrigin),
+			sessionFile: sessionFileForTask(params.agent!, 0),
 			context: contextPolicy.contextForAgent(params.agent!),
 			skills,
 			output: effectiveOutput,
@@ -3313,9 +3248,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			modelOverride,
 			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
-			modelOverrideFromParent,
-			modelOrigin,
-			thinkingOverride: externalRunnerWithoutExplicitModel ? undefined : thinkingOverrideForTask(params.agent!, 0, modelOverride, modelOverrideFromParent, modelOrigin),
+			thinkingOverride: modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0),
 			thinkingCeiling: a.maxThinking,
 			maxSubagentDepth,
 			waitToolEnabled: deps.waitToolEnabled,
@@ -3695,28 +3628,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	const parentModel = data.parentModel;
 	const currentProvider = parentModel?.provider;
 	const availableModels: ModelInfo[] = ctx.modelRegistry.getAvailable().map(toModelInfo);
-	const modelScopes = resolveModelScopesForAgent(data.modelScope, agentConfig.name, parentModel);
 	let task = typeof params.task === "string" ? params.task : "";
-	const modelOrigin = resolveModelOrigin({
-		storedOrigin: params.modelOrigin as ModelOrigin | undefined,
-		explicitModel: params.model as string | undefined,
-		agentModel: agentConfig.model,
-		parentModel,
-	});
-	let modelOverride: string | undefined = resolveEffectiveSubagentModel(
-		params.model as string | undefined,
-		agentConfig.model,
-		parentModel,
-		availableModels,
-		agentConfig.modelProvider ?? currentProvider,
-		{
-			...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
-			task: typeof params.task === "string" ? params.task : undefined,
-				source: modelOrigin === "explicit" ? "explicit" : "inherited",
-			...(data.parentSessionId ? { sessionId: data.parentSessionId } : {}),
-		},
-	);
-	const modelOverrideFromParent = modelOrigin === "inherited";
+	const modelOverride = agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job" ? undefined : sessionChildModel(parentModel);
 	let skillOverride: string[] | false | undefined = normalizeSkillInput(params.skill);
 	let readsOverride: string[] | false | undefined = params.reads;
 	const rawOutput = params.output !== undefined ? params.output : agentConfig.output;
@@ -3787,7 +3700,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	let detachForeground: ((reason?: string) => boolean) | undefined;
 	const foregroundControl = deps.state.foregroundControls.get(runId);
 	if (foregroundControl) {
-		const thinking = resolveEffectiveThinking(modelOverride, thinkingOverrideForTask(params.agent!, 0, modelOverride, modelOverrideFromParent, modelOrigin));
+		const thinking = resolveEffectiveThinking(modelOverride, modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0));
 		beginForegroundChild(foregroundControl, omitUndefinedProperties({
 			index: 0,
 			agent: params.agent!,
@@ -3842,7 +3755,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			intercomEvents: deps.pi.events,
 			runId,
 			sessionDir: sessionDirForIndex(0),
-			sessionFile: sessionFileForTask(params.agent!, 0, modelOverride, modelOverrideFromParent, modelOrigin),
+			sessionFile: sessionFileForTask(params.agent!, 0),
 			share: shareEnabled,
 			artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
 			artifactConfig,
@@ -3865,14 +3778,11 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			modelOverride,
 			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
-			modelOverrideFromParent,
-			modelOrigin,
-			thinkingOverride: thinkingOverrideForTask(params.agent!, 0, modelOverride, modelOverrideFromParent, modelOrigin),
+			thinkingOverride: modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0),
 			thinkingCeiling: agentConfig.maxThinking,
 			extensionBindings: params.extensionBindings,
 			availableModels,
 			preferredModelProvider: currentProvider,
-			modelScope: modelScopes,
 			skills: effectiveSkills,
 			structuredOutput: structuredRuntime,
 			agentContract: params.agentContract,
@@ -4731,7 +4641,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		ctx: ExtensionContext,
 	) => Promise<AgentToolResult<Details>>;
 } {
-	const delegatedThinkingOverrides = new WeakMap<object, AgentConfig["thinking"]>();
 	const delegatedZeroToolBudgets = new WeakSet<object>();
 	const delegatedExecutions = new WeakSet<object>();
 	const publicExecutions = new WeakSet<object>();
@@ -4749,7 +4658,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		parentModelOverride?: ParentModel | null,
 	): Promise<AgentToolResult<Details>> => {
 		const workflowLaunchObserver = workflowLaunchObservers.get(params);
-		const delegatedThinkingOverride = delegatedThinkingOverrides.get(params);
 		const allowZeroToolBudget = delegatedZeroToolBudgets.has(params);
 		const delegatedExecution = delegatedExecutions.has(params);
 		const publicExecution = publicExecutions.has(params);
@@ -4768,9 +4676,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			const { modelRouteCandidates: _untrustedRouteCandidates, ...publicParams } = requestParams;
 			requestParams = publicParams;
 		}
-		// Keep branch-specific authored text separate from common briefs and
-		// advisory task-state packets so a mechanical child is assessed locally.
-		const adaptiveBriefs = requestParams;
 		const dispatchDefaults = adaptiveDispatchDefaults(requestParams, deps.config, currentExecutionProfile(ctx));
 		requestParams = dispatchDefaults.params;
 		if (dispatchDefaults.changes.length) {
@@ -6367,7 +6272,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const canonicalParams = canonicalizeExecutionParams(effectiveParams, discoveredAgents, discovered.agentDiagnostics, unknownAgentDiagnosticContext);
 		if (canonicalParams.error) return buildRequestedModeError(effectiveParams, canonicalParams.error);
 		effectiveParams = canonicalParams.params!;
-		const modelScope = discovered.modelScope;
 		effectiveParams = applySingleAgentLaunchDefaults(effectiveParams, discoveredAgents);
 		// An agent-level defaultContext is a preference, unlike an explicit request.
 		// Prefer fork only when the parent session is persisted and has a current leaf;
@@ -6427,54 +6331,20 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 
 		let forkSessionFileForIndex: (idx?: number) => string | undefined = () => undefined;
 		let prepareForkSessionForIndex: (idx?: number) => Promise<void> = async () => {};
-		let forkThinkingOverrideForIndex: (idx?: number) => AgentConfig["thinking"] | undefined = () => undefined;
-		let prepareForkThinking = (_agentName: string, _index: number, _modelOverride?: string, _modelOverrideFromParent?: boolean, _modelOrigin?: ModelOrigin): void => {};
+		let forkThinkingOverrideForIndex: (idx?: number) => string | false | undefined = () => undefined;
+		let prepareForkThinking = (_agentName: string, _index: number): void => {};
 		const forkThinkingRequirements = new Map<number, boolean>();
 		const forkThinkingDowngrades = new Map<number, string>();
 		try {
 			const forkAvailableModels = contextPolicy.usesFork ? ctx.modelRegistry.getAvailable().map(toModelInfo) : [];
 			const parentModel = requestParentModel;
-			prepareForkThinking = (agentName, index, modelOverride, modelOverrideFromParent, storedOrigin) => {
+			prepareForkThinking = (agentName, index) => {
 				const agentConfig = agents.find((agent) => agent.name === agentName);
 				if (agentConfig?.runner?.type === "external-cli" || agentConfig?.runner?.type === "external-job") {
 					forkThinkingRequirements.set(index, true);
 					return;
 				}
-				const effectiveStoredOrigin = storedOrigin === "configured" && modelOverride === undefined && agentConfig?.model === undefined
-					? undefined
-					: storedOrigin;
-				const origin = resolveModelOrigin({
-					fromParent: modelOverrideFromParent,
-					storedOrigin: effectiveStoredOrigin,
-					explicitModel: modelOverrideFromParent || effectiveStoredOrigin === "configured" ? undefined : modelOverride,
-					agentModel: agentConfig?.model,
-					parentModel,
-				});
-				const primaryModel = modelOverrideFromParent
-					? modelOverride
-					: resolveEffectiveSubagentModel(
-						effectiveStoredOrigin === "configured" ? undefined : modelOverride,
-						agentConfig?.model,
-						parentModel,
-						forkAvailableModels,
-						agentConfig?.modelProvider ?? parentModel?.provider,
-						{ source: origin === "explicit" ? "explicit" : "inherited" },
-					);
-				const candidates = buildModelCandidates(
-					primaryModel,
-					agentConfig?.fallbackModels,
-					forkAvailableModels,
-					agentConfig?.modelProvider ?? parentModel?.provider,
-					{
-						primaryModelFromParent: origin === "inherited",
-						origin,
-					},
-				);
-				forkThinkingRequirements.set(
-					index,
-					candidates.length === 0
-						|| candidates.some((candidate) => forkedChildRequiresThinkingOff(candidate, forkAvailableModels, parentModel?.provider)),
-				);
+				forkThinkingRequirements.set(index, forkedChildRequiresThinkingOff(sessionChildModel(parentModel), forkAvailableModels, parentModel?.provider));
 			};
 			const pruneSession = contextPolicy.usesFork && (deps.config.forkContext?.mode === "pruned" || deps.config.forkContext?.mode === "capsule")
 				? await createPrunedForkSessionWriter(ctx, deps.config.forkContext, signal)
@@ -6587,35 +6457,28 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		}
 		const sessionDirForIndex = (idx?: number) =>
 			path.join(sessionRoot, `run-${idx ?? 0}`);
-		const forkSessionFileForTask: ForkSessionFileForTask = (agentName, idx = 0, modelOverride, modelOverrideFromParent, modelOrigin) => {
+		const forkSessionFileForTask: ForkSessionFileForTask = (agentName, idx = 0) => {
 			if (!shouldForkAgent(contextPolicy, agentName)) return undefined;
-			prepareForkThinking(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin);
+			prepareForkThinking(agentName, idx);
 			return forkSessionFileForIndex(idx);
 		};
-		const prepareForkSessionForTask: PrepareForkSessionForTask = async (agentName, idx = 0, modelOverride, modelOverrideFromParent, modelOrigin) => {
+		const prepareForkSessionForTask: PrepareForkSessionForTask = async (agentName, idx = 0) => {
 			if (!shouldForkAgent(contextPolicy, agentName)) return;
-			prepareForkThinking(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin);
+			prepareForkThinking(agentName, idx);
 			await prepareForkSessionForIndex(idx);
 		};
-		let nativeThinkingModels: ModelInfo[] | undefined;
-		const forkThinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, idx = 0, modelOverride, modelOverrideFromParent, modelOrigin) => {
-			const agent = agents.find(candidate => candidate.name === agentName);
-			const nativeDefault = () => adaptiveNativeChildThinking({
-				brief: adaptiveChildBrief(adaptiveBriefs, idx, deps.config.chain?.dynamicFanout?.maxItems),
-				model: modelOverride ?? agent?.model ?? (requestParentModel ? `${requestParentModel.provider}/${requestParentModel.id}` : undefined),
-				agentThinking: agent?.thinking, requestThinking: effectiveParams.thinking,
-				maxThinking: agent?.maxThinking, fallbackModels: agent?.fallbackModels,
-				externalRunner: agent?.runner?.type === "external-cli" || agent?.runner?.type === "external-job",
-				availableModels: nativeThinkingModels ??= ctx.modelRegistry.getAvailable().map(toModelInfo), provider: requestParentModel?.provider,
-			});
-			if (!shouldForkAgent(contextPolicy, agentName)) return delegatedThinkingOverride ?? nativeDefault();
-			prepareForkThinking(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin);
+		// Every helper starts at the session's thinking ceiling; its own effort
+		// controller (Jev) steps down per task. A sanitized fork still forces off.
+		const sessionThinking = sessionThinkingCeiling(ctx.sessionManager.getBranch?.(), deps.pi.getThinkingLevel?.());
+		const forkThinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, idx = 0) => {
+			if (!shouldForkAgent(contextPolicy, agentName)) return sessionThinking;
+			prepareForkThinking(agentName, idx);
 			const override = forkThinkingOverrideForIndex(idx);
 			if (override === "off") forkThinkingDowngrades.set(idx, agentName);
-			return override ?? delegatedThinkingOverride ?? nativeDefault();
+			return override ?? sessionThinking;
 		};
-		const childSessionFileForTask: ForkSessionFileForTask = (agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin) =>
-			forkSessionFileForTask(agentName, idx, modelOverride, modelOverrideFromParent, modelOrigin) ?? path.join(sessionDirForIndex(idx), "session.jsonl");
+		const childSessionFileForTask: ForkSessionFileForTask = (agentName, idx) =>
+			forkSessionFileForTask(agentName, idx) ?? path.join(sessionDirForIndex(idx), "session.jsonl");
 		const childSessionFileForIndex = (idx?: number) =>
 			path.join(sessionDirForIndex(idx), "session.jsonl");
 		try {
@@ -6719,7 +6582,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			configToolBudget: configToolBudget.toolBudget,
 			configToolTimeoutMs: deps.config.toolTimeoutMs,
 			contextPolicy,
-			modelScope,
 			parentModel: requestParentModel,
 			parentSessionId: requestSessionId,
 			parentPiSessionId: requestPiSessionId,
@@ -6826,7 +6688,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					parentModel: requestParentModel,
 					availableModels: ctx.modelRegistry.getAvailable().map(toModelInfo),
 					currentProvider: requestParentModel?.provider,
-					modelScope,
 					thinkingOverrideForTask: forkThinkingOverrideForTask,
 					dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems,
 				});
@@ -6906,9 +6767,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						? deriveChildSessionName({ agent: singleTask.agent, task: singleTask.task })
 						: undefined;
 				const launch = hasSingle
-					? { agent: effectiveParams.agent!, ...(singleSessionName ? { sessionName: singleSessionName } : {}), sessionFile: childSessionFileForTask(effectiveParams.agent!, 0, effectiveParams.model), async: effectiveAsync, runId: effectiveAsync ? asyncRunId : runId }
+					? { agent: effectiveParams.agent!, ...(singleSessionName ? { sessionName: singleSessionName } : {}), sessionFile: childSessionFileForTask(effectiveParams.agent!, 0), async: effectiveAsync, runId: effectiveAsync ? asyncRunId : runId }
 					: singleTask
-						? { agent: singleTask.agent, ...(singleSessionName ? { sessionName: singleSessionName } : {}), sessionFile: childSessionFileForTask(singleTask.agent, 0, singleTask.model), async: effectiveAsync, runId: effectiveAsync ? asyncRunId : runId }
+						? { agent: singleTask.agent, ...(singleSessionName ? { sessionName: singleSessionName } : {}), sessionFile: childSessionFileForTask(singleTask.agent, 0), async: effectiveAsync, runId: effectiveAsync ? asyncRunId : runId }
 						: undefined;
 				if (launch) {
 					workflowLaunchObservers.delete(params);
@@ -7019,17 +6880,13 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 	): Promise<AgentToolResult<Details>> => {
 		const delegatedParams = { ...params };
 		const privateParams = delegatedParams as SubagentParamsLike & {
-			delegatedThinkingOverride?: AgentConfig["thinking"];
 			delegatedAllowZeroToolBudget?: true;
 			delegatedWorkflowPermit?: WorkflowChildPermit;
 		};
-		const thinkingOverride = privateParams.delegatedThinkingOverride;
 		const allowZeroToolBudget = privateParams.delegatedAllowZeroToolBudget === true;
 		const workflowPermit = privateParams.delegatedWorkflowPermit;
-		delete privateParams.delegatedThinkingOverride;
 		delete privateParams.delegatedAllowZeroToolBudget;
 		delete privateParams.delegatedWorkflowPermit;
-		if (thinkingOverride !== undefined) delegatedThinkingOverrides.set(delegatedParams, thinkingOverride);
 		if (allowZeroToolBudget) delegatedZeroToolBudgets.add(delegatedParams);
 		if (workflowPermit) workflowPermitContexts.set(delegatedParams, { root: workflowPermit });
 		delegatedExecutions.add(delegatedParams);

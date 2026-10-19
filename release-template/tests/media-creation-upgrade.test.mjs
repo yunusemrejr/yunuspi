@@ -123,15 +123,8 @@ test('vision uses current provider registry, thinking and real cropped attachmen
   const pixels = await design.decodeImage(Buffer.from(attachment.data, 'base64'));
   assert.equal(pixels.sourceWidth, 8); assert.equal(result.images[0].original.width, 16);
   assert.deepEqual(usage, ['pending', 'completed']);
-  assert.throws(() => vision.visionModel({}, { model: { ...model, input: ['text'] } }), /does not accept images/);
-  const registry = { getAvailable: () => [
-    { provider: 'other', id: 'dear', input: ['text', 'image'], cost: { input: 5, output: 15 } },
-    { provider: 'other', id: 'cheap', input: ['text', 'image'], cost: { input: 0.1, output: 0.4 } },
-    { provider: 'fixture', id: 'text-only', input: ['text'] },
-    { provider: 'fixture', id: 'sibling', input: ['text', 'image'], cost: { input: 1, output: 2 } },
-  ] };
-  assert.throws(() => vision.visionModel({}, { model: { ...model, input: ['text'] }, modelRegistry: registry }),
-    /provider:"fixture" model:"sibling", provider:"other" model:"cheap", provider:"other" model:"dear" \(action:models lists all 3\)/);
+  assert.throws(() => vision.visionModel({ model: { ...model, input: ['text'] } }), /does not accept images/);
+  await assert.rejects(vision.imageUnderstand({ action: 'models' }, cwd, undefined, ctx), /action must be analyze/);
   await assert.rejects(vision.imageUnderstand({ path: 'ref.png', prompt: 'Describe', region: { x: -1, y: 0, width: 8, height: 8 } }, cwd, undefined, ctx), /inside the source/);
   assert.equal(calls.length, 1);
 });

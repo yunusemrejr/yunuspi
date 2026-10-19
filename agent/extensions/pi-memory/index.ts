@@ -556,41 +556,6 @@ async function resolveExitSummaryApiKey(
 	return undefined;
 }
 
-/**
- * Model used for exit summaries. Defaults to the session's active model;
- * PI_MEMORY_EXIT_SUMMARY_MODEL="provider/model-id" overrides it (e.g. to a
- * cheaper/faster model). An unresolved explicit route skips automatic summaries.
- */
-function resolveExitSummaryModel(
-	ctx: ExtensionContext,
-): ExtensionContext["model"] {
-	const spec = (process.env.PI_MEMORY_EXIT_SUMMARY_MODEL ?? "").trim();
-	if (!spec) return ctx.model;
-
-	const slash = spec.indexOf("/");
-	const modelRegistry =
-		ctx.modelRegistry as ExtensionContext["modelRegistry"] & {
-			find?: (provider: string, modelId: string) => ExtensionContext["model"];
-		};
-	const found =
-		slash > 0
-			? modelRegistry?.find?.(spec.slice(0, slash), spec.slice(slash + 1))
-			: undefined;
-	if (found) return found;
-
-	if (ctx.hasUI) {
-		try {
-			ctx.ui.notify(
-				`pi-memory: PI_MEMORY_EXIT_SUMMARY_MODEL "${spec}" not resolved; skipping exit summary`,
-				"warning",
-			);
-		} catch {
-			/* UI may already be tearing down during shutdown */
-		}
-	}
-	return undefined;
-}
-
 async function fallbackExitSummary(ctx: ExtensionContext): Promise<ExitSummaryResult | undefined> {
 	try {
 		const branch = getSessionBranch(ctx);
@@ -650,7 +615,7 @@ async function generateExitSummary(
 		return { summary: null, hasMessages: false };
 	}
 
-	const model = resolveExitSummaryModel(ctx);
+	const model = ctx.model;
 	if (!model) {
 		return { summary: null, error: "No active model", hasMessages: true };
 	}
@@ -1547,7 +1512,12 @@ export function _clearEmbedInFlight() {
 
 export function scheduleQmdUpdate() {
 	if (getQmdUpdateMode() !== "background") return;
-	if (!qmdAvailable) return;
+	if (!qmdAvailable) {
+		void ensureQmdAvailableForUpdate().then((ok) => {
+			if (ok) scheduleQmdUpdate();
+		});
+		return;
+	}
 	if (updateTimer) clearTimeout(updateTimer);
 	updateTimer = setTimeout(() => {
 		updateTimer = null;
@@ -1885,22 +1855,6 @@ export default function (pi: ExtensionAPI) {
 			});
 		}
 
-		qmdAvailable = await detectQmd();
-		// No notice: memory_search works without qmd (built-in BM25), and
-		// memory_status explains the optional install when asked.
-		if (!qmdAvailable) {
-			refreshMemorySnapshot("session_start");
-			return;
-		}
-
-		const hasCollection = await checkCollection("pi-memory");
-		if (!hasCollection) {
-			await setupQmdCollection();
-		}
-		// Catch-up embed: covers writes from previous sessions (shutdown skips
-		// embedding) and fresh installs where the collection exists but was
-		// never embedded. Incremental, so a no-op when already current.
-		ensureQmdEmbed();
 		refreshMemorySnapshot("session_start");
 	});
 
@@ -3076,7 +3030,6 @@ export default function (pi: ExtensionAPI) {
 				`- PI_MEMORY_QMD_SEARCH_TIMEOUT_MS: ${getQmdSearchTimeoutMs()}`,
 				`- PI_MEMORY_DIR: ${process.env.PI_MEMORY_DIR ? "set" : "default"}`,
 				`- PI_MEMORY_EXIT_SUMMARY: ${isExitSummaryEnabled() ? "enabled" : "disabled"}`,
-				`- PI_MEMORY_EXIT_SUMMARY_MODEL: ${process.env.PI_MEMORY_EXIT_SUMMARY_MODEL?.trim() || "session model"}`,
 				`- PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS: ${getExitSummaryTimeoutMs()}`,
 			);
 

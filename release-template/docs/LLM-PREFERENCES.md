@@ -20,23 +20,10 @@ Invalid aliases, model entries and role lists are reported and skipped while
 valid entries remain active. Unsupported thinking levels retain the model and
 use dynamic child thinking, as described below.
 
-`session_observer` is an exception to autonomous fallback: an absent role uses
-only `deepseek/deepseek-flash` through the official DeepSeek API with `high`
-thinking. An explicit role uses its own ordered routes; it never inherits the
-main model, Subagents list or autonomous alternatives. Missing authentication,
-unsupported configured thinking or unavailable routes skip the observation.
-Observer model IDs accept unambiguous case and separator formatting after
-aliases are expanded. Owner/leaf substitutions, dated revision aliases and
-ambiguous provider-free IDs are rejected. The default remains the exact
-official DeepSeek Flash route.
-Observer routes require at least 12,288 context tokens and 4,096 output tokens.
-The native `openai-codex-responses` API cannot enforce a finite output allowance
-and is unavailable for this role; ordinary model roles retain Codex support.
-Malformed observer configuration also skips it. Set
-`"session_observer": { "models": [] }` to disable the observer; removing the
-role restores the default. The `/models` editor exposes these controls under
-**Session Observer**, including the route's thinking level. Saving changes
-affects subsequent observations, not a request already in flight.
+`session_observer` and `prompt_analysis` do not read this file. Both run on
+the session model only, with its own credentials: no other model, preference
+chain, fallback or economy selection applies (see
+[Session observer](SESSION-OBSERVER.md)). Their roles below are ignored.
 
 A viable preference keeps its place across repeated requests and sessions.
 Usage frequency and random rotation do not move free alternatives ahead of it.
@@ -123,11 +110,7 @@ normal main-session model:
     "fanout": { "models": ["cheap_auto"] },
     "quality_review": { "models": ["cheap_auto"] },
     "project_review": { "models": ["cheap_auto"] },
-    "error_review": { "models": ["cheap_auto"] },
-    "prompt_analysis": { "models": ["cheap_auto"] },
-    "session_observer": {
-      "models": [{ "provider": "deepseek", "model": "deepseek-flash", "thinking": "high" }]
-    }
+    "error_review": { "models": ["cheap_auto"] }
   }
 }
 ```
@@ -140,11 +123,8 @@ normal main-session model:
 - `preferences.<role>.models` is an ordered list of aliases (or inline
   entries). Role names accept `subagents`, `council`, `fanout` (`swarm` and `fusion` are accepted aliases),
   `quality_review`, `project_review`, `error_review` and
-  `main_session_fallback`, `prompt_analysis`, and `session_observer` (dashes, case and
-  singular/plural variants are accepted). Unknown roles pass through for
-  future mechanisms. When `prompt_analysis` has no explicit list, its
-  low-cost, tool-free initial and follow-up checks inherit the ordered
-  `subagents` chain; no model ID is hardcoded by prompt analysis.
+  `main_session_fallback` (dashes, case and singular/plural variants are
+  accepted). Unknown roles pass through for future mechanisms.
 - Ad-hoc subagent tasks use the `subagents` chain unless the task explicitly
   names a review or council (`project review`, `error review`, `bug review`,
   `quality review`, `council`). Automatic dispatchers pass their role
@@ -178,11 +158,8 @@ use a different configured backend without mutating the shared registry
 model. Global `/provider` pins in `models.json` remain part of the route.
 `provider_options` is ignored for non-OpenRouter providers.
 
-The `/models` command opens the graphical editor for these same preferences.
-It saves against a content revision, keeps unknown JSON fields, writes a
-verified backup, and refuses to overwrite concurrent manual edits. See
-[Model routing](MODEL-ROUTING.md) for provider-aware search, diagnostics and
-recovery behavior.
+The `/models` command no longer edits these preferences; it chooses only media
+routes. Edit `llm_preferences.json` directly.
 
 ## Parallel allocation
 
@@ -194,4 +171,4 @@ are needed than viable preferences, suitable entries are reused and the
 existing autonomous selector fills the remaining gaps.
 
 
-The `/models` browser editor also has **Images**, **Video** and **Audio** sections. Those choices use the session's SettingsManager media fields, with separate **Use for session** and **Save media choices** actions. They do not edit this LLM preferences document or change the current language model, thinking level or cycling list. See [Video studio](VIDEO-STUDIO.md) for generation capabilities, budget planning and local alternatives.
+The `/models` browser editor has **Images** and **Audio** sections. Those choices use the session's SettingsManager media fields, with separate **Use for session** and **Save media choices** actions. They do not edit this LLM preferences document or change the current language model, thinking level or cycling list. See [Video studio](VIDEO-STUDIO.md) for generation capabilities, budget planning and local alternatives.

@@ -643,10 +643,6 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 export function applySteeringRecoveryAgentConfig(agentConfig: AgentConfig, descriptor: SteeringRecoveryDescriptor): AgentConfig {
 	return {
 		...agentConfig,
-		model: descriptor.model,
-		modelProvider: descriptor.modelProvider,
-		fallbackModels: descriptor.fallbackModels ? [...descriptor.fallbackModels] : undefined,
-		thinking: descriptor.thinking,
 		fast: descriptor.fast,
 		maxThinking: intersectThinkingCeilings(descriptor.thinkingCeiling, agentConfig.maxThinking),
 		tools: descriptor.tools ? [...descriptor.tools] : undefined,

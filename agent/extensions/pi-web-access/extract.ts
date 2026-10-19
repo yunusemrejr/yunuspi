@@ -326,7 +326,6 @@ export interface ExtractOptions {
 	frames?: number;
 	model?: string;
 	mode?: "readable" | "raw" | "answer";
-	answerModel?: string;
 	authFetchProfile?: AuthFetchProfile;
 	toolNames?: RegisteredToolNames;
 	/** Optional http(s) proxy URL; routed through the curl-backed transport. */

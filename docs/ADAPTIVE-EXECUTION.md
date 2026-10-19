@@ -34,9 +34,8 @@ scope-appropriate reasoning defaults where no explicit setting exists.
 Ordinary requested native children also classify their own authored brief before
 shared task-state context is added. Direct children use minimal reasoning,
 investigators use low, and complex or consequential children use high, within
-the agent's configured maximum and actual model support. Configured agent
-thinking and model suffixes remain exact; external runners keep their native
-contract. Missing briefs and unresolved templates retain moderate uncertainty.
+the configured thinking ceiling and actual model support. Agent definitions set
+no model or thinking level; external runners keep their native contract. Missing briefs and unresolved templates retain moderate uncertainty.
 Fork transcript restrictions still take precedence.
 
 Requested parallel arrays and chain groups execute every child. Without an
@@ -66,16 +65,15 @@ reuse their exact current annotations from native tool results on the active
 branch after restart, fork or resume. Branches before delivery still receive
 guidance. These annotations record advice, never a completed check.
 
-RPC clients use native dialogs for subagent discovery, model/thinking selection
-and targeted stop controls, and receive visible fleet and command results.
+RPC clients use native dialogs for subagent discovery and targeted stop
+controls, and receive visible fleet and command results.
 Terminal-only components and shortcuts stay in TUI mode. `/run` and single
 prompt workflows launch native children directly, retaining the requested
 model, skills and context without an extra script VM. Multi-stage prompt
 workflows retain their per-stage context and output substitution.
 Session reports and hook ledgers use bounded visible RPC messages excluded
 from model context, and background-task dialogs stop only a selected task from
-the current session. Custom Double uses native model, thinking and reconciler
-dialogs with an explicit final selection; cancelling preserves its saved pair.
+the current session.
 
 Automatic project-memory ingestion retains raw text, lexical indexes and source
 provenance for direct scopes, while deferring semantic embedding and backlog

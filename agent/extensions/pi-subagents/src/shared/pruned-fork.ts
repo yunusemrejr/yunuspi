@@ -5,8 +5,6 @@ import * as path from "node:path";
 import type { TextContent } from "@yunuspi/ai";
 import { completeSimple } from "@yunuspi/ai/compat";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
-import { resolveModelCandidate } from "../runs/shared/model-fallback.ts";
-import { splitKnownThinkingSuffix, toModelInfo } from "./model-info.ts";
 import type { ForkContextConfig } from "./types.ts";
 
 const MAX_INHERITED_SESSION_BYTES = 64 * 1024;
@@ -396,12 +394,6 @@ export async function pruneForkSessionFile(sessionFile: string, summarize: Summa
 	return true;
 }
 
-function splitProviderModel(value: string): { provider: string; id: string } | undefined {
-	const slash = value.indexOf("/");
-	if (slash <= 0 || slash === value.length - 1) return undefined;
-	return { provider: value.slice(0, slash), id: value.slice(slash + 1) };
-}
-
 /** Opt-in local capsule. Critical overflow/unsupported content preserves the full fork. */
 export async function capsuleForkSessionFile(sessionFile: string): Promise<boolean> {
   if (process.env.PI_CONTEXT_MEMORY === "off") return false;
@@ -445,17 +437,10 @@ export async function createPrunedForkSessionWriter(
 ): Promise<(sessionFile: string) => Promise<void>> {
 	if (config?.mode === "capsule") return async (sessionFile) => { await capsuleForkSessionFile(sessionFile); };
 	if (config?.mode !== "pruned") return async () => {};
-	if (!config.model?.trim()) throw new Error("Pruned fork context requires config.forkContext.model.");
-	const available = ctx.modelRegistry.getAvailable();
-	const resolved = resolveModelCandidate(config.model.trim(), available.map(toModelInfo), ctx.model?.provider);
-	if (!resolved) throw new Error(`Pruned fork model '${config.model}' did not match exactly one available model.`);
-	const { baseModel } = splitKnownThinkingSuffix(resolved);
-	const named = splitProviderModel(baseModel);
-	if (!named) throw new Error(`Pruned fork model '${config.model}' must resolve to provider/model.`);
-	const model = ctx.modelRegistry.find(named.provider, named.id);
-	if (!model) throw new Error(`Pruned fork model '${config.model}' was not found as '${baseModel}'.`);
+	const model = ctx.model;
+	if (!model) throw new Error("Pruned fork context requires an active session model.");
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (auth.ok === false) throw new Error(`Pruned fork model auth failed for ${baseModel}: ${auth.error}`);
+	if (auth.ok === false) throw new Error(`Pruned fork model auth failed for ${model.provider}/${model.id}: ${auth.error}`);
 
 	let sharedSummary: Promise<string> | undefined;
 	const summarize: SummaryFunction = async (payload) => {

@@ -37,9 +37,9 @@ Shell-write observations happen after the command and are labeled post-write aud
 See [native delegation and independent file checks](SUBAGENT-CONTRACTS.md), [session metrics](SESSION-METRICS.md), and the [execution boundary](SECURITY.md). Restart Pi and resume an existing session to load the updated extension and core modules.
 
 Fresh installations expose Pi's built-in `grep`, `find` and `ls` alongside file
-editing and bash, so searches and listings can use structured arguments. Child
-thinking defaults to `low`; explicit model/thinking selections and economy
-budgets remain authoritative.
+editing and bash, so searches and listings can use structured arguments. Children
+run on the session model; their thinking is chosen per run by the effort
+controller, up to the session ceiling.
 
 `session_self {view:"failures"}` inspects at most 2,000 recent branch entries and
 returns up to 12 model, tool, child or workflow diagnostics with recovery clues.
@@ -109,7 +109,7 @@ Harness notices (reminders, Guardian interventions, observer notes) render as a 
 
 Common tool-call mistakes now recover without a wasted turn. When the only schema failure is an over-long explanation field (`reason`, `description`, `summary`, `note` and similar), the text is shortened to the limit with a `[shortened from N characters]` marker and the call proceeds; any other error, and identifiers, paths or content, still reject. `project_tests` assessments split a chain of individually valid checks (`php -l a.php && php -l b.php`, optionally behind one `cd dir &&`) into separate planned checks and say so.
 
-A request such as "only use HTML, CSS, JavaScript and PHP" is a technology constraint. Previously any "only use X" was read as a model/provider pin, which disabled the observer, automatic independent reviews and fallback for a whole session; a pin now needs a route-shaped target (model, provider, route, a `provider/model` id or a known model family).
+A request such as "only use HTML, CSS, JavaScript and PHP" is a technology constraint. A pin needs a route-shaped target (model, provider, route, a `provider/model` id or a known model family).
 
 ## Asynchronous skill discovery and visible activity
 
@@ -142,7 +142,7 @@ The offline session audit reports the ten largest raw-text contributors and exac
 The cost governor keeps a long request view affordable without an extra model call. DeepSeek routes are cache-first: when either the provider or the model id names DeepSeek (official, DeepInfra, Qwen/Alibaba, OpenRouter, OpenCode, Fireworks, Together, Bedrock and other aliases), the request prefix stays append-only and folds only near 80% of the model window. That keeps the provider's automatic prefix cache warm instead of re-billing a rewritten prefix; `/budget` labels it `cache-first, fold only near the window`. A resumed session still uses a lower first-call budget because its retained prefix is already cold. Other routes fold at `PI_CONTEXT_BUDGET` (default 100,000 estimated tokens). On every route a fold happens at a real tool boundary into a deterministic digest, keeps the latest user request and a recent tail verbatim, and re-folds only after the tail grows enough to be worth the one cache invalidation. `read_many` batches two to six independent file inspections into one request, bounding each file and the sum. Bash/search results above `PI_TOOL_RESULT_MAX` (default 24,000 characters) keep both ends with the full output spilled for exact follow-up. `/budget` reports spend, cache-hit rate, the cause of each cache miss, context size, folds and cap savings; `/budget <usd|off|reset>` sets a soft budget, and `PI_COST_BUDGET_USD` (default 0.10) switches to economy mode by tightening tool caps. On DeepSeek routes economy mode leaves the context budget high to protect the cache; other routes also tighten it. In economy mode only, routine all-mechanical tool continuations step down from the configured thinking ceiling to `high`; deep, judgment, error and large-change turns keep the ceiling, a manual selection wins, and `/budget off` restores it. `PI_ADAPTIVE_EFFORT=off` keeps the configured level throughout; `PI_CONTEXT_GOVERNOR=off` disables the governor. The digest is not a summary of claims and never replaces verification or the durable session; old files can always be re-read.
 
 
-Automatic exit summaries abort provider work at their deadline, request at most 2,048 output tokens, skip offline mode and do not fall back from an unavailable explicitly configured summary model to the active model. Truncated responses are not saved as completed memory. A session metadata marker prevents another summary of unchanged history after resume; new messages make a later summary eligible. Selective priming can retrieve a bounded task-relevant memory digest once per session; complete memory contents remain available on demand.
+Automatic exit summaries always use the active session model, abort provider work at their deadline, request at most 2,048 output tokens and skip offline mode. Truncated responses are not saved as completed memory. A session metadata marker prevents another summary of unchanged history after resume; new messages make a later summary eligible. Selective priming can retrieve a bounded task-relevant memory digest once per session; complete memory contents remain available on demand.
 
 Automatic research assistance has a three-minute investigation allowance for source-reading turns and synthesis. The enclosing cancellation watchdog allows five additional seconds for terminal receipts and cleanup. These helpers run asynchronously while the main agent continues; their existing tool, token and cost budgets still apply, and cancelling the owning task cancels its helpers immediately.
 

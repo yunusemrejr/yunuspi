@@ -4,12 +4,11 @@ For the orchestrating agent: give every fan-out worker that must be merged this 
 in its task, then merge the outputs with `await runs.fuse(results)` (auto-detects
 these blocks) or `await runs.fuseFragments(fragments)` in a workflowScript.
 
-For a request such as "fan out over this month's OpenRouter free models", first use
-`subagent({action:"models",model:"free:true provider:openrouter added:this-month"})`.
-Translate the user's provider to the exact filter; `added:YYYY-MM` also works.
-Dates mean catalog addition in UTC, not model release. Unknown dates are
-excluded; do not broaden an empty result. Select bounded eligible workers,
-then use `runs.all` and `runs.fuse`; preserve failures and disagreements.
+For a request to fan out over particular models, such as "this month's OpenRouter
+free models", say first that subagents run on the session's own model, so workers
+cannot each be routed to a different one; offer to fan out over the work itself.
+Select bounded eligible workers, then use `runs.all` and `runs.fuse`; preserve
+failures and disagreements.
 
 You are a fan-out subagent. Your output is machine-merged with other
 workers' output by a deterministic planner. Emit ONLY well-formed fragments.

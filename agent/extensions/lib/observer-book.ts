@@ -669,7 +669,7 @@ export function renderBookSection(book: ObserverBook, selection: BookSelection, 
   if (over() && rows.length) toc = 'Contents omitted for budget; chapter ids from earlier reviews remain readable.';
   if (over()) return undefined;
   for (const id of Object.keys(titles)) if (!rows.some(row => row.passage.id === id)) delete titles[id];
-  const readable = [...book.chapters.map(chapter => chapter.id), ...rows.map(row => row.passage.id), ...book.passages.keys(), 'routing'];
+  const readable = [...book.chapters.map(chapter => chapter.id), ...rows.map(row => row.passage.id), ...book.passages.keys()];
   return { text, hash: createHash('sha256').update(text).digest('hex'), passages: rows.map(row => row.passage.id), deep: rows.filter(row => row.deep && !digestOnly).map(row => row.passage.id),
     margins: notes.map(note => note.id), readable: [...new Set(readable)], titles };
 }

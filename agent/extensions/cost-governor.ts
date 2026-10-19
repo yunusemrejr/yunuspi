@@ -634,7 +634,9 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	const judgeEffort = async (event: any, ctx: any): Promise<void> => {
 		if (!effortInitialized) initEffort();
 		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy) return;
-		if (process.env.PI_SUBAGENT_CHILD === "1" || ctx?.model?.reasoning === false) return;
+		// Children judge their own task too: a helper launches at the session's
+		// ceiling and steps down here exactly like a main-session turn.
+		if (ctx?.model?.reasoning === false) return;
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		if (!prompt.trim()) return;
 		if (levelRank(effortCeiling) < EFFORT_MIN_CEILING_RANK) return;
@@ -874,7 +876,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		// A burst of tool errors means the judged-simple turn was harder than
 		// it looked: restore the ceiling at once (a step up never waits on the
 		// prompt cache, because quality outranks it).
-		if (event?.isError === true && process.env.PI_SUBAGENT_CHILD !== "1" && !effortManual && !economy) {
+		if (event?.isError === true && !effortManual && !economy) {
 			effortTurnErrors += 1;
 			if (effortTurnErrors >= 2 && effortAuto && effortCeiling && effortAuto !== effortCeiling) {
 				applyEffort(effortCeiling, ctx, `${effortTurnErrors} tool errors; configured level restored`, "jev");

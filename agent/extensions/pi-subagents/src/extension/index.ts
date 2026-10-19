@@ -11,11 +11,11 @@ import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } fr
  * Toggle: async parameter (default: true; set asyncByDefault:false in config.json to opt out)
  *
  * Config file: ~/.pi/agent/extensions/subagent/config.json
- *   { "asyncByDefault": true, "defaultSubagentContext": "fork", "forkContext": { "mode": "pruned", "model": "provider/model" }, "forceTopLevelAsync": true, "maxSubagentDepth": 1, "intercomBridge": { "mode": "always", "instructionFile": "./intercom-bridge.md" }, "worktreeSetupHook": "./scripts/setup-worktree.mjs" }
+ *   { "asyncByDefault": true, "defaultSubagentContext": "fork", "forkContext": { "mode": "pruned" }, "forceTopLevelAsync": true, "maxSubagentDepth": 1, "intercomBridge": { "mode": "always", "instructionFile": "./intercom-bridge.md" }, "worktreeSetupHook": "./scripts/setup-worktree.mjs" }
  */
 
 import { randomUUID } from "node:crypto";
-import { registerAutonomousRecovery } from "./autonomous-recovery.ts";
+import { registerQualityReviewRunner } from "./quality-review-runner.ts";
 import { registerDoubleMode } from "./double-runner.ts";
 import { registerSubagentContinuation } from "./continuation-notice.ts";
 import { noteSessionTurnover, noteUserInput } from "../../../lib/intervention-shared.ts";
@@ -654,7 +654,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	} catch {
 		// Session stop degrades to trigger suppression without run cancellation.
 	}
-	registerAutonomousRecovery(pi, executor.executeDelegated);
+	registerQualityReviewRunner(pi, executor.executeDelegated);
 	registerDoubleMode(pi, { launch: executor.executeDelegated });
 
 	pi.registerMessageRenderer<SlashMessageDetails>(SLASH_RESULT_TYPE, (message, options, theme) => {

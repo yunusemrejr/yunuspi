@@ -6,30 +6,12 @@ import { integer } from "./media-process.ts";
 import { redactSecrets } from "./memory-redaction.ts";
 import { measureFrameColor } from './video-color-evidence.ts';
 
-export function visionModel(params: any, ctx: any) {
-  const explicit = params.model !== undefined || params.provider !== undefined;
-  let model = explicit ? ctx.modelRegistry?.find?.(params.provider ?? ctx.model?.provider, params.model ?? ctx.model?.id) : ctx.model;
-  // Catalog ids can contain slashes. Match exact ids and fully qualified
-  // provider/id values instead of guessing the provider from the first slash.
-  if (!model && params.model && !params.provider) {
-    const matches = (ctx.modelRegistry?.getAvailable?.() ?? []).filter((m: any) => m.id === params.model || `${m.provider}/${m.id}` === params.model);
-    if (matches.length > 1) throw Error('This vision model id is ambiguous; provide its exact provider and model from action:models');
-    if (matches.length === 1) model = matches[0];
-  }
-  if (!model) throw Error(`Choose an available vision model with provider/model${visionSuggestions(ctx)}`);
-  if (!model.input?.includes("image")) throw Error(`${model.provider}/${model.id} does not accept images; select a vision model explicitly${visionSuggestions(ctx)}`);
+/** Vision runs on the session's own model; no other model is selected. */
+export function visionModel(ctx: any) {
+  const model = ctx.model;
+  if (!model) throw Error("Image understanding runs on the session model, and this session has no model selected");
+  if (!model.input?.includes("image")) throw Error(`The session model ${model.provider}/${model.id} does not accept images, so image understanding is unavailable in this session; report the visual limitation`);
   return model;
-}
-
-/** Name concrete choices in the refusal: agents otherwise guess ids that do
- * not exist and spend a turn per guess. Same provider first, then cheapest. */
-function visionSuggestions(ctx: any) {
-  let models: any[] = [];
-  try { models = (ctx.modelRegistry?.getAvailable?.() ?? []).filter((m: any) => m.input?.includes("image")); } catch { /* registry optional */ }
-  if (!models.length) return "; no available model accepts images";
-  const price = (m: any) => Number(m.cost?.input ?? 0) + Number(m.cost?.output ?? 0);
-  models.sort((a: any, b: any) => Number(b.provider === ctx.model?.provider) - Number(a.provider === ctx.model?.provider) || price(a) - price(b));
-  return `; for example ${models.slice(0, 5).map((m: any) => `provider:"${m.provider}" model:"${m.id}"`).join(", ")} (action:models lists all ${models.length})`;
 }
 
 export async function prepareVisionImages(params: any, cwd: string, signal?: AbortSignal) {
@@ -63,13 +45,9 @@ export async function prepareVisionImages(params: any, cwd: string, signal?: Abo
 }
 
 export async function imageUnderstand(params: any, cwd: string, signal: AbortSignal | undefined, ctx: any, runtime: { complete?: (...args: any[]) => Promise<any>; onUsage?: (usage: unknown, status: string, model: any) => void } = {}) {
-  if ((params.action ?? "analyze") === "models") {
-    const models = (ctx.modelRegistry?.getAvailable?.() ?? []).filter((m: any) => m.input?.includes("image"));
-    return { models: models.slice(0, 128).map((m: any) => ({ provider: m.provider, id: m.id, name: m.name, reasoning: m.reasoning })), total: models.length, selection: "analyze uses the current model by default; provider/model overrides only this call. Catalog presence is not proof of inference." };
-  }
-  if (params.action !== undefined && params.action !== "analyze") throw Error("action must be analyze or models");
+  if (params.action !== undefined && params.action !== "analyze") throw Error("action must be analyze");
   if (typeof params.prompt !== "string" || !params.prompt.trim() || params.prompt.length > 8000) throw Error("Image understanding needs a prompt of 1..8000 characters");
-  const model = visionModel(params, ctx);
+  const model = visionModel(ctx);
   const maxTokens = integer(params.maxTokens, 2048, 128, 8192, "maxTokens");
   const images = await prepareVisionImages(params, cwd, signal);
   signal?.throwIfAborted();
@@ -103,5 +81,5 @@ export async function imageUnderstand(params: any, cwd: string, signal: AbortSig
   if (["error", "aborted"].includes(response.stopReason)) throw Error(`Vision inference failed: ${redactSecrets(String(response.errorMessage ?? response.stopReason)).slice(0, 400)}`);
   const text = response.content?.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
   if (!text) throw Error(response.stopReason === "length" ? "Vision model spent its whole output allowance (including reasoning) before answering; retry with a larger maxTokens or a non-reasoning vision model" : "Vision model returned no textual observations");
-  return { provider: model.provider, model: model.id, observations: text, images: images.map(image => image.source), usage: response.usage ?? null, truncated: response.stopReason === "length", note: "Model observations are inference, not a verified verdict. Original image hashes, dimensions, crop and sent-pixel scales identify the evidence. No session model was changed." };
+  return { provider: model.provider, model: model.id, observations: text, images: images.map(image => image.source), usage: response.usage ?? null, truncated: response.stopReason === "length", note: "Model observations are inference, not a verified verdict. Original image hashes, dimensions, crop and sent-pixel scales identify the evidence." };
 }

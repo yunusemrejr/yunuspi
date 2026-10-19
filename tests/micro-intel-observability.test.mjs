@@ -39,8 +39,8 @@ test("micro_status exposes the new layers without inference", () => {
   assert.ok("span" in layers);
   assert.ok("microworker" in layers);
   assert.ok("rerank" in layers);
-  assert.ok(snapshot.span && typeof snapshot.span.model === "string");
-  assert.ok(snapshot.microworker && Array.isArray(snapshot.microworker.candidates));
+  assert.ok(snapshot.span && typeof snapshot.span.enabled === "boolean" && typeof snapshot.span.shadow === "boolean");
+  assert.ok(snapshot.microworker && typeof snapshot.microworker.enabled === "boolean" && !("candidates" in snapshot.microworker));
   assert.ok(snapshot.rerank && typeof snapshot.rerank.url === "string");
   assert.ok(Array.isArray(snapshot.metrics));
 });

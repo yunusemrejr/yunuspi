@@ -23,9 +23,6 @@ export interface RuntimeAgentDefinition {
 	excludeTools?: readonly string[];
 	allowNestedSubagents?: boolean;
 	mcpDirectTools?: readonly string[];
-	model?: string;
-	fallbackModels?: readonly string[];
-	thinking?: string | false;
 	systemPromptMode?: "append" | "replace";
 	inheritProjectContext?: boolean;
 	inheritGlobalContext?: boolean;
@@ -198,6 +195,8 @@ function validateToolBudget(value: unknown): ToolBudgetConfig | undefined {
 function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Runtime agent definition must be an object.");
 	const definition = value as Record<string, unknown>;
+	// model, fallbackModels and thinking are retired (subagents run on the session
+	// model): accepted so older registrations still load, and ignored.
 	const supported = new Set([
 		"description", "systemPrompt", "aliases", "tools", "excludeTools", "allowNestedSubagents", "mcpDirectTools", "model", "fallbackModels", "thinking",
 		"systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "defaultContext", "defaultAsync", "defaultTimeoutMs",
@@ -211,8 +210,6 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	if (systemPromptMode !== undefined && systemPromptMode !== "append" && systemPromptMode !== "replace") throw new Error("Runtime agent definition systemPromptMode must be 'append' or 'replace'.");
 	const defaultContext = definition.defaultContext;
 	if (defaultContext !== undefined && defaultContext !== "fresh" && defaultContext !== "fork") throw new Error("Runtime agent definition defaultContext must be 'fresh' or 'fork'.");
-	const thinking = definition.thinking;
-	if (thinking !== undefined && thinking !== false && typeof thinking !== "string") throw new Error("Runtime agent definition thinking must be a string or false when provided.");
 	const acceptanceRole = definition.acceptanceRole;
 	if (acceptanceRole !== undefined && acceptanceRole !== "read-only" && acceptanceRole !== "writer") throw new Error("Runtime agent definition acceptanceRole must be 'read-only' or 'writer'.");
 	const outputMode = definition.outputMode;
@@ -222,8 +219,6 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const excludeTools = validateStringList(definition.excludeTools, "Runtime agent definition excludeTools");
 	const allowNestedSubagents = validateBoolean(definition.allowNestedSubagents, "Runtime agent definition allowNestedSubagents");
 	const mcpDirectTools = validateStringList(definition.mcpDirectTools, "Runtime agent definition mcpDirectTools");
-	const model = validateOptionalString(definition.model, "Runtime agent definition model");
-	const fallbackModels = validateStringList(definition.fallbackModels, "Runtime agent definition fallbackModels");
 	const inheritProjectContext = validateBoolean(definition.inheritProjectContext, "Runtime agent definition inheritProjectContext");
 	const inheritGlobalContext = validateBoolean(definition.inheritGlobalContext, "Runtime agent definition inheritGlobalContext");
 	const inheritSkills = validateBoolean(definition.inheritSkills, "Runtime agent definition inheritSkills");
@@ -254,9 +249,6 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 		...(excludeTools ? { excludeTools } : {}),
 		...(allowNestedSubagents !== undefined ? { allowNestedSubagents } : {}),
 		...(mcpDirectTools ? { mcpDirectTools } : {}),
-		...(model ? { model } : {}),
-		...(fallbackModels ? { fallbackModels } : {}),
-		...(thinking !== undefined ? { thinking: thinking as string | false } : {}),
 		...(systemPromptMode !== undefined ? { systemPromptMode: systemPromptMode as "append" | "replace" } : {}),
 		...(inheritProjectContext !== undefined ? { inheritProjectContext } : {}),
 		...(inheritGlobalContext !== undefined ? { inheritGlobalContext } : {}),
@@ -334,9 +326,6 @@ function toAgentConfig(name: string, definition: RuntimeAgentDefinition): AgentC
 		...(definition.excludeTools !== undefined ? { excludeTools: [...definition.excludeTools] } : {}),
 		...(definition.allowNestedSubagents !== undefined ? { allowNestedSubagents: definition.allowNestedSubagents } : {}),
 		...(definition.mcpDirectTools !== undefined ? { mcpDirectTools: [...definition.mcpDirectTools] } : {}),
-		...(definition.model !== undefined ? { model: definition.model } : {}),
-		...(definition.fallbackModels !== undefined ? { fallbackModels: [...definition.fallbackModels] } : {}),
-		...(definition.thinking !== undefined ? { thinking: definition.thinking } : {}),
 		systemPromptMode: definition.systemPromptMode ?? defaultSystemPromptMode(name),
 		inheritProjectContext: definition.inheritProjectContext ?? defaultInheritProjectContext(name),
 		inheritGlobalContext: definition.inheritGlobalContext ?? false,

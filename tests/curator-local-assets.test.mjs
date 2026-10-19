@@ -6,7 +6,6 @@ import { startCuratorServer } from '../agent/extensions/pi-web-access/curator-se
 const options = (sessionToken) => ({
   queries: ['a query'], sessionToken, timeout: 60,
   availableProviders: { duckduckgo: true }, defaultProvider: 'duckduckgo', searchProvider: 'duckduckgo',
-  summaryModels: [], defaultSummaryModel: null,
 });
 const callbacks = {
   onSubmit() {}, onCancel() {}, onProviderChange() {},
@@ -15,7 +14,7 @@ const callbacks = {
 };
 
 test('the curator page never reaches an external host to render', () => {
-  const html = generateCuratorPage(['q'], 'tok en', 60, { duckduckgo: true }, 'duckduckgo', 'duckduckgo', [], null);
+  const html = generateCuratorPage(['q'], 'tok en', 60, { duckduckgo: true }, 'duckduckgo', 'duckduckgo');
   const hosts = [...html.matchAll(/(?:src|href)=["'](https?:\/\/[^"']+)/g)].map((m) => m[1]);
   assert.deepEqual(hosts, [], 'fonts and scripts load from the local server only');
   assert.doesNotMatch(html, /fonts\.googleapis|fonts\.gstatic|cdn\.jsdelivr/);
@@ -23,6 +22,7 @@ test('the curator page never reaches an external host to render', () => {
   assert.doesNotMatch(html, /Instrument Serif|Outfit/, 'no webfont dependency');
   assert.doesNotMatch(html.match(/\.hero-title \{[^}]*\}/)[0], /italic|font-display/, 'the headline is not an italic display serif');
   assert.doesNotMatch(html, /class="hero-kicker"/);
+  assert.doesNotMatch(html, /summary-model-select|summary-provider-select|preview-modal-model/, 'summaries use the session model; the page has no model picker');
 });
 
 test('the local server serves marked only for the session and the page keeps working without it', async (t) => {

@@ -18,20 +18,12 @@ const BASE_KEY_IDS = new Set([
 	...Object.values(Key).flatMap((value) => typeof value === "string" ? [value.toLowerCase()] : []),
 ]);
 
-class PrunedForkConfigError extends Error {}
-
 function validateForkContextConfig(value: unknown): void {
 	if (value === undefined) return;
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config.forkContext must be a JSON object");
 	const config = value as Record<string, unknown>;
 	if (config.mode !== undefined && config.mode !== "full" && config.mode !== "pruned" && config.mode !== "capsule") {
 		throw new Error('config.forkContext.mode must be "full", "pruned" or "capsule"');
-	}
-	if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim())) {
-		throw new PrunedForkConfigError("config.forkContext.model must be a non-empty string");
-	}
-	if (config.mode === "pruned" && config.model === undefined) {
-		throw new PrunedForkConfigError('config.forkContext.model is required when config.forkContext.mode is "pruned"');
 	}
 }
 
@@ -228,7 +220,6 @@ export function loadConfig(): ExtensionConfig {
 	try {
 		return readConfigForUpdate(configPath);
 	} catch (error) {
-		if (error instanceof PrunedForkConfigError) throw error;
 		console.error(`Failed to load subagent config from '${configPath}':`, error);
 	}
 	return {};

@@ -11,10 +11,7 @@ export const KNOWN_FIELDS = new Set([
 	"tools",
 	"excludeTools",
 	"allowNestedSubagents",
-	"model",
-	"fallbackModels",
 	"fast",
-	"thinking",
 	"systemPromptMode",
 	"inheritProjectContext",
 	"inheritGlobalContext",
@@ -43,6 +40,11 @@ export const KNOWN_FIELDS = new Set([
 	"permissions",
 	"memory",
 	"runner",
+	// Retired with per-agent model and thinking selection: read as no-ops and
+	// dropped on save, so old files keep loading without the keys reappearing.
+	"model",
+	"fallbackModels",
+	"thinking",
 ]);
 
 function joinComma(values: string[] | undefined): string | undefined {
@@ -77,13 +79,7 @@ export function serializeAgent(config: AgentConfig, options: SerializeAgentOptio
 		lines.push(`allowNestedSubagents: ${config.allowNestedSubagents === undefined ? "" : config.allowNestedSubagents ? "true" : "false"}`);
 	}
 
-	if (config.model || preserve("model")) lines.push(`model: ${config.model ?? ""}`);
-	const fallbackModelsValue = joinComma(config.fallbackModels);
-	if (fallbackModelsValue || preserve("fallbackModels")) lines.push(`fallbackModels: ${fallbackModelsValue ?? ""}`);
 	if (config.fast === true || preserve("fast")) lines.push(`fast: ${config.fast === undefined ? "" : config.fast ? "true" : "false"}`);
-	if ((config.thinking && (config.thinking !== "off" || preserve("thinking"))) || (!config.thinking && preserve("thinking"))) {
-		lines.push(`thinking: ${config.thinking ?? ""}`);
-	}
 	if (!preservingExistingFrontmatter || preserve("systemPromptMode")) lines.push(`systemPromptMode: ${config.systemPromptMode}`);
 	if (!preservingExistingFrontmatter || preserve("inheritProjectContext")) lines.push(`inheritProjectContext: ${config.inheritProjectContext ? "true" : "false"}`);
 	if (config.inheritGlobalContext || preserve("inheritGlobalContext")) lines.push(`inheritGlobalContext: ${config.inheritGlobalContext ? "true" : "false"}`);

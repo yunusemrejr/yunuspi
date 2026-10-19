@@ -287,7 +287,6 @@ export default function piObservationsExtension(
 			event.content.some((part) => part.type === "image")
 		) {
 			visionHintSent = true;
-			const canDelegate = pi.getActiveTools().includes("subagent");
 			return {
 				content: [
 					...event.content,
@@ -295,9 +294,7 @@ export default function piObservationsExtension(
 						type: "text" as const,
 						text:
 							"[visual capability] Your current model cannot see this image. Reading source or capturing another screenshot does not provide visual evidence. " +
-							(canDelegate
-								? 'For layout, color, composition or meaning, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
-								: "No subagent tool is active here. Report the visual limitation; do not claim to have inspected the pixels."),
+							"Subagents run on the same model, so they cannot see it either. Report the visual limitation; do not claim to have inspected the pixels.",
 					},
 				],
 			};

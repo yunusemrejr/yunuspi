@@ -49,7 +49,7 @@ test('literal constraints prefer an actionable repetition over an earlier quoted
 	assert.deepEqual(parsed.explicitConstraints, [{
 		text, source: 'literal-user', start, end: start + text.length, quoted: false,
 	}]);
-	assert.match(mod.renderPromptAnalysis(parsed, 'prompt_analysis'), /Keep the cache warm/);
+	assert.match(mod.renderPromptAnalysis(parsed), /Keep the cache warm/);
 });
 
 test('literal constraints reach instructions between long runs of quoted examples', () => {
@@ -76,7 +76,7 @@ test('full context projection remains valid JSON and includes every bounded advi
 		completionConditions: ['tests pass'], ambiguities: ['none'], needsExternalVerification: true,
 		needsMemory: true, needsProjectGraph: true, reviewWorthy: true, multiPerspective: true,
 	}), prompt, 'initial');
-	const content = mod.renderPromptAnalysisContext(parsed, 'prompt_analysis', 'openrouter/cheap');
+	const content = mod.renderPromptAnalysisContext(parsed, 'openrouter/cheap');
 	const data = JSON.parse(content.split('\n')[1]);
 	for (const key of ['intent', 'taskLabel', 'deliverables', 'explicitConstraints', 'inferredConstraints', 'subtasks', 'dependencies', 'references', 'suggestedCapabilities', 'expectedTools', 'expectedSkills', 'completionConditions', 'ambiguities']) assert.ok(key in data, key);
 	assert.equal(data.needsMemory, true);

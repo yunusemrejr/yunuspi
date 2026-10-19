@@ -51,6 +51,8 @@ test('child skill isolation recognizes current and legacy catalog headers withou
     const project='Inspect the fixture.\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\nproject guidance'+catalog+'\nCurrent date: 2026-10-06';
     assert.equal(stripProjectContext(project),prompt,'legacy project stripping retains either skill catalog');
   }
+  const modernPrompt = 'Inspect the fixture.\n\n<available_skills>\n  <skill>\n    <name>fixture-guide</name>\n  </skill>\n</available_skills>\nCurrent working directory: /workspace/proj';
+  assert.equal(stripInheritedSkills(modernPrompt), 'Inspect the fixture.\nCurrent working directory: /workspace/proj');
 });
 
 test('optional skill reads cannot reject or widen a child tool ceiling', () => {
@@ -70,7 +72,7 @@ test('a missing optional guide warns in child preflight without removing tools o
   try {
     fs.mkdirSync(path.join(cwd,'.pi/agents'),{recursive:true});
     fs.writeFileSync(path.join(cwd,'.pi/agents/fixture.md'),'---\nname: fixture\ndescription: Inspect a fixture\ntools: read\n---\nInspect the assigned file.\n');
-    const input={agent:'fixture',agentScope:'project',cwd,task:'Inspect the fixture',sessionRoot:path.join(cwd,'sessions'),artifacts:false};
+    const input={agent:'fixture',agentScope:'project',cwd,task:'Inspect the fixture',sessionRoot:path.join(cwd,'sessions'),artifacts:false,parentModel:{provider:'test',id:'fixture'}};
     const result=await resolveSubagentLaunchContract({...input,skill:['missing-fixture-guide']});
     assert.equal(result.ok,true);
     assert.deepEqual(result.contract.skills.missing,['missing-fixture-guide']);

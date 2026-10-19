@@ -500,6 +500,10 @@ export async function main(args, options) {
         console.log(VERSION);
         process.exit(0);
     }
+    if (parsed.help && (parsed.extensions?.length ?? 0) === 0 && (options?.extensionFactories ?? []).length === 0) {
+        printHelp([]);
+        process.exit(0);
+    }
     if (parsed.export) {
         let result;
         try {

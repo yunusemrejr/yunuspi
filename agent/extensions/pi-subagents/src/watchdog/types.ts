@@ -102,14 +102,10 @@ export interface WatchdogCadenceConfig {
 
 export interface WatchdogEndpointConfig {
 	enabled: boolean;
-	model?: string;
-	thinking?: string | false;
 }
 
 export interface WatchdogChildOverrideConfig {
 	enabled?: boolean;
-	model?: string;
-	thinking?: string | false;
 }
 
 export interface WatchdogChildrenConfig extends WatchdogEndpointConfig {

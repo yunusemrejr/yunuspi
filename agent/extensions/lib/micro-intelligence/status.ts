@@ -105,13 +105,13 @@ export function microStatusSnapshot(request?: {
     },
     {
       layer: "span",
-      status: !span.enabled ? "disabled" : !hasKey ? "no-key" : "ready",
-      detail: span.shadow ? `shadow record-only · ${span.model}` : span.model,
+      status: !span.enabled ? "disabled" : "ready",
+      detail: span.shadow ? "shadow record-only · session model" : "session model",
     },
     {
       layer: "microworker",
       status: !worker.enabled ? "disabled" : "on-demand",
-      detail: worker.candidates.length ? `micro_task · ${worker.candidates.length} configured routes; measured admission` : "micro_task · native registry/current route; measured admission",
+      detail: "micro_task · session model only; measured admission",
     },
     {
       layer: "rerank",

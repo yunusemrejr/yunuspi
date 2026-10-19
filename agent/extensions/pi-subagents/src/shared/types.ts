@@ -6,7 +6,6 @@ import type { ChildProgressEvidence } from "./progress-evidence.ts";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Message } from "@yunuspi/ai";
-import type { AgentConfig } from "../agents/agents.ts";
 import type { FSWatcher } from "node:fs";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
 import type { ModelScopeRule } from "../runs/shared/model-scope.ts";
@@ -1397,7 +1396,6 @@ export interface AgentCapabilityRow {
 	runner: { type: "pi" } | { type: "external-cli"; adapter?: string; capabilities: ExternalCliCapabilities } | { type: "external-job"; provider: string; available?: boolean; capabilities: ExternalJobRunnerStatus["capabilities"] };
 	constraints?: string[];
 	tools: { ambient: boolean; names: string[]; excludeTools?: string[]; mcpDirectTools: string[]; mutationTools?: string[] };
-	model?: { value?: string; fallbackModels?: string[]; thinking?: string | false };
 	execution?: { defaultAsync?: boolean; timeoutMs?: number };
 	output?: { path?: string; mode?: OutputMode };
 	extensions?: { names?: string[]; subagentOnly?: string[]; skills?: string[] };
@@ -2458,7 +2456,7 @@ export interface RunSyncOptions {
 	/** LLM intent arbiter for the completion mutation guard (rescues read-only review runs). */
 	llmIntentArbiter?: import("../runs/shared/llm-intent-arbiter.ts").TaskMutationArbiter;
 	/** Override the agent's default thinking level for this run */
-	thinkingOverride?: AgentConfig["thinking"];
+	thinkingOverride?: string | false;
 	thinkingCeiling?: ThinkingLevel;
 	extensionBindings?: ExtensionBindings;
 	/** Package-internal one-use authorization for one foreground workflow child. */
@@ -2572,8 +2570,6 @@ export interface MainWindowRendererConfig {
 export interface ForkContextConfig {
 	/** Keep the complete fork by default, or summarize large text-only tool results before launch. */
 	mode?: "full" | "pruned" | "capsule";
-	/** Required pruning model when mode is "pruned". */
-	model?: string;
 }
 
 export interface ActiveAsyncCapacityConfig {
@@ -2774,7 +2770,7 @@ export const POLL_INTERVAL_MS = 250;
 export const WIDGET_ANIMATION_INTERVAL_MS = 1000;
 export const MAX_WIDGET_JOBS = 4;
 export const DEFAULT_SUBAGENT_MAX_DEPTH = 2;
-export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "lane.status", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model", "schedule.create", "schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"] as const;
+export const SUBAGENT_ACTIONS = ["list", "get", "children.list", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "lane.status", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "schedule.create", "schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"] as const;
 
 export const DEFAULT_FORK_PREAMBLE =
 	"You are a delegated subagent running from a fork of the parent session. " +

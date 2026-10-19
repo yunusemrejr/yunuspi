@@ -14,21 +14,23 @@ import { createExtensionRuntime, loadExtensionFromFactory } from '../core/coding
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-prompt-path-'));
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = directory;
-process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'llm_preferences.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
 const { default: microIntelligence, settleMicroAnalyses } = await import('../agent/extensions/micro-intelligence.ts');
-const { clearLlmPreferencesCache } = await import('../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 const { default: adaptiveWorkflows } = await import('../agent/extensions/lib/adaptive-workflows-impl.ts');
 
 const model = (id) => ({ id, provider: 'audit-fixture', name: id, api: 'openai-completions', baseUrl: 'http://localhost:1',
   contextWindow: 65_536, maxTokens: 4096, reasoning: false, input: ['text'],
   cost: { input: 0.1, output: 0.1, cacheRead: 0, cacheWrite: 0 } });
-const models = ['main', 'first', 'second', 'third'].map(model);
+const models = [model('main')];
 const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+// Analysis requests end with a JSON object naming the current prompt; turns never do.
+const isAnalysis = (context) => String(context?.messages?.[0]?.content?.[0]?.text ?? '').includes('"currentPrompt"');
+const analysisCalls = (f) => f.calls.filter((call) => isAnalysis(call.context));
+const turnCalls = (f) => f.calls.filter((call) => !isAnalysis(call.context));
 function respond(selected, text) {
   const stream = new AssistantMessageEventStream();
   const message = { role: 'assistant', api: selected.api, provider: selected.provider, model: selected.id,
@@ -36,13 +38,6 @@ function respond(selected, text) {
   stream.push({ type: 'start', partial: { ...message, content: [] } });
   stream.push({ type: 'done', reason: 'stop', message });
   return stream;
-}
-function preferences(order) {
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ version: 1,
-    models: Object.fromEntries(models.map((entry) => [entry.id, { provider: entry.provider, model: entry.id }])),
-    preferences: { prompt_analysis: { models: order } },
-  }));
-  clearLlmPreferencesCache();
 }
 async function fixture(t, { afterInput, complete, adaptive = false } = {}) {
   const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
@@ -56,7 +51,7 @@ async function fixture(t, { afterInput, complete, adaptive = false } = {}) {
   const stream = (selected, context, options) => {
     calls.push({ id: selected.id, context, options, baseUrl: selected.baseUrl });
     if (complete) { const result = complete(selected, context, options); if (result) return result; }
-    if (selected.id === 'main') return respond(selected, 'Synthetic completed turn.');
+    if (!isAnalysis(context)) return respond(selected, 'Synthetic completed turn.');
     const request = JSON.parse(context.messages[0].content[0].text.split('\n').at(-1));
     return respond(selected, JSON.stringify({ intent: 'Advisory interpretation', taskLabel: 'Synthetic task',
       confidence: 0.9, explicitConstraints: request.currentPrompt.includes('Use architecture A') ? ['Use architecture A'] : [],
@@ -93,16 +88,12 @@ async function fixture(t, { afterInput, complete, adaptive = false } = {}) {
   return { session, calls, errors, notices, events, runtime };
 }
 
-test('real SDK dispatches configured native analysis providers, preserves raw authority and excludes synthetic events', async (t) => {
-  preferences(['first', 'second', 'third']);
-  const f = await fixture(t, { complete: (selected) => {
-    if (selected.id === 'first') throw new Error('synthetic provider unavailable');
-    if (selected.id === 'second') return respond(selected, '{malformed');
-  } });
+test('real SDK analyses on the session model, preserves raw authority and excludes synthetic events', async (t) => {
+  const f = await fixture(t);
   const raw = 'Use architecture A. The advisory may mistakenly say B. Preserve this exact sentence.';
   await f.session.prompt(raw);
-  assert.deepEqual(f.calls.map((call) => call.id), ['first', 'second', 'third', 'main']);
-  assert.ok(f.calls.every((call) => call.baseUrl === 'http://localhost:43210/v1'), 'canonical auth URL reaches both analysis and main providers');
+  assert.deepEqual(f.calls.map((call) => call.id), ['main', 'main'], 'the analysis and the turn both use the session model');
+  assert.ok(f.calls.every((call) => call.baseUrl === 'http://localhost:43210/v1'), 'canonical auth URL reaches both analysis and main provider');
   const main = f.calls.at(-1).context.messages;
   assert.ok(main.some((message) => message.role === 'user' && message.content.some((part) => part.text === raw)));
   assert.ok(main.some((message) => message.content.some((part) => part.text?.includes('Auxiliary interpretation (advisory only'))));
@@ -110,13 +101,12 @@ test('real SDK dispatches configured native analysis providers, preserves raw au
   assert.equal(f.events.length, 1);
   assert.equal(f.session.sessionManager.getEntries().filter((entry) => entry.type === 'custom_message' && entry.customType === 'prompt-analysis').length, 1);
   const shown = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
-  assert.deepEqual(shown.details.attempts.map(attempt => attempt.outcome), ['failed', 'malformed', 'complete']);
+  assert.deepEqual(shown.details.attempts.map(attempt => attempt.outcome), ['complete']);
   assert.ok(main.some(message => message.content.some(part => part.text?.includes(shown.details.advisory))), 'visible expanded advisory exactly matches text in the main agent request, including when adjacent user messages are merged');
   await f.session.prompt('Automatic background result.', { source: 'extension' });
-  assert.equal(f.calls.filter((call) => call.id !== 'main').length, 3, 'automatic messages do not invoke analysis recursively');
-  preferences(['third']);
+  assert.equal(analysisCalls(f).length, 1, 'automatic messages do not invoke analysis recursively');
   await f.session.prompt('Also add the validation test.', { source: 'rpc' });
-  assert.equal(f.calls.at(-2).id, 'third');
+  assert.equal(analysisCalls(f).length, 2);
   assert.equal(f.calls.at(-2).options.maxTokens, 320);
   assert.equal(f.events.length, 2);
   const followup = f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').at(-1);
@@ -126,13 +116,12 @@ test('real SDK dispatches configured native analysis providers, preserves raw au
   assert.deepEqual(f.errors, []);
 });
 
-test('fallback visibly explains route failure and long input while preserving the literal request', async t => {
-  preferences(['first']);
-  const f = await fixture(t, { complete: selected => { if (selected.id !== 'main') throw new Error('HTTP 400 invalid_request_error private diagnostic'); } });
+test('fallback visibly explains session-model failure and long input while preserving the literal request', async t => {
+  const f = await fixture(t, { complete: (selected, context) => { if (isAnalysis(context)) throw new Error('HTTP 400 invalid_request_error private diagnostic'); } });
   const raw = '<mindset>' + 'Reusable work guidance. '.repeat(1400) + '</mindset>\nImplement menu navigation.';
   await f.session.prompt(raw);
   const shown = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
-  assert.match(shown.content, /Intent analysis · initial · unavailable — audit-fixture\/first failed \(invalid-request\)\./);
+  assert.match(shown.content, /Intent analysis · initial · unavailable — audit-fixture\/main failed \(invalid-request\)\./);
   assert.match(shown.content, /Nothing was added to the main agent's context/);
   assert.doesNotMatch(shown.content, /private diagnostic/);
   const main = f.calls.at(-1).context.messages;
@@ -143,12 +132,11 @@ test('fallback visibly explains route failure and long input while preserving th
 });
 
 test('real preflight handled after input cancels analysis and lineage before the next genuine request', async (t) => {
-  preferences(['third']);
   let intercept = true;
   const f = await fixture(t, { afterInput: () => { if (intercept) return { action: 'handled' }; } });
   await f.session.prompt('Discard this handled request.');
   await settleMicroAnalyses();
-  assert.deepEqual(f.calls.map((call) => call.id), [], 'analysis no longer blocks input, so a handled request never spends a route call');
+  assert.deepEqual(f.calls.map((call) => call.id), [], 'analysis no longer blocks input, so a handled request never spends a model call');
   assert.equal(f.events.length, 0);
   intercept = false;
   await f.session.prompt('Use architecture A.');
@@ -157,13 +145,12 @@ test('real preflight handled after input cancels analysis and lineage before the
   assert.deepEqual(f.errors, []);
 });
 
-test('queued follow-ups keep explicit lineage and new routes without switching the active main turn', async (t) => {
-  preferences(['third']);
+test('queued follow-ups keep explicit lineage without switching the active main turn', async (t) => {
   let finishMain, began;
   const started = new Promise((resolve) => { began = resolve; });
-  let mainCalls = 0;
-  const f = await fixture(t, { complete: (selected) => {
-    if (selected.id !== 'main' || ++mainCalls !== 1) return;
+  let turns = 0;
+  const f = await fixture(t, { complete: (selected, context) => {
+    if (isAnalysis(context) || ++turns !== 1) return;
     const held = new AssistantMessageEventStream();
     finishMain = () => {
       const message = { role: 'assistant', api: selected.api, provider: selected.provider, model: selected.id,
@@ -175,7 +162,6 @@ test('queued follow-ups keep explicit lineage and new routes without switching t
   } });
   const running = f.session.prompt('Use architecture A. Implement the API.');
   await started;
-  preferences(['second']);
   await f.session.prompt('Also add the API validation tests.', { streamingBehavior: 'followUp' });
   await f.session.prompt('Preserve the return code in those tests.', { streamingBehavior: 'followUp' });
   await settleMicroAnalyses();
@@ -183,25 +169,24 @@ test('queued follow-ups keep explicit lineage and new routes without switching t
   assert.equal(tasks.length, 3);
   assert.equal(tasks[1].parentTaskId, tasks[0].requestId);
   assert.equal(tasks[2].parentTaskId, tasks[1].requestId, 'accepted queued request remains the latest lineage parent');
-  assert.deepEqual(f.calls.filter((call) => call.id !== 'main').map((call) => call.id), ['third', 'second', 'second']);
-  const thirdInterpretation = JSON.parse(f.calls.at(-1).context.messages[0].content[0].text.split('\n').at(-1));
-  assert.ok(thirdInterpretation.priorHistory.some((entry) => entry.constraints.includes('Use architecture A')),
+  assert.equal(analysisCalls(f).length, 3, 'each accepted prompt is analysed once');
+  const lastInterpretation = JSON.parse(analysisCalls(f).at(-1).context.messages[0].content[0].text.split('\n').at(-1));
+  assert.ok(lastInterpretation.priorHistory.some((entry) => entry.constraints.includes('Use architecture A')),
     'an intervening small follow-up must not erase the original task constraint from advisory context');
   finishMain();
   await running;
-  assert.ok(f.calls.filter((call) => call.id === 'main').length >= 2);
+  assert.ok(turnCalls(f).length >= 2);
   assert.equal(f.events.length, 3);
   assert.deepEqual(f.errors, []);
 });
 
 test('abort while the first turn awaits analysis cancels it and prevents any late advisory publication', async (t) => {
-  preferences(['third']);
   let finishAnalysis, began, downstreamCalls = 0;
   const started = new Promise((resolve) => { began = resolve; });
   const f = await fixture(t, {
     afterInput: () => { downstreamCalls++; },
-    complete: (selected) => {
-      if (selected.id === 'main' || finishAnalysis) return;
+    complete: (selected, context) => {
+      if (!isAnalysis(context) || finishAnalysis) return;
       const held = new AssistantMessageEventStream();
       finishAnalysis = () => {
         const message = { role: 'assistant', api: selected.api, provider: selected.provider, model: selected.id,
@@ -224,7 +209,8 @@ test('abort while the first turn awaits analysis cancels it and prevents any lat
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(f.events.length, 0);
   assert.equal(f.notices.length, 0);
-  assert.deepEqual(f.calls.map((call) => call.id), ['third'], 'the main model is never called before the awaited analysis');
+  assert.equal(f.calls.length, 1, 'the turn never starts before the awaited analysis settles');
+  assert.ok(isAnalysis(f.calls[0].context));
   await f.session.prompt('Use architecture A. Start a fresh request.');
   assert.equal(f.calls.at(-2).options.maxTokens, 768);
   assert.equal(f.events.length, 1, 'only the fresh request publishes an advisory');
@@ -232,9 +218,7 @@ test('abort while the first turn awaits analysis cancels it and prevents any lat
   assert.deepEqual(f.errors, []);
 });
 
-
 test('adaptive SDK dispatch skips helpers and auxiliary context for a direct task while retaining complex analysis', async t => {
-  preferences(['third']);
   const f = await fixture(t, { adaptive: true });
   const direct = 'What is the capital of France? Preserve this literal request.';
   await f.session.prompt(direct);
@@ -249,7 +233,7 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   assert.doesNotMatch(directAnalysis.content, /unavailable|no eligible analysis route/, 'a deliberate skip must not read as a failed route');
   const complex = 'Investigate cross-file race conditions and compare architectural alternatives in the Node.js parser.';
   await f.session.prompt(complex);
-  assert.deepEqual(f.calls.map(call => call.id), ['main', 'third', 'main']);
+  assert.deepEqual(f.calls.map(call => call.id), ['main', 'main', 'main']);
   const complexMessages = f.calls.at(-1).context.messages;
   assert.ok(complexMessages.some(message => message.role === 'user' && message.content.some(part => part.text === complex)));
   assert.ok(complexMessages.some(message => message.content?.some?.(part => part.text?.includes('Auxiliary interpretation (advisory only'))));
@@ -260,7 +244,6 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
 });
 
 test('a comparison prompt carries the prior-art paragraph to the main model; ordinary work does not', async t => {
-  preferences(['third']);
   const f = await fixture(t);
   const carries = (call) => call.context.messages.some(message => Array.isArray(message.content) && message.content.some(part => typeof part?.text === 'string' && part.text.includes('Prior art (advisory')));
   await f.session.prompt('Compare our harness with other agent harnesses and tell me what we are missing.');
@@ -279,11 +262,10 @@ test.after(() => fs.rmSync(directory, { recursive: true, force: true }));
 const kickoffFor = (words) => `[goal-tracked g1] Goal: ${words}\n\nAcceptance criteria (refine with goal({action:"criteria", items:[…]}) if they miss something; keep it to what the user asked):\n- C1: ${words}\n- V: Result checked end to end against the real artifact.\n\nWork autonomously until all are verified with evidence.`;
 
 test('a /goal kickoff reaches intent analysis and the design-direction ambition guidance; a continuation does not', async (t) => {
-  preferences(['first']);
   const f = await fixture(t);
   const words = 'Create stunning complex website designs with advanced motion graphics for a pottery studio.';
   await f.session.sendUserMessage(kickoffFor(words), { authored: true, userText: words });
-  assert.deepEqual(f.calls.map((call) => call.id), ['first', 'main'], 'the kickoff is analysed before the main turn, like any prompt');
+  assert.deepEqual(f.calls.map((call) => call.id), ['main', 'main'], 'the kickoff is analysed before the main turn, like any prompt');
   const request = JSON.parse(f.calls[0].context.messages[0].content[0].text.split('\n').at(-1));
   assert.equal(request.currentPrompt, words, 'the analyzer reads what the user wrote, not the harness criteria wrapper');
   const modelContext = JSON.stringify(f.calls.at(-1).context.messages);
@@ -294,13 +276,12 @@ test('a /goal kickoff reaches intent analysis and the design-direction ambition 
   assert.equal(f.session.sessionManager.getEntries().filter((entry) => entry.customType === 'prompt-analysis').length, 1);
   // The harness's own continuation stays synthetic: no second analysis, no new Guardian task.
   await f.session.sendUserMessage('[goal g1, continuation 1/6] The goal is not finished: 1 criteria have no evidence yet.');
-  assert.deepEqual(f.calls.map((call) => call.id), ['first', 'main', 'main']);
+  assert.deepEqual(f.calls.map((call) => call.id), ['main', 'main', 'main']);
   assert.equal(f.events.length, 1);
   assert.deepEqual(f.errors, []);
 });
 
 test('the ambition level follows the goal: a minimalist brief is told to stay restrained', async (t) => {
-  preferences(['first']);
   const f = await fixture(t);
   const words = 'Make this whole mail app into a super minimalist, centered UI. No chunks of text or tons of buttons.';
   await f.session.sendUserMessage(kickoffFor(words), { authored: true, userText: words });

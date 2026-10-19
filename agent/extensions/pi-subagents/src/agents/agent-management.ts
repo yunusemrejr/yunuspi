@@ -30,8 +30,6 @@ import {
 	buildProactiveSkillSubagentRecommendationLines,
 } from "./proactive-skills.ts";
 import { parseFrontmatter, parseFrontmatterList } from "./frontmatter.ts";
-import { THINKING_LEVELS, resolveEffectiveThinking, toModelInfo, type ModelInfo } from "../shared/model-info.ts";
-import { resolveSubagentModelOverride, type ParentModel } from "../runs/shared/model-fallback.ts";
 import { validateToolBudgetConfig } from "../runs/shared/tool-budget.ts";
 import { validateAcceptanceInput } from "../runs/shared/acceptance.ts";
 import { CODE_OWNED_EXTERNAL_CLI_ADAPTER_LABEL, isCodeOwnedExternalCliAdapterId, resolveExternalCliRunnerStatus, validateCodeOwnedProfileRunner } from "../runs/shared/external-cli-contract.ts";
@@ -41,14 +39,10 @@ import { previewDisplayText } from "../shared/display-text.ts";
 import { capabilityCeilingAgentRestrictionSources, isAgentAllowedByCapabilityCeiling, resolveCurrentSubagentCapabilityCeiling } from "../runs/shared/capability-ceiling.ts";
 import { mergeRuntimeAgents, type RuntimeAgentOwner } from "./runtime-agent-registry.ts";
 import { listExternalJobProviders } from "../api/external-job-provider.ts";
-import { describeFreeRoutes, catalogRouteCapabilities } from "../runs/shared/free-route-evidence.ts";
-import { readRankCache } from "../runs/shared/model-selection.ts";
-import { modelIdentity, QUALITY_TTL_MS } from "../runs/shared/model-quality.ts";
-import { classifyModelEconomy, loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 
-type ManagementAction = "list" | "get" | "models" | "create" | "update" | "delete" | "eject" | "disable" | "enable" | "reset";
+type ManagementAction = "list" | "get" | "create" | "update" | "delete" | "eject" | "disable" | "enable" | "reset";
 type ManagementScope = "user" | "project";
-type ManagementContext = Pick<ExtensionContext, "cwd" | "modelRegistry"> & { model?: ExtensionContext["model"]; config?: ExtensionConfig; currentSessionId?: string; runtimeAgentOwner?: RuntimeAgentOwner };
+type ManagementContext = Pick<ExtensionContext, "cwd"> & { model?: ExtensionContext["model"]; config?: ExtensionConfig; currentSessionId?: string; runtimeAgentOwner?: RuntimeAgentOwner };
 
 interface ManagementParams {
 	action?: string;
@@ -58,51 +52,6 @@ interface ManagementParams {
 	agentScope?: unknown;
 	capabilities?: unknown;
 	config?: unknown;
-	model?: string;
-}
-
-/**
- * Case-insensitive all-token substring filter over registry fullIds so the
- * session can resolve natural-language model requests ("glm 5.3 flash",
- * "together deepseek") in one models call. Every token must appear in the
- * fullId ("together" doubles as a provider filter since provider names prefix
- * every fullId).
- */
-export function filterModelsByQuery(models: ModelInfo[], query: string, now = Date.now()) {
- const tokens=query.toLowerCase().split(/\s+/).filter(Boolean);
- const months=tokens.filter(token=>token.startsWith("added:"));
- if(months.length>1)return [];
- let after: number | undefined,before: number | undefined;
- if(months.length) {
-  const value=months[0].slice(6);
-  const today=new Date(now);
-  const match=/^(\d{4})-(0[1-9]|1[0-2])$/.exec(value);
-  if(value!=="this-month"&&!match)return [];
-  const year=match?Number(match[1]):today.getUTCFullYear();
-  const month=match?Number(match[2])-1:today.getUTCMonth();
-  after=Date.UTC(year,month,1);before=Date.UTC(year,month+1,1);
- }
- const freeOnly=tokens.includes("free:true");
- const candidates=models.filter(entry=>tokens.every(token=>token==="free:true"||token.startsWith("added:")?true
-  :token==="tools:true"?catalogRouteCapabilities(entry,undefined,now)?.toolCalling===true
-  :token.startsWith("input:")?entry.input?.includes(token.slice(6))===true
-  :token.startsWith("provider:")?entry.provider.toLowerCase()===token.slice(9)
-  :entry.fullId.toLowerCase().includes(token)));
- if(freeOnly) {
-  const eligible=new Set(describeFreeRoutes(candidates,{now,requirements:{catalogAddedAfter:after,catalogAddedBefore:before}}).candidates.filter(row=>row.eligible).map(row=>row.route));
-  return candidates.filter(entry=>eligible.has(entry.fullId));
- }
- if(after!==undefined) return candidates.filter(entry=>{const date=catalogRouteCapabilities(entry,undefined,now)?.catalogAddedAt;return Number.isFinite(date)&&date!>=after!&&date!<before!;});
- return candidates;
-}
-
-/** Compact supported-thinking annotation for a filtered model listing. */
-function describeModelThinking(entry: ModelInfo): string {
-	if (entry.reasoning === false) return "no reasoning";
-	const map = entry.thinkingLevelMap;
-	if (!map) return "reasoning (native levels unknown)";
-	const levels = THINKING_LEVELS.filter((level) => map[level] != null);
-	return levels.length ? `thinking levels: ${levels.join(", ")}` : "reasoning (no explicit thinking levels)";
 }
 
 function result(text: string, isError = false, details?: Partial<Details>): AgentToolResult<Details> {
@@ -264,18 +213,11 @@ function isMutableSource(source: AgentSource): source is ManagementScope {
 	return source === "user" || source === "project";
 }
 
-function modelWarning(ctx: ManagementContext, model: string | undefined): string | undefined {
-	if (!model) return undefined;
-	const found = ctx.modelRegistry.getAvailable().some((m) => `${m.provider}/${m.id}` === model || m.id === model);
-	if (found) return undefined;
-	return `Warning: model '${model}' is not in the current model registry. Run subagent({ action: "models" }) to list valid provider/id selectors, then use the exact provider/id form (bare ids resolve only when unique).`;
-}
-
-function fallbackModelsWarning(ctx: ManagementContext, fallbackModels: string[] | undefined): string | undefined {
-	if (!fallbackModels || fallbackModels.length === 0) return undefined;
-	const available = new Set(ctx.modelRegistry.getAvailable().flatMap((m) => [`${m.provider}/${m.id}`, m.id]));
-	const missing = fallbackModels.filter((model) => !available.has(model));
-	return missing.length ? `Warning: fallback models not in the current model registry: ${missing.join(", ")}.` : undefined;
+/** Per-agent model and thinking config is retired: such keys are accepted and ignored. */
+function retiredModelFieldNote(cfg: Record<string, unknown>): string | undefined {
+	return ["model", "fallbackModels", "thinking"].some((field) => hasKey(cfg, field))
+		? "Note: model/thinking fields are ignored: subagents run on the session model."
+		: undefined;
 }
 
 function skillsWarning(cwd: string, agent: Pick<AgentConfig, "skills" | "skillPath" | "filePath">): string | undefined {
@@ -309,9 +251,6 @@ export function editableAgentConfig(agent: AgentConfig): AgentConfig {
 		output: _output,
 		outputMode: _outputMode,
 		defaultReads: _defaultReads,
-		model: _model,
-		fallbackModels: _fallbackModels,
-		thinking: _thinking,
 		systemPromptMode: _systemPromptMode,
 		inheritProjectContext: _inheritProjectContext,
 		inheritGlobalContext: _inheritGlobalContext,
@@ -342,9 +281,6 @@ export function editableAgentConfig(agent: AgentConfig): AgentConfig {
 		...(base.output !== undefined ? { output: base.output } : {}),
 		...(base.outputMode !== undefined ? { outputMode: base.outputMode } : {}),
 		...(base.defaultReads !== undefined ? { defaultReads: [...base.defaultReads] } : {}),
-		...(base.model !== undefined ? { model: base.model } : {}),
-		...(base.fallbackModels !== undefined ? { fallbackModels: [...base.fallbackModels] } : {}),
-		...(base.thinking !== undefined ? { thinking: base.thinking } : {}),
 		systemPromptMode: base.systemPromptMode,
 		inheritProjectContext: base.inheritProjectContext,
 		inheritGlobalContext: base.inheritGlobalContext,
@@ -386,8 +322,6 @@ export function preservedAgentFrontmatterFields(agent: AgentConfig, cfg: Record<
 	if (hasKey(cfg, "aliases")) changed("alias", "aliases");
 	if (hasKey(cfg, "systemPrompt")) changed("systemPrompt");
 	if (hasKey(cfg, "runner")) changed("runner");
-	if (hasKey(cfg, "model")) changed("model");
-	if (hasKey(cfg, "fallbackModels")) changed("fallbackModels");
 	if (hasKey(cfg, "tools")) changed("tools");
 	if (hasKey(cfg, "excludeTools")) changed("excludeTools");
 	if (hasKey(cfg, "skills")) changed("skill", "skills");
@@ -395,10 +329,6 @@ export function preservedAgentFrontmatterFields(agent: AgentConfig, cfg: Record<
 	if (hasKey(cfg, "extensions")) changed("extensions");
 	if (hasKey(cfg, "subagentOnlyExtensions")) changed("subagentOnlyExtensions");
 	if (hasKey(cfg, "mutationTools")) changed("mutationTools");
-	if (hasKey(cfg, "thinking")) {
-		changed("thinking");
-		if (cfg.thinking === "off") fields.add("thinking");
-	}
 	if (hasKey(cfg, "systemPromptMode")) {
 		changed("systemPromptMode");
 		fields.add("systemPromptMode");
@@ -487,29 +417,6 @@ function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): st
 			} else return `config.runner must be { type: 'pi' }, { type: 'external-cli', adapter?: ${CODE_OWNED_EXTERNAL_CLI_ADAPTER_LABEL}, command: string, args?: string[], promptDelivery?: 'stdin' }, or { type: 'external-job', provider: string, options?: object }.`;
 		} else return "config.runner must be an object, false, or empty string when provided.";
 	}
-	if (hasKey(cfg, "model")) {
-		if (cfg.model === false || cfg.model === "") delete target.model;
-		else if (typeof cfg.model === "string") {
-			const model = cfg.model.trim();
-			if (model) target.model = model;
-			else delete target.model;
-		} else return "config.model must be a string or false when provided.";
-	}
-	if (hasKey(cfg, "fallbackModels")) {
-		if (cfg.fallbackModels === false || cfg.fallbackModels === "") delete target.fallbackModels;
-		else if (typeof cfg.fallbackModels === "string") {
-			const models = parseCsv(cfg.fallbackModels);
-			if (models.length) target.fallbackModels = models;
-			else delete target.fallbackModels;
-		} else if (Array.isArray(cfg.fallbackModels)) {
-			const models = cfg.fallbackModels
-				.filter((value): value is string => typeof value === "string")
-				.map((value) => value.trim())
-				.filter(Boolean);
-			if (models.length) target.fallbackModels = [...new Set(models)];
-			else delete target.fallbackModels;
-		} else return "config.fallbackModels must be a comma-separated string, string array, or false when provided.";
-	}
 	if (hasKey(cfg, "tools")) {
 		if (cfg.tools === false || cfg.tools === "") { delete target.tools; delete target.mcpDirectTools; }
 		else if (typeof cfg.tools === "string") {
@@ -569,14 +476,6 @@ function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): st
 		else if (cfg.mutationTools === "") target.mutationTools = [];
 		else if (typeof cfg.mutationTools === "string") target.mutationTools = parseCsv(cfg.mutationTools);
 		else return "config.mutationTools must be a comma-separated string, empty string, or false when provided.";
-	}
-	if (hasKey(cfg, "thinking")) {
-		if (cfg.thinking === false || cfg.thinking === "") delete target.thinking;
-		else if (typeof cfg.thinking === "string") {
-			const thinking = cfg.thinking.trim();
-			if (thinking) target.thinking = thinking;
-			else delete target.thinking;
-		} else return "config.thinking must be a string or false when provided.";
 	}
 	if (hasKey(cfg, "systemPromptMode")) {
 		if (cfg.systemPromptMode === "append" || cfg.systemPromptMode === "replace") target.systemPromptMode = cfg.systemPromptMode;
@@ -665,9 +564,6 @@ function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): st
 		const unsupported = [
 			target.tools?.length || target.mcpDirectTools?.length ? "tools" : undefined,
 			target.excludeTools?.length ? "excludeTools" : undefined,
-			target.model ? "model" : undefined,
-			target.fallbackModels?.length ? "fallbackModels" : undefined,
-			target.thinking ? "thinking" : undefined,
 			target.extensions?.length ? "extensions" : undefined,
 			target.subagentOnlyExtensions?.length ? "subagentOnlyExtensions" : undefined,
 			target.mutationTools?.length ? "mutationTools" : undefined,
@@ -772,14 +668,8 @@ function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<stri
 		tools = declaredTools.join(", ");
 	}
 	if (agent.excludeTools?.length) tools = `${tools}; excludes: ${agent.excludeTools.join(", ")}`;
-	let model = "inherits current session";
-	if (agent.model !== undefined) {
-		model = agent.model;
-		if (agent.modelProvider && !agent.model.includes("/")) model = `${agent.modelProvider}/${agent.model}`;
-	}
-	const thinking = agent.thinking === false ? "off" : agent.thinking ?? "default";
 	const constraints = agentCapabilityConstraints(agent);
-	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: ${model}; Thinking: ${thinking}${constraints.length ? `; Constraints: ${constraints.join(", ")}` : ""}`;
+	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: session; Thinking: per-run effort controller${constraints.length ? `; Constraints: ${constraints.join(", ")}` : ""}`;
 }
 
 const EXTERNAL_JOB_CAPABILITIES = { stop: false, steer: false, resume: false, structuredOutput: false, toolEvents: false } as const;
@@ -823,7 +713,6 @@ function agentCapabilityRow(agent: AgentConfig, options: { executable: boolean; 
 		runner: agentCapabilityRunner(agent, options.providerNames),
 		...(agentCapabilityConstraints(agent).length ? { constraints: agentCapabilityConstraints(agent) } : {}),
 		tools: agentCapabilityTools(agent),
-		model: presentDetails({ value: agent.model, fallbackModels: agent.fallbackModels, thinking: agent.thinking }),
 		execution: presentDetails({ defaultAsync: agent.defaultAsync, timeoutMs: agent.defaultTimeoutMs }),
 		output: presentDetails({ path: agent.output, mode: agent.outputMode }),
 		extensions: presentDetails({ names: agent.extensions, subagentOnly: agent.subagentOnlyExtensions, skills: agent.skills }),
@@ -923,8 +812,7 @@ function formatAgentDetail(agent: AgentConfig): string {
 		lines.push(`Package: ${agent.packageName}`);
 	}
 	if (agent.aliases?.length) lines.push(`Aliases: ${agent.aliases.join(", ")}`);
-	if (agent.model) lines.push(`Model: ${agent.model}`);
-	if (agent.fallbackModels?.length) lines.push(`Fallback models: ${agent.fallbackModels.join(", ")}`);
+	lines.push("Model: session (subagents run on the session model)");
 	if (tools.length) lines.push(`Tools: ${tools.join(", ")}`);
 	if (agent.excludeTools?.length) lines.push(`Excluded tools: ${agent.excludeTools.join(", ")}`);
 	if (agent.skills?.length) lines.push(`Skills: ${agent.skills.join(", ")}`);
@@ -950,7 +838,6 @@ function formatAgentDetail(agent: AgentConfig): string {
 	if (agent.mutationTools !== undefined) lines.push(`Mutation tools: ${agent.mutationTools.length ? agent.mutationTools.join(", ") : "(none)"}`);
 	const constraints = agentCapabilityConstraints(agent);
 	if (constraints.length) lines.push(`Hard constraints: ${constraints.join("; ")}`);
-	if (agent.thinking) lines.push(`Thinking: ${agent.thinking}`);
 	if (agent.output) lines.push(`Output: ${agent.output}`);
 	if (agent.outputMode) lines.push(`Output mode: ${agent.outputMode}`);
 	if (agent.defaultReads?.length) lines.push(`Reads: ${agent.defaultReads.join(", ")}`);
@@ -1019,176 +906,6 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	}));
 }
 
-function formatModelSource(agent: AgentConfig, currentModel: ParentModel | undefined): string {
-	if (agent.override && agent.model !== agent.override.base.model) {
-		return `${agent.override.scope} override`;
-	}
-	if (agent.modelSource?.type === "subagents.defaultModel" && agent.model === agent.modelSource.model) {
-		return `${agent.modelSource.scope} defaultModel`;
-	}
-	if (agent.model) return `${agent.source} agent config`;
-	if (currentModel) return "inherits current session model";
-	return "inherit requested, but no current session model is available";
-}
-
-function handleModels(params: ManagementParams, ctx: ManagementContext): AgentToolResult<Details> {
-	const requestedAgent = params.agent?.trim();
-	const scope = normalizeListScope(params.agentScope);
-	if (!scope) return result("agentScope must be 'user', 'project', or 'both' for models.", true);
-
-	const discovered = discoverAgentsAll(ctx.cwd, ctx.model?.provider);
-	const effectiveAgents = effectiveAgentsForScope(scope, discovered, ctx.runtimeAgentOwner)
-		.sort((a, b) => a.name.localeCompare(b.name));
-	const availableModels = ctx.modelRegistry.getAvailable().map(toModelInfo);
-	const currentModel = ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined;
-	const preferredProvider = ctx.model?.provider;
-	const capabilityCeiling = resolveCurrentSubagentCapabilityCeiling(ctx.currentSessionId);
-	const modelQuery = params.model?.trim() ?? "";
-	const filteredModels = modelQuery ? filterModelsByQuery(availableModels, modelQuery) : availableModels;
-
-	let selectedAgents = effectiveAgents;
-	let modelsFallbackWarning: string | undefined;
-	if (requestedAgent) {
-		const matches = findAgentsInDiscovery(requestedAgent, discovered, scope, ctx.runtimeAgentOwner);
-		const diagnostics = diagnosticsForScope(discovered.agentDiagnostics, scope);
-		const normalizedName = sanitizeName(requestedAgent);
-		const diagnostic = findBlockingAgentDiagnostic(requestedAgent, matches, diagnostics)
-			?? (normalizedName !== requestedAgent ? findBlockingAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
-		if (diagnostic) return result(formatBlockingAgentError(requestedAgent, diagnostic), true);
-		const shadowed = findShadowedAgentDiagnostic(requestedAgent, matches, diagnostics)
-			?? (normalizedName !== requestedAgent ? findShadowedAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
-		const distinctNames = [...new Set(matches.map((agent) => agent.name))];
-		if (distinctNames.length > 1) return result(`Ambiguous agent alias or name '${params.agent}': ${distinctNames.sort((a, b) => a.localeCompare(b)).join(", ")}`, true);
-		if (!matches.length) {
-			return result(`Agent '${params.agent}' not found. Available: ${availableAgentNamesFromDiscovery(discovered, ctx.runtimeAgentOwner).join(", ") || "none"}.`, true);
-		}
-		selectedAgents = [matches[0]!];
-		if (shadowed) modelsFallbackWarning = formatShadowedAgentWarning(requestedAgent, matches[0]!, shadowed);
-	}
-
-	const dateNotice = /(?:^|\s)added:/i.test(modelQuery) ? "Date filter uses the provider catalog addition timestamp in UTC, not the model's release date. Missing dates are excluded; an empty result is not permission to broaden the request." : undefined;
-	const lines = [
-		...(dateNotice ? [dateNotice, ""] : []),
-		...(modelsFallbackWarning ? [modelsFallbackWarning, ""] : []),
-		requestedAgent ? "Subagent model" : "Subagent models",
-		"",
-		...(requestedAgent ? [] : [
-			"Current main-session model (not necessarily within the subagent budget):",
-			`  ${currentModel ? `${currentModel.provider}/${currentModel.id}` : "(unavailable)"}`,
-			"",
-		]),
-	];
-
-	if (!requestedAgent && modelQuery) {
-		if (!filteredModels.length) {
-			const providers = [...new Set(availableModels.map((m) => m.provider))].sort();
-			return result(
-				`${dateNotice ? dateNotice + '\n' : ''}No registry model matches '${modelQuery}'. Registered providers (use one as the model filter to list its models): ${providers.join(", ")}. Report the miss to the user and ask how to proceed — do not silently substitute another model or provider.`,
-			);
-		}
-		lines.push(
-			`Registry matches for '${modelQuery}': ${filteredModels.length} (copy an exact provider/id; append a thinking suffix only at a listed supported level):`,
-			"",
-		);
-		const economy = loadModelEconomyConfig();
-		const intelligence = readRankCache().cache;
-  const evidenceNow = Date.now();
-		const rows = filteredModels.map((entry) => ({
-			entry,
-			policy: classifyModelEconomy(entry.fullId, entry, economy),
-		}));
-		const eligible = (row: typeof rows[number]) => !economy.enabled || ["affordable", "subscription"].includes(row.policy.verdict);
-		// Agents pick from the top of this list. Alphabetical order put premium
-		// routes first: a text-only main agent sent six screenshot reviews to a
-		// $2/$10 route while $0.035/$0.29 image routes sat further down. List
-		// free and subscription routes first, then the cheapest worst case.
-		const price = (row: typeof rows[number]) => row.policy.verdict === "subscription" ? 0 : row.policy.rates ? row.policy.rates.input + row.policy.rates.output : Number.POSITIVE_INFINITY;
-		rows.sort((a, b) => Number(eligible(b)) - Number(eligible(a)) || price(a) - price(b) || a.entry.fullId.localeCompare(b.entry.fullId));
-		for (const { entry, policy } of rows.slice(0, 40)) {
-			const want = modelIdentity(entry.id);
-			const benchmarks = (intelligence?.observations ?? []).filter(b=>modelIdentity(b.model)===want && b.observedAt<=evidenceNow && evidenceNow-b.observedAt<QUALITY_TTL_MS);
-   const quality = benchmarks.length ? `benchmark evidence: ${benchmarks.length} measures (${[...new Set(benchmarks.map(b=>b.domain))].join(", ")}); task gate still applies` : "benchmark quality: unknown";
-			const rates = policy.rates ? `; worst-case $${policy.rates.input}/$${policy.rates.output} per M input/output` : "";
-			const caps = catalogRouteCapabilities(entry);
-			lines.push(`  ${entry.fullId}  [${describeModelThinking(entry)}; input: ${entry.input?.join(", ") ?? "unknown"}; tools: ${caps?.toolCalling === true ? "yes" : caps?.toolCalling === false ? "no" : "unknown"}; ${caps?.catalogAddedAt ? `catalog added: ${new Date(caps.catalogAddedAt).toISOString().slice(0,10)}; ` : ""}economy: ${economy.enabled ? policy.verdict : "disabled"}${rates}; ${quality}]`);
-		}
-		if (rows.length > 40) lines.push(`  ... ${rows.length - 40} more; narrow the query with a provider or model name.`);
-		lines.push("", "For automatic budget-aware selection use model: inherit. For an explicit route, choose an affordable/subscription entry with the required capabilities; expensive/zero-placeholder entries will be blocked unless already authorized. Pass a :thinking suffix only at a supported level. Registry capability is not a live probe; scope, quota and user constraints still apply. Benchmark evidence is cached from exact model identities; a newer version is preferred only when comparable scores support it. Unknown quality permits bounded advice, not an automatic quality downgrade for implementation. Artificial Analysis data attribution: https://artificialanalysis.ai/.");
-		if (modelQuery.toLowerCase().split(/\s+/).includes("input:image"))
-			lines.push("Visual inspection of local files: narrow with input:image tools:true to require advertised tool calling as well as vision; unknown tool support is excluded by tools:true. Otherwise choose an eligible image route explicitly (default children may inherit your text-only model). Use a fresh read-only child with the absolute image paths and a concrete visual question; it must read the images and return observations, not edit files. If none is permitted, report the limitation rather than guessing.");
-		return result(lines.join("\n"));
-	}
-
-	const modelEntries = selectedAgents.flatMap((agent) => requestedAgent
-		? [{ agent, name: requestedAgent }]
-		: [{ agent, name: agent.name }, ...(agent.aliases ?? []).map((name) => ({ agent, name }))]);
-	for (const { agent, name } of modelEntries) {
-		const resolvedModel = resolveSubagentModelOverride(agent.model, currentModel, availableModels, agent.modelProvider ?? preferredProvider);
-		const effectiveThinking = resolveEffectiveThinking(resolvedModel, agent.thinking)
-			?? (agent.thinking === false ? "off" : undefined);
-		const source = `${formatModelSource(agent, currentModel)}${agent.disabled ? "; disabled" : ""}${isAgentAllowedByCapabilityCeiling(agent.name, capabilityCeiling) ? "" : "; restricted"}`;
-		if (requestedAgent) {
-			lines.push(`Agent: ${requestedAgent}`);
-			lines.push("Effective model:");
-			lines.push(`  ${resolvedModel ?? "(unresolved)"}`);
-			lines.push(`Source: ${source}`);
-			lines.push(`Thinking: ${effectiveThinking ?? "default"}`);
-			if (agent.fallbackModels?.length) {
-				lines.push("Fallback models:");
-				for (const fallback of agent.fallbackModels) {
-					lines.push(`  ${resolveSubagentModelOverride(fallback, currentModel, availableModels, agent.modelProvider ?? preferredProvider) ?? fallback}`);
-				}
-			}
-			if (agent.override) {
-				lines.push("Override file:");
-				lines.push(`  ${agent.override.path}`);
-			}
-			if (agent.model && resolvedModel && agent.model !== resolvedModel) {
-				lines.push("Requested model setting:");
-				lines.push(`  ${agent.model}`);
-			}
-			if (agent.disabled) lines.push("Disabled: true");
-			if (!isAgentAllowedByCapabilityCeiling(agent.name, capabilityCeiling)) lines.push("Restricted: true");
-			lines.push("Current session model:");
-			lines.push(`  ${currentModel ? `${currentModel.provider}/${currentModel.id}` : "(unavailable)"}`);
-			break;
-		}
-		lines.push(name);
-		lines.push("  model:");
-		lines.push(`    ${resolvedModel ?? "(unresolved)"}`);
-		lines.push(`  source: ${source}`);
-		lines.push(`  thinking: ${effectiveThinking ?? "default"}`);
-		if (agent.fallbackModels?.length) {
-			lines.push("  fallback models:");
-			for (const fallback of agent.fallbackModels) {
-				lines.push(`    ${resolveSubagentModelOverride(fallback, currentModel, availableModels, agent.modelProvider ?? preferredProvider) ?? fallback}`);
-			}
-		}
-		if (agent.override) {
-			lines.push("  override file:");
-			lines.push(`    ${agent.override.path}`);
-		}
-		if (agent.model && resolvedModel && agent.model !== resolvedModel) {
-			lines.push("  requested model setting:");
-			lines.push(`    ${agent.model}`);
-		}
-		lines.push("");
-	}
-
-	const availableFullIds = availableModels.map((m) => m.fullId).sort();
-	if (!requestedAgent && availableFullIds.length > 0) {
-		lines.push("Available models in this session's registry (copy an exact provider/id when passing model):");
-		lines.push("");
-		const shown = availableFullIds.slice(0, 80);
-		for (const fullId of shown) lines.push(`  ${fullId}`);
-		if (availableFullIds.length > shown.length) lines.push(`  ... and ${availableFullIds.length - shown.length} more`);
-		lines.push("");
-		lines.push("Use an exact provider/id from this list when you pass model; bare ids resolve only when unique in the registry.");
-	}
-	if (!requestedAgent) appendAgentDiagnosticLines(lines, diagnosticsForScope(discovered.agentDiagnostics, scope));
-	return result(lines.join("\n"));
-}
-
 function handleGet(params: ManagementParams, ctx: ManagementContext): AgentToolResult<Details> {
 	if (!params.agent) return result(params.id || params.runId
 		? `get reads an agent definition, not a run. Inspect this run with subagent({ action: "status", id: ${JSON.stringify(params.id ?? params.runId)} }); use view: "transcript" for its retained conversation.`
@@ -1255,10 +972,8 @@ export function handleCreate(params: ManagementParams, ctx: ManagementContext): 
 	if (applyError) return result(applyError, true);
 	const profileError = validateCodeOwnedProfileRunner(agent);
 	if (profileError) return result(profileError, true);
-	const mw = modelWarning(ctx, agent.model);
-	if (mw) warnings.push(mw);
-	const fmw = fallbackModelsWarning(ctx, agent.fallbackModels);
-	if (fmw) warnings.push(fmw);
+	const retired = retiredModelFieldNote(cfg);
+	if (retired) warnings.push(retired);
 	const sw = skillsWarning(ctx.cwd, agent);
 	if (sw) warnings.push(sw);
 	fs.writeFileSync(targetPath, serializeAgent(agent), "utf-8");
@@ -1309,14 +1024,8 @@ export function handleUpdate(params: ManagementParams, ctx: ManagementContext): 
 	const profileError = validateCodeOwnedProfileRunner(updated);
 	if (profileError) return result(profileError, true);
 	if (hasKey(cfg, "description")) updated.description = (cfg.description as string).trim();
-	if (hasKey(cfg, "model")) {
-		const mw = modelWarning(ctx, updated.model);
-		if (mw) warnings.push(mw);
-	}
-	if (hasKey(cfg, "fallbackModels")) {
-		const fmw = fallbackModelsWarning(ctx, updated.fallbackModels);
-		if (fmw) warnings.push(fmw);
-	}
+	const retired = retiredModelFieldNote(cfg);
+	if (retired) warnings.push(retired);
 	if (hasKey(cfg, "skills") || hasKey(cfg, "skillPath")) {
 		const sw = skillsWarning(ctx.cwd, updated);
 		if (sw) warnings.push(sw);
@@ -1478,7 +1187,6 @@ export function handleManagementAction(action: string, params: ManagementParams,
 	switch (action) {
 		case "list": return handleList(params, ctx);
 		case "get": return handleGet(params, ctx);
-		case "models": return handleModels(params, ctx);
 		case "create": return handleCreate(params, ctx);
 		case "update": return handleUpdate(params, ctx);
 		case "delete": return handleDelete(params, ctx);

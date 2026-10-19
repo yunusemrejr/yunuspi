@@ -76,14 +76,13 @@ test("browse and search return small bounded previews with progressive detail", 
   const searches = [
     ["swarm", "fanout-execution"],
     ["fusion", "fanout-execution"],
-    ["free:true", "model-selection"],
     ["future session notes", "memory-notes"],
     ["prior memory", "memory-retrieval"],
     ["search old memory", "memory-retrieval"],
-    ["free provider", "model-selection"],
     ["workdir", "subagent-dispatch"],
     ["same checkout", "session-coordination"],
     ["provider selection", "provider-routing"],
+    ["double", "double-mode"],
   ];
   for (const [query, id] of searches) {
     assert.ok(searchCapabilities({ query }).results.some((row) => row.id === id), `${query} finds ${id}`);

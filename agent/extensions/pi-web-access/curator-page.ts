@@ -41,11 +41,9 @@ export function generateCuratorPage(
 	availableProviders: ProviderAvailability,
 	defaultProvider: string,
 	searchProvider: string,
-	summaryModels: Array<{ value: string; label: string }>,
-	defaultSummaryModel: string | null,
 ): string {
 	const providerButtonsHtml = buildProviderButtons(availableProviders, defaultProvider, queries.length > 0);
-	const inlineData = safeInlineJSON({ queries, sessionToken, timeout, defaultProvider, searchProvider, summaryModels, defaultSummaryModel, availableProviders });
+	const inlineData = safeInlineJSON({ queries, sessionToken, timeout, defaultProvider, searchProvider, availableProviders });
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -93,10 +91,6 @@ ${CSS}
 <div>
 <h2 class="summary-title">Review summary draft</h2>
 <p class="summary-subtitle" id="summary-subtitle">Edit the summary before approving.</p>
-</div>
-<div class="summary-model-controls">
-<select id="summary-provider-select" class="summary-model-dropdown" aria-label="Summary provider"></select>
-<select id="summary-model-select" class="summary-model-dropdown" aria-label="Summary model"></select>
 </div>
 </div>
 </div>
@@ -162,7 +156,6 @@ ${CSS}
 <button class="btn btn-submit preview-popover-btn" id="preview-popover-regen">Regenerate</button>
 </div>
 <div class="preview-modal-footer">
-<select id="preview-modal-model" class="preview-modal-model" aria-label="Summary model"></select>
 <button class="btn btn-secondary" id="preview-modal-regenerate">Regenerate</button>
 <button class="btn btn-submit" id="preview-modal-approve">Approve</button>
 </div>
@@ -378,33 +371,6 @@ main {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-}
-.summary-model-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex-shrink: 0;
-}
-.summary-model-dropdown {
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fg);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
-  max-width: 220px;
-}
-.summary-model-dropdown:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.summary-model-dropdown:disabled {
-  opacity: 0.65;
-  cursor: default;
 }
 .provider-btn {
   font-family: var(--font);
@@ -1233,22 +1199,9 @@ main {
 .preview-modal-footer {
   padding: 12px 20px;
   border-top: 1px solid var(--border);
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   flex-shrink: 0;
 }
-.preview-modal-model {
-  margin-right: auto;
-  font-family: var(--font);
-  font-size: 11px;
-  color: var(--fg-muted);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
-  max-width: 220px;
-  outline: none;
-}
-.preview-modal-model:focus { border-color: var(--accent); }
 
 .preview-popover {
   position: absolute;
@@ -1345,8 +1298,6 @@ main {
   .hero-title { font-size: 28px; }
   .hero-desc { font-size: 13px; }
   .summary-header-top { flex-direction: column; }
-  .summary-model-controls { flex-wrap: wrap; }
-  .summary-model-dropdown { max-width: 100%; }
   .action-bar { padding: 10px 14px; }
   .action-shortcuts { display: none; }
   .result-card-header { padding: 12px 14px; }
@@ -1367,15 +1318,6 @@ const SCRIPT = `(function() {
   if (providers.indexOf(initialDefaultProvider) === -1) initialDefaultProvider = "duckduckgo";
   var initialSearchProvider = typeof DATA.searchProvider === "string" ? DATA.searchProvider.toLowerCase() : initialDefaultProvider;
   if (initialSearchProvider !== "auto" && providers.indexOf(initialSearchProvider) === -1) initialSearchProvider = initialDefaultProvider;
-
-  var summaryModels = Array.isArray(DATA.summaryModels)
-    ? DATA.summaryModels.filter(function(model) {
-      return model && typeof model === "object" && typeof model.value === "string";
-    })
-    : [];
-  var defaultSummaryModel = typeof DATA.defaultSummaryModel === "string"
-    ? DATA.defaultSummaryModel.trim()
-    : "";
 
   var submitted = false;
   var timerExpired = false;
@@ -1435,12 +1377,9 @@ const SCRIPT = `(function() {
   var addSearchEl = document.getElementById("add-search");
   var addSearchWand = document.getElementById("add-search-wand");
   var heroStatus = document.getElementById("hero-status");
-  var summaryProviderSelect = document.getElementById("summary-provider-select");
-  var summaryModelSelect = document.getElementById("summary-model-select");
   var previewModal = document.getElementById("preview-modal");
   var previewModalBody = document.getElementById("preview-modal-body");
   var previewModalClose = document.getElementById("preview-modal-close");
-  var previewModalModel = document.getElementById("preview-modal-model");
   var previewModalRegenerate = document.getElementById("preview-modal-regenerate");
   var previewModalApprove = document.getElementById("preview-modal-approve");
   var previewPopover = document.getElementById("preview-popover");
@@ -1450,11 +1389,6 @@ const SCRIPT = `(function() {
   var providerButtons = Array.prototype.slice.call(document.querySelectorAll(".provider-btn"));
   var loadingPanelEl = null;
 
-  var summaryModelsByProvider = Object.create(null);
-  var summaryProviders = [];
-  var currentSummaryProvider = "";
-  var currentSummaryModel = "";
-  var summaryPendingModel = "";
   var summaryGeneratingStartedAt = 0;
   var summaryGeneratingPhase = -1;
   var rewriteInFlight = false;
@@ -1587,147 +1521,6 @@ const SCRIPT = `(function() {
     }
     html += "</div>";
     return html;
-  }
-
-  function getSummaryProvider(modelValue) {
-    if (typeof modelValue !== "string") return "";
-    var trimmed = modelValue.trim();
-    var slash = trimmed.indexOf("/");
-    if (slash <= 0) return "";
-    return trimmed.slice(0, slash);
-  }
-
-  function summaryProviderLabel(provider) {
-    if (!provider) return "";
-    if (provider === "openai") return "OpenAI";
-    if (provider === "google") return "Google";
-    if (provider === "anthropic") return "Anthropic";
-    return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-
-  function buildSummaryModelState() {
-    summaryModelsByProvider = Object.create(null);
-    summaryProviders = [];
-    var seenValues = {};
-
-    for (var i = 0; i < summaryModels.length; i++) {
-      var model = summaryModels[i];
-      if (!model || typeof model.value !== "string") continue;
-      var value = model.value.trim();
-      if (!value || seenValues[value]) continue;
-      var provider = getSummaryProvider(value);
-      if (!provider) continue;
-      seenValues[value] = true;
-
-      if (!summaryModelsByProvider[provider]) {
-        summaryModelsByProvider[provider] = [];
-        summaryProviders.push(provider);
-      }
-
-      var label = typeof model.label === "string" && model.label.trim().length > 0
-        ? model.label.trim()
-        : value;
-      summaryModelsByProvider[provider].push({ value: value, label: label });
-    }
-  }
-
-  function renderSummaryProviderSelect() {
-    if (!summaryProviderSelect) return;
-
-    summaryProviderSelect.innerHTML = "";
-    for (var i = 0; i < summaryProviders.length; i++) {
-      var provider = summaryProviders[i];
-      var option = document.createElement("option");
-      option.value = provider;
-      option.textContent = summaryProviderLabel(provider);
-      summaryProviderSelect.appendChild(option);
-    }
-  }
-
-  function populateSummaryModelSelect(provider, preferredModel) {
-    if (!summaryModelSelect) return;
-
-    summaryModelSelect.innerHTML = "";
-
-    var autoOption = document.createElement("option");
-    autoOption.value = "";
-    autoOption.textContent = "Auto";
-    summaryModelSelect.appendChild(autoOption);
-
-    var models = summaryModelsByProvider[provider] || [];
-    for (var i = 0; i < models.length; i++) {
-      var option = document.createElement("option");
-      option.value = models[i].value;
-      var shortLabel = models[i].value;
-      var labelSlash = shortLabel.indexOf("/");
-      if (labelSlash > 0) shortLabel = shortLabel.slice(labelSlash + 1);
-      option.textContent = shortLabel;
-      summaryModelSelect.appendChild(option);
-    }
-
-    var hasPreferred = false;
-    if (preferredModel) {
-      for (var j = 0; j < models.length; j++) {
-        if (models[j].value === preferredModel) {
-          hasPreferred = true;
-          break;
-        }
-      }
-    }
-
-    if (hasPreferred) {
-      summaryModelSelect.value = preferredModel;
-    } else if (models.length > 0) {
-      summaryModelSelect.value = models[0].value;
-    } else {
-      summaryModelSelect.value = "";
-    }
-
-    currentSummaryModel = typeof summaryModelSelect.value === "string"
-      ? summaryModelSelect.value.trim()
-      : "";
-  }
-
-  function setSummaryProvider(provider, preferredModel) {
-    if (summaryProviders.indexOf(provider) === -1) return;
-    currentSummaryProvider = provider;
-
-    if (summaryProviderSelect) {
-      summaryProviderSelect.value = provider;
-    }
-
-    populateSummaryModelSelect(provider, preferredModel);
-  }
-
-  function initializeSummaryModelControls() {
-    buildSummaryModelState();
-    renderSummaryProviderSelect();
-
-    if (summaryProviders.length === 0) {
-      currentSummaryProvider = "";
-      currentSummaryModel = "";
-      if (summaryProviderSelect) summaryProviderSelect.innerHTML = "";
-      if (summaryModelSelect) {
-        summaryModelSelect.innerHTML = '<option value="">Auto</option>';
-        summaryModelSelect.value = "";
-      }
-      return;
-    }
-
-    var defaultProvider = getSummaryProvider(defaultSummaryModel);
-    if (defaultProvider && summaryProviders.indexOf(defaultProvider) !== -1) {
-      setSummaryProvider(defaultProvider, defaultSummaryModel);
-      return;
-    }
-
-    setSummaryProvider(summaryProviders[0], "");
-  }
-
-  function getSelectedSummaryModel() {
-    if (!summaryModelSelect) return currentSummaryModel;
-    if (typeof summaryModelSelect.value !== "string") return currentSummaryModel;
-    currentSummaryModel = summaryModelSelect.value.trim();
-    return currentSummaryModel;
   }
 
   function getFeedbackText() {
@@ -1892,9 +1685,7 @@ const SCRIPT = `(function() {
     if (nextPhase === 1) phaseLabel = "Drafting summary";
     if (nextPhase === 2) phaseLabel = "Polishing summary";
 
-    summaryGeneratingCopy.textContent = summaryPendingModel
-      ? phaseLabel + " with " + summaryPendingModel + "…"
-      : phaseLabel + "…";
+    summaryGeneratingCopy.textContent = phaseLabel + "…";
 
     if (summaryGeneratingEl) {
       summaryGeneratingEl.dataset.phase = String(nextPhase);
@@ -1915,9 +1706,7 @@ const SCRIPT = `(function() {
       } else if (isRegenerating) {
         summarySubtitle.textContent = "Selection changed — summary will regenerate shortly…";
       } else if (stage === "generating-summary") {
-        summarySubtitle.textContent = summaryPendingModel
-          ? "Summarizing " + selLabel + " with " + summaryPendingModel + "…"
-          : "Summarizing " + selLabel + "…";
+        summarySubtitle.textContent = "Summarizing " + selLabel + "…";
       } else if (summaryMeta && summaryMeta.fallbackUsed) {
         var fallbackLabel = summaryMeta.phase === "deterministic-fallback" ? "Deterministic fallback summary" : "Fallback summary";
         var fallbackReason = summaryMeta.fallbackReason ? " Reason: " + summaryMeta.fallbackReason + "." : "";
@@ -1939,13 +1728,6 @@ const SCRIPT = `(function() {
     }
     if (summaryFeedback) {
       summaryFeedback.disabled = submitted || timerExpired || submitInFlight || stage === "generating-summary" || isRegenerating;
-    }
-    var disableSummaryModelControls = submitted || timerExpired || stage === "generating-summary" || submitInFlight || summaryProviders.length === 0;
-    if (summaryProviderSelect) {
-      summaryProviderSelect.disabled = disableSummaryModelControls;
-    }
-    if (summaryModelSelect) {
-      summaryModelSelect.disabled = disableSummaryModelControls;
     }
 
     var inResults = stage === "results";
@@ -2645,7 +2427,6 @@ const SCRIPT = `(function() {
     }
   }
 
-  initializeSummaryModelControls();
   syncLoadingPanel();
   recomputeProviderStates();
   updateStageUI();
@@ -2889,16 +2670,7 @@ const SCRIPT = `(function() {
     };
   }
 
-  function isSummaryModelSelectionError(message) {
-    if (typeof message !== "string") return false;
-    return message.indexOf("Invalid summary model") !== -1
-      || message.indexOf("Summary model not found") !== -1
-      || message.indexOf("No API key available for summary model") !== -1
-      || message.indexOf("Invalid provider") !== -1;
-  }
-
   function resetSummaryGeneratingState() {
-    summaryPendingModel = "";
     summaryGeneratingStartedAt = 0;
     summaryGeneratingPhase = -1;
   }
@@ -2951,8 +2723,6 @@ const SCRIPT = `(function() {
     clearError();
     var previousStage = stage;
     var wasRegenerating = isRegenerating;
-    var selectedSummaryModel = getSelectedSummaryModel();
-    summaryPendingModel = selectedSummaryModel;
     summaryGeneratingStartedAt = Date.now();
     summaryGeneratingPhase = -1;
     stage = "generating-summary";
@@ -2961,9 +2731,6 @@ const SCRIPT = `(function() {
     var requestId = ++summaryRequestSeq;
     var feedbackText = typeof feedback === "string" ? feedback.trim() : "";
     var summarizePayload = { selected: indices };
-    if (selectedSummaryModel.length > 0) {
-      summarizePayload.model = selectedSummaryModel;
-    }
     if (feedbackText.length > 0) {
       summarizePayload.feedback = feedbackText;
     }
@@ -2975,31 +2742,6 @@ const SCRIPT = `(function() {
           throw new Error(extractServerError(data) || "summary request rejected");
         }
         return data;
-      })
-      .catch(function(err) {
-        if (requestId !== summaryRequestSeq) throw err;
-
-        var firstMessage = err instanceof Error ? err.message : String(err);
-        if (selectedSummaryModel.length === 0 || !isSummaryModelSelectionError(firstMessage)) {
-          throw err;
-        }
-
-        summaryPendingModel = "";
-        updateStageUI();
-
-        var retryPayload = { selected: indices };
-        if (feedbackText.length > 0) {
-          retryPayload.feedback = feedbackText;
-        }
-        return postJson("/summarize", retryPayload).then(function(retryData) {
-          if (!retryData || retryData.ok === false) {
-            throw new Error(extractServerError(retryData) || "summary request rejected");
-          }
-          return retryData;
-        }).catch(function(retryErr) {
-          var retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          throw new Error(firstMessage + " (auto retry failed: " + (retryMessage || "unknown error") + ")");
-        });
       })
       .then(function(data) {
         if (requestId !== summaryRequestSeq) return;
@@ -3167,17 +2909,6 @@ const SCRIPT = `(function() {
       ? marked.parse(draft, { breaks: true })
       : "<pre>" + escHtml(draft) + "</pre>";
     previewModalBody.innerHTML = sanitizeMarkdownHtml(rendered);
-    if (previewModalModel) {
-      previewModalModel.innerHTML = '<option value="">Auto</option>';
-      for (var i = 0; i < summaryModels.length; i++) {
-        var m = summaryModels[i];
-        var opt = document.createElement("option");
-        opt.value = m.value;
-        opt.textContent = m.label;
-        previewModalModel.appendChild(opt);
-      }
-      previewModalModel.value = getSelectedSummaryModel() || "";
-    }
     previewModal.classList.remove("hidden");
     resetTimer();
   }
@@ -3225,15 +2956,7 @@ const SCRIPT = `(function() {
   }
   if (previewModalRegenerate) {
     previewModalRegenerate.addEventListener("click", function() {
-      var selectedModel = previewModalModel ? previewModalModel.value.trim() : "";
       closePreviewModal();
-      var modelProvider = getSummaryProvider(selectedModel);
-      if (modelProvider && modelProvider !== currentSummaryProvider) {
-        setSummaryProvider(modelProvider, selectedModel);
-      } else if (summaryModelSelect) {
-        summaryModelSelect.value = selectedModel;
-        currentSummaryModel = selectedModel;
-      }
       requestSummary(getSelectedIndices(), getFeedbackText());
       resetTimer();
     });
@@ -3269,15 +2992,7 @@ const SCRIPT = `(function() {
       var feedback = 'Regarding: "' + quoted + '"';
       if (note) feedback += " \u2014 " + note;
 
-      var selectedModel = previewModalModel ? previewModalModel.value.trim() : "";
       closePreviewModal();
-      var modelProvider = getSummaryProvider(selectedModel);
-      if (modelProvider && modelProvider !== currentSummaryProvider) {
-        setSummaryProvider(modelProvider, selectedModel);
-      } else if (summaryModelSelect) {
-        summaryModelSelect.value = selectedModel;
-        currentSummaryModel = selectedModel;
-      }
       requestSummary(getSelectedIndices(), feedback);
       resetTimer();
     });
@@ -3331,27 +3046,6 @@ const SCRIPT = `(function() {
       summaryMeta.edited = true;
       clearError();
       updateStageUI();
-      resetTimer();
-    });
-  }
-
-  if (summaryProviderSelect) {
-    summaryProviderSelect.addEventListener("change", function() {
-      var provider = typeof summaryProviderSelect.value === "string" ? summaryProviderSelect.value : "";
-      if (!provider || provider === currentSummaryProvider) return;
-      setSummaryProvider(provider, "");
-      clearError();
-      updateStageUI();
-      resetTimer();
-    });
-  }
-
-  if (summaryModelSelect) {
-    summaryModelSelect.addEventListener("change", function() {
-      currentSummaryModel = typeof summaryModelSelect.value === "string"
-        ? summaryModelSelect.value.trim()
-        : "";
-      clearError();
       resetTimer();
     });
   }
