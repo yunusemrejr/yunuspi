@@ -116,6 +116,14 @@ test('a failed test becomes one escaped GitHub annotation naming its file', () =
   assert.equal(line, '::error file=tests/x.test.mjs,title=handles%3A odd%2C names%0A100%25::expected 1%2C got 2\n');
 });
 
+test('a crashed child annotates its error line, not the Node source location printed before it', () => {
+  const crash = 'node:internal/fs/cp/cp-sync:138\n    throw new ERR_FS_CP_EEXIST({\n    ^\n\nError [ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (/tmp/x/stage/a.txt already exists)\n    at checkPathsSync';
+  const line = annotation({ name: 'installs', file: path.join(root, 'tests/x.test.mjs'), details: { error: { message: crash } } }, root);
+  assert.match(line, /::Error \[ERR_FS_CP_EEXIST\]%3A Target already exists/);
+  assert.doesNotMatch(line, /cp-sync/);
+  assert.equal(annotation({ name: 'plain', details: { error: { message: 'expected 1, got 2' } } }, root), '::error title=plain::expected 1%2C got 2\n');
+});
+
 test('known slow files start first and every registered slow file exists', () => {
   const all = ['tests/a.test.mjs', ...SLOW_FIRST.slice(0, 2).reverse(), 'tests/b.test.mjs'];
   const ordered = orderForRun(all, file => file === 'tests/b.test.mjs' ? 10 : 1);

@@ -6,9 +6,13 @@ const escape = text => String(text ?? '').replace(/%/g, '%25').replace(/\r/g, '%
 
 export function annotation(data, cwd = process.cwd()) {
   const error = data.details?.error;
-  const message = String(error?.cause?.message ?? error?.message ?? error ?? 'failed').split('\n').find(Boolean) ?? 'failed';
+  const lines = String(error?.cause?.message ?? error?.message ?? error ?? 'failed').split('\n').filter(Boolean);
+  // A crashed child prints Node's source location ("node:internal/fs/cp/cp-sync:138") before the error itself;
+  // a red shard is only diagnosable from the unauthenticated annotations if the error line is the one shown.
+  const message = (/^node:|^file:\/\/|^\s+at /.test(lines[0] ?? '') ? lines.find(line => /^(?:\w*Error|\w+Exception)\b/.test(line)) : undefined) ?? lines[0] ?? 'failed';
   const file = data.file ? path.relative(cwd, data.file.replace(/^file:\/\//, '')) : '';
-  return `::error${file ? ` file=${escape(file)}` : ''},title=${escape(data.name)}::${escape(message.slice(0, 300))}\n`;
+  // GitHub's workflow-command syntax is `::error prop=a,prop=b::message`: the properties follow a space, not a comma.
+  return `::error ${[file ? `file=${escape(file)}` : '', `title=${escape(data.name)}`].filter(Boolean).join(',')}::${escape(message.slice(0, 300))}\n`;
 }
 
 export default async function* ciFailureReporter(source) {
