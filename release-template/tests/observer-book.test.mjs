@@ -11,12 +11,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-book-'));
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = fixtureRoot;
-process.env.PI_LLM_PREFERENCES_FILE = path.join(fixtureRoot, 'preferences.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(fixtureRoot, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(fixtureRoot, 'exclusions.json');
-process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(fixtureRoot, 'economy.json');
 process.env.PI_OBSERVER_BOOK_DIR = 'off';
-fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 for (const key of ['PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_BOOK', 'PI_OBSERVER_MARGINS', 'PI_OBSERVER_MARGINS_DIR', 'PI_MEMORY_DIR']) delete process.env[key];
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 
@@ -342,15 +339,13 @@ function harness(options = {}) {
   const time = clock(), handlers = new Map(), listeners = new Map(), sent = [], receipts = [], packets = [], commands = new Map(), notified = [], routes = [];
   let branch = [], requestId = 0, reply;
   const model = { provider: 'deepseek', id: 'deepseek-flash', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, cost: { input: .1, output: .2, cacheRead: .01, cacheWrite: .1 }, input: ['text'] };
-  const models = [model, ...(options.models ?? [])];
+  const models = [model];
   const ctx = { cwd: fixtureRoot, sessionManager: { getSessionId: () => 'book-session', getSessionFile: () => '/synthetic/book.jsonl', getBranch: () => branch }, isIdle: () => false, model, modelRegistry: { getAvailable: () => models }, hasUI: true, ui: { notify: (text, level) => notified.push([text, level]) } };
   const pi = { events: { on: (name, fn) => { listeners.set(name, fn); return () => listeners.delete(name); } }, on: (name, fn) => handlers.set(name, fn), registerMessageRenderer() {}, registerCommand: (name, spec) => commands.set(name, spec),
     getActiveTools: () => ['read', 'edit'], getAllTools: () => [{ name: 'read', description: 'Read files' }, { name: 'edit', description: 'Edit files' }, { name: 'render_see', description: 'Render and capture a page' }, { name: 'browser_session', description: 'Drive a browser' }],
     sendMessage: (...args) => sent.push(args), appendEntry: (...args) => { receipts.push(args); branch.push({ type: 'custom', customType: args[0], data: args[1] }); } };
   observerExtension(pi, { ...time, judge: options.judge ?? (async () => ({ ok: false, skipped: 'fixture' })), marginDir: options.marginDir ?? path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
     packets.push(packet); routes.push(route.route);
-    if (options.fail?.(route.route)) return { stopReason: 'error', content: [] };
-    if (options.hang?.(route.route)) return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     const next = reply?.(packet) ?? { note: '', evidence: [] }; return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(next) }] }; } });
   const emit = (event, data = {}) => handlers.get(event)?.(data, ctx);
   emit('session_start');
@@ -391,10 +386,6 @@ test('the observer extension reads its book, applies doctrine and keeps margin n
   await h.advance(30000);
   assert.doesNotMatch(h.packets.at(-1).text, /\[m1\] Settings UI lives in src\/Settings\.tsx/);
   assert.ok(!h.packets.at(-1).book.passages.includes('ui-ux.verify-rendered') || /⚑/.test(h.packets.at(-1).text), 'just-cited doctrine rests unless its trigger still fires');
-  // Model routing evidence is sent once per task and omitted while unchanged.
-  const routing = h.packets.map(p => p.evidence.find(row => row.id === 'model-routing').text);
-  assert.doesNotMatch(routing[0], /Omitted this review/);
-  assert.match(routing.at(-1), /Omitted this review to save tokens/);
   // The command lets the user read the book and manage margin notes.
   const command = h.commands.get('observer-book');
   await command.handler('', h.ctx); assert.match(h.notified.at(-1)[0], /Observer Book [0-9a-f]{8}: \d+ chapters, \d+ passages[\s\S]*Last review read:[\s\S]*Margin notes for this project: 1/);
@@ -430,48 +421,6 @@ test('the observer requests a chapter, then reviews the same chunk with that cha
   assert.match(h.sent.at(-1)[0].content, /Observer book: Modern web design patterns ›/);
   h.close();
 });
-
-test('one timed-out review counts once toward cooling its route', async () => {
-  const prefs = process.env.PI_LLM_PREFERENCES_FILE;
-  fs.writeFileSync(prefs, JSON.stringify({ version: 1, preferences: { session_observer: { models: [{ provider: 'deepseek', model: 'deepseek-flash' }, { provider: 'zai', model: 'glm-flash' }] } } }));
-  try {
-    const backup = { provider: 'zai', id: 'glm-flash', api: 'openai-completions', baseUrl: 'https://api.z.ai/api/paas/v4', maxTokens: 8192, contextWindow: 65536, reasoning: false, cost: { input: .1, output: .2, cacheRead: 0, cacheWrite: 0 }, input: ['text'] };
-    const h = harness({ models: [backup], hang: route => route === 'deepseek/deepseek-flash' });
-    h.input('Fix the parser validation');
-    const review = async i => {
-      h.emit('tool_result', { toolCallId: `t${i}`, toolName: 'bash', input: { command: `npm test -- ${i}` }, isError: true, content: [{ type: 'text', text: `Failure ${i}` }] });
-      const before = h.routes.length;
-      for (let tick = 0; tick < 12 && h.routes.length === before; tick++) await h.advance(30000);
-      await h.advance(180000);
-    };
-    await review(0);
-    const timeouts = h.receipts.filter(([, data]) => data.status === 'timeout');
-    assert.equal(timeouts.length, 2, 'the deadline and the settled transport both report');
-    assert.equal(new Set(timeouts.map(([, data]) => data.id)).size, 1, 'for one dispatch');
-    await review(1);
-    assert.deepEqual(h.routes.slice(0, 2), ['deepseek/deepseek-flash', 'zai/glm-flash'], 'one timeout already cost a full deadline: the configured fallback serves next');
-    h.close();
-  } finally { fs.rmSync(prefs, { force: true }); }
-});
-
-test('a failing observer route cools down while the next configured route serves', async () => {
-  const prefs = process.env.PI_LLM_PREFERENCES_FILE;
-  fs.writeFileSync(prefs, JSON.stringify({ version: 1, preferences: { session_observer: { models: [{ provider: 'deepseek', model: 'deepseek-flash', thinking: 'high' }, { provider: 'zai', model: 'glm-flash' }] } } }));
-  try {
-    const backup = { provider: 'zai', id: 'glm-flash', api: 'openai-completions', baseUrl: 'https://api.z.ai/api/paas/v4', maxTokens: 8192, contextWindow: 65536, reasoning: false, cost: { input: .1, output: .2, cacheRead: 0, cacheWrite: 0 }, input: ['text'] };
-    const h = harness({ models: [backup], fail: route => route === 'deepseek/deepseek-flash' });
-    h.input('Fix the parser validation');
-    for (let i = 0; i < 3; i++) {
-      h.emit('tool_result', { toolCallId: `t${i}`, toolName: 'bash', input: { command: `npm test -- ${i}` }, isError: true, content: [{ type: 'text', text: `Failure ${i}` }] });
-      await h.advance(30000);
-    }
-    assert.deepEqual(h.routes.slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash']);
-    assert.equal(h.routes[2], 'zai/glm-flash', 'the configured fallback serves after two consecutive failures');
-    assert.ok(h.sent.some(([message]) => /failed repeatedly; using configured fallback zai\/glm-flash/.test(message.content)));
-    h.close();
-  } finally { fs.rmSync(prefs, { force: true }); }
-});
-
 
 test('margin duplicate decisions apply only while their task owns the result', async () => {
   const { projectMemoryKey } = await import('../agent/extensions/pi-memory/project-identity.ts');

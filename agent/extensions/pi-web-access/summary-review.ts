@@ -1,21 +1,10 @@
-import { clampThinkingLevel, type ModelThinkingLevel, type ThinkingLevel } from "@yunuspi/ai";
-import { complete, completeSimple, type Api, type Message, type Model } from "@yunuspi/ai/compat";
+import { complete, type Api, type Message, type Model } from "@yunuspi/ai/compat";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
-import { findModelWithProviderRouting, loadEnabledModelPatterns, modelMatchesEnabledPatterns, splitThinkingSuffix, type SummaryThinkingLevel } from "./summary-model-scope.ts";
 import type { QueryResultData } from "./storage.ts";
 
 type ProviderHeaders = Record<string, string | null>;
 type CompleteFunction = typeof complete;
 type SummaryModelRegistry = SummaryGenerationContext["modelRegistry"] & { complete?: CompleteFunction };
-
-const PREFERRED_SUMMARY_MODELS = [
-	{ provider: "anthropic", id: "claude-haiku-4-5" },
-	{ provider: "openai-codex", id: "gpt-5.6-luna" },
-	{ provider: "openai-codex", id: "gpt-5.6-terra" },
-	{ provider: "google", id: "gemini-3.6-flash" },
-	{ provider: "openai", id: "gpt-5-mini" },
-	{ provider: "deepseek", id: "deepseek-v4-flash" },
-] as const;
 
 export const SUMMARY_GENERATION_DEADLINE_MS = 30_000;
 
@@ -29,7 +18,7 @@ export interface SummaryMeta {
 	edited?: boolean;
 }
 
-export type SummaryGenerationContext = Pick<ExtensionContext, "model" | "modelRegistry" | "cwd" | "isProjectTrusted">;
+export type SummaryGenerationContext = Pick<ExtensionContext, "model" | "modelRegistry">;
 
 function estimateTokens(text: string): number {
 	const trimmed = text.trim();
@@ -191,59 +180,14 @@ export function buildDeterministicSummary(results: QueryResultData[]): { summary
 	};
 }
 
-function parseModelSelector(value: string): { provider: string; id: string; thinkingLevel?: SummaryThinkingLevel } {
-	const selector = splitThinkingSuffix(value);
-	const slashIndex = selector.value.indexOf("/");
-	if (slashIndex <= 0 || slashIndex >= selector.value.length - 1) {
-		throw new Error(`Invalid summary model: ${value}. Use provider/model-id.`);
-	}
-	return {
-		provider: selector.value.slice(0, slashIndex),
-		id: selector.value.slice(slashIndex + 1),
-		thinkingLevel: selector.thinkingLevel,
-	};
-}
+type ResolvedSummaryModel = { model: Model<Api>; apiKey?: string; headers?: ProviderHeaders } | { error: string };
 
-function resolveThinkingLevel(model: Model<Api>, requested?: SummaryThinkingLevel): ModelThinkingLevel | undefined {
-	if (!requested) return undefined;
-	return clampThinkingLevel(model, requested as ModelThinkingLevel);
-}
-
-async function resolveSummaryModelCandidates(
-	ctx: SummaryGenerationContext,
-	modelOverride?: string,
-): Promise<{ candidates: Array<{ model: Model<Api>; apiKey?: string; headers?: ProviderHeaders; thinkingLevel?: SummaryThinkingLevel }>; errors: string[] }> {
-	const enabledModelPatterns = loadEnabledModelPatterns(ctx);
-	const specs: Array<{ provider: string; id: string; thinkingLevel?: SummaryThinkingLevel }> = [];
-	const normalizedOverride = typeof modelOverride === "string" ? modelOverride.trim() : "";
-	if (normalizedOverride.length > 0) specs.push(parseModelSelector(normalizedOverride));
-	specs.push(...PREFERRED_SUMMARY_MODELS);
-
-	const candidates: Array<{ model: Model<Api>; apiKey?: string; headers?: ProviderHeaders; thinkingLevel?: SummaryThinkingLevel }> = [];
-	const errors: string[] = [];
-	const seen = new Set<string>();
-	for (const spec of specs) {
-		const value = `${spec.provider}/${spec.id}`;
-		if (seen.has(value)) continue;
-		seen.add(value);
-
-		const model = findModelWithProviderRouting(ctx.modelRegistry, spec.provider, spec.id);
-		if (!model) {
-			errors.push(`Summary model not found: ${value}`);
-			continue;
-		}
-		if (!modelMatchesEnabledPatterns(model, enabledModelPatterns)) {
-			errors.push(`Summary model is not enabled: ${value}`);
-			continue;
-		}
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok) {
-			errors.push(`No API key available for summary model ${value}`);
-			continue;
-		}
-		candidates.push({ model, apiKey: auth.apiKey, headers: auth.headers, thinkingLevel: spec.thinkingLevel });
-	}
-	return { candidates, errors };
+async function resolveSessionSummaryModel(ctx: SummaryGenerationContext): Promise<ResolvedSummaryModel> {
+	const model = ctx.model;
+	if (!model) return { error: "No active session model" };
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok) return { error: `No API key available for summary model ${model.provider}/${model.id}` };
+	return { model, apiKey: auth.apiKey, headers: auth.headers };
 }
 
 function buildFallbackSummary(
@@ -287,7 +231,6 @@ export async function generateSummaryDraft(
 	results: QueryResultData[],
 	ctx: SummaryGenerationContext,
 	signal?: AbortSignal,
-	modelOverride?: string,
 	feedback?: string,
 	completeFn?: CompleteFunction,
 	deadlineMs = SUMMARY_GENERATION_DEADLINE_MS,
@@ -343,9 +286,9 @@ export async function generateSummaryDraft(
 	try {
 		if (signal?.aborted) throw new Error("Aborted");
 		const prompt = buildSummaryPrompt(results, feedback);
-		let resolved: Awaited<ReturnType<typeof resolveSummaryModelCandidates>>;
+		let resolved: ResolvedSummaryModel;
 		try {
-			resolved = await raceSummaryOperation(resolveSummaryModelCandidates(ctx, modelOverride));
+			resolved = await raceSummaryOperation(resolveSessionSummaryModel(ctx));
 		} catch (err) {
 			if (signal?.aborted) throw new Error("Aborted");
 			if (err === deadlineMarker || deadlineController.signal.aborted) {
@@ -354,74 +297,62 @@ export async function generateSummaryDraft(
 			const message = err instanceof Error ? err.message : String(err);
 			return buildFallbackSummary(results, `summary-model-settings-error: ${message}`, Date.now() - generationStartedAt);
 		}
-
-		let lastError = resolved.errors.at(-1);
-		for (const { model, apiKey, headers, thinkingLevel } of resolved.candidates) {
-			const startedAt = Date.now();
-			try {
-				const userMessage: Message = {
-					role: "user",
-					content: [{ type: "text", text: prompt }],
-					timestamp: Date.now(),
-				};
-				const requestedThinkingLevel = resolveThinkingLevel(model, thinkingLevel);
-				const enabledThinkingLevel = requestedThinkingLevel && requestedThinkingLevel !== "off"
-					? requestedThinkingLevel as ThinkingLevel
-					: undefined;
-				const completionOptions = {
-					...(usesRegistryComplete ? {} : { apiKey, headers }),
-					signal: completionSignal,
-					...(requestedThinkingLevel ? { reasoning: requestedThinkingLevel } : {}),
-					...(enabledThinkingLevel ? { reasoningEffort: enabledThinkingLevel } : {}),
-				};
-				const completion = thinkingLevel !== undefined && !customCompleteFn && !usesRegistryComplete
-					? completeSimple(model, { messages: [userMessage] }, { apiKey, headers, signal: completionSignal, ...(enabledThinkingLevel ? { reasoning: enabledThinkingLevel } : {}) })
-					: completeFn(model, { messages: [userMessage] }, completionOptions);
-
-				const response = await raceSummaryOperation(Promise.resolve(completion));
-				if (response.stopReason === "aborted") {
-					throw new Error("Aborted");
-				}
-
-				const contentParts = Array.isArray(response.content) ? response.content : [];
-				const summary = contentParts
-					.map((part: unknown) => getTextFromContentPart(part))
-					.filter((text: string) => text.trim().length > 0)
-					.join("\n")
-					.trim();
-
-				if (summary.length === 0) {
-					const partTypes = contentParts.map((part: unknown) => getContentPartType(part));
-					const typesLabel = partTypes.length > 0 ? partTypes.join(", ") : "none";
-					throw new Error(`Summary model returned empty response (content parts: ${typesLabel})`);
-				}
-
-				return {
-					summary,
-					meta: {
-						model: `${model.provider}/${model.id}`,
-						durationMs: Math.max(0, Date.now() - startedAt),
-						tokenEstimate: estimateTokens(summary),
-						fallbackUsed: false,
-						phase: "summary-model",
-						edited: false,
-					},
-				};
-			} catch (err) {
-				if (signal?.aborted) throw new Error("Aborted");
-				if (err === deadlineMarker || deadlineController.signal.aborted) {
-					return buildFallbackSummary(results, "summary-generation-timeout", Date.now() - generationStartedAt);
-				}
-				if (isAbortError(err)) throw err;
-				lastError = err instanceof Error ? err.message : String(err);
-			}
+		if ("error" in resolved) {
+			return buildFallbackSummary(results, `summary-model-unavailable: ${resolved.error}`, Date.now() - generationStartedAt);
 		}
 
-		return buildFallbackSummary(
-			results,
-			lastError ? `summary-model-unavailable: ${lastError}` : "summary-model-unavailable",
-			Date.now() - generationStartedAt,
-		);
+		const { model, apiKey, headers } = resolved;
+		const startedAt = Date.now();
+		try {
+			const userMessage: Message = {
+				role: "user",
+				content: [{ type: "text", text: prompt }],
+				timestamp: Date.now(),
+			};
+			const completionOptions = {
+				...(usesRegistryComplete ? {} : { apiKey, headers }),
+				signal: completionSignal,
+			};
+			const completion = completeFn(model, { messages: [userMessage] }, completionOptions);
+
+			const response = await raceSummaryOperation(Promise.resolve(completion));
+			if (response.stopReason === "aborted") {
+				throw new Error("Aborted");
+			}
+
+			const contentParts = Array.isArray(response.content) ? response.content : [];
+			const summary = contentParts
+				.map((part: unknown) => getTextFromContentPart(part))
+				.filter((text: string) => text.trim().length > 0)
+				.join("\n")
+				.trim();
+
+			if (summary.length === 0) {
+				const partTypes = contentParts.map((part: unknown) => getContentPartType(part));
+				const typesLabel = partTypes.length > 0 ? partTypes.join(", ") : "none";
+				throw new Error(`Summary model returned empty response (content parts: ${typesLabel})`);
+			}
+
+			return {
+				summary,
+				meta: {
+					model: `${model.provider}/${model.id}`,
+					durationMs: Math.max(0, Date.now() - startedAt),
+					tokenEstimate: estimateTokens(summary),
+					fallbackUsed: false,
+					phase: "summary-model",
+					edited: false,
+				},
+			};
+		} catch (err) {
+			if (signal?.aborted) throw new Error("Aborted");
+			if (err === deadlineMarker || deadlineController.signal.aborted) {
+				return buildFallbackSummary(results, "summary-generation-timeout", Date.now() - generationStartedAt);
+			}
+			if (isAbortError(err)) throw err;
+			const message = err instanceof Error ? err.message : String(err);
+			return buildFallbackSummary(results, `summary-model-unavailable: ${message}`, Date.now() - generationStartedAt);
+		}
 	} finally {
 		if (deadlineTimer) clearTimeout(deadlineTimer);
 		if (signal && callerAbortListener) signal.removeEventListener("abort", callerAbortListener);

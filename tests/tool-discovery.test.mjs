@@ -310,6 +310,17 @@ test("skill projection removes only the configured SDK catalog and keeps user in
   "duplicate-blocks",
  );
  assert.equal(skillCatalogProjectionMiss(event, ["read"]), null);
+ const oldChild = process.env.PI_SUBAGENT_CHILD;
+ try {
+  process.env.PI_SUBAGENT_CHILD = "1";
+  const childProjected = compactSkillCatalog(event, ["read"]);
+  assert.ok(childProjected, "subagent children compact skill catalog even without skill_review");
+  assert.ok(!childProjected.includes("<available_skills>"));
+  assert.match(childProjected, /managed by parent session/);
+ } finally {
+  if (oldChild === undefined) delete process.env.PI_SUBAGENT_CHILD;
+  else process.env.PI_SUBAGENT_CHILD = oldChild;
+ }
 });
 
 test("group browsing and query previews do not expose schemas until a specific activation", async () => {

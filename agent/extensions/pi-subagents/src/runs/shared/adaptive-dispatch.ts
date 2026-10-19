@@ -1,8 +1,6 @@
 import { adaptiveExecutionEnabled, classifyExecution, type ExecutionProfile } from '../../../../lib/adaptive-execution.ts';
-import { findModelInfo, getSupportedThinkingLevels, THINKING_LEVELS, splitKnownThinkingSuffix, type ModelInfo, type ThinkingLevel } from '../../shared/model-info.ts';
-import { decodeThinkingCeiling, intersectThinkingCeilings, SUBAGENT_THINKING_CEILING_ENV } from '../../shared/thinking-ceiling.ts';
 
-interface ChildBrief { task?: string; model?: string; thinking?: string | false; count?: number }
+interface ChildBrief { task?: string; count?: number }
 interface Group { parallel: ChildBrief[] | ChildBrief; concurrency?: number; expand?: { maxItems?: number } }
 interface DispatchRequest extends ChildBrief {
   tasks?: ChildBrief[];
@@ -59,59 +57,4 @@ export function adaptiveDispatchDefaults<T extends DispatchRequest>(request: T, 
     params = {...params,globalConcurrencyLimit:3}; changes.push({path:'workflow',concurrency:3,source:'adaptive'});
   }
   return {params,changes};
-}
-
-/** Match native flat launch indices, including count expansion and reserved
- * dynamic slots, without copying child briefs or allocating a fan-out array. */
-export function adaptiveChildBrief(request: DispatchRequest, index: number, dynamicMaxItems?: number): ChildBrief | undefined {
-  if (!Number.isSafeInteger(index) || index < 0) return;
-  let offset = 0;
-  const find = (child: ChildBrief, copies = 1) => {
-    const amount = Number.isSafeInteger(copies) && copies > 0 ? copies : 0;
-    const selected = index >= offset && index < offset + amount;
-    offset += amount; return selected ? child : undefined;
-  };
-  if (request.tasks) {
-    for (const child of request.tasks) { const selected = find(child, child.count ?? 1); if (selected) return selected; }
-    return;
-  }
-  if (request.chain) {
-    for (const step of request.chain) {
-      if ('parallel' in step) {
-        if (Array.isArray(step.parallel)) {
-          for (const child of step.parallel) { const selected = find(child, child.count ?? 1); if (selected) return selected; }
-        } else {
-          const selected = find(step.parallel, step.expand?.maxItems ?? dynamicMaxItems ?? 0); if (selected) return selected;
-        }
-      } else { const selected = find(step); if (selected) return selected; }
-    }
-    return;
-  }
-  return index === 0 ? request : undefined;
-}
-
-/** Per-child native default. Agent/settings and model suffix pins stay exact;
- * the automatic choice respects inherited ceilings and actual model support.
- * Classification uses the authored brief, before task-state/fork additions. */
-export function adaptiveNativeChildThinking(input: {
-  brief?: ChildBrief; model?: string; agentThinking?: string | false;
-  requestThinking?: string | false; maxThinking?: ThinkingLevel;
-  availableModels?: ModelInfo[]; provider?: string;
-  fallbackModels?: readonly string[];
-  externalRunner?: boolean;
-}): ThinkingLevel | undefined {
-  if (!adaptiveExecutionEnabled() || input.externalRunner || !input.brief || input.agentThinking !== undefined
-    || input.requestThinking !== undefined || input.brief.thinking !== undefined
-    || splitKnownThinkingSuffix(input.model ?? '').thinkingSuffix
-    || input.fallbackModels?.some(model => splitKnownThinkingSuffix(model).thinkingSuffix)) return;
-  const model = findModelInfo(input.model, input.availableModels, input.provider);
-  if (!model?.reasoning) return;
-  const ceiling = intersectThinkingCeilings(input.maxThinking, decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]));
-  const task = input.brief.task ?? '';
-  const uncertain = !task.trim() || /^(?:\{(?:task|previous|item|key)\}\s*)+$/.test(task.trim());
-  const target = classifyExecution({task,scope:'subtask',uncertainty:uncertain ? .6 : 0}).reasoning;
-  const supported = getSupportedThinkingLevels(model).filter(level => !ceiling || THINKING_LEVELS.indexOf(level) <= THINKING_LEVELS.indexOf(ceiling));
-  if (supported.includes(target)) return target;
-  const targetRank = THINKING_LEVELS.indexOf(target);
-  return supported.find(level => THINKING_LEVELS.indexOf(level) > targetRank) ?? [...supported].reverse()[0];
 }

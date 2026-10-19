@@ -1,4 +1,4 @@
-// Micro-worker: eligibility gates (price/quality/health/privacy), budgets,
+// Micro-worker: eligibility gates (quality/health), budgets,
 // output validation, caching. The remote call is always mocked.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -15,10 +15,10 @@ const workerMod = await load("extensions/lib/micro-intelligence/micro-worker.ts"
 const privacyMod = await load("extensions/lib/micro-intelligence/route-privacy.ts");
 const metricsMod = await load("extensions/lib/micro-intelligence/metrics.ts");
 
-const { microWorkerEligibility, runMicroWorker, clearMicroWorkerCache, microWorkerCandidates } = workerMod;
+const { microWorkerEligibility, runMicroWorker, clearMicroWorkerCache, microWorkerStatus } = workerMod;
 const { routePrivacyTier, routeSafeForPrivateRepo } = privacyMod;
 
-const facts = (over = {}) => ({ provider: "openrouter", model: "cheap/free", healthy: true, privateInput: false, pricePerM: .05, quality: .85, ...over });
+const facts = (over = {}) => ({ provider: "openrouter", model: "cheap/free", healthy: true, quality: .85, ...over });
 
 test("privacy tiers: unknown is never safe for private input", () => {
   assert.equal(routePrivacyTier("ollama", "qwen", {}, 'http://127.0.0.1:11434').tier, "local");
@@ -33,19 +33,13 @@ test("privacy tiers: unknown is never safe for private input", () => {
   assert.equal(routePrivacyTier("openrouter", "x/y", { PI_PRIVATE_ROUTES: "nope,,," }).tier, "unknown");
 });
 
-test("eligibility gates health, cooldown, price, quality and privacy", () => {
+test("eligibility gates health, cooldown and quality", () => {
   assert.deepEqual(microWorkerEligibility(facts()), { eligible: true, reason: "eligible" });
   assert.equal(microWorkerEligibility(facts({ healthy: false })).reason, "unhealthy");
   assert.equal(microWorkerEligibility(facts({ cooldownUntil: Date.now() + 60_000 })).reason, "cooldown");
-  assert.equal(microWorkerEligibility(facts({ pricePerM: 5 })).reason, "over-price-cap");
-  assert.equal(microWorkerEligibility(facts({ pricePerM: undefined })).reason, 'unknown-price');
   assert.equal(microWorkerEligibility(facts({ quality: undefined })).reason, 'unknown-quality');
-  for (const pricePerM of [NaN, Infinity, -1]) assert.equal(microWorkerEligibility(facts({ pricePerM })).reason, 'invalid-price');
   for (const quality of [NaN, Infinity, -1, 1.1]) assert.equal(microWorkerEligibility(facts({ quality })).reason, 'invalid-quality');
   assert.equal(microWorkerEligibility(facts({ quality: 0.2 })).reason, "quality-floor");
-  assert.equal(microWorkerEligibility(facts({ privateInput: true })).reason, "private-input-unsafe-route");
-  assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q", baseUrl: 'http://127.0.0.1:11434' })).eligible, true);
-  assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q", baseUrl: 'https://remote.example/v1' })).reason, 'private-input-unsafe-route');
 });
 
 test("runner validates JSON, enforces budgets, and caches", async () => {
@@ -73,11 +67,6 @@ test("runner validates JSON, enforces budgets, and caches", async () => {
     });
     assert.equal(malformed.skipped, "malformed");
 
-    const pricey = await runMicroWorker("error-hypothesis", "another failure text here", {
-      complete: async () => ({ text: "{}", costUsd: 1, ms: 1 }), facts: facts(),
-    });
-    assert.equal(pricey.skipped, "over-cost-cap");
-
     assert.equal((await runMicroWorker("nope", "input text here", { complete, facts: facts() })).skipped, "unknown-kind");
     assert.equal((await runMicroWorker("error-hypothesis", "x", { complete, facts: facts() })).skipped, "trivial");
     assert.equal((await runMicroWorker("error-hypothesis", "input text here", { complete: undefined, facts: facts() })).skipped, "no-route");
@@ -87,22 +76,8 @@ test("runner validates JSON, enforces budgets, and caches", async () => {
   }
 });
 
-test("private input is refused on unknown-privacy routes", async () => {
-  metricsMod.resetMicroMetrics();
-  try {
-    const complete = async () => ({ text: "{}", ms: 1 });
-    const verdict = await runMicroWorker("handoff-brief", "private repo context here", {
-      complete, facts: facts({ privateInput: true }), privateInput: true,
-    });
-    assert.equal(verdict.skipped, "private-input-unsafe-route");
-  } finally {
-    metricsMod.resetMicroMetrics();
-  }
-});
-
-test("candidates parse from env only", () => {
-  assert.deepEqual(microWorkerCandidates({}), []);
-  assert.deepEqual(microWorkerCandidates({ PI_MICRO_WORKER_ROUTES: "a/b, c/d, junk" }), ["a/b", "c/d"]);
+test("the session model is the only route: no configured candidate list is read", () => {
+  assert.deepEqual(Object.keys(microWorkerStatus({ PI_MICRO_WORKER_ROUTES: "a/b, c/d" })).sort(), ["cacheEntries", "enabled"]);
 });
 
 test('micro-worker enforces each output schema and isolates cached structured results', async () => {

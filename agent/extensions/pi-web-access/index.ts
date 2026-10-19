@@ -51,7 +51,6 @@ import { isCurrentModelHostedSearchEligible, isOpenAISearchAvailable } from "./o
 import { isDuckDuckGoAvailable } from "./duckduckgo.ts";
 import { isKimiSearchAvailable } from "./kimi-search.ts";
 import { buildSearchErrorPlan, type SearchErrorDetails, type SearchErrorPlan } from "./render-search-error.ts";
-import { findModelWithProviderRouting, loadEnabledModelPatterns, modelMatchesEnabledPatterns, splitThinkingSuffix } from "./summary-model-scope.ts";
 import {
 	buildResearchArtifact,
 	withClaimAssessment,
@@ -119,7 +118,6 @@ interface WebSearchConfig {
 	curatorTimeoutSeconds?: unknown;
 	autoOpenBrowser?: unknown;
 	curatorRemote?: unknown;
-	summaryModel?: string;
 	summaryGenerationDeadlineMs?: unknown;
 	maxInlineContentChars?: unknown;
 	webSearch?: {
@@ -491,8 +489,6 @@ interface PendingCurate {
 	availableProviders: ProviderAvailability;
 	defaultProvider: CuratorProvider;
 	searchProvider: SearchProviderSelection;
-	summaryModels: Array<{ value: string; label: string }>;
-	defaultSummaryModel: string | null;
 	timeoutSeconds: number;
 	proxy?: string;
 	curatorUrl?: string;
@@ -1107,7 +1103,6 @@ export default function (pi: ExtensionAPI) {
 		resultsByIndex: Map<number, QueryResultData>,
 		summaryContext: SummaryGenerationContext,
 		signal?: AbortSignal,
-		modelOverride?: string,
 		feedback?: string,
 	): Promise<{ summary: string; meta: SummaryMeta }> {
 		const selectedResults: QueryResultData[] = [];
@@ -1123,7 +1118,6 @@ export default function (pi: ExtensionAPI) {
 				selectedResults,
 				summaryContext,
 				signal,
-				modelOverride,
 				feedback,
 				undefined,
 				getSummaryGenerationDeadlineMs(),
@@ -1140,93 +1134,6 @@ export default function (pi: ExtensionAPI) {
 				},
 			};
 		}
-	}
-
-	async function loadSummaryModelChoices(
-		summaryContext: SummaryGenerationContext,
-	): Promise<{ summaryModels: Array<{ value: string; label: string }>; defaultSummaryModel: string | null }> {
-		const summaryModels: Array<{ value: string; label: string }> = [];
-		const seen = new Set<string>();
-		const availableValues = new Set<string>();
-
-		const addModel = (provider: string, id: string) => {
-			const value = `${provider}/${id}`;
-			if (seen.has(value)) return;
-			seen.add(value);
-			summaryModels.push({ value, label: value });
-		};
-
-		let enabledModelPatterns: string[] | null = null;
-		let scopeLoaded = true;
-		try {
-			enabledModelPatterns = loadEnabledModelPatterns(summaryContext);
-			const availableModels = summaryContext.modelRegistry.getAvailable();
-			for (const model of availableModels) {
-				if (!modelMatchesEnabledPatterns(model, enabledModelPatterns)) continue;
-				const value = `${model.provider}/${model.id}`;
-				availableValues.add(value);
-				addModel(model.provider, model.id);
-			}
-		} catch (err) {
-			scopeLoaded = false;
-			const message = err instanceof Error ? err.message : String(err);
-			console.error(`Failed to load summary models: ${message}`);
-		}
-
-		const currentModelValue = summaryContext.model
-			? `${summaryContext.model.provider}/${summaryContext.model.id}`
-			: null;
-		if (scopeLoaded && summaryContext.model && currentModelValue && !seen.has(currentModelValue) && modelMatchesEnabledPatterns(summaryContext.model, enabledModelPatterns)) {
-			addModel(summaryContext.model.provider, summaryContext.model.id);
-		}
-
-		const config = loadConfig();
-		const configuredSummaryModel = typeof config.summaryModel === "string" ? config.summaryModel.trim() : "";
-		const preferredDefaults = [
-			{ provider: "anthropic", id: "claude-haiku-4-5" },
-			{ provider: "openai-codex", id: "gpt-5.6-luna" },
-			{ provider: "openai-codex", id: "gpt-5.6-terra" },
-			{ provider: "google", id: "gemini-3.6-flash" },
-			{ provider: "openai", id: "gpt-5-mini" },
-			{ provider: "deepseek", id: "deepseek-v4-flash" },
-		];
-
-		const resolveAvailableModelValue = (selector: string): string | null => {
-			const parsed = splitThinkingSuffix(selector);
-			const slashIndex = parsed.value.indexOf("/");
-			if (slashIndex <= 0 || slashIndex >= parsed.value.length - 1) return null;
-			const model = findModelWithProviderRouting(
-				summaryContext.modelRegistry,
-				parsed.value.slice(0, slashIndex),
-				parsed.value.slice(slashIndex + 1),
-			);
-			if (!model) return null;
-			const value = `${model.provider}/${model.id}`;
-			if (!availableValues.has(value)) return null;
-			if (selector !== value && !seen.has(selector)) {
-				seen.add(selector);
-				summaryModels.push({ value: selector, label: selector });
-			}
-			return selector;
-		};
-
-		let defaultSummaryModel: string | null = null;
-		if (scopeLoaded && configuredSummaryModel.length > 0) {
-			defaultSummaryModel = availableValues.has(configuredSummaryModel)
-				? configuredSummaryModel
-				: resolveAvailableModelValue(configuredSummaryModel);
-		}
-		if (scopeLoaded && !defaultSummaryModel) {
-			for (const preferred of preferredDefaults) {
-				const model = findModelWithProviderRouting(summaryContext.modelRegistry, preferred.provider, preferred.id);
-				const value = model ? `${model.provider}/${model.id}` : null;
-				if (value && availableValues.has(value)) {
-					defaultSummaryModel = value;
-					break;
-				}
-			}
-		}
-		return { summaryModels, defaultSummaryModel };
 	}
 
 	function resolveSummaryForSubmit(
@@ -1415,11 +1322,9 @@ export default function (pi: ExtensionAPI) {
 					availableProviders: pc.availableProviders,
 					defaultProvider: pc.defaultProvider,
 					searchProvider: toCuratorProvider(pc.searchProvider) ?? "auto",
-					summaryModels: pc.summaryModels,
-					defaultSummaryModel: pc.defaultSummaryModel,
 				},
 				{
-					async onSummarize(selectedQueryIndices, summarizeSignal, model, feedback) {
+					async onSummarize(selectedQueryIndices, summarizeSignal, feedback) {
 						return runWithProxy(pc.proxy, async () => {
 							if (pendingCurates.get(callId) !== pc) throw new Error("Curator session is no longer active.");
 							pc.onUpdate?.({
@@ -1431,7 +1336,6 @@ export default function (pi: ExtensionAPI) {
 								pc.searchResults,
 								pc.summaryContext,
 								summarizeSignal,
-								model,
 								feedback,
 							);
 							if (pendingCurates.get(callId) !== pc) throw new Error("Curator session is no longer active.");
@@ -1749,10 +1653,7 @@ export default function (pi: ExtensionAPI) {
 				const summaryContext: SummaryGenerationContext = {
 					model: ctx.model,
 					modelRegistry: ctx.modelRegistry,
-					cwd: ctx.cwd,
-					isProjectTrusted: () => ctx.isProjectTrusted(),
 				};
-				const summaryModelChoices = await loadSummaryModelChoices(summaryContext);
 
 				const pc: PendingCurate = {
 					phase: "searching",
@@ -1769,8 +1670,6 @@ export default function (pi: ExtensionAPI) {
 					availableProviders,
 					defaultProvider,
 					searchProvider,
-					summaryModels: summaryModelChoices.summaryModels,
-					defaultSummaryModel: summaryModelChoices.defaultSummaryModel,
 					timeoutSeconds: curatorTimeoutSeconds,
 					proxy: typeof params.proxy === "string" ? params.proxy : undefined,
 					onUpdate: onUpdate as PendingCurate["onUpdate"],
@@ -1964,15 +1863,11 @@ export default function (pi: ExtensionAPI) {
 				const summaryContext: SummaryGenerationContext = {
 					model: ctx.model,
 					modelRegistry: ctx.modelRegistry,
-					cwd: ctx.cwd,
-					isProjectTrusted: () => ctx.isProjectTrusted(),
 				};
-				const summaryModelChoices = await loadSummaryModelChoices(summaryContext);
 				const generated = await generateSummaryDraft(
 					searchResults,
 					summaryContext,
 					signal,
-					summaryModelChoices.defaultSummaryModel ?? undefined,
 					undefined,
 					undefined,
 					getSummaryGenerationDeadlineMs(),
@@ -2425,9 +2320,6 @@ export default function (pi: ExtensionAPI) {
 			mode: Type.Optional(StringEnum(["readable", "raw", "answer"], {
 				description: "Fetch mode: readable (default extraction), raw (exact textual HTTP body), or answer (answer prompt using only fetched content).",
 			})),
-			answerModel: Type.Optional(Type.String({
-				description: "Optional provider/model-id override for mode answer. Defaults to fetch.answerProvider + fetch.answerModel when configured, otherwise the current Pi model.",
-			})),
 			timestamp: Type.Optional(Type.String({
 				description: "Extract video frame(s) at a timestamp or time range. Single: '1:23:45', '23:45', or '85' (seconds). Range: '23:41-25:00' extracts evenly-spaced frames across that span (default 6). Use frames with ranges to control density; single+frames uses a fixed 5s interval. YouTube requires yt-dlp + ffmpeg; local videos require ffmpeg. Use a range when you know the approximate area but not the exact moment — you'll get a contact sheet to visually identify the right frame.",
 			})),
@@ -2461,14 +2353,11 @@ export default function (pi: ExtensionAPI) {
 				if (mode === "answer" && !options.prompt) {
 					return { content: [{ type: "text", text: "Error: mode answer requires prompt." }], details: { error: "mode answer requires prompt" } };
 				}
-				if (mode === "raw" && (options.forceClone === true || options.timestamp || options.frames || options.prompt || options.model || options.answerModel)) {
-					return { content: [{ type: "text", text: "Error: mode raw cannot be combined with forceClone, prompt, timestamp, frames, model, or answerModel." }], details: { error: "Incompatible raw mode options" } };
-				}
-				if (mode !== "answer" && options.answerModel) {
-					return { content: [{ type: "text", text: "Error: answerModel requires mode answer." }], details: { error: "answerModel requires mode answer" } };
+				if (mode === "raw" && (options.forceClone === true || options.timestamp || options.frames || options.prompt || options.model)) {
+					return { content: [{ type: "text", text: "Error: mode raw cannot be combined with forceClone, prompt, timestamp, frames, or model." }], details: { error: "Incompatible raw mode options" } };
 				}
 				if (mode === "answer" && options.model) {
-					return { content: [{ type: "text", text: "Error: use answerModel, not model, with mode answer." }], details: { error: "model is incompatible with mode answer" } };
+					return { content: [{ type: "text", text: "Error: model cannot be combined with mode answer; answer mode uses the current session model." }], details: { error: "model is incompatible with mode answer" } };
 				}
 				if (mode === "answer" && options.auth !== undefined) {
 					return { content: [{ type: "text", text: "Error: auth cannot be combined with mode answer." }], details: { error: "auth cannot be combined with mode answer" } };
@@ -2494,7 +2383,7 @@ export default function (pi: ExtensionAPI) {
 					details: { phase: "fetch", progress: 0 },
 				});
 
-				const { answerModel: _answerModel, auth: _auth, ...extractionOptions } = options;
+				const { auth: _auth, ...extractionOptions } = options;
 				const fetchOptions = mode === "answer"
 					? (() => {
 						const { prompt: _prompt, ...rest } = extractionOptions;
@@ -2513,7 +2402,6 @@ export default function (pi: ExtensionAPI) {
 								question: options.prompt!,
 								pageText: result.content,
 								sourceUrl: result.url,
-								...(options.answerModel ? { model: options.answerModel } : {}),
 							}, ctx, signal);
 							return { ...result, content: answer.text };
 						} catch (err) {
@@ -2673,7 +2561,7 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme) {
 			const { urlList, options } = normalizeFetchContentParams(args);
-			const { prompt, timestamp, frames, model, mode, answerModel, auth } = options;
+			const { prompt, timestamp, frames, model, mode, auth } = options;
 			if (urlList.length === 0) {
 				return new Text(theme.fg("toolTitle", theme.bold("fetch ")) + theme.fg("error", "(no URL)"), 0, 0);
 			}
@@ -2706,9 +2594,6 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (model) {
 				lines.push(theme.fg("dim", "  model: ") + theme.fg("warning", model));
-			}
-			if (answerModel) {
-				lines.push(theme.fg("dim", "  answer model: ") + theme.fg("warning", answerModel));
 			}
 			if (auth !== undefined) {
 				lines.push(theme.fg("dim", "  auth: ") + theme.fg("warning", auth === true ? "true" : auth));
@@ -3175,10 +3060,7 @@ export default function (pi: ExtensionAPI) {
 			const summaryContext: SummaryGenerationContext = {
 				model: ctx.model,
 				modelRegistry: ctx.modelRegistry,
-				cwd: ctx.cwd,
-				isProjectTrusted: () => ctx.isProjectTrusted(),
 			};
-			const summaryModelChoices = await loadSummaryModelChoices(summaryContext);
 
 			ctx.ui.notify("Opening web search curator...", "info");
 
@@ -3206,11 +3088,9 @@ export default function (pi: ExtensionAPI) {
 						availableProviders,
 						defaultProvider: initialProvider,
 						searchProvider: toCuratorProvider(currentSearchProvider) ?? "auto",
-						summaryModels: summaryModelChoices.summaryModels,
-						defaultSummaryModel: summaryModelChoices.defaultSummaryModel,
 					},
 					{
-						async onSummarize(selectedQueryIndices, summarizeSignal, model, feedback) {
+						async onSummarize(selectedQueryIndices, summarizeSignal, feedback) {
 							if (commandHandle && !isCommandActive()) {
 								throw new Error("Curator session is no longer active.");
 							}
@@ -3219,7 +3099,6 @@ export default function (pi: ExtensionAPI) {
 								collected,
 								summaryContext,
 								summarizeSignal,
-								model,
 								feedback,
 							);
 						},

@@ -370,10 +370,10 @@ export function buildPromptAnalysisRequest(prompt: string, kind: PromptAnalysisK
 }
 
 /** Compact display/context projection; detailed schema stays out of the TUI. */
-export function renderPromptAnalysis(analysis: PromptAnalysis, source: string, route?: string): string {
+export function renderPromptAnalysis(analysis: PromptAnalysis, route?: string): string {
   const constraints = analysis.explicitConstraints.filter((item) => !item.quoted).slice(0, 3).map((item) => item.text);
   const tasks = analysis.subtasks.slice(0, 3);
-  const origin = analysis.source === "fallback" ? "deterministic fallback" : `model · ${source}`;
+  const origin = analysis.source === "fallback" ? "deterministic fallback" : "model";
   const lines = [
     `Intent analysis · ${analysis.kind} · ${origin}${route && analysis.source === "model" ? ` · ${route}` : ""}`,
     `Primary: ${analysis.taskLabel || analysis.intent}`,
@@ -387,13 +387,12 @@ export function renderPromptAnalysis(analysis: PromptAnalysis, source: string, r
 /** Full but strictly bounded context projection. The TUI uses the smaller
  * renderPromptAnalysis() view; all structured categories remain available to
  * the active model without exposing the raw machine JSON in the transcript. */
-export function renderPromptAnalysisContext(analysis: PromptAnalysis, source: string, route?: string): string {
+export function renderPromptAnalysisContext(analysis: PromptAnalysis, route?: string): string {
   const asList = (items: string[]) => items.slice(0, 6).map((item) => item.slice(0, 140));
   const structured = {
     version: 1,
     kind: analysis.kind,
     analysisSource: analysis.source,
-    preferenceSource: source,
     ...(route ? { route: route.slice(0, 120) } : {}),
     confidence: analysis.confidence,
     intent: analysis.intent,

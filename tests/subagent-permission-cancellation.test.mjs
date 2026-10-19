@@ -17,7 +17,7 @@ const { CHILD_WATCHDOG_CONFIG_ENV } = await import(base + 'watchdog/child-status
 
 const rawConfig = (timeout = 1000) => JSON.stringify({
   enabled: true, watchdogTailTimeoutMs: timeout, agentEndTimeoutMs: timeout,
-  maxWarnings: 1, thinking: false,
+  maxWarnings: 1,
   lsp: { enabled: false, timeoutMs: 100, maxFiles: 1, maxDiagnostics: 1 },
   autoFollowBlockers: false, autoFollowMaxAttempts: 0, stalemateRepeats: 2,
 });

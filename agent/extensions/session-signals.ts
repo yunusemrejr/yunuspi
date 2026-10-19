@@ -1256,6 +1256,7 @@ export default function (pi: any) {
   // First-request system snapshots, in memory plus one runtime file per
   // session so /sys-prompt survives a reload. Runtime state, never exported.
   const sysSnapshots = new Map<string, SysSnapshot>();
+  const checkedDiskSys = new Set<string>();
   const sysSnapshotFile = (sid: string) =>
     path.join(sysPromptDir(), `${sanitizeFileSegment(sid)}.json`);
   const readSysSnapshot = (ctx: any): SysSnapshot | undefined => {
@@ -1268,6 +1269,8 @@ export default function (pi: any) {
     if (!sid) return undefined;
     const live = sysSnapshots.get(sid);
     if (live) return live;
+    if (checkedDiskSys.has(sid)) return undefined;
+    checkedDiskSys.add(sid);
     try {
       const raw = JSON.parse(fs.readFileSync(sysSnapshotFile(sid), "utf8"));
       if (raw && typeof raw.system === "string" && raw.system) {
@@ -1289,6 +1292,7 @@ export default function (pi: any) {
   };
   const storeSysSnapshot = (sid: string, snapshot: SysSnapshot): void => {
     sysSnapshots.set(sid, snapshot);
+    checkedDiskSys.add(sid);
     try {
       fs.mkdirSync(sysPromptDir(), { recursive: true, mode: 0o700 });
       fs.writeFileSync(sysSnapshotFile(sid), JSON.stringify(snapshot), { encoding: "utf8", mode: 0o600 });

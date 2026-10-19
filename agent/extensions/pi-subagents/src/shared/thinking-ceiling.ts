@@ -50,3 +50,21 @@ export function assertThinkingWithinCeiling(input: ThinkingCeilingCheck): void {
 		.join(" ");
 	throw new Error(`Thinking level '${requestedLevel}' exceeds configured maximum '${input.ceiling}'${subject ? ` for ${subject}` : ""}.`);
 }
+
+const EFFORT_ENTRY = "jev-effort-v1";
+
+/** Thinking level a helper starts at: the session's configured ceiling (the
+ * level the person chose, persisted by the effort controller), else the live
+ * level. Each child's own effort controller (Jev) then steps down from it for
+ * an easy task, so helpers never pick a level of their own. */
+export function sessionThinkingCeiling(entries: readonly unknown[] | undefined, liveLevel: unknown): ThinkingLevel | undefined {
+	let ceiling: unknown;
+	for (const entry of entries ?? []) {
+		const record = entry as { type?: unknown; customType?: unknown; data?: { version?: unknown; ceiling?: unknown } } | undefined;
+		if (record?.type === "custom" && record.customType === EFFORT_ENTRY && record.data?.version === 1) ceiling = record.data.ceiling;
+	}
+	for (const level of [ceiling, liveLevel]) {
+		if (typeof level === "string" && thinkingLevelRanks.has(level as ThinkingLevel)) return level as ThinkingLevel;
+	}
+	return undefined;
+}

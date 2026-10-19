@@ -3,7 +3,6 @@ name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
 tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, read, grep, find, ls, math_check, value_convert, data_query, handoff_capsule, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
-thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

@@ -415,62 +415,6 @@
       "tools": []
     },
     {
-      "id": "scope-council",
-      "group": "review",
-      "summary": "Automatically deliberate over open-ended change scope with preservation and meaningful-change perspectives under a shared bounded budget; it has no opt-in user tool.",
-      "entrypoints": [
-        "scope-council-runner",
-        "before_agent_start",
-        "context"
-      ],
-      "options": [
-        {
-          "name": "PI_SCOPE_COUNCIL",
-          "values": [
-            "on",
-            "off"
-          ],
-          "summary": "Disable automatic scope deliberation when set to off."
-        },
-        {
-          "name": "deadlineMs",
-          "summary": "Shared council deadline; default 240000."
-        },
-        {
-          "name": "tokens",
-          "summary": "Aggregate child token ceiling; default 144000."
-        },
-        {
-          "name": "tools",
-          "summary": "Aggregate child tool ceiling; default 12."
-        },
-        {
-          "name": "costUsd",
-          "summary": "Aggregate runtime ceiling; default 0.03."
-        },
-        {
-          "name": "nativeSubagent",
-          "summary": "The council runs only when the native subagent capability is active; project sessions do not provide workflowScript."
-        },
-        {
-          "name": "fixedRoute|sameModel|freeOnly|noDelegation",
-          "summary": "Constraints that can make the council unavailable."
-        }
-      ],
-      "related": [
-        "project-intelligence",
-        "quality-review",
-        "subagent-dispatch"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/extension/scope-council-runner.ts",
-        "agent/extensions/lib/scope-deliberation.ts"
-      ],
-      "doc": "docs/CHANGE-SCOPE.md",
-      "tools": [],
-      "commands": []
-    },
-    {
       "id": "fanout-execution",
       "group": "orchestration",
       "summary": "Fan-out (formerly swarm and fusion): run separable investigations or competing approaches as parallel children, preserve each outcome, failure and acceptance evidence, and merge outputs deterministically with provenance (duplicate, complementary and conflicting sections stay visible for parent review).",
@@ -535,7 +479,6 @@
         "quality-review"
       ],
       "sourceFiles": [
-        "agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts",
         "agent/extensions/pi-subagents/src/runs/shared/fanout.ts",
         "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts",
         "agent/extensions/rpiv-todo/tool/types.ts"
@@ -546,16 +489,14 @@
     {
       "id": "double-mode",
       "group": "orchestration",
-      "summary": "Session mode that analyzes every user request twice before the agent starts and reconciles both into one planning directive. /double runs the session model twice; /custom-double opens a popup to search and pick two models (any providers) for streams A and B plus the reconciling route. The directive is advice below the user's own words; reviewers and the scope council see it on a shared note board.",
+      "summary": "Session mode that analyzes every user request twice on the session model before the agent starts and reconciles both into one planning directive. The directive is advice below the user's own words; reviewers see it on a shared note board.",
       "entrypoints": [
         "/double",
-        "/custom-double",
         "before_agent_start",
         "double-directive"
       ],
       "commands": [
-        "double",
-        "custom-double"
+        "double"
       ],
       "options": [
         {
@@ -564,35 +505,19 @@
             "on",
             "off"
           ],
-          "summary": "Disable Double mode (both commands) when set to off."
+          "summary": "Disable Double mode when set to off."
         },
         {
           "name": "/double [on|off|status]",
           "summary": "Twin mode: the session model runs both streams."
-        },
-        {
-          "name": "/custom-double provider/model[:thinking] provider/model[:thinking]",
-          "summary": "Pin two chosen routes without the popup."
-        },
-        {
-          "name": "reconcile",
-          "values": [
-            "a",
-            "b",
-            "session"
-          ],
-          "summary": "Which route reconciles the two analyses."
         }
       ],
       "related": [
-        "scope-council",
         "fanout-execution",
         "subagent-dispatch"
       ],
       "sourceFiles": [
         "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "agent/extensions/pi-subagents/src/extension/double-pair.ts",
-        "agent/extensions/pi-subagents/src/slash/double-pair-picker.ts",
         "agent/extensions/lib/double.ts",
         "agent/extensions/lib/reviewer-board.ts"
       ],
@@ -602,12 +527,11 @@
     {
       "id": "agent-model-management",
       "group": "models",
-      "summary": "List executable agents and their capabilities, inspect or edit scoped definitions, and ask for effective models without hardcoding a provider inventory.",
+      "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
       "entrypoints": [
         "subagent",
         "action:list",
         "action:get",
-        "action:models",
         "action:create",
         "action:update"
       ],
@@ -616,11 +540,7 @@
       ],
       "commands": [
         "subagents",
-        "subagents-models",
-        "subagents-doctor",
-        "subagents-profiles",
-        "subagents-load-profile",
-        "subagents-check-profile"
+        "subagents-doctor"
       ],
       "options": [
         {
@@ -628,7 +548,6 @@
           "values": [
             "list",
             "get",
-            "models",
             "create",
             "update",
             "delete",
@@ -661,21 +580,12 @@
           "summary": "Agent config object or JSON for create/update."
         },
         {
-          "name": "model",
-          "summary": "Model selector for models or explicit child route."
-        },
-        {
-          "name": "thinking",
-          "summary": "Configured thinking level or ceiling."
-        },
-        {
           "name": "skill",
           "summary": "Declared child skill name(s)."
         }
       ],
       "related": [
         "subagent-dispatch",
-        "model-selection",
         "provider-routing",
         "skill-catalog"
       ],
@@ -685,69 +595,6 @@
         "agent/extensions/pi-subagents/src/slash/slash-commands.ts"
       ],
       "doc": "docs/SUBAGENT-CONTRACTS.md"
-    },
-    {
-      "id": "model-selection",
-      "group": "models",
-      "summary": "Filter the live session model registry by exact name, free eligibility, provider, input modality, tools support or catalog addition month.",
-      "entrypoints": [
-        "subagent",
-        "action:models",
-        "filterModelsByQuery"
-      ],
-      "tools": [
-        "subagent"
-      ],
-      "commands": [
-        "subagents-models"
-      ],
-      "options": [
-        {
-          "name": "action",
-          "values": [
-            "models"
-          ],
-          "summary": "Use model listing mode."
-        },
-        {
-          "name": "model",
-          "summary": "All-token selector query."
-        },
-        {
-          "name": "free:true",
-          "summary": "Keep eligible free routes after economy checks."
-        },
-        {
-          "name": "provider:<id>",
-          "summary": "Filter to an exact provider id from the current registry."
-        },
-        {
-          "name": "input:<modality>",
-          "summary": "Filter advertised input modality."
-        },
-        {
-          "name": "tools:true",
-          "summary": "Require advertised tool calling support."
-        },
-        {
-          "name": "added:this-month|added:YYYY-MM",
-          "summary": "Filter provider catalog addition timestamps in UTC."
-        },
-        {
-          "name": "model: provider/id:thinking",
-          "summary": "Pass an exact route with optional supported thinking suffix."
-        }
-      ],
-      "related": [
-        "agent-model-management",
-        "provider-routing"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/agents/agent-management.ts",
-        "agent/extensions/pi-subagents/src/runs/shared/model-selection.ts",
-        "agent/extensions/pi-subagents/src/shared/model-info.ts"
-      ],
-      "doc": "docs/MODEL-ROUTING.md"
     },
     {
       "id": "provider-routing",
@@ -805,7 +652,6 @@
         }
       ],
       "related": [
-        "model-selection",
         "agent-model-management"
       ],
       "sourceFiles": [
@@ -814,67 +660,6 @@
       ],
       "doc": "docs/MODEL-ROUTING.md",
       "tools": []
-    },
-    {
-      "id": "model-preferences",
-      "group": "models",
-      "summary": "Prefer explicit per-role model/provider choices from llm_preferences.json, with the autonomous selector as fallback when preferences are absent or unusable.",
-      "entrypoints": [
-        "/models",
-        "llm_preferences.json",
-        "resolveLlmPreferenceChain",
-        "selectAssistanceTeam"
-      ],
-      "options": [
-        {
-          "name": "models",
-          "summary": "Reusable alias registry of provider/model/thinking/provider_options entries."
-        },
-        {
-          "name": "preferences.<role>.models",
-          "summary": "Ordered alias list per role: subagents, council, fanout, quality_review, project_review, error_review, prompt_analysis, main_session_fallback."
-        },
-        {
-          "name": "/models",
-          "summary": "Open the graphical editor for ordered role routes, upstream pins and canonical JSON recovery."
-        },
-        {
-          "name": "thinking",
-          "values": [
-            "auto",
-            "none",
-            "low",
-            "medium",
-            "high",
-            "max"
-          ],
-          "summary": "Explicit level, auto for dynamic logic, or none for off."
-        },
-        {
-          "name": "provider_options.routing",
-          "values": [
-            "auto",
-            "pinned",
-            "custom"
-          ],
-          "summary": "OpenRouter backend control; auto preserves normal selection."
-        }
-      ],
-      "related": [
-        "model-selection",
-        "provider-routing",
-        "agent-model-management"
-      ],
-      "sourceFiles": [
-        "agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts",
-        "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts",
-        "agent/extensions/model-routing-config.ts",
-        "agent/extensions/lib/model-routing-store.ts",
-        "agent/extensions/lib/model-routing-metrics.ts"
-      ],
-      "doc": "docs/LLM-PREFERENCES.md",
-      "tools": [],
-      "commands": []
     },
     {
       "id": "quality-review",
@@ -915,7 +700,6 @@
         }
       ],
       "related": [
-        "scope-council",
         "project-intelligence",
         "source-intelligence"
       ],
@@ -967,7 +751,6 @@
       ],
       "related": [
         "quality-review",
-        "scope-council",
         "subagent-dispatch"
       ],
       "sourceFiles": [
@@ -1035,12 +818,12 @@
       "group": "review",
       "summary": "Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.",
       "entrypoints": [
-        "session_observer preference role",
+        "agent_start",
+        "agent_settled",
         "/observer-book"
       ],
       "commands": [
-        "observer-book",
-        "models"
+        "observer-book"
       ],
       "options": [
         {
@@ -1061,7 +844,7 @@
         },
         {
           "name": "PI_SESSION_OBSERVER",
-          "summary": "Set to off to disable periodic observation entirely; the /models Session Observer role chooses the route."
+          "summary": "Set to off to disable periodic observation entirely; the observer runs on the session model."
         }
       ],
       "related": [
@@ -1183,12 +966,6 @@
         "subagents-detach",
         "subagents-stop",
         "subagents-steer",
-        "subagents-models",
-        "subagents-profiles",
-        "subagents-load-profile",
-        "subagents-refresh-provider-models",
-        "subagents-generate-profiles",
-        "subagents-check-profile",
         "subagents-watchdog",
         "prompt-workflow",
         "google-account",
@@ -1398,7 +1175,6 @@
         }
       ],
       "related": [
-        "scope-council",
         "quality-review",
         "todo-planning",
         "source-intelligence"
@@ -3320,14 +3096,9 @@
             "analyze",
             "status",
             "qualify",
-            "route",
             "run"
           ],
-          "summary": "Batch semantic analysis, inspect routes, refresh qualification, compare routing or run one bounded task."
-        },
-        {
-          "name": "PI_MICRO_WORKER_ROUTES",
-          "summary": "Optional exact provider/model candidates; the current session route and existing economy selector are available when omitted."
+          "summary": "Batch semantic analysis, inspect status, refresh the session model's qualification or run one bounded task on the session model."
         },
         {
           "name": "PI_RERANK_MODEL|VOYAGE_API_KEY",
@@ -3386,7 +3157,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 884
+        "line": 886
       },
       {
         "name": "catalog-status",
@@ -3401,27 +3172,22 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1848
+        "line": 1852
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1398
+        "line": 1402
       },
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3404
-      },
-      {
-        "name": "custom-double",
-        "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 488
+        "line": 3283
       },
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 468
+        "line": 381
       },
       {
         "name": "effort",
@@ -3431,7 +3197,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1812
+        "line": 1816
       },
       {
         "name": "export-json",
@@ -3446,7 +3212,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3446
+        "line": 3325
       },
       {
         "name": "graph",
@@ -3541,7 +3307,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 494
+        "line": 211
       },
       {
         "name": "nobug",
@@ -3556,12 +3322,12 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 786
+        "line": 783
       },
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 577
+        "line": 520
       },
       {
         "name": "or-provider",
@@ -3576,7 +3342,7 @@
       {
         "name": "prompt-workflow",
         "source": "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts",
-        "line": 258
+        "line": 257
       },
       {
         "name": "provider",
@@ -3596,102 +3362,72 @@
       {
         "name": "run",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 872
+        "line": 825
       },
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3494
+        "line": 3373
       },
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1736
+        "line": 1740
       },
       {
         "name": "subagent-cost",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 912
+        "line": 865
       },
       {
         "name": "subagents",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 865
-      },
-      {
-        "name": "subagents-check-profile",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1284
+        "line": 818
       },
       {
         "name": "subagents-detach",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 990
+        "line": 943
       },
       {
         "name": "subagents-doctor",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 919
+        "line": 872
       },
       {
         "name": "subagents-fleet",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 956
-      },
-      {
-        "name": "subagents-generate-profiles",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1246
+        "line": 909
       },
       {
         "name": "subagents-inspect-rpc",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 926
-      },
-      {
-        "name": "subagents-load-profile",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1159
-      },
-      {
-        "name": "subagents-models",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1129
-      },
-      {
-        "name": "subagents-profiles",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1147
+        "line": 879
       },
       {
         "name": "subagents-refine",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 943
-      },
-      {
-        "name": "subagents-refresh-provider-models",
-        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1212
+        "line": 896
       },
       {
         "name": "subagents-steer",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1058
+        "line": 1011
       },
       {
         "name": "subagents-stop",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1002
+        "line": 955
       },
       {
         "name": "subagents-watchdog",
         "source": "agent/extensions/pi-subagents/src/watchdog/register-main.ts",
-        "line": 405
+        "line": 221
       },
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1761
+        "line": 1765
       },
       {
         "name": "task-state",
@@ -3706,7 +3442,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1780
+        "line": 1784
       },
       {
         "name": "video",
@@ -3716,7 +3452,7 @@
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3143
+        "line": 3028
       }
     ],
     "commandDynamicOwners": [
@@ -3921,14 +3657,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 198,
+        "line": 196,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 199,
+        "line": 197,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4001,49 +3737,49 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2604,
+        "line": 2558,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2464,
+        "line": 2418,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2747,
+        "line": 2701,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2846,
+        "line": 2800,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 3001,
+        "line": 2955,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2116,
+        "line": 2070,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 501,
+        "line": 416,
         "kind": "literal"
       },
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 46,
+        "line": 28,
         "kind": "literal"
       },
       {
@@ -4079,7 +3815,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 710,
+        "line": 707,
         "kind": "literal"
       },
       {
@@ -4133,7 +3869,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2277,
+        "line": 2231,
         "kind": "literal"
       },
       {
@@ -4151,7 +3887,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1878,
+        "line": 1882,
         "kind": "literal"
       },
       {
@@ -4169,7 +3905,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 197,
+        "line": 195,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4188,7 +3924,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 940,
+        "line": 887,
         "kind": "literal"
       },
       {
@@ -4350,7 +4086,7 @@
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 196,
+        "line": 194,
         "kind": "configured-default",
         "configurable": true
       },
@@ -4461,55 +4197,55 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2604,
+        "line": 2558,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2464,
+        "line": 2418,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2747,
+        "line": 2701,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2846,
+        "line": 2800,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 3001,
+        "line": 2955,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2116,
+        "line": 2070,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 501,
+        "line": 416,
         "kind": "literal"
       },
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 46,
+        "line": 28,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 710,
+        "line": 707,
         "kind": "literal"
       },
       {
@@ -4557,7 +4293,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2277,
+        "line": 2231,
         "kind": "literal"
       },
       {
@@ -4575,7 +4311,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1878,
+        "line": 1882,
         "kind": "literal"
       },
       {
@@ -4593,7 +4329,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 940,
+        "line": 887,
         "kind": "literal"
       },
       {
@@ -4821,10 +4557,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1668,
-          2256,
-          2410,
-          2809
+          1572,
+          2151,
+          2305,
+          2694
         ],
         "knownNames": [
           "fetch_content",
@@ -4887,7 +4623,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 717,
+      "sourceFiles": 711,
       "registrationSites": 66,
       "indirectRegistrationSites": 21,
       "stableRegistrationRows": 102,
@@ -5546,7 +5282,7 @@
       },
       {
         "path": "agent/extensions/lib/observer-model-evidence.ts",
-        "exists": true
+        "exists": false
       },
       {
         "path": "agent/extensions/lib/office-build.ts",
@@ -6020,7 +5756,7 @@
       },
       {
         "path": "agent/extensions/lib/micro-intelligence/router-shadow.ts",
-        "exists": true
+        "exists": false
       },
       {
         "path": "agent/extensions/lib/micro-intelligence/span-sensor.ts",
@@ -6843,12 +6579,6 @@
         ]
       },
       {
-        "source": "agent/extensions/lib/micro-intelligence/span-sensor.ts",
-        "signals": [
-          "wrapper/adapter"
-        ]
-      },
-      {
         "source": "agent/extensions/lib/project-intelligence/client.mjs",
         "signals": [
           "wrapper/adapter"
@@ -7112,12 +6842,6 @@
         ]
       },
       {
-        "source": "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts",
-        "signals": [
-          "MCP"
-        ]
-      },
-      {
         "source": "agent/extensions/pi-subagents/src/runs/shared/model-research.ts",
         "signals": [
           "wrapper/adapter"
@@ -7131,6 +6855,12 @@
       },
       {
         "source": "agent/extensions/pi-subagents/src/runs/shared/pi-args.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/session-model.ts",
         "signals": [
           "MCP"
         ]

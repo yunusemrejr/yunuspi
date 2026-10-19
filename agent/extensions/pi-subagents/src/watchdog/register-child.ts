@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { MainWatchdogRuntime } from "./runtime.ts";
-import { createMainWatchdogReview } from "./review.ts";
 import { createCoordinatedWatchdogReview } from "./coordinated-review.ts";
 import { DEFAULT_WATCHDOG_CONFIG } from "./settings.ts";
 import { createWatchdogWarningMessage } from "./warning-format.ts";
@@ -13,17 +12,13 @@ import {
 } from "./child-status.ts";
 import type { ResolvedWatchdogConfig, WatchdogWarningDetails } from "./types.ts";
 
-export function childResolvedConfig(config: ChildWatchdogConfig): ResolvedWatchdogConfig {
+function childResolvedConfig(config: ChildWatchdogConfig): ResolvedWatchdogConfig {
 	return {
 		...DEFAULT_WATCHDOG_CONFIG,
 		enabled: true,
 		agentEndTimeoutMs: config.agentEndTimeoutMs,
 		maxWarnings: config.maxWarnings,
-		main: {
-			enabled: true,
-			...(config.model ? { model: config.model } : {}),
-			...(config.thinking !== undefined ? { thinking: config.thinking } : {}),
-		},
+		main: { enabled: true },
 		autoFollow: {
 			blockers: config.autoFollowBlockers,
 			maxAttempts: config.autoFollowMaxAttempts,
@@ -75,9 +70,10 @@ export function registerChildWatchdog(pi: ExtensionAPI, rawConfig = process.env[
 	const resolved = childResolvedConfig(childConfig);
 	const runtime = new MainWatchdogRuntime({
 		resolveConfig: () => ({ ok: true, config: resolved, errors: [], sources: [{ scope: "session", exists: true }] }),
-		review: createCoordinatedWatchdogReview(() => currentContext,createMainWatchdogReview(() => currentContext, { getThinkingLevel: () => pi.getThinkingLevel() })),
-		reviewDescription: "local diagnostics; parent owns integrated source review unless a child model is configured",
-		ownsAutoFollow: () => Boolean(childConfig.model),
+		review: createCoordinatedWatchdogReview(() => currentContext),
+		reviewDescription: "local diagnostics; parent owns integrated source review",
+		// Children have no local quality owner; the parent owns any follow-up.
+		ownsAutoFollow: () => false,
 		reviewChangesOnly: true,
 		displayWarning: (details) => {
 			const childDetails = childWarningDetails(details, childConfig);

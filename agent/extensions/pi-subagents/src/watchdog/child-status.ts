@@ -14,8 +14,6 @@ export interface ChildWatchdogConfig {
 	watchdogTailTimeoutMs: number;
 	agentEndTimeoutMs: number;
 	maxWarnings: number | null;
-	model?: string;
-	thinking?: string | false;
 	lsp: WatchdogLspConfig;
 	autoFollowBlockers: boolean;
 	autoFollowMaxAttempts: number | null;
@@ -53,8 +51,6 @@ export function resolveChildWatchdogConfig(input: {
 	const override = input.agent ? input.config.children.overrides[input.agent] : undefined;
 	const enabled = input.config.enabled && (override?.enabled ?? input.config.children.enabled);
 	if (!enabled) return undefined;
-	const model = override?.model ?? input.config.children.model;
-	const thinking = override?.thinking ?? input.config.children.thinking;
 	return {
 		enabled: true,
 		...(input.runId ? { runId: input.runId } : {}),
@@ -63,8 +59,6 @@ export function resolveChildWatchdogConfig(input: {
 		watchdogTailTimeoutMs: input.config.children.watchdogTailTimeoutMs,
 		agentEndTimeoutMs: input.config.agentEndTimeoutMs,
 		maxWarnings: input.config.maxWarnings,
-		...(model ? { model } : {}),
-		...(thinking !== undefined ? { thinking } : {}),
 		lsp: { ...input.config.lsp },
 		autoFollowBlockers: input.config.children.autoFollow.blockers,
 		autoFollowMaxAttempts: input.config.children.autoFollow.maxAttempts,
@@ -139,14 +133,9 @@ export function decodeChildWatchdogConfig(raw: string | undefined): ChildWatchdo
 	const parsed = childConfigObject(JSON.parse(raw), "root");
 	if (parsed.enabled === false) return undefined;
 	if (parsed.enabled !== true) throw new Error("Invalid child watchdog config: enabled must be true or false.");
-	const thinking = parsed.thinking;
-	if (thinking !== undefined && typeof thinking !== "string" && thinking !== false) {
-		throw new Error("Invalid child watchdog config: thinking must be a string or false.");
-	}
 	const runId = childConfigOptionalString(parsed, "runId");
 	const agent = childConfigOptionalString(parsed, "agent");
 	const childIndex = childConfigOptionalIndex(parsed, "childIndex");
-	const model = childConfigOptionalString(parsed, "model");
 	return {
 		enabled: true,
 		...(runId ? { runId } : {}),
@@ -155,8 +144,6 @@ export function decodeChildWatchdogConfig(raw: string | undefined): ChildWatchdo
 		watchdogTailTimeoutMs: childConfigPositiveInteger(parsed, "watchdogTailTimeoutMs"),
 		agentEndTimeoutMs: childConfigPositiveInteger(parsed, "agentEndTimeoutMs"),
 		maxWarnings: childConfigNullableNonNegativeInteger(parsed, "maxWarnings"),
-		...(model ? { model } : {}),
-		...(thinking !== undefined ? { thinking: thinking as string | false } : {}),
 		lsp: childConfigLsp(parsed.lsp),
 		autoFollowBlockers: childConfigBoolean(parsed, "autoFollowBlockers"),
 		autoFollowMaxAttempts: childConfigNullableNonNegativeInteger(parsed, "autoFollowMaxAttempts"),

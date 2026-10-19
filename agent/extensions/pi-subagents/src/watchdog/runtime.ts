@@ -14,7 +14,6 @@ import { resolveWatchdogConfig } from "./settings.ts";
 import { formatWatchdogTurnDelta } from "./turn-delta.ts";
 import {
 	type ResolvedWatchdogConfig,
-	type WatchdogEndpointConfig,
 	type WatchdogLspRuntimeSnapshot,
 	type WatchdogRuntimeStatus,
 	type WatchdogSettingsError,
@@ -55,7 +54,6 @@ export interface WatchdogRuntimeSnapshot {
 	epoch: number;
 	activeReviewId?: number;
 	sessionOverride?: boolean;
-	sessionModelOverride?: Partial<Pick<WatchdogEndpointConfig, "model" | "thinking">>;
 	lastWarning?: WatchdogWarningDetails;
 	lastError?: string;
 	failedReviews: number;
@@ -129,7 +127,6 @@ export class MainWatchdogRuntime {
 	private readonly scope = new WatchdogScopeArtifact();
 	private configResult: WatchdogSettingsResult;
 	private sessionOverrideEnabled: boolean | undefined;
-	private sessionModelOverride: Partial<Pick<WatchdogEndpointConfig, "model" | "thinking">> | undefined;
 	private status: WatchdogRuntimeStatus = "idle";
 	private pendingDeltas: string[] = [];
 	private pendingDeltaChars = 0;
@@ -192,7 +189,6 @@ export class MainWatchdogRuntime {
 	bindSession(ctx: ContextLike): void {
 		this.cwd = ctx.cwd;
 		this.sessionOverrideEnabled = undefined;
-		this.sessionModelOverride = undefined;
 		this.refreshConfig(ctx.cwd);
 		this.reset("session_start", { clearReviewInputSignature: true, resetChangeSignature: true, clearLspLedger: true, clearScope: true, resetAutoFollow: true });
 	}
@@ -200,15 +196,9 @@ export class MainWatchdogRuntime {
 	refreshConfig(cwd = this.cwd): WatchdogSettingsResult {
 		this.cwd = cwd;
 		const wasEnabled = this.isEnabled();
-		const session = this.sessionOverrideEnabled === undefined && this.sessionModelOverride === undefined
+		const session = this.sessionOverrideEnabled === undefined
 			? undefined
-			: {
-				...(this.sessionOverrideEnabled === undefined ? {} : { enabled: this.sessionOverrideEnabled }),
-				main: {
-					...(this.sessionOverrideEnabled === undefined ? {} : { enabled: this.sessionOverrideEnabled }),
-					...(this.sessionModelOverride ?? {}),
-				},
-			};
+			: { enabled: this.sessionOverrideEnabled, main: { enabled: this.sessionOverrideEnabled } };
 		this.configResult = this.resolveConfig(this.cwd, session === undefined ? undefined : { session });
 		if (this.configResult.config.maxWarnings !== this.guardMaxWarnings) {
 			this.guardMaxWarnings = this.configResult.config.maxWarnings;
@@ -225,28 +215,8 @@ export class MainWatchdogRuntime {
 		return this.getSnapshot();
 	}
 
-	setSessionModel(patch: { model?: string | null; thinking?: WatchdogEndpointConfig["thinking"] | null }, cwd = this.cwd): WatchdogRuntimeSnapshot {
-		const next = { ...(this.sessionModelOverride ?? {}) };
-		if (patch.model === null) delete next.model;
-		else if (patch.model !== undefined) next.model = patch.model;
-		if (patch.thinking === null) delete next.thinking;
-		else if (patch.thinking !== undefined) next.thinking = patch.thinking;
-		this.sessionModelOverride = next.model === undefined && next.thinking === undefined ? undefined : next;
-		this.reset("session model override");
-		this.refreshConfig(cwd);
-		return this.getSnapshot();
-	}
-
-	clearSessionModel(cwd = this.cwd): WatchdogRuntimeSnapshot {
-		this.sessionModelOverride = undefined;
-		this.reset("session model override cleared");
-		this.refreshConfig(cwd);
-		return this.getSnapshot();
-	}
-
 	clearSessionOverride(cwd = this.cwd): WatchdogRuntimeSnapshot {
 		this.sessionOverrideEnabled = undefined;
-		this.sessionModelOverride = undefined;
 		this.reset("session override cleared");
 		this.refreshConfig(cwd);
 		return this.getSnapshot();
@@ -458,7 +428,6 @@ export class MainWatchdogRuntime {
 			epoch: this.epoch,
 			...(this.activeReviewId !== undefined ? { activeReviewId: this.activeReviewId } : {}),
 			...(this.sessionOverrideEnabled !== undefined ? { sessionOverride: this.sessionOverrideEnabled } : {}),
-			...(this.sessionModelOverride !== undefined ? { sessionModelOverride: { ...this.sessionModelOverride } } : {}),
 			...(this.lastWarning ? { lastWarning: this.lastWarning } : {}),
 			...(this.lastError ? { lastError: this.lastError } : {}),
 			failedReviews: this.failedReviews,

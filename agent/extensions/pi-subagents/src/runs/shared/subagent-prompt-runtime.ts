@@ -1,4 +1,3 @@
-import { READ_ONLY_REASONING_TOOLS } from "./tool-budget.ts";
 import { AUTOMATIC_HELPER_LIMITS } from "./automatic-budgets.ts";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -33,64 +32,7 @@ import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
 import { resolveWaitToolConfig } from "../background/wait-config.ts";
 import { registerWaitTool } from "../background/wait-tool.ts";
 import { drainOutstandingWork } from "../background/auto-drain.ts";
-import { registerAutonomousRecovery } from "../../extension/autonomous-recovery.ts";
-import { toModelInfo } from "../../shared/model-info.ts";
-import { registerEconomyRequestHook, isAutonomousMeteredEligible, loadModelEconomyConfig, operationalEconomyQualification } from "./model-economy.ts";
-import { capFreeRequest, isProvenFreeRoute } from "./free-route-evidence.ts";
 import { decodeSubagentModelRouteCandidate, SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV } from "../../shared/model-route.ts";
-
-/** Helper admission and dispatch share the global economy caps; per-child runaway circuit breakers own spend. */
-export function capAutomaticHelperRequest(raw: any, model: NonNullable<ExtensionContext["model"]>) {
- if (!raw || typeof raw !== "object" || Array.isArray(raw) || ![model.id,`${model.provider}/${model.id}`].includes(raw.model)) throw new Error("Helper route/payload mismatch");
- const cfg=loadModelEconomyConfig();
- // Relaxed: helpers share the global economy caps. The per-child runaway
- // circuit breaker owns spend; do not re-clamp $/M here.
- const cheap={...cfg};
- let payload: any;
- if(isProvenFreeRoute(model)) payload=capFreeRequest(raw,model);
- else {
-  if(!isAutonomousMeteredEligible(toModelInfo(model),cheap)) throw new Error("Helper route has no eligible low-price evidence");
-  payload={...raw};
-  if(model.provider==="openrouter") {
-   const provider={...(raw.provider??{})};const cap={...(provider.max_price??{})};
-   const qualified=operationalEconomyQualification(toModelInfo(model),cheap);
-   for(const [field,limit] of [["prompt",qualified?.maxPerMillion??cheap.maxInputPerMillion],["completion",qualified?.maxPerMillion??cheap.maxOutputPerMillion]] as const) {
-    if(cap[field]!==undefined && (typeof cap[field]!=="number" || !Number.isFinite(cap[field]) || cap[field]<0)) throw new Error("Invalid helper price cap");
-    cap[field]=Math.min(cap[field]??limit,limit);
-   }
-   payload.provider={...provider,max_price:cap};
-  }
- }
- // Reasoning tokens share the provider's output allowance. A 1024-token
- // discovery cap can consume the whole response before producing any JSON,
- // especially when an explicitly configured route requests high reasoning.
- // Keep the ordinary helper ceiling for those models; the parent still owns
- // the cumulative token, cost and deadline budgets and the bounded JSON result.
- const discovery = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery";
- const reasoningEnabled = Boolean(model.reasoning) && requestEnablesReasoning(payload);
- const outputLimit = discovery && !model.reasoning ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens + (reasoningEnabled ? AUTOMATIC_HELPER_LIMITS.reasoningOutputTokens : 0);
- const fields=["max_tokens","max_completion_tokens","max_output_tokens"].filter(key=>Object.hasOwn(payload,key));
- if(!fields.length) fields.push(model.api==="openai-responses"?"max_output_tokens":"max_tokens");
- for(const field of fields) {
-  const prior=payload[field];
-  if(prior!==undefined && (!Number.isSafeInteger(prior)||prior<=0))throw new Error("Invalid helper output budget");
-  payload={...payload,[field]:Math.min(prior??outputLimit,outputLimit,model.maxTokens || outputLimit)};
- }
- // Anthropic's explicit thinking budget must remain below max_tokens after
- // the helper cap. Reserve the same short answer allowance as discovery.
- if(payload.thinking?.type === "enabled" && Number.isSafeInteger(payload.thinking.budget_tokens) && payload.thinking.budget_tokens > 0 && Number.isSafeInteger(payload.max_tokens)) {
-  const budget = Math.min(payload.thinking.budget_tokens, payload.max_tokens - 1024);
-  if(budget < 1024) throw new Error("Helper output budget cannot fit enabled thinking and an answer");
-  payload={...payload,thinking:{...payload.thinking,budget_tokens:budget}};
- }
- return payload;
-}
-
-function requestEnablesReasoning(payload: any): boolean {
- const off = (value: unknown) => value === undefined || value === null || value === false || value === "none" || value === "off" || value === "minimal";
- return !off(payload?.reasoning_effort) || (payload?.reasoning && typeof payload.reasoning === "object" && (!off(payload.reasoning.effort) || payload.reasoning.enabled === true || Number(payload.reasoning.max_tokens) > 0))
-  || ["enabled", "adaptive"].includes(payload?.thinking?.type) || payload?.enable_thinking === true;
-}
 
 const SUBAGENT_INHERIT_PROJECT_CONTEXT_ENV = "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT";
 const SUBAGENT_INHERIT_SKILLS_ENV = "PI_SUBAGENT_INHERIT_SKILLS";
@@ -332,10 +274,14 @@ export function stripGlobalContext(prompt: string): string {
 }
 
 export function stripInheritedSkills(prompt: string): string {
-	const startIndex = findSectionEnd(prompt, 0, SKILLS_HEADERS);
-	if (startIndex === prompt.length) return prompt;
-	const endIndex = findSectionEnd(prompt, startIndex + 1, [DATE_HEADER]);
-	return `${prompt.slice(0, startIndex)}${prompt.slice(endIndex)}`;
+	let cleaned = prompt;
+	if (cleaned.includes("<available_skills>")) {
+		cleaned = cleaned.replace(/\n*<available_skills>[\s\S]*?<\/available_skills>\n*/g, "\n");
+	}
+	const startIndex = findSectionEnd(cleaned, 0, SKILLS_HEADERS);
+	if (startIndex === cleaned.length) return cleaned.trimEnd();
+	const endIndex = findSectionEnd(cleaned, startIndex + 1, [DATE_HEADER, "\nCurrent working directory:"]);
+	return `${cleaned.slice(0, startIndex)}${cleaned.slice(endIndex)}`;
 }
 
 export function stripSubagentOrchestrationSkill(prompt: string): string {
@@ -541,7 +487,6 @@ export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget 
 	let toolCount = 0;
 	let softNudged = false;
 	let finalizedTools = false;
-	const automatic = ["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "");
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
 	onRuntimeEvent("tool_call", (event) => {
@@ -559,22 +504,21 @@ export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget 
 		return { block: true, reason: toolBudgetBlockedMessage(budget, toolName, toolCount) };
 	});
 	// Blocking a call alone still advertises the tool on the next request. Some
-	// helpers repeatedly retry blocked reads until the deadline. Once an automatic
-	// read-only run has consumed its all-tools budget, leave only text finalization.
+	// helpers repeatedly retry blocked reads until the deadline. Once a run has
+	// consumed an all-tools budget, leave only text finalization.
 	onRuntimeEvent("tool_result", () => {
-		if (automatic && budget.block === "*" && toolCount >= budget.hard && !finalizedTools) {
+		if (budget.block === "*" && toolCount >= budget.hard && !finalizedTools) {
 			pi.setActiveTools([]);
 			finalizedTools = true;
 		}
 	});
 }
 
-/** Automatic read-only helpers finalize before their reported-token budget is
- * crossed. The parent only accounts the budget after exit, so without this a
- * reviewer kept reading until its deadline and the whole paid review was lost. */
+/** A child with a hard token budget finalizes before the budget is crossed.
+ * The parent only accounts the budget after exit, so without this a reviewer
+ * kept reading until its deadline and the whole paid review was lost. */
 export function registerTokenBudget(pi: ExtensionAPI, hard: number): void {
 	if (!Number.isSafeInteger(hard) || hard <= 0) return;
-	if (!["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "")) return;
 	let used = 0;
 	let finalized = false;
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
@@ -677,7 +621,7 @@ export function registerSteeringInbox(
 					acknowledge(request, "failed", error instanceof Error ? error.message : String(error));
 				};
 				try {
-					const acceptance = sendUserMessage(formatted, autoCanUseIdle ? undefined : { deliverAs: delivery });
+					const acceptance = sendUserMessage(formatted, { deliverAs: delivery });
 					void Promise.resolve(acceptance).catch(failDelivery);
 				} catch (error) {
 					failDelivery(error);
@@ -913,8 +857,11 @@ export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): P
 		registerNativeSupervisorClientOnce();
 	});
 	onRuntimeEvent("agent_start", () => {
-		const diagnostic = refreshChildToolDiagnostic(pi);
-		if (diagnostic) throw new Error(formatChildToolDiagnostic(diagnostic));
+		try {
+			refreshChildToolDiagnostic(pi);
+		} catch {
+			// Diagnostic recording is best-effort telemetry and must not break child execution.
+		}
 	});
 	onRuntimeEvent("agent_end", async (_event: unknown, ctx: unknown) => {
 		if ((ctx as { hasUI?: boolean } | undefined)?.hasUI === true) return;
@@ -973,27 +920,6 @@ export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): P
 		});
 	}
 
-	registerEconomyRequestHook({ on: (name, handler) => onRuntimeEvent(name, (event, ctx) => handler(event as { payload?: unknown }, ctx)) });
-	// Only parent-admitted alternatives may continue this exact worker session.
-	let recoveryRoutes: string[] = [];
-	try {
-		const encoded=process.env.PI_SUBAGENT_RECOVERY_ROUTES ?? "";
-		const parsed=encoded.length<=8192 ? JSON.parse(encoded||"[]") : [];
-		if(Array.isArray(parsed)&&parsed.length<=8&&parsed.every(route=>typeof route==="string"&&route.length<=512&&route.includes("/")&&!/[\s\x00-\x1f]/.test(route)))recoveryRoutes=[...new Set(parsed)];
-	} catch {}
-	if(recoveryRoutes.length>1) registerAutonomousRecovery(pi,async()=>{throw new Error("Nested helper launch disabled");},{childRoutes:recoveryRoutes});
-	if (["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "")) {
-		const discovery = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery";
-		onRuntimeEvent("tool_call", (event: any) => !discovery && ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS].includes(event.toolName) ? undefined : { block: true, reason: discovery ? "Skill discovery cannot use tools." : "Autonomous free assistance is strictly read-only." });
-		onRuntimeEvent("before_provider_request", (event: any, ctx) => {
-			try {
-				if (!ctx?.model) throw new Error("Missing selected helper model");
-				return capAutomaticHelperRequest(event.payload, ctx.model);
-			} catch (error) {
-				throw Object.assign(new Error(`Helper dispatch denied: ${String(error)}`), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
-			}
-		});
-	}
 	onRuntimeEvent("before_provider_request", (event: unknown, ctx?: ExtensionContext) => rewriteForkCacheProviderRequest(event as BeforeProviderRequestEvent, ctx));
 
 	onRuntimeEvent("context", (event: unknown, ctx?: ExtensionContext) => {

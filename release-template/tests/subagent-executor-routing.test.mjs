@@ -35,7 +35,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking } = {}) {
   clearExclusions();
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
@@ -76,7 +76,7 @@ ${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
     subagentSpawns: { sessionId: null, count: 0 }, asyncJobs: new Map(), foregroundRuns: new Map(), foregroundControls: new Map(),
     cleanupTimers: new Map(), completionSeen: new Map(), resultFileCoalescer: { schedule: () => false, clear() {} } };
   const runtimeModel = { ...model, reasoning }, entries = [];
-  const pi = { events: createEventBus(), appendEntry(type, data) { entries.push({type,data}); }, getActiveTools: () => [], getModel: () => runtimeModel, getSessionName: () => "Executor fixture" };
+  const pi = { events: createEventBus(), appendEntry(type, data) { entries.push({type,data}); }, getActiveTools: () => [], getModel: () => runtimeModel, getThinkingLevel: () => sessionThinking, getSessionName: () => "Executor fixture" };
   const executor = createSubagentExecutor({ state, pi, config, asyncByDefault: false,
     tempArtifactsDir: path.join(cwd, "artifacts"), getSubagentSessionRoot: () => path.join(cwd, "sessions"),
     expandTilde: value => value, discoverAgents: () => ({ agents: [agent] }) });
@@ -107,24 +107,23 @@ function launchThinking(row) {
   return /:(off|minimal|low|medium|high|xhigh|max)$/.exec(modelArg ?? '')?.[1];
 }
 
-test('adaptive native foreground reasoning follows authored child scope and preserves route/config pins',{timeout:30_000},async t=>{
-  const f=fixture(t,{reasoning:true,captureNative:true});
-  const briefs=[['Fix a one-line README comment typo','minimal'],['Investigate an intermittent parser failure','low'],['Redesign authentication across multiple services','high']];
-  for(const [task, expected] of briefs){
-    const result=await f.executor.execute('adaptive-reasoning',{agent:'route-fixture',commonTask:'Parent context: redesign authentication across multiple services',task,context:'fresh',async:false,artifacts:false,acceptance:{level:'none',reason:'Read-only launch-contract fixture'}},new AbortController().signal,undefined,f.ctx);
+test('native child thinking is the session ceiling for every brief and ignores agent and requested thinking',{timeout:30_000},async t=>{
+  const f=fixture(t,{reasoning:true,captureNative:true,sessionThinking:'high'});
+  const briefs=['Fix a one-line README comment typo','Investigate an intermittent parser failure','Redesign authentication across multiple services'];
+  for(const task of briefs){
+    const result=await f.executor.execute('session-thinking',{agent:'route-fixture',commonTask:'Parent context: redesign authentication across multiple services',task,context:'fresh',async:false,artifacts:false,acceptance:{level:'none',reason:'Read-only launch-contract fixture'}},new AbortController().signal,undefined,f.ctx);
     assert.notEqual(result.isError,true,JSON.stringify(result));
-    assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),expected);
+    assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),'high');
   }
-  f.agent.thinking='high';
-  await f.executor.execute('adaptive-pinned-config',{agent:'route-fixture',task:briefs[0][0],context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
+  f.agent.thinking='low';
+  await f.executor.execute('session-agent-config',{agent:'route-fixture',task:briefs[0],context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
   assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),'high');
-  delete f.agent.thinking;
-  await f.executor.execute('adaptive-pinned-route',{agent:'route-fixture',task:briefs[0][0],model:`${route}:high`,context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
+  await f.executor.execute('session-requested-model',{agent:'route-fixture',task:briefs[0],model:`${route}:low`,context:'fresh',async:false,artifacts:false},new AbortController().signal,undefined,f.ctx);
   assert.equal(launchThinking(f.records().filter(row=>row.phase==='start').at(-1)),'high');
 });
 
-test('adaptive native background arrays apply per-child reasoning and default scheduler width without dropping work',{timeout:75_000},async t=>{
-  const f=fixture(t,{reasoning:true,captureNative:true,childDelayMs:600,startBarrier:2});
+test('native background arrays use the session ceiling with default scheduler width without dropping work',{timeout:75_000},async t=>{
+  const f=fixture(t,{reasoning:true,captureNative:true,childDelayMs:600,startBarrier:2,sessionThinking:'high'});
   const result=await f.executor.execute('adaptive-parallel',{tasks:[
     {agent:'route-fixture',task:'Fix a one-line README comment typo'},
     {agent:'route-fixture',task:'Investigate an intermittent parser failure'},
@@ -134,7 +133,7 @@ test('adaptive native background arrays apply per-child reasoning and default sc
   const status=await awaitNativeBackground(f,result);
   const records=f.records(),starts=records.filter(row=>row.phase==='start');
   assert.equal(starts.length,4,'every requested child must execute');
-  assert.deepEqual(starts.map(launchThinking).sort(),['low','minimal','minimal','minimal']);
+  assert.deepEqual(starts.map(launchThinking),['high','high','high','high']);
   let active=0,peak=0;for(const row of records){active+=row.phase==='start'?1:-1;peak=Math.max(peak,active);}
   assert.equal(peak,2,'the actual native process scheduler consumes width 2');
   assert.equal(active,0);
@@ -167,7 +166,7 @@ for (const background of [false, true]) test(`successful ${background ? 'backgro
   const f=fixture(t,{lingerAfterStop:true});
   const result=await f.executor.executeDelegated('cleanup-request',{
     agent:'route-fixture',task:'Read the source and return a concise observation',context:'fresh',async:background,
-    artifacts:false,model:route,modelOrigin:'inherited',modelRouteCandidates:[pins[1]],timeoutMs:15_000,
+    artifacts:false,modelRouteCandidates:[pins[1]],timeoutMs:15_000,
     acceptance:{level:'none',reason:'Read-only cleanup fixture; no implementation deliverable.'},
   },new AbortController().signal,undefined,f.ctx);
   let row=result.details.results?.[0];
@@ -187,11 +186,11 @@ for (const background of [false, true]) test(`successful ${background ? 'backgro
   assert.equal(f.records().length,1);
 });
 
-for (const background of [false, true]) test(`real ${background ? "background" : "foreground"} executor preserves delegated upstream retry pins`, { timeout: 30_000 }, async t => {
+for (const background of [false, true]) test(`real ${background ? "background" : "foreground"} executor launches only the delegated session route`, { timeout: 30_000 }, async t => {
   const f = fixture(t);
   const result = await f.executor.executeDelegated("fixture-request", {
     agent: "route-fixture", task: "Read the source and return a concise observation", context: "fresh", async: background,
-    artifacts: false, model: route, modelOrigin: "inherited", modelRouteCandidates: pins, timeoutMs: 15_000,
+    artifacts: false, modelRouteCandidates: [pins[1]], timeoutMs: 15_000,
   }, new AbortController().signal, undefined, f.ctx);
   assert.notEqual(result.isError, true, JSON.stringify(result));
   if (background) {
@@ -210,16 +209,28 @@ for (const background of [false, true]) test(`real ${background ? "background" :
     assert.match(result.content[0].text, /Child completed/);
   }
   const attempts = f.records();
-  assert.equal(attempts.length, 2);
-  assert.deepEqual(attempts.map(attempt => attempt.candidate), pins);
-  assert.deepEqual(attempts.map(attempt => attempt.provider), pins.map(pin => pin.providerRouting));
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(attempts.map(attempt => attempt.candidate), [pins[1]]);
+  assert.deepEqual(attempts.map(attempt => attempt.provider), [pins[1].providerRouting]);
+});
+
+test("a failed delegated session route is not retried on another upstream pin", { timeout: 30_000 }, async t => {
+  const f = fixture(t);
+  const result = await f.executor.executeDelegated("failed-route-request", {
+    agent: "route-fixture", task: "Read the source and return a concise observation", context: "fresh", async: false,
+    artifacts: false, modelRouteCandidates: [pins[0]], timeoutMs: 15_000,
+  }, new AbortController().signal, undefined, f.ctx);
+  assert.equal(result.isError, true);
+  const attempts = f.records();
+  assert.ok(attempts.length >= 1);
+  assert.ok(attempts.every(attempt => attempt.candidate.providerRouting?.only?.[0] === "together"), JSON.stringify(attempts));
 });
 
 for (const background of [false, true]) test(`native ${background ? "background" : "foreground"} child length stops retain their typed cause in terminal receipts`, { timeout: 30_000 }, async t => {
   const f = fixture(t, { stopReason: "length" });
   const result = await f.executor.executeDelegated("length-request", {
     agent: "route-fixture", task: "Read the source and return a concise observation", context: "fresh", async: background,
-    artifacts: false, model: route, modelOrigin: "inherited", modelRouteCandidates: [pins[1]], timeoutMs: 10_000,
+    artifacts: false, modelRouteCandidates: [pins[1]], timeoutMs: 10_000,
   }, new AbortController().signal, undefined, f.ctx);
   let row;
   if (background) {

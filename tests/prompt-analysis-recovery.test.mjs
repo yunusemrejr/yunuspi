@@ -12,11 +12,8 @@ assert.ok(agent, 'agent extension tree must exist');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-recovery-'));
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = directory;
-process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'preferences.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
-process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(directory, 'economy.json');
-fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
 // These transport/recovery checks intentionally exercise full analysis even
@@ -24,7 +21,6 @@ delete process.env.PI_SUBAGENT_CHILD;
 const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
 process.env.PI_ADAPTIVE_EXECUTION = 'off';
 const { default: register, lastMicroRequest, settleMicroAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
-const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { runPromptAnalysis } = await import(pathToFileURL(path.join(agent, 'extensions/lib/prompt-analysis-runtime.ts')));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function bounded(pending, label) {
@@ -67,16 +63,14 @@ function anthropicResponse() {
   return new Response(rows.map(row => `event: ${row.type}\ndata: ${JSON.stringify(row)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
 }
 
-async function fixture(t, { mode = 'registry', thinking, mandatoryReasoning = true, maxTokens = 16384, api = 'openai-completions', adaptive = false, fetchPlan, auth, throwingUI = false, autonomous = false, cost, thinkingLevelMap = {} } = {}) {
+async function fixture(t, { mode = 'registry', mandatoryReasoning = true, maxTokens = 16384, api = 'openai-completions', adaptive = false, fetchPlan, auth, throwingUI = false } = {}) {
+  // The session model is the only model analysis may use; its reasoning is
+  // turned off when it allows that, and is mandatory otherwise.
   const model = { provider: 'recovery-fixture', id: 'advisor', name: 'Synthetic advisor', api,
     baseUrl: 'https://synthetic.invalid/v1', contextWindow: 65536, maxTokens, reasoning: true, input: ['text'],
-    thinkingLevelMap: { ...(mandatoryReasoning ? { off: null } : {}), ...thinkingLevelMap },
+    thinkingLevelMap: mandatoryReasoning ? { off: null } : {},
     compat: { supportsReasoningEffort: true, maxTokensField: 'max_completion_tokens', ...(adaptive ? { forceAdaptiveThinking: true } : {}) },
-    cost: cost ?? { input: .1, output: .2, cacheRead: .1, cacheWrite: .1 } };
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ version: 1,
-    models: autonomous ? {} : { advisor: { provider: model.provider, model: model.id, ...(thinking ? { thinking } : {}) } },
-    preferences: autonomous ? {} : { prompt_analysis: { models: ['advisor'] } } }));
-  clearLlmPreferencesCache();
+    cost: { input: .1, output: .2, cacheRead: .1, cacheWrite: .1 } };
   let sessionId = `session-${++sequence}`;
   const hooks = new Map(), requests = [], sdkResponses = [], statuses = [], rows = [], events = [];
   let status, warmups = 0;
@@ -90,7 +84,7 @@ async function fixture(t, { mode = 'registry', thinking, mandatoryReasoning = tr
     sdkResponses.push(result);
     return result;
   };
-  const ctx = { cwd: directory, sessionManager: { getSessionId: () => sessionId, getEntries: () => [], getBranch: () => [] },
+  const ctx = { cwd: directory, model, sessionManager: { getSessionId: () => sessionId, getEntries: () => [], getBranch: () => [] },
     modelRegistry: { getAvailable: () => [model], find: () => model,
       getApiKeyAndHeaders: auth ?? (async () => ({ ok: true, apiKey: 'synthetic-key' })),
       ...(mode === 'registry' ? { completeSimple: complete } : {}) },
@@ -158,23 +152,18 @@ test('adaptive direct recovery fixture needs no inference, warmup, progress or a
   } finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 
-test('explicit thinking and provider output ceilings survive compact recovery', async t => {
-  for (const options of [
-    { thinking: 'high', mandatoryReasoning: true, maxTokens: 4000, expected: [4000, 4000], effort: 'high' },
-    { thinking: 'off', mandatoryReasoning: false, maxTokens: 4000, expected: [768, 1536], effort: undefined },
-  ]) {
-    const f = await fixture(t, { ...options, fetchPlan: count => response({ truncated: count === 1 }) });
-    await f.input(`thinking-${options.thinking}`).run();
-    assert.deepEqual(f.requests.map(row => row.wire.max_completion_tokens), options.expected);
-    assert.ok(f.requests.every(row => row.wire.reasoning_effort === options.effort));
-    assert.equal(f.analysis()?.source, 'model');
-  }
+test('provider output ceilings survive compact recovery when the session model can turn reasoning off', async t => {
+  const f = await fixture(t, { mandatoryReasoning: false, maxTokens: 4000, fetchPlan: count => response({ truncated: count === 1 }) });
+  await f.input('reasoning-off').run();
+  assert.deepEqual(f.requests.map(row => row.wire.max_completion_tokens), [768, 1536]);
+  assert.ok(f.requests.every(row => row.wire.reasoning_effort === undefined));
+  assert.equal(f.analysis()?.source, 'model');
 });
 
-test('Anthropic default and explicit off never enable adaptive thinking or inflate the output allowance', async t => {
-  for (const adaptive of [false, true]) for (const thinking of [undefined, 'off']) {
-    const f = await fixture(t, { api: 'anthropic-messages', mandatoryReasoning: false, adaptive, thinking, fetchPlan: () => anthropicResponse() });
-    await f.input(`anthropic-${adaptive}-${thinking ?? 'default'}`).run();
+test('Anthropic simple analysis never enables adaptive thinking or inflates the output allowance', async t => {
+  for (const adaptive of [false, true]) {
+    const f = await fixture(t, { api: 'anthropic-messages', mandatoryReasoning: false, adaptive, fetchPlan: () => anthropicResponse() });
+    await f.input(`anthropic-${adaptive}`).run();
     assert.equal(f.analysis()?.source, 'model');
     assert.equal(f.requests.length, 1);
     assert.equal(f.requests[0].wire.max_tokens, 768, 'a disabled thinking budget must not expand into the provider ceiling');
@@ -206,19 +195,6 @@ test('native Anthropic simple transport treats explicit off as disabled and keep
       assert.equal(wire.thinking.type, 'disabled');
     }
   }
-});
-
-test('autonomous admission includes reasoning and recovery room while preserving explicit paid preferences', async t => {
-  const expensiveReasoning = { cost: { input: 2, output: 2, cacheRead: 2, cacheWrite: 2 }, thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: 'high' } };
-  const automatic = await fixture(t, { ...expensiveReasoning, autonomous: true });
-  await automatic.input('automatic-budget').run();
-  assert.equal(automatic.requests.length, 0, 'the permitted high reasoning allowance alone would exceed the initial $0.01 estimate');
-  assert.equal(automatic.analysis()?.source, 'fallback');
-  const configured = await fixture(t, expensiveReasoning);
-  await configured.input('configured-budget').run();
-  assert.equal(configured.requests.length, 1, 'explicit provider preferences retain user authority over route cost');
-  assert.equal(configured.requests[0].wire.reasoning_effort, 'high');
-  assert.equal(configured.analysis()?.source, 'model');
 });
 
 test('the preferred route keeps its own allowance when more fallbacks are configured', async () => {

@@ -3,7 +3,6 @@ name: worker
 description: Implementation agent for normal tasks and approved oracle handoffs
 aliases: developer, coder, implementer, develop
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../media-tools.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
-thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

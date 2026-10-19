@@ -12,9 +12,6 @@
     "find",
     "ls"
   ],
-  "subagents": {
-    "defaultModel": "inherit"
-  },
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,

@@ -1,19 +1,14 @@
 import { complete, type Api, type Model, type ProviderHeaders } from "@yunuspi/ai/compat";
 import type { SummaryGenerationContext } from "./summary-review.ts";
-import { findModelWithProviderRouting, loadEnabledModelPatterns, modelMatchesEnabledPatterns } from "./summary-model-scope.ts";
 
-async function resolveFirstAvailableModel(
+async function resolveSessionModel(
 	ctx: SummaryGenerationContext,
-	candidates: Array<{ provider: string; id: string }>,
 ): Promise<{ model: Model<Api>; apiKey: string; headers?: ProviderHeaders }> {
-	const enabledModelPatterns = loadEnabledModelPatterns(ctx);
-	for (const { provider, id } of candidates) {
-		const model = findModelWithProviderRouting(ctx.modelRegistry, provider, id);
-		if (!model || !modelMatchesEnabledPatterns(model, enabledModelPatterns)) continue;
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (auth.ok && auth.apiKey) return { model, apiKey: auth.apiKey, headers: auth.headers };
-	}
-	throw new Error(`No enabled model available: ${candidates.map(candidate => `${candidate.provider}/${candidate.id}`).join(", ")}`);
+	const model = ctx.model;
+	if (!model) throw new Error("No active session model for query rewrite");
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (auth.ok && auth.apiKey) return { model, apiKey: auth.apiKey, headers: auth.headers };
+	throw new Error(`No API key available for query rewrite model ${model.provider}/${model.id}`);
 }
 
 export async function rewriteSearchQuery(
@@ -23,14 +18,10 @@ export async function rewriteSearchQuery(
 ): Promise<string> {
 	const trimmedQuery = typeof query === "string" ? query.trim() : "";
 	// Blank input needs no rewrite: return it as-is instead of burning a model
-	// call (and, when no enabled model is available, throwing a misleading
-	// "No enabled model available" error for something that had nothing to say).
+	// call (and, when no session model is available, throwing a misleading
+	// error for something that had nothing to say).
 	if (!trimmedQuery) return query;
-	const { model, apiKey, headers } = await resolveFirstAvailableModel(ctx, [
-		{ provider: "anthropic", id: "claude-haiku-4-5" },
-		{ provider: "google", id: "gemini-3.6-flash" },
-		{ provider: "openai", id: "gpt-5-mini" },
-	]);
+	const { model, apiKey, headers } = await resolveSessionModel(ctx);
 	const registry = ctx.modelRegistry as typeof ctx.modelRegistry & { complete?: typeof complete };
 	const usesRegistryComplete = typeof registry.complete === "function";
 	const completeFn = usesRegistryComplete ? registry.complete!.bind(registry) : complete;

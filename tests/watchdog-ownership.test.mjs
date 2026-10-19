@@ -16,8 +16,8 @@ test('default watchdog supplies fresh diagnostics without a nested reviewer or c
  assert.equal(config.enabled,true);assert.equal(config.main.enabled,true);
  assert.equal(resolveChildWatchdogConfig({config,agent:'worker'}).enabled,true);
  assert.equal(Object.hasOwn(config,'asyncCompletion'),false,'retired unused completion mode is absent from default capabilities');
- let key='baseline',diagnostics=0,independent=0,wakes=0;const warnings=[];
- const review=createCoordinatedWatchdogReview(()=>ctx,()=>{independent++;return {warnings:[]};});
+ let key='baseline',diagnostics=0,wakes=0;const warnings=[];
+ const review=createCoordinatedWatchdogReview(()=>ctx);
  const runtime=new MainWatchdogRuntime({cwd:ctx.cwd,resolveConfig:()=>({ok:true,config,errors:[],sources:[]}),review,reviewChangesOnly:true,ownsAutoFollow:()=>false,
   repoChangeSignature:()=>({root:ctx.cwd,key,changedPaths:key==='baseline'?[]:['src/value.ts']}),
   lspDiagnostics:async()=>{diagnostics++;return {status:'ok',checkedPaths:['src/value.ts'],skippedPaths:[],diagnostics:[{path:'src/value.ts',line:1,column:1,severity:'error',source:'fixture',message:'The referenced identifier does not exist.'}]};},
@@ -26,11 +26,13 @@ test('default watchdog supplies fresh diagnostics without a nested reviewer or c
   runtime.handleBeforeAgentStart({prompt:'Fix the reported behavior'},ctx);key='changed';runtime.enqueueDelta('Changed src/value.ts');
   await runtime.handleAgentEnd({},ctx);await runtime.handleAgentEnd({},ctx);
   assert.equal(diagnostics,1);assert.equal(warnings.length,1);assert.equal(warnings[0].source,'lsp');
-  assert.equal(independent,0);assert.equal(wakes,0);assert.equal(runtime.getSnapshot().autoFollowActive,false);
-  config.main.model='fixture/explicit-reviewer';
-  await review({config,delta:'Changed source',epoch:1,hasScope:true,reviewId:1,emitWarning:()=>true});
-  assert.equal(independent,1,'an explicitly configured model retains standalone review');
+  assert.equal(wakes,0);assert.equal(runtime.getSnapshot().autoFollowActive,false);
+  assert.deepEqual((await review({config,delta:'Changed source',epoch:1,hasScope:true,reviewId:1,emitWarning:()=>true})).warnings,[],'the shared owner is the only reviewer');
  }finally{runtime.dispose();}
  const legacy=resolveWatchdogConfig('/fixture/watchdog',{session:{asyncCompletion:{enabled:true,autoFollowBlockers:true}}});
  assert.equal(legacy.ok,true,'legacy completion settings remain readable without pretending to schedule another reviewer');
+ const retired=resolveWatchdogConfig('/fixture/watchdog',{session:{main:{model:'fixture/old',thinking:'high'},children:{model:'fixture/old',overrides:{worker:{model:'fixture/old',thinking:false}}}}});
+ assert.equal(retired.ok,true,'retired reviewer model and thinking settings are ignored, not rejected');
+ assert.equal(Object.hasOwn(retired.config.main,'model'),false);
+ assert.equal(Object.hasOwn(retired.config.children,'model'),false);
 });

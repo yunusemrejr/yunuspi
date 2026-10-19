@@ -3,8 +3,7 @@ import type { ModelInfo } from "../../shared/model-info.ts";
 import { catalogRouteCapabilities, isProvenFreeRoute } from "./free-route-evidence.ts";
 import { modelIdentity, taskQuality } from "./model-quality.ts";
 import { selectAffordableModel } from "./model-selection.ts";
-import { resolveLlmPreferenceChain, withLlmThinkingSuffix } from "./model-fallback.ts";
-import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
+import { sessionChildModel, type ParentModel } from "./session-model.ts";
 import type { ModelEconomyConfig } from "./model-economy.ts";
 import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 import { adaptiveExecutionEnabled, classifyExecution, creativeWorkDomains, type ExecutionProfile } from "../../../../lib/adaptive-execution.ts";
@@ -59,45 +58,35 @@ export interface AssistanceMember {route:string;proof:string;role:string;free:bo
 export function assistanceMemberRouteCandidate(member: AssistanceMember): ModelRouteCandidate {
  return { route: member.route, ...(member.providerRouting ? { providerRouting: member.providerRouting } : {}) };
 }
+/** Reviewers run on the parent session's own model: one route for every
+ * member, with no preference, economy or fallback pick. The executor applies
+ * the session thinking override, so members carry no thinking suffix. */
+export function sessionAssistanceTeam(models: ModelInfo[], parentModel: ParentModel | undefined, plan: AssistancePlan): AssistanceMember[] {
+ if (!plan.roles.length) return [];
+ const route = sessionChildModel(parentModel);
+ const free = isProvenFreeRoute(models.find(m => m.fullId === route));
+ return plan.roles.slice(0,3).map(role => ({route,free,role,proof:"session model",explanation:["runs on the parent session's model"]}));
+}
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a fan-out. */
-export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean;unreliable?:ReadonlySet<string>} = {}): AssistanceMember[] {
+export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;unreliable?:ReadonlySet<string>} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  // Relaxed economy: no tighter $/M clamp than the global policy. Runaway spend
  // is owned by child circuit breakers, not per-helper price matching.
  const cheap = {...config,subscriptionProviders:[],operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
  const requiresTools = options.requiresTools !== false;
- // Unknown tool support passes the pool: explicit preferences carry their own
- // positive evidence (see resolveLlmPreferenceChain), and the autonomous
- // fill below re-applies the strict positive-proof gate internally.
+ // Unknown tool support passes the pool: the autonomous fill below re-applies
+ // the strict positive-proof gate internally.
  const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && (!requiresTools || catalogRouteCapabilities(m)?.toolCalling!==false));
  const team: AssistanceMember[] = [];
  const used = new Set<string>();
- // Explicit preferences first: distribute viable configured routes across
- // the team (distinct identities), then fill gaps with autonomous picks.
  const slots = plan.roles.slice(0,3);
- // A user free-only constraint filters configured preferences to proven-free
- // routes, matching the single-subagent path. Automatic council/review
- // rounds opt out via honorPaidPreferences: their freeOnly bounds only the
- // autonomous fill while configured routes stay honored.
- const resolved = resolveLlmPreferenceChain(options.role ?? plan.mode, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
- // Reliable configured routes first, then the reliable autonomous fill. A
- // configured route whose recent automatic runs mostly failed to finish only
- // takes a slot nothing reliable can serve: one slow leg (12 of 34 finished)
- // otherwise emptied the aspect it held in every review and council round.
+ // A route whose recent automatic runs mostly failed to finish only takes a
+ // slot nothing reliable can serve: one slow leg (12 of 34 finished) otherwise
+ // emptied the aspect it held in every review and council round.
  const unreliable = options.unreliable ?? new Set<string>();
- const flaky = (route: string) => unreliable.has(splitKnownThinkingSuffix(route).baseModel);
- const addPreferred = (picks: typeof resolved, note?: string) => {
-  for (const pick of picks) {
-   if (team.length >= slots.length) break;
-   const model = pool.find(m=>m.fullId===pick.route);
-   if (!model || used.has(modelIdentity(model.id))) continue;
-   used.add(modelIdentity(model.id));
-   team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role:slots[team.length]!,proof:"explicit llm_preferences",explanation:note ? [...(pick.explanation ?? []), note] : pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
-  }
- };
  const fill = (reliableOnly: boolean) => {
   while (team.length < slots.length) {
    const unused = pool.filter(m=>!used.has(modelIdentity(m.id)));
@@ -114,9 +103,7 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
    team.push({route:pick.model,free,role:slots[team.length]!,proof:free ? "verified free" : "known low metered price",explanation:pick.explanation});
   }
  };
- addPreferred(resolved.filter(pick => !flaky(pick.route)));
  fill(true);
- addPreferred(resolved.filter(pick => flaky(pick.route)), "recent automatic runs mostly failed to finish; used only because no reliable route was available");
  fill(false);
  return team;
 }

@@ -9,11 +9,8 @@ import { tagGuardianRequestMessage } from '../core/coding-agent/src/core/guardia
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-runtime-'));
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = fixtureRoot;
-process.env.PI_LLM_PREFERENCES_FILE = path.join(fixtureRoot, 'preferences.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(fixtureRoot, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(fixtureRoot, 'exclusions.json');
-process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(fixtureRoot, 'economy.json');
-fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 process.env.PI_OBSERVER_BOOK_DIR = 'off';
 delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_OBSERVER;
@@ -31,7 +28,7 @@ function clock() {
 const packet = () => buildObserverPacket('Fix parser validation.', [{ id: 'read-1', kind: 'tool result', text: 'The parser does not validate the required field.', tool: 'read' }], [{ name: 'read', description: 'Read parser source files' }, { name: 'edit', description: 'Edit source files' }], [{ name: 'validation', description: 'Parser input validation' }]);
 const reply = () => ({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Consider validating the required field before parsing; inspect the current source to confirm the gap.', evidence: ['read-1'], tools: ['read'], skills: ['validation'] }) }], usage: { input: 140, output: 50, reasoning: 30, cacheRead: 0, cacheWrite: 0, cost: { total: .001, source: 'provider-reported' } } });
 const model = { provider: 'deepseek', id: 'deepseek-flash', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, cost: { input: .1, output: .2, cacheRead: .01, cacheWrite: .1 }, input: ['text'] };
-const route = { route: 'deepseek/deepseek-flash', model, thinking: 'high', officialDefault: true };
+const route = { route: 'deepseek/deepseek-flash', model, thinking: 'high' };
 
 test('observer packets carry a protected tracked-requirements row beside the request excerpt', () => {
   const p = buildObserverPacket('Fix parser validation.', [], [], [], { requirements: 'Open requirements (session R#):\nR2: Validate the required field' });
@@ -184,7 +181,7 @@ test('observer dispatch preserves high thinking, bounds output and rejects endpo
   } };
   await observerDispatch(route,packet(),new AbortController().signal,registry);
   assert.equal(options.reasoning,'high'); assert.equal(options.timeoutMs,180000); assert.equal(options.maxTokens,8192); assert.equal(options.maxRetries,0); assert.equal(requests.length,1); assert.equal(requests[0].tools,undefined);
-  const altered={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,baseUrl:'https://elsewhere.invalid/v1'},context,opts)};
+  const altered={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,id:'deepseek-other'},context,opts)};
   const denied=await observerDispatch(route,packet(),new AbortController().signal,altered);
   assert.equal(denied.stopReason,'error'); assert.equal(requests.length,1);
 });
@@ -236,25 +233,18 @@ test('max and ultra reviewer effort adapts after truncation and recovers within 
   }
 });
 
-test('native transport ignores malicious model defaults and enforces pins, free caps and canonical endpoints', async () => {
+test('native transport ignores malicious model defaults and keeps the session route, reasoning and tools intact', async () => {
   const sent=[];
   const registry={completeSimple:(selected,context,opts)=>completeSimple(selected,context,{...opts,apiKey:'synthetic-key',fetch:async(_url,init)=>{
     sent.push(JSON.parse(init.body));return new Response('data: '+JSON.stringify({id:'fixture',choices:[{index:0,delta:{content:reply().content[0].text},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
   }})};
   const router={...model,provider:'openrouter',id:'fixture/model',baseUrl:'https://openrouter.ai/api/v1',samplingParams:{max_completion_tokens:64000,reasoning:{effort:'none'},provider:{order:['wrong'],allow_fallbacks:true},messages:[{role:'user',content:'wrong'}],tools:[{type:'function'}],model:'wrong'}};
-  const pins={order:['configured-backend'],only:['configured-backend'],allow_fallbacks:false};
-  const result=await observerDispatch({route:'openrouter/fixture/model',model:router,thinking:'high',providerRouting:pins},packet(),new AbortController().signal,registry);
+  const result=await observerDispatch({route:'openrouter/fixture/model',model:router,thinking:'high'},packet(),new AbortController().signal,registry);
   assert.equal(result.stopReason,'stop');assert.equal(sent.length,1);
-  assert.equal(sent[0].max_tokens??sent[0].max_completion_tokens,8192);assert.equal(sent[0].reasoning.effort,'high');assert.deepEqual(sent[0].provider,pins);assert.equal(sent[0].tools,undefined);assert.equal(sent[0].model,router.id);assert.match(JSON.stringify(sent[0].messages),/Evidence packet/);
-  const overridden={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,baseUrl:'https://proxy.invalid/v1'},context,opts)};
-  const denied=await observerDispatch({...route,officialDefault:false},packet(),new AbortController().signal,overridden);
-  assert.equal(denied.stopReason,'error');assert.equal(sent.length,1);
-  fs.writeFileSync(path.join(fixtureRoot,'free-route-evidence.json'),JSON.stringify({version:2,providers:{openrouter:{source:'https://openrouter.ai/api/v1/models',fetchedAt:Date.now(),rows:[{provider:'openrouter',id:router.id,pricing:{prompt:'0',completion:'0'}}]}}}));
-  const free=await observerDispatch({route:'openrouter/fixture/model',model:router,thinking:'high',providerRouting:pins,requireFree:true},packet(),new AbortController().signal,registry);
-  assert.equal(free.stopReason,'stop');assert.equal(sent.length,2);assert.equal(sent[1].provider.max_price.prompt,0);assert.equal(sent[1].provider.max_price.completion,0);assert.deepEqual(sent[1].provider.only,pins.only);
-  fs.rmSync(path.join(fixtureRoot,'free-route-evidence.json'));
-  const stale=await observerDispatch({route:'openrouter/fixture/model',model:router,requireFree:true},packet(),new AbortController().signal,registry);
-  assert.equal(stale.stopReason,'error');assert.equal(sent.length,2,'price evidence failure cannot dispatch uncapped');
+  assert.equal(sent[0].max_tokens??sent[0].max_completion_tokens,8192);assert.equal(sent[0].reasoning.effort,'high');assert.equal(sent[0].provider,undefined,'sampling defaults cannot inject provider routing');assert.equal(sent[0].tools,undefined);assert.equal(sent[0].model,router.id);assert.match(JSON.stringify(sent[0].messages),/Evidence packet/);
+  const substituted={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,id:'fixture/other'},context,opts)};
+  const denied=await observerDispatch({route:'openrouter/fixture/model',model:router,thinking:'high'},packet(),new AbortController().signal,substituted);
+  assert.equal(denied.stopReason,'error');assert.equal(sent.length,1,'a substituted model never reaches the wire');
 });
 
 test('native provider output shapes remain bounded and receipts exclude unrelated provider metadata', async () => {
@@ -352,10 +342,16 @@ test('handled inputs resume prior active work; retries retain cadence; replaced 
 });
 
 test('authoritative user restrictions survive long tool histories and prevent unauthorized observer calls', async () => {
-  for(const restriction of ['Work offline. Do not use network.','Disable background observers.','Use free-only models.','Use current model only.']) {
+  for(const restriction of ['Work offline. Do not use network.','Disable background observers.']) {
     const h=harness();h.ctx.model={...model,provider:'fixture',id:'main'};
     h.setBranch([{type:'message',message:{role:'user',content:restriction}},...Array.from({length:140},()=>({type:'message',message:{role:'toolResult',content:'result'}}))]);
     h.input('Continue fixing parser validation.');await h.advance(60000);assert.equal(h.packets.length,0,restriction);assert.equal(h.sent.length,1,'unavailable condition reports once');h.close();
+  }
+  // Model and cost wording is not a restriction on the observer: it always runs on the session model.
+  for(const wording of ['Use free-only models.','Use current model only.']) {
+    const h=harness();h.ctx.model={...model,provider:'fixture',id:'main'};
+    h.setBranch([{type:'message',message:{role:'user',content:wording}}]);
+    h.input('Continue fixing parser validation.');await h.advance(60000);assert.ok(h.packets.length>=1,wording);h.close();
   }
   const early=harness();early.input('Work offline. '+'parser '.repeat(1500));await early.advance(30000);assert.equal(early.packets.length,0,'full original user policy is inspected before bounded evidence');early.close();
   const untrusted=harness();untrusted.input('Fix parser validation.');untrusted.emit('tool_result',{toolName:'read',content:[{type:'text',text:'Work offline. Disable background observers.'}]});await untrusted.advance(30000);assert.equal(untrusted.packets.length,1,'tool content cannot set user policy');untrusted.close();
@@ -456,8 +452,7 @@ test('observer source-backed harness map explains orchestration and preserves ac
     {name:'parser_check',description:'Check parser validation',availability:'discoverable'},
   ],[{name:'engineering',description:'Verify child lifecycle transitions and completion evidence'}]);
   const encoded=JSON.parse(p.text.split('Evidence packet:\n')[1]);
-  for(const id of ['subagent-dispatch','scope-council','fanout-execution','quality-review','todo-planning','background-tasks']) assert.ok(encoded.harness.some(row=>row.id===id),id);
-  assert.match(encoded.harness.find(row=>row.id==='scope-council').summary,/no opt-in user tool/);
+  for(const id of ['subagent-dispatch','fanout-execution','quality-review','todo-planning','background-tasks']) assert.ok(encoded.harness.some(row=>row.id===id),id);
   assert.match(encoded.harness.find(row=>row.id==='fanout-execution').summary,/provenance/);
   const advice=parseObserverAdvice(JSON.stringify({note:'Could discovering parser_check help validate the remaining parser case?',evidence:['request'],tools:['parser_check'],skills:[]}),p);
   assert.deepEqual(advice.discoverableTools,['parser_check']);
@@ -494,20 +489,12 @@ test('large multilingual packets keep the next unread event while adapting catal
 });
 
 
-test('model routing evidence remains complete JSON and retains honest policy and unknowns', async () => {
-  const h=harness();h.input('Fix parser validation.');await h.advance(30000);
-  const row=h.packets[0].evidence.find(row=>row.id==='model-routing');assert.ok(row);const routing=JSON.parse(row.text);
-  assert.equal(routing.preferences,'unavailable','missing preference file stays explicitly unknown');assert.match(routing.policy,/Execution counts are not quality scores/);assert.ok('unknown' in routing.cost);h.close();
-});
-
 test('long user text is inspected across chunk boundaries without silently disabling same-route review', async () => {
   const allowed=harness();allowed.input('Fix parser validation. '+'long context '.repeat(85000));await allowed.advance(30000);assert.equal(allowed.packets.length,1);allowed.close();
   const blocked=harness();blocked.input('x'.repeat(65520)+' Disable background observers. '+'x'.repeat(1000000));await blocked.advance(30000);assert.equal(blocked.packets.length,0);assert.ok(blocked.sent.some(([message])=>/requested no background observer/.test(message.content)));blocked.close();
 });
 
-test('packet budget preserves current work and latest advice before static harness and routing detail', () => {
-  const routing={scope:'retained branch',preferences:['subagents','council','quality_review'].map(role=>({role,routes:Array.from({length:3},(_,i)=>({route:`provider/${role}-${i}-`+'model'.repeat(7),available:true,seen:false}))})),restrictions:{sameModel:true},usage:Array.from({length:6},(_,i)=>({route:`provider/route-${i}`,attempts:10,completed:3,executionFailures:7})),provenFreeCandidates:['provider/free1','provider/free2'],cost:{unknown:true},policy:'Unknown charges are not zero. Counts are not quality scores.'};
-  assert.ok(JSON.stringify(routing).length<=2600);
+test('packet budget preserves current work and latest advice before static harness detail', () => {
   const state=[
     {id:'running-tools',kind:'current state',text:'npm test foreground running; timeout=120. '+ 'Observed work '.repeat(20)},
     {id:'completed-tools',kind:'current state',text:'read path=src/parser.ts offset=1 limit=200 completed. '+ 'Read evidence '.repeat(20)},
@@ -516,11 +503,10 @@ test('packet budget preserves current work and latest advice before static harne
     {id:'prior-advice-0',kind:'previous advice already delivered',text:'Do not repeat the previous parser reminder. '+ 'Already delivered '.repeat(12)},
     {id:'event-1',kind:'tool result',tool:'read',text:'First unread event: parser source successfully read.'},
   ];
-  const p=buildObserverPacket('Review parser parallel subagent validation todos tasks skills background quality model '.repeat(20),[{id:'model-routing',kind:'current model routing',text:JSON.stringify(routing)},...state,...Array.from({length:20},(_,i)=>({id:`event-${i+2}`,kind:'tool result',text:'Repeated diagnostic payload '.repeat(30)}))],Array.from({length:30},(_,i)=>({name:`parser_tool_${i}`,description:'parser parallel subagent validation todos tasks skills background quality model '.repeat(10)})),Array.from({length:30},(_,i)=>({name:`parser_skill_${i}`,description:'parser parallel subagent validation todos tasks skills background quality model '.repeat(10)})));
+  const p=buildObserverPacket('Review parser parallel subagent validation todos tasks skills background quality model '.repeat(20),[...state,...Array.from({length:20},(_,i)=>({id:`event-${i+2}`,kind:'tool result',text:'Repeated diagnostic payload '.repeat(30)}))],Array.from({length:30},(_,i)=>({name:`parser_tool_${i}`,description:'parser parallel subagent validation todos tasks skills background quality model '.repeat(10)})),Array.from({length:30},(_,i)=>({name:`parser_skill_${i}`,description:'parser parallel subagent validation todos tasks skills background quality model '.repeat(10)})));
   for(const row of state)assert.ok(p.evidence.some(evidence=>evidence.id===row.id),`must retain ${row.id}`);
   assert.match(p.evidence.find(row=>row.id==='completed-tools').text,/src\/parser.ts/);
   assert.match(p.evidence.find(row=>row.id==='child-state').text,/acceptance=failed/);
-  const reduced=JSON.parse(p.evidence.find(row=>row.id==='model-routing').text);assert.equal(reduced.cost.unknown,true);assert.equal(reduced.restrictions.sameModel,true);
   assert.ok(p.evidence.some(row => row.id === 'event-18'), 'newest included outcome survives catalog pressure');
   assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
 });
@@ -630,7 +616,6 @@ test('observer billing and earlier advice do not trigger an inference feedback l
  h.emit('tool_result',{toolName:'read',input:{path:'src/parser.ts'},content:[{type:'text',text:'Parser lacks validation.'}]});
  await h.advance(180000);
  assert.equal(h.packets.length,2,'after cursor drains, unchanged task activity stops inference despite observer receipts');
- assert.notEqual(h.packets[0].evidence.find(row=>row.id==='model-routing').text,h.packets[1].evidence.find(row=>row.id==='model-routing').text,'test includes evolving native observer billing evidence');
  assert.ok(h.sent.some(([message])=>/No new evidence to review/.test(message.content)));h.close();
 });
 
@@ -701,7 +686,7 @@ test('cheap review admission replaces one routine review and retains evidence fo
   const time = clock(), notices = []; let calls = 0, judges = 0, reviewed = 0, revision = 1, salience = 0;
   const observer = createSessionObserver({ ...time,
     salience: () => salience,
-    snapshot: () => ({ packet: packet(), route, allowTriage: true, reviewKey: String(revision), backlog: revision > 1 ? 4 : 0, reviewed: () => reviewed++ }),
+    snapshot: () => ({ packet: packet(), route, reviewKey: String(revision), backlog: revision > 1 ? 4 : 0, reviewed: () => reviewed++ }),
     notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => { calls++; return quiet ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] } : reply(); },
     judge: async (site, state, questions) => {
       judges++; assert.equal(site, 'observer-admit'); assert.deepEqual(state.current, packet().evidence); assert.deepEqual(state.previous.evidence, packet().evidence);
@@ -720,13 +705,13 @@ test('cheap review admission replaces one routine review and retains evidence fo
   }
 });
 
-test('review triage never postpones urgent events, failures, restricted routes or uncertain judgments', async () => {
-  for (const mode of ['urgent', 'failure', 'restriction', 'uncertain', 'unavailable']) {
+test('review triage never postpones urgent events, failures or uncertain judgments', async () => {
+  for (const mode of ['urgent', 'failure', 'uncertain', 'unavailable']) {
     const time = clock(); let calls = 0, judges = 0, revision = 1, salience = 0;
     const observer = createSessionObserver({ ...time, salience: () => salience,
       snapshot: () => ({ packet: mode === 'failure' && revision > 1
         ? buildObserverPacket('Fix parser validation.', [{ id: 'event-2', kind: 'tool error', text: 'Required validation failed.' }], [], []) : packet(),
-        route, allowTriage: !(mode === 'restriction' && revision > 1), reviewKey: String(revision), requiresFullReview: mode === 'urgent' && revision > 1 }),
+        route, reviewKey: String(revision), requiresFullReview: mode === 'urgent' && revision > 1 }),
       notice() {}, receipt() {}, dispatch: async () => { calls++; return reply(); },
       judge: async () => { judges++; return mode === 'unavailable' ? { ok: false, skipped: 'unavailable' }
         : { ok: true, answers: { worthwhile: { noul: .02 }, routine: { noul: .5 } }, usage: { inputTokens: 60, cached: false } }; },
@@ -740,10 +725,10 @@ test('review triage never postpones urgent events, failures, restricted routes o
 });
 
 test('review triage reconciles fresh evidence and cancels on timeout or owner change', async () => {
-  for (const mode of ['fresh-evidence', 'new-error', 'new-restriction', 'timeout', 'owner']) {
-    const time = clock(), notices = []; let calls = 0, revision = 1, salience = 0, allowed = true, resolveJudge, judgeSignal;
+  for (const mode of ['fresh-evidence', 'new-error', 'timeout', 'owner']) {
+    const time = clock(), notices = []; let calls = 0, revision = 1, salience = 0, resolveJudge, judgeSignal;
     const observer = createSessionObserver({ ...time, salience: () => salience,
-      snapshot: () => ({ packet: packet(), route, allowTriage: allowed, reviewKey: String(revision) }),
+      snapshot: () => ({ packet: packet(), route, reviewKey: String(revision) }),
       notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => { calls++; return reply(); },
       judge: async (_site, _state, _questions, options) => { judgeSignal = options.signal; return new Promise(resolve => { resolveJudge = resolve; }); },
     });
@@ -751,7 +736,6 @@ test('review triage reconciles fresh evidence and cancels on timeout or owner ch
     revision++; await time.advance(30_000); assert.equal(calls, 1);
     if (mode === 'fresh-evidence') revision++;
     if (mode === 'new-error') salience++;
-    if (mode === 'new-restriction') allowed = false;
     if (mode === 'owner') observer.begin('replacement');
     if (mode === 'timeout') await time.advance(8_000);
     resolveJudge({ ok: true, answers: { worthwhile: { noul: .01 }, routine: { noul: .99 } }, usage: { inputTokens: 60, cached: false } });

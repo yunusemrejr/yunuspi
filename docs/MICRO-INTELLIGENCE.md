@@ -47,9 +47,9 @@ Routine background work (Guardian checks, Needle rankings, fuzzy matches, router
 
 Initial and follow-up analyses produce one persistent TUI message. It shows the task interpretation, follow-up relationship, model route or categorized fallback cause, and whether a long input was excerpted. Expand the message to inspect the exact advisory inserted next to the corresponding original user message. No approval step is introduced and no replacement prompt is substituted for the user's text.
 
-The advisory separates concrete work from reusable mindset scaffolding and quoted examples. This extraction is a heuristic, not authority: omitted content may contain additional requirements, and the main agent still receives the original. A bounded model attempt may time out; the final configured route gets the remaining preflight budget. When every route fails, the TUI names each route and its timeout or failure category, and nothing is added to the main agent's context: a zero-confidence restatement of the prompt carries no information. Late responses cannot turn an already delivered fallback into a model success, and an aborted request is reported as late-failed rather than as a late completion.
+The advisory separates concrete work from reusable mindset scaffolding and quoted examples. This extraction is a heuristic, not authority: omitted content may contain additional requirements, and the main agent still receives the original. A bounded model attempt may time out. When the attempt fails, the TUI names the route and its timeout or failure category, and nothing is added to the main agent's context: a zero-confidence restatement of the prompt carries no information. Late responses cannot turn an already delivered fallback into a model success, and an aborted request is reported as late-failed rather than as a late completion.
 
-Initial and follow-up prompt analysis each have one absolute four-minute deadline. A preferred route receives up to two minutes without dividing that allowance by the number of fallback routes; the final route can use the remaining time. With two configured routes, a two-minute timeout on the first still leaves two minutes for the second. This allows provider queueing and reasoning time; successful responses and fast failures advance immediately without waiting out the allowance. Only caller cancellation stops the whole analysis: a provider-originated abort advances to the next route. The JSON request asks for required intent/label/confidence and only relevant optional fields. Dynamic thinking uses the lowest supported effort; explicit configured effort is retained, with a separate bounded reasoning allowance. Output-limit responses are identified from the native stop reason and may receive one compact retry within the same deadline and four-attempt cap. Complete bounded JSON ignores unknown fields; truncated JSON is never salvaged or injected. The active route, attempt, elapsed time and allowed time are visible while analysis runs; cancellation and session replacement clear that status immediately.
+Initial and follow-up prompt analysis each have one absolute four-minute deadline on the session model. This allows provider queueing and reasoning time; a successful response or fast failure ends the attempt without waiting out the allowance. Only caller cancellation stops the analysis; a provider-originated abort is a failed attempt. The JSON request asks for required intent/label/confidence and only relevant optional fields. Reasoning is turned off when the session model allows it, otherwise it uses the model's lowest supported level, with a separate bounded reasoning allowance. Output-limit responses are identified from the native stop reason and may receive one compact retry within the same deadline and four-attempt cap. Complete bounded JSON ignores unknown fields; truncated JSON is never salvaged or injected. The active route, attempt, elapsed time and allowed time are visible while analysis runs; cancellation and session replacement clear that status immediately.
 
 ## Needle3 — local semantic reflex
 
@@ -289,18 +289,14 @@ helper `spanAdvisory` tests P(present) ≥ 0.80 with deterministic corroboration
 it is not a production intervention path. Changing the shadow flag alone
 does not connect scores to Guardian or Observer.
 
-Transport is the OpenRouter decisions endpoint (Span is a decisions model;
-chat completions refuses it): the bounded trace is the state and each
-catalog signal is one plain `noul` question, so P(yes) becomes
-present/absent and `notObservable` stays 0. The default route is
-`respan/span-01-lite` with paid `respan/span-01` fallback when the Lite
-route itself is missing (never on auth, quota, timeout, or malformed
-answers). Slugs are configuration resolved against the live registry;
-an unlisted slug degrades to `route-unavailable`, never to an invented
-model. Every paid call is ledgered as `span-usage-v1` (same contract
-as `jev-usage-v1`) and surfaces in `micro_status`, `/metrics`,
-`/used`, export analytics, and concise TUI activity. `PI_SPAN=off`
-disables the sensor. Quality-review aspect selection uses its deterministic
+Scoring runs on the session model through its registry credentials, like
+every other helper: the bounded trace goes with the catalog, and the model
+answers one JSON object of per-signal `present`/`absent`/`notObservable`
+probabilities, validated before use. No other model is chosen, so without a
+session model the trace yields no signal. Every paid call is ledgered as
+`span-usage-v1` (same contract as `jev-usage-v1`) and surfaces in
+`micro_status`, `/metrics`, `/used`, export analytics, and concise TUI
+activity. `PI_SPAN=off` disables the sensor. Quality-review aspect selection uses its deterministic
 selector directly; it no longer buys a discarded shadow suggestion.
 
 ## Typed Jev decisions
@@ -420,27 +416,19 @@ cache in 2 ms with no new provider tokens. This is a bounded fixture, not a
 production accuracy or session-wide savings measurement.
 
 `micro_task` exposes these operations through the existing tool registry.
-Use `action:"status"` to inspect eligibility without inference, `qualify` to
-refresh measured evidence, `route` to compare a bounded candidate choice,
-or `run` with a `kind` and bounded `input`.
-Unmeasured native worker routes first run three synthetic qualification checks, without
-receiving the task input. Failed qualification cannot produce task advice.
+Use `action:"status"` to inspect the session model without inference,
+`qualify` to refresh its measured evidence, or `run` with a `kind` and
+bounded `input`. Measures the session model with three synthetic
+qualification checks, without receiving the task input, before it is used.
+Failed qualification cannot produce task advice.
 
-For native `run`, `qualify` and `route` actions, routes come from optional
-`PI_MICRO_WORKER_ROUTES`, the current session
-model, and the existing economy selector. Native registry dispatch preserves
+Native `run` and `qualify` use the session model only. No configured route,
+alternate model or economy selector applies. Native registry dispatch preserves
 provider authentication; the shared auxiliary ledger records each completion.
-Admission checks current
-price, workload, health and expiring quality evidence; one inference is
-capped at an estimated $0.005 and a complete invocation, including
-qualification, at $0.01. Missing price evidence is not zero cost.
-
-For those native actions, private input stays with the exact session model
-and endpoint, a
-literal loopback endpoint, or an operator-allowlisted route
-(`PI_PRIVATE_ROUTES`). A provider name such as "local" is not evidence that
-its transport stays on this machine. Public/synthetic input can explicitly
-set `privateInput:false`. All outputs remain advisory JSON; the worker
+Admission checks health, expiring quality evidence and the output capacity the
+role needs. Price and per-call dollar caps do not apply: the session model's
+spend is bounded by the token budgets (at most 1,000 output tokens and 8,000
+input characters per call). All outputs remain advisory JSON; the worker
 cannot execute tools, edit files, or establish completion.
 
 ## Remote rerank — configured precision stage
@@ -461,22 +449,7 @@ The stage is enabled by default and runs once `PI_RERANK_MODEL` and
 remain operator controls. No provider or successful inference is inferred
 from enabled status alone.
 
-## Router shadow and qualification lab
-
-`micro_task({action:"route", input, candidates, currentChoice})` compares a
-qualified model's suggested route with the current YunusPi choice. Supply
-2–32 exact authenticated, scoped routes; `currentChoice` defaults to the
-session route. Optional `model` selects the judge, including a TypeSafe
-router when its route has verified pricing and passes the same admission
-checks. Unknown price never means free.
-
-Comparisons validate the returned model against the offered candidates,
-share the helper's privacy and cost limits, and remain advisory. They never
-change the selected model or run a candidate. `micro_task({action:"status"})`
-reports per-session comparison counts and agreement; session replacement
-clears the records and cancels pending comparisons. Outcome metrics remain
-unknown until a caller supplies measured outcomes through the comparison
-library; an advisory suggestion is not evidence of a successful task.
+## Qualification lab
 
 The model qualification lab (`model-qual-lab.ts`,
 `agent/scripts/run-model-qual-lab.mjs --live --route p/m`) runs a
@@ -544,8 +517,8 @@ Controls: `PI_NEEDLE=off`, `PI_NEEDLE_SHADOW=1`,
 `PI_INTENT_PRESCREEN=off`,
 `PI_MICRO_INTELLIGENCE=off`, `PI_SPAN=off`, `PI_SPAN_SHADOW=0`
 (benchmark control; production remains record-only),
-`PI_SPAN_MODEL` / `PI_SPAN_FALLBACK`, `PI_MICRO_WORKER=off`,
-`PI_MICRO_WORKER_ROUTES`, `PI_PRIVATE_ROUTES`, `PI_RERANK=on`,
+`PI_MICRO_WORKER=off`,
+`PI_PRIVATE_ROUTES`, `PI_RERANK=on`,
 `PI_RERANK_MODEL` / `PI_RERANK_URL`, `PI_OBSERVER_SEMANTIC_MARGINS=off`,
 plus the existing `PI_MINI_PREPROCESSOR`, `PI_JEV`, and `PI_OUTPUT_DISTILLER` scopes.
 

@@ -3,7 +3,7 @@ import { captureFileVerification, hasFailedFileVerification } from "../shared/fi
 import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
-import { modelRouteCandidateAt, routeOf } from "../../shared/model-route.ts";
+import { modelRouteCandidateAt } from "../../shared/model-route.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -96,7 +96,7 @@ import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTr
 import { collectDynamicResults, DynamicFanoutError, materializeDynamicParallelStep, validateDynamicCollection } from "../shared/dynamic-fanout.ts";
 import { claimRunFanoutBatch, getRunFanoutBudgetSnapshot } from "../shared/run-fanout-budget.ts";
 import { nestedSummaryFromAsyncStatus, projectNestedEvents, resolveNestedAsyncDir, writeNestedEvent } from "../shared/nested-events.ts";
-import { formatModelAttemptNote, formatSubagentModelVerificationError, isContextOverflow, isRetryableModelFailureAttempt, recordRetryableModelFailure } from "../shared/model-fallback.ts";
+import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import {
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
 	formatSubagentExtensionConflictError,
@@ -648,7 +648,6 @@ function runPiStreaming(
 	expectedModelForVerification?: string,
 	modelVerificationRegistry?: Array<{ provider: string; id: string; fullId: string }>,
 	mutationTools?: readonly string[],
-	recoveryRoutes: readonly string[] = [],
 ): Promise<RunPiStreamingResult> {
 	return new Promise((resolve) => {
 		const startedAt = Date.now();
@@ -699,7 +698,7 @@ const __piSubagentGate = (() => {
     const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
     return { acquire, release };
 })();
-const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutes.length>1 ? JSON.stringify(recoveryRoutes) : "[]" };
+const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: "[]" };
 		const spawnSpec = getPiSpawnCommand(args, {
 			...(piPackageRoot ? { piPackageRoot } : {}),
 			...(piArgv1 ? { argv1: piArgv1 } : {}),
@@ -924,8 +923,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				if (event.message.model) {
 					model = event.message.provider && !event.message.model.startsWith(`${event.message.provider}/`) ? `${event.message.provider}/${event.message.model}` : event.message.model;
 					if (expectedModelForVerification && !hasToolCall) {
-						const allowed=recoveryRoutes.length>1 ? recoveryRoutes : [expectedModelForVerification];
-						const modelVerificationError = allowed.some(candidate=>!formatSubagentModelVerificationError(candidate,model!,modelVerificationRegistry)) ? undefined : formatSubagentModelVerificationError(expectedModelForVerification,model!,modelVerificationRegistry);
+						const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, model!, modelVerificationRegistry);
 						if (modelVerificationError && !error) error = modelVerificationError;
 					}
 				}
@@ -1755,12 +1753,11 @@ async function runSingleStepInner(
 		const modelRouteCandidate = modelRouteCandidateAt(step.modelRouteCandidates, modelIndex);
 		recordModelRoutingAttempt({
 			route: modelRouteCandidate?.route ?? candidate,
-			fromRoute: modelIndex > 0 ? routeOf(modelRouteCandidateAt(step.modelRouteCandidates, modelIndex - 1)) : undefined,
-			source: step.modelOrigin ?? "subagents",
-			fallback: modelIndex > 0,
+			source: "subagents",
+			fallback: false,
 			providerRouting: modelRouteCandidate?.providerRouting,
 		});
-		const expectedModelForVerification = candidate && !(step.skipPrimaryModelVerification && modelIndex === 0) ? candidate : undefined;
+		const expectedModelForVerification = candidate;
 		try {
 			assertThinkingWithinCeiling({ model: candidate, configThinking: step.thinking, ceiling: step.thinkingCeiling ?? decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]), agent: step.agent, runId: ctx.id });
 		} catch (error) {
@@ -2188,17 +2185,11 @@ async function runSingleStepInner(
 			finalResult.finalOutput = startupError;
 			break modelAttemptsLoop;
 		}
-		const retryableModelFailure = isRetryableModelFailureAttempt({ error, messages: run.messages, toolCount: run.toolCount });
-		if (retryableModelFailure) recordRetryableModelFailure(candidate ?? run.model ?? step.model, error);
 		if (isContextOverflow(error)) {
 			contextOverflow = true;
 			attemptNotes.push(`[fallback] ${attempt.model} failed: context overflow — the input exceeds this model's context window. Reduce the task input or use a model with a larger context window.`);
-			break modelAttemptsLoop;
 		}
-		if (!retryableModelFailure || modelIndex === candidates.length - 1) break modelAttemptsLoop;
-		attemptNotes.push(formatModelAttemptNote(attempt, candidates[modelIndex + 1]));
-		modelIndex += 1;
-		startupAttemptIndex = 0;
+		break modelAttemptsLoop;
 	}
 
 	const rawOutput = finalResult?.finalOutput ?? "";
@@ -4189,7 +4180,6 @@ async function runSubagent(
 		const first = flatSteps.find((step) => !step.importAsyncRoot) ?? flatSteps[0];
 		const candidates = first?.modelCandidates;
 		const requested = candidates?.[0] ?? first?.model;
-		const fallbacks = candidates && candidates.length > 1 ? candidates.slice(1) : [];
 		const slash = requested?.indexOf("/") ?? -1;
 		const provider = slash > 0 && requested ? requested.slice(0, slash) : undefined;
 		const model = slash > 0 && requested ? requested.slice(slash + 1) : requested;
@@ -4215,7 +4205,6 @@ async function runSubagent(
 			...(requested ? { requestedModel: requested } : {}),
 			origin: requested ? "explicit" : "automatic",
 			...(requested ? { selected: requested } : {}),
-			...(fallbacks.length > 0 ? { fallbacks } : {}),
 			...(rates ? { rates } : {}),
 			...(health ? { health } : {}),
 			hasUsageBudgetConfig: config.usageBudget !== undefined,

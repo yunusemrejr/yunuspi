@@ -749,8 +749,9 @@ function buildSkillCatalog(skills: any[]): string {
 
 /** Skills eligible for projection, or null when projection does not apply. */
 function projectionSkills(event: any, activeTools: string[]): any[] | null {
-  if (process.env.PI_SKILL_CATALOG === 'full' || process.env.PI_SUBAGENT_CHILD === "1"
-    || !activeTools.includes('skill_review')) return null;
+  if (process.env.PI_SKILL_CATALOG === 'full') return null;
+  const isChild = process.env.PI_SUBAGENT_CHILD === "1";
+  if (!isChild && !activeTools.includes('skill_review')) return null;
   const skills = event.systemPromptOptions?.skills?.filter((skill: any)=>!skill.disableModelInvocation);
   if (!Array.isArray(skills) || !skills.length) return null;
   if (skills.some((skill: any)=>![skill.name,skill.description,skill.filePath].every(value=>typeof value==='string'))) return null;
@@ -765,7 +766,11 @@ export function compactSkillCatalog(event: any, activeTools: string[]): string |
   if (!skills || typeof source !== 'string') return;
   const catalog = buildSkillCatalog(skills);
   if (source.split(catalog).length!==2) return;
-  return source.replace(catalog,`Installed skills: ${skills.length} workflows. Use skill_review action:"browse" for groups or action:"search" with a query for short matches.`);
+  const isChild = process.env.PI_SUBAGENT_CHILD === "1";
+  const replacement = isChild
+    ? `Installed skills: ${skills.length} workflows (managed by parent session).`
+    : `Installed skills: ${skills.length} workflows. Use skill_review action:"browse" for groups or action:"search" with a query for short matches.`;
+  return source.replace(catalog, replacement);
 }
 
 /** Explain why projection could not run, so a silent full-catalogue injection

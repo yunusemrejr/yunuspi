@@ -25,6 +25,6 @@ export function helperLaunchFailure(error: unknown, diagnosticRef: string): Help
 export function helperFailureGap(error: unknown, diagnosticRef: string): string {
   const row = helperLaunchFailure(error, diagnosticRef);
   return row.runtimeError
-    ? `Native helper launch failed with ${row.diagnosticCode}. This is a harness error; changing provider cannot repair it. Diagnostic: ${diagnosticRef}.`
+    ? `Native helper launch failed with ${row.diagnosticCode}. This is a harness error, not a model or provider failure. Diagnostic: ${diagnosticRef}.`
     : `Native helper launch failed before a result was returned. Diagnostic: ${diagnosticRef}; provider usage is unknown.`;
 }

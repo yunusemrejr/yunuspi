@@ -18,9 +18,8 @@ const {createHookLedger} = await import(pathToFileURL(path.join(agent,"extension
 test("fresh installations expose built-in search and inherited child model and thinking",()=>{
   const settings=JSON.parse(fs.readFileSync(path.join(root,"config/settings.example.json"),"utf8"));
   assert.deepEqual(settings.defaultTools,["read","bash","edit","write","grep","find","ls"]);
-  // abb06748: omit thinking so children inherit the session level.
-  assert.equal(settings.subagents.defaultModel,"inherit");
-  assert.equal(settings.subagents.defaultThinking,undefined);
+  // Children run on the session model and their thinking is chosen per run, so no subagent model or thinking setting ships.
+  assert.equal(settings.subagents,undefined);
 });
 
 test("publication builds owned core after script-disabled dependency installation",()=>{

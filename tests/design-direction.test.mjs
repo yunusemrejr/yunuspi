@@ -61,7 +61,7 @@ test('the interpretation block says what it is, which message it reads and that 
   const parsed = interpretation.parsePromptAnalysis(JSON.stringify({ intent: 'Build portfolio', taskLabel: 'Portfolio', confidence: 0.9, openEnded: true, visualDesign: true, styleReferences: [], contextReferences: ['github.com/me'] }), prompt, 'initial');
   assert.equal(parsed.openEnded, true);
   assert.deepEqual(parsed.contextReferences, ['github.com/me']);
-  const text = interpretation.renderPromptAnalysisContext(parsed, 'prompt_analysis');
+  const text = interpretation.renderPromptAnalysisContext(parsed);
   const [header, json] = text.split('\n');
   assert.match(header, /^Auxiliary interpretation \(advisory only; the literal user prompt is authoritative\)/);
   assert.match(header, /user message directly above/);

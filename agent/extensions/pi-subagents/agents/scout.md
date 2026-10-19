@@ -3,7 +3,6 @@ name: scout
 description: Fast codebase recon that returns compressed context for handoff
 tools: sqlite_probe, package_probe, net_probe, archive_probe, skill_review, workspace_search, ssh_plan, read, grep, find, ls, bash, write, math_check, value_convert, data_query, handoff_capsule, git_info, http_request, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
-thinking: low
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

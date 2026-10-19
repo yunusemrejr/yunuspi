@@ -17,7 +17,7 @@ import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
 import { registerMicroTask } from "./lib/micro-intelligence/micro-task.ts";
 import {
   createSpanTrace,
-  openRouterSpanScorer,
+  sessionSpanScorer,
   scoreSpanTrace,
   spanEnabled,
   type SpanScoreResult,
@@ -27,7 +27,6 @@ import { runPromptAnalysis } from "./lib/prompt-analysis-runtime.ts";
 import { detectDesignBrief, designDirectionGuidance, designDirectionSummary } from "./lib/design-direction.ts";
 import { buildExpertBrief } from "./lib/expert-brief.ts";
 import {
-  buildPromptAnalysisRequest,
   promptAnalysisEvent,
   promptAnalysisHash,
   renderPromptAnalysis,
@@ -39,11 +38,6 @@ import {
 import type { PromptAnalysisAttempt, PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
 import { packetRequirements } from "./lib/requirement-ledger.ts";
 import { classifyExecution, currentExecutionProfile, adaptiveExecutionEnabled } from "./lib/adaptive-execution.ts";
-import { resolvePromptAnalysisPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
-import { loadModelEconomyConfig } from "./pi-subagents/src/runs/shared/model-economy.ts";
-import { selectAffordableModel } from "./pi-subagents/src/runs/shared/model-selection.ts";
-import { findModelInfo, toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
-import { capFreeRequest, isProvenFreeRoute } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 const PROMPT_ANALYSIS_EVENT = "guardian:prompt-analysis:v1";
@@ -101,7 +95,6 @@ interface PendingPromptAnalysis {
   source: "interactive" | "rpc";
   promptHash: string;
   analysis: PromptAnalysis;
-  preferenceSource: "prompt_analysis" | "subagents" | "autonomous";
   route?: string;
   status: "model" | "fallback";
   attempts: PromptAnalysisAttempt[];
@@ -214,7 +207,6 @@ function promptAnalysisAdvice(analysis: PromptAnalysis): AdvisoryResult | undefi
 }
 
 interface AnalysisSelection {
-  source: PendingPromptAnalysis["preferenceSource"];
   routes: PromptAnalysisCandidate[];
   requirements: string;
 }
@@ -233,17 +225,9 @@ function tokens(response: any, direction: "input" | "output"): number | undefine
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-function scopedRouteSet(ctx: any): Set<string> | undefined {
-  if (!Array.isArray(ctx.scopedModels) || ctx.scopedModels.length === 0) return undefined;
-  const routes = ctx.scopedModels.map((entry: any) => {
-    const model = entry?.model;
-    return typeof model?.provider === "string" && typeof model?.id === "string"
-      ? `${model.provider}/${model.id}`
-      : undefined;
-  }).filter((route: unknown): route is string => typeof route === "string");
-  return new Set(routes);
-}
-
+/** Prompt analysis runs only on the session model. Without it, or without the
+ * output capacity this analysis needs, there is no candidate and the
+ * deterministic fallback reports that no eligible analysis route exists. */
 function analysisCandidates(
   ctx: any,
   prompt: string,
@@ -252,115 +236,47 @@ function analysisCandidates(
   completePromptAnalysis: MicroDependencies["completePromptAnalysis"],
 ): AnalysisSelection {
   try {
-    const scope = scopedRouteSet(ctx);
-    const available = ctx.modelRegistry.getAvailable();
-    const models = available.filter((model: any) => !scope || scope.has(`${model.provider}/${model.id}`));
-    const modelInfos = models.map(toModelInfo);
     const maxOutputTokens = kind === "initial" ? 768 : 320;
     const requirements = packetRequirements(prompt, ctx.sessionManager?.getBranch?.() ?? [], 1200);
-    const request = buildPromptAnalysisRequest(prompt, kind, undefined, requirements);
-    const minContextWindow = Math.max(8192, Math.ceil(request.length / 4) + maxOutputTokens + 1024);
-    const options = {
-      requirements: { inputModalities: ["text"], minContextWindow, minOutputTokens: maxOutputTokens },
-    };
-    const preference = resolvePromptAnalysisPreferenceChain(modelInfos, options);
-    const resolved: Array<{ route: string; model: any; thinking?: string; providerRouting?: Record<string, unknown> }> = [];
-    const add = (route: string, thinking?: string, providerRouting?: Record<string, unknown>) => {
-      const info = findModelInfo(route, modelInfos);
-      if (!info) return;
-      const model = ctx.modelRegistry.find(info.provider, info.id);
-      if (!model) return;
-      if (resolved.some((entry) => entry.route === route && entry.thinking === thinking)) return;
-      resolved.push({ route, model, ...(thinking ? { thinking } : {}), ...(providerRouting ? { providerRouting } : {}) });
-    };
-
-    // Honor the configured Prompt Analysis route chain (or inherited
-    // Subagents chain) in its existing order. Explicit preferences are the
-    // user's route choice and therefore are not silently reordered by cost.
-    for (const preferred of preference.routes) {
-      add(preferred.route, preferred.thinking, preferred.providerRouting);
-    }
-    if (resolved.length) {
-      return { source: preference.source, routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)), requirements };
-    }
-
-    // With no usable configured route, use the existing offline economy
-    // selector under a per-request estimated spend cap. This selection is
-    // bounded by declared pricing; the current primary model is never an
-    // implicit expensive fallback.
-    const maxEstimatedUsd = kind === "initial" ? 0.01 : 0.003;
-    const estimatedInputTokens = Math.ceil(request.length / 2);
-    // Admission includes the largest supported reasoning reserve and the
-    // compact recovery answer allowance, not only visible JSON tokens.
-    const estimatedCostTokens = estimatedInputTokens + maxOutputTokens * 2 + 8192;
-    const requestRateCap = maxEstimatedUsd * 1_000_000 / estimatedCostTokens;
-    const configuredEconomy = loadModelEconomyConfig();
-    const boundedEconomy = {
-      ...configuredEconomy,
-      maxInputPerMillion: Math.min(configuredEconomy.maxInputPerMillion, requestRateCap),
-      maxOutputPerMillion: Math.min(configuredEconomy.maxOutputPerMillion, requestRateCap),
-      operationalPremiumMaxPerMillion: undefined,
-    };
-    const excluded: string[] = [];
-    for (let index = 0; index < 4; index++) {
-      const selected = selectAffordableModel(modelInfos, boundedEconomy, {
-        exclude: excluded,
-        decision: { preferenceRole: "prompt_analysis" },
-        requirements: { minContextWindow: 8192, minOutputTokens: maxOutputTokens, reasoning: false, inputModalities: ["text"], toolCalling: false },
-      });
-      if (!selected) break;
-      add(selected.model);
-      excluded.push(selected.model);
-    }
-    return { source: "autonomous", routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)), requirements };
+    const model = ctx.model;
+    const capable = typeof model?.provider === "string" && typeof model?.id === "string"
+      && Number.isSafeInteger(model.maxTokens) && model.maxTokens >= maxOutputTokens;
+    return { routes: capable ? [makeCandidate(model, ctx, metrics, completePromptAnalysis)] : [], requirements };
   } catch {
-    return { source: "autonomous", routes: [], requirements: "" };
+    return { routes: [], requirements: "" };
   }
 }
 
 function makeCandidate(
-  entry: { route: string; model: any; thinking?: string; providerRouting?: Record<string, unknown> },
+  model: any,
   ctx: any,
   metrics: ReturnType<typeof microMetrics>,
   completePromptAnalysis: MicroDependencies["completePromptAnalysis"],
 ): PromptAnalysisCandidate {
-  // This direct SDK request does not pass through the agent's provider hooks.
-  // Retain the admission-time free obligation across asynchronous auth, then
-  // revalidate the actual wire model and current price evidence before dispatch.
-  const requireFreeDispatch = isProvenFreeRoute(entry.model);
   return {
-    route: entry.route,
+    route: `${model.provider}/${model.id}`,
     complete: async ({ prompt: analysisPrompt, maxTokens, signal }) => {
       if (signal.aborted) throw new Error("Prompt analysis cancelled");
-      const routedModel = entry.providerRouting
-        ? { ...entry.model, compat: { ...(entry.model.compat ?? {}), openRouterRouting: entry.providerRouting } }
-        : entry.model;
       const context = { messages: [{ role: "user", content: [{ type: "text", text: analysisPrompt }], timestamp: Date.now() }] };
       // Some providers cannot turn reasoning off. Their reasoning and answer
       // share maxTokens, so reserve answer room instead of exhausting the
       // entire tiny JSON allowance before the first answer token.
-      const reasoning = clampThinkingLevel(entry.model, (entry.thinking ?? "off") as any);
+      const reasoning = clampThinkingLevel(model, "off");
       const reasoningAllowance = reasoning === "off" ? 0 : reasoning === "minimal" ? 2048 : reasoning === "low" ? 4096 : 8192;
-      const options = { maxTokens: Math.min(entry.model.maxTokens || 32768, maxTokens + reasoningAllowance), signal, ...(reasoning === "off" ? {} : { reasoning }), maxRetries: 0,
-        ...(requireFreeDispatch ? { onPayload: (payload: Record<string, any>, model: any) => {
-          if (model?.provider !== entry.model.provider || model?.id !== entry.model.id)
-            throw Object.assign(new Error("Prompt analysis free route changed before dispatch"), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
-          return capFreeRequest(payload, model);
-        } } : {}),
-      };
+      const options = { maxTokens: Math.min(model.maxTokens || 32768, maxTokens + reasoningAllowance), signal, ...(reasoning === "off" ? {} : { reasoning }), maxRetries: 0 };
       // The registry owns native provider dispatch, OAuth/base URL overrides
       // and auth cancellation. Using the global compatibility API bypasses
       // providers registered by this session. Keep a legacy adapter for older
       // extension hosts and the narrow completion seam used by unit fixtures.
       if (!completePromptAnalysis && typeof ctx.modelRegistry.completeSimple === "function") {
         metrics.llmHelperCall();
-        const response = await ctx.modelRegistry.completeSimple(routedModel, context, options);
+        const response = await ctx.modelRegistry.completeSimple(model, context, options);
         if (response?.stopReason === "error") throw new Error(response.errorMessage || "Prompt analysis model request failed");
         // An aborted stream is the timeout/cancel echo, not a late completion.
         if (response?.stopReason === "aborted") throw Object.assign(new Error("Prompt analysis request aborted"), { name: "AbortError" });
         return { text: toText(response), stopReason: response.stopReason, reasoningTokens: response.usage?.reasoning, inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
       }
-      const authRequest = Promise.resolve(ctx.modelRegistry.getApiKeyAndHeaders(entry.model));
+      const authRequest = Promise.resolve(ctx.modelRegistry.getApiKeyAndHeaders(model));
       let onAbort: (() => void) | undefined;
       const auth = await Promise.race([
         authRequest,
@@ -372,9 +288,9 @@ function makeCandidate(
       ]).finally(() => { if (onAbort) signal.removeEventListener("abort", onAbort); });
       if (signal.aborted) throw new Error("Prompt analysis cancelled");
       if (!auth || auth.ok === false) throw new Error(auth?.error || "Model route authentication unavailable");
-      const model = auth.baseUrl ? { ...routedModel, baseUrl: auth.baseUrl } : routedModel;
+      const wire = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
       metrics.llmHelperCall();
-      const response: any = await (completePromptAnalysis ?? completeSimple)(model, context, {
+      const response: any = await (completePromptAnalysis ?? completeSimple)(wire, context, {
         apiKey: auth.apiKey,
         headers: auth.headers,
         env: auth.env,
@@ -387,7 +303,7 @@ function makeCandidate(
   };
 }
 
-function analysisDetails(pending: PendingPromptAnalysis, source: string) {
+function analysisDetails(pending: PendingPromptAnalysis) {
   return {
     version: 1,
     requestId: pending.requestId,
@@ -396,7 +312,6 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
     processId: pending.processId,
     sessionId: pending.sessionId,
     kind: pending.analysis.kind,
-    source,
     status: pending.status,
     attempts: pending.attempts,
     ...(pending.skipped ? { skipped: pending.skipped } : {}),
@@ -595,7 +510,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       spanLastAt = Date.now();
       const flight = Promise.resolve().then(async () => {
         try {
-          const result = await (deps.scoreSpan ?? scoreSpanTrace)(trace, openRouterSpanScorer(), { pi, signal: sessionSignal });
+          const result = await (deps.scoreSpan ?? scoreSpanTrace)(trace, sessionSpanScorer(ctx), { pi, signal: sessionSignal });
           if (generation === epoch && !sessionSignal.aborted) lastSpan = result;
         } catch {
           /* Scoring failures degrade to no signal. */
@@ -800,14 +715,13 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         source: event.source,
         promptHash: promptAnalysisHash(prompt),
         analysis,
-        preferenceSource: selected.source,
         ...(result.route ? { route: result.route } : {}),
         status: result.status,
         attempts,
         ...(skipped ? { skipped } : {}),
         advisory: result.status === "fallback"
           ? [designGuidance, expertGuidance].filter(Boolean).join("\n")
-          : [renderPromptAnalysisContext(analysis, selected.source, result.route), designGuidance, expertGuidance].filter(Boolean).join("\n"),
+          : [renderPromptAnalysisContext(analysis, result.route), designGuidance, expertGuidance].filter(Boolean).join("\n"),
         designGuidance,
         designSummary: designDirectionSummary(designBrief),
         expertGuidance,
@@ -833,7 +747,6 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       }
       noteHealth("ml.prompt.analysis", {
         route: result.route ?? "none",
-        owner: selected.source,
         decision: result.status,
         durationMs: result.durationMs,
         ...(result.inputTokens !== undefined ? { inputTokens: result.inputTokens } : {}),
@@ -902,7 +815,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       // A deterministic fallback only restates the literal prompt with zero
       // confidence; injecting it would spend context on no new information.
       if ((pending.status !== "fallback" || pending.designGuidance || pending.expertGuidance) && pending.advisory && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
-        const details = analysisDetails(pending, pending.preferenceSource);
+        const details = analysisDetails(pending);
         const content = pending.advisory;
         inserts.push({
           index: request.messageIndex,
@@ -944,7 +857,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
           ...(pending.designSummary ? [pending.designSummary] : []),
           ...(pending.expertSummary ? [pending.expertSummary] : []),
         ].join("\n") : [
-          renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route),
+          renderPromptAnalysis(pending.analysis, pending.route),
           ...(pending.analysis.kind === "followup" && !pending.analysis.relation ? ["Relationship: uncertain; earlier user scope remains authoritative."] : []),
           ...(reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
           ...(pending.excerpted ? ["Long request: analysis used the beginning, end and extracted task focus; the omitted middle may contain additional constraints."] : []),
@@ -952,7 +865,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
           ...(pending.expertSummary ? [pending.expertSummary] : []),
           "Original user prompt preserved. This advisory informs the main agent; it does not replace the request.",
         ].join("\n");
-        const details = analysisDetails(pending, pending.preferenceSource);
+        const details = analysisDetails(pending);
         try {
           await pi.sendMessage({
             customType: "prompt-analysis",

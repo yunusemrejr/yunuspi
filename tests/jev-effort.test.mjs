@@ -177,6 +177,21 @@ test('a simple human turn steps down through Jev and the next complex turn resto
   } finally { f.cleanup(); }
 });
 
+test('a subagent child judges its own task: it starts at the session ceiling and steps down for an easy task', async () => {
+  const calls = mockJev();
+  const previous = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = '1';
+  const f = await start();
+  try {
+    await f.turn('what does the json flag mean');
+    assert.equal(f.thinking(), 'minimal', 'the child steps down exactly like a main-session turn');
+    assert.equal(calls.length, 1);
+  } finally {
+    f.cleanup();
+    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = previous;
+  }
+});
+
 test('an ambiguous answer, a failed judge or a goal round never changes the level', async () => {
   const ambiguous = mockJev(async () => ({ model: 'typesafe/jev-1.14-20261014', answers: ANSWERS(0.62, 0.5), usage: { input_tokens: 10, cost: 0 } }));
   let f = await start();

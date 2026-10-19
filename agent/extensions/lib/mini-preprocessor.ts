@@ -112,7 +112,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  // fleet-wide rate limit and can starve the first real selection.
  // Starting it when the session starts leaves the warmup done before the first
  // large tool result arrives.
- if(!runtime)void loadRuntime().then(v=>{runtime=v;if(v)ensure?.();});
+ if(!runtime)void loadRuntime().then(v=>{runtime=v;});
  // Turn boundary: validated cache and in-flight selections stay valid (keyed by
  // source+task hash), so unlike reset this neither aborts nor clears.
  const endTurn=()=>{};

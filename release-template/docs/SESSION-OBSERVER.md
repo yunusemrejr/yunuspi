@@ -8,8 +8,8 @@ It consults [the Observer Book](OBSERVER-BOOK.md), 14 chapters of doctrine selec
 
 - Reviews start after the main agent's first response of a task (harness preparation such as prompt analysis or a scope council is not agent work to judge).
 - Opportunities start every 30 seconds during active work, at least 30 seconds apart. After a review that adds nothing new the next waits 60, 120, then at most 240 seconds, until something salient happens: a tool error, a test or build result, a plan change, a completion claim, a peer message or a newly fired book trigger. Idle sessions generate no inference.
-- At most one review is pending. Each has a three-minute allowance; a timed-out route cools down for ten minutes while the next configured route serves.
-- The default route is `deepseek/deepseek-flash` with high thinking. Change the **Session Observer** role in `/models`; `"session_observer": { "models": [] }` disables it, as do `PI_SESSION_OBSERVER=off` and the user phrases `no observers` or `work offline`.
+- At most one review is pending. Each has a three-minute allowance.
+- Reviews run on the session model with its own credentials, the same model as the main agent. No other model, preference, fallback or route is chosen for the observer. If the session model is missing or cannot produce the output a review needs, the review is skipped and says so. Reviews use the session's thinking level; a timeout or truncated reply steps it down for later reviews, and clean reviews step it back up. The observer runs only with `PI_LEAN_GATES=on`; `PI_SESSION_OBSERVER=off` and the user phrases `no observers` or `work offline` also stop it.
 
 ## What it sees
 

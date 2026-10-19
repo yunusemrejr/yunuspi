@@ -1,8 +1,6 @@
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
- * Deterministic routes prioritize advice; optional asynchronous discovery
- * offers bounded catalog-backed advice. Tool-output prose is never authority. */
-import { createSkillDiscoveryController } from "./skill-discovery-controller.ts";
+ * Deterministic routes prioritize advice. Tool-output prose is never authority. */
 import { createContextAnchor } from "./context-anchor.ts";
 import path from "node:path";
 import fs from "node:fs";
@@ -151,17 +149,17 @@ export function createRelevantGuidance(pi: any) {
   // Keep the selected identity and reason: replacing those with generic browse
   // instructions throws away the work of both deterministic and async routing.
   // Skills never impose a read checkpoint or alter a tool's safety contract.
-  // Advisory discovery is available by default. Its controller owns the
-  // observation threshold, explicit opt-out, request budget and cancellation.
+  // Advisory discovery invitations are available by default; explicit opt-out
+  // and the one-shot delivery budget below bound them.
   const advisoryInvitation = (hint: Hint): Hint | undefined => {
     const operationalGuidance = new Set(['visual-handoff', 'render', 'workspace', 'delegation-contract']);
     if (reviewMode() !== 'advisory' || skillReviewDisabled || hint.key.startsWith('signal:') || operationalGuidance.has(hint.key)) return hint;
     const kind = hint.skill ? 'workflow' : hint.tool ? 'capability' : undefined;
     if (!kind) return hint;
-    // Rank-derived and async-discovery skill hints keep their concrete
-    // identity: rewriting them into the shared one-shot discovery topic
-    // silently dropped every computed rank (600 ranks → 0 delivered). The
-    // discovery marker is preserved so delivery accounting still applies.
+    // Rank-derived skill hints keep their concrete identity: rewriting them
+    // into the shared one-shot discovery topic silently dropped every computed
+    // rank (600 ranks → 0 delivered). The discovery marker is preserved so
+    // delivery accounting still applies.
     if (hint.key.startsWith('skillctx:')) return {...hint, discovery: kind};
     if (advisoryDiscoveryDelivered.has(kind)) return undefined;
     const tool = kind === 'workflow' ? 'skill_review' : 'tool_search';
@@ -264,15 +262,8 @@ export function createRelevantGuidance(pi: any) {
     if (!admitted) return;
     pending.set(hint.key, hint);
   };
-  const discovery = createSkillDiscoveryController({
-    catalog: () => skills,
-    covered: file => skillCovered(file) || reviewTargets.has(file) || deferredSkills.has(file),
-    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent'),
-    offer: (skill, reason) => add({key:`skillctx:${skill.file}`,skill:skill.file,reason,priority:64,
-      text:`Async skill discovery (advisory): ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} — ${JSON.stringify(reason)} Read if useful; this suggestion is not a read receipt or a new requirement.`}),
-  });
   for (const event of ['agent_end','session_shutdown','session_before_switch','session_before_fork','session_before_tree','model_select'])
-    pi.on?.(event, () => { discovery.cancel(); cancelSearches(); });
+    pi.on?.(event, () => { cancelSearches(); });
   const skillHint = (topic: string, preferred: string[], terms: RegExp, nameOnly = false, priority = 0) => {
     // Exact known skills first; otherwise use a matching *loaded* description.
     // No fabricated paths and no catalogue/skill-body injection.

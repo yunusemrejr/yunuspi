@@ -83,15 +83,8 @@ import { formatMidToolExitError, formatProcessSignalError, isOrdinaryToolForMidT
 import { readChildToolDiagnosticError } from "../shared/tool-availability.ts";
 import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTrackedMutations } from "../shared/mutation-evidence.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
-import {
-	buildModelRouteCandidates,
-	formatSubagentModelVerificationError,
-	formatModelAttemptNote,
-	isContextOverflow,
-	isRetryableModelFailureAttempt,
-	recordRetryableModelFailure,
-} from "../shared/model-fallback.ts";
-import { modelRouteCandidateAt, routeOf, type ModelRouteCandidate } from "../../shared/model-route.ts";
+import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
+import { modelRouteCandidateAt, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import {
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
@@ -387,14 +380,12 @@ async function runSingleAttempt(
 		progressEvidence: ReturnType<typeof createProgressEvidence>;
 	},
 ): Promise<SingleResult> {
-	const effectiveThinking = options.thinkingOverride ?? agent.thinking;
+	const effectiveThinking = options.thinkingOverride;
 	const modelArg = applyThinkingSuffix(model, effectiveThinking, options.thinkingOverride !== undefined);
 	assertThinkingWithinCeiling({ model: modelArg, configThinking: effectiveThinking, ceiling: options.thinkingCeiling, agent: agent.name, runId: options.runId });
 	const expectedModelForVerification = shared.verifyModel ? modelArg : undefined;
 	const admittedModels=[...new Set((shared.modelCandidates ?? []).map(value=>splitKnownThinkingSuffix(value).baseModel))].slice(0,8);
 	const permitRoutes=options.workflowChildPermitLaunch ? workflowChildPermitRoutes(options.workflowChildPermitLaunch.permit) : undefined;
-	const recoveryModels=permitRoutes ? admittedModels.filter(route=>permitRoutes.includes(route)) : admittedModels;
-	const continuationRecovery = recoveryModels.length > 1;
 	const resolvedThinking = resolveEffectiveThinking(modelArg, effectiveThinking);
 	// Display name for the child session: applied inside the child via
 	// PI_SUBAGENT_SESSION_NAME and echoed back on the result payload so hosts
@@ -684,7 +675,7 @@ const __piSubagentGate = (() => {
     const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
     return { acquire, release };
 })();
-const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: continuationRecovery ? JSON.stringify(recoveryModels) : "[]" };
+const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: "[]" };
 	const mutationSnapshot = snapshotTrackedMutations(options.cwd ?? runtimeCwd);
 	let observedMutationAttempt = false;
 	let structuredOutputToolInvoked = false;
@@ -1237,8 +1228,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 						result.model = evt.message.provider && !evt.message.model.startsWith(`${evt.message.provider}/`) ? `${evt.message.provider}/${evt.message.model}` : evt.message.model;
 						if (expectedModelForVerification && !hasToolCall) {
 							const observed=evt.message.provider && !evt.message.model.startsWith(`${evt.message.provider}/`) ? `${evt.message.provider}/${evt.message.model}` : evt.message.model;
-							const allowed=continuationRecovery ? recoveryModels : [expectedModelForVerification];
-							const modelVerificationError = allowed.some(candidate=>!formatSubagentModelVerificationError(candidate,observed,options.availableModels)) ? undefined : formatSubagentModelVerificationError(expectedModelForVerification,observed,options.availableModels);
+							const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, observed, options.availableModels);
 							if (modelVerificationError && !result.error) result.error = modelVerificationError;
 						}
 					}
@@ -1985,44 +1975,19 @@ async function runSyncCompletionInner(
 	systemPrompt = appendAgentRefinementOverlay(systemPrompt, { cwd: skillCwd, agentName });
 	systemPrompt = injectOutputPathSystemPrompt(systemPrompt, options.outputPath, agent);
 
-	const configuredCandidates = options.modelRouteCandidates?.length ? options.modelRouteCandidates : buildModelRouteCandidates(
-		options.modelOverride ?? agent.model,
-		agent.fallbackModels,
-		options.availableModels,
-		agent.modelProvider ?? options.preferredModelProvider,
-		{
-			scope: options.modelScope,
-			allowAutomaticAlternatives: !options.workflowChildPermitLaunch || workflowChildPermitRoutes(options.workflowChildPermitLaunch.permit).length > 1,
-			task,
-			primaryModelFromParent: options.modelOverrideFromParent,
-			origin: options.modelOrigin ?? (options.modelOverrideFromParent ? "inherited" : "configured"),
-		},
-	);
+	// The child runs on the session route the executor resolved (or a resumed run's reused route list).
+	const configuredCandidates: ModelRouteCandidate[] = options.modelRouteCandidates?.length
+		? options.modelRouteCandidates
+		: options.modelOverride ? [{ route: options.modelOverride }] : [];
 	const candidates = configuredCandidates.flatMap((candidate) => {
-		const route = applyThinkingSuffix(candidate.route, options.thinkingOverride ?? agent.thinking, options.thinkingOverride !== undefined);
+		const route = applyThinkingSuffix(candidate.route, options.thinkingOverride, options.thinkingOverride !== undefined);
 		return route ? [{ ...candidate, route }] : [];
 	});
 	const modelCandidates = candidates.map((candidate) => candidate.route);
-	if (options.workflowChildPermitLaunch && candidates.length > 1 && (() => {
-		const allowed=workflowChildPermitRoutes(options.workflowChildPermitLaunch.permit);
-		const requested=[...new Set(candidates.map(value=>splitKnownThinkingSuffix(value.route).baseModel))];
-		return requested.length!==allowed.length || requested.some(route=>!allowed.includes(route));
-	})()) {
-		const error = "Workflow child permit does not authorize these continuation routes.";
-		return redactResultPrompt(withRunContext({
-			index: options.index ?? 0,
-			agent: agent.name,
-			task,
-			exitCode: 1,
-			messages: [],
-			usage: emptyUsage(),
-			error,
-		}, options.context));
-	}
 	try {
 		for (const candidate of candidates) {
 			const model = candidate.route;
-			assertThinkingWithinCeiling({ model, configThinking: options.thinkingOverride ?? agent.thinking, ceiling: options.thinkingCeiling, agent: agent.name, runId: options.runId });
+			assertThinkingWithinCeiling({ model, configThinking: options.thinkingOverride, ceiling: options.thinkingCeiling, agent: agent.name, runId: options.runId });
 		}
 	} catch (error) {
 		return redactResultPrompt(withRunContext({
@@ -2119,15 +2084,14 @@ async function runSyncCompletionInner(
 		const candidate = routeCandidate?.route;
 		recordModelRoutingAttempt({
 			route: candidate,
-			fromRoute: modelIndex > 0 ? routeOf(modelRouteCandidateAt(candidates, modelIndex - 1)) : undefined,
-			source: options.modelOrigin ?? "subagents",
-			fallback: modelIndex > 0,
+			source: "subagents",
+			fallback: false,
 			providerRouting: routeCandidate?.providerRouting,
 		});
 		for (let startupAttemptIndex = 0; ; startupAttemptIndex++) {
 			const recoveringAbort = abortRecoveryAttempted;
 			const attemptTask = nextAttemptTask;
-			const verifyModel = Boolean(candidate) && !(options.modelOverrideFromParent && modelIndex === 0);
+			const verifyModel = Boolean(candidate);
 			const outputSnapshot = captureSingleOutputSnapshot(options.outputPath);
 			try {
 				shadowAssistanceLaunch({ agent: agent.name, task: attemptTask, model: candidate, runId: options.runId, stepIndex: options.index, mode: "foreground" });
@@ -2162,7 +2126,7 @@ async function runSyncCompletionInner(
 			totalDurationMs += result.progressSummary?.durationMs ?? 0;
 			const attemptSucceeded = result.exitCode === 0 && !result.error;
 			const attempt: ModelAttempt = {
-				model: result.model ?? candidate ?? agent.model ?? "default",
+				model: result.model ?? candidate ?? "default",
 				success: attemptSucceeded,
 				exitCode: result.exitCode,
 				stopReason: result.stopReason,
@@ -2211,7 +2175,7 @@ async function runSyncCompletionInner(
 			if (options.workflowChildPermitLaunch && !attemptSucceeded) break modelAttemptsLoop;
 			// Preserve the legacy intercom handoff contract: once this logical run has
 			// been handed to a supervisor, terminating that attempt must not launch a
-			// startup retry or model fallback. Explicit user detach retains fallback.
+			// startup retry. Explicit user detach retains the startup retry.
 			if (intercomDetached || result.timedOut) break modelAttemptsLoop;
 			if (attemptSucceeded) break modelAttemptsLoop;
 
@@ -2280,16 +2244,11 @@ async function runSyncCompletionInner(
 				attempt.error = startupError;
 				break modelAttemptsLoop;
 			}
-			const retryableModelFailure = isRetryableModelFailureAttempt({ error: result.error, messages: result.messages, toolCount: result.progressSummary?.toolCount });
-			if (retryableModelFailure) recordRetryableModelFailure(result.model ?? candidate, result.error);
 			if (isContextOverflow(result.error)) {
 				result.contextOverflow = true;
 				attemptNotes.push(`[fallback] ${attempt.model} failed: context overflow — the input exceeds this model's context window. Reduce the task input or use a model with a larger context window.`);
-				break modelAttemptsLoop;
 			}
-			if (!retryableModelFailure || modelIndex === modelsToTry.length - 1) break modelAttemptsLoop;
-			attemptNotes.push(formatModelAttemptNote(attempt, modelsToTry[modelIndex + 1]));
-			break;
+			break modelAttemptsLoop;
 		}
 	}
 

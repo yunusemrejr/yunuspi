@@ -19,8 +19,6 @@ const load=p=>import(pathToFileURL(path.join(agent,p)));
 const {registerAutonomousRecovery,automaticFanoutBody,automaticHelpersDigest,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
 const {registerPlannerStatus}=await load('extensions/lib/reviewer-board.ts');
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
-const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
-const {buildModelCandidates}=await load('extensions/pi-subagents/src/runs/shared/model-fallback.ts');
 const {AUTOMATIC_HELPER_LIMITS}=await load('extensions/pi-subagents/src/runs/shared/automatic-budgets.ts');
 const {planAssistance}=await load('extensions/pi-subagents/src/runs/shared/assistance-plan.ts');
 const {classifyExecution,createAdaptiveExecutionController,registerAdaptiveExecution}=await load('extensions/lib/adaptive-execution.ts');
@@ -33,16 +31,16 @@ after(()=>fs.rmSync(dir,{recursive:true,force:true}));
 
 function fixture({judge=async()=>({ok:false,skipped:'unavailable'}),launch=async()=>result('READ: additive\nWHY: preserve existing work'),send,models=[model],primary=model}={}) {
  resetSharedControl();
- const hooks=new Map(),calls=[],messages=[],abort=new AbortController();
+ const hooks=new Map(),calls=[],messages=[],entries=[],abort=new AbortController();
  let session='first';
  const ctx={cwd:dir,model:primary,signal:abort.signal,scopedModels:[],modelRegistry:{getAvailable:()=>models},sessionManager:{getSessionFile:()=>session,getBranch:()=>[]},ui:{setStatus(){}}};
  const events=new EventEmitter();
- const pi={events,on:(n,fn)=>hooks.set(n,[...(hooks.get(n)??[]),fn]),getActiveTools:()=>['subagent'],appendEntry(){},
+ const pi={events,on:(n,fn)=>hooks.set(n,[...(hooks.get(n)??[]),fn]),getActiveTools:()=>['subagent'],appendEntry(type,data){entries.push({type,data});},
   setModel:()=>{throw Error('Helper changed the main model');},setThinkingLevel:()=>{throw Error('Helper changed thinking');},
   sendMessage:(message,options)=>{messages.push({message,options});return send?.(message,options);}};
  registerAutonomousRecovery(pi,async(...args)=>{calls.push(args);return launch(...args);},{judge});
  const emit=async(n,event={})=>{for(const fn of hooks.get(n)??[])await fn(event,ctx);};
- return {ctx,emit,events,calls,messages,abort,switch:()=>{session='second';},input:text=>emit('input',{source:'user',text})};
+ return {ctx,emit,events,calls,messages,entries,abort,switch:()=>{session='second';},input:text=>emit('input',{source:'user',text})};
 }
 
 test('settled adaptive failures admit one helper regardless of tool_result registration order',async()=>{
@@ -70,16 +68,13 @@ test('unavailable helper capacity does not consume the later failure-driven oppo
  dispose();await fx.emit('session_shutdown');
 });
 
-test('scene, audio and motion advisers run concurrently with the existing read-only cost and tool ceilings',async t=>{
- const models=['scene','audio','motion'].map(id=>({...model,id:`example/${id}-adviser`}));
- evidence.publishFreeEvidence(models.map(row=>({id:row.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}})),evidence.FREE_CATALOG_URL);
- t.after(()=>evidence.publishFreeEvidence([{id:model.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL));
+test('scene, audio and motion advisers run concurrently on the session model with the read-only cost and tool ceilings',async()=>{
  const releases=[];
- const fx=fixture({models,primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>releases.push(resolve))});
+ const fx=fixture({launch:()=>new Promise(resolve=>releases.push(resolve))});
  const task='Remake a music video in Blender, compose music and animate moving clouds. Check the result, not only asserted.';
  await fx.input(task);await fx.emit('before_agent_start',{prompt:task});await tick();
  assert.equal(fx.calls.length,3);assert.equal(releases.length,3,'all roles start before any member completes');
- assert.equal(new Set(fx.calls.map(call=>call[1].model)).size,3);
+ assert.ok(fx.calls.every(([,args])=>args.model===undefined),'the executor applies the session route');
  for(const [,args] of fx.calls) {
   assert.equal(args.context,'fresh');assert.ok(!args.capabilityCeiling.allowedTools.includes('write'));assert.ok(!args.capabilityCeiling.allowedTools.includes('bash'));
   assert.ok(args.usageBudget.costUsd.hard<=.01);assert.equal(args.toolBudget.hard,AUTOMATIC_HELPER_LIMITS.tools);
@@ -90,20 +85,20 @@ test('scene, audio and motion advisers run concurrently with the existing read-o
 
 test('startup uses local skill references and stale helper results cannot cross request/session boundaries',async()=>{
  for(const transition of ['input','session','abort']) {
-  let release, judges=0;
-  const fx=fixture({judge:()=>{judges++;return new Promise(()=>{});},launch:()=>new Promise(resolve=>{release=resolve;})});
+  let releases=[], judges=0;
+  const fx=fixture({judge:()=>{judges++;return new Promise(()=>{});},launch:()=>new Promise(resolve=>{releases.push(resolve);})});
   const prompt='Audit cross-file compatibility for the README documentation and release notes for this repository';
   await fx.input(prompt);
   const systemPrompt=['git-github','engineering'].map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('');
   await fx.emit('before_agent_start',{prompt,systemPrompt});await tick();
   assert.equal(judges,0,'optional references do not block startup on a second remote rank');
-  assert.equal(fx.calls.length,1);
-  assert.equal(typeof release,'function');
+  assert.ok(fx.calls.length>=1,'the helper team starts on the session model');
+  assert.ok(releases.length>=1);
   assert.match(fx.calls[0][1].task,/Optional skill references/);
   if(transition==='input')await fx.input('Audit the other package and its independent compatibility boundaries');
   if(transition==='session')fx.switch();
   if(transition==='abort')fx.abort.abort();
-  release(result('Late advisory evidence'));await tick();
+  releases.forEach(resolve=>resolve(result('Late advisory evidence')));await tick();
   assert.equal(fx.messages.some(({message})=>message.customType==='autonomous-free-fanout'),false,transition);
   await fx.emit('session_shutdown');
  }
@@ -137,37 +132,34 @@ test('direct single-file work performs no helper launch or remote ranking, then 
  await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,0);
  controller.observe({ok:false,failureKey:'parse'});
  await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,1);
- assert.equal(fx.calls[0][1].delegatedThinkingOverride,'low');
+ assert.equal(fx.calls[0][1].delegatedThinkingOverride,undefined,'child thinking comes from the executor session override');
  controller.observe({ok:false,failureKey:'parse'});
  await fx.emit('tool_result',{isError:true});await tick();assert.equal(fx.calls.length,1,'one group does not respawn on each failure');
  dispose();await fx.emit('session_shutdown');
 });
 
-test('technology-only constraints preserve diagnosis helpers and configured reasoning',async(t)=>{
+test('technology-only constraints preserve diagnosis helpers on the session model',async()=>{
  const preferred={...model,provider:'friendli',id:'vendor/diagnostic',baseUrl:'https://provider.invalid/v1'};
  const route='friendli/vendor/diagnostic';
- fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({version:1,models:{chosen:{provider:preferred.provider,model:preferred.id}},preferences:{subagents:{models:['chosen']}}}));
- clearLlmPreferencesCache();
- t.after(()=>{fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});clearLlmPreferencesCache();});
  const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
  assert.equal(planAssistance(prompt).mode,'subagent');
  assert.equal(classifyExecution({task:prompt}).features.assistance,true);
- const fx=fixture({primary:{...model,provider:'parent'},models:[preferred,model]});
+ const fx=fixture({primary:preferred,models:[preferred,model]});
  await fx.input(prompt);await fx.emit('before_agent_start',{prompt});await tick();
- assert.equal(fx.calls.length,1);assert.equal(fx.calls[0][1].model,route);
- assert.equal(fx.calls[0][1].delegatedThinkingOverride,undefined,'configured child thinking stays exact');
+ assert.equal(fx.calls.length,1);
+ assert.deepEqual(fx.entries.find(entry=>entry.type==='model-routing-decision').data.members.map(member=>member.route),[route]);
+ assert.equal(fx.calls[0][1].model,undefined,'the executor applies the session route');
+ assert.equal(fx.calls[0][1].delegatedThinkingOverride,undefined,'child thinking comes from the executor session override');
  await fx.emit('session_shutdown');
 });
 
-test('automatic completion review retains whole-task thinking and reviewer width after a mechanical todo',async()=>{
- const models=['reviewer-a','reviewer-b','reviewer-c'].map(id=>({...model,id:`example/${id}`}));
- evidence.publishFreeEvidence(models.map(row=>({id:row.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}})),evidence.FREE_CATALOG_URL);
- const fx=fixture({primary:{...model,provider:'parent'},models});
+test('automatic completion review keeps reviewer width on the session model after a mechanical todo',async()=>{
+ const fx=fixture();
  const dispose=registerAdaptiveExecution(fx.ctx,()=>classifyExecution({task:'Format one source file',scope:'todo'}));
  await fx.input('Fix authentication token validation');
  await globalThis[Symbol.for('yunus-pi.quality-review-runner.v1')]({task:'Fix authentication token validation',aspects:[{id:'security'},{id:'correctness'},{id:'runtime'}],automatic:true,files:['src/auth.ts'],history:[]},fx.ctx,new AbortController().signal);
  assert.equal(fx.calls.length,3);
- assert.ok(fx.calls.every(call=>call[1].delegatedThinkingOverride==='high'));
+ assert.ok(fx.calls.every(call=>call[1].delegatedThinkingOverride===undefined),'thinking is the executor session override, not a per-review effort');
  dispose();await fx.emit('session_shutdown');
  evidence.publishFreeEvidence([{id:model.id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL);
 });
@@ -217,26 +209,19 @@ test('automatic fan-out retains attribution, conflicts and omitted-source gaps',
  assert.equal(identical.split('same evidence').length,2);
 });
 
-test('preferred Friendli helper and quality-review routes keep configured admission through launch',async(t)=>{
+test('a Friendli session model serves helper and quality-review launches without a model override',async()=>{
  const friendli={...model,provider:'friendli',id:'vendor/example-reviewer',baseUrl:'https://provider.invalid/v1'};
  const route='friendli/vendor/example-reviewer';
- fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({version:1,models:{chosen:{provider:'friendli',model:friendli.id}},preferences:{subagents:{models:['chosen']},quality_review:{models:['chosen']}}}));
- clearLlmPreferencesCache();
- t.after(()=>{fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});clearLlmPreferencesCache();});
  for(const kind of ['helper','quality-review']) {
-  const admissions=[];
-  const fx=fixture({primary:{...model,provider:'parent'},models:[friendli,model],launch:async(_id,params)=>{
-   admissions.push(buildModelCandidates(params.model,[],[friendli,model].map(m=>({...m,fullId:`${m.provider}/${m.id}`})),undefined,{origin:params.modelOrigin,task:params.task})[0]);
-   return result('Source evidence is available for the parent to verify.');
-  }});
+  const fx=fixture({primary:friendli,models:[friendli,model],launch:async()=>result('Source evidence is available for the parent to verify.')});
   const prompt='Investigate the concrete compatibility boundary for this package';
   await fx.input(prompt);
   if(kind==='helper')await fx.emit('before_agent_start',{prompt});
   else await globalThis[Symbol.for('yunus-pi.quality-review-runner.v1')]({task:prompt,aspects:[{id:'correctness'}],automatic:true,files:[],history:[]},fx.ctx,new AbortController().signal);
   await tick();
   assert.equal(fx.calls.length,1,kind);
-  assert.equal(fx.calls[0][1].modelOrigin,'configured',kind);
-  assert.deepEqual(admissions,[route],kind);
+  assert.equal(fx.calls[0][1].model,undefined,kind);
+  if(kind==='helper')assert.deepEqual(fx.entries.find(entry=>entry.type==='model-routing-decision').data.members.map(member=>member.route),[route]);
   await fx.emit('session_shutdown');
  }
 });
@@ -254,12 +239,12 @@ test('automatic investigations receive their full multi-turn deadline inside the
   'Compare architectural alternatives for the package compatibility boundary',
   'Investigate cross-file failures in the frontend and backend with tests',
  ]) {
-  let finish;
-  const fx=fixture({primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>{finish=resolve;})});
+  const finishers=[];
+  const fx=fixture({launch:()=>new Promise(resolve=>{finishers.push(resolve);})});
   await fx.input(prompt);
   await fx.emit('before_agent_start',{prompt});
   await tick();
-  assert.equal(fx.calls.length,1);
+  assert.ok(fx.calls.length>=1);
   const [,params,signal]=fx.calls[0];
   assert.equal(planAssistance(prompt,true).deadlineMs,180000);
   assert.equal(params.timeoutMs,180000);
@@ -268,7 +253,7 @@ test('automatic investigations receive their full multi-turn deadline inside the
   assert.equal(params.usageBudget.tokens.hard,AUTOMATIC_HELPER_LIMITS.tokens);
   assert.ok(deadlines.some(d=>d.ms===185000),'outer watchdog leaves time for the child receipt');
   assert.equal(signal.aborted,false);
-  finish(result('Source inspection finished; the parent can verify the finding.'));
+  finishers.forEach(finish=>finish(result('Source inspection finished; the parent can verify the finding.')));
   await tick();await tick();
   assert.ok(fx.messages.some(m=>m.message.customType==='autonomous-free-fanout'));
   await fx.emit('session_shutdown');
@@ -280,7 +265,7 @@ test('generous helper deadlines still cancel promptly with the owning turn',asyn
  const outer=new AbortController();
  t.mock.method(AbortSignal,'timeout',()=>outer.signal);
  let finish;
- const fx=fixture({primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>{finish=resolve;})});
+ const fx=fixture({primary:model,launch:()=>new Promise(resolve=>{finish=resolve;})});
  const prompt='Investigate the concrete compatibility boundary for this package';
  await fx.input(prompt);
  await fx.emit('before_agent_start',{prompt});
@@ -297,18 +282,18 @@ test('generous helper deadlines still cancel promptly with the owning turn',asyn
 test('Double mode already analyses the prompt twice, so no third proactive team starts, and turning Double off restores it',async t=>{
  const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
  assert.equal(planAssistance(prompt).mode,'subagent');
- const control=fixture({primary:{...model,provider:'parent'}});
+ const control=fixture({primary:model});
  await control.input(prompt);await control.emit('before_agent_start',{prompt});await tick();
  assert.equal(control.calls.length,1,'without Double the helper starts');
  await control.emit('session_shutdown');
  const dispose=registerPlannerStatus('double',()=>'ON (the session model, twice): every user prompt is analyzed twice.');
  t.after(dispose);
- const fx=fixture({primary:{...model,provider:'parent'}});
+ const fx=fixture({primary:model});
  await fx.input(prompt);await fx.emit('before_agent_start',{prompt});await tick();
  assert.equal(fx.calls.length,0,'Double supplies the independent analysis; a second proactive team would repeat it');
  assert.equal(fx.messages.length,0);
  dispose();
- const after=fixture({primary:{...model,provider:'parent'}});
+ const after=fixture({primary:model});
  await after.input(prompt);await after.emit('before_agent_start',{prompt});await tick();
  assert.equal(after.calls.length,1,'turning Double off restores the helper');
  await after.emit('session_shutdown');await fx.emit('session_shutdown');
@@ -317,7 +302,7 @@ test('Double mode already analyses the prompt twice, so no third proactive team 
 test('the automatic helper team tells the shared board what it handed the agent',async()=>{
  const board=await load('extensions/lib/reviewer-board.ts');
  const prompt='Investigate the validation failure. Only use HTML, CSS and PHP.';
- const fx=fixture({primary:{...model,provider:'parent'}});
+ const fx=fixture({primary:model});
  await fx.input(prompt);await fx.emit('before_agent_start',{prompt});
  for(let i=0;i<50&&!fx.messages.length;i++)await tick();
  assert.equal(fx.messages.length,1,'the helper report reached the agent');

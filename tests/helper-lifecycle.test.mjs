@@ -12,12 +12,11 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find((p) =>
 );
 if (!agent) throw new Error('agent extension tree is missing');
 const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-analysis-lifecycle-'));
-const preferencesFile = path.join(configDir, 'llm_preferences.json');
 process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
 process.env.PI_CODING_AGENT_DIR = configDir;
 process.env.PI_PROVIDER_STATE_FILE = path.join(configDir, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(configDir, 'exclusions.json');
-process.env.PI_LLM_PREFERENCES_FILE = preferencesFile;
+process.env.PI_LLM_PREFERENCES_FILE = path.join(configDir, 'llm_preferences.json');
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(configDir, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_SUBAGENT_CHILD;
@@ -27,7 +26,6 @@ const priorAdaptive = process.env.PI_ADAPTIVE_EXECUTION;
 process.env.PI_ADAPTIVE_EXECUTION = 'off';
 
 const { default: register, lastMicroRequest, microRequestAdvice, settleMicroAnalyses: settleAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
-const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { searchCapabilityMetadata } = await import(pathToFileURL(path.join(agent, 'extensions/lib/capability-groups.ts')));
 const { collectSessionMetrics } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-metrics.ts')));
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -45,15 +43,8 @@ const routeInside = { provider: 'openrouter', id: 'test/inside', api: 'openai-co
 const routeOutside = { ...routeInside, id: 'test/outside' };
 const promptA = 'Implement the endpoint. Preserve the existing error shape.';
 const promptB = 'Also add a validation test. Do not change the return code.';
-
-function writePreferences({ promptAnalysis = ['outside', 'inside'], subagents = ['inside'] } = {}) {
-	const models = { inside: { provider: routeInside.provider, model: routeInside.id }, outside: { provider: routeOutside.provider, model: routeOutside.id } };
-	const preferences = {};
-	if (promptAnalysis) preferences.prompt_analysis = { models: promptAnalysis };
-	if (subagents) preferences.subagents = { models: subagents };
-	fs.writeFileSync(preferencesFile, JSON.stringify({ version: 1, models, preferences }));
-	clearLlmPreferencesCache();
-}
+// A session model too small for the analysis output budget: no analysis route.
+const unusableRoute = { ...routeInside, maxTokens: 100 };
 
 function analysisAnswer(requestPrompt, taskLabel = 'Parsed task') {
 	const jsonLine = requestPrompt.slice(requestPrompt.lastIndexOf('\n') + 1);
@@ -94,6 +85,7 @@ function analysisAnswer(requestPrompt, taskLabel = 'Parsed task') {
 function fixture({
 	ownerId = 'owner-1',
 	sessionId = 'session-1',
+	model = routeInside,
 	models = [routeOutside, routeInside],
 	scopedModels = [{ model: { provider: routeInside.provider, id: routeInside.id }, thinkingLevel: 'low' }],
 	taskLabel = 'Parsed task',
@@ -116,6 +108,7 @@ function fixture({
 	};
 	const ctx = {
 		cwd: configDir,
+		model,
 		scopedModels,
 		signal: lifecycle.signal,
 		modelRegistry,
@@ -166,7 +159,6 @@ function input({ prompt, requestId, ownerId = 'owner-1', sessionId = 'session-1'
 }
 
 test('only core-provenanced interactive and RPC inputs receive one structured advisory per request', async (t) => {
-	writePreferences();
 	const f = fixture();
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
@@ -225,7 +217,6 @@ test('only core-provenanced interactive and RPC inputs receive one structured ad
 });
 
 test('adaptive direct inputs preserve literal constraints without a helper or advisory context', async t => {
-	writePreferences();
 	process.env.PI_ADAPTIVE_EXECUTION = 'on';
 	const f = fixture();
 	t.after(() => f.emit('session_shutdown'));
@@ -246,36 +237,19 @@ test('adaptive direct inputs preserve literal constraints without a helper or ad
 	} finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 
-test('unusable explicit analysis routes inherit configured subagent order', async (t) => {
-	writePreferences({ promptAnalysis: ['outside'], subagents: ['inside'] });
-	const f = fixture();
-	t.after(() => f.emit('session_shutdown'));
-	await f.emit('session_start', { reason: 'new' });
-	await f.emit('input', input({ prompt: promptA, requestId: 'inherited' }));
-	await settleMicroAnalyses();
-	assert.equal(f.completions[0].model, 'openrouter/test/inside');
-	await f.emit('context', {
-		messages: [{ role: 'user', content: [{ type: 'text', text: promptA }] }],
-		requestMessages: [{ requestId: 'inherited', turnId: 'turn-inherited', messageIndex: 0 }],
-	});
-	assert.equal(f.customMessages[0].message.details.source, 'subagents');
-});
 
-test('autonomous route selection enforces the request spend bound and does not inherit the primary model', async (t) => {
-	writePreferences({ promptAnalysis: null, subagents: null });
+test('analysis runs on the session model even when a cheaper registry route exists', async (t) => {
 	const cheap = { ...routeInside, id: 'test/cheap', cost: { input: 0.1, output: 0.2, cacheRead: 0.05, cacheWrite: 0.1 } };
 	const expensivePrimary = { ...routeOutside, id: 'test/primary', cost: { input: 100, output: 100, cacheRead: 50, cacheWrite: 100 } };
-	const f = fixture({ models: [expensivePrimary, cheap], scopedModels: [] });
-	f.ctx.model = expensivePrimary;
+	const f = fixture({ model: expensivePrimary, models: [expensivePrimary, cheap], scopedModels: [] });
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'economy' }));
 	await settleMicroAnalyses();
-	assert.equal(f.completions[0].model, 'openrouter/test/cheap');
+	assert.equal(f.completions[0].model, 'openrouter/test/primary');
 });
 
 test('extension-generated API messages and missing provenance are excluded even when text looks like a prompt', async (t) => {
-	writePreferences();
 	const f = fixture();
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
@@ -287,9 +261,8 @@ test('extension-generated API messages and missing provenance are excluded even 
 	assert.equal(lastMicroRequest('owner-1'), undefined);
 });
 
-test('an unusable route degrades to labelled deterministic analysis without fabricating model usage', async (t) => {
-	writePreferences({ promptAnalysis: null, subagents: null });
-	const f = fixture({ models: [], scopedModels: [] });
+test('an unusable session route degrades to labelled deterministic analysis without fabricating model usage', async (t) => {
+	const f = fixture({ model: unusableRoute });
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'fallback' , source: 'rpc' }));
@@ -304,11 +277,10 @@ test('an unusable route degrades to labelled deterministic analysis without fabr
 	});
 	assert.equal(f.typedEvents[0].event.analysisSource, 'fallback');
 	assert.equal(f.typedEvents[0].event.confidence, 0);
-	assert.equal(f.customMessages[0].message.details.source, 'autonomous');
+	assert.equal(f.customMessages[0].message.details.status, 'fallback');
 });
 
 test('explicit abort prevents stale analysis from reaching context or Guardian', async (t) => {
-	writePreferences();
 	let began;
 	let finish;
 	const started = new Promise((resolve) => { began = resolve; });
@@ -334,7 +306,6 @@ test('explicit abort prevents stale analysis from reaching context or Guardian',
 });
 
 test('queued prompt from a replaced session cannot reset or contaminate the new owner', async (t) => {
-	writePreferences();
 	let began;
 	let finish;
 	const started = new Promise((resolve) => { began = resolve; });
@@ -368,7 +339,6 @@ test('queued prompt from a replaced session cannot reset or contaminate the new 
 });
 
 test('two live extension instances with identical prompt text keep request state isolated by Guardian owner', async (t) => {
-	writePreferences();
 	const a = fixture({ ownerId: 'owner-a', taskLabel: 'First session request' });
 	const b = fixture({ ownerId: 'owner-b', taskLabel: 'Second session request' });
 	t.after(async () => { await a.emit('session_shutdown'); await b.emit('session_shutdown'); });
@@ -384,8 +354,7 @@ test('two live extension instances with identical prompt text keep request state
 });
 
 test('large user prompts are hashed, bounded for analysis, and not retained in replay metadata', async (t) => {
-	writePreferences({ promptAnalysis: null, subagents: null });
-	const f = fixture({ models: [], scopedModels: [] });
+	const f = fixture({ model: unusableRoute });
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	const marker = 'PRIVATE-RAW-PROMPT-';
@@ -424,7 +393,6 @@ test('session metrics include readable tool names and counts', () => {
 });
 
 test('a resumed session classifies the first prompt as a follow-up with restored prior context', async (t) => {
-	writePreferences();
 	// The session manager persists the analysis display message as a
 	// `custom_message` entry; resume must read that real shape.
 	const persisted = {
@@ -467,7 +435,6 @@ test('a resumed session classifies the first prompt as a follow-up with restored
 });
 
 test('only the newest user request keeps its advisory in later provider payloads', async (t) => {
-	writePreferences();
 	const f = fixture();
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
@@ -515,7 +482,6 @@ test('only the newest user request keeps its advisory in later provider payloads
 });
 
 test('startup and reload restore only the active branch, never an abandoned task', async (t) => {
-	writePreferences();
 	const active = { type: 'custom_message', customType: 'prompt-analysis', details: { taskLabel: 'Active task', subtasks: [], explicitConstraints: [] } };
 	const abandoned = { ...active, details: { ...active.details, taskLabel: 'Abandoned task' } };
 	for (const reason of ['startup', 'reload', 'resume', 'fork', 'tree']) {
@@ -532,7 +498,6 @@ test('startup and reload restore only the active branch, never an abandoned task
 });
 
 test('vetoed navigation and rejected analysed requests do not replace the accepted task', async (t) => {
-	writePreferences();
 	const f = fixture();
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
@@ -551,7 +516,6 @@ test('vetoed navigation and rejected analysed requests do not replace the accept
 });
 
 test('legacy completion observes auth URL overrides', async (t) => {
-	writePreferences();
 	let observedUrl;
 	const f = fixture({ complete: async (model) => {
 		observedUrl = model.baseUrl;

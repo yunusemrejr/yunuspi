@@ -5,7 +5,6 @@ import { Type, type Static } from "typebox";
 import { appendPermissionAudit, permissionArgsPreview } from "../runs/shared/permissions.ts";
 import { agentStreamOptions } from "../shared/agent-stream-options.ts";
 import { decodeChildWatchdogConfig } from "./child-status.ts";
-import { childResolvedConfig } from "./register-child.ts";
 import { resolveWatchdogReviewModel } from "./review.ts";
 
 const PermissionDecisionParams = Type.Object({
@@ -93,8 +92,7 @@ export function createWatchdogPermissionArbiter(options: WatchdogPermissionArbit
 		let abort: (() => void) | undefined;
 		try {
 			const run = async (): Promise<WatchdogPermissionResult> => {
-				const config = childResolvedConfig(childConfig);
-				const selection = await resolveWatchdogReviewModel(request.ctx, config);
+				const selection = await resolveWatchdogReviewModel(request.ctx);
 				// Auth lookup can outlive cancellation or the permission deadline.
 				// A finished request must never start a late, unsupervised inference.
 				if (completed) return finalResult!;

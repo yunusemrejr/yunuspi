@@ -508,30 +508,3 @@ test('council progress delivery failures do not reject successful advisory work'
   await new Promise(resolve=>setImmediate(resolve));
 });
 
-test('configured council routes survive economy admission without changing their role order',async()=>{
-  const fallback=await import(shared+'model-fallback.ts');
-  const prefs=await import(shared+'llm-preferences.ts');
-  const configured=[
-    {...model('vendor/preferred'),provider:'friendli',baseUrl:'https://api.friendli.ai/serverless/v1'},
-    {...model('vendor/backup'),provider:'friendli',baseUrl:'https://api.friendli.ai/serverless/v1',cost:{input:99,output:99,cacheRead:0,cacheWrite:0}},
-  ];
-  const available=configured.map(row=>({...row,fullId:`${row.provider}/${row.id}`}));
-  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({preferences:{council:configured.map(row=>({provider:row.provider,model:row.id}))}}));
-  prefs.clearLlmPreferencesCache();
-  const calls=[];
-  try{
-    for(const row of available) assert.throws(()=>fallback.buildModelCandidates(row.fullId,undefined,available,undefined,{origin:'explicit'}),/economy|price|expensive|metered/i,'direct explicit overrides retain their strict economy policy');
-    registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{available:()=>configured,constraints:()=>({}),rankPerspectives:null,
-      launch:async(_id,params)=>{
-        calls.push(params);
-        assert.equal(params.modelOrigin,'configured');
-        const route=fallback.resolveEffectiveSubagentModel(params.model,undefined,undefined,available,undefined,{source:params.modelOrigin==='explicit'?'explicit':'inherited',task:params.task});
-        assert.deepEqual(fallback.buildModelCandidates(route,undefined,available,undefined,{origin:params.modelOrigin,task:params.task}),[params.model]);
-        return result('Bounded council advice based on the supplied source evidence.');
-      }});
-    const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task},context());
-    assert.equal(output.status,'complete');
-    assert.deepEqual(calls.slice(0,2).map(row=>row.model),available.map(row=>row.fullId));
-    assert.equal(calls.length,3);
-  }finally{fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache();}
-});

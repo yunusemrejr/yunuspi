@@ -5,9 +5,8 @@ import { discoverAgentSnapshot, findBlockingAgentDiagnostic, findShadowedAgentDi
 import { resolveExecutionAgentScope } from "../agents/agent-scope.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
-import { buildModelRouteCandidates, inheritsParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, type AvailableModelInfo, type ParentModel } from "../runs/shared/model-fallback.ts";
+import { sessionChildModel, type ParentModel } from "../runs/shared/session-model.ts";
 import type { ModelRouteCandidate } from "../shared/model-route.ts";
-import { resolveModelScopesForAgent } from "../runs/shared/model-scope.ts";
 import { applyThinkingSuffix, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, normalizeSingleOutputOverride, resolveSingleOutputPath } from "../runs/shared/single-output.ts";
 import { getArtifactPaths, getArtifactsDir } from "../shared/artifacts.ts";
@@ -39,6 +38,7 @@ export type SubagentLaunchContractReasonCode =
 	| "unsupported_mode"
 	| "restricted_agent"
 	| "thinking_ceiling"
+	| "missing_session_model"
 	| "invalid_extension_bindings";
 
 export type SubagentLaunchContractDiagnosticCode = SubagentLaunchContractReasonCode | "host_required" | "snapshot_warning" | "workspace_scope_authority";
@@ -55,13 +55,12 @@ export interface SubagentLaunchContractInput {
 	task?: string;
 	agentScope?: AgentScope;
 	context?: "fresh" | "fork";
-	model?: string;
 	fast?: boolean;
+	/** Thinking override from the executor; the agent's own thinking is never used. */
 	thinking?: string | false;
 	thinkingCeiling?: ThinkingLevel;
 	inheritedThinkingCeiling?: ThinkingLevel;
 	parentModel?: ParentModel;
-	availableModels?: ReadonlyArray<AvailableModelInfo | { provider: string; id: string; fullId?: string; reasoning?: boolean }>;
 	preferredProvider?: string;
 	skill?: string | string[] | boolean;
 	output?: string | boolean;
@@ -191,10 +190,6 @@ function digestContract(contract: Omit<SubagentLaunchContract, "digest">): strin
 	return stableJsonDigest(contract);
 }
 
-function normalizeAvailableModels(models: SubagentLaunchContractInput["availableModels"]): AvailableModelInfo[] {
-	return (models ?? []).map((model) => ({ ...model, fullId: model.fullId ?? `${model.provider}/${model.id}` }));
-}
-
 function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent: AgentConfig): "fresh" | "fork" {
 	return resolveSubagentLaunchContext({
 		explicitContext: input.context,
@@ -303,7 +298,6 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		...(outputOverride !== undefined ? { output: outputOverride } : {}),
 		...(input.outputMode !== undefined ? { outputMode: input.outputMode } : {}),
 		...(skillInput !== undefined ? { skills: skillInput } : {}),
-		...(input.model !== undefined ? { model: input.model } : {}),
 	});
 	const requestedSkills = behavior.skills === false ? [] : behavior.skills;
 	const resolvedSkills = resolveSkillsWithFallback(
@@ -319,38 +313,29 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	if (resolvedSkills.missing.length > 0) diagnostics.push({ code: "missing_skill", severity: "warning", message: `Optional skill guides unavailable: ${resolvedSkills.missing.join(", ")}. Continue with the task and available tools.` });
 
 	const externalRunner = agent.runner?.type === "external-cli" || agent.runner?.type === "external-job";
-	const availableModels = normalizeAvailableModels(input.availableModels);
-	const preferredProvider = agent.modelProvider ?? input.preferredProvider ?? input.parentModel?.provider;
-	const modelScopes = resolveModelScopesForAgent(discovered.modelScope, agent.name, input.parentModel);
-	const modelOrigin = resolveModelOrigin({ explicitModel: input.model, agentModel: agent.model, parentModel: input.parentModel });
-	const primaryModel = externalRunner
-		? undefined
-		: resolveEffectiveSubagentModel(input.model, agent.model, input.parentModel, availableModels, preferredProvider, {
-			scope: modelScopes,
-			source: modelOrigin === "explicit" ? "explicit" : "inherited",
-		});
-	const effectiveThinkingConfig = input.thinking !== undefined ? input.thinking : agent.thinking;
+	const thinkingOverride = input.thinking;
+	let sessionRoute: string | undefined;
+	if (!externalRunner) {
+		try {
+			sessionRoute = sessionChildModel(input.parentModel);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			diagnostics.push({ code: "missing_session_model", severity: "error", message });
+			return { ok: false, code: "missing_session_model", message, diagnostics };
+		}
+	}
 	const thinkingCeiling = externalRunner ? undefined : intersectThinkingCeilings(
 		discovered.maxThinking,
 		input.thinkingCeiling,
 		input.inheritedThinkingCeiling,
 		decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]),
 	);
-	const model = externalRunner ? undefined : applyThinkingSuffix(primaryModel, effectiveThinkingConfig, input.thinking !== undefined);
-	const modelRouteCandidates = externalRunner
-		? []
-		: buildModelRouteCandidates(primaryModel, agent.fallbackModels, availableModels, preferredProvider, {
-			scope: modelScopes,
-			task: input.task,
-			primaryModelFromParent: modelOrigin === "inherited" || inheritsParentModel(input.model, agent.model, input.parentModel),
-			origin: modelOrigin,
-		})
-			.map((candidate) => ({ ...candidate, route: applyThinkingSuffix(candidate.route, effectiveThinkingConfig, input.thinking !== undefined) ?? candidate.route }));
+	const model = externalRunner ? undefined : applyThinkingSuffix(sessionRoute, thinkingOverride, thinkingOverride !== undefined);
+	const modelRouteCandidates: ModelRouteCandidate[] = model ? [{ route: model }] : [];
 	const modelCandidates = modelRouteCandidates.map((candidate) => candidate.route);
 	if (!externalRunner) {
 		try {
-			assertThinkingWithinCeiling({ model, configThinking: effectiveThinkingConfig, ceiling: thinkingCeiling, agent: agent.name, runId });
-			for (const candidate of modelCandidates) assertThinkingWithinCeiling({ model: candidate, configThinking: effectiveThinkingConfig, ceiling: thinkingCeiling, agent: agent.name, runId });
+			assertThinkingWithinCeiling({ model, configThinking: thinkingOverride, ceiling: thinkingCeiling, agent: agent.name, runId });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			diagnostics.push({ code: "thinking_ceiling", severity: "error", message });
@@ -396,9 +381,6 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		? nestedResultsPath(input.nestedRootRunId, runId)
 		: resultFilePath(DIRS.results, runId);
 	if (!sessionDir) diagnostics.push({ code: "host_required", severity: "host-required", message: "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy." });
-	if (!externalRunner && input.availableModels === undefined && (input.model || agent.model || input.parentModel)) {
-		diagnostics.push({ code: "host_required", severity: "host-required", message: "No availableModels snapshot was supplied; model resolution may differ from the active Pi host registry." });
-	}
 	let effectiveSystemPrompt = agent.systemPrompt?.trim() ?? "";
 	if (resolvedSkills.resolved.length > 0) {
 		const skillInjection = buildSkillInjection(resolvedSkills.resolved);
@@ -427,7 +409,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		...(model ? { model } : {}),
 		modelCandidates,
 		modelRouteCandidates,
-		...(resolveEffectiveThinking(model, effectiveThinkingConfig) ? { thinking: resolveEffectiveThinking(model, effectiveThinkingConfig) } : {}),
+		...(resolveEffectiveThinking(model, thinkingOverride) ? { thinking: resolveEffectiveThinking(model, thinkingOverride) } : {}),
 		...(thinkingCeiling ? { thinkingCeiling } : {}),
 		systemPromptMode: agent.systemPromptMode,
 		inheritProjectContext: agent.inheritProjectContext,
@@ -484,7 +466,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 			...(model ? { model } : {}),
 			modelCandidates,
 			...(fast !== undefined ? { fast } : {}),
-			...(resolveEffectiveThinking(model, effectiveThinkingConfig) ? { thinking: resolveEffectiveThinking(model, effectiveThinkingConfig) } : {}),
+			...(resolveEffectiveThinking(model, thinkingOverride) ? { thinking: resolveEffectiveThinking(model, thinkingOverride) } : {}),
 			systemPrompt: effectiveSystemPrompt,
 			systemPromptMode: agent.systemPromptMode,
 			inheritProjectContext: agent.inheritProjectContext,
