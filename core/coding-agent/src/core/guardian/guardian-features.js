@@ -221,7 +221,7 @@ export function isVerificationCall(toolName, args) {
 	const command = args.command.trim().replace(/^cd\s+[\w./~-]+\s*&&\s*/, "");
 	return !/[;|&\n`]|\$\(/.test(command) && VERIFY_COMMAND.test(command);
 }
-const MUTATING_TOOLS = new Set(["write", "edit", "bulk_edit", "multi_edit", "apply_patch"]);
+const MUTATING_TOOLS = new Set(["write", "edit", "multi_edit", "apply_patch"]);
 export function isMutationCall(toolName, args) {
 	if (MUTATING_TOOLS.has(toolName)) return true;
 	return toolName === "bash" && typeof args?.command === "string" && /(?:^|[;&|]\s*)(?:sed\s+-i|perl\s+-pi|tee\b|cp\b|mv\b|rm\b|git\s+(?:apply|checkout|restore|reset|merge|rebase|cherry-pick)|npm\s+(?:i|install|uninstall)\b|patch\b)|>>?\s*[\w./-]+\.\w+/.test(args.command);

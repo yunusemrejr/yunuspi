@@ -723,7 +723,7 @@ export class GuardianSupervisor {
 				}
 			}
 		}
-		if ((call.toolName === "edit" || call.toolName === "bulk_edit") && event.isError && call.rawPath) {
+		if (call.toolName === "edit" && event.isError && call.rawPath) {
 			const record = task.editFailures.get(call.rawPath) ?? { count: 0, prints: new Set() };
 			record.count++; if (call.fingerprint && record.prints.size < 16) record.prints.add(call.fingerprint);
 			task.editFailures.set(call.rawPath, record);
