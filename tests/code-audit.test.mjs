@@ -107,6 +107,8 @@ test('backend cues: timeouts, mass assignment, leaks, blocking, N+1 and handler 
   lacks('src/a.js','const u = await db.users.findOne({ id });','query-in-loop');
   lacks('src/a.js','for (const id of ids) {\n  const item = await item.compute(id);\n}','query-in-loop');
   has('src/a.py','for u in users:\n    cur.execute("select 1")','query-in-loop');
+  has('src/a.py','for i in ids:\n    User.objects.get(id=i)','query-in-loop');
+  lacks('src/a.py','for name in names:\n    o = bpy.data.objects.get(name)','query-in-loop');
   has('src/a.py','async def f():\n    time.sleep(1)','blocking-in-async');
   lacks('src/a.py','def f():\n    time.sleep(1)','blocking-in-async');
   const express='const express = require("express");\n';

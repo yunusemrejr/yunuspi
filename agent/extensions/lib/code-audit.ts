@@ -193,7 +193,8 @@ const RULES: Rule[] = [
     re: /\bawait\s+(?:[\w$]+\.)*(?:(?:db|database|prisma|pool|conn|connection|knex|sequelize|orm|supabase|mongo|redis|cursor|tx|trx)|[\w$]*(?:Repository|Repo|Model|Collection|Db|DB|Pool|Client))[\w$]*\.\w+\s*\(|\bawait\s+[\w$.]+\.(?:findOne|findUnique|findFirst|findById|findByPk|findMany|findAll|insertOne|updateOne|deleteOne|query|execute)\s*\(/,
     message: "A database call runs once per loop iteration (N+1).", fix: "Batch it: one query with IN/ANY, a JOIN, findMany({ where: { id: { in } } }), or a bulk insert." },
   { id: "query-in-loop", domain: "backend", severity: "medium", langs: ["py"], scope: "loop", live: true,
-    re: /\b(?:cursor|cur|conn|connection|db|session)\.(?:execute|query|get|add|scalar)\(|\.objects\.(?:get|filter|create|exclude)\(|\bsession\.query\(/,
+    // Django managers hang off a model class (User.objects); bpy.data.objects.get is a Blender lookup, not a query.
+    re: /\b(?:cursor|cur|conn|connection|db|session)\.(?:execute|query|get|add|scalar)\(|\b[A-Z]\w*\.objects\.(?:get|filter|create|exclude)\(|\bsession\.query\(/,
     message: "A database call runs once per loop iteration (N+1).", fix: "Batch it: select_related/prefetch_related, an IN clause, executemany or bulk_create." },
   { id: "defer-in-loop", domain: "backend", severity: "medium", langs: ["go"], scope: "loop", live: true, re: /^\s*defer\s/, message: "defer inside a loop holds every resource until the function returns.", fix: "Move the body into a function so each iteration's defer runs, or close explicitly." },
 

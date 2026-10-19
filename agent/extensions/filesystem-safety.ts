@@ -1711,14 +1711,9 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		} catch {
 			/* Size unavailable, not zero. */
 		}
+		// Structured receipt only: the write/edit result already names the path,
+		// and a repeated text receipt on every mutation stayed in context for good.
 		return {
-			content: [
-				...event.content,
-				{
-					type: "text" as const,
-					text: `File mutation succeeded: path=${JSON.stringify(raw)}; resolved=${JSON.stringify(target ?? null)}; size=${bytes ?? "unknown"} bytes. Content not independently verified.`,
-				},
-			],
 			details: {
 				...event.details,
 				fileMutation: { path: raw, resolved: target, bytes },

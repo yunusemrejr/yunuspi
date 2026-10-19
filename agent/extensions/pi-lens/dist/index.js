@@ -64098,6 +64098,26 @@ function lensDiagnosticKey(d) {
 function lensRoutineKey(d) {
   return [d.tool ?? "", d.rule ?? d.id ?? "", d.message ?? ""].join("\u0001");
 }
+// YunusPi: missing-package diagnostics describe the environment, not the edit.
+// Modules a host application embeds (Blender's bpy) never resolve outside it;
+// any other missing package is reported once per session, not on every write.
+var LENS_HOST_MODULE = /^(?:bpy|bpy_extras|bpy_types|bmesh|mathutils|gpu|gpu_extras|bgl|blf|aud|freestyle|idprop|imbuf)(?:\.|$)/;
+function lensMissingModule(d) {
+  const rule = String(d.rule ?? d.id ?? ""), message = String(d.message ?? "");
+  const match = /(?:^|:)7016$/.test(rule) ? /declaration file for module '([^']+)'/.exec(message)
+    : /(?:^|:)2307$/.test(rule) ? /Cannot find module '([^'.][^']*)'/.exec(message)
+    : /(?:^|:)reportMissing(?:Imports|ModuleSource)$/.test(rule) ? /Import "([^"]+)"/.exec(message) : null;
+  return match?.[1];
+}
+function lensEnvironmentRepeat(d, ctx) {
+  const module = lensMissingModule(d);
+  if (!module) return false;
+  if (LENS_HOST_MODULE.test(module)) return true;
+  const key = "session.missing-module." + (ctx.projectRoot ?? ctx.cwd) + ":" + module;
+  if (ctx.facts?.getSessionFact?.(key)) return true;
+  ctx.facts?.setSessionFact?.(key, true);
+  return false;
+}
 function lensRoutineDiagnostics(visible, all, ctx, baseline) {
   if (ctx.analysisOnly) return { visible, preexisting: 0, outside: 0, advisory: 0 };
   const priorExact = new Set((baseline ?? []).map(lensDiagnosticKey));
@@ -64706,8 +64726,9 @@ async function dispatchForFile(ctx, groups2, registry, onRunnerResult) {
   const coverageNotice = lensCoverageState(ctx, runnerLatencies);
   const blockerOutput = formatDiagnostics(inlineBlockers, "blocking");
   let output = blockerOutput;
-  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === "error"), "warning");
-  if (routineScope.preexisting || routineScope.outside || routineScope.advisory) output += `\npi-lens: ${routineScope.preexisting} unchanged baseline, ${routineScope.outside} outside verified changed lines, ${routineScope.advisory} advisory diagnostic(s); details available with lens_diagnostics.\n`;
+  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === "error" && !lensEnvironmentRepeat(d, ctx)), "warning");
+  // YunusPi: the "N unchanged baseline / outside / advisory" footer printed on
+  // most writes and lens_diagnostics was never called from it; counts stay in telemetry.
   output += formatDiagnostics(inlineFixed, "fixed");
   if (coverageNotice) {
     output += "\nℹ " + coverageNotice.message + "\n";
@@ -93483,6 +93504,7 @@ async function runPipeline(ctx, deps) {
     fileContent = nodeFs7.readFileSync(filePath, "utf-8");
   } catch {
   }
+  const writtenContent = fileContent; // YunusPi: the text the agent wrote, for a changed-lines autofix notice.
   phase.end("read_file");
   phase.start("format");
   let formatChanged = false;
@@ -93775,6 +93797,7 @@ ${dispatchResult.output}`;
     postMutation: ctx.autofixMode !== "deferred" && autofixChangedFiles.some((f) => path152.resolve(f) === path152.resolve(filePath)) && fileContent !== void 0 ? {
       filePath: path152.resolve(filePath),
       content: fileContent,
+      before: writtenContent,
       source: "autofix"
     } : void 0
   };
@@ -98537,9 +98560,9 @@ function renderPostAutofixNotice(notice, decision) {
   const fileList = notice.changedFiles.length ? "\nModified files:\n" + topFiles + overflow : "";
   switch (decision) {
     case "attached":
-      return `\u26A0\uFE0F **The attached full content for ${notice.targetPath} is authoritative after autofix. You MUST re-read any other modified side-effect files before editing them.**${fileList}`;
+      return `The text attached above is current for ${notice.targetPath} after autofix; re-read any other modified file before editing it.${fileList}`;
     case "size-capped":
-      return `\u26A0\uFE0F **File was modified by auto-format/fix. You MUST re-read ${notice.targetPath} before making any further edits \u2014 the authoritative content is too large to attach.**${fileList}`;
+      return `Autofix changed ${notice.targetPath}; re-read it before editing (the change is too large to attach).${fileList}`;
     case "aggregate-budget-degraded":
       return `\u26A0\uFE0F **File was modified by auto-format/fix. You MUST re-read ${notice.targetPath} before making any further edits \u2014 the aggregate authoritative content for this command is too large to attach.**${fileList}`;
     default:
@@ -98552,6 +98575,41 @@ init_word_index();
 init_runtime_config();
 init_session_lifecycle();
 var AUTHORITATIVE_CONTENT_MAX_BYTES = RUNTIME_CONFIG.pipeline.lspMaxFileBytes;
+// YunusPi: an autofix usually sorts imports or reflows a few lines, yet the
+// whole file was attached (up to lspMaxFileBytes) and then rode along in every
+// later request. Attach the current text of the changed lines only; the rest
+// of the file is unchanged from what was written. Larger changes ask for a re-read.
+var AUTOFIX_ATTACHMENT_MAX_BYTES = 6e3;
+function autofixChangedLines(before, after) {
+  if (typeof before !== "string" || typeof after !== "string") return void 0;
+  const a = before.split("\n"), b = after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tailA = a.length, tailB = b.length;
+  while (tailA > head && tailB > head && a[tailA - 1] === b[tailB - 1]) { tailA--; tailB--; }
+  const n = tailA - head, m = tailB - head;
+  if (!n && !m) return "(no line changed)";
+  // Separate blocks inside the differing middle when it is small enough for an LCS table.
+  let blocks = [[head, tailA, head, tailB]];
+  if (n && m && n * m <= 25e4) {
+    const lcs = new Uint32Array((n + 1) * (m + 1)), at = (i2, j2) => i2 * (m + 1) + j2;
+    for (let i2 = n - 1; i2 >= 0; i2--) for (let j2 = m - 1; j2 >= 0; j2--)
+      lcs[at(i2, j2)] = a[head + i2] === b[head + j2] ? lcs[at(i2 + 1, j2 + 1)] + 1 : Math.max(lcs[at(i2 + 1, j2)], lcs[at(i2, j2 + 1)]);
+    blocks = [];
+    let i = 0, j = 0, open;
+    const close = () => { if (open) blocks.push([head + open[0], head + i, head + open[1], head + j]); open = void 0; };
+    while (i < n || j < m) {
+      if (i < n && j < m && a[head + i] === b[head + j]) { close(); i++; j++; continue; }
+      if (!open) open = [i, j];
+      if (j < m && (i >= n || lcs[at(i, j + 1)] >= lcs[at(i + 1, j)])) j++; else i++;
+    }
+    close();
+  }
+  const width = String(b.length).length;
+  return blocks.map(([fromA, toA, fromB, toB]) => toB > fromB
+    ? `L${fromB + 1}${toB - fromB > 1 ? `-${toB}` : ""}:\n` + b.slice(fromB, toB).map((line, k) => `${String(fromB + k + 1).padStart(width)}│${line}`).join("\n")
+    : `after L${fromB}: ${toA - fromA} line(s) removed`).join("\n");
+}
 var GIT_INTEGRATION_SUBCOMMANDS = /* @__PURE__ */ new Set([
   "merge",
   "rebase",
@@ -99445,11 +99503,14 @@ ${formatBehaviorWarnings(behaviorWarnings)}`;
   });
   runtime2.reportedThisTurn.add(filePath);
   const postMutation = result.postMutation;
-  const attachmentText = postMutation ? `pi-lens applied autofix to ${postMutation.filePath}. The following full content is authoritative for subsequent edits:
+  const changedLines = postMutation ? autofixChangedLines(postMutation.before, postMutation.content) : void 0;
+  const attachmentText = !postMutation ? "" : changedLines !== void 0 ? `pi-lens autofix changed ${postMutation.filePath}. Current text of the changed lines; the rest of the file is unchanged:
 
-${postMutation.content}` : "";
-  const contentBytes = postMutation ? Buffer.byteLength(postMutation.content, "utf-8") : 0;
-  const withinPerFileCap = contentBytes <= AUTHORITATIVE_CONTENT_MAX_BYTES;
+${changedLines}` : `pi-lens applied autofix to ${postMutation.filePath}. The following full content is authoritative for subsequent edits:
+
+${postMutation.content}`;
+  const contentBytes = Buffer.byteLength(attachmentText, "utf-8");
+  const withinPerFileCap = contentBytes <= AUTOFIX_ATTACHMENT_MAX_BYTES;
   const budget = deps._attachmentBudget;
   const withinSharedBudget = !budget || Buffer.byteLength(attachmentText, "utf-8") <= budget.remaining;
   const attachAuthoritativeContent = postMutation !== void 0 && withinPerFileCap && withinSharedBudget;

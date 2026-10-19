@@ -1,6 +1,6 @@
 id: unchecked-throwing-call
 language: TypeScript
-severity: error
+severity: warning
 message: "$CALL without try/catch — throws on invalid input"
 note: |
   These calls throw on malformed input and should always be wrapped.

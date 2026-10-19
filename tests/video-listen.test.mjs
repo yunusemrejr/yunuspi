@@ -275,9 +275,10 @@ test("videoListen fails fast with the install instruction when no interpreter ha
   writeWav(master, tone(0.5, 440, 0.2));
   const home = path.join(dir, "home");
   fs.mkdirSync(home);
-  await withEnv({ PI_ASR_PYTHON: undefined, PI_CODING_AGENT_DIR: undefined, HOME: home }, async () => {
+  await withEnv({ PI_ASR_PYTHON: undefined, PI_ASR_AUTO_INSTALL: "0", PI_CODING_AGENT_DIR: undefined, HOME: home }, async () => {
     await assert.rejects(listen.videoListen({ path: master }, dir), (error) => {
       assert.match(error.message, /Speech recognition is not installed\. Create it once with: python3 -m venv ~\/\.pi\/agent\/local-models\/asr\/venv && ~\/\.pi\/agent\/local-models\/asr\/venv\/bin\/pip install faster-whisper==1\.2\.1/);
+      assert.match(error.message, /Automatic setup is off \(PI_ASR_AUTO_INSTALL=0\)/);
       return true;
     });
   });
@@ -330,6 +331,41 @@ test("videoListen runs the helper, measures the master and writes the listen rep
   assert.equal(fs.readFileSync(probes, "utf8").trim().split("\n").length, 1, "the import probe runs once per interpreter");
 });
 
+test("videoListen compares against spoken text passed as script instead of a file path", { skip: !hasFfmpeg && "ffmpeg is not installed", timeout: 300_000 }, async (t) => {
+  const dir = tmpDir(t);
+  const fake = fakePython(dir, "fake-python");
+  const master = path.join(dir, "master.wav");
+  writeWav(master, tone(3, 440, (t) => (t >= 0.5 && t < 1.5 ? 0.5 : 0.05)));
+  const fixture = resultFixture(path.join(dir, "result.json"), { text: "Welcome to the car.", words: wordsFrom("Welcome to the car", 0.5, 0.25), speechWindows: [[0.5, 1.5]] });
+  const spoken = "Welcome to the car.";
+  const result = await withEnv({ PI_ASR_PYTHON: fake, FAKE_ASR_FIXTURE: fixture, FAKE_ASR_LOG: undefined, FAKE_ASR_PROBES: undefined, FAKE_ASR_MODE: undefined }, () => listen.videoListen({ path: master, script: spoken }, dir));
+  assert.equal(result.wer, 0);
+  const report = JSON.parse(fs.readFileSync(result.report, "utf8"));
+  assert.equal(report.script.path, null);
+  assert.equal(report.script.wordCount, 4);
+  assert.equal(report.script.sha256, crypto.createHash("sha256").update(spoken).digest("hex"));
+  assert.equal(listen.isInlineScript("out/script-v2.txt", dir), false, "a script file path stays a path");
+  assert.equal(listen.isInlineScript(path.join(dir, "master.wav"), dir), false, "an existing file stays a path");
+  await assert.rejects(listen.videoListen({ path: master, script: "missing.txt" }, dir), /ENOENT|no such file/i);
+});
+
+test("videoListen sets up speech recognition itself and reports a setup failure with the manual command", { skip: !hasFfmpeg && "ffmpeg is not installed", timeout: 120_000 }, async (t) => {
+  const dir = tmpDir(t);
+  const master = path.join(dir, "master.wav");
+  writeWav(master, tone(0.5, 440, 0.2));
+  const home = path.join(dir, "home"), emptyBin = path.join(dir, "bin");
+  fs.mkdirSync(home); fs.mkdirSync(emptyBin);
+  // No python3 on PATH: the automatic setup is attempted and its failure is explicit.
+  await withEnv({ PI_ASR_PYTHON: undefined, PI_ASR_AUTO_INSTALL: undefined, PI_CODING_AGENT_DIR: undefined, HOME: home, PATH: emptyBin }, async () => {
+    await assert.rejects(listen.videoListen({ path: master }, dir), (error) => {
+      assert.match(error.message, /Speech recognition is not installed\./);
+      assert.match(error.message, /Automatic setup failed: /);
+      return true;
+    });
+  });
+  assert.ok(fs.existsSync(path.join(home, ".pi/agent/local-models/asr")), "setup ran in the agent's local-models folder");
+});
+
 test("videoListen measures speech over music exactly from narration and music stems", { skip: !hasFfmpeg && "ffmpeg is not installed", timeout: 300_000 }, async (t) => {
   const dir = tmpDir(t);
   const fake = fakePython(dir, "fake-python");
@@ -377,7 +413,7 @@ test("an import probe that fails is cached per interpreter and reported with the
   writeWav(master, tone(0.5, 440, 0.2));
   const home = path.join(dir, "home");
   fs.mkdirSync(home);
-  await withEnv({ PI_ASR_PYTHON: broken, FAKE_ASR_IMPORT: "fail", FAKE_ASR_PROBES: probes, PI_CODING_AGENT_DIR: undefined, HOME: home }, async () => {
+  await withEnv({ PI_ASR_PYTHON: broken, PI_ASR_AUTO_INSTALL: "0", FAKE_ASR_IMPORT: "fail", FAKE_ASR_PROBES: probes, PI_CODING_AGENT_DIR: undefined, HOME: home }, async () => {
     await assert.rejects(listen.videoListen({ path: master }, dir), /pip install faster-whisper==1\.2\.1/);
     await assert.rejects(listen.videoListen({ path: master }, dir), /pip install faster-whisper==1\.2\.1/);
   });

@@ -3347,7 +3347,7 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1827
+        "line": 1829
       },
       {
         "name": "cost",
@@ -3422,52 +3422,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113838
+        "line": 113899
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113542
+        "line": 113603
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113599
+        "line": 113660
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113634
+        "line": 113695
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113611
+        "line": 113672
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113753
+        "line": 113814
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113567
+        "line": 113628
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113535
+        "line": 113596
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113772
+        "line": 113833
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113549
+        "line": 113610
       },
       {
         "name": "logs",
@@ -4091,7 +4091,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1857,
+        "line": 1859,
         "kind": "literal"
       },
       {
@@ -4509,7 +4509,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1857,
+        "line": 1859,
         "kind": "literal"
       },
       {

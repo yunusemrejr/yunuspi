@@ -33,6 +33,12 @@ test('todo dependency block (legacy and blocker-naming shapes) classifies as gua
   }
 });
 
+test('setup refusals and a reasoning-exhausted reply get a category instead of unclassified', () => {
+  assert.equal(failureCategory('Speech recognition is not installed. Create it once with: python3 -m venv ~/.pi/agent/local-models/asr/venv').category, 'dependency');
+  assert.equal(failureCategory('Audio was not submitted: ElevenLabs is not configured. Inspect music_compose for local music').category, 'dependency');
+  assert.equal(failureCategory('Vision model spent its whole output allowance (including reasoning) before answering; retry with a larger maxTokens').category, 'truncated');
+});
+
 test('bare nouns still do not classify', () => {
   assert.equal(failureCategory('dependencies: react, typescript').category, 'unclassified');
   assert.equal(failureCategory('agent: delegate finished ok').category, 'unclassified');
