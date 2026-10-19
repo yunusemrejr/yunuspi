@@ -13,10 +13,11 @@ import { fileURLToPath } from "node:url";
 
 const baseDir = dirname(fileURLToPath(import.meta.url));
 
-// A session must not download toolchains while it works: measured, a hello-world
-// project made pi-lens run `npm install types-registry@latest` and start five
-// language servers on the first write. Tools already under ~/.pi-lens keep
-// working; set either variable to 0 to allow on-demand installs again.
+// A session must not download linters or language servers while it works.
+// Tools already under ~/.pi-lens keep working; set either variable to 0 to allow
+// on-demand installs again. (TypeScript's own type acquisition, the
+// `npm install types-registry` seen in traces, belongs to the language server
+// and is avoided by leaving LSP off by default; see the no-lsp flag in dist.)
 process.env.PI_LENS_DISABLE_TOOL_INSTALL ??= "1";
 process.env.PI_LENS_DISABLE_LSP_INSTALL ??= "1";
 

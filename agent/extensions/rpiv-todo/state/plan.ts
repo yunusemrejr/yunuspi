@@ -122,4 +122,21 @@ export function renderPlan(tasks: readonly Task[], view: 'tree' | 'frontier' = '
   return text;
 }
 
+/**
+ * Whether a prompt earns the plan orientation. The orientation tells the model to
+ * build a todo ledger first, which cost four extra model turns on a measured
+ * "write a module and its tests, run them" request. A short, single-purpose ask
+ * does not need one; a long, listed or already-planned piece of work does.
+ * PI_ACTION_PLAN=always restores the orientation for every actionable prompt.
+ */
+export function wantsPlanOrientation(prompt: unknown, hasPlan: boolean, mode: string | undefined = process.env.PI_ACTION_PLAN): boolean {
+	if (mode === "off") return false;
+	if (mode === "always" || hasPlan) return true;
+	if (typeof prompt !== "string") return false;
+	const text = prompt.trim();
+	if (text.length >= 600) return true;
+	const listed = text.split("\n").filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+\S/.test(line)).length;
+	return listed >= 3;
+}
+
 export const PLAN_GUIDANCE = 'For each actionable user request, create or revise the todo plan autonomously: outcomes → executable steps, parentId, dependencies and acceptance checks. Preserve open work across follow-ups; revise affected nodes, not the whole goal. Choose self/subagent/fanout per step and record files, owner/runId and project/evidence refs. Mark steps in_progress with activeForm before acting. Modes describe intent, never dispatch or grant permission. Use native orchestration tools, inspect results, record evidence, then complete. Use batch for related edits; list view=frontier for next work.';

@@ -287,6 +287,56 @@ finally: os.chmod(locked,0o700)
   f.close();
  }
 });
+test("a passing hard-link inventory is reused briefly, never a failure, and never an untrusted marker", () => {
+ const script = `import importlib.util, os, shutil, stat, sys, tempfile
+from unittest.mock import patch
+base=tempfile.mkdtemp(prefix='inventory-')
+root=os.path.join(base,'harness');os.makedirs(os.path.join(root,'agent/scripts'));os.makedirs(os.path.join(root,'agent/cache'))
+wrapper=os.path.join(root,'agent/scripts/harness-readonly-exec.py');shutil.copyfile(sys.argv[1],wrapper)
+spec=importlib.util.spec_from_file_location('guard',wrapper)
+guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+open(os.path.join(root,'original'),'w').write('x')
+scans=[];real=guard.check_protected_hardlinks
+def counting(roots): scans.append(1); return real(roots)
+os.environ.pop('PI_HARDLINK_SCAN_TTL_S',None)
+with patch.object(guard,'check_protected_hardlinks',counting):
+ guard.verified_hardlink_inventory(root,{root});guard.verified_hardlink_inventory(root,{root})
+ assert len(scans)==1,('second call inside the window must not rescan',len(scans))
+ marker=os.path.join(root,'agent/cache',guard.INVENTORY_MARKER)
+ assert stat.S_IMODE(os.stat(marker).st_mode)==0o600
+ # A different root set is a different verification.
+ other=os.path.join(base,'other');os.mkdir(other)
+ guard.verified_hardlink_inventory(root,{root,other});assert len(scans)==2
+ # Expired window rescans.
+ import time
+ with patch.object(guard.time,'time',return_value=time.time()+guard.INVENTORY_TTL_S+5):
+  guard.verified_hardlink_inventory(root,{root,other})
+ assert len(scans)==3
+ # TTL 0 restores a fresh scan per command.
+ os.environ['PI_HARDLINK_SCAN_TTL_S']='0'
+ guard.verified_hardlink_inventory(root,{root,other});guard.verified_hardlink_inventory(root,{root,other})
+ assert len(scans)==5
+ del os.environ['PI_HARDLINK_SCAN_TTL_S']
+ # A loosened marker is not trusted.
+ guard.verified_hardlink_inventory(root,{root,other});n=len(scans)
+ os.chmod(marker,0o666)
+ guard.verified_hardlink_inventory(root,{root,other});assert len(scans)==n+1
+ # Failures are never remembered.
+ os.unlink(marker)
+ os.link(os.path.join(root,'original'),os.path.join(base,'outside alias'))
+ for _ in range(2):
+  try: guard.verified_hardlink_inventory(root,{root})
+  except RuntimeError as error: assert 'hard-linked' in str(error)
+  else: raise AssertionError('outside alias was accepted')
+ assert not os.path.exists(marker)
+ # Without a cache directory inside the protected root nothing is remembered.
+ shutil.rmtree(os.path.join(root,'agent/cache'));os.unlink(os.path.join(base,'outside alias'));n=len(scans)
+ guard.verified_hardlink_inventory(root,{root});guard.verified_hardlink_inventory(root,{root});assert len(scans)==n+2
+shutil.rmtree(base)
+`;
+ const result = spawnSync("python3", ["-B", "-c", script, wrapper], { encoding: "utf8" });
+ assert.equal(result.status, 0, result.stderr);
+});
 test("SSH projections preserve bytes and never bless untrusted or unavailable files", () => {
  const script = `import importlib.util, os, stat, sys
 from unittest.mock import patch

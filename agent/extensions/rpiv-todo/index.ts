@@ -26,7 +26,7 @@ import type {
 import type { KeyId } from "@yunuspi/tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.js";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
-import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
+import { PLAN_GUIDANCE, renderPlan, wantsPlanOrientation } from "./state/plan.ts";
 import { isDirectReplyPrompt } from "../lib/intent-context.ts";
 import { getState } from "./state/store.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -176,6 +176,7 @@ export default function (
 		planInputs.delete(sid(ctx));
 		if (isDirectReplyPrompt(event.prompt)) return;
 		const tasks = getState(sid(ctx)).tasks;
+		if (!wantsPlanOrientation(event.prompt, tasks.length > 0)) return;
 		return {message:{customType:"todo-plan", display:false, content:PLAN_GUIDANCE + "\n" + renderPlan(tasks, "frontier", 1600)}};
 	});
 	pi.on("session_before_compact", (event, ctx) => {

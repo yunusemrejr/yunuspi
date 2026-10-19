@@ -45,7 +45,7 @@ import type {
 	ProviderModelConfig,
 } from "@yunuspi/coding-agent";
 import type { FreeRouteCapabilities } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -198,7 +198,7 @@ function validModels(value: unknown): LiveCatalogModel[] {
 			}),
 	);
 }
-function loadCache(): CacheFile {
+function readCacheFile(): CacheFile {
 	const cache: CacheFile = { version: 1, providers: {} };
 	try {
 		const parsed = JSON.parse(readFileSync(CACHE_FILE, "utf-8"));
@@ -259,6 +259,32 @@ function loadCache(): CacheFile {
 		// missing/corrupt cache = empty
 	}
 	return cache;
+}
+
+// Each provider's refresh loads the catalog; with dozens of providers the
+// parse-and-validate pass repeated for every one of them (over a second of
+// startup CPU). The parsed result is reused until the file changes: writes
+// always replace the file, so inode, size and mtime change with them.
+let cacheMemo: { key: string; providers: CacheFile["providers"] } | undefined;
+function loadCache(): CacheFile {
+	let key = "";
+	try {
+		const info = statSync(CACHE_FILE);
+		key = `${info.ino}:${info.size}:${info.mtimeMs}`;
+	} catch {
+		// missing = empty, never memoized
+	}
+	if (key && cacheMemo?.key === key) return { version: 1, providers: copyProviders(cacheMemo.providers) };
+	const cache = readCacheFile();
+	if (key) cacheMemo = { key, providers: copyProviders(cache.providers) };
+	return cache;
+}
+function copyProviders(providers: CacheFile["providers"]): CacheFile["providers"] {
+	const copy: CacheFile["providers"] = {};
+	for (const id of Object.keys(providers)) {
+		Object.defineProperty(copy, id, { value: providers[id], enumerable: true, writable: true, configurable: true });
+	}
+	return copy;
 }
 
 /** Serialized writes: refresh phases for different providers can overlap. */

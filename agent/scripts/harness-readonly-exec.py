@@ -5,10 +5,20 @@ Only executable children are restricted; Pi's own session/log writes are unaffec
 """
 import os
 import glob
+import hashlib
+import json
 import platform
 import stat
 import subprocess
 import sys
+import time
+
+# The hard-link inventory walks every protected tree (hundreds of thousands of
+# files under a real harness root: 2-4 s of CPU) and used to run before every
+# guarded command. A passing inventory is remembered for this long; failures are
+# never remembered. PI_HARDLINK_SCAN_TTL_S=0 restores a fresh scan per command.
+INVENTORY_TTL_S = 120
+INVENTORY_MARKER = 'hardlink-inventory.json'
 
 
 def ssh_config_mounts():
@@ -134,6 +144,82 @@ def check_protected_hardlinks(protected_roots):
         raise RuntimeError('harness has hard-linked files with aliases outside protected roots; a maintenance session must replace them with independent copies before guarded execution')
 
 
+def inventory_ttl():
+    raw = os.environ.get('PI_HARDLINK_SCAN_TTL_S')
+    if raw is None:
+        return INVENTORY_TTL_S
+    try:
+        return max(0, min(3600, int(raw)))
+    except ValueError:
+        return INVENTORY_TTL_S
+
+
+def inventory_key(protected_roots):
+    parts = []
+    for root in sorted(set(protected_roots)):
+        try:
+            info = os.lstat(root)
+            parts.append('%s:%d:%d' % (root, info.st_dev, info.st_ino))
+        except FileNotFoundError:
+            parts.append('%s:missing' % root)
+    return hashlib.sha256('\0'.join(parts).encode()).hexdigest()
+
+
+def inventory_marker(protected):
+    """<agent>/cache/<marker>, only where that directory sits inside the protected root."""
+    cache = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cache'))
+    if not os.path.isdir(cache) or os.path.commonpath([protected, cache]) != protected:
+        return None
+    return os.path.join(cache, INVENTORY_MARKER)
+
+
+def verified_hardlink_inventory(protected, protected_roots):
+    """Run the fresh inventory unless this exact root set passed a moment ago.
+
+    The marker (<agent>/cache) lives inside the protected tree, which guarded commands see
+    read-only, so a command cannot forge it. A hard-link alias can only be made
+    from outside the sandbox (link() across the read-only bind mount is EXDEV),
+    so a short window cannot hide one that a guarded command could create.
+    Anything unexpected about the marker, or no cache directory inside the
+    protected root, means a fresh scan.
+    """
+    ttl = inventory_ttl()
+    marker = inventory_marker(protected)
+    if marker is None:
+        ttl = 0
+    key = inventory_key(protected_roots)
+    if ttl:
+        try:
+            fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(fd)
+                if (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                        and not info.st_mode & 0o022 and info.st_size < 4096):
+                    with os.fdopen(os.dup(fd), 'rb') as stream:
+                        record = json.loads(stream.read(4096))
+                    age = time.time() - float(record['at'])
+                    if record.get('key') == key and 0 <= age < ttl:
+                        return
+            finally:
+                os.close(fd)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    check_protected_hardlinks(protected_roots)
+    if not ttl:
+        return
+    temporary = '%s.%d.tmp' % (marker, os.getpid())
+    try:
+        with open(temporary, 'w', opener=lambda path, flags: os.open(path, flags | os.O_NOFOLLOW, 0o600)) as stream:
+            json.dump({'key': key, 'at': time.time()}, stream)
+        os.replace(temporary, marker)
+    except OSError:
+        # A read-only or full harness root only costs the next command a scan.
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
 def writable_mounts(protected_roots):
     """Keep every protected branch and its ancestors read-only.
 
@@ -201,8 +287,9 @@ def main():
         raise RuntimeError('invalid guarded command')
     # An already-existing alias outside the protected tree would otherwise have
     # the outside path's permissions. Refuse instead of pretending path rules
-    # protect inode aliases. This bounded-by-tree scan is intentional.
-    check_protected_hardlinks(roots)
+    # protect inode aliases. This bounded-by-tree scan is intentional; a pass is
+    # reused briefly (see verified_hardlink_inventory), never a failure.
+    verified_hardlink_inventory(protected, roots)
     os.environ['PI_HARNESS_MUTATION_DENIED'] = '1'
     # A separate PID namespace and fresh procfs prevent /proc/<host-pid>/root
     # aliases to the parent's writable mounts. Capabilities are removed after

@@ -7684,10 +7684,10 @@ var init_lens_flag_registry = __esm({
       },
       {
         name: "no-lsp",
-        description: "Disable unified LSP diagnostics and use language-specific fallbacks (for example pyright). Also via lsp.enabled=false in ~/.pi-lens/config.json.",
+        description: "Disable unified LSP diagnostics and use language-specific fallbacks (for example pyright). Off by default in this harness: a cold start of up to five language servers blocked the first write result for 9-11 s. Turn LSP on with lsp.enabled=true in ~/.pi-lens/config.json.",
         configKey: "lsp.enabled",
         negated: true,
-        default: false,
+        default: true,
         scope: "global"
       },
       {
