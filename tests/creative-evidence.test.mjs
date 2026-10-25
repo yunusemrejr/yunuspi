@@ -66,8 +66,12 @@ test('UNKNOWN, measured failures, incomplete capture and uninspected responsive 
   evidence.matrix('index.html', matrix(), evidence.stamp(), 'matrix-png');
   assert.ok(evidence.gaps().some(line => line.includes('responsive matrix pixels')));
   evidence.vision('matrix-png'); assert.deepEqual(evidence.gaps(), []);
-  evidence.matrix('index.html', matrix('incomplete'), evidence.stamp(), 'matrix-png', true);
-  assert.ok(evidence.gaps().some(line => line.includes('incomplete')));
+  evidence.matrix('index.html', { ...matrix('incomplete'), plan: { capped: true } }, evidence.stamp(), 'matrix-png', true);
+  assert.ok(evidence.gaps().some(line => line.includes('incomplete')), 'a capped matrix stays open: fewer states complete it');
+  evidence.matrix('index.html', matrix('incomplete'), evidence.stamp(), 'limited-png');
+  assert.ok(evidence.gaps().some(line => line.includes('responsive matrix pixels')), 'an inspection-limited matrix still needs its pixels seen');
+  evidence.vision('limited-png');
+  assert.deepEqual(evidence.gaps(), [], 'DOM inspection bounds the agent cannot repair hold nothing open once the pixels are seen');
   assert.throws(() => evidence.run(capture({ consistent: false }), 'png', true), /revision changed/);
 });
 

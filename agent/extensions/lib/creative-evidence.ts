@@ -10,7 +10,7 @@ type Obligation = { id: string; revision: string; state: string; line: string };
 export function createCreativeEvidence() {
   const changes = new Map<string, { hash: string; kind: 'ui' | 'svg' }>();
   const runs = new Map<string, Run>();
-  const matrices = new Map<string, { stamp: string; kind: 'ui' | 'svg'; widths: number[]; status: string; imageHash: string; seen: boolean; findings: string[]; file?: string }>();
+  const matrices = new Map<string, { stamp: string; kind: 'ui' | 'svg'; widths: number[]; status: string; imageHash: string; seen: boolean; findings: string[]; file?: string; limited?: boolean }>();
   const judgments = new Map<string, { stamp: string; kind: 'ui' | 'svg'; blocking: number; source: string; controls: number }>();
   const geometry = new Map<string, { stamp: string; failures: number }>();
   const interactions = new Map<string, { stamp: string; actions: Set<string> }>();
@@ -34,7 +34,10 @@ export function createCreativeEvidence() {
       const matrix = matching(matrices, source);
       if (!current(matrix) || !matrix!.widths.some(w => w <= 320) || !matrix!.widths.some(w => w >= 1024))
         add(`responsive:${source}`, 'needs-capture', `${source}: run ui_explore at narrow (320px), mobile, tablet and desktop on the final revision.`);
-      else if (['fail', 'incomplete'].includes(matrix!.status)) add(`responsive:${source}`, matrix!.status, `${source}: responsive measurements ${matrix!.status}; repair defects or disclose the precise unresolved coverage.`);
+      // Incomplete only because DOM inspection hit its bounds (a 20k-row mail app always truncates) is a
+      // disclosed limit the agent cannot repair: once the captured pixels are seen it holds nothing open.
+      // A capped plan (too many states) stays open, since fewer states fix it.
+      else if (matrix!.status === 'fail' || matrix!.status === 'incomplete' && !matrix!.limited) add(`responsive:${source}`, matrix!.status, `${source}: responsive measurements ${matrix!.status}; repair defects or disclose the precise unresolved coverage.`);
       else if (!matrix!.seen) add(`responsive:${source}`, 'needs-pixels', `${source}: inspect the responsive matrix pixels with read/vision or permitted image_understand; DOM measurements cannot judge mobile composition.`);
       const judgment = matching(judgments, source);
       if (!current(judgment) || judgment!.blocking) add(`visual:${source}`, 'unresolved', `${source}: visual review is missing, stale or unresolved; run visual_review, inspect pixels and record all rubric sections with runId.`);
@@ -85,7 +88,8 @@ export function createCreativeEvidence() {
       if (!report.consistent || capturedStamp !== stamp()) return;
       const widths = (report.cells ?? []).filter((c: any) => c.ok && c.dom?.available).map((c: any) => c.width);
       matrices.delete(source);
-      matrices.set(source, { stamp: capturedStamp, kind: uiSource(report.source ?? source, report.cells?.find((c: any) => c.ok)?.dom) ? 'ui' : 'svg', widths, status: report.status, imageHash, seen, findings: (report.findings ?? []).slice(0, 6), file: report.preview });
+      const limited = report.status === 'incomplete' && report.plan?.capped !== true && !(report.cells ?? []).some((c: any) => !c.ok);
+      matrices.set(source, { stamp: capturedStamp, kind: uiSource(report.source ?? source, report.cells?.find((c: any) => c.ok)?.dom) ? 'ui' : 'svg', widths, status: report.status, imageHash, seen, findings: (report.findings ?? []).slice(0, 6), file: report.preview, limited });
       while (matrices.size > 24) matrices.delete(matrices.keys().next().value!);
     },
     geometry(source: string, failures: number) { geometry.set(source, { stamp: stamp(), failures }); while (geometry.size > 64) geometry.delete(geometry.keys().next().value!); },
