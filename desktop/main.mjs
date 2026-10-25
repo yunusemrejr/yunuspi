@@ -282,7 +282,10 @@ async function dispatch(action, input = {}) {
       if (images.reduce((sum, image) => sum + image.data.length, 0) > 14_000_000) throw Error('Attachments together must be smaller than 10 MiB.');
       if (store.session(input.id).draft.trim() === message.trim()) store.setDraft(input.id, '');
       const worker = await workerFor(input.id);
-      const result = await worker.request('prompt', { message, images, streamingBehavior: 'followUp' });
+      // During a run, Enter steers: the agent reads the message at its next step. Every message used to
+      // wait for the whole run, so "you don't have to use Blender" arrived 49 minutes and a finished render
+      // later. Alt+Enter still queues a message for after the run.
+      const result = await worker.request('prompt', { message, images, streamingBehavior: input.delivery === 'followUp' ? 'followUp' : 'steer' });
       if (store.session(input.id).title === 'New session') store.update(input.id, { title: message.slice(0, 72) });
       publish(); return result;
     }

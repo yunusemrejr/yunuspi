@@ -130,7 +130,7 @@ function renderChrome() {
   const peers = project ? workspace.runtime.filter(r => r.id !== activeId && workspace.sessions.find(s => s.id === r.id)?.projectId === project.id) : [];
   $('peer-indicator').hidden = !peers.length; $('peer-indicator').querySelector('span').textContent = `${peers.length + 1} sessions`;
   $('peer-indicator').title = 'Same-project sessions share coordination notices and project memory.';
-  $('session-caption').textContent = state?.sending ? 'Sending…' : busy ? 'Enter to queue a follow-up · Esc to stop' : session ? 'Enter to send · Shift Enter for a new line' : 'Local files · persistent project memory';
+  $('session-caption').textContent = state?.sending ? 'Sending…' : busy ? 'Enter steers the running turn · Alt Enter queues for after it · Esc to stop' : session ? 'Enter to send · Shift Enter for a new line' : 'Local files · persistent project memory';
   const stats = state?.stats;
   $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · ${costText(stats)}` : '';
   $('welcome-project').hidden = Boolean(session);
@@ -397,7 +397,7 @@ function offerCorrection(id, check) {
     actions.append(keep, use); content.append(actions); queueMicrotask(() => use.focus());
   });
 }
-async function sendPrompt(event, { checked = false } = {}) {
+async function sendPrompt(event, { checked = false, later = false } = {}) {
   event?.preventDefault();
   closeCommandMenu();
   const id = activeId, session = current(); if (!session || opening) return;
@@ -432,17 +432,17 @@ async function sendPrompt(event, { checked = false } = {}) {
   state.strayOffer = null;
   session.draft = '';
   $('prompt').value = ''; attachments.set(id, []); renderAttachments(); resizePrompt(); drawLens(null);
-  return deliver(id, message, images, reading, true);
+  return deliver(id, message, images, reading, true, later);
 }
 // Sends one message or command and keeps its bubble honest: queued, sent, or failed with the draft restorable.
-async function deliver(id, message, images, reading, restoreDraft) {
+async function deliver(id, message, images, reading, restoreDraft, later = false) {
   const state = conversationOf(id);
   state.sending = true; state.error = '';
-  const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? 'Queued' : 'Sending…', revision: 0, ...(reading ? { command: reading } : {}) };
+  const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? later ? 'Queued for after this turn' : 'Steering · read at the next step' : 'Sending…', revision: 0, ...(reading ? { command: reading } : {}) };
   state.messages.push(optimistic); viewOf(id).pinned = true;
   renderMessages();
   try {
-    await api.prompt(id, message, images.map(({ name, ...part }) => part));
+    await api.prompt(id, message, images.map(({ name, ...part }) => part), later ? 'followUp' : 'steer');
     if (message.startsWith('/') && optimistic.optimistic) { optimistic.optimistic = false; optimistic.revision++; }
   }
   catch (error) {
@@ -843,7 +843,7 @@ async function handleShortcut(action) {
     case 'settings': return showSettings();
     case 'search': setSidebar(true); $('session-search').focus(); break;
     case 'sidebar': setSidebar(innerWidth <= 850 ? !$('app').classList.contains('sidebar-open') : $('app').classList.contains('sidebar-hidden')); break;
-    case 'help': modal('Keyboard shortcuts', content => { for (const [key, value] of [['Ctrl / ⌘ N', 'New session'], ['Ctrl / ⌘ O', 'Open project'], ['Ctrl / ⌘ K', 'Find sessions'], ['Ctrl / ⌘ B', 'Toggle sidebar'], ['Ctrl / ⌘ W', 'Close session'], ['Ctrl / ⌘ ,', 'Settings'], ['Enter', 'Send or queue follow-up'], ['Shift Enter', 'New line'], ['Escape', 'Close dialog or stop turn']]) { const row = element('p'); row.append(element('kbd', '', key), document.createTextNode(`  ${value}`)); content.append(row); } }); break;
+    case 'help': modal('Keyboard shortcuts', content => { for (const [key, value] of [['Ctrl / ⌘ N', 'New session'], ['Ctrl / ⌘ O', 'Open project'], ['Ctrl / ⌘ K', 'Find sessions'], ['Ctrl / ⌘ B', 'Toggle sidebar'], ['Ctrl / ⌘ W', 'Close session'], ['Ctrl / ⌘ ,', 'Settings'], ['Enter', 'Send; while a turn runs, steer it'], ['Alt Enter', 'Queue for after the running turn'], ['Shift Enter', 'New line'], ['Escape', 'Close dialog or stop turn']]) { const row = element('p'); row.append(element('kbd', '', key), document.createTextNode(`  ${value}`)); content.append(row); } }); break;
   }
 }
 
@@ -908,7 +908,7 @@ $('prompt').onkeydown = event => {
     if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') { event.preventDefault(); acceptCommand(); return; }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeCommandMenu(); return; }
   }
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt()); }
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); tryAction(() => sendPrompt(undefined, { later: event.altKey })); }
 };
 $('prompt').addEventListener('click', () => { if (commandMenu || slashContext()) void updateCommandMenu(); });
 $('prompt').addEventListener('scroll', () => { $('prompt-marks').scrollTop = $('prompt').scrollTop; }, { passive: true });
