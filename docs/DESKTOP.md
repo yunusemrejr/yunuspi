@@ -25,7 +25,7 @@ Same-project sessions use the existing canonical-checkout coordination layer. Ro
 
 ## Working in a conversation
 
-Enter sends a request; Shift Enter inserts a line break. During a running turn, Enter queues a follow-up and the stop control remains available. The model and thinking controls use the existing core registry. Existing provider credentials are reused; Settings can add an API key through the locked harness credential store without exposing stored keys to the renderer.
+Enter sends a request; Shift Enter inserts a line break. During a running turn, Enter steers it (the agent reads the message at its next step) and Alt Enter queues a follow-up for after the turn; the stop control remains available. The model and thinking controls use the existing core registry. Existing provider credentials are reused; Settings can add an API key through the locked harness credential store without exposing stored keys to the renderer.
 
 Images can be chosen, dropped or pasted, up to six images and 10 MiB total. Tool runs show compact status rows; expand one for its bounded output or image results. Markdown code blocks and tables scroll within their own bounds. The composer stays fixed while the conversation scrolls. Reading older messages suspends automatic following; **Latest** returns to the bottom. History loads in pages with a byte budget, and larger previews point out truncation while the complete core transcript remains on disk.
 
