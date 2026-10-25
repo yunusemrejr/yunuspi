@@ -155,6 +155,10 @@ export class AgentSession {
     _baseSystemPrompt = "";
     _baseSystemPromptOptions;
     _systemPromptOverride;
+    /** The last prompt extensions built in before_agent_start, and the base it was built from.
+     * Turns the harness triggers itself (follow-ups, wakes) skip before_agent_start; carrying
+     * this keeps their system prompt byte-identical so the provider's prefix cache still hits. */
+    _carriedSystemPrompt;
     constructor(config) {
         this.agent = config.agent;
         this.sessionManager = config.sessionManager;
@@ -351,7 +355,7 @@ export class AgentSession {
                 ...previousSnapshot,
                 context: {
                     ...nextContext,
-                    systemPrompt: this._systemPromptOverride ?? this._baseSystemPrompt,
+                    systemPrompt: this._effectiveSystemPrompt(),
                     tools: this.agent.state.tools.slice(),
                 },
                 model: this.agent.state.model,
@@ -766,7 +770,23 @@ export class AgentSession {
         this.agent.state.tools = tools;
         // Rebuild base system prompt with new tool set
         this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-        this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+        this.agent.state.systemPrompt = this._effectiveSystemPrompt();
+    }
+    /**
+     * The system prompt for the next request: the live override while a prompted run lasts,
+     * otherwise the carried extension prompt. A harness-triggered turn after the run used to
+     * fall back to the bare base prompt (no extension additions), which re-billed the whole
+     * conversation as a cache miss after every follow-up. When the tool set changed since,
+     * the carried additions are re-applied to the new base when they were pure appends.
+     */
+    _effectiveSystemPrompt() {
+        if (this._systemPromptOverride !== undefined) return this._systemPromptOverride;
+        const carried = this._carriedSystemPrompt;
+        if (carried) {
+            if (carried.base === this._baseSystemPrompt) return carried.prompt;
+            if (carried.prompt.startsWith(carried.base)) return this._baseSystemPrompt + carried.prompt.slice(carried.base.length);
+        }
+        return this._baseSystemPrompt;
     }
     /** Whether compaction or branch summarization is currently running */
     get isCompacting() {
@@ -951,6 +971,7 @@ export class AgentSession {
         const expandPromptTemplates = options?.expandPromptTemplates ?? true;
         const preflightResult = options?.preflightResult;
         let messages;
+        let carriedBeforeStart;
         try {
             inputAbortController.signal.throwIfAborted();
             // Handle extension commands first (execute immediately, even during streaming)
@@ -1061,8 +1082,11 @@ export class AgentSession {
             }
             this._pendingNextTurnMessages = [];
             // Reset per-turn system prompt override before before_agent_start so setActiveTools
-            // inside before_agent_start updates this.systemPrompt immediately.
+            // inside before_agent_start updates this.systemPrompt immediately. The carried
+            // prompt is set aside too: extensions build on the base, never on last run's result.
             this._systemPromptOverride = undefined;
+            carriedBeforeStart = this._carriedSystemPrompt;
+            this._carriedSystemPrompt = undefined;
             this.agent.state.systemPrompt = this._baseSystemPrompt;
             // Emit before_agent_start extension event
             const result = await awaitBeforeAbort(this._extensionRunner.emitBeforeAgentStart(expandedText, currentImages, this._baseSystemPrompt, this._baseSystemPromptOptions, inputAbortController.signal), inputAbortController.signal);
@@ -1085,15 +1109,20 @@ export class AgentSession {
             // Apply extension-modified system prompt, or reset to base
             if (result?.systemPrompt !== undefined) {
                 this._systemPromptOverride = result.systemPrompt;
+                this._carriedSystemPrompt = { base: this._baseSystemPrompt, prompt: result.systemPrompt };
                 this.agent.state.systemPrompt = result.systemPrompt;
             }
             else {
                 // Ensure we're using the base prompt (in case previous turn had modifications)
                 this._systemPromptOverride = undefined;
+                this._carriedSystemPrompt = undefined;
                 this.agent.state.systemPrompt = this._baseSystemPrompt;
             }
+            carriedBeforeStart = undefined;
         }
         catch (error) {
+            // A prompt that never reached the model leaves the previous run's prompt in force.
+            if (carriedBeforeStart !== undefined && this._carriedSystemPrompt === undefined) this._carriedSystemPrompt = carriedBeforeStart;
             inputAbortController.abort(error);
             this._guardian?.cancelRequest(inputMeta.requestId);
             if (inputAbortController) this._pendingInputControllers.delete(inputAbortController);
@@ -2188,7 +2217,7 @@ export class AgentSession {
         };
         this._resourceLoader.extendResources(extensionPaths);
         this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-        this.agent.state.systemPrompt = this._baseSystemPrompt;
+        this.agent.state.systemPrompt = this._effectiveSystemPrompt();
     }
     buildExtensionResourcePaths(entries) {
         return entries.map((entry) => {

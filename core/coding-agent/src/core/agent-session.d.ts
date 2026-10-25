@@ -251,6 +251,8 @@ export declare class AgentSession {
     private _baseSystemPrompt;
     private _baseSystemPromptOptions;
     private _systemPromptOverride?;
+    private _carriedSystemPrompt?;
+    private _effectiveSystemPrompt;
     constructor(config: AgentSessionConfig);
     get modelRuntime(): ModelRuntime;
     private _getRequiredRequestAuth;
