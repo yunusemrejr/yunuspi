@@ -87855,6 +87855,21 @@ function formatSimilarLines(suggestions, rawLineAligned) {
 Did you mean one of these current lines?
 ${rows.join("\n")}`;
 }
+// The file's current lines where an oldText's first line matched but the rest
+// did not. Re-reading cost a round trip per miss, and after a few misses
+// sessions rewrote whole files instead (about 29k output tokens in one UI run).
+function formatCurrentRegion(rawLineAligned, firstLine, oldText) {
+  const rawLines = rawLineAligned.split("\n");
+  const start = Math.max(1, firstLine - 1);
+  const end = Math.min(rawLines.length, firstLine + Math.min(28, oldText.split("\n").length + 6));
+  const pad = (n) => String(n).padStart(4, " ");
+  const rows = [];
+  for (let line = start; line <= end; line++) rows.push(`      ${pad(line)} \u2502 ${(rawLines[line - 1] ?? "").trimEnd().slice(0, 400)}`);
+  return `
+
+The file currently reads (lines ${start}-${end}; copy oldText from these lines, without the line numbers):
+${rows.join("\n")}`;
+}
 function countFileLines(filePath) {
   try {
     const content = nodeFs.readFileSync(filePath, "utf-8");
@@ -88163,22 +88178,22 @@ function resolveOldTextEdits(edits, filePath, sessionId, correlationId) {
         errorMsg += ` The file uses a different quote style \u2014 your oldText has ${needle.includes('"') ? "double" : "single"} quotes but the file has ${needle.includes('"') ? "single" : "double"} quotes. Fix the quote style in both oldText and newText before retrying.`;
       } else {
         const lineHint = findFirstLineOfOldText(content, oldText);
-        const offsetHint = lineHint !== void 0 ? `\`offset=${Math.max(1, lineHint - 2)} limit=20\`` : void 0;
         if (lineHint !== void 0) {
           if (failCount >= 2) {
-            errorMsg += ` This is attempt #${failCount} \u2014 the first line of your oldText appears near line ${lineHint} but the surrounding content no longer matches. This is a content-drift failure, not an indentation issue (indentation autopatch already ran and did not fix it). Re-read ${offsetHint} and rebuild oldText verbatim from the current file.`;
+            errorMsg += ` This is attempt #${failCount} \u2014 the first line of your oldText appears near line ${lineHint} but the surrounding content no longer matches. This is not an indentation issue (indentation autopatch already ran and did not fix it). Rebuild oldText verbatim from the current lines below, not from memory.`;
           } else {
-            errorMsg += ` The first line of your oldText appears near line ${lineHint} but the rest doesn't match. The file has likely changed since your last read \u2014 this is a content-drift issue, not indentation. Re-read ${offsetHint} and rebuild oldText from the verbatim file content.`;
+            errorMsg += ` The first line of your oldText appears near line ${lineHint} but the rest doesn't match: the file differs from your oldText there (a formatter may have rewritten it, or the text was recalled rather than copied). This is not an indentation issue.`;
           }
+          errorMsg += formatCurrentRegion(normalizeToLF(stripBom(rawContent).text), lineHint, oldText);
         } else {
           if (failCount >= 2) {
             errorMsg += ` This is attempt #${failCount} \u2014 this text does not appear anywhere in the file, even ignoring whitespace differences. Do NOT retry from memory. Re-read the relevant section before rebuilding your edit.`;
           } else {
-            errorMsg += ` This text does not appear anywhere in the file, even ignoring indentation differences \u2014 the file has likely changed significantly. Re-read the relevant section before retrying.`;
+            errorMsg += ` This text does not appear anywhere in the file, even ignoring indentation differences. Re-read the relevant section and copy oldText from it before retrying.`;
           }
         }
       }
-      if (!errorMsg.includes("quote style")) {
+      if (!errorMsg.includes("quote style") && !errorMsg.includes("The file currently reads")) {
         const similarLines = findSimilarLines(content, distinctiveLineOfOldText(oldText), { nearLine: findFirstLineOfOldText(content, oldText) });
         if (similarLines.length > 0) {
           errorMsg += formatSimilarLines(similarLines, normalizeToLF(stripBom(rawContent).text));
