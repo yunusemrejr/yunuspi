@@ -74,6 +74,11 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 update
           sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y --no-install-recommends bubblewrap python3 python3-numpy apparmor ffmpeg xvfb xdotool x11-apps x11-utils libfluidsynth3 timgm6mb-soundfont
           sudo apparmor_parser -r config/bwrap.apparmor
+          # Since the ubuntu-latest move to Ubuntu 26 (2026-10-19) the runner confines bwrap's
+          # namespace so it cannot write a uid map or bring up loopback; unchanged 0.49.0 went
+          # from green to red on it. The sandbox works under the profile above on an Ubuntu
+          # 26.04 desktop, so lift the restriction on this disposable runner only.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Start disposable sandbox resource manager
         run: |
           sudo systemctl start "user@$(id -u).service"
