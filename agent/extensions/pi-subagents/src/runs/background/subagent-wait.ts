@@ -77,7 +77,7 @@ const MIN_POLL_INTERVAL_MS = 250;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 
 export interface SubagentWaitParams {
-	/** Optional run id/prefix to wait for. When omitted, waits across every active run in this session. */
+	/** Optional run or background task id/prefix to wait for. When omitted, waits across every active run in this session. */
 	id?: string;
 	/** Arm a durable exact-run wake subscription and return immediately. Requires id. */
 	nonBlocking?: boolean;
@@ -258,6 +258,20 @@ function hasSupervisorTool(run: AsyncRunSummary): boolean {
 
 function backgroundWorkIdentity(item: RegisteredBackgroundWorkItem): string {
 	return `${item.provider}\0${item.sessionId}\0${item.id}`;
+}
+
+/** Exact provider item id, else the items whose id starts with the given prefix. */
+function matchProviderItems(items: readonly RegisteredBackgroundWorkItem[], id: string): RegisteredBackgroundWorkItem[] {
+	const exact = items.filter((item) => item.id === id);
+	return exact.length > 0 ? exact : items.filter((item) => item.id.startsWith(id));
+}
+
+/** Keep only the provider item a `bg_wait({ id })` call named, so the wait never tracks other session work. */
+function targetProviderItems(snapshot: BackgroundWorkSnapshot, target: RegisteredBackgroundWorkItem | undefined): BackgroundWorkSnapshot {
+	return {
+		providers: snapshot.providers,
+		items: target ? snapshot.items.filter((item) => backgroundWorkIdentity(item) === backgroundWorkIdentity(target)) : [],
+	};
 }
 
 function backgroundWorkForSession(deps: SubagentWaitDeps, nowMs: number): BackgroundWorkSnapshot {
@@ -569,10 +583,13 @@ export async function waitForSubagents(
 	let active: AsyncRunSummary[];
 	let foreground: ForegroundResumeRun[];
 	let providerSnapshot: BackgroundWorkSnapshot;
+	let providerTarget: RegisteredBackgroundWorkItem | undefined;
 	try {
 		active = activeRunsForSession(params, deps);
 		foreground = activeDetachedForegroundRuns(params, deps);
-		providerSnapshot = params.id ? { providers: [], items: [] } : backgroundWorkForSession(deps, startedAt);
+		// A subagent id that matches a run never consults provider items; any other id may name one.
+		const subagentMatched = Boolean(params.id) && (active.length > 0 || foreground.length > 0);
+		providerSnapshot = subagentMatched ? { providers: [], items: [] } : backgroundWorkForSession(deps, startedAt);
 	} catch (error) {
 		return result(error instanceof Error ? error.message : String(error), true);
 	}
@@ -603,6 +620,17 @@ export async function waitForSubagents(
 			return waitForDetachedForegroundRun(selected.run, signal, deps, startedAt, now, pollIntervalMs, timeoutMs);
 		}
 		active = selected?.kind === "async" ? [selected.run] : [];
+		if (!selected) {
+			const items = matchProviderItems(providerSnapshot.items, params.id);
+			if (items.length > 1) {
+				return result(`Ambiguous background work id prefix "${params.id}" matched ${items.length} provider items: ${items.map((item) => item.id).join(", ")}. Pass a longer id.`, true);
+			}
+			providerTarget = items[0];
+			if (providerTarget && params.nonBlocking) {
+				return result(`Non-blocking wait subscriptions support subagent runs only; "${providerTarget.id}" is ${providerTarget.provider} background work. Call bg_wait({ id: "${providerTarget.id}" }) to block on it.`, true);
+			}
+		}
+		providerSnapshot = targetProviderItems(providerSnapshot, providerTarget);
 	}
 
 	let providerActive = providerSnapshot.items;
@@ -611,7 +639,7 @@ export async function waitForSubagents(
 			? `No active run matched "${params.id}". Nothing to wait for.`
 			: "No active async runs or registered provider work in this session. Nothing to wait for.");
 	}
-	const waitParams = params.id ? { ...params, id: active[0]!.id } : params;
+	const waitParams = params.id && active.length > 0 ? { ...params, id: active[0]!.id } : params;
 	const initialAsyncIds = new Set(active.map((run) => run.id));
 	const initialProviderIds = new Set(providerActive.map(backgroundWorkIdentity));
 	const initialProviderNames = new Set(providerActive.map((item) => item.provider));
@@ -653,7 +681,8 @@ export async function waitForSubagents(
 			await waitForWake(pollIntervalMs, signal, deps);
 			active = activeRunsForSession(waitParams, deps);
 			attention = attentionRunsForSession(waitParams, deps, initialAsyncIds);
-			providerSnapshot = params.id ? providerSnapshot : backgroundWorkForSession(deps, now());
+			if (!params.id) providerSnapshot = backgroundWorkForSession(deps, now());
+			else if (providerTarget) providerSnapshot = targetProviderItems(backgroundWorkForSession(deps, now()), providerTarget);
 			for (const provider of initialProviderNames) {
 				if (!providerSnapshot.providers.includes(provider)) {
 					return result(`Background-work provider '${provider}' disappeared while bg_wait was tracking its active work; completion cannot be confirmed.`, true);

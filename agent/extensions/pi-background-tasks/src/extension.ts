@@ -37,9 +37,15 @@ import {
 import { BackgroundTaskRegistry, MAX_TASK_TIMEOUT_SECONDS } from "./core/registry.js";
 import { registerContinuationSource } from "../../lib/continuation-notice.ts";
 import {
+  BG_TERMINAL_CHANNEL,
   installBackgroundTaskExtensionApi,
   type BackgroundTaskExtensionService,
 } from "./core/extension-api.js";
+import {
+  registerBackgroundWorkProvider,
+  type BackgroundWorkProvider,
+} from "../../pi-subagents/src/api/background-work.ts";
+import { resolveCurrentSessionId } from "../../pi-subagents/src/shared/session-identity.ts";
 import {
   BackgroundTasksManager,
   type BackgroundTaskForUi,
@@ -263,6 +269,24 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       getContext: () => currentCtx,
       isShuttingDown: () => registry.isShuttingDown(),
     });
+
+  // bg_wait blocks on these tasks through the background-work protocol. Services
+  // are persistent by design and never finish, so they are not waitable. Only
+  // sessions with a UI register: headless runs auto-drain provider work before
+  // exiting, and a child's long build must not hold its parent for 30 minutes.
+  let unregisterBackgroundWork: (() => void) | undefined;
+  // The session key is fixed at registration: a failed UI update clears currentCtx.
+  const backgroundWorkProvider = (sessionKey: string): BackgroundWorkProvider => ({
+    name: "bg_run",
+    wakeChannels: [BG_TERMINAL_CHANNEL],
+    listActiveWork(context) {
+      if (!context || context.sessionId !== sessionKey) return [];
+      return registry
+        .allTasks()
+        .filter((task) => task.status === "running" && task.service !== true)
+        .map((task) => ({ id: task.id, sessionId: sessionKey }));
+    },
+  });
 
   const registerContinuationNotice = (ctx: ExtensionContext): void => {
     disposeContinuationNotice?.();
@@ -512,6 +536,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     registry.setShuttingDown(false);
     currentCtx = ctx;
+    unregisterBackgroundWork?.();
+    unregisterBackgroundWork = undefined;
+    try {
+      if (ctx.hasUI) unregisterBackgroundWork = registerBackgroundWorkProvider(backgroundWorkProvider(resolveCurrentSessionId(ctx.sessionManager)));
+    } catch { /* without a session identity bg_wait cannot scope this work; bg_status still reports it */ }
     registerContinuationNotice(ctx);
     await registry.ensureRuntimeDir(ctx);
     updateUi(ctx);
@@ -523,6 +552,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async (_event, ctx) => {
     registry.setShuttingDown(true);
+    unregisterBackgroundWork?.();
+    unregisterBackgroundWork = undefined;
     currentCtx = undefined;
     disposeContinuationNotice?.();
     disposeContinuationNotice = undefined;

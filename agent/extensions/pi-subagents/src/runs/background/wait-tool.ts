@@ -18,7 +18,7 @@ Ordinary async subagent runs already notify this session natively when they comp
 
 • { } — return when the first initially active async run or registered provider item finishes, or when a subagent needs attention.
 • { all: true } — wait for every async run and provider item that was active when the call began.
-• { id: "..." } — wait for one async or remembered detached foreground subagent run (id or prefix).
+• { id: "..." } — wait for one async or remembered detached foreground subagent run, or one bg_run task (id or prefix).
 • { id: "...", nonBlocking: true } — resolve the prefix once, persist an exact-run wake subscription, and return immediately. Use this for detached work without native completion delivery; the originating interactive session wakes on completion, failure, attention, reconciliation failure, or timeout.
 • { stopOnAttention: false } — for blocking waits only, keep waiting through idle or long-thinking attention; supervisor/contact requests still stop the wait.
 • { timeoutMs: 600000 } — stop waiting after N ms; active work keeps running. Omitted values use waitTool.defaultTimeoutMs, then 30 minutes. Window expiry returns a non-error window_elapsed result with active work identities.
