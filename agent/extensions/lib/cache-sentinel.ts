@@ -25,6 +25,9 @@ export interface CacheMiss {
 	atMessage?: number;
 	/** Tool names that appeared or disappeared (tools only). */
 	toolsChanged?: string[];
+	/** First system-prompt paragraph that differs and how it began before/after (system only), so a
+	 * miss names the block that changed: harness text, never conversation content. */
+	systemChange?: { paragraph: number; before: string; after: string };
 	usd: number;
 }
 
@@ -39,6 +42,8 @@ export interface CacheSentinelSummary {
 interface Fingerprint {
 	tools: string;
 	system: string;
+	/** [digest, first 60 characters] of each system-prompt paragraph. */
+	systemParts: Array<[string, string]>;
 	toolNames: string[];
 	messages: string[];
 	roles: string[];
@@ -70,6 +75,10 @@ function digestOf(value: unknown): string {
 	return digest;
 }
 
+const textOf = (value: unknown): string => typeof value === "string" ? value
+	: Array.isArray(value) ? value.map(textOf).join("\n\n")
+	: value && typeof value === "object" ? textOf((value as any).text ?? (value as any).parts ?? (value as any).content ?? "") : "";
+
 export function fingerprintPayload(payload: any): Fingerprint | undefined {
 	if (!payload || typeof payload !== "object") return undefined;
 	const key = MESSAGE_KEYS.find((candidate) => Array.isArray(payload[candidate]));
@@ -84,13 +93,25 @@ export function fingerprintPayload(payload: any): Fingerprint | undefined {
 		.map((tool) => String(tool?.function?.name ?? tool?.name ?? ""))
 		.filter(Boolean);
 	const list: any[] = payload[key];
+	const lead = list[0];
+	const systemText = Object.keys(system).length ? textOf(Object.values(system)) : /^(?:system|developer)$/.test(String(lead?.role ?? "")) ? textOf(lead.content) : "";
 	return {
+		systemParts: systemText.split(/\n{2,}/).slice(0, 400).map((part) => [sha(part), part.trim().replace(/\s+/g, " ").slice(0, 60)]),
 		tools: sha(JSON.stringify(tools)),
 		system: sha(JSON.stringify(system)),
 		toolNames,
 		messages: list.map((message) => digestOf(message)),
 		roles: list.map((message) => String(message?.role ?? message?.type ?? "")),
 	};
+}
+
+function noteSystemChange(miss: CacheMiss, before: Fingerprint, after: Fingerprint): void {
+	const count = Math.max(before.systemParts.length, after.systemParts.length);
+	for (let paragraph = 0; paragraph < count; paragraph++) {
+		if (before.systemParts[paragraph]?.[0] === after.systemParts[paragraph]?.[0]) continue;
+		miss.systemChange = { paragraph, before: before.systemParts[paragraph]?.[1] ?? "", after: after.systemParts[paragraph]?.[1] ?? "" };
+		return;
+	}
 }
 
 export function createCacheSentinel(options: { ttlMs?: number } = {}) {
@@ -135,6 +156,7 @@ export function createCacheSentinel(options: { ttlMs?: number } = {}) {
 			if (removedOrAdded.length) miss.toolsChanged = removedOrAdded.slice(0, 8);
 		} else if (before.fp.system !== sent.fp.system) {
 			miss.cause = "system";
+			noteSystemChange(miss, before.fp, sent.fp);
 		} else {
 			let index = 0;
 			const shared = Math.min(before.fp.messages.length, sent.fp.messages.length);
@@ -142,6 +164,7 @@ export function createCacheSentinel(options: { ttlMs?: number } = {}) {
 			if (index < before.fp.messages.length) {
 				miss.cause = /^(?:system|developer)$/.test(sent.fp.roles[index] ?? "") ? "system" : "history";
 				miss.atMessage = index;
+				if (miss.cause === "system") noteSystemChange(miss, before.fp, sent.fp);
 			}
 		}
 		summary.misses += 1;

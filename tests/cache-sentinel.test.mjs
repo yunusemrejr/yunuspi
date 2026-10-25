@@ -117,3 +117,16 @@ test("the idle gap follows the route cache lifetime, and a provider that reports
  assert.equal(unreported.response(usage(33000, 0), PREMIUM, 1_000, false), undefined, "cacheRead 0 on every request is a missing field, not a miss");
  assert.equal(unreported.summary().misses, 0);
 });
+
+test("a system miss names the paragraph that changed and how it began", () => {
+ const tools = [tool("read")];
+ const head = "You are an agent.\n\nTools: read.";
+ const withDate = { role: "system", content: `${head}\n\nCurrent date: 2026-10-20.` };
+ const bare = { role: "system", content: head };
+ const a = run([[{ model: "m", tools, messages: [withDate, ...turn(1)] }, 40000, 0], [{ model: "m", tools, messages: [bare, ...turn(1), ...turn(2)] }, 42000, 0]]);
+ assert.equal(a.misses[1].cause, "system");
+ assert.deepEqual(a.misses[1].systemChange, { paragraph: 2, before: "Current date: 2026-10-20.", after: "" });
+ const anthropic = (system) => ({ model: "m", system, tools, messages: [...turn(1)] });
+ const b = run([[anthropic([{ type: "text", text: "Base.\n\nMemory: v1" }]), 40000, 0], [anthropic([{ type: "text", text: "Base.\n\nMemory: v2" }]), 41000, 0]]);
+ assert.deepEqual(b.misses[1].systemChange, { paragraph: 1, before: "Memory: v1", after: "Memory: v2" });
+});
