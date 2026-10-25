@@ -2750,22 +2750,22 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 386
+        "line": 420
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 400
+        "line": 434
       },
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 568
+        "line": 599
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 602
+        "line": 633
       },
       {
         "name": "budget",
@@ -2815,7 +2815,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 361
+        "line": 395
       },
       {
         "name": "google-account",
@@ -2840,62 +2840,62 @@
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 657
+        "line": 688
       },
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113926
+        "line": 113941
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113630
+        "line": 113645
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113687
+        "line": 113702
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113722
+        "line": 113737
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113699
+        "line": 113714
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113841
+        "line": 113856
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113655
+        "line": 113670
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113623
+        "line": 113638
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113860
+        "line": 113875
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113637
+        "line": 113652
       },
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 625
+        "line": 656
       },
       {
         "name": "memory-prime",
@@ -2915,12 +2915,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 379
+        "line": 413
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 372
+        "line": 406
       },
       {
         "name": "obs",
@@ -2955,7 +2955,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1104
+        "line": 1121
       },
       {
         "name": "run",
@@ -3035,7 +3035,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 594
+        "line": 625
       },
       {
         "name": "used",
@@ -3045,7 +3045,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 393
+        "line": 427
       },
       {
         "name": "websearch",
@@ -3098,7 +3098,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 76,
+        "line": 81,
         "kind": "factory"
       },
       {
@@ -3110,32 +3110,32 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 586,
+        "line": 587,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 823,
+        "line": 854,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 780,
+        "line": 811,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 693,
+        "line": 724,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 752,
+        "line": 783,
         "kind": "literal"
       },
       {
@@ -3233,7 +3233,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 409,
+        "line": 443,
         "kind": "literal"
       },
       {
@@ -3323,7 +3323,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 72,
+        "line": 77,
         "kind": "factory"
       },
       {
@@ -3341,13 +3341,19 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 618,
+        "line": 623,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "line": 691,
+        "kind": "literal"
+      },
+      {
+        "name": "project_tests",
+        "source": "agent/extensions/lib/project-tests.ts",
+        "line": 777,
         "kind": "literal"
       },
       {
@@ -3486,7 +3492,7 @@
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 84,
+        "line": 89,
         "kind": "factory"
       },
       {
@@ -3498,19 +3504,19 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 52,
+        "line": 57,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 68,
+        "line": 73,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 61,
+        "line": 66,
         "kind": "factory"
       },
       {
@@ -3549,25 +3555,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 823,
+        "line": 854,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 780,
+        "line": 811,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 693,
+        "line": 724,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 752,
+        "line": 783,
         "kind": "literal"
       },
       {
@@ -3603,7 +3609,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 409,
+        "line": 443,
         "kind": "literal"
       },
       {
@@ -3675,13 +3681,19 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 618,
+        "line": 623,
         "kind": "literal"
       },
       {
         "name": "project_intel",
         "source": "agent/extensions/lib/project-intelligence-impl.ts",
         "line": 691,
+        "kind": "literal"
+      },
+      {
+        "name": "project_tests",
+        "source": "agent/extensions/lib/project-tests.ts",
+        "line": 777,
         "kind": "literal"
       },
       {
@@ -3842,7 +3854,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          589
+          590
         ],
         "knownNames": [
           "bash",
@@ -3985,7 +3997,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          20
+          25
         ],
         "knownNames": [
           "audio_generate",
@@ -3999,10 +4011,10 @@
     ],
     "coverage": {
       "sourceFiles": 647,
-      "registrationSites": 59,
+      "registrationSites": 60,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 76,
-      "uniqueStableTools": 75,
+      "stableRegistrationRows": 77,
+      "uniqueStableTools": 76,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",

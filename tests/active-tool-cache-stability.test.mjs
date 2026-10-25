@@ -5,7 +5,7 @@ import { AgentSession } from '../core/coding-agent/src/core/agent-session.js';
 test('restoring an identical active tool set preserves prompt and schema order',()=>{
  const tools=['read','bash','edit'].map(name=>({name,parameters:{type:'object',properties:{}}}));
  const owner={_toolRegistry:new Map(tools.map(tool=>[tool.name,tool])),agent:{state:{}},
-  _rebuildSystemPrompt:names=>names.join('\n')};
+  _rebuildSystemPrompt:names=>names.join('\n'),_effectiveSystemPrompt:AgentSession.prototype._effectiveSystemPrompt};
  AgentSession.prototype.setActiveToolsByName.call(owner,['read','bash','edit']);
  const prompt=owner.agent.state.systemPrompt,wire=JSON.stringify(owner.agent.state.tools);
  AgentSession.prototype.setActiveToolsByName.call(owner,['edit','read','bash','read','not_registered']);
