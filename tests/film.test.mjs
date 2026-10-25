@@ -100,6 +100,8 @@ test("a film's own scripts run through bash or bg_run find the film's Python too
   assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", path.join(cwd, "film"))?.startsWith("export PATH="), true, "the session cwd may be the film itself");
   assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", cwd), undefined, "outside a film folder nothing changes");
   assert.equal(film.withFilmTools("cd film && npm run check", cwd), undefined, "other commands are left alone");
+  assert.equal(film.withFilmTools("cd film && python3 - <<'PY'\nimport soundfile\nPY", cwd)?.startsWith("export PATH="), true, "an inline python3 in a film folder gets the film's packages too");
+  assert.equal(film.withFilmTools("cd film && pythonic-tool run", cwd), undefined, "only the python executable itself");
   assert.equal(film.withFilmTools(film.withFilmTools(render, cwd), cwd), undefined, "applied once");
   fs.rmSync(venv, { recursive: true });
   assert.equal(film.withFilmTools(render, cwd), undefined, "without the film environment the command runs as written");
