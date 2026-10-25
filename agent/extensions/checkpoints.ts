@@ -992,6 +992,19 @@ function latestTodoTasks(ctx: ExtensionContext): Array<{ id: number; status?: st
 
 const LEDGER_ENTRY = "requirement-ledger-v1";
 
+/** Status of the latest goal snapshot on the branch (goal.ts persists whole
+ * snapshots as goal-state-v1), or undefined when the session has no goal. */
+function latestGoalStatus(ctx: ExtensionContext): string | undefined {
+	try {
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i--) {
+			const entry = branch[i] as any;
+			if (entry?.type === "custom" && entry.customType === "goal-state-v1") return typeof entry.data?.status === "string" ? entry.data.status : undefined;
+		}
+	} catch { /* an unreadable branch means no goal */ }
+	return undefined;
+}
+
 /** Multi-part demands become numbered requirements the model sees on every
  * call; a final answer that leaves some unreported carries a receipt naming
  * them (once per open set), so no part of a demand drops silently. */
@@ -1031,9 +1044,21 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 		clean.push({ role: "custom", customType: "requirement-ledger", content: text, display: false, timestamp: 0 } as any);
 		return { messages: clean };
 	});
-	pi.on("message_end", (event) => {
+	pi.on("message_end", (event, ctx) => {
 		const message = event.message;
 		if (message.role !== "assistant" || message.stopReason !== "stop" || !ledger.items.length) return undefined;
+		// A goal turns the same sentences into criteria and its completion gate
+		// demands evidence for each, so the ledger defers to it: no second
+		// "not reported" footer while it runs (answers cite C#, not R#), and an
+		// achieved goal settles what the ledger tracked alongside it.
+		const goalStatus = latestGoalStatus(ctx);
+		if (goalStatus === "achieved") {
+			ledger = { ...emptyRequirementLedger(), next: ledger.next };
+			warnedKey = "";
+			save();
+			return undefined;
+		}
+		const goalOwns = goalStatus === "active" || goalStatus === "paused";
 		const answer = typeof message.content === "string" ? message.content
 			: message.content.map((part: any) => (part?.type === "text" ? part.text : "")).join("\n");
 		const settled = settleRequirements(ledger, answer);
@@ -1066,7 +1091,7 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 			save();
 		}
 		const key = settled.open.map((item) => item.id).join(",");
-		if (!settled.open.length || key === warnedKey) return undefined;
+		if (goalOwns || !settled.open.length || key === warnedKey) return undefined;
 		warnedKey = key;
 		const warning = `\n\n---\n⚠️ Requirements not reported in this answer (requirement ledger):\n${settled.open.slice(0, 8).map((item) => `- ${item.id}: ${item.text.slice(0, 140)}`).join("\n")}\nThey stay open until an answer maps them to evidence or states they are not done.`;
 		const content = typeof message.content === "string" ? message.content + warning : [...message.content, { type: "text" as const, text: warning }];

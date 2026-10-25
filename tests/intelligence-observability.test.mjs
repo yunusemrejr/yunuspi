@@ -157,6 +157,29 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
   } finally { activity.dispose(); }
 });
 
+test('a clean source check after every edit is shown once per ten minutes; findings always show', async () => {
+  const sent = [], activity = createActivityIndicators(message => sent.push(message));
+  const originalNow = Date.now;
+  let now = 1000;
+  Date.now = () => now;
+  try {
+    for (let i = 0; i < 35; i++) {
+      activity.note('ml.wasm.completed', { helper: 'source-check', runtime: 'tree-sitter-wasm', findings: 0 });
+      now += 5_000; await Promise.resolve();
+    }
+    assert.equal(sent.length, 1, 'identical zero-finding checks collapse to one line');
+    assert.equal(activity.counters().events['ml.wasm.completed'], 35, 'every check stays counted');
+    activity.note('ml.wasm.completed', { helper: 'source-check', runtime: 'tree-sitter-wasm', findings: 1 });
+    await Promise.resolve();
+    assert.equal(sent.length, 2);
+    assert.match(sent.at(-1).details.detail, /1 findings/);
+    now += 600_000;
+    activity.note('ml.wasm.completed', { helper: 'source-check', runtime: 'tree-sitter-wasm', findings: 0 });
+    await Promise.resolve();
+    assert.equal(sent.length, 3, 'a clean check is news again after ten minutes');
+  } finally { Date.now = originalNow; activity.dispose(); }
+});
+
 test('repeated eligibility and lexical checks stay counted without drowning out helper results', async () => {
   const sent = [], activity = createActivityIndicators(message => sent.push(message));
   const originalNow = Date.now;

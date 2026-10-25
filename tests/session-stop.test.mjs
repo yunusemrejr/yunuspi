@@ -231,6 +231,32 @@ test('the requirement ledger reaches context and names unreported parts once on 
   assert.equal(appended.filter(e => e.customType === 'requirement-ledger-v1').at(-1).data.next, 3, 'persisted for resume');
 });
 
+test('a live goal owns its requirements: no ledger footer while it runs, and its achievement settles the ledger', async () => {
+  const hooks = {};
+  const appended = [];
+  const pi = {
+    on: (name, fn) => { (hooks[name] ??= []).push(fn); },
+    registerTool: () => {}, registerCommand: () => {}, sendMessage: () => {},
+    appendEntry: (customType, data) => appended.push({ type: 'custom', customType, data }),
+    getActiveTools: () => [],
+  };
+  checkpoints.default(pi);
+  const ctx = scopeCtx(appended, 'ledger-goal-session');
+  const fire = async (name, event) => { let out; for (const fn of hooks[name] ?? []) { const r = await fn(event, ctx); if (r !== undefined) out = r; } return out; };
+  await fire('session_start', {});
+  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'active', criteria: [] } });
+  await fire('input', { source: 'interactive', text: 'Create a 20 second ad. Use the original logo. Narration should be via elevenlabs.' });
+  const final = (text) => fire('message_end', { message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] } });
+  assert.equal(await final('C1 rendered at 20.0 s; C2 logo traced; C3 ElevenLabs narration.'), undefined, 'the goal gate, not a second footer, judges a goal answer');
+  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'achieved', criteria: [] } });
+  assert.equal(await final('Goal achieved.'), undefined);
+  const after = await fire('context', { messages: [{ role: 'user', content: 'x' }] });
+  assert.equal(after?.messages?.some(m => m.customType === 'requirement-ledger') ?? false, false, 'an achieved goal settles the ledger it shadowed');
+  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'cleared', criteria: [] } });
+  await fire('input', { source: 'interactive', text: '1. Add the chart\n2. Fix the footer credit' });
+  assert.match((await final('Chart added.')).message.content.at(-1).text, /R\d+: Add the chart/, 'without a live goal the footer returns');
+});
+
 test('deploys and the last todo completion wait for unresolved verification receipts, with a recorded waiver', async () => {
   const { registerContinuationSource } = await import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts')));
   const hooks = {};

@@ -460,7 +460,10 @@ export function createActivityIndicators(send: ActivitySender, pulse?: ActivityP
         // Keep their full counters/ring, but repeat a stable status at most
         // once a minute. Actual inference and context-delivery receipts remain
         // individually visible.
-        const cooldown = ["ml.fuzzy.used", "ml.jev.skipped", "ml.needle.skipped"].includes(kind) ? 60_000 : 0;
+        // A clean source check follows every edit (35 identical lines in one
+        // UI session); it is news once per ten minutes, a finding every time.
+        const cleanSourceCheck = kind === "ml.wasm.completed" && Number(data.findings ?? 0) === 0;
+        const cooldown = cleanSourceCheck ? 600_000 : ["ml.fuzzy.used", "ml.jev.skipped", "ml.needle.skipped"].includes(kind) ? 60_000 : 0;
         if (cooldown) {
           const key = `intelligence\0${kind}\0${visibleIntelligence.status}\0${kind === "ml.fuzzy.used" ? "" : visibleIntelligence.detail}`;
           const last = lastLine.get(key);
