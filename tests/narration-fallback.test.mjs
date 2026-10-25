@@ -81,6 +81,19 @@ test('explicit ElevenLabs keeps the provider error and never falls back to Piper
   assert.equal(m.calls.length, 1);
 });
 
+test('a refusal carries ElevenLabs\' own reason, bounded and with keys masked', async t => {
+  const dir = await workspace(t), { wav } = await fixtures(dir);
+  setEnv(t, { PI_CODING_AGENT_DIR: await installPiper(dir, wav), ELEVENLABS_API_KEY: KEY });
+  const m = mockFetch(t);
+  m.reply(() => Response.json({ detail: { status: 'missing_permissions', message: 'The API key you used (sk_abcdef1234567890) is missing the permission voices_read to execute this operation.' } }, { status: 401 }));
+  await assert.rejects(video.narrationTts({ action: 'speak', text: 'Hello there.', backend: 'elevenlabs' }, dir), err => {
+    assert.match(err.message, /HTTP 401 \(missing_permissions: The API key you used \(\[key\]\) is missing the permission voices_read/);
+    assert.doesNotMatch(err.message, /sk_abcdef/);
+    assert.equal(err.providerStatus, 401);
+    return true;
+  });
+});
+
 test('automatic ElevenLabs 401, 402, 403 and 429 fall back to Piper after exactly one attempt', async t => {
   const dir = await workspace(t), { wav } = await fixtures(dir);
   setEnv(t, { PI_CODING_AGENT_DIR: await installPiper(dir, wav), ELEVENLABS_API_KEY: KEY });

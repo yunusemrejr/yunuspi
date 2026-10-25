@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { selectedMediaParams } from "./lib/media-model-routing.ts";
 import { narrationTts, PIPER_VOICES, SFX_TYPES, VOICE_STYLES, videoQa } from "./lib/video-studio.ts";
-import { filmCheck, filmInit, filmInstall, filmRender, filmStatus } from "./lib/film.ts";
+import { filmCheck, filmInit, filmInstall, filmRender, filmStatus, withFilmTools } from "./lib/film.ts";
 import { choices } from "./lib/tool-schema.ts";
 import { audioGenerate } from './lib/elevenlabs.ts';
 import { videoBrowser } from './lib/video-browser.ts';
@@ -16,6 +16,11 @@ const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 
 export default function videoStudio(pi: any) {
   const reviews = installVideoReviewEvidence(pi);
+  pi.on?.("tool_call", (event: any, ctx: any) => {
+    if (event.toolName !== "bash" && event.toolName !== "bg_run") return;
+    const command = withFilmTools(event.input?.command, ctx?.cwd || process.cwd());
+    if (command) event.input.command = command;
+  });
   function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void) => Promise<any>, deadlineMs: number) {
     pi.registerTool({
       name, label: name.replaceAll("_", " "), description, parameters,

@@ -24,6 +24,23 @@ export function narrationBackend(params: any, env: Env = process.env): 'piper' |
   return backend === 'auto' ? params.voice ? 'piper' : params.voiceId || params.model || keyOf(env) ? 'elevenlabs' : 'piper' : backend;
 }
 
+/** ElevenLabs' own explanation of a refusal (`{"detail":{"status":"missing_permissions","message":"…voices_read…"}}`).
+ * A bare "HTTP 401" sent a session to curl to learn that its key could speak but not list voices.
+ * Bounded to 4 KB read and 240 characters kept; anything shaped like a key is masked. */
+async function providerReason(response: Response): Promise<string | undefined> {
+  try {
+    const reader = response.body?.getReader();
+    if (!reader) return undefined;
+    let text = '';
+    while (text.length < 4096) { const part = await reader.read(); if (part.done) break; text += Buffer.from(part.value).toString('utf8'); }
+    await reader.cancel().catch(() => {});
+    let detail: any = text;
+    try { detail = JSON.parse(text)?.detail ?? JSON.parse(text); } catch { /* plain text body */ }
+    const reason = typeof detail === 'string' ? detail : [detail?.status, detail?.message].filter((part) => typeof part === 'string' && part).join(': ');
+    return reason.replace(/\b(?:sk|xi)_[A-Za-z0-9]{8,}\b/g, '[key]').replace(/\s+/g, ' ').trim().slice(0, 240) || undefined;
+  } catch { return undefined; }
+}
+
 async function request(endpoint: string, body: any, signal: AbortSignal | undefined, env: Env, maxBytes = 64 * 1024 * 1024) {
   const key = keyOf(env);
   if (!key) throw Object.assign(new Error('ElevenLabs is not configured; set ELEVENLABS_API_KEY or explicitly use backend:piper for speech'), { submissionNotSent: true });
@@ -38,7 +55,10 @@ async function request(endpoint: string, body: any, signal: AbortSignal | undefi
       const code = error?.cause?.code ?? error?.cause?.errors?.[0]?.code;
       throw ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code) ? Object.assign(error, { submissionNotSent: true }) : error;
     });
-  if (!response.ok) { await response.body?.cancel(); throw Object.assign(new Error(`ElevenLabs returned HTTP ${response.status}; no automatic retry or fallback was attempted`), { providerStatus: response.status }); }
+  if (!response.ok) {
+    const reason = await providerReason(response);
+    throw Object.assign(new Error(`ElevenLabs returned HTTP ${response.status}${reason ? ` (${reason})` : ''}; no automatic retry or fallback was attempted`), { providerStatus: response.status, ...(reason ? { providerReason: reason } : {}) });
+  }
   if (!response.body) throw Error('ElevenLabs returned no body');
   const reader = response.body.getReader(), chunks: Buffer[] = [];
   let bytes = 0;

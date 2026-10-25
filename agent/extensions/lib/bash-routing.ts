@@ -377,3 +377,12 @@ export function selfMatchingSignal(command: string): { reason: string; replaceme
   }
   return null;
 }
+
+/** A background task's exit arrives later as a notification: `render.sh … | tail -60` reported exit 0
+ * for a crashed render because the pipeline returned tail's status. Prefix pipefail to a command that
+ * ends in a tail filter. tail reads all its input, so pipefail cannot add a broken-pipe failure (a
+ * trailing head can, and is left alone). Undefined when nothing changes. */
+export function observableBackgroundExit(command: unknown): string | undefined {
+  if (typeof command !== "string" || /\bset -o pipefail\b/.test(command)) return undefined;
+  return /\|\s*tail(?:\s+-[nc]\s*\+?\d+|\s+-\d+)?\s*$/.test(command) ? `set -o pipefail; ${command}` : undefined;
+}

@@ -133,6 +133,20 @@ const filmEnv = (): Record<string, string> => {
 	return { PATH: [...(existsSync(venv) ? [venv] : []), process.env.PATH ?? ""].join(path.delimiter), ...(browser ? { REMOTION_BROWSER: browser } : {}) };
 };
 
+/** A shell command that runs a cinetic film's own scripts (render.sh, check-sync.py, ...) in a film folder,
+ * rewritten to find the film's Python tools first, as video_render does. render.sh calls `python3` from PATH:
+ * run through bash or bg_run it found the system interpreter, whose missing soundfile crashed check-sync
+ * in the middle of an 11-minute master that still reported exit 0. Undefined when nothing needs to change. */
+export function withFilmTools(command: unknown, cwd: string): string | undefined {
+	if (typeof command !== "string" || !/(?:^|[\s/;&|])scripts\/(?:render\.sh|[\w-]+\.py)\b/.test(command)) return undefined;
+	const venv = path.dirname(filmPython());
+	if (!existsSync(venv) || command.includes(venv)) return undefined;
+	const target = /^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/.exec(command)?.[1]?.replace(/^["']|["']$/g, "");
+	const dir = target ? path.resolve(cwd, target) : cwd;
+	if (!existsSync(path.join(dir, "scripts", "render.sh")) || !existsSync(path.join(dir, "remotion.config.ts"))) return undefined;
+	return `export PATH=${JSON.stringify(venv)}:"$PATH"; ${command}`;
+}
+
 const tail = (text: string, lines = 30) => text.trim().split("\n").slice(-lines).join("\n");
 
 async function freshOut(dir: string, kind: string): Promise<string> {

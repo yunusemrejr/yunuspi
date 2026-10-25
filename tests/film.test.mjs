@@ -82,3 +82,25 @@ test("flags only apply to preview and final renders", async (t) => {
   fs.mkdirSync(path.join(cwd, "made/node_modules/remotion"), { recursive: true });
   await assert.rejects(film.filmRender({ dir: "made", mode: "stills", flags: ["--keep"] }, cwd), /flags apply to preview and final renders/);
 });
+
+test("a film's own scripts run through bash or bg_run find the film's Python tools first", (t) => {
+  const saved = process.env.PI_CODING_AGENT_DIR;
+  const agent = fs.mkdtempSync(path.join(os.tmpdir(), "film-agent-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "film-cwd-"));
+  t.after(() => { if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = saved; fs.rmSync(agent, { recursive: true, force: true }); fs.rmSync(cwd, { recursive: true, force: true }); });
+  process.env.PI_CODING_AGENT_DIR = agent;
+  const venv = path.join(agent, "local-tools/film/venv/bin");
+  fs.mkdirSync(venv, { recursive: true });
+  fs.mkdirSync(path.join(cwd, "film/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, "film/scripts/render.sh"), "");
+  fs.writeFileSync(path.join(cwd, "film/remotion.config.ts"), "");
+  const render = `cd ${path.join(cwd, "film")} && bash scripts/render.sh Film out/master.mp4 --audio public/audio/soundtrack.wav 2>&1 | tail -60`;
+  assert.equal(film.withFilmTools(render, cwd), `export PATH=${JSON.stringify(venv)}:"$PATH"; ${render}`);
+  assert.equal(film.withFilmTools("cd film && python3 scripts/check-sync.py public/audio/soundtrack.wav", cwd)?.startsWith("export PATH="), true, "a relative cd is resolved against the session cwd");
+  assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", path.join(cwd, "film"))?.startsWith("export PATH="), true, "the session cwd may be the film itself");
+  assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", cwd), undefined, "outside a film folder nothing changes");
+  assert.equal(film.withFilmTools("cd film && npm run check", cwd), undefined, "other commands are left alone");
+  assert.equal(film.withFilmTools(film.withFilmTools(render, cwd), cwd), undefined, "applied once");
+  fs.rmSync(venv, { recursive: true });
+  assert.equal(film.withFilmTools(render, cwd), undefined, "without the film environment the command runs as written");
+});

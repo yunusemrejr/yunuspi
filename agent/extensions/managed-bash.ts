@@ -28,6 +28,7 @@
 import { spawn } from "node:child_process";
 import { guardedCommand } from "./lib/self-mutation-guard.ts";
 import { ownProcessGroup } from "./lib/process-owner.ts";
+import { observableBackgroundExit } from "./lib/bash-routing.ts";
 import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "./lib/disk-guard.ts";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
@@ -590,6 +591,10 @@ export default function (pi: ExtensionAPI) {
 	};
 	register(process.cwd());
 	pi.on("tool_call", (event: any) => {
+		if (event.toolName === "bg_run") {
+			const command = observableBackgroundExit(event.input?.command);
+			if (command) event.input.command = command;
+		}
 		if (event.toolName !== "bash") return;
 		event.input.timeout = positiveSeconds(event.input.timeout) ?? (DOWNLOAD_COMMAND_RE.test(String(event.input.command ?? "")) ? DEFAULT_DOWNLOAD_TIMEOUT_SECONDS : DEFAULT_BASH_TIMEOUT_SECONDS);
 	});
