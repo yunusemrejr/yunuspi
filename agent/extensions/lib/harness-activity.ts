@@ -10,10 +10,11 @@ type Context = { hasUI?: boolean; signal?: AbortSignal; cwd?: string; sessionMan
 export type HarnessActivityService = (request: ActivityRequest, ctx?: Context) => FinishActivity | undefined;
 const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', tool: 'Tool', jev: 'JEV', needle: 'Needle', kompress: 'Kompress', council: 'Council', fanout: 'Fan-out', agents: 'Agents', interpretation: 'Interpretation', span: 'Span' };
 const helpers = new Set(['JEV', 'Needle', 'Kompress', 'Span']);
-let sequence = 0;
+// Ids are unique across module copies, which all report into one activity service.
+const counter: { sequence: number } = ((globalThis as any)[Symbol.for("yunus-pi.harness-activity-sequence.v1")] ??= { sequence: 0 });
 /** No payloads, global status handles or model messages escape this boundary. */
 export function beginHarnessActivity(label: ActivityLabel): FinishActivity {
-  try { return sessionObservability()[HARNESS_ACTIVITY]?.({ action: 'start', id: `helper-${++sequence}`, label }) ?? (() => {}); }
+  try { return sessionObservability()[HARNESS_ACTIVITY]?.({ action: 'start', id: `helper-${++counter.sequence}`, label }) ?? (() => {}); }
   catch { return () => {}; }
 }
 const toolLabels: Record<string, string> = {

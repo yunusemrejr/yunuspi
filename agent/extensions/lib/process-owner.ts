@@ -46,11 +46,13 @@ export function processIdentity(pid: number): string {
 	return statFields(pid)?.[19] ?? "";
 }
 
-let record: string | undefined;
+// One owner record and reaper per process, not per module copy (the loader
+// evaluates this module once per importing extension; each copy spawned its own reaper).
+const owner: { record?: string; requestedAt: Map<string, number> } = ((globalThis as any)[Symbol.for("yunus-pi.process-owner.v1")] ??= { requestedAt: new Map() });
 
 /** Idempotent: writes this process's record and starts its reaper once. */
 export function ensureOwnerRecord(): string | undefined {
-	if (record) return record;
+	if (owner.record) return owner.record;
 	if (process.platform === "win32") return undefined;
 	try {
 		const dir = ownerDir();
@@ -60,12 +62,12 @@ export function ensureOwnerRecord(): string | undefined {
 		const reaper = spawn("/bin/bash", [OWNER_SCRIPT, "reap", path, String(process.pid), identity], { cwd: "/", detached: true, stdio: "ignore" });
 		reaper.once("error", () => { /* backstop only; graceful shutdown still applies */ });
 		reaper.unref();
-		record = path;
+		owner.record = path;
 	} catch { /* backstop only */ }
-	return record;
+	return owner.record;
 }
 
-export function resetOwnerRecordForTests(): void { record = undefined; requestedAt.clear(); }
+export function resetOwnerRecordForTests(): void { owner.record = undefined; requestedAt.clear(); }
 
 /** Record a detached child's process group so it dies with this process.
  * Only a direct child that leads its own group is recorded (Linux), so an
@@ -79,7 +81,7 @@ export function ownProcessGroup(pgid: number | undefined): void {
 	try { appendFileSync(path, `${pgid} ${fields[19]}\n`); } catch { /* backstop only */ }
 }
 
-const requestedAt = new Map<string, number>();
+const requestedAt = owner.requestedAt;
 
 /** Hold a lease on a local service and start its unit when it is down.
  * Throttled per unit; a no-op without a user systemd unit (manual installs). */

@@ -335,7 +335,7 @@ function payloadToolNames(payload: any): string[] | undefined {
 }
 const OBSERVER_TOOL_NAMES = new Set(OBSERVER_TOOLS.map(tool => tool.name));
 /** Routes whose provider rejected tool definitions: reviewed packet-only. */
-const toollessRoutes = new Set<string>();
+const toollessRoutes: Set<string> = ((globalThis as any)[Symbol.for("yunus-pi.observer-toolless-routes.v1")] ??= new Set());
 const TOOL_REJECTION = /\b(?:tools?|function(?:s|_call| calling)?|tool_choice)\b[^.]*\b(?:not supported|unsupported|invalid|not allowed|unknown|unrecognized)\b|\b(?:does not|doesn't) support (?:tools|function)/i;
 const addUsage = (total: any, next: any) => {
   if (!next || typeof next !== 'object') return total;

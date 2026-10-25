@@ -631,3 +631,19 @@ test('a declared oversized content-length is rejected before any body is read', 
   assert.equal(result.ok, false);
   assert.equal(read, false);
 });
+
+test('every extension\'s copy of the client shares one cache, in-flight set and breaker', async () => {
+  // The loader gives each extension its own module copy (moduleCache: false).
+  const other = await import(`${pathToFileURL(path.join(agent, "extensions/lib/jev-client.ts")).href}?copy=second-extension`);
+  assert.notEqual(other, jev, 'two module instances');
+  let calls = 0;
+  harness(async () => { calls++; return decisionsOk(); });
+  const questions = { ping: { type: 'noul', instructions: 'Affirmative?' } };
+  assert.equal((await jev.askJev('unit', 'shared evidence', questions)).ok, true);
+  const again = await other.askJev('unit', 'shared evidence', questions);
+  assert.equal(again.usage.cached, true, 'the second copy reuses the first copy\'s paid answer');
+  assert.equal(calls, 1);
+  other.resetJevClient();
+  assert.equal((await jev.askJev('unit', 'shared evidence', questions)).usage.cached, false, 'a reset through any copy resets the one client');
+  assert.equal(other.jevHealth().state, jev.jevHealth().state);
+});

@@ -93,7 +93,8 @@ export function parsePorcelainZ(output: string): string[] {
 	return paths;
 }
 
-const recent = new Map<string, { at: number; work: Promise<CheckpointOutcome> }>();
+// Shared by every module copy: checkpoints.ts and pi-memory both snapshot at shutdown, which this collapses.
+const recent: Map<string, { at: number; work: Promise<CheckpointOutcome> }> = ((globalThis as any)[Symbol.for("yunus-pi.worktree-checkpoint.v1")] ??= new Map());
 
 const boundReason = (value: unknown, fallback: string): string => {
 	const flat = (value instanceof Error ? value.message : String(value ?? "")).replace(/\s+/g, " ").trim();

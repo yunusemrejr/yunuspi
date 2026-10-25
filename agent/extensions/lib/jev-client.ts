@@ -201,8 +201,7 @@ const deps: Deps = {
   requestTimeoutMs: JEV_REQUEST_TIMEOUT_MS,
 };
 
-/** Test seam: inject fetch/clock/timers and shrink the breaker window. */
-export function configureJevClient(partial: Partial<Deps>): void {
+function configureJevClientLocal(partial: Partial<Deps>): void {
   Object.assign(deps, partial);
 }
 
@@ -231,8 +230,7 @@ type InflightEntry = {
 };
 const inflight = new Map<string, InflightEntry>();
 
-/** Test seam: reset every module singleton. */
-export function resetJevClient(): void {
+function resetJevClientLocal(): void {
   generation++;
   nextFamily = "jev";
   for (const route of Object.values(routeHealth)) Object.assign(route, { retryAt: 0, active: 0, failures: 0 });
@@ -250,7 +248,7 @@ export function resetJevClient(): void {
   inflight.clear();
 }
 
-export function jevHealth(): {
+function jevHealthLocal(): {
   state: "closed" | "open";
   slug?: string;
   /** Dated model reported by the route for the requested alias. */
@@ -336,7 +334,7 @@ async function discoverSlugs(): Promise<string[]> {
 }
 
 /** Full cascade order: preferred slugs, then discovered variations. */
-export async function jevCascadeSlugs(): Promise<string[]> {
+async function jevCascadeSlugsLocal(): Promise<string[]> {
   const found = await discoverSlugs();
   return [...new Set([JEV_LATEST_ALIAS, ...(resolvedSlug ? [resolvedSlug] : []), ...JEV_PREFERRED_SLUGS, ...found])];
 }
@@ -508,12 +506,12 @@ function knownSlugs(): string[] {
 
 /** Catalog discovery is shared, but a cancelled caller need not wait for it. */
 async function discoverForCaller(signal?: AbortSignal): Promise<string[]> {
-  if (!signal) return jevCascadeSlugs();
+  if (!signal) return jevCascadeSlugsLocal();
   if (signal.aborted) return [];
   let cancel!: () => void;
   const aborted = new Promise<string[]>(resolve => { cancel = () => resolve([]); });
   signal.addEventListener('abort', cancel, { once: true });
-  try { return await Promise.race([jevCascadeSlugs(), aborted]); }
+  try { return await Promise.race([jevCascadeSlugsLocal(), aborted]); }
   finally { signal.removeEventListener('abort', cancel); }
 }
 
@@ -553,7 +551,7 @@ function trimMiddle(text: string, keep: number): string {
   return `${text.slice(0, head)}\n[... ${text.length - keep} characters omitted to fit the judge's input budget ...]\n${text.slice(-tail)}`;
 }
 
-export async function askJev(
+async function askJevLocal(
   site: string,
   state: unknown,
   questions: Record<string, unknown>,
@@ -836,3 +834,25 @@ export function tooShort(text: unknown, minChars: number): boolean {
   return typeof text !== "string" || text.trim().length < minChars;
 }
 
+
+// One Jev client per process, not one per module copy. The extension loader
+// evaluates this module once for each of the ~12 extensions that ask Jev
+// (moduleCache: false), so each copy kept its own breaker, 30-minute answer
+// cache, in-flight dedupe and second-opinion budget: an open breaker did not
+// stop the other copies, identical questions were paid for twice and the
+// second-opinion burst was multiplied by the number of copies. The first copy
+// loaded owns the state; every copy's exports delegate to it.
+const shared: {
+  configure: typeof configureJevClientLocal; reset: typeof resetJevClientLocal; health: typeof jevHealthLocal;
+  cascade: typeof jevCascadeSlugsLocal; ask: typeof askJevLocal;
+} = ((globalThis as any)[Symbol.for("yunus-pi.jev-client.v1")] ??= {
+  configure: configureJevClientLocal, reset: resetJevClientLocal, health: jevHealthLocal, cascade: jevCascadeSlugsLocal, ask: askJevLocal,
+});
+
+/** Test seam: inject fetch/clock/timers and shrink the breaker window. */
+export function configureJevClient(partial: Partial<Deps>): void { shared.configure(partial); }
+/** Test seam: reset every module singleton. */
+export function resetJevClient(): void { shared.reset(); }
+export function jevHealth(): ReturnType<typeof jevHealthLocal> { return shared.health(); }
+export function jevCascadeSlugs(): Promise<string[]> { return shared.cascade(); }
+export function askJev(...args: Parameters<typeof askJevLocal>): Promise<JevAskResult> { return shared.ask(...args); }
