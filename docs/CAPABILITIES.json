@@ -2750,12 +2750,12 @@
       {
         "name": "3d",
         "source": "agent/extensions/goal.ts",
-        "line": 420
+        "line": 428
       },
       {
         "name": "anatomy",
         "source": "agent/extensions/goal.ts",
-        "line": 434
+        "line": 442
       },
       {
         "name": "bg",
@@ -2815,7 +2815,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 395
+        "line": 403
       },
       {
         "name": "google-account",
@@ -2915,12 +2915,12 @@
       {
         "name": "nobug",
         "source": "agent/extensions/goal.ts",
-        "line": 413
+        "line": 421
       },
       {
         "name": "noslop",
         "source": "agent/extensions/goal.ts",
-        "line": 406
+        "line": 414
       },
       {
         "name": "obs",
@@ -3045,7 +3045,7 @@
       {
         "name": "video",
         "source": "agent/extensions/goal.ts",
-        "line": 427
+        "line": 435
       },
       {
         "name": "websearch",
@@ -3177,7 +3177,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3233,7 +3233,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 443,
+        "line": 451,
         "kind": "literal"
       },
       {
@@ -3353,7 +3353,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 777,
+        "line": 789,
         "kind": "literal"
       },
       {
@@ -3407,7 +3407,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -3585,7 +3585,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3609,7 +3609,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 443,
+        "line": 451,
         "kind": "literal"
       },
       {
@@ -3693,7 +3693,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 777,
+        "line": 789,
         "kind": "literal"
       },
       {
@@ -3747,7 +3747,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 375,
         "kind": "literal"
       },
       {
