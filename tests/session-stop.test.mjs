@@ -231,7 +231,7 @@ test('the requirement ledger reaches context and names unreported parts once on 
   assert.equal(appended.filter(e => e.customType === 'requirement-ledger-v1').at(-1).data.next, 3, 'persisted for resume');
 });
 
-test('a live goal owns its requirements: no ledger footer while it runs, and its achievement settles the ledger', async () => {
+test('a goal owns the requirements its kickoff carried: no ledger footer while it runs, settled by its achievement', async () => {
   const hooks = {};
   const appended = [];
   const pi = {
@@ -243,18 +243,21 @@ test('a live goal owns its requirements: no ledger footer while it runs, and its
   checkpoints.default(pi);
   const ctx = scopeCtx(appended, 'ledger-goal-session');
   const fire = async (name, event) => { let out; for (const fn of hooks[name] ?? []) { const r = await fn(event, ctx); if (r !== undefined) out = r; } return out; };
+  const footer = (result) => result?.message?.content?.at(-1)?.text ?? '';
   await fire('session_start', {});
-  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'active', criteria: [] } });
-  await fire('input', { source: 'interactive', text: 'Create a 20 second ad. Use the original logo. Narration should be via elevenlabs.' });
+  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { id: 'g1', status: 'active', criteria: [] } });
+  const words = 'Create a 20 second ad. Use the original logo. Narration should be via elevenlabs.';
+  await fire('input', { source: 'interactive', text: `[goal-tracked g1] Goal: ${words}\n\nAcceptance criteria: …`, originalText: words });
   const final = (text) => fire('message_end', { message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] } });
   assert.equal(await final('C1 rendered at 20.0 s; C2 logo traced; C3 ElevenLabs narration.'), undefined, 'the goal gate, not a second footer, judges a goal answer');
-  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'achieved', criteria: [] } });
-  assert.equal(await final('Goal achieved.'), undefined);
-  const after = await fire('context', { messages: [{ role: 'user', content: 'x' }] });
-  assert.equal(after?.messages?.some(m => m.customType === 'requirement-ledger') ?? false, false, 'an achieved goal settles the ledger it shadowed');
-  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { status: 'cleared', criteria: [] } });
-  await fire('input', { source: 'interactive', text: '1. Add the chart\n2. Fix the footer credit' });
-  assert.match((await final('Chart added.')).message.content.at(-1).text, /R\d+: Add the chart/, 'without a live goal the footer returns');
+  await fire('input', { source: 'interactive', text: '1. Add a captions track\n2. Export a square cut too' });
+  assert.match(footer(await final('Working on the film.')), /Add a captions track/, 'a requirement added mid-goal is not a goal criterion and keeps its footer');
+  appended.push({ type: 'custom', customType: 'goal-state-v1', data: { id: 'g1', status: 'achieved', criteria: [] } });
+  const settled = footer(await final('Goal achieved.'));
+  assert.doesNotMatch(settled, /original logo|elevenlabs/i, 'the achieved goal settled what its kickoff carried');
+  await final('R4 captions added. R5 square cut exported.');
+  await fire('input', { source: 'interactive', text: '1. Add the chart\n2. Fix the footer credit\n3. Move the disclosure' });
+  assert.match(footer(await final('Chart added.')), /R\d+: Fix the footer credit/, 'after the goal, a new multi-part request is tracked again');
 });
 
 test('deploys and the last todo completion wait for unresolved verification receipts, with a recorded waiver', async () => {

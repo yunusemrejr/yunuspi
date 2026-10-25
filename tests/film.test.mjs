@@ -95,7 +95,8 @@ test("a film's own scripts run through bash or bg_run find the film's Python too
   fs.writeFileSync(path.join(cwd, "film/scripts/render.sh"), "");
   fs.writeFileSync(path.join(cwd, "film/remotion.config.ts"), "");
   const render = `cd ${path.join(cwd, "film")} && bash scripts/render.sh Film out/master.mp4 --audio public/audio/soundtrack.wav 2>&1 | tail -60`;
-  assert.equal(film.withFilmTools(render, cwd), `export PATH=${JSON.stringify(venv)}:"$PATH"; ${render}`);
+  assert.equal(film.withFilmTools(render, cwd), `export PATH='${venv}':"$PATH" && ${render}`);
+  assert.equal(film.withFilmTools(`PATH=/opt/py/bin:$PATH ${render}`, cwd), undefined, "a command that sets PATH itself is left alone");
   assert.equal(film.withFilmTools("cd film && python3 scripts/check-sync.py public/audio/soundtrack.wav", cwd)?.startsWith("export PATH="), true, "a relative cd is resolved against the session cwd");
   assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", path.join(cwd, "film"))?.startsWith("export PATH="), true, "the session cwd may be the film itself");
   assert.equal(film.withFilmTools("python3 scripts/check-sync.py x.wav", cwd), undefined, "outside a film folder nothing changes");

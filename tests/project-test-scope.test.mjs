@@ -9,7 +9,7 @@ const root=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/project-tests.ts')));
 const schema='data:text/javascript,'+encodeURIComponent('export const Type=new Proxy({}, {get:()=>()=>({})});');
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){return n==='typebox'?{url:${JSON.stringify(schema)},shortCircuit:true}:next(n,c);}`),import.meta.url);
-const {projectCheckCommand,createProjectTestLifecycle}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
+const {projectCheckCommand,createProjectTestLifecycle,andChainChecks}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
 
 test('non-check shell calls scan on result only; real checks still bind the current tree before execution',async t=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-scan-count-')),tools={};let scans=0;
@@ -256,6 +256,27 @@ test('an AND chain that exits 0 earns a receipt for every check in it; masked or
  assert.match(piped.input.command,/^set -o pipefail; /,'a trailing filter runs under pipefail so the last exit stays observable');
  assert.equal(api.snapshot().need,null,'every planned check in a passing chain is current');
  assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['passed','passed','passed']);
+});
+
+test('a chain that hides segments or changes the shell for later ones earns nothing', () => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-chain-shape-'));
+ try {
+  const any=()=>true;
+  assert.deepEqual(andChainChecks('make && ./build/app --selftest',cwd,any)?.checks.map(c=>c.label),['make','./build/app --selftest']);
+  for (const command of [
+   'make && ./x # && ./y',                     // bash never runs ./y
+   'export SKIP_SLOW=1 && npm test',           // the run is not plain `npm test`
+   'SKIP_SLOW=1 && npm test',
+   'set +o pipefail && make && ./app | tail -5', // switches the injected pipefail off again
+   '. ./env.sh && npm test', 'source env.sh && npm test',
+   'make && cd sub && ./app',                  // ./app ran in sub, not the project root
+   'make && ./x || true', 'make; npm test', 'make & npm test',
+  ]) assert.equal(andChainChecks(command,cwd,any),undefined,command);
+  assert.ok(andChainChecks("make && node --test 'a#b.test.js'",cwd,any),'a quoted # is not a comment');
+  assert.deepEqual(andChainChecks(`export PATH='/agent/film/venv/bin':"$PATH" && cd ${cwd} && python3 scripts/check-sync.py a.wav && npm test`,cwd,any)?.checks.map(c=>c.key),
+   andChainChecks(`cd ${cwd} && python3 scripts/check-sync.py a.wav && npm test`,cwd,any)?.checks.map(c=>c.key),'the film PATH prefix leaves receipt keys unchanged');
+  assert.equal(projectCheckCommand(`export PATH='/agent/film/venv/bin':"$PATH" && npm test`,cwd)?.key,projectCheckCommand('npm test',cwd)?.key,'a single prefixed check keeps its key');
+ } finally { fs.rmSync(cwd,{recursive:true,force:true}); }
 });
 
 test('follow-up turns that edit and settle recursively cannot replenish their two-turn budget', async t => {

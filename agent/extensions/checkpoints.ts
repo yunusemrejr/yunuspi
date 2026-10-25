@@ -990,14 +990,15 @@ function latestTodoTasks(ctx: ExtensionContext): Array<{ id: number; status?: st
 
 const LEDGER_ENTRY = "requirement-ledger-v1";
 
-/** Status of the latest goal snapshot on the branch (goal.ts persists whole
- * snapshots as goal-state-v1), or undefined when the session has no goal. */
-function latestGoalStatus(ctx: ExtensionContext): string | undefined {
+/** The latest goal snapshot on the branch (goal.ts persists whole snapshots
+ * as goal-state-v1), or undefined when the session has no goal. */
+function latestGoal(ctx: ExtensionContext): { id: string; status: string } | undefined {
 	try {
 		const branch = ctx.sessionManager.getBranch();
 		for (let i = branch.length - 1; i >= 0; i--) {
 			const entry = branch[i] as any;
-			if (entry?.type === "custom" && entry.customType === "goal-state-v1") return typeof entry.data?.status === "string" ? entry.data.status : undefined;
+			if (entry?.type === "custom" && entry.customType === "goal-state-v1")
+				return typeof entry.data?.id === "string" && typeof entry.data?.status === "string" ? { id: entry.data.id, status: entry.data.status } : undefined;
 		}
 	} catch { /* an unreadable branch means no goal */ }
 	return undefined;
@@ -1032,7 +1033,10 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 		// The user's own words, not text the harness wrapped around them (a goal kickoff adds criteria).
 		const folded = foldRequirements(ledger, typeof event.originalText === "string" ? event.originalText : event.text);
 		if (folded.ledger === ledger) return;
-		ledger = folded.ledger;
+		// A goal kickoff's sentences are also that goal's criteria: tag them so its gate owns them.
+		const goal = /^\[goal-tracked (\S+)\]/.exec(event.text)?.[1];
+		const added = new Set(folded.added.map((item) => item.id));
+		ledger = goal ? { ...folded.ledger, items: folded.ledger.items.map((item) => added.has(item.id) ? { ...item, goal } : item) } : folded.ledger;
 		save();
 	});
 	pi.on("context", (event) => {
@@ -1045,18 +1049,19 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 	pi.on("message_end", (event, ctx) => {
 		const message = event.message;
 		if (message.role !== "assistant" || message.stopReason !== "stop" || !ledger.items.length) return undefined;
-		// A goal turns the same sentences into criteria and its completion gate
-		// demands evidence for each, so the ledger defers to it: no second
-		// "not reported" footer while it runs (answers cite C#, not R#), and an
-		// achieved goal settles what the ledger tracked alongside it.
-		const goalStatus = latestGoalStatus(ctx);
-		if (goalStatus === "achieved") {
-			ledger = { ...emptyRequirementLedger(), next: ledger.next };
-			warnedKey = "";
+		// A goal turns its kickoff's sentences into criteria and its completion
+		// gate demands evidence for each, so the ledger defers on those items: no
+		// second "not reported" footer while the goal runs (answers cite C#, not
+		// R#), and the goal's achievement settles them. Later requests, and
+		// requirements added mid-goal, keep the footer.
+		const goal = latestGoal(ctx);
+		if (goal?.status === "achieved" && ledger.items.some((item) => item.goal === goal.id)) {
+			const items = ledger.items.filter((item) => item.goal !== goal.id);
+			ledger = items.length ? { ...ledger, items } : { ...emptyRequirementLedger(), next: ledger.next };
 			save();
-			return undefined;
+			if (!items.length) return undefined;
 		}
-		const goalOwns = goalStatus === "active" || goalStatus === "paused";
+		const owned = (item: { goal?: string }) => !!item.goal && item.goal === goal?.id && (goal.status === "active" || goal.status === "paused");
 		const answer = typeof message.content === "string" ? message.content
 			: message.content.map((part: any) => (part?.type === "text" ? part.text : "")).join("\n");
 		const settled = settleRequirements(ledger, answer);
@@ -1064,10 +1069,11 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 			ledger = settled.ledger;
 			save();
 		}
-		const key = settled.open.map((item) => item.id).join(",");
-		if (goalOwns || !settled.open.length || key === warnedKey) return undefined;
+		const unreported = settled.open.filter((item) => !owned(item));
+		const key = unreported.map((item) => item.id).join(",");
+		if (!unreported.length || key === warnedKey) return undefined;
 		warnedKey = key;
-		const warning = `\n\n---\n⚠️ Requirements not reported in this answer (requirement ledger):\n${settled.open.slice(0, 8).map((item) => `- ${item.id}: ${item.text.slice(0, 140)}`).join("\n")}\nThey stay open until an answer maps them to evidence or states they are not done.`;
+		const warning = `\n\n---\n⚠️ Requirements not reported in this answer (requirement ledger):\n${unreported.slice(0, 8).map((item) => `- ${item.id}: ${item.text.slice(0, 140)}`).join("\n")}\nThey stay open until an answer maps them to evidence or states they are not done.`;
 		const content = typeof message.content === "string" ? message.content + warning : [...message.content, { type: "text" as const, text: warning }];
 		return { message: { ...message, content } } as { message: typeof message };
 	});

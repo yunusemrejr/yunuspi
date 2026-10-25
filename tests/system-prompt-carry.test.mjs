@@ -21,10 +21,13 @@ test('a harness-triggered turn keeps the system prompt extensions built, so the 
 		Object.assign(process.env, saved);
 		fs.rmSync(cwd, { recursive: true, force: true });
 	});
-	let api;
+	let api, hold;
 	const extension = (pi) => {
 		api = pi;
-		pi.on('before_agent_start', (event) => ({ systemPrompt: `${event.systemPrompt}\n\nExtension addition: frozen date anchor.` }));
+		pi.on('before_agent_start', async (event) => {
+			if (hold) await hold;
+			return { systemPrompt: `${event.systemPrompt}\n\nExtension addition: frozen date anchor.` };
+		});
 		// Tool staging re-applies the active set between runs (as adaptive workflows do).
 		pi.on('agent_settled', () => { pi.setActiveTools(pi.getActiveTools()); });
 	};
@@ -62,4 +65,16 @@ test('a harness-triggered turn keeps the system prompt extensions built, so the 
 	await session.prompt('Now list the files.', { source: 'rpc' });
 	assert.equal(systems.at(-1), systems[0], 'the next user prompt rebuilds the same prompt from the base');
 	assert.equal(systems.at(-1).match(/Extension addition/g).length, 1, 'additions are rebuilt on the base, never stacked on the carried prompt');
+	// Esc while before_agent_start is still running: the prompt never reaches the
+	// model, and a later harness wake still carries the previous prompt.
+	let release; hold = new Promise((resolve) => { release = resolve; });
+	const aborted = session.prompt('A request the user cancels.', { source: 'rpc' }).catch((error) => error);
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	await session.abort();
+	release(); hold = undefined;
+	await aborted;
+	const before = systems.length;
+	await api.sendMessage({ customType: 'background-task-notification', content: 'Render finished.', display: true }, { triggerTurn: true });
+	assert.ok(systems.length > before, 'the wake ran');
+	assert.ok(systems.slice(before).every((system) => system === systems[0]), 'an aborted prompt leaves the carried prompt in force');
 });

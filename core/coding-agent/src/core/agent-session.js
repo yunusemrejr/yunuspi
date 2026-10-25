@@ -1122,7 +1122,11 @@ export class AgentSession {
         }
         catch (error) {
             // A prompt that never reached the model leaves the previous run's prompt in force.
-            if (carriedBeforeStart !== undefined && this._carriedSystemPrompt === undefined) this._carriedSystemPrompt = carriedBeforeStart;
+            if (carriedBeforeStart !== undefined && this._carriedSystemPrompt === undefined) {
+                this._carriedSystemPrompt = carriedBeforeStart;
+                this._systemPromptOverride = undefined;
+                this.agent.state.systemPrompt = this._effectiveSystemPrompt();
+            }
             inputAbortController.abort(error);
             this._guardian?.cancelRequest(inputMeta.requestId);
             if (inputAbortController) this._pendingInputControllers.delete(inputAbortController);

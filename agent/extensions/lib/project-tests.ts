@@ -250,6 +250,7 @@ export function projectCheckCommandReason(command: unknown, cwd: string): string
   return 'reason' in verdict ? verdict.reason : null;
 }
 
+const SHELL_STATE = new Set(['cd', 'pushd', 'popd', 'export', 'unset', 'set', 'shopt', 'source', '.', 'eval', 'exec', 'alias', 'trap', 'declare', 'typeset', 'local', 'readonly', 'ulimit', 'umask', 'enable', 'builtin', 'command']);
 /** `make && ./build/app --forttest && git status`: an AND chain that exits 0
  * ran every segment and each one exited 0, so every check in it passed. Two
  * game sessions re-ran such chains three times and then waived the goal
@@ -258,12 +259,16 @@ export function projectCheckCommandReason(command: unknown, cwd: string): string
  * `isCheck` accepts it and otherwise observed evidence an exact later plan can
  * adopt (a leading `cd <dir>` scopes the rest), or undefined when any segment is not a
  * simple command: `;`, `||`, `&` or a pipe could hide an earlier exit. Only
- * the last segment may end in a `| tail|head N` filter, which needs pipefail. */
+ * the last segment may end in a `| tail|head N` filter, which needs pipefail.
+ * A chain that changes the shell for the segments after it (export, set,
+ * source, a later cd, a bare assignment) or hides segments behind a `#`
+ * comment earns nothing: its later checks did not run as their keys say. */
 export function andChainChecks(command: unknown, cwd: string, isCheck: (check: { key: string; label: string }) => boolean): { checks: { key: string; label: string; observeOnly: boolean }[]; pipefail: boolean } | undefined {
   if (typeof command !== 'string' || command.length > 2000 || /[`\r\n]/.test(command)) return undefined;
+  if (/(?:^|\s)#/.test(command.replace(/\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*'/g, '_'))) return undefined;
   const parts = checkSegments(command).map(part => part.trim());
   if (parts.length < 2 || parts.some(part => !part)) return undefined;
-  let prefix = '', pipefail = false;
+  let prefix = '', pipefail = false, leading = true;
   const checks: { key: string; label: string; observeOnly: boolean }[] = [];
   for (const [index, raw] of parts.entries()) {
     let part = raw;
@@ -278,7 +283,12 @@ export function andChainChecks(command: unknown, cwd: string, isCheck: (check: {
     }
     const argv = commandArgv(part);
     if (!argv?.length) return undefined;
-    if (index === 0 && argv[0] === 'cd' && argv.length === 2 && !part.includes('$')) { prefix = `${part} && `; continue; }
+    // Leading prefixes only: one `cd <dir>`, and a PATH export (the film environment), which receipt keys ignore.
+    if (leading && argv[0] === 'export' && argv.length > 1 && argv.slice(1).every(token => token.startsWith('PATH='))) continue;
+    if (leading && argv[0] === 'cd' && argv.length === 2 && !part.includes('$') && !prefix) { prefix = `${part} && `; continue; }
+    leading = false;
+    const program = argv.find(token => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
+    if (!program || SHELL_STATE.has(program)) return undefined;
     const check = projectCheckCommand(prefix + part, cwd, true);
     if (check && !reconCommand(part) && !checks.some(c => c.key === check.key)) checks.push({ ...check, observeOnly: !isCheck(check) });
   }
@@ -524,9 +534,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   // A project's own runners (`make`, `./build/app --selftest`) are checks only
   // once a plan names them; goal.ts cannot recognise them by shape, so the
   // call that completes a fully passing plan is announced to clear its debt.
-  const planPassedBy = (callId: string) => {
+  const planPassedBy = (callId: string, keys: string[]) => {
     const planned = state.assessment?.revision === state.revision ? state.assessment.checks : [];
-    if (!planned.length || projectTestNeed(state) !== null) return;
+    // Only a call that ran a planned check announces it; an ls after a passing plan does not.
+    if (!planned.length || !keys.some(key => planned.some(check => check.key === key)) || projectTestNeed(state) !== null) return;
     if (!planned.every(check => currentProjectCheck(state, check.key)?.outcome === 'passed')) return;
     try { pi.events?.emit?.('project-tests-plan-passed', { callId, revision: state.revision }); } catch { /* listeners never control receipts */ }
   };
@@ -705,9 +716,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         const text = textOf(event.content);
         const exit = event.details?.execution?.exitCode ?? event.details?.exitCode ?? event.details?.exit_code;
         const noTests = /\bno tests? (?:found|ran|collected|to run)|\b(?:Ran 0 tests?|0 passing)\b/i.test(text);
-        if (event.isError === false && exit === 0 && !noTests && !facts?.unavailable && !event.details?.task?.id && !/\[managed bash\] Still running/.test(text))
+        if (event.isError === false && exit === 0 && !noTests && !facts?.unavailable && !event.details?.task?.id && !/\[managed bash\] Still running/.test(text)) {
           for (const [index, { observeOnly, ...check }] of start.chain.entries()) receipt({ ...start, check, observeOnly }, `${event.toolCallId}#${index}`, 'passed');
-        planPassedBy(event.toolCallId);
+          planPassedBy(event.toolCallId, start.chain.filter(check => !check.observeOnly).map(check => check.key));
+        }
       } else if (start && start.epoch === epoch) {
         const text = textOf(event.content);
         const task = event.details?.task;
@@ -721,7 +733,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           const exit = event.details?.execution?.exitCode ?? event.details?.exitCode ?? event.details?.exit_code;
           const failed = event.isError || typeof exit === 'number' && exit !== 0 || !!(event.details?.execution?.signal ?? event.details?.signal);
           receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed', undefined, testDiagnostics(text));
-          planPassedBy(event.toolCallId);
+          if (!start.observeOnly) planPassedBy(event.toolCallId, [start.check.key]);
         }
       }
       if (event.toolName === 'process') { await scan(ctx, completesOwnedCheck(event.details?.managedJob)); terminal(event.details?.managedJob); }

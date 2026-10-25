@@ -14,6 +14,8 @@ import { promptRequestFocus } from "./prompt-interpretation.ts";
 export interface RequirementItem {
 	id: string;
 	text: string;
+	/** Goal whose kickoff carried this requirement; that goal's criteria and gate own it. */
+	goal?: string;
 }
 
 export interface RequirementLedger {

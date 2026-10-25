@@ -140,11 +140,12 @@ const filmEnv = (): Record<string, string> => {
 export function withFilmTools(command: unknown, cwd: string): string | undefined {
 	if (typeof command !== "string" || !/(?:^|[\s/;&|(])(?:scripts\/(?:render\.sh|[\w-]+\.py)\b|python3?(?=[\s;&|)]|$))/.test(command)) return undefined;
 	const venv = path.dirname(filmPython());
-	if (!existsSync(venv) || command.includes(venv)) return undefined;
+	if (!existsSync(venv) || command.includes(venv) || /(?:^|[\s;&|(])PATH=/.test(command)) return undefined;
 	const target = /^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/.exec(command)?.[1]?.replace(/^["']|["']$/g, "");
 	const dir = target ? path.resolve(cwd, target) : cwd;
 	if (!existsSync(path.join(dir, "scripts", "render.sh")) || !existsSync(path.join(dir, "remotion.config.ts"))) return undefined;
-	return `export PATH=${JSON.stringify(venv)}:"$PATH"; ${command}`;
+	// Joined with && so project tests still read the command as its check (a PATH export is peeled off the key).
+	return `export PATH='${venv.replaceAll("'", "'\\''")}':"$PATH" && ${command}`;
 }
 
 const tail = (text: string, lines = 30) => text.trim().split("\n").slice(-lines).join("\n");
