@@ -17,7 +17,13 @@ export const STOP_ALL_RUNS = Symbol.for("yunus-pi.subagent-stop-all.v1");
 export type StopGate = { met: boolean; detail: string };
 export type StopGates = { quality: StopGate; subagent: StopGate; met: boolean; required: false };
 
-const states = new Map<string, { stopId: string; at: string; announced: boolean }>();
+// One map per process, not per module copy: the extension loader evaluates this
+// module once for every extension that imports it (moduleCache: false), so a
+// module-level map let goal.ts mark a goal achieved while art-direction,
+// deliverables and quality review each read their own empty copy and kept
+// waking the model with follow-ups after the user was told it was done.
+const states: Map<string, { stopId: string; at: string; announced: boolean }> =
+  ((globalThis as any)[Symbol.for("yunus-pi.session-stop.v1")] ??= new Map());
 
 export function stopScopeKey(ctx: any): string | undefined {
   try {

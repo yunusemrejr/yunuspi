@@ -287,3 +287,16 @@ test('deploys and the last todo completion wait for unresolved verification rece
   }
   assert.equal(await call('bash', { command: 'git push namecheap main' }), undefined, 'resolved receipts never block');
 });
+
+test('a stop noted by one extension is seen by every other (the loader gives each its own module copy)', async () => {
+  const file = pathToFileURL(path.join(agent, 'extensions/lib/session-stop.ts')).href;
+  const goalCopy = await import(`${file}?copy=goal`);
+  const artCopy = await import(`${file}?copy=art-direction`);
+  assert.notEqual(goalCopy, artCopy, 'two module instances, as moduleCache:false produces');
+  const ctx = scopeCtx([], 'cross-copy-stop');
+  assert.equal(artCopy.isSessionStopped(ctx), false);
+  assert.equal(goalCopy.noteSessionStopped(ctx, 'goal:g1:achieved'), true);
+  assert.equal(artCopy.isSessionStopped(ctx), true, 'a follow-up source sees the achieved goal');
+  assert.equal(artCopy.stopInputUnlocks({ source: 'interactive', text: 'next task' }, ctx), true);
+  assert.equal(goalCopy.isSessionStopped(ctx), false, 'and genuine input unlocks it everywhere');
+});
