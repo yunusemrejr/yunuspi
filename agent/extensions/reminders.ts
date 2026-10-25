@@ -334,6 +334,19 @@ export function classifyFollowTool(name: unknown): FollowMarker | undefined {
 	return undefined;
 }
 
+/** Whether the latest goal on the branch was achieved after `since` (ms). */
+function achievedSince(ctx: ExtensionContext, since: number): boolean {
+	try {
+		const branch = ctx.sessionManager.getBranch() as any[];
+		for (let i = branch.length - 1; i >= 0; i--) {
+			const entry = branch[i];
+			if (entry?.type !== "custom" || entry.customType !== "goal-state-v1") continue;
+			return entry.data?.status === "achieved" && Number(entry.data?.updatedAt) > since;
+		}
+	} catch { /* no readable branch: keep the nudge */ }
+	return false;
+}
+
 export function reminderText(
 	st: ReminderState,
 	sid: string,
@@ -754,6 +767,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			st.promptCount += 1;
 			const now = Date.now();
 			const fire = shouldFire(st, now);
+			// A plan left untouched since its goal was achieved belongs to that
+			// goal: "Open todos: 4 pending" against the next, unrelated request
+			// was noise. Touching the list again re-arms the nudge.
+			if ((fire.todo || fire.drift) && achievedSince(ctx, st.lastTodoActionAt)) { fire.todo = false; fire.drift = false; }
 			const dueManual = dueManualReminders(st, now);
 			if (
 				!fire.todo &&
