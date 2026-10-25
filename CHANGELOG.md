@@ -22,7 +22,7 @@ All now live on `globalThis`, as the other cross-extension registries already di
 
 **Edits that miss say what is there.** When an edit's first line matched but the rest did not, the error claimed the file "has likely changed since your last read". In the UI session a formatter had expanded compact CSS and the model rebuilt regexes from memory: eight misses, eight re-reads, then three whole-file rewrites (about 29k output tokens). The miss now shows the file's current lines for that region to copy from.
 
-**Less noise.** A clean WASM source check followed every edit (35 identical lines in one session); it now shows once per ten minutes, and a finding every time.
+**Less noise.** A clean WASM source check followed every edit (35 identical lines in one session); it now shows once per ten minutes, and a finding every time. Every settled final answer also asked Jev and Kev, in the background, whether its evidence supported up to two requirements: calibration for the qualification lab removed in 0.48. Nothing read the result, so those remote calls (which sent the requirement and the answer to OpenRouter) and their two activity lines are gone.
 
 **Validation.** Each fix has a regression test that fails on 0.49.0 where that was checkable (the system-prompt carry, the cross-copy stop and the Jev client were each run against the old code). See the commit messages for the per-fix evidence.
 

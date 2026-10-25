@@ -16,7 +16,6 @@ import { readJevChoice } from "../jev-client.ts";
 import { effortQuestions, interpretEffortAnswers } from "../effort-policy.mjs";
 
 export type TypedDecisionId =
-  | "requirement-closure"
   | "claim-verification"
   | "tool-intent-alignment"
   | "observer-admission"
@@ -129,15 +128,6 @@ function interpretReviewAdmission(answers: Record<string, TypedAnswer>): TypedVe
 }
 
 export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
-  "requirement-closure": {
-    site: "requirement-closure",
-    owner: "requirement ledger (checkpoints) keeps settle authority; this only flags unsupported claims",
-    maxStateChars: 4000,
-    questions: (ctx) => ({
-      supported: noul("Does the cited evidence actually demonstrate the requirement is met (not merely mention it)?"),
-    }),
-    interpret: (answers) => acceptNoul(answers.supported?.noul, NOUL_PAIR("supported", "unsupported")),
-  },
   "claim-verification": {
     site: "claim-verify",
     owner: "completion/verification owners; Jev only grades claim-vs-evidence fit",

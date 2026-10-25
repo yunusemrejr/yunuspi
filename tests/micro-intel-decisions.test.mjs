@@ -24,12 +24,12 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
     return { ok: true, answers, usage };
   };
 
-test("registry names all fifteen decision types with owners", () => {
+test("registry names every decision type with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
     "claim-verification", "delegation-topology", "effort-tier", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
-    "recovery-strategy", "requirement-closure", "review-aspects",
+    "recovery-strategy", "review-aspects",
     "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
     "verification-method",
   ]);
@@ -41,11 +41,11 @@ test("registry names all fifteen decision types with owners", () => {
 test("noul decisions accept at the bars and abstain between them", async () => {
   metricsMod.resetMicroMetrics();
   try {
-    const high = await askTypedDecision("requirement-closure",
-      { state: { requirement: "r", evidence: "e" } },
-      { judge: judgeWith({ supported: { noul: 0.85 } }) });
+    const high = await askTypedDecision("claim-verification",
+      { state: { claim: "c", evidence: "e" } },
+      { judge: judgeWith({ verified: { noul: 0.85 } }) });
     assert.equal(high.ok, true);
-    assert.deepEqual(high.verdict, { supported: true, label: "supported" });
+    assert.deepEqual(high.verdict, { supported: true, label: "verified" });
 
     const low = await askTypedDecision("claim-verification",
       { state: { claim: "c", evidence: "e" } },

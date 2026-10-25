@@ -315,9 +315,10 @@ owner framed, and every verdict degrades to unknown (caller keeps its
 heuristic). New production uses start in shadow mode — judged,
 measured, and agreement-recorded via `ml.jev.shadow` health events, but
 never applied — until calibration evidence justifies influence.
-Currently shadow-wired (besides the live decision above): requirement closure at ledger settle time,
-review aspects per review round, and recovery strategy per recovery
-episode. The remaining registry entries are defined, barred, and
+Currently shadow-wired (besides the live decision above): review aspects
+per review round and recovery strategy per recovery episode
+(requirement closure at ledger settle time was removed in 0.50.0: no
+calibration consumer remained). The remaining registry entries are defined, barred, and
 tested, with production call sites staged behind the same shadow
 evidence bar.
 
