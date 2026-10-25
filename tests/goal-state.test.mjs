@@ -205,18 +205,26 @@ function harness({failSend=false}={}){
  return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted,bus:pi.events};
 }
 
-test('only the latest queued kickoff reaches the model, once, and never after its goal stopped',async()=>{
+test('a queued kickoff is screened: copies already waiting and kickoffs for a stopped goal are dropped',async()=>{
  const h=harness();
  await h.commands.goal.handler('Ship the exporter',h.ctx);
- const first=h.sent[0];
- assert.equal(await h.emit('input',{text:first,source:'extension'}),undefined,'the kickoff is delivered');
- assert.deepEqual(await h.emit('input',{text:first,source:'extension'}),{action:'handled'},'a second copy of the same kickoff is dropped');
- await h.commands.goal.handler('resume',h.ctx);await h.commands.goal.handler('resume',h.ctx);
- const [older,latest]=h.sent.slice(-2);
- assert.deepEqual(await h.emit('input',{text:older+' (stale)',source:'extension'}),{action:'handled'},'a superseded kickoff is dropped');
+ const kickoff=h.sent[0];
+ const queue=text=>h.emit('input',{text,source:'interactive',streamingBehavior:'followUp'});
+ assert.equal(await queue(kickoff),undefined,'the first queued copy is accepted');
+ assert.deepEqual(await queue(kickoff),{action:'handled'},'an identical copy already waiting is dropped');
+ await h.emit('message_start',{message:{role:'user',content:[{type:'text',text:kickoff}]}});
+ assert.equal(await queue(kickoff),undefined,'once delivered, a later resume may queue it again');
+ await h.emit('message_start',{message:{role:'user',content:kickoff}});
+ assert.equal(await h.emit('input',{text:kickoff,source:'interactive'}),undefined,'an idle send is never held back');
+ assert.equal(await h.emit('input',{text:kickoff,source:'interactive'}),undefined,'and idle sends are not remembered as queued');
  await h.call({action:'blocked',reason:'Needs a human listening review of the final mix.'});
- assert.deepEqual(await h.emit('input',{text:latest,source:'extension'}),{action:'handled'},'a kickoff queued before the goal was blocked is dropped');
+ assert.deepEqual(await h.emit('input',{text:kickoff,source:'interactive'}),{action:'handled'},'a kickoff for a goal that is no longer active is dropped');
  assert.equal(await h.emit('input',{text:'the sound is too loud',source:'interactive'}),undefined,'ordinary input is untouched');
+ await h.commands.goal.handler('resume',h.ctx);
+ const resumed=h.sent.at(-1);
+ assert.equal(await queue(resumed),undefined);
+ await h.emit('agent_settled');
+ assert.equal(await queue(resumed),undefined,'a queue that settled empty (Stop cleared it) holds nothing back');
 });
 
 test('a planned project runner that passes the whole plan clears the goal\'s write debt, in either event order',async()=>{
