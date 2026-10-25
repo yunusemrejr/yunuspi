@@ -73,6 +73,17 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 	const refused = new Set<string>();
 	let lastStop: string | undefined;
+	// project-tests-plan-passed and this extension's tool_result arrive in either order.
+	const planCandidates = new Map<string, CheckStart>();
+	const passedPlanCalls = new Map<string, CheckStart>();
+	let lastCtx: ExtensionContext | undefined;
+	pi.events?.on?.("project-tests-plan-passed", (data: any) => {
+		const callId = typeof data?.callId === "string" ? data.callId : "";
+		if (!callId) return;
+		const start = planCandidates.get(callId);
+		if (start && lastCtx) { planCandidates.delete(callId); cover(start, lastCtx); }
+		else remember(passedPlanCalls, callId, { goalId: goal?.id ?? "", revision: 0, command: "", tool: "bash" });
+	});
 
 	let unsaved: GoalState | undefined;
 	// A failed append used to leave the session running on state the disk never
@@ -195,6 +206,14 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		}
 		else if (event.toolCallId && !start) return;
 		else if (name === "bash" && isTestLikeCommand(observed.command) && (event.details?.exitCode === undefined || event.details.exitCode === 0)) cover(observed, ctx);
+		else if (name === "bash" && event.toolCallId) {
+			// A planned project runner (`make && ./build/app --selftest`) is recognised
+			// by project tests, which announces the call that passed the whole plan.
+			remember(planCandidates, event.toolCallId, observed);
+			lastCtx = ctx;
+			const passed = passedPlanCalls.get(event.toolCallId);
+			if (passed) { passedPlanCalls.delete(event.toolCallId); cover(observed, ctx); }
+		}
 		else if (name === "project_tests" && event.details?.need === null && event.details?.projectTests?.plannedChecks?.length
 			&& event.details.projectTests.plannedChecks.every((check: any) => check.outcome === "passed")) cover(observed, ctx);
 		else if (isVerificationToolResult(name, event.input)) cover(observed, ctx);

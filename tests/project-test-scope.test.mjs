@@ -226,6 +226,38 @@ test('safe pre-plan commands retain exact receipts, while composition and stale 
  assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['stale','stale']);
 });
 
+test('an AND chain that exits 0 earns a receipt for every check in it; masked or failed chains earn none', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-chain-')),tools={};
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){},sendMessage(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Add garrisonable castles and update github'});
+ const edit=async value=>{fs.writeFileSync(path.join(cwd,'map.cpp'),`int forts=${value};`);await api.result({toolName:'write',toolCallId:`w${value}`,input:{path:'map.cpp'},isError:false},ctx);};
+ const run=async(command,id,exitCode=0)=>{
+  const event={toolName:'bash',toolCallId:id,input:{command}};
+  await api.call(event,ctx);await api.result({...event,isError:exitCode!==0,details:{exitCode},content:[{type:'text',text:exitCode?'forttest failed':'forttest seed 12345: ok'}]},ctx);
+  return event;
+ };
+ const assess=()=>tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'Build plus the dedicated stronghold and civic tests cover the map change.',commands:['make -s -j2','./build/onehour --forttest','./build/onehour --civictest']},undefined,undefined,ctx);
+ await edit(1);
+ // Run before any plan exists, then declared: the observed chain is adopted without a rerun.
+ await run(`cd ${cwd} && make -s -j2 && ./build/onehour --forttest && ./build/onehour --civictest && git status --short`,'pre');
+ await assess();
+ assert.equal(api.snapshot().need,null,'a passing chain run before the plan satisfies the exact planned commands');
+ await edit(2);
+ await assess();
+ assert.equal(api.snapshot().need,'missing');
+ const masked=await run('make -s -j2 && ./build/onehour --forttest || true','masked');
+ assert.equal(api.snapshot().need,'missing','`|| true` can hide a failure, so the chain proves nothing');
+ assert.equal(masked.input.command,'make -s -j2 && ./build/onehour --forttest || true');
+ await run('make -s -j2 && ./build/onehour --forttest && ./build/onehour --civictest','failed',2);
+ assert.equal(api.snapshot().need,'missing','a failed chain cannot say which segment failed and records nothing');
+ const piped=await run('make -s -j2 && ./build/onehour --forttest && ./build/onehour --civictest | tail -2','piped');
+ assert.match(piped.input.command,/^set -o pipefail; /,'a trailing filter runs under pipefail so the last exit stays observable');
+ assert.equal(api.snapshot().need,null,'every planned check in a passing chain is current');
+ assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['passed','passed','passed']);
+});
+
 test('follow-up turns that edit and settle recursively cannot replenish their two-turn budget', async t => {
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-followup-budget-')),sent=[],branch=[];
  const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};

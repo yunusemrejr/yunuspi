@@ -188,6 +188,7 @@ let harnessCount=0;
 function harness({failSend=false}={}){
  const sessionId=`goal-fixture-${++harnessCount}`;
  const handlers={},commands={},tools={},entries=[],sent=[],sentOptions=[],notes=[],emitted=[];
+ const listeners={};
  const pi={
   on:(name,fn)=>{(handlers[name]??=[]).push(fn);},
   registerCommand:(name,options)=>{commands[name]=options;},
@@ -195,14 +196,36 @@ function harness({failSend=false}={}){
   appendEntry:(customType,data)=>{entries.push({type:'custom',customType,data});},
   sendUserMessage:async(text,options)=>{if(failSend)throw new Error('input queue closed');sent.push(text);sentOptions.push(options);},
   getActiveTools:()=>['read'],setActiveTools:()=>{},
-  events:{emit:(name,event)=>emitted.push({name,event})},
+  events:{emit:(name,event)=>{emitted.push({name,event});for(const fn of listeners[name]??[])fn(event);},on:(name,fn)=>{(listeners[name]??=[]).push(fn);return()=>{};}},
  };
  const ctx={cwd:cleanRepo,ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries,getSessionId:()=>sessionId},hasPendingMessages:()=>false};
  goalExtension(pi);
  const emit=async(name,event={})=>{for(const fn of handlers[name]??[])await fn(event,ctx);};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
- return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted};
+ return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted,bus:pi.events};
 }
+
+test('a planned project runner that passes the whole plan clears the goal\'s write debt, in either event order',async()=>{
+ for(const order of ['result-first','event-first']){
+  const h=harness();
+  await h.commands.goal.handler('Add garrisonable castles',h.ctx);
+  for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'forttest seed 12345: ok'});
+  await h.emit('tool_result',{toolName:'edit',input:{path:'map.cpp'}});
+  const command='make -s -j2 && ./build/onehour --forttest';
+  await h.emit('tool_call',{toolName:'bash',toolCallId:'chain',input:{command}});
+  if(order==='event-first')h.bus.emit('project-tests-plan-passed',{callId:'chain',revision:3});
+  await h.emit('tool_result',{toolName:'bash',toolCallId:'chain',input:{command},details:{exitCode:0}});
+  if(order==='result-first')h.bus.emit('project-tests-plan-passed',{callId:'chain',revision:3});
+  assert.match(await h.call({action:'complete'}),/Goal achieved/,order);
+ }
+ const h=harness();
+ await h.commands.goal.handler('Add garrisonable castles',h.ctx);
+ for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'forttest seed 12345: ok'});
+ await h.emit('tool_result',{toolName:'edit',input:{path:'map.cpp'}});
+ await h.emit('tool_call',{toolName:'bash',toolCallId:'other',input:{command:'./build/onehour --forttest'}});
+ await h.emit('tool_result',{toolName:'bash',toolCallId:'other',input:{command:'./build/onehour --forttest'},details:{exitCode:0}});
+ assert.match(await h.call({action:'complete'}),/file change/,'an unplanned project binary is still not verification by itself');
+});
 
 test('an earlier background verification cannot clear later edits',async()=>{
  const h=harness();
