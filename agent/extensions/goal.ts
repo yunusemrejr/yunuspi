@@ -73,6 +73,21 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 	const refused = new Set<string>();
 	let lastStop: string | undefined;
+	// A kickoff queued behind a running turn is delivered later. Four queued
+	// copies of an 18k-character kickoff reached a goal that had meanwhile been
+	// blocked, and each cost a turn restating "still blocked". Only the latest
+	// queued kickoff is delivered, once, and only while its goal is active.
+	let latestKickoff = "";
+	let kickoffDelivered = false;
+	const queueKickoff = (text: string) => { latestKickoff = text; kickoffDelivered = false; return text; };
+	pi.on("input", (event: any) => {
+		const text = typeof event?.text === "string" ? event.text : "";
+		const id = /^\[goal-tracked (\S+)\]/.exec(text)?.[1];
+		if (!id) return undefined;
+		const current = text === latestKickoff && !kickoffDelivered && goal?.id === id && goal.status === "active";
+		if (text === latestKickoff) kickoffDelivered = true;
+		return current || !latestKickoff ? undefined : { action: "handled" as const };
+	});
 	// project-tests-plan-passed and this extension's tool_result arrive in either order.
 	const planCandidates = new Map<string, CheckStart>();
 	const passedPlanCalls = new Map<string, CheckStart>();
@@ -278,7 +293,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// `userText` keeps the user's literal words apart from the criteria the harness adds, so
 			// analysis, the Guardian and memory work from what was asked, not from our wrapper.
 			// A goal set while a turn is streaming starts after it instead of failing as "already processing".
-			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text, deliverAs: "followUp" }))
+			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(queueKickoff(goalKickoff(state)), { authored: true, userText: state.text, deliverAs: "followUp" }))
 				.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 			switch (command.kind) {
 				case "status": return notify(goalSummary(goal));
@@ -313,7 +328,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			const open = rearmed.criteria.filter((criterion) => criterion.status === "open").length;
 			const note = "note" in command ? command.note : undefined;
 			notify(`Goal ${rearmed.id} resumed: ${open} of ${rearmed.criteria.length} criteria open, continuation budget reset.${note ? " Your note goes with it." : ""}`);
-			void Promise.resolve(pi.sendUserMessage(`${goalKickoff(rearmed)}${note ? `\n\nThe user's note on resuming: ${note}` : ""}`, { authored: true, userText: note ?? rearmed.text, deliverAs: "followUp" }))
+			void Promise.resolve(pi.sendUserMessage(queueKickoff(`${goalKickoff(rearmed)}${note ? `\n\nThe user's note on resuming: ${note}` : ""}`), { authored: true, userText: note ?? rearmed.text, deliverAs: "followUp" }))
 				.catch((error) => notify(`Goal resume failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -329,7 +344,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		persist(next, ctx);
 		ctx.ui?.notify?.(boostedGoalNotice(found.presets, next), "info");
 		// The literal is the user's own words; the expanded briefs travel as the kickoff text.
-		void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: found.literal, deliverAs: "followUp" }))
+		void Promise.resolve(pi.sendUserMessage(queueKickoff(goalKickoff(next)), { authored: true, userText: found.literal, deliverAs: "followUp" }))
 			.catch((error: unknown) => ctx.ui?.notify?.(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 	};
 	// A bare boost while a goal is live joins that goal: its brief is appended and its fronts take the free criteria slots.
@@ -341,7 +356,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		const tracked = fronts ? `${fronts} front(s) tracked` : "no free criteria slots, so it applies through the brief";
 		ctx.ui?.notify?.(`${labels} boost added to goal ${updated.id} — ${tracked}, ${updated.criteria.length} criteria to settle with evidence.${clipped ? ` The goal text is at its ${MAX_GOAL_TEXT}-character cap, so this brief was clipped — /goal clear then re-run the boost for the full brief.` : ""} /goal shows progress, /goal pause stops it.`, "info");
 		// Steered into a running turn, so the work already underway picks the boost up at its next step.
-		void Promise.resolve(pi.sendUserMessage(goalKickoff(updated), { authored: true, userText: presetUserText(fresh, ""), deliverAs: "steer" }))
+		void Promise.resolve(pi.sendUserMessage(queueKickoff(goalKickoff(updated)), { authored: true, userText: presetUserText(fresh, ""), deliverAs: "steer" }))
 			.catch((error: unknown) => ctx.ui?.notify?.(`${labels} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 	};
 
@@ -370,7 +385,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// Authored like a typed /goal, but userText stays the user's own
 			// short demand; the expanded briefs are the harness's wording and
 			// travel as the kickoff message (and the goal text) instead.
-			void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: presetUserText(chain.presets, chain.task), deliverAs: "followUp" }))
+			void Promise.resolve(pi.sendUserMessage(queueKickoff(goalKickoff(next)), { authored: true, userText: presetUserText(chain.presets, chain.task), deliverAs: "followUp" }))
 				.catch((error: unknown) => ctx.ui?.notify?.(`${label} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");

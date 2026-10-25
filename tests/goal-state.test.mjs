@@ -200,10 +200,24 @@ function harness({failSend=false}={}){
  };
  const ctx={cwd:cleanRepo,ui:{notify:(text,level)=>notes.push({text,level}),setStatus:()=>{}},sessionManager:{getBranch:()=>entries,getSessionId:()=>sessionId},hasPendingMessages:()=>false};
  goalExtension(pi);
- const emit=async(name,event={})=>{for(const fn of handlers[name]??[])await fn(event,ctx);};
+ const emit=async(name,event={})=>{let out;for(const fn of handlers[name]??[]){const result=await fn(event,ctx);if(result!==undefined)out=result;}return out;};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
  return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted,bus:pi.events};
 }
+
+test('only the latest queued kickoff reaches the model, once, and never after its goal stopped',async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Ship the exporter',h.ctx);
+ const first=h.sent[0];
+ assert.equal(await h.emit('input',{text:first,source:'extension'}),undefined,'the kickoff is delivered');
+ assert.deepEqual(await h.emit('input',{text:first,source:'extension'}),{action:'handled'},'a second copy of the same kickoff is dropped');
+ await h.commands.goal.handler('resume',h.ctx);await h.commands.goal.handler('resume',h.ctx);
+ const [older,latest]=h.sent.slice(-2);
+ assert.deepEqual(await h.emit('input',{text:older+' (stale)',source:'extension'}),{action:'handled'},'a superseded kickoff is dropped');
+ await h.call({action:'blocked',reason:'Needs a human listening review of the final mix.'});
+ assert.deepEqual(await h.emit('input',{text:latest,source:'extension'}),{action:'handled'},'a kickoff queued before the goal was blocked is dropped');
+ assert.equal(await h.emit('input',{text:'the sound is too loud',source:'interactive'}),undefined,'ordinary input is untouched');
+});
 
 test('a planned project runner that passes the whole plan clears the goal\'s write debt, in either event order',async()=>{
  for(const order of ['result-first','event-first']){
