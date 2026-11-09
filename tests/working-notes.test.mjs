@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  GUIDE_ROUTES, MAX_USER_NOTES_CHARS, WORKING_NOTES, guideIndex, loadWorkingNotes, resetWorkingNotesCache,
+  DELEGATED_NOTES, GUIDE_ROUTES, MAX_USER_NOTES_CHARS, WORKING_NOTES, guideIndex, loadWorkingNotes, resetWorkingNotesCache,
 } from '../core/coding-agent/src/core/working-notes.js';
 import { buildSystemPrompt } from '../core/coding-agent/src/core/system-prompt.js';
 
@@ -86,5 +86,29 @@ test('the default system prompt carries the notes before user and project additi
   assert.ok(prompt.indexOf('APPENDED-BY-USER') < prompt.indexOf('PROJECT-RULES'));
   assert.doesNotMatch(prompt, /expert coding assistant/);
   assert.equal(buildSystemPrompt(options), prompt, 'two builds are byte-identical');
-  assert.doesNotMatch(buildSystemPrompt({ ...options, customPrompt: 'You are a reviewer.' }), /Working notes \(/);
+  assert.doesNotMatch(buildSystemPrompt({ ...options, customPrompt: 'You are a reviewer.' }), /Working notes/);
+});
+
+test('a delegated child gets the short notes after its role prompt, with the same guide index', t => {
+  resetWorkingNotesCache();
+  const before = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = '1';
+  t.after(() => {
+    if (before === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = before;
+    resetWorkingNotesCache();
+  });
+  const prompt = buildSystemPrompt({ cwd: '/work/project', customPrompt: 'You are a worker.', contextFiles: [{ path: '/work/project/AGENTS.md', content: 'PROJECT-RULES' }] });
+  const notes = prompt.indexOf(DELEGATED_NOTES);
+  assert.ok(notes > prompt.indexOf('You are a worker.'), 'the role comes first');
+  assert.ok(notes < prompt.indexOf('PROJECT-RULES'), 'project rules have the last word');
+  assert.doesNotMatch(prompt, /Working notes \(/, 'not the full session notes');
+  assert.ok(DELEGATED_NOTES.length < 1_400, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
+  for (const anchor of ['The brief is the whole assignment', 'Never invent', 'waiting for the session that gave you the task', 'what was verified'])
+    assert.ok(DELEGATED_NOTES.includes(anchor), anchor);
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-notes-child-'));
+  t.after(() => fs.rmSync(agentDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(agentDir, 'NOTES.md'), 'PERSONAL-NOTES');
+  assert.doesNotMatch(loadWorkingNotes(agentDir, {}, true), /PERSONAL-NOTES/, 'a child keeps the short form');
+  assert.match(loadWorkingNotes(agentDir, {}), /PERSONAL-NOTES/);
+  assert.equal(loadWorkingNotes(agentDir, { PI_WORKING_NOTES: '0' }, true), '');
 });

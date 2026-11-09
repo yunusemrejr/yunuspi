@@ -18,6 +18,11 @@ export function buildSystemPrompt(options) {
         if (appendSection) {
             prompt += appendSection;
         }
+        // A delegated child runs a role prompt; it still builds things.
+        const delegatedNotes = process.env.PI_SUBAGENT_CHILD === "1" ? loadWorkingNotes(getAgentDir(), process.env, true) : "";
+        if (delegatedNotes) {
+            prompt += `\n\n${delegatedNotes}`;
+        }
         // Append project context files
         if (contextFiles.length > 0) {
             prompt += "\n\n<project_context>\n\n";

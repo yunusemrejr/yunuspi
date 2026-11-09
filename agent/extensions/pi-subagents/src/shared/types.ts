@@ -2734,7 +2734,6 @@ export function resolveTempScopeId(options?: {
 	return "shared";
 }
 
-const MAX_PARALLEL = 8;
 export const MAX_CONCURRENCY = 4;
 const configuredTempRoot = process.env.PI_SUBAGENTS_TEMP_ROOT?.trim();
 export const TEMP_ROOT_DIR = configuredTempRoot
@@ -2770,25 +2769,6 @@ export const DEFAULT_FORK_PREAMBLE =
 	"Treat the inherited conversation as reference-only context, not a live thread to continue. " +
 	"Do not continue or answer prior messages as if they are waiting for a reply. " +
 	"Your sole job is to execute the task below and return a focused result for that task using your tools.";
-
-function normalizeTopLevelParallelValue(value: unknown): number | undefined {
-	const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-	if (!Number.isInteger(parsed) || parsed < 1) return undefined;
-	return parsed;
-}
-
-export function resolveTopLevelParallelMaxTasks(value: unknown): number {
-	return normalizeTopLevelParallelValue(value) ?? MAX_PARALLEL;
-}
-
-export function resolveTopLevelParallelConcurrency(
-	override: unknown,
-	configValue: unknown,
-): number {
-	return normalizeTopLevelParallelValue(override)
-		?? normalizeTopLevelParallelValue(configValue)
-		?? MAX_CONCURRENCY;
-}
 
 export function getAsyncConfigPath(suffix: string): string {
 	return path.join(TEMP_ROOT_DIR, `async-cfg-${suffix}.json`);

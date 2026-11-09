@@ -62,6 +62,18 @@ Reporting
 - Say in a few plain sentences what state things are in now, so someone who did not watch can follow. Report a failure or a skipped step as plainly as a success.`;
 
 /**
+ * The same judgment cut to what a delegated task needs. A child's prompt is
+ * its role file, so without this a worker would build with none of it.
+ */
+export const DELEGATED_NOTES = `Working notes for a delegated task
+- The brief is the whole assignment. Every detail in it is a requirement, and nothing outside it is yours to change. If a part cannot be done as written, say which and why instead of swapping in something easier.
+- Read the surrounding code or material before adding to it, and match what is there.
+- Evidence, not belief: run the check that would show the work is wrong, and report what you ran and what it printed. Never invent a fact, number, path or result to fill a gap; write "not found" or "not verified".
+- Anything a person will see: real content, less text, colour that carries meaning, and look at the rendered result before calling it done.
+- Do not push, publish, deploy, send or delete beyond the brief. Report such a step as waiting for the session that gave you the task.
+- End with what the next reader needs: what changed (paths), what was verified and how, what is left or uncertain. Report a failure as plainly as a success.`;
+
+/**
  * Guides worth opening before choosing an approach. Each row names the kind of
  * work and the guide for it; a row appears only when every guide it names is
  * installed, so the prompt never points at a file that is not there.
@@ -94,17 +106,18 @@ const cache = new Map();
 /**
  * The notes for this agent directory, read once per process so the prompt
  * prefix stays byte-stable for the whole session. A user's edit to NOTES.md
- * takes effect at the next start.
+ * takes effect at the next start. `delegated` gives the short form for a
+ * child running a role prompt.
  */
-export function loadWorkingNotes(agentDir, env = process.env) {
+export function loadWorkingNotes(agentDir, env = process.env, delegated = false) {
     if (env.PI_WORKING_NOTES === "0" || env.PI_WORKING_NOTES === "off")
         return "";
-    const key = String(agentDir ?? "");
+    const key = `${delegated ? "delegated" : "session"}:${agentDir ?? ""}`;
     const known = cache.get(key);
     if (known !== undefined)
         return known;
-    let notes = WORKING_NOTES;
-    try {
+    let notes = delegated ? DELEGATED_NOTES : WORKING_NOTES;
+    if (!delegated) try {
         const own = agentDir ? readFileSync(join(agentDir, "NOTES.md"), "utf8").trim() : "";
         if (own)
             notes = own.length > MAX_USER_NOTES_CHARS ? `${own.slice(0, MAX_USER_NOTES_CHARS - 1)}…` : own;
