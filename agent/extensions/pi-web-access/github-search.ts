@@ -252,7 +252,7 @@ export function renderRepoFacts(facts: RepoFacts, now = Date.now()): string {
 	return lines.join("\n");
 }
 
-async function gather(repo: string, rest: Rest, options: { signal?: AbortSignal; depth: "brief" | "full"; token?: string | null }): Promise<{ facts?: RepoFacts; failure?: GitHubRestResponse }> {
+async function gather(repo: string, rest: Rest, options: { signal?: AbortSignal; depth: "brief" | "full"; token?: string | null; now?: number }): Promise<{ facts?: RepoFacts; failure?: GitHubRestResponse }> {
 	const base = `/repos/${repo}`;
 	const call = (path: string, extra: { raw?: boolean; query?: Record<string, string | number | boolean | undefined> } = {}) =>
 		rest(path, { ...extra, ...(options.signal ? { signal: options.signal } : {}), ...(options.token !== undefined ? { token: options.token } : {}) });
@@ -287,7 +287,7 @@ async function gather(repo: string, rest: Rest, options: { signal?: AbortSignal;
 		topics: (Array.isArray(info.topics) ? info.topics : []).map((topic: unknown) => clean(topic, 40)).filter(Boolean).slice(0, 12),
 		...(typeof info.created_at === "string" ? { createdAt: info.created_at } : {}),
 		...(pushedAt ? { pushedAt } : {}),
-		health: repoHealth(pushedAt, archived),
+		health: repoHealth(pushedAt, archived, options.now),
 		archived,
 		...(clean(info.default_branch, 80) ? { defaultBranch: clean(info.default_branch, 80) } : {}),
 		...(/^https?:\/\//.test(clean(info.homepage, 200)) ? { homepage: clean(info.homepage, 200) } : {}),
@@ -353,7 +353,7 @@ export async function runGithubSearch(input: GithubSearchInput, options: { signa
 	if (action === "repo") {
 		const repo = clean(input.repo, 140).replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/$/, "");
 		if (!REPO_PATTERN.test(repo)) return fail("Supply repo as owner/name (or a github.com URL).");
-		const { facts, failure } = await gather(repo, rest, { ...(options.signal ? { signal: options.signal } : {}), depth: input.depth ?? "full", ...(options.token !== undefined ? { token: options.token } : {}) });
+		const { facts, failure } = await gather(repo, rest, { ...(options.signal ? { signal: options.signal } : {}), depth: input.depth ?? "full", now, ...(options.token !== undefined ? { token: options.token } : {}) });
 		if (!facts) return fail(failureText(failure!, `reading ${repo}`), { repo });
 		return { text: renderRepoFacts(facts, now), details: { ok: true, action, facts } };
 	}
