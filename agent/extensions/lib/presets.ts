@@ -428,7 +428,7 @@ const fit = (text: string) => {
 };
 
 /** The user's own words in a goal, without the boost text that follows them. */
-function goalAssignment(text: string): string {
+export function goalAssignment(text: string): string {
 	const assignment = /(?:^|\n\n)Assignment: ([\s\S]*?)(?:\n\n|$)/.exec(text)?.[1];
 	if (assignment !== undefined) return assignment.replace(/\s+/g, " ").trim();
 	const cut = text.search(/\n\n(?:Boosts in force|Boosts added to this goal|Standards added to this goal)/);

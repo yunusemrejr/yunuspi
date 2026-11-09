@@ -1,5 +1,7 @@
 /** Accident prevention for parsed host commands, not a sandbox or shell evaluator.
  * The filesystem guard owns shell parsing, substitutions and wrapper handling. */
+import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 export type HostOperationRisk = { level: 'block' | 'review'; reason: string; target: string; resolved: boolean };
@@ -28,6 +30,74 @@ export function separateHarnessPid(pid: number): boolean {
   } catch { return false; }
 }
 
+/** Every process this harness starts inherits this variable, so a name-wide
+ * stop can be shown to reach only what the session itself started. One mark
+ * per harness process, shared by every copy of this module. */
+const OWNER_MARK = Symbol.for('yunus-pi.process-owner.v1');
+export function processOwnerMark(): string {
+  return ((globalThis as any)[OWNER_MARK] ??= (process.env.PI_PROCESS_OWNER = `${process.pid}.${randomBytes(6).toString('hex')}`));
+}
+processOwnerMark();
+
+export type MatchedProcess = { pid: number; name: string };
+export interface ProcessProbe {
+  /** The processes a pkill/killall selection reaches now; undefined when that cannot be established. */
+  matched(tool: 'pkill' | 'killall', args: readonly string[]): MatchedProcess[] | undefined;
+  /** Whether this harness process started the process (it carries the owner mark). */
+  owned(pid: number): boolean;
+}
+
+/** pgrep takes pkill's selection options unchanged, and reports process names, never command lines. */
+function pgrep(args: readonly string[]): MatchedProcess[] | undefined {
+  try {
+    const out = execFileSync('pgrep', ['-l', ...args], { timeout: 2_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split('\n').flatMap(line => {
+      const found = /^(\d+)\s+(.*)$/.exec(line.trim());
+      return found ? [{ pid: Number(found[1]), name: found[2] }] : [];
+    });
+  } catch (error) {
+    return (error as { status?: number })?.status === 1 ? [] : undefined;
+  }
+}
+
+export const systemProcessProbe: ProcessProbe = {
+  matched(tool, args) {
+    if (tool === 'killall') {
+      // Only the plain form: exact names behind an optional signal.
+      const names = args.filter(arg => !/^-(?:\d+|(?:SIG)?[A-Z][A-Z0-9+-]+)$/.test(arg));
+      if (!names.length || names.some(arg => arg.startsWith('-'))) return;
+      const all: MatchedProcess[] = [];
+      for (const name of names) {
+        const found = pgrep(['-x', '--', name.slice(0, 15).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]);
+        if (!found) return;
+        all.push(...found);
+      }
+      return all;
+    }
+    const selection: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === '--signal') { i++; continue; }
+      if (arg.startsWith('--signal=') || /^-(?:\d+|(?:SIG)?[A-Z][A-Z0-9+-]+)$/.test(arg) || ['-e', '--echo', '-H', '--require-handler'].includes(arg)) continue;
+      if (arg === '-q' || arg === '--queue' || arg.startsWith('--queue=')) return;
+      selection.push(arg);
+    }
+    return selection.length ? pgrep(selection) : undefined;
+  },
+  owned(pid) {
+    try {
+      return readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`PI_PROCESS_OWNER=${processOwnerMark()}`);
+    } catch { return false; }
+  },
+};
+
+const tally = (processes: readonly MatchedProcess[]) => {
+  const counts = new Map<string, number>();
+  for (const { name } of processes) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const rows = [...counts].sort((a, b) => b[1] - a[1]);
+  return `${rows.slice(0, 4).map(([name, count]) => count > 1 ? `${name} ×${count}` : name).join(', ')}${rows.length > 4 ? ` and ${rows.length - 4} more` : ''}`;
+};
+
 /** The session's own running background tasks, published by
  * pi-background-tasks, so a blocked kill names the one-call safe path. */
 const OWNED_TASKS = Symbol.for('yunus-pi.bg-owned-tasks.v1');
@@ -41,7 +111,7 @@ function ownedTaskHint(): string {
 }
 
 export function hostOperationRisk(name: string, values: readonly (string | undefined)[],
-  ancestors?: readonly number[]): HostOperationRisk | undefined {
+  ancestors?: readonly number[], probe: ProcessProbe = systemProcessProbe): HostOperationRisk | undefined {
   const args = values.map(value => value ?? ''), has = (...words: string[]) => args.some(arg => words.includes(arg));
   const options = args.slice(0, args.includes('--') ? args.indexOf('--') : args.length);
   const flag = (...words: string[]) => options.some(arg => words.includes(arg));
@@ -169,7 +239,13 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
       else if (/^-(?:\d+|(?:SIG)?[A-Z][A-Z0-9+-]+)$/.test(arg)) signals.push(arg.slice(1));
     }
     if (signals.length && signals.every(signal => signal === '0') || name === 'killall' && flag('-l','--list')) return;
-    return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect the process list (ps) and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
+    // A selection that reaches only processes this session started is the
+    // session stopping its own work (a dev server, a watcher): nothing to guard.
+    const matched = values.includes(undefined) ? undefined : probe.matched(name, args);
+    const guarded = ancestors ?? sessionAncestorPids();
+    if (matched?.length && matched.every(({ pid }) => !guarded.includes(pid) && probe.owned(pid))) return;
+    const reach = matched === undefined ? '' : matched.length ? ` Right now it matches ${tally(matched)}, and not all of those were started by this session.` : ' Right now it matches no process.';
+    return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications.${reach} Inspect the process list (ps) and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
   }
   if (name === 'wipefs') {
     let noAct = false, erases = false;

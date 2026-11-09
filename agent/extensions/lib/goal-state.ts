@@ -312,6 +312,18 @@ export function goalKickoff(goal: GoalState): string {
 	return `[goal-tracked ${goal.id}] Goal: ${goal.text}\n\nAcceptance criteria (refine with goal({action:"criteria", items:[…]}) if they miss something; keep it to what the user asked):\n${goal.criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}`).join("\n")}\n\nWork autonomously until all are verified with evidence.`;
 }
 
+/** The user's own words inside a message goal mode sent in the user's name:
+ * the goal text of a kickoff (plus a note given on resuming), nothing for a
+ * continuation or a standards note, `undefined` when the message is not goal
+ * mode's. Callers that weigh what the user asked for read this instead of the
+ * criteria and instructions wrapped around it. */
+export function goalUserWords(message: string): string | undefined {
+	const kickoff = /^\[goal-tracked [^\]]+\] Goal: ([\s\S]*?)(?:\n\nAcceptance criteria|$)/.exec(message);
+	if (!kickoff) return /^\[goal [^\]]+\]/.test(message) ? "" : undefined;
+	const note = /\n\nThe user's note on resuming: ([\s\S]*)$/.exec(message)?.[1];
+	return [kickoff[1], note].filter(Boolean).join("\n\n").trim();
+}
+
 export function goalSummary(goal: GoalState | undefined): string {
 	if (!goal || goal.status === "cleared") return `No goal set in this session.\n${GOAL_USAGE}`;
 	const met = goal.criteria.filter((criterion) => criterion.status !== "open").length;

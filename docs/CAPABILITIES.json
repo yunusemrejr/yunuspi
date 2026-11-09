@@ -2748,16 +2748,6 @@
   "tools": {
     "commandRegistrations": [
       {
-        "name": "3d",
-        "source": "agent/extensions/goal.ts",
-        "line": 428
-      },
-      {
-        "name": "anatomy",
-        "source": "agent/extensions/goal.ts",
-        "line": 442
-      },
-      {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 599
@@ -2815,7 +2805,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 403
+        "line": 428
       },
       {
         "name": "google-account",
@@ -2911,16 +2901,6 @@
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
         "line": 211
-      },
-      {
-        "name": "nobug",
-        "source": "agent/extensions/goal.ts",
-        "line": 421
-      },
-      {
-        "name": "noslop",
-        "source": "agent/extensions/goal.ts",
-        "line": 414
       },
       {
         "name": "obs",
@@ -3043,17 +3023,21 @@
         "line": 1759
       },
       {
-        "name": "video",
-        "source": "agent/extensions/goal.ts",
-        "line": 435
-      },
-      {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 3028
       }
     ],
     "commandDynamicOwners": [
+      {
+        "source": "agent/extensions/goal.ts",
+        "signals": [
+          "registerCommand() receives a computed name"
+        ],
+        "lines": [
+          442
+        ]
+      },
       {
         "source": "agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts",
         "signals": [
@@ -3233,7 +3217,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 451,
+        "line": 453,
         "kind": "literal"
       },
       {
@@ -3609,7 +3593,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 451,
+        "line": 453,
         "kind": "literal"
       },
       {
@@ -4010,7 +3994,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 647,
+      "sourceFiles": 649,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,
@@ -4273,6 +4257,14 @@
       },
       {
         "path": "agent/extensions/lib/code-structure.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/command-consequence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/command-intent.ts",
         "exists": true
       },
       {

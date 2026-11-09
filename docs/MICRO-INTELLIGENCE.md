@@ -290,7 +290,8 @@ selector directly; it no longer buys a discarded shadow suggestion.
 Jev/Kev decisions, each with a question builder and
 heuristic acceptance bars in one registry so call sites cannot drift
 into ad-hoc thresholds: requirement-to-evidence closure, final-answer
-claim/evidence verification, high-blast-radius tool-intent alignment,
+claim/evidence verification, whether the user's own messages asked for a
+command's consequence (a push, a publish, a deploy),
 Observer admission and focus, quality-review aspect
 selection (add-only: Jev may suggest aspects, never remove the
 deterministic set), memory classification/admission, delegation

@@ -82,7 +82,6 @@ const allowed = [
   'perl -pi -e "s/old/new/g" src/*.ts',
   "git clean -ndx",
   "git push --dry-run --force origin feature",
-  "git push --force-with-lease origin feature",
   "rsync --delete --dry-run source/ target/",
   "rsync -an --delete source/ target/",
   "env MODE=test command rm -rf ./build",
@@ -149,6 +148,8 @@ for (const command of [
   "git reset --hard",
   "git clean -xdf",
   "git push --force origin feature",
+  "git push --force-with-lease origin feature",
+  "git push origin feature",
   "rsync --delete source/ target/",
 ])
   test(`bounded review: ${command}`, () =>

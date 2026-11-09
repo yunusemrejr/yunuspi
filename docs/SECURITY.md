@@ -30,7 +30,31 @@ Unreadable, invalid, excessively broad or unbounded global skill configuration r
 
 The filesystem hook assesses foreground `bash` and `bg_run` commands by command role and mutation operands. Copy sources, read-only inventories, quoted prose, heredoc data, and comments do not become deletion targets. Normal cleanup of a specific project or temporary subtree is allowed whether paths are relative, absolute, quoted, or derived from a recognized `mktemp` invocation. Assignments are evaluated in order; later assignments cannot authorize earlier operations. Actual environment values are used, including `TMPDIR`, `TMP`, and `TEMP`; their names alone grant no scope.
 
-Definite system/home/temp-root mutations are blocked even from a broadly rooted session. A whole-workspace wipe or a destructive Git/rsync operation can be reviewed interactively for that exact invocation. Dry runs remain available, and `--force-with-lease` is distinguished from an unconditional force push. No review grants general deletion authority or overrides a hard protected-path decision. Unresolved destructive targets require explicit paths or a simpler command; an unknown value is never silently treated as a temporary directory. Headless runs cannot manufacture interactive approval.
+Definite system/home/temp-root mutations are blocked even from a broadly rooted session. Unresolved destructive targets require explicit paths or a simpler command; an unknown value is never silently treated as a temporary directory. Dry runs always pass.
+
+## Commands that reach beyond the project
+
+Some commands are not dangerous to the files in front of them and still should not happen unasked. The hook names these from the parsed command (never from text inside quotes, comments or data), and each is settled by evidence instead of by a standing prompt:
+
+| The command | Examples | How it is settled |
+| --- | --- | --- |
+| discards uncommitted work that a snapshot can bring back | `git reset --hard`, `git checkout -- file`, `git restore file`, `git clean -fd` | The worktree is snapshotted into `refs/yunuspi/checkpoints/<session>` first, then the command runs. The tool result names the ref and the one-line restore. No prompt. |
+| publishes, deploys or sends | `git push`, `npm publish`, `cargo publish`, `docker push`, `gh pr create`, `vercel --prod`, `terraform apply`, `kubectl delete`, `helm upgrade`, an email | The user's own words decide (below). |
+| deletes what no snapshot covers | `git clean -x`, `git stash drop`, `docker compose down -v`, `aws … delete-*`, `DROP TABLE` sent to a database server, `ssh host rm …`, a whole-workspace wipe, `rsync --delete` | The user's own words decide. |
+| runs a download unread | `curl … \| sh`, `bash <(curl …)`, `sh -c "$(curl …)"` | The user's own words decide. Downloading to a file and reading it first is an ordinary command. |
+| runs a script, build or test as administrator | `sudo make install`, `sudo bash setup.sh` | The user's own words decide. |
+
+**The user's own words.** The hook collects the user's messages from the session (the first one and the latest five; a goal contributes the text the user typed, not the criteria wrapped around it) and asks one typed question: did the user ask for this effect? The typed judge answers when it is enabled; when it is not, or is unsure, the session's own model is asked in a separate request that carries only those messages, the command and its effect. Tool output, web pages and the command text are never evidence: a comment claiming permission proves nothing.
+
+- Asked for it: the command runs, with a one-line notice. "Commit and push" covers the push; "push my branch" does not cover a force push; "bump the version and build" does not cover a publish.
+- Not asked for it, with someone at the screen: a dialog states the effect in plain words and shows the command. The answer covers that one invocation.
+- Not asked for it, with nobody to ask (print mode, a delegated task): the command is not run, and the model is told to finish the rest and report that the step waits for a go-ahead. A delegated task never clears one itself.
+
+`PI_COMMAND_JUDGE=off` skips both judges, so every such command is asked about or refused. No judge can lift a hard block: protected paths, power and network operations and unresolved targets are decided before it is consulted.
+
+Stopping processes by name (`pkill`, `killall`) is allowed when every process the pattern matches was started by this session, which the harness can show because its children inherit a per-process mark. A pattern that also matches anything else stays blocked, and the refusal says what it matched.
+
+No review grants general deletion authority or overrides a hard protected-path decision.
 
 This is bounded accident prevention, not a full shell interpreter or general operating-system sandbox. Complex expansion, sourced scripts, arbitrary Python/JavaScript programs, remote commands and other execution tools are not comprehensively modeled by this hook. The independent harness mount boundary still applies to guarded executable descendants. Concurrent changes by other host processes remain outside its guarantees.
 

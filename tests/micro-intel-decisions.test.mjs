@@ -27,10 +27,10 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
 test("registry names every decision type with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
-    "claim-verification", "delegation-topology", "effort-tier", "evidence-relevance",
+    "claim-verification", "command-request", "delegation-topology", "effort-tier", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "review-aspects",
-    "tool-intent-alignment", "tool-skill-shortlist", "ui-work",
+    "tool-skill-shortlist", "ui-work",
     "verification-method",
   ]);
   for (const spec of Object.values(TYPED_DECISIONS)) {
@@ -169,14 +169,15 @@ test("judge failures degrade to unknown with skip reasons", async () => {
   }
 });
 
-test("tool-intent reports alignment and risk separately", async () => {
+test("command-request clears a consequence only on a clear answer, and refuses on any plurality", async () => {
   metricsMod.resetMicroMetrics();
   try {
-    const verdict = await askTypedDecision("tool-intent-alignment",
-      { state: { tool: "bash", intent: "list files" } },
-      { judge: judgeWith({ aligned: { noul: 0.95 }, risky: { noul: 0.1 } }) });
-    assert.equal(verdict.ok, true);
-    assert.deepEqual(verdict.verdict, { aligned: true, risky: false });
+    const ask = (probabilities) => askTypedDecision("command-request",
+      { state: { userMessages: ["commit and push"], command: "git push", effect: "publishes local commits" } },
+      { judge: judgeWith({ intent: { choice: Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0][0], probabilities } }) });
+    assert.deepEqual((await ask({ requested: 0.9, unrequested: 0.1 })).verdict, { intent: "requested" });
+    assert.equal((await ask({ requested: 0.6, unrequested: 0.4 })).ok, false, "a narrow yes is not a yes");
+    assert.deepEqual((await ask({ requested: 0.45, unrequested: 0.55 })).verdict, { intent: "unrequested" });
   } finally {
     metricsMod.resetMicroMetrics();
   }

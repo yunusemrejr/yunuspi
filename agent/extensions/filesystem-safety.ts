@@ -2,8 +2,15 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+	commandConsequence, elevatedConsequence, pipelineConsequence, programOperands, substitutionConsequence,
+	type Consequence, type ParsedCommand,
+} from "./lib/command-consequence.ts";
+import { commandIntent, sessionModelAsker, userWords, type IntentReading } from "./lib/command-intent.ts";
 import { hostOperationRisk } from "./lib/host-operation-safety.ts";
 import { isDirectReplyPrompt } from "./lib/intent-context.ts";
+import { askJev, jevEnabled } from "./lib/jev-client.ts";
+import { checkpointWorktree, isSnapshotted } from "./lib/worktree-checkpoint.ts";
 import {
 	getAgentDir,
 	type ExtensionAPI,
@@ -63,6 +70,12 @@ type ShellRisk = {
 	target?: string;
 	expanded?: string;
 	resolved: boolean;
+	/** What the command does beyond the project, when that is what needs the
+	 * user's say; the handler clears it by snapshot, by the user's own words or
+	 * by asking. Absent for scope and unknown-target reviews. */
+	consequence?: Consequence;
+	/** Where the command runs, for the snapshot a local loss needs. */
+	workdir?: string;
 };
 type ShellState = {
 	vars: Map<string, string | undefined>;
@@ -428,6 +441,27 @@ function assessShellMutation(
 		reason = "unresolved shell variable or dynamic target",
 		resolved = false,
 	) => note({ level: "review", target, resolved, reason });
+	const consequential = (consequence: Consequence | undefined, target: string) => {
+		if (!consequence) return;
+		// "As administrator" is the least specific thing to say about a command.
+		if (risk?.level === "review" && risk.consequence?.kind === "privilege" && consequence.kind !== "privilege") risk = undefined;
+		let workdir = state.cwd;
+		try {
+			if (consequence.workdir !== undefined && state.cwd) workdir = canonicalMutationPath(consequence.workdir, state.cwd);
+		} catch { workdir = undefined; }
+		note({ level: "review", target, resolved: true, reason: `This command ${consequence.effect}`, consequence, ...(workdir ? { workdir } : {}) });
+	};
+	/** The command a substitution body runs first, behind any wrapper. */
+	const substituted = (body: string): ParsedCommand => {
+		const run: string[] = [];
+		for (const token of shellTokens(body)) {
+			if (token.operator) break;
+			run.push(token.raw);
+		}
+		while (run.length > 1 && ["sudo", "doas", "command", "env", "nohup"].includes(path.basename(run[0]))) run.shift();
+		return { name: path.basename(shellValue(run[0] ?? "", state) ?? ""), values: run.slice(1).map((raw) => shellValue(raw, state)) };
+	};
+	let parsed: ParsedCommand | undefined;
 	const check = (
 		raw: string,
 		recursive = false,
@@ -698,6 +732,13 @@ function assessShellMutation(
 		note(hostOperationRisk(name, values));
 		if (/^python[\d.]*$/.test(name) && values[0] === "-m" && values[1] === "esptool")
 			note(hostOperationRisk("esptool", values.slice(2)));
+		parsed = { name, values };
+		consequential(
+			commandConsequence(name, values) ??
+				substitutionConsequence(name, programOperands(name, values).flatMap((at) => shellSubstitutions(operands[at])).map(substituted)) ??
+				(elevated ? elevatedConsequence(name) : undefined),
+			name,
+		);
 		if (name === "find") {
 			for (let at = 0; at < operands.length; at++) {
 				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(values[at] ?? "")) continue;
@@ -726,8 +767,6 @@ function assessShellMutation(
 				note(assessShellMutation([...operands.slice(at), '"${__PI_XARGS_OPERAND}"'].join(" "), state.cwd ?? cwd,
 					{ ...childEnvironment, __PI_XARGS_OPERAND: undefined }, depth + 1));
 		}
-		if (elevated && /^(?:bash|sh|dash|zsh|python[\d.]*|node|npm|npx|pnpm|yarn|pytest|make|ctest|cargo|go)$/.test(name))
-			uncertain(name, "Elevated scripts, builds and tests can change the host beyond this command's visible operands. Inspect the entrypoint, device/network access and recovery first; prefer an unprivileged focused check or sandbox_run", values.every(value => value !== undefined));
 		if (name === "cd") {
 			const dest = shellValue(
 				operands.find((a) => a !== "--" && a !== "-P" && a !== "-L") ?? "~",
@@ -837,43 +876,8 @@ function assessShellMutation(
 			}
 			return;
 		}
-		// Remote/state-wide operations are reviewable, not rejected because a regex
-		// sees '--force' inside --force-with-lease or '--delete' beside --dry-run.
-		if (name === "git") {
-			let start = 0;
-			while (start < values.length && values[start]?.startsWith("-")) {
-				if (["-C", "-c", "--git-dir", "--work-tree"].includes(values[start]!))
-					start++;
-				start++;
-			}
-			const verb = values[start],
-				opts = values.slice(start + 1);
-			const has = (...flags: string[]) =>
-				opts.some((v) => v !== undefined && flags.includes(v));
-			if (
-				verb === "push" &&
-				!has("--dry-run", "-n") &&
-				(has("--force", "-f", "--delete", "-d", "--mirror") ||
-					opts.some((v) => v?.startsWith("+") || v?.startsWith(":")))
-			)
-				uncertain(
-					"git push",
-					"Remote history or refs would be overwritten or removed; review the exact command",
-					true,
-				);
-			if (
-				(verb === "reset" && has("--hard")) ||
-				(verb === "clean" &&
-					!has("--dry-run", "-n") &&
-					opts.some((v) => /^-[a-z]*f/.test(v ?? "")))
-			)
-				uncertain(
-					"git " + verb,
-					"Working-tree data would be discarded; preview or review the exact command",
-					true,
-				);
-			return;
-		}
+		// Pushes and the verbs that discard work were named with the consequences above.
+		if (name === "git") return;
 		if (name === "rsync") {
 			if (
 				!values.some(
@@ -891,10 +895,7 @@ function assessShellMutation(
 		if (name === "ssh") {
 			const tail = values.filter((v): v is string => v !== undefined).join(" ");
 			if (/\b(?:rm|mkfs|dd|shred)\b/.test(tail))
-				uncertain(
-					"ssh",
-					"Remote mutation has no verified local filesystem scope; review the remote command",
-				);
+				consequential({ kind: "remote-delete", needs: "request", effect: "deletes or overwrites data on a remote machine, where nothing here can check the target or undo it" }, "ssh");
 			return;
 		}
 		if (
@@ -1082,11 +1083,31 @@ function assessShellMutation(
 	};
 	const subshells: ReturnType<typeof snapshot>[] = [];
 	let pipeline: ReturnType<typeof snapshot> | undefined;
+	// Commands joined by `|`, and the command a `<( … )` feeds, are read together:
+	// a download piped or substituted into an interpreter runs unread.
+	const stages: ParsedCommand[] = [];
+	const feeds: (ParsedCommand | undefined)[] = [];
+	const endSegment = (operator?: string) => {
+		const substitutes = operator === "(" && segment.at(-1)?.operator === true && segment.at(-1)!.raw === "<";
+		parsed = undefined;
+		processSegment(segment);
+		segment = [];
+		const run = parsed as ParsedCommand | undefined;
+		if (run) stages.push(run);
+		if (operator !== "|") {
+			consequential(pipelineConsequence(stages), "pipeline");
+			stages.length = 0;
+		}
+		if (operator === "(") feeds.push(substitutes ? run : undefined);
+		if (operator === ")") {
+			const fed = feeds.pop();
+			if (fed && run) consequential(substitutionConsequence(fed.name, [run]), fed.name);
+		}
+	};
 	for (const token of shellTokens(stripShellData(command, "paths"))) {
 		if (token.operator && /^[;\n|&()]|^&&$|^\|\|$/.test(token.raw)) {
 			const before = snapshot();
-			processSegment(segment);
-			segment = [];
+			endSegment(token.raw);
 			if (token.raw === "&&" && conditionalCd) state.cwd = conditionalCd;
 			if (token.raw === "(") {
 				subshells.push(snapshot());
@@ -1108,7 +1129,7 @@ function assessShellMutation(
 			}
 		} else segment.push(token);
 	}
-	processSegment(segment);
+	endSegment();
 	return risk;
 }
 
@@ -1584,6 +1605,9 @@ export function invalidShellPath(command: string, depth = 0): string | undefined
 	}
 }
 
+/** The typed judge answers in about a second; past this the session model is asked instead. */
+const COMMAND_JUDGE_TIMEOUT_MS = 6_000;
+
 export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	let maintenanceReminded = false;
 	pi.on("session_start", () => {
@@ -1603,6 +1627,8 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	const approved = new Map<string, "file" | "directory">(),
 		denied = new Set<string>();
 	const pending = new Map<string, Promise<boolean>>();
+	/** What to tell the model about a snapshot taken before its command ran. */
+	const snapshotNotes = new Map<string, string>();
 	let generation = 0;
 	const reset = () => {
 		generation++;
@@ -1610,6 +1636,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		denied.clear();
 		pending.clear();
 		pendingWaiters.clear();
+		snapshotNotes.clear();
 	};
 	pi.on("session_start", reset);
 	pi.on("session_shutdown", reset);
@@ -1659,42 +1686,88 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		}
 
 		const risk = assessShellMutation(command, ctx.cwd);
-		if (risk) {
-			const reason = `${risk.level === "review" ? "Review required" : "Blocked"}: ${risk.reason}${risk.target ? `: ${JSON.stringify(risk.target)}` : ""}${risk.expanded ? ` (resolves to ${JSON.stringify(risk.expanded)})` : ""}.`;
-			// Approval is for this exact invocation only. It never enlarges write
-			// scope or overrides a hard harness/system boundary.
-			const epoch = generation;
-			if (
-				risk.level === "review" &&
-				risk.resolved &&
-				ctx.hasUI &&
-				!ctx.signal?.aborted
-			) {
-				const allowed = await confirmAccounted(
-					ctx,
-					"Review destructive operation",
-					`${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
-				);
-				if (
-					allowed &&
-					epoch === generation &&
-					!ctx.signal?.aborted &&
-					JSON.stringify(assessShellMutation(command, ctx.cwd)) ===
-						JSON.stringify(risk)
-				)
-					return undefined;
+		if (!risk) return undefined;
+		const reason = `${risk.level === "review" ? "Review required" : "Blocked"}: ${risk.reason}${risk.target ? `: ${JSON.stringify(risk.target)}` : ""}${risk.expanded ? ` (resolves to ${JSON.stringify(risk.expanded)})` : ""}.`;
+		const narrow = " Use explicit, narrow targets or a preview before retrying; unresolved targets are never guessed from variable names.";
+		if (risk.level !== "review") return { block: true, reason };
+		if (!risk.resolved || ctx.signal?.aborted) return { block: true, reason: reason + narrow };
+
+		// Clearing a review covers this exact invocation only: the next one is
+		// read again. It never enlarges write scope or overrides a hard
+		// harness/system boundary.
+		const epoch = generation;
+		const current = () => epoch === generation && !ctx.signal?.aborted &&
+			JSON.stringify(assessShellMutation(command, ctx.cwd)) === JSON.stringify(risk);
+		const consequence = risk.consequence;
+		const effect = consequence ? `This command ${consequence.effect}.` : `${risk.reason}.`;
+		const receipt = (outcome: string, reading: IntentReading = {}) => {
+			try {
+				pi.appendEntry?.("command-review-v1", { target: risk.target, kind: consequence?.kind ?? "scope", needs: consequence?.needs ?? "request", intent: reading.intent, by: reading.by, outcome });
+			} catch { /* diagnostics never block safety */ }
+		};
+
+		// A snapshot makes a local loss recoverable: take it and let the command run.
+		if (consequence?.needs === "snapshot") {
+			let sessionId = "";
+			try { sessionId = ctx.sessionManager?.getSessionId?.() ?? ""; } catch { /* the ref falls back to a fixed name */ }
+			const taken = await checkpointWorktree(risk.workdir ?? ctx.cwd, sessionId, `before ${risk.target}`, true);
+			if (taken.status === "clean" && current()) return undefined;
+			if (isSnapshotted(taken) && current()) {
+				const note = `Uncommitted work was snapshotted before this command ran: ${taken.ref} (${taken.changedCount} path(s)). Bring a file back with: git checkout ${taken.ref} -- <path>`;
+				if (event.toolCallId) snapshotNotes.set(event.toolCallId, note);
+				receipt("snapshot");
+				return undefined;
 			}
-			return {
-				block: true,
-				reason:
-					reason +
-					(risk.level === "review"
-						? " Use explicit, narrow targets or a preview before retrying; unresolved targets are never guessed from variable names."
-						: ""),
-			};
 		}
 
-		return undefined;
+		// The user's own words: a request clears it without a prompt. A delegated
+		// task carries no user words, so a child never clears one by itself.
+		const child = process.env.PI_SUBAGENT_CHILD === "1";
+		let reading: IntentReading = {};
+		if (process.env.PI_COMMAND_JUDGE !== "off") {
+			let words: string[] = [];
+			try { words = child ? [] : userWords(ctx.sessionManager?.getBranch?.()); } catch { words = []; }
+			reading = await commandIntent(command, effect, words, {
+				judge: jevEnabled() ? (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: COMMAND_JUDGE_TIMEOUT_MS }) : undefined,
+				ask: sessionModelAsker(ctx),
+				signal: ctx.signal,
+			});
+		}
+		if (reading.intent === "requested" && current()) {
+			receipt("allowed", reading);
+			if (ctx.hasUI) ctx.ui.notify(`You asked for this, so it runs without a prompt. ${effect}`, "info");
+			return undefined;
+		}
+		if (ctx.hasUI && !ctx.signal?.aborted) {
+			const allowed = await confirmAccounted(
+				ctx,
+				consequence ? "Run this command?" : "Review destructive operation",
+				consequence
+					? `${effect}${reading.intent === "unrequested" ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
+					: `${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
+			);
+			if (allowed && current()) {
+				receipt("confirmed", reading);
+				return undefined;
+			}
+			receipt(allowed ? "stale" : "declined", reading);
+			if (!allowed && consequence)
+				return { block: true, reason: `Not run: the user said no to this command (it ${consequence.effect}). Do not retry it or reach the same effect another way; carry on with the rest, or ask what they would like instead.` };
+			return { block: true, reason: reason + narrow };
+		}
+		receipt("refused", reading);
+		if (!consequence) return { block: true, reason: reason + narrow };
+		return {
+			block: true,
+			reason: `Not run: this command ${consequence.effect}, and ${child ? "a delegated task cannot decide that" : "nothing in the user's messages asks for that"}. Leave this step out and finish the rest; in your report, say that it is waiting for ${child ? "the session that gave you this task" : "the user's go-ahead"}.`,
+		};
+	});
+
+	pi.on("tool_result", (event) => {
+		const note = snapshotNotes.get(event.toolCallId);
+		if (note === undefined) return;
+		snapshotNotes.delete(event.toolCallId);
+		return { content: [...(event.content ?? []), { type: "text" as const, text: note }] };
 	});
 
 	pi.on("tool_result", (event, ctx) => {

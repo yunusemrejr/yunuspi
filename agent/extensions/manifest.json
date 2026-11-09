@@ -219,7 +219,9 @@
     "wire-warmth.ts",
     "project-intelligence-impl.ts",
     "film.ts",
-    "captions.ts"
+    "captions.ts",
+    "command-consequence.ts",
+    "command-intent.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

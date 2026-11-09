@@ -102,11 +102,14 @@ const boundReason = (value: unknown, fallback: string): string => {
 };
 
 /** Snapshot a dirty worktree into the session's private ref. Never throws;
- * every failure mode returns a classified outcome instead of undefined. */
-export function checkpointWorktree(cwd: string, sessionId: string, reason: string): Promise<CheckpointOutcome> {
+ * every failure mode returns a classified outcome instead of undefined.
+ * `fresh` inspects the tree now instead of sharing an outcome from the last
+ * few seconds: a caller about to let work be discarded needs the present
+ * state, not a "clean" from before the latest edit. */
+export function checkpointWorktree(cwd: string, sessionId: string, reason: string, fresh = false): Promise<CheckpointOutcome> {
 	const key = `${cwd}\0${sessionId}`;
 	const cached = recent.get(key);
-	if (cached && Date.now() - cached.at < REUSE_MS) return cached.work;
+	if (!fresh && cached && Date.now() - cached.at < REUSE_MS) return cached.work;
 	const work = snapshot(cwd, sessionId, reason).catch((error) => ({ status: "failed" as const, reason: boundReason(error, "checkpoint failed") }));
 	recent.set(key, { at: Date.now(), work });
 	return work;
