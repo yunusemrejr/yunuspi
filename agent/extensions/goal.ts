@@ -8,11 +8,13 @@
  * resume, fork and compaction all see the same goal. Fail-open: any error here
  * leaves the session running as if no goal existed.
  *
- * This extension also owns the preset goals /noslop, /nobug, /3d, /video and /anatomy (briefs,
- * fronts and the chaining grammar in lib/presets.ts) so
- * every command shares the one persisted goal state instead of writing
- * competing snapshots. `/3d /video /noslop <task>` stacks their aims onto
- * one goal.
+ * /goal is the only command a user needs. The kickoff offers the standards a
+ * kind of work is held to (design, noslop, nobug, 3d, video, anatomy, research,
+ * browser; lib/presets.ts) and the model adopts the ones that apply through the
+ * goal tool; work that plainly is video or 3D adopts its standard even when the
+ * model did not. The older shortcuts /noslop, /nobug, /3d, /video and /anatomy
+ * still start a goal with that standard already in force, and share this
+ * extension's one persisted goal state.
  */
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
@@ -27,7 +29,10 @@ import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalRestoreNotice, goalStatusText, goalSummary,
 	parseGoalArgs, GOAL_USAGE, recordEvidence, recordEvidenceBatch, restoreGoal, setCriteria, stopGate, reopenRejectedGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalState,
 } from "./lib/goal-state.ts";
-import { addBoosts, boostedGoalNotice, chainCompletions, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, PRESET_LABELS, type PresetChain, type PresetId, type PresetTokens } from "./lib/presets.ts";
+import {
+	addBoosts, boostedGoalNotice, chainCompletions, createBoostedGoal, createPresetChainGoal, extractPresetTokens, presetNotice, presetUserText, resolveStandards,
+	standardsBrief, standardsInForce, standardsOffer, standardTools, CHAIN_SUMMARIES, PRESET_IDS, PRESET_LABELS, STANDARD_IDS, type PresetChain, type PresetId, type PresetTokens, type StandardId,
+} from "./lib/presets.ts";
 
 const ENTRY = "goal-state-v1";
 const GOAL_SUBCOMMANDS: ReadonlyArray<readonly [string, string]> = [
@@ -50,6 +55,10 @@ const VERIFY_TOOLS = new Set([
 	"deliverable_check", "svg_inspect", 
 	"sandbox_run", "lsp_diagnostics", "lens_diagnostics",
 ]);
+/** Tools whose use shows what kind of work is under way, whatever the request called it. */
+const WORK_STANDARD: Readonly<Record<string, StandardId>> = { video_project: "video", video_render: "video", blender: "3d" };
+/** A kickoff carries the goal and, while any is left to adopt, the standards on offer. */
+const kickoffText = (state: GoalState) => [goalKickoff(state), standardsOffer(state)].filter(Boolean).join("\n\n");
 function isVerificationToolResult(name: string, input?: Record<string, unknown>): boolean {
 	const action = String(input?.action ?? "");
 	if (name === "blender") return ["render", "inspect", "qa", "verify"].includes(action);
@@ -209,11 +218,28 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		remember(checkStarts, event.toolCallId, { goalId: goal.id, revision: goal.verification?.revision ?? 0,
 			command: String(event.input?.command ?? ""), tool: event.toolName });
 	});
+	// Adopting a standard: its text joins the goal, its fronts become criteria and its tools go on the wire.
+	const adopt = (live: GoalState, ids: readonly StandardId[], ctx: ExtensionContext) => {
+		const added = addBoosts(live, ids);
+		if (!added.fresh.length) return added;
+		persist(added.goal, ctx);
+		try { pi.events?.emit?.("adaptive-pipeline-selection", { sessionManager: ctx.sessionManager, names: standardTools(added.fresh) }); } catch { /* tool_search still finds them */ }
+		return added;
+	};
 	pi.on("tool_result", (event: { toolName?: string; toolCallId?: string; input?: Record<string, unknown>; details?: any; isError?: boolean }, ctx) => {
 		const start = event.toolCallId ? checkStarts.get(event.toolCallId) : undefined;
 		if (event.toolCallId) checkStarts.delete(event.toolCallId);
 		if (!goalIsLive(goal) || event.isError || start && start.goalId !== goal.id) return;
 		const name = event.toolName ?? "";
+		// A model that started a film or a 3D scene without adopting its standard gets it at the first such call.
+		const shown = WORK_STANDARD[name];
+		if (shown && goal.status === "active" && !standardsInForce(goal).includes(shown)) {
+			const added = adopt(goal, [shown], ctx);
+			if (added.fresh.length) {
+				ctx.ui?.notify?.(`Goal ${added.goal.id}: ${PRESET_LABELS[shown]} standard in force, taken from the work under way.`, "info");
+				void Promise.resolve(pi.sendUserMessage(`[goal ${added.goal.id}] ${added.appended}`, { deliverAs: "steer" })).catch(() => { /* the goal anchor still names the standard */ });
+			}
+		}
 		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
 		if (WRITE_TOOLS.has(name)) {
 			const file = event.details?.fileMutation?.resolved ?? event.input?.path;
@@ -301,7 +327,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// `userText` keeps the user's literal words apart from the criteria the harness adds, so
 			// analysis, the Guardian and memory work from what was asked, not from our wrapper.
 			// A goal set while a turn is streaming starts after it instead of failing as "already processing".
-			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(goalKickoff(state), { authored: true, userText: state.text, deliverAs: "followUp" }))
+			const kickoff = (state: GoalState) => void Promise.resolve(pi.sendUserMessage(kickoffText(state), { authored: true, userText: state.text, deliverAs: "followUp" }))
 				.catch((error) => notify(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 			switch (command.kind) {
 				case "status": return notify(goalSummary(goal));
@@ -336,7 +362,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			const open = rearmed.criteria.filter((criterion) => criterion.status === "open").length;
 			const note = "note" in command ? command.note : undefined;
 			notify(`Goal ${rearmed.id} resumed: ${open} of ${rearmed.criteria.length} criteria open, continuation budget reset.${note ? " Your note goes with it." : ""}`);
-			void Promise.resolve(pi.sendUserMessage(`${goalKickoff(rearmed)}${note ? `\n\nThe user's note on resuming: ${note}` : ""}`, { authored: true, userText: note ?? rearmed.text, deliverAs: "followUp" }))
+			void Promise.resolve(pi.sendUserMessage(`${kickoffText(rearmed)}${note ? `\n\nThe user's note on resuming: ${note}` : ""}`, { authored: true, userText: note ?? rearmed.text, deliverAs: "followUp" }))
 				.catch((error) => notify(`Goal resume failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`Goal unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -352,19 +378,18 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		persist(next, ctx);
 		ctx.ui?.notify?.(boostedGoalNotice(found.presets, next), "info");
 		// The literal is the user's own words; the expanded briefs travel as the kickoff text.
-		void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: found.literal, deliverAs: "followUp" }))
+		void Promise.resolve(pi.sendUserMessage(kickoffText(next), { authored: true, userText: found.literal, deliverAs: "followUp" }))
 			.catch((error: unknown) => ctx.ui?.notify?.(`Goal kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 	};
 	// A bare boost while a goal is live joins that goal: its brief is appended and its fronts take the free criteria slots.
 	const boostLive = (live: GoalState, presets: PresetId[], ctx: ExtensionContext) => {
-		const { goal: updated, fresh, fronts, clipped } = addBoosts(live, presets);
+		const { goal: updated, fresh, fronts, clipped } = adopt(live, presets, ctx);
 		if (!fresh.length) return ctx.ui?.notify?.(`${presets.map((id) => PRESET_LABELS[id]).join(" + ")} already in force on goal ${live.id}. /goal shows progress.`, "info");
-		persist(updated, ctx);
 		const labels = fresh.map((id) => PRESET_LABELS[id]).join(" + ");
 		const tracked = fronts ? `${fronts} front(s) tracked` : "no free criteria slots, so it applies through the brief";
 		ctx.ui?.notify?.(`${labels} boost added to goal ${updated.id} — ${tracked}, ${updated.criteria.length} criteria to settle with evidence.${clipped ? ` The goal text is at its ${MAX_GOAL_TEXT}-character cap, so this brief was clipped — /goal clear then re-run the boost for the full brief.` : ""} /goal shows progress, /goal pause stops it.`, "info");
 		// Steered into a running turn, so the work already underway picks the boost up at its next step.
-		void Promise.resolve(pi.sendUserMessage(goalKickoff(updated), { authored: true, userText: presetUserText(fresh, ""), deliverAs: "steer" }))
+		void Promise.resolve(pi.sendUserMessage(kickoffText(updated), { authored: true, userText: presetUserText(fresh as PresetId[], ""), deliverAs: "steer" }))
 			.catch((error: unknown) => ctx.ui?.notify?.(`${labels} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 	};
 
@@ -393,7 +418,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// Authored like a typed /goal, but userText stays the user's own
 			// short demand; the expanded briefs are the harness's wording and
 			// travel as the kickoff message (and the goal text) instead.
-			void Promise.resolve(pi.sendUserMessage(goalKickoff(next), { authored: true, userText: presetUserText(chain.presets, chain.task), deliverAs: "followUp" }))
+			void Promise.resolve(pi.sendUserMessage(kickoffText(next), { authored: true, userText: presetUserText(chain.presets, chain.task), deliverAs: "followUp" }))
 				.catch((error: unknown) => ctx.ui?.notify?.(`${label} kickoff failed: ${error instanceof Error ? error.message : String(error)}`, "warning"));
 		} catch (error) {
 			ctx.ui?.notify?.(`${label} unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -401,7 +426,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.registerCommand("goal", {
-		description: "Set a goal with a real definition of done: /goal <what you want>. /goal shows progress; /goal pause, resume [note], retry, done, clear, help. Boosts chain anywhere in it: /goal /3d /video <task>.",
+		description: "Set a goal with a real definition of done: /goal <what you want>. The session works until each criterion has evidence and holds the work to the standards it needs (design, bugs, 3D, video, research, browser) without being told. /goal shows progress; /goal pause, resume [note], retry, done, clear, help.",
 		chainable: true,
 		// `/goal ` lists its subcommands; a `/` token lists the boosts that can join.
 		getArgumentCompletions: (prefix: string) => {
@@ -411,49 +436,26 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		},
 		handler: goalCommandHandler,
 	});
-	pi.registerCommand("noslop", {
-		description: "Desloppify the codebase: remove AI slop across UI, copy, comments and dead/duplicate code, cut every screen down to a calm low-density essential, and replace what had a real job plainly. Runs as a goal until every front has evidence. Chains with /nobug, /3d, /video and /anatomy.",
-		argumentHint: "[focus — an area, surface or front; omit for the whole codebase]",
-		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "noslop"),
-		handler: startPreset("noslop"),
-	});
-	pi.registerCommand("nobug", {
-		description: "Debug the codebase: hunt logic, edge-case, broken-code, dependency, duplication, UI/UX, responsive and cross-browser bugs; reproduce each, fix it at its root, prove it. Runs as a goal. Chains with /noslop, /3d, /video and /anatomy.",
-		argumentHint: "[focus or assignment — an area, pipeline or output; omit for the whole codebase]",
-		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "nobug"),
-		handler: startPreset("nobug"),
-	});
-	pi.registerCommand("3d", {
-		description: "3D boost: build or fix 3D work (Blender, three.js/WebGL) with real assets, grounded references and rendered proof. Bare /3d improves this project's existing 3D work, or says there is none. Chains: /3d /video /noslop /nobug /anatomy <task>.",
-		argumentHint: "[assignment — what to make; omit to fix this project's 3D work]",
-		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "3d"),
-		handler: startPreset("3d"),
-	});
-	pi.registerCommand("video", {
-		description: "Video boost: make or fix video with finished sound (narration/TTS, music, effects), purposeful visuals and a verified final export. Bare /video improves this project's existing video work, or says there is none. Chains with /3d, /anatomy, /noslop and /nobug.",
-		argumentHint: "[assignment — what to make; omit to fix this project's video work]",
-		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "video"),
-		handler: startPreset("video"),
-	});
-	pi.registerCommand("anatomy", {
-		description: "Anatomy boost: an object or mechanism built from real parts with the anatomy and anatomy-reveal skills — interactive explainers, exploded/dissection pages, product-reveal films — checked by audit and rendered frames. Bare /anatomy improves this project's anatomy figures, or says there are none. Chains: /anatomy /3d /video <task>.",
-		argumentHint: "[assignment — an object, mechanism or system to show; omit to fix this project's anatomy figures]",
-		chainable: true,
-		getArgumentCompletions: (prefix: string) => chainCompletions(prefix, "anatomy"),
-		handler: startPreset("anatomy"),
-	});
+	// Shortcuts from before /goal chose its own standards: `/3d <task>` is `/goal <task>` with 3D already in
+	// force. They keep working and chaining, and stay out of the command menus.
+	for (const id of PRESET_IDS) {
+		pi.registerCommand(id, {
+			description: `Shortcut for /goal with the ${PRESET_LABELS[id]} standard in force: ${CHAIN_SUMMARIES[id]}.`,
+			argumentHint: "[task]",
+			chainable: true,
+			hidden: true,
+			getArgumentCompletions: (prefix: string) => chainCompletions(prefix, id),
+			handler: startPreset(id),
+		});
+	}
 
 	const text = (value: string, details?: Record<string, unknown>) => ({ content: [{ type: "text" as const, text: value }], details: details ?? {} });
 	pi.registerTool({
 		name: "goal",
 		label: "goal",
-		description: "Track the user's /goal. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker (credentials, a decision, access) — difficulty, uncertainty or remaining work is not a blocker; status shows progress.",
+		description: "Track the user's /goal. adopt with items:[standard names from the kickoff] returns each standard in full and tracks its checks. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker (credentials, a decision, access) — difficulty, uncertainty or remaining work is not a blocker; status shows progress.",
 		parameters: Type.Object({
-			action: StringEnum(["status", "check", "met", "waive", "criteria", "blocked", "complete"] as const),
+			action: StringEnum(["status", "check", "adopt", "met", "waive", "criteria", "blocked", "complete"] as const),
 			id: Type.Optional(Type.String({ maxLength: 8, description: "Criterion id such as C1 or V" })),
 			// The owner clips each text and keeps at most MAX_CRITERIA - 1 items; a
 			// schema refusal of longer input only cost a retry turn per call.
@@ -484,6 +486,21 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				case "criteria": {
 					persist(setCriteria(goal, params.items ?? []), ctx);
 					return text(goalSummary(goal));
+				}
+				case "adopt": {
+					const { ids, unknown } = resolveStandards(params.items ?? []);
+					const strangers = unknown.length ? `Not a standard: ${unknown.join(", ")}. ` : "";
+					if (!ids.length) return text(`${strangers}adopt takes standard names in items: ${STANDARD_IDS.join(", ")}.`);
+					const held = standardsInForce(goal);
+					const added = adopt(goal, ids, ctx);
+					const again = ids.filter((id) => held.includes(id));
+					const criteria = added.goal.criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}`).join("\n");
+					return text([
+						strangers.trim(),
+						added.appended,
+						again.length ? `Already in force:\n\n${standardsBrief(again, standardsInForce(added.goal))}` : "",
+						added.fresh.length ? `Criteria now:\n${criteria}` : "",
+					].filter(Boolean).join("\n\n"), { adopted: added.fresh, inForce: standardsInForce(added.goal) });
 				}
 				case "met":
 				case "waive": {

@@ -135,7 +135,7 @@ test('a bare boost joins a live goal: fronts fill free slots before V, and a rep
   const joined = ps.addBoosts(full, ['3d']);
   assert.deepEqual([joined.fresh, joined.fronts, joined.goal.criteria.length], [['3d'], 1, 12]);
   assert.match(joined.goal.criteria.at(-2).text, /^3D: /);
-  assert.match(joined.goal.text, /^own work\n\nBoosts added to this goal — 3D — [\s\S]*\[3D\]\n3D: build the picture/);
+  assert.match(joined.goal.text, /^own work\n\nStandards added to this goal — 3D — [\s\S]*\[3D\]\n3D: build the picture/);
   assert.deepEqual(ps.addBoosts(joined.goal, ['3d']).fresh, [], 'a repeat adds nothing');
   const solo = ps.createPresetChainGoal(ps.parsePresetChain('noslop', 'the settings page'));
   assert.deepEqual(ps.addBoosts(solo, ['noslop']).fresh, []);
@@ -249,4 +249,88 @@ test('a failed goal-state append warns and is retried at the next turn boundary'
   // The next turn boundary retries the same snapshot, so a restart sees `cleared`.
   for (const handler of h.hooks.get('before_agent_start') ?? []) await handler({ type: 'before_agent_start' }, h.ctx);
   assert.equal(h.entries.at(-1).data.status, 'cleared');
+});
+
+test('standard names resolve however they are written, and strangers are reported', () => {
+  assert.deepEqual(ps.resolveStandards(['/3D', ' Video ', 'design', 'cinema', 'video', '']), { ids: ['3d', 'video', 'design'], unknown: ['cinema'] });
+  assert.deepEqual(ps.STANDARD_IDS.filter((id) => !ps.PRESET_IDS.includes(id)), ['design', 'research', 'browser'], 'standards without a shortcut command');
+  const offer = ps.standardsOffer({ boosts: ['video', 'retired-standard'] });
+  assert.match(offer, /^Standards \(in force: Video\): before starting, adopt/);
+  assert.doesNotMatch(offer, /^- video:/m);
+  for (const id of ps.STANDARD_IDS.filter((id) => id !== 'video')) assert.match(offer, new RegExp(`^- ${id}: \\S`, 'm'), id);
+  assert.equal(ps.standardsOffer({ boosts: [...ps.STANDARD_IDS] }), '');
+  assert.deepEqual(ps.standardTools(['research', 'browser', 'noslop']), ['web_search', 'fetch_content', 'browser_session']);
+});
+
+test('a plain /goal offers the standards; the model adopts what its work needs through the goal tool', async () => {
+  const h = harness();
+  const staged = [];
+  h.pi.events = { emit: (name, data) => staged.push({ name, names: data.names }) };
+  await h.commands.goal.handler('Make a 20 second launch film for the bakery with a turning 3D loaf', h.ctx); await tick();
+  assert.equal(h.entries.at(-1).data.boosts, undefined, 'nothing is assumed from the wording');
+  assert.match(h.sent[0], /\[goal-tracked [\s\S]*\n\nStandards: before starting, adopt each one this goal's work calls for with goal\(\{action:"adopt"/);
+  assert.match(h.sent[0], /^- video: a finished video or film$/m);
+  const run = (params) => h.tools.goal.execute('id', params, undefined, undefined, h.ctx);
+
+  const none = await run({ action: 'adopt', items: ['films'] });
+  assert.match(none.content[0].text, /^Not a standard: films\. adopt takes standard names in items: design, noslop, nobug, 3d, video, anatomy, research, browser\.$/);
+
+  const persisted = h.entries.length;
+  const adopted = await run({ action: 'adopt', items: ['video', '3D', 'films'] });
+  const text = adopted.content[0].text;
+  assert.match(text, /^Not a standard: films\.\n\nStandards added to this goal — Video \+ 3D/);
+  assert.match(text, /\nFilm: one film whose hero in every shot is the subject built in 3D/);
+  assert.match(text, /\[Video\]\nVideo: a finished film/);
+  assert.match(text, /\[3D\]\n3D: build the picture/);
+  assert.match(text, /\n\nCriteria now:\n- C1: /);
+  assert.deepEqual(adopted.details, { adopted: ['video', '3d'], inForce: ['video', '3d'] });
+  const goal = h.entries.at(-1).data;
+  assert.equal(h.entries.length, persisted + 1);
+  assert.deepEqual(goal.boosts, ['video', '3d']);
+  assert.ok(goal.criteria.some((c) => c.text.startsWith('Video: ')) && goal.criteria.some((c) => c.text.startsWith('3D: ')));
+  assert.equal(goal.criteria.at(-1).id, 'V');
+  assert.deepEqual(staged.at(-1), { name: 'adaptive-pipeline-selection', names: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'video_frames', 'media_info', 'blender'] });
+
+  const stagedBefore = staged.length;
+  const again = await run({ action: 'adopt', items: ['video'] });
+  assert.match(again.content[0].text, /^Already in force:\n\n\[Video\]\nVideo: a finished film/, 'a model that lost the text to compaction can read it again');
+  assert.equal(h.entries.length, persisted + 1, 'adopting a standard twice changes nothing');
+  assert.equal(staged.length, stagedBefore);
+
+  // The goal anchor names what is in force, and a resumed kickoff offers only what is left.
+  assert.match(gs.goalAnchor(goal), /\nStandards in force: video, 3d \(goal adopt with a name returns it again\)\.\n/);
+  await h.commands.goal.handler('resume', h.ctx); await tick();
+  assert.match(h.sent.at(-1), /\nStandards \(in force: Video, 3D\): /);
+  assert.doesNotMatch(h.sent.at(-1), /^- (?:video|3d): /m);
+  assert.match(h.sent.at(-1), /^- research: /m);
+});
+
+test('work that is plainly a film adopts the video standard when the model did not', async () => {
+  const h = harness();
+  await h.commands.goal.handler('Tell the bakery story for the launch', h.ctx); await tick();
+  const result = (toolName, id) => { for (const hook of h.hooks.get('tool_result')) hook({ toolName, toolCallId: id, input: {}, details: {} }, h.ctx); };
+  result('read', 't0');
+  assert.equal(h.entries.at(-1).data.boosts, undefined, 'ordinary tools say nothing about the kind of work');
+  result('video_project', 't1'); await tick();
+  assert.deepEqual(h.entries.at(-1).data.boosts, ['video']);
+  assert.match(h.sent.at(-1), /^\[goal g\w+\] Standards added to this goal — Video — [\s\S]*\[Video\]\nVideo: a finished film/);
+  assert.deepEqual(h.sentOptions.at(-1), { deliverAs: 'steer' });
+  assert.match(h.notes.at(-1).text, /Video standard in force, taken from the work under way/);
+  const sent = h.sent.length;
+  result('video_render', 't2'); await tick();
+  assert.equal(h.sent.length, sent, 'a standard already in force is not sent twice');
+  result('blender', 't3'); await tick();
+  assert.deepEqual(h.entries.at(-1).data.boosts, ['video', '3d']);
+  assert.match(h.sent.at(-1), /\nFilm: one film whose hero/, '3D joining a film brings the film paragraph');
+});
+
+test('the old shortcuts still run but are kept out of menus; /goal is the one listed command', () => {
+  const h = harness();
+  for (const name of ps.PRESET_IDS) {
+    assert.equal(h.commands[name].hidden, true, name);
+    assert.match(h.commands[name].description, /^Shortcut for \/goal with the /);
+  }
+  assert.equal(h.commands.goal.hidden, undefined);
+  assert.doesNotMatch(h.commands.goal.description, /\/3d|\/video|boost/i);
+  assert.doesNotMatch(gs.GOAL_USAGE, /\/3d|\/video|boost/i);
 });

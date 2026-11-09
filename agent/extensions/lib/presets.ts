@@ -1,18 +1,26 @@
 /**
- * Preset goals — /noslop, /nobug, /3d, /video and /anatomy, alone or chained.
+ * Goal standards — what a kind of work is held to, and the few fronts it is judged on.
  *
- * Each preset is a /goal with a short standard and the few fronts it is judged
- * on. Chained, the standards share one assignment: a chain that makes a video
- * turns noslop, nobug and anatomy into checks on the picture and the file instead
- * of a codebase audit or a kit build, and video with 3d or anatomy adds one film paragraph naming
- * the lead skill. Pure, so the wording and the chaining grammar are testable.
+ * `/goal <task>` is the only command a user needs: the kickoff offers the
+ * standards in one line each and the model adopts the ones its work calls for
+ * through the goal tool, which returns the standard in full, tracks its fronts
+ * as criteria and stages its tools. Five of them can also be named in the text
+ * (`/goal /3d /video <task>`, or the older `/3d <task>` shortcuts). Standards
+ * in force together share one assignment: with video, noslop, nobug and anatomy
+ * judge the picture and the file instead of a codebase or a kit, and video with
+ * 3d or anatomy adds one film paragraph naming the lead guide. Pure, so the
+ * wording and the grammar are testable.
  */
 import path from "node:path";
 import { createGoal, createPresetGoal, MAX_CRITERIA, MAX_GOAL_TEXT, type GoalCriterion, type GoalState } from "./goal-state.ts";
 
+/** Standards a user can also name in the text as a `/token`. */
 export type PresetId = "noslop" | "nobug" | "3d" | "video" | "anatomy";
 export const PRESET_IDS: readonly PresetId[] = ["noslop", "nobug", "3d", "video", "anatomy"];
-export const PRESET_LABELS: Record<PresetId, string> = { noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video", anatomy: "Anatomy" };
+/** Every standard a goal can adopt, in the order the kickoff offers them. */
+export type StandardId = PresetId | "design" | "research" | "browser";
+export const STANDARD_IDS: readonly StandardId[] = ["design", "noslop", "nobug", "3d", "video", "anatomy", "research", "browser"];
+export const PRESET_LABELS: Record<StandardId, string> = { design: "Design", noslop: "Noslop", nobug: "Nobug", "3d": "3D", video: "Video", anatomy: "Anatomy", research: "Research", browser: "Browser" };
 
 const MAX_TASK = 4000;
 const VERIFY_ID = "V";
@@ -162,10 +170,14 @@ const CHOOSE = "a tool, engine or provider the user named is the one to use";
 interface Boost {
 	/** The standard this boost holds the work to. */
 	standard: string;
-	/** What the bare command surveys for; empty means the whole project. */
+	/** The work it is for, as the kickoff offers it. */
+	when: string;
+	/** What a bare shortcut surveys for; empty means the whole project. */
 	kind: string;
 	/** Fronts, most important first; a chain keeps fewer. */
 	fronts: readonly string[];
+	/** Tools this work needs on the wire; adoption stages them so no keyword has to guess. */
+	tools?: readonly string[];
 	/** In a chain that makes a video, noslop, nobug and anatomy judge the picture and the file instead of a codebase or a kit. */
 	media?: { standard: string; front: string };
 }
@@ -183,9 +195,21 @@ export const NOSLOP_CRITERIA: readonly string[] = [
 	"Behavior, public interfaces and the deliberate design kept; checks pass and rendered screens were compared before and after.",
 ];
 
-const BOOSTS: Record<PresetId, Boost> = {
+const BOOSTS: Record<StandardId, Boost> = {
+	design: {
+		standard: `Design: an interface made for this subject and its users, not a template. Read the guide first (${skill("ui-design")}). Before any code, write who uses this and what they come for, then the palette, the type and the layout, each with a reason taken from the subject or the existing brand. Inside an existing product, extend its tokens, components and voice instead of restyling it. Real content only: no invented metrics, testimonials or placeholder copy. Design every state a user can reach (empty, loading, error, long text). Render it in a real browser at 360, 768 and 1440 px (render_see), look at the screenshots, and fix what a designer would reject before reporting.`,
+		when: "building or redesigning an interface, page, deck or other visual surface",
+		kind: "",
+		fronts: [
+			"Palette, type and layout each have a stated reason from the subject or the existing brand; no template look, invented content or decorative filler.",
+			"Rendered in a real browser at phone, tablet and desktop width and the screenshots looked at; nothing overflows, overlaps or shifts on hover and focus.",
+			"Empty, loading, error and long-content states work; keyboard focus is visible and text contrast is readable.",
+		],
+		tools: ["render_see"],
+	},
 	noslop: {
 		standard: NOSLOP_STANDARD,
+		when: "removing AI slop and clutter from an existing interface, copy or codebase",
 		kind: "",
 		fronts: NOSLOP_CRITERIA,
 		media: {
@@ -199,6 +223,7 @@ const BOOSTS: Record<PresetId, Boost> = {
 			"Baseline first: run the project's checks (build, types, lint, tests), record what already fails, and map the entry points and surfaces users touch. Hunt logic errors (conditions, off-by-one, null paths, units and time zones, stale state, races, swallowed errors), edge cases (empty, huge and malformed input, failed network, missing files, first run versus upgrade), broken imports and scripts, and dependency drift. Where there is an interface, test the rendered thing: loading, empty and error states, keyboard and focus, 360px to wide layouts, the target browsers; a terminal app in narrow terminals, piped output and Ctrl-C.",
 			"Each fix: a repro first (a failing test where the project has tests), the smallest root-cause change, then the repro and the existing checks pass. Never mask a bug with swallowed errors, skipped tests, disabled lints or retry loops. Report what you could not prove as suspected and name environments you could not check.",
 		].join("\n\n"),
+		when: "hunting and fixing bugs in existing code",
 		kind: "",
 		fronts: [
 			"Every fix reproduced first, fixed at its root, and the repro and existing checks pass; nothing masked.",
@@ -212,7 +237,9 @@ const BOOSTS: Record<PresetId, Boost> = {
 	},
 	"3d": {
 		standard: `3D: build the picture from real geometry, materials and motivated light. Choose the route from the subject, the deliverable and this machine (Blender through the blender tool and the 3d-cad skill, three.js in code, the anatomy kit for an object made of real parts, or a mix such as a Blender-built GLB in three.js); ${CHOOSE}. Ground proportions and materials in references. Render stills from several angles, look at them, fix what is weak and look again. ${NO_IMAGE_STANDIN} Placeholder primitives are scaffolding, not the delivery. It runs from a clean start with every asset resolving.`,
+		when: "real 3D assets or scenes",
 		kind: "3D (Blender scenes, three.js or WebGL code, models, shaders)",
+		tools: ["blender", "video_frames"],
 		fronts: [
 			"Purpose-built geometry, materials and light grounded in references; no placeholder primitives and no generated or stock image standing in for the 3D.",
 			"Rendered stills from several angles were looked at and the weak ones fixed.",
@@ -221,7 +248,9 @@ const BOOSTS: Record<PresetId, Boost> = {
 	},
 	video: {
 		standard: `Video: a finished film on every track, at a standard a viewer would rank. Plan it before building: the script with timings, what each shot shows and why, the look and the sound; facts the film states come from real sources. Choose the engine from the subject, this machine and the user's words: cinetic (${skill("cinetic")}, Remotion with three.js for 3D, through video_project) for designed films of any kind, Blender for photoreal scenes, the media guide (${skill("media")}) for editing supplied footage; ${CHOOSE}. Choose the voice the same way: the provider the user named, else the best one available here (ElevenLabs with a key, a /models speech route, local Piper). Look at a hero still before any long render, a contact sheet of every shot and frames from the final file (read returns images; a text-only model uses image_understand); fix what a director would reject. Sound: narration on the picture it describes, music ducked under speech, effects on visible motion, the master measured (video_qa listen; about -16 LUFS, true peak under -1 dBTP). Previews small, the final once; one file at the asked length, size and frame rate.`,
+		when: "a finished video or film",
 		kind: "video (timelines, render scripts, narration and music, exports)",
+		tools: ["video_project", "video_render", "video_qa", "narration_tts", "video_frames", "media_info"],
 		fronts: [
 			"Every shot is purposeful in stills you looked at, transitions follow motion, and no placeholder or mistimed frames survive.",
 			"Narration intelligible and in sync, music under speech, nothing clipped, measured on the delivered file.",
@@ -230,6 +259,7 @@ const BOOSTS: Record<PresetId, Boost> = {
 	},
 	anatomy: {
 		standard: `Anatomy: show the subject as a real object made of real parts, with motion and numbers from one model. Choose and read the guide first: anatomy (${skill("anatomy")}) to explain how something works; anatomy-reveal (${skill("anatomy-reveal")}) to show one object taken apart, as a page or a reveal film. Start from the closest example, copy the kit into the project and never write into the skill folder. Write a short spec from real references first: dimensions, parts by assembly, the feature that moves. No traced or embedded images. Run the skill's checks (kit audit, scan-apart, motion scan), look at every image they make, and drive pages in a real browser.`,
+		when: "a figure or film that shows a real object's parts or how a mechanism works",
 		kind: "anatomy (figures built with the anatomy kit, anatomy-reveal projects, exploded views)",
 		fronts: [
 			"Built with the chosen anatomy skill's kit at real dimensions from a written spec; its checks report clean.",
@@ -241,19 +271,81 @@ const BOOSTS: Record<PresetId, Boost> = {
 			front: "the subject's parts, proportions and motion match real references, and the shots show how it is built or works.",
 		},
 	},
+	research: {
+		standard: `Research: an answer a careful reader can check. Read the guide first (${skill("research")}). Search with web_search, then open the pages that matter (fetch_content) instead of trusting snippets, and prefer the primary source (the paper, the documentation, the filing, the dataset) to a write-up about it. Every claim the conclusion rests on gets a source you opened, with its date; one that carries real weight gets a second, independent source. Give a number with its unit, its date and what it is a share of. Say what the sources disagree on and what you could not find, and keep what a source states apart from what you infer. Lead with the answer, then the support.`,
+		when: "an answer or report built from sources found on the web",
+		kind: "",
+		fronts: [
+			"Every claim the conclusion rests on cites a source that was opened, with its date; the weightiest have a second independent source.",
+			"What the sources disagree on and what could not be found is stated; inference is marked as inference.",
+		],
+		tools: ["web_search", "fetch_content"],
+	},
+	browser: {
+		standard: `Browser: operate the site the way a careful person would. Read the guide first (${skill("browser")}). With browser_session, snapshot and read the page before each action, act on what is actually there, and confirm each step on the page (the new state, a confirmation, the changed value) before the next. A login, CAPTCHA or verification code goes to the user. Go up to but not through paying, sending, posting, deleting or submitting in the user's name unless they asked for exactly that; after an uncertain submit, check whether it went through before trying again. Type no secret the user did not give for this site. Report what was done, what was read off the page, and where it ended.`,
+		when: "operating a live website",
+		kind: "",
+		fronts: [
+			"The end state was confirmed on the page itself after the last step (snapshot or screenshot), not assumed from a click.",
+			"Nothing was paid, sent, posted or deleted beyond what the user asked for; logins and verification prompts went to the user.",
+		],
+		tools: ["browser_session"],
+	},
 };
 
-const isMedia = (ids: readonly PresetId[]) => ids.length > 1 && ids.includes("video");
-const isFilm = (ids: readonly PresetId[]) => ids.includes("video") && (ids.includes("3d") || ids.includes("anatomy"));
+/**
+ * Standard names as a model or user writes them (`video`, `/3D`, `Design`),
+ * resolved to ids. Anything that is not a standard comes back in `unknown`.
+ */
+export function resolveStandards(items: readonly unknown[]): { ids: StandardId[]; unknown: string[] } {
+	const ids: StandardId[] = [];
+	const unknown: string[] = [];
+	for (const item of items ?? []) {
+		const name = String(item ?? "").trim().replace(/^\//, "").toLowerCase();
+		const id = STANDARD_IDS.find((candidate) => candidate === name);
+		if (!id) { if (name) unknown.push(name.slice(0, 40)); }
+		else if (!ids.includes(id)) ids.push(id);
+	}
+	return { ids, unknown };
+}
+
+/** The goal's standards as recorded, ignoring anything another build wrote that this one does not know. */
+export const standardsInForce = (goal: Pick<GoalState, "boosts">): StandardId[] => resolveStandards(goal.boosts ?? []).ids;
+
+/** Standards already in force, in full, for a model that lost them to compaction. */
+export function standardsBrief(ids: readonly StandardId[], inForce: readonly StandardId[]): string {
+	return ids.map((id) => `[${PRESET_LABELS[id]}]\n${standardOf(id, inForce)}`).join("\n\n");
+}
+
+/** Tools the given standards need on the wire. */
+export const standardTools = (ids: readonly StandardId[]): string[] => [...new Set(ids.flatMap((id) => BOOSTS[id].tools ?? []))];
+
+/**
+ * The offer that closes a goal kickoff: one line per standard not yet in
+ * force, so the model picks what its work calls for instead of the user typing
+ * a command per kind of work. Empty once every standard is in force.
+ */
+export function standardsOffer(goal: Pick<GoalState, "boosts">): string {
+	const inForce = standardsInForce(goal);
+	const open = STANDARD_IDS.filter((id) => !inForce.includes(id));
+	if (!open.length) return "";
+	return [
+		`Standards${inForce.length ? ` (in force: ${inForce.map((id) => PRESET_LABELS[id]).join(", ")})` : ""}: before starting, adopt each one this goal's work calls for with goal({action:"adopt", items:[…]}). It returns the standard in full, tracks its checks and readies its tools. Adopt another when the work turns out to need it; make no call when none fits.`,
+		...open.map((id) => `- ${id}: ${BOOSTS[id].when}`),
+	].join("\n");
+}
+
+const isMedia = (ids: readonly StandardId[]) => ids.length > 1 && ids.includes("video");
+const isFilm = (ids: readonly StandardId[]) => ids.includes("video") && (ids.includes("3d") || ids.includes("anatomy"));
 
 /** The standard a boost contributes in this chain. */
-function standardOf(id: PresetId, ids: readonly PresetId[]): string {
+function standardOf(id: StandardId, ids: readonly StandardId[]): string {
 	const boost = BOOSTS[id];
 	return isMedia(ids) && boost.media ? boost.media.standard : boost.standard;
 }
 
 /** A boost's first `count` fronts for this chain, labelled. */
-function labelledFronts(id: PresetId, count: number, ids: readonly PresetId[]): string[] {
+function labelledFronts(id: StandardId, count: number, ids: readonly StandardId[]): string[] {
 	const boost = BOOSTS[id];
 	const fronts = isMedia(ids) && boost.media ? [boost.media.front] : boost.fronts;
 	return fronts.slice(0, count).map((text) => `${PRESET_LABELS[id]}: ${text}`);
@@ -339,25 +431,26 @@ const fit = (text: string) => {
 function goalAssignment(text: string): string {
 	const assignment = /(?:^|\n\n)Assignment: ([\s\S]*?)(?:\n\n|$)/.exec(text)?.[1];
 	if (assignment !== undefined) return assignment.replace(/\s+/g, " ").trim();
-	const cut = text.search(/\n\n(?:Boosts in force|Boosts added to this goal)/);
+	const cut = text.search(/\n\n(?:Boosts in force|Boosts added to this goal|Standards added to this goal)/);
 	const base = (cut >= 0 ? text.slice(0, cut) : text).replace(/\s+/g, " ").trim();
 	return /^(?:Boosts in force|Desloppify:|Debug:|3D:|Video:|Anatomy:)/.test(base) ? "" : base;
 }
 
 /**
- * Bare boosts added to a live goal: each new standard joins the goal text and
- * its fronts take the free criteria slots ahead of V. A boost already in force
- * is skipped; when nothing is new the goal comes back unchanged with `fresh`
+ * Standards added to a live goal: each new one joins the goal text and its
+ * fronts take the free criteria slots ahead of V. One already in force is
+ * skipped; when nothing is new the goal comes back unchanged with `fresh`
  * empty. The continuation budget is re-armed because the goal has new work.
+ * `appended` is the text that joined the goal, for the caller to hand over.
  */
-export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = Date.now()): { goal: GoalState; fresh: PresetId[]; fronts: number; clipped: boolean } {
-	const recorded = goal.boosts ?? [];
+export function addBoosts(goal: GoalState, presets: readonly StandardId[], now = Date.now()): { goal: GoalState; fresh: StandardId[]; fronts: number; clipped: boolean; appended: string } {
+	const recorded = standardsInForce(goal);
 	const requested = [...new Set(presets)];
 	const all = [...new Set([...recorded, ...requested])];
 	const tracked = (text: string) => goal.criteria.some((criterion) => criterion.text === fit(text));
-	const carried = (id: PresetId) => labelledFronts(id, 3, all).every((text) => tracked(text) || tracked(text.slice(PRESET_LABELS[id].length + 2)));
+	const carried = (id: StandardId) => labelledFronts(id, 3, all).every((text) => tracked(text) || tracked(text.slice(PRESET_LABELS[id].length + 2)));
 	const fresh = requested.filter((id) => !recorded.includes(id) && !carried(id));
-	if (!fresh.length) return { goal, fresh, fronts: 0, clipped: false };
+	if (!fresh.length) return { goal, fresh, fronts: 0, clipped: false, appended: "" };
 	const queued = fresh.flatMap((id) => labelledFronts(id, perBoost(all.length), all)).filter((text) => !tracked(text));
 	const body = goal.criteria.filter((criterion) => criterion.id !== VERIFY_ID);
 	const tail = goal.criteria.filter((criterion) => criterion.id === VERIFY_ID);
@@ -366,7 +459,7 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 	const added = queued.slice(0, room).map((text): GoalCriterion => ({ id: `C${++counter}`, text: fit(text), status: "open" }));
 	const film = isFilm(all) && !isFilm(recorded) ? [filmDirective(goalAssignment(goal.text))] : [];
 	const appended = [
-		`Boosts added to this goal — ${fresh.map((id) => PRESET_LABELS[id]).join(" + ")} — in force from here on, alongside everything above.`,
+		`Standards added to this goal — ${fresh.map((id) => PRESET_LABELS[id]).join(" + ")} — in force from here on, alongside everything above.`,
 		...film,
 		...fresh.map((id) => `[${PRESET_LABELS[id]}]\n${standardOf(id, all)}`),
 	].join("\n\n");
@@ -378,7 +471,7 @@ export function addBoosts(goal: GoalState, presets: readonly PresetId[], now = D
 		boosts: all,
 		status: "active", nudges: 0, progressMark: "", stalls: 0, note: undefined, updatedAt: now,
 	};
-	return { goal: next, fresh, fronts: added.length, clipped: full.length > MAX_GOAL_TEXT };
+	return { goal: next, fresh, fronts: added.length, clipped: full.length > MAX_GOAL_TEXT, appended };
 }
 
 /** One-line notice when a /goal starts with preset boosts. */

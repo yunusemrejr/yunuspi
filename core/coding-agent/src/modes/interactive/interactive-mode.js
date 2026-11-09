@@ -464,16 +464,15 @@ export class InteractiveMode {
         }));
         // Convert extension commands to SlashCommand format
         const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
-        // Chainable boosts lead the list and say so, so they read as a family
-        // distinct from one-shot commands.
         const toItem = (cmd) => ({
             name: cmd.invocationName,
-            description: cmd.chainable ? `[boost · chains] ${cmd.description ?? ""}` : this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
+            description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
             ...(cmd.argumentHint && { argumentHint: cmd.argumentHint }),
             getArgumentCompletions: cmd.getArgumentCompletions,
         });
-        const registered = this.session.extensionRunner.getRegisteredCommands().filter((cmd) => !builtinCommandNames.has(cmd.name));
-        const boostCommands = registered.filter((cmd) => cmd.chainable).map(toItem);
+        // Hidden commands still run when typed; they are simply not offered. /goal leads the list.
+        const registered = this.session.extensionRunner.getRegisteredCommands().filter((cmd) => !builtinCommandNames.has(cmd.name) && !cmd.hidden);
+        const leadCommands = registered.filter((cmd) => cmd.chainable).map(toItem);
         const extensionCommands = registered.filter((cmd) => !cmd.chainable).map(toItem);
         // Build skill commands from session.skills (if enabled)
         this.skillCommands.clear();
@@ -488,7 +487,7 @@ export class InteractiveMode {
                 });
             }
         }
-        return new CombinedAutocompleteProvider([...boostCommands, ...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList], this.sessionManager.getCwd(), this.fdPath);
+        return new CombinedAutocompleteProvider([...leadCommands, ...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList], this.sessionManager.getCwd(), this.fdPath);
     }
     setupAutocompleteProvider() {
         let provider = this.createBaseAutocompleteProvider();

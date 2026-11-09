@@ -40,7 +40,7 @@ export interface GoalState {
 	updatedAt: number;
 	/** Native writes and the latest revision covered by a successful check. */
 	verification?: { revision: number; checked: number };
-	/** Preset boosts (3D, Video, ...) already written into this goal, so a bare repeat adds nothing. */
+	/** Standards (design, video, 3d, ...) already written into this goal, so adopting one twice adds nothing. */
 	boosts?: string[];
 }
 
@@ -111,7 +111,7 @@ const ALIASES: Record<string, GoalCommand["kind"]> = { stop: "clear", continue: 
 
 /** Every `/goal` form in one place: `/goal help`, the bare-goal status and the desktop composer show it. */
 export const GOAL_USAGE = [
-	"/goal <what you want done> starts a goal; boosts chain anywhere in it: /goal /3d /video <task>.",
+	"/goal <what you want done> starts a goal. It works out what kind of work this is and holds it to the matching standards (design, bugs, 3D, video, research, browser and so on) by itself.",
 	"/goal shows progress · /goal pause · /goal resume [note] (or continue) · /goal retry after a stall · /goal done marks it achieved yourself · /goal clear (or stop) drops it · /goal criteria a; b replaces the open criteria.",
 ].join("\n");
 
@@ -303,7 +303,8 @@ function continuationPrompt(goal: GoalState): string {
 export function goalAnchor(goal: GoalState | undefined): string | undefined {
 	if (!goal || goal.status !== "active") return undefined;
 	const rows = goal.criteria.map((criterion) => `${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}`);
-	return `[Goal ${goal.id} — set by the user; the session continues until every criterion has evidence]\n${clip(goal.text, 400)}\n${rows.join("\n")}\nWork directly on the request. When finished, record all criterion evidence and close in one goal({action:"complete", results:[{id,evidence},…]}) call. check is optional diagnostics; do not add a check/status turn just to finish.`;
+	const standards = goal.boosts?.length ? `\nStandards in force: ${goal.boosts.join(", ")} (goal adopt with a name returns it again).` : "";
+	return `[Goal ${goal.id} — set by the user; the session continues until every criterion has evidence]\n${clip(goal.text, 400)}\n${rows.join("\n")}${standards}\nWork directly on the request. When finished, record all criterion evidence and close in one goal({action:"complete", results:[{id,evidence},…]}) call. check is optional diagnostics; do not add a check/status turn just to finish.`;
 }
 
 /** The message that starts work on a freshly set goal; the marker stages the goal tool. */
@@ -316,7 +317,7 @@ export function goalSummary(goal: GoalState | undefined): string {
 	const met = goal.criteria.filter((criterion) => criterion.status !== "open").length;
 	const header = `Goal ${goal.id} [${goal.status}] ${met}/${goal.criteria.length} criteria settled, ${goal.nudges} continuation(s)${goal.note ? ` — ${goal.note}` : ""}`;
 	const next = { active: "/goal pause stops it · /goal clear drops it", paused: "/goal resume continues it", blocked: "/goal retry continues it · /goal clear drops it", achieved: "/goal <text> starts the next one" }[goal.status as "active"];
-	return [header, clip(goal.text, 300), ...goal.criteria.map((criterion) => `  ${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}${criterion.evidence ? ` — ${criterion.evidence}` : ""}`), ...(next ? [next] : [])].join("\n");
+	return [header, clip(goal.text, 300), ...(goal.boosts?.length ? [`Standards: ${goal.boosts.join(", ")}`] : []), ...goal.criteria.map((criterion) => `  ${criterion.status === "open" ? "[ ]" : criterion.status === "met" ? "[x]" : "[~]"} ${criterion.id} ${criterion.text}${criterion.evidence ? ` — ${criterion.evidence}` : ""}`), ...(next ? [next] : [])].join("\n");
 }
 
 /**

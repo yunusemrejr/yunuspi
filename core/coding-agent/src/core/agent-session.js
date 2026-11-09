@@ -2276,6 +2276,7 @@ export class AgentSession {
                 sourceInfo: command.sourceInfo,
                 ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
                 ...(command.chainable ? { chainable: true } : {}),
+                ...(command.hidden ? { hidden: true } : {}),
                 ...(command.interactiveOnly ? { interactiveOnly: true } : {}),
             }));
             const templates = this.promptTemplates.map((template) => ({

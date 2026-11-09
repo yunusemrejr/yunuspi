@@ -6,8 +6,10 @@ export interface SlashCommandInfo {
     source: SlashCommandSource;
     sourceInfo: SourceInfo;
     argumentHint?: string;
-    /** A boost that combines with the other chainable commands in one message: `/3d /video /noslop make X`. */
+    /** A command whose tokens may share one message with the other chainable commands: `/goal /3d /video make X`. */
     chainable?: boolean;
+    /** Runs when typed, but stays out of menus, autocomplete and command lists. */
+    hidden?: boolean;
     /** Works only in the terminal UI. */
     interactiveOnly?: boolean;
 }

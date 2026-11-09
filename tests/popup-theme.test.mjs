@@ -106,8 +106,10 @@ test('commands page groups by source in a stable order and escapes the filter in
   assert.ok(!html.includes('Skill <b>'));
   assert.doesNotMatch(html, /data-cmd="[^"]*"[^>]*"[^"]*">/, 'attribute values cannot be broken out of');
   assert.match(signals.commandsHtml([]), /No slash commands are registered/);
-  const boosts = signals.commandsHtml([{ name: 'used', source: 'extension' }, { name: 'video', source: 'extension', chainable: true }]);
-  assert.ok(boosts.indexOf('Boosts') >= 0 && boosts.indexOf('Boosts') < boosts.indexOf('Extension commands'), 'chainable boosts lead as their own group');
+  const listed = signals.commandsHtml([{ name: 'used', source: 'extension' }, { name: 'video', source: 'extension', hidden: true }]);
+  assert.match(listed, /\/used/);
+  assert.doesNotMatch(listed, /\/video|Boosts/, 'a hidden shortcut is not listed');
+  assert.match(listed, /1 registered/);
 });
 
 test('system prompt page outlines headings but not comment lines inside code fences', () => {

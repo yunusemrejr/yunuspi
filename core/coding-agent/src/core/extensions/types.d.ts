@@ -923,8 +923,10 @@ export interface RegisteredCommand {
     description?: string;
     /** Shown after the command name in autocomplete: what the arguments are. */
     argumentHint?: string;
-    /** A boost that combines with the other chainable commands in one message: `/3d /video /noslop make X`. */
+    /** A command whose tokens may share one message with the other chainable commands: `/goal /3d /video make X`. */
     chainable?: boolean;
+    /** Runs when typed, but stays out of menus, autocomplete and command lists. */
+    hidden?: boolean;
     /** Works only in the terminal UI; other front ends present it as terminal-only. */
     interactiveOnly?: boolean;
     getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;

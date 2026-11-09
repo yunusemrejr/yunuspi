@@ -150,8 +150,10 @@ export interface RpcSlashCommand {
     sourceInfo: SourceInfo;
     /** What the arguments are, for extension commands that declare it */
     argumentHint?: string;
-    /** A boost that combines with the other chainable commands in one message */
+    /** A command whose tokens may share one message with the other chainable commands */
     chainable?: boolean;
+    /** Runs when typed, but stays out of menus, autocomplete and command lists. */
+    hidden?: boolean;
     /** Works only in the terminal UI */
     interactiveOnly?: boolean;
 }

@@ -566,6 +566,7 @@ export async function runRpcMode(runtimeHost) {
                         sourceInfo: command.sourceInfo,
                         ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
                         ...(command.chainable ? { chainable: true } : {}),
+                        ...(command.hidden ? { hidden: true } : {}),
                         ...(command.interactiveOnly ? { interactiveOnly: true } : {}),
                     });
                 }
