@@ -18,8 +18,9 @@ test('the embedded skill ships with frontmatter and the swap test', () => {
   const file = path.join(agent, 'skills', UI_DOCTRINE_SKILL, 'SKILL.md');
   const body = fs.readFileSync(file, 'utf8');
   assert.match(body, /^---\nname: ui-design\ndescription: .{40,}\n---/);
-  for (const anchor of ['Ground and anti-slop', 'Swap test', 'Banned as defaults', 'Verify by rendering'])
+  for (const anchor of ['Indigo SaaS', 'Cream editorial', 'Name the subject', 'Real content only', 'swap test', '360, 768 and 1440'])
     assert.ok(body.includes(anchor), anchor);
+  assert.ok(body.length < 6_000, 'the guide is read whole before design work, so it stays short');
   assert.ok(!/Voidstack|earlier in this conversation/.test(body), 'no unresolvable conversation references');
 });
 
