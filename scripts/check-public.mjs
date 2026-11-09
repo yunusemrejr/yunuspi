@@ -13,7 +13,7 @@ const PUBLIC_BINARY_SHA256 = {
   "core/coding-agent/src/modes/interactive/assets/clankolas.png": "169acd0dfe6fbb8d8742ed24a3fc654fd0b2e2d4223c733249c5493723f1b72d",
   // Rendered from desktop/renderer/assets/app-icon.svg at 256px.
   "desktop/renderer/assets/app-icon.png":
-    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
+    "f25c2043ba71b940a7ca88e02e06ed7bb4e5103279fceca09678df1cc6618712",
   "docs/assets/metrics-demo.png":
     "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
   // The next four entries are not mirror handling: the removed release-template/
@@ -57,12 +57,16 @@ const PUBLIC_BINARY_SHA256 = {
     "ac0f25247763dfd90bfb95b8c85bf0a01794ff330c2f0eb33338cddebf83ae52",
 };
 
-// Previously published import-free Guardian kernel, reviewed at 511b6f4.
-// History-only: these bytes are NEVER accepted in the tree or index, where
-// the current binary and matching source/build provenance remain mandatory.
-const REVIEWED_HISTORICAL_GUARDIAN = Object.freeze({
+// Published binaries a later release replaced. History-only: these bytes are
+// NEVER accepted in the tree or index, where the current binary (and, for the
+// Guardian kernel, matching source/build provenance) remains mandatory.
+const REVIEWED_HISTORICAL_BINARY = Object.freeze({
+  // Import-free Guardian kernel, reviewed at 511b6f4.
   "core/coding-agent/src/core/guardian/similarity.wasm":
     "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
+  // The launcher icon before the 0.51 redraw.
+  "desktop/renderer/assets/app-icon.png":
+    "2e90e33676c0831eab4d05cd6daa49fc8fc978c286ae0e853d42c1ad8c124865",
 });
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -304,8 +308,8 @@ export function scanGit(root, { history = true } = {}) {
       if (end >= data.length || data[end] !== 10) throw Error('Truncated Git blob; publication blocked.');
       const content = data.subarray(headerEnd + 1, end);
       for (const [filename, origin] of objects.get(oid)) {
-        const reviewedHistory = origin === "history" && Object.hasOwn(REVIEWED_HISTORICAL_GUARDIAN, filename)
-          && createHash("sha256").update(content).digest("hex") === REVIEWED_HISTORICAL_GUARDIAN[filename];
+        const reviewedHistory = origin === "history" && Object.hasOwn(REVIEWED_HISTORICAL_BINARY, filename)
+          && createHash("sha256").update(content).digest("hex") === REVIEWED_HISTORICAL_BINARY[filename];
         if (!reviewedHistory) findings.push(...scanContent(filename, content).map(f => ({ ...f, origin })));
       }
       offset = end + 1;

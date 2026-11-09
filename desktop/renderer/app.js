@@ -618,19 +618,23 @@ async function showThinking() {
   const id = activeId; if (!id) return;
   await loadingModal('Thinking level', id, () => api.models(id), (content, { levels }) => { const list = element('div', 'dialog-list'); for (const level of levels) list.append(actionButton(level[0].toUpperCase() + level.slice(1), 'brain', async () => { await api.setThinking(id, level); conversationOf(id).thinkingLevel = level; renderChrome(); })); content.append(list); });
 }
-// The session's commands, fetched once per runtime: boosts (chainable), then
-// one-shot commands and workflows, then skills.
+// The session's commands, fetched once per runtime. Menus list commands, then
+// skills, with /goal first: it is the one command a task needs. Shortcut
+// commands the harness marks hidden still work when typed and are read by the
+// command lens; they are just not advertised. A chainable command that is not
+// hidden (an extension's own) gets its own group.
 function commandsFor(id) {
   // Terminal-only commands cannot run here, so they are not offered.
   if (!commandLists.has(id)) commandLists.set(id, api.commands(id).then(result => result.commands.filter(c => !c.interactiveOnly)).catch(error => { commandLists.delete(id); throw error; }));
   return commandLists.get(id);
 }
 const COMMAND_GROUPS = [
-  { key: 'boost', title: 'Boosts', note: 'Combine any of these in one message: /3d /video /noslop make a film about…', symbol: 'link' },
-  { key: 'command', title: 'Commands', note: 'Run one at a time.', symbol: 'compass' },
+  { key: 'command', title: 'Commands', note: '/goal keeps working until the result holds; it chooses its own standards.', symbol: 'compass' },
+  { key: 'boost', title: 'Standards', note: 'Optional. Add one to a goal to insist on it.', symbol: 'link' },
   { key: 'skill', title: 'Skills', note: 'Load one guide into the session.', symbol: 'file' },
 ];
-const groupOf = command => command.chainable ? 'boost' : command.source === 'skill' ? 'skill' : 'command';
+const groupOf = command => command.name === 'goal' ? 'command' : command.chainable ? 'boost' : command.source === 'skill' ? 'skill' : 'command';
+const listed = commands => commands.filter(c => !c.hidden).sort((a, b) => (b.name === 'goal') - (a.name === 'goal'));
 function commandOption(command, symbol) {
   const button = element('button'), detail = element('span', '', `/${command.name}`);
   detail.append(element('small', '', command.description || command.source)); button.append(icon(symbol), detail);
@@ -643,7 +647,7 @@ async function showCommands() {
     const draw = () => {
       list.replaceChildren();
       const query = search.value.toLocaleLowerCase();
-      const matches = commands.filter(c => `${c.name} ${c.description ?? ''}`.toLocaleLowerCase().includes(query));
+      const matches = listed(commands).filter(c => `${c.name} ${c.description ?? ''}`.toLocaleLowerCase().includes(query));
       for (const group of COMMAND_GROUPS) {
         const members = matches.filter(c => groupOf(c) === group.key).slice(0, 150);
         if (!members.length) continue;
@@ -658,8 +662,8 @@ async function showCommands() {
   });
 }
 
-// Slash menu: typing /… at the start lists commands; after a boost, typing /…
-// again lists the boosts that can still join the chain.
+// Slash menu: typing /… at the start lists commands; after a chainable one,
+// typing /… again lists the others that can still join it.
 let commandMenu = null, commandMenuRequest = 0;
 function slashContext() {
   const prompt = $('prompt'); if (prompt.selectionStart !== prompt.selectionEnd) return null;
@@ -687,7 +691,7 @@ async function updateCommandMenu() {
   if (request !== commandMenuRequest || id !== activeId || !context) return request === commandMenuRequest ? closeCommandMenu() : undefined;
   const sections = [];
   if (context.kind === 'command') {
-    const ranked = rankCommands(commands, context.query);
+    const ranked = rankCommands(listed(commands), context.query);
     for (const group of COMMAND_GROUPS) {
       if (group.key === 'skill' && context.query.length < 2) continue;
       const members = ranked.filter(c => groupOf(c) === group.key).slice(0, group.key === 'boost' ? 8 : 6);
@@ -696,7 +700,7 @@ async function updateCommandMenu() {
   } else if (commands.find(c => c.name === context.head)?.chainable) {
     const present = new Set([...$('prompt').value.matchAll(/(?:^|\s)\/([\w-]+)/g)].map(match => match[1].toLocaleLowerCase()));
     const members = commands.filter(c => c.chainable && !present.has(c.name) && c.name.startsWith(context.query));
-    if (members.length) sections.push({ group: { ...COMMAND_GROUPS[0], note: `Joins /${context.head} in the same message.` }, members });
+    if (members.length) sections.push({ group: { ...COMMAND_GROUPS.find(group => group.key === 'boost'), note: `Joins /${context.head} in the same message.` }, members });
   }
   if (!sections.length) return closeCommandMenu();
   commandMenu = { context, items: sections.flatMap(section => section.members), index: 0 };
@@ -973,7 +977,7 @@ document.addEventListener('keydown', event => {
 for (const suggestion of document.querySelectorAll('[data-suggest]')) suggestion.onclick = () => tryAction(async () => {
   if (!activeId) await newSession();
   if (!activeId) return;
-  setEditorDraft(activeId, { explore: 'Explore this project and explain how its main parts fit together.', build: 'Help me build ', improve: 'Find and fix the most useful improvements in this project.' }[suggestion.dataset.suggest], true);
+  setEditorDraft(activeId, { goal: '/goal ', explore: 'Explore this project and explain how its main parts fit together.', build: 'Help me build ', improve: 'Find and fix the most useful improvements in this project.' }[suggestion.dataset.suggest], true);
 });
 let narrow = innerWidth <= 850;
 new ResizeObserver(() => {

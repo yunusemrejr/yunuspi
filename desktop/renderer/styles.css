@@ -420,7 +420,14 @@ kbd {
 }
 .suggestions {
   display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
   gap:11px
+}
+/* The one action a task needs carries the accent; the rest stay quiet. */
+.suggestions button[data-suggest="goal"] {
+  border-color:var(--accent);
+  color:var(--accent)
 }
 .suggestions button {
   display:flex;

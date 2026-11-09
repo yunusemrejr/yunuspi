@@ -61,6 +61,12 @@ export default function(pi) {
   for (const name of ['desktop-boost', 'desktop-boost-two']) pi.registerCommand(name, {description:'Synthetic chainable boost', chainable:true, handler:async(args)=>{
     pi.sendMessage({customType:'desktop-boost',content:'Boost ran with '+name+' '+args,display:true},{triggerTurn:false});
   }});
+  pi.registerCommand('goal', {description:'Synthetic goal command', chainable:true, handler:async(args)=>{
+    pi.sendMessage({customType:'desktop-boost',content:'Goal ran with '+args,display:true},{triggerTurn:false});
+  }});
+  pi.registerCommand('desktop-hidden-shortcut', {description:'Synthetic shortcut the menus do not advertise', hidden:true, handler:async()=>{
+    pi.sendMessage({customType:'desktop-boost',content:'Hidden shortcut ran',display:true},{triggerTurn:false});
+  }});
   pi.registerCommand('desktop-notify', {description:'Synthetic long notice', handler:async(_args,ctx)=>{
     ctx.ui.notify('Long notice. '.repeat(160),'warning');
   }});
@@ -91,6 +97,17 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('#welcome h1'); report.bootMs = Math.round(performance.now() - started);
   await page.waitForFunction(() => !document.getElementById('prompt').disabled, { timeout: 60_000 }); report.readyMs = Math.round(performance.now() - started);
+  assert.equal(await page.locator('#welcome .suggestions button').first().getAttribute('data-suggest'), 'goal');
+  await page.screenshot({ path: path.join(output, 'desktop-welcome.png') }); report.screenshots.push('desktop-welcome.png');
+  const opened = await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(560, 640));
+  await page.waitForTimeout(120);
+  const narrow = await page.evaluate(() => ({ width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, right: Math.max(...[...document.querySelectorAll('#welcome .suggestions button')].map(node => node.getBoundingClientRect().right)) }));
+  assert.ok(narrow.overflow <= 1 && narrow.right <= narrow.width, `welcome actions leave a ${narrow.width}px window (${Math.round(narrow.right)})`);
+  await page.screenshot({ path: path.join(output, 'desktop-welcome-560.png') }); report.screenshots.push('desktop-welcome-560.png');
+  await electron.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size[0], size[1]), opened);
+  await page.waitForTimeout(120);
+  check('the empty session opens on the rat and offers a goal first');
   const nativePid = await electron.evaluate(() => process.pid);
   assert.ok(activePiProcesses(path.join(repo, 'core/coding-agent')).includes(nativePid), 'the running Electron executable remains an owner without a core CLI parent');
   check('live Electron blocks updates without a CLI launch owner');
@@ -186,7 +203,7 @@ try {
   check('archive, restore and reopening retain the conversation');
   await page.locator('#prompt').fill('/desktop-b');
   await page.waitForSelector('#command-menu:not([hidden]) .command-option.boost', { timeout: 30_000 });
-  assert.match(await page.locator('#command-menu .command-group').first().innerText(), /Boosts/);
+  assert.match(await page.locator('#command-menu .command-group').first().innerText(), /Standards/);
   assert.equal(await page.locator('#prompt').getAttribute('aria-expanded'), 'true');
   await page.screenshot({ path: path.join(output, 'desktop-command-menu.png') }); report.screenshots.push('desktop-command-menu.png');
   await page.keyboard.press('Enter');
@@ -196,7 +213,16 @@ try {
   assert.match(await page.locator('#command-menu').innerText(), /Joins \/desktop-boost/);
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#command-menu').isHidden(), true);
-  check('the slash menu lists boosts first, completes them, and offers chain members after a boost');
+  await page.locator('#prompt').fill('/desktop-hidden');
+  await page.waitForFunction(() => document.getElementById('command-menu').hidden);
+  await page.locator('#prompt').fill('/');
+  await page.waitForSelector('#command-menu:not([hidden]) .command-option');
+  assert.doesNotMatch(await page.locator('#command-menu').innerText(), /desktop-hidden-shortcut/);
+  assert.match(await page.locator('#command-menu .command-group').first().innerText(), /Commands/);
+  assert.match(await page.locator('#command-menu .command-option').first().innerText(), /^\/goal\s/);
+  await page.screenshot({ path: path.join(output, 'desktop-command-menu-open.png') }); report.screenshots.push('desktop-command-menu-open.png');
+  await page.locator('#prompt').fill('');
+  check('the slash menu opens on /goal, lists commands before optional standards, completes and chains them, and does not advertise hidden shortcuts');
   const requestsBeforeCommands = requests.length;
   await page.locator('#prompt').fill('/desktop-boost /desktop-boost-two go');
   await page.waitForFunction(() => document.querySelectorAll('#prompt-marks .command-token[data-kind="boost"]').length === 2 && /one goal for your task/.test(document.getElementById('command-lens').textContent));
