@@ -10,12 +10,12 @@
  * prompt and the earlier messages stayed byte-identical.
  *
  * Nothing leaves the machine and no real credentials are used: the agent directory
- * is a throwaway copy (only the immutable runtime code is shared by symlink), the
+ * is a throwaway copy (only the runtime code is shared, read-only, by symlink), the
  * provider is `fakeds`, Jev and the network are off, and every environment variable
  * that looks like a key, token or secret is dropped from the child.
  *
  *   node agent/scripts/cache-probe.mjs                      # probe the installed harness
- *   node agent/scripts/cache-probe.mjs --repo <checkout>    # overlay a checkout's extensions
+ *   node agent/scripts/cache-probe.mjs --repo <checkout>    # probe a checkout: its core, extensions and skills
  *   node agent/scripts/cache-probe.mjs --scenario ui        # core-tier / UI work instead
  *   node agent/scripts/cache-probe.mjs --keep               # keep the work directory
  *
@@ -141,14 +141,36 @@ const server = http.createServer((req, res) => {
 });
 
 // ── isolated agent directory and project ────────────────────────────────────────────────────────────────────
+/** A checkout's core runs from `dist`, a copy `npm run build:core` makes of `src`.
+ * Returns the first source file whose built copy differs, so the probe never
+ * reports on code other than the checkout's. */
+function staleCoreFile(root) {
+  const core = path.join(root, "core");
+  for (const name of fs.readdirSync(core).sort()) {
+    const src = path.join(core, name, "src");
+    if (!fs.existsSync(src)) continue;
+    for (const entry of fs.readdirSync(src, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const file = path.join(entry.parentPath, entry.name), built = path.join(core, name, "dist", path.relative(src, file));
+      if (!fs.existsSync(built) || !fs.readFileSync(file).equals(fs.readFileSync(built))) return path.relative(root, file);
+    }
+  }
+  return undefined;
+}
+
 function stageAgent() {
   fs.mkdirSync(stage, { recursive: true });
+  if (repo) {
+    const stale = staleCoreFile(repo);
+    if (stale) throw Error(`the checkout's built core is behind its source (${stale}); run \`npm run build:core\` there first`);
+  }
   for (const dir of ["extensions", "skills", "scripts", "bin"]) fs.cpSync(path.join(baseAgent, dir), path.join(stage, dir), { recursive: true, dereference: false });
-  fs.symlinkSync(path.join(baseAgent, "runtime"), path.join(stage, "runtime"));
+  // The launcher runs runtime/core/coding-agent/dist/cli.js, and a checkout has the layout of an installed runtime.
+  fs.symlinkSync(repo ?? path.join(baseAgent, "runtime"), path.join(stage, "runtime"));
   for (const file of ["AGENTS.md", "installation.json", "live-model-catalog.json", "models-store.json"]) {
     if (fs.existsSync(path.join(baseAgent, file))) fs.copyFileSync(path.join(baseAgent, file), path.join(stage, file));
   }
-  if (repo) fs.cpSync(path.join(repo, "agent", "extensions"), path.join(stage, "extensions"), { recursive: true, filter: (src) => !src.includes(`${path.sep}node_modules`) && !src.endsWith(`${path.sep}dist`) });
+  if (repo) for (const dir of ["extensions", "skills"]) fs.cpSync(path.join(repo, "agent", dir), path.join(stage, dir), { recursive: true, filter: (src) => !src.includes(`${path.sep}node_modules`) && !src.endsWith(`${path.sep}dist`) });
   const settings = JSON.parse(fs.readFileSync(path.join(baseAgent, "settings.json"), "utf8"));
   settings.defaultProvider = "fakeds";
   settings.defaultModel = "deepseek-flash";
@@ -199,11 +221,16 @@ async function drive() {
       try { const event = JSON.parse(line); log.push(event); waiters = waiters.filter((w) => !w(event)); } catch { /* not JSON */ }
     }
   });
-  child.stderr.on("data", () => {});
-  const wait = (predicate, ms) => new Promise((resolve, reject) => {
+  // A harness that exits is reported at once with what it said, not after the turn's time limit.
+  let said = "", gone;
+  const exited = new Promise((_, reject) => { gone = reject; });
+  exited.catch(() => {});
+  child.stderr.on("data", (chunk) => { said = (said + chunk).slice(-600); });
+  child.on("exit", (code) => gone(new Error(`the harness exited (${code ?? "killed"}) before the scenario ended: ${said.trim() || "no message"}`)));
+  const wait = (predicate, ms) => Promise.race([exited, new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timed out waiting for the harness")), ms);
     waiters.push((event) => (predicate(event) ? (clearTimeout(timer), resolve(event), true) : false));
-  });
+  })]);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
     await sleep(Number(process.env.PI_PROBE_BOOT_MS || 9000));
