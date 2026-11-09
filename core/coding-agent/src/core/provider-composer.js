@@ -150,7 +150,7 @@ function applyExtension(providerId, models, config) {
     if (!config.models) {
         return config.baseUrl ? models.map((model) => ({ ...model, baseUrl: config.baseUrl })) : [...models];
     }
-    return config.models.map((definition) => {
+    const custom = config.models.map((definition) => {
         const defaults = findModelDefaults(models, definition.id, definition.api ?? config.api);
         const api = definition.api ?? config.api ?? defaults?.api;
         if (!api) {
@@ -167,6 +167,12 @@ function applyExtension(providerId, models, config) {
             headers: undefined,
         };
     });
+    if (!config.additive)
+        return custom;
+    // An additive extension discovers models; what the built-in catalog and
+    // models.json already define keeps its definition.
+    const defined = new Set(models.map((model) => model.id));
+    return [...models, ...custom.filter((model) => !defined.has(model.id))];
 }
 function adaptOAuth(config) {
     return {

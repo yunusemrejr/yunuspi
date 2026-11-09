@@ -221,7 +221,8 @@
     "film.ts",
     "captions.ts",
     "command-consequence.ts",
-    "command-intent.ts"
+    "command-intent.ts",
+    "model-directory.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

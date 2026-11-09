@@ -1,5 +1,9 @@
 import { acquireCatalogCacheLock } from "./lib/catalog-cache-lock.ts";
-import { MODEL_FACTS, currentModelFacts, directDeepseekCost } from "./lib/model-facts.ts";
+import { MODEL_FACTS, currentModelFacts, directDeepseekCost, knownModelFacts } from "./lib/model-facts.ts";
+import {
+	DIRECTORY_TTL_MS, DIRECTORY_URL, catalogRowFacts, directoryCovers, directoryFacts, directoryProvider, distillDirectory, parseDirectory,
+	scopedDirectory, type DirectoryFacts, type ModelDirectory, type ProviderAddress,
+} from "./lib/model-directory.ts";
 import {boundedContextLimit,normalizeModelLimits} from "./lib/context-limits.ts";
 import { registerLocalModels } from "./lib/local-models.ts";
 /**
@@ -31,6 +35,11 @@ import { registerLocalModels } from "./lib/local-models.ts";
  *   thinkingLevelMap from the live `reasoning.supported_efforts` metadata,
  *   so freshly shipped models expose minimal/xhigh (and max where offered)
  *   immediately instead of waiting for the pi.dev store to catch up.
+ * - Every other provider in models.json that names a base URL and a wire API
+ *   is asked for its own `/models` list, so a provider added with one model
+ *   offers all of them. Discovery only adds: a model the user defined keeps
+ *   that definition. Limits and prices the list leaves out come from the model
+ *   directory (lib/model-directory.ts), refreshed once a day.
  * - Opt-in together reasoning experiments probe unknown model ids and
  *   cached by id; probes run without blocking catalog publication. Refresh
  *   cancellation stops them; HTTP failures remain unknown, not negative.
@@ -50,6 +59,11 @@ const AGENT_DIR: string =
 	process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 const MODELS_JSON = join(AGENT_DIR, "models.json");
 const CACHE_FILE = join(AGENT_DIR, "live-model-catalog.json");
+const DIRECTORY_FILE = join(AGENT_DIR, "model-directory.json");
+const DIRECTORY_TIMEOUT_MS = 12_000;
+const DISCOVERY_TIMEOUT_MS = 8_000;
+/** Wire APIs whose hosts conventionally serve a model list. */
+const DISCOVERABLE_APIS = new Set(["openai-completions", "openai-responses", "anthropic-messages"]);
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 const ROUTER_CATALOG_TTL_MS = 15 * 60 * 1000; // cheaper than stale capability/price guesses
 const FETCH_TIMEOUT_MS = 25_000;
@@ -1244,15 +1258,17 @@ export function formatCatalogAge(ageMs: number | null): string {
 export function catalogDiagnostics(now = Date.now()) {
   return [...catalogHealth].map(([provider,health]) => ({provider,...health,
     ageMs:health.observedAt > 0 ? Math.max(0,now-health.observedAt) : null,
-    stale:health.source === "fallback" || health.observedAt <= 0 || now-health.observedAt >= ROUTER_CATALOG_TTL_MS,
-    facts: Object.hasOwn(MODEL_FACTS,provider) ? currentModelFacts(provider,now) ? "current" : "expired" : "not used",
+    stale:health.source === "fallback" || health.observedAt <= 0 || now-health.observedAt >= (Object.hasOwn(REFRESHERS,provider) ? ROUTER_CATALOG_TTL_MS : CACHE_TTL_MS),
+    // Stale snapshot facts stay in force; the directory makes up for their age when it knows the provider.
+    facts: !Object.hasOwn(MODEL_FACTS,provider) ? "not used" : currentModelFacts(provider,now) ? "current"
+      : directoryProvider(loadDirectory(), provider, wireFor(provider).baseUrl) ? "directory" : "stale",
   }));
 }
 function catalogStatus(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
   const row = catalogDiagnostics().find(item => item.provider === ctx.model?.provider);
-  ctx.ui.setStatus("model-catalog", row && (row.failure || row.stale || row.facts === "expired")
-    ? ctx.ui.theme.fg('warning', `Model list: ${row.provider} · ${row.source === 'fallback' ? 'fallback; update time unknown' : `updated ${formatCatalogAge(row.ageMs)}`}${row.stale ? ' · stale' : ''}${row.failure ? ` · ${row.failure}` : ''}${row.facts === 'expired' ? ' · model facts expired' : ''} · /catalog-status`)
+  ctx.ui.setStatus("model-catalog", row && (row.failure || row.stale || row.facts === "stale")
+    ? ctx.ui.theme.fg('warning', `Model list: ${row.provider} · ${row.source === 'fallback' ? 'fallback; update time unknown' : `updated ${formatCatalogAge(row.ageMs)}`}${row.stale ? ' · stale' : ''}${row.failure ? ` · ${row.failure}` : ''}${row.facts === 'stale' ? ` · model facts last checked ${MODEL_FACTS[row.provider].verifiedAt}` : ''} · /catalog-status`)
     : undefined);
 }
 
@@ -1272,7 +1288,8 @@ function minimalModel(
 	provider: string,
 	maxTokens?: number,
 ): LiveCatalogModel {
-	return {
+	const known = directoryFacts(directoryProvider(loadDirectory(), provider, wireFor(provider).baseUrl), id);
+	return withFacts({
 		id,
 		name: id,
 		reasoning: false,
@@ -1281,8 +1298,128 @@ function minimalModel(
 		maxTokens: maxTokens ?? 8_192,
 		outputLimitEstimated: maxTokens === undefined,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output"] },
+	}, maxTokens === undefined || !known ? known : { ...known, maxTokens: undefined });
+}
+
+/** Lay known facts over a model row. A supplied output limit is no longer an
+ * estimate, and a supplied price is no longer missing. */
+function withFacts(model: LiveCatalogModel, facts: DirectoryFacts | undefined): LiveCatalogModel {
+	if (!facts) return model;
+	const maxTokens = facts.maxTokens ?? model.maxTokens;
+	return {
+		...model,
+		...(facts.name && model.name === model.id ? { name: facts.name } : {}),
+		...(facts.reasoning !== undefined ? { reasoning: facts.reasoning } : {}),
+		...(facts.input ? { input: facts.input } : {}),
+		// A stated context bounds the output; an unstated one is at least as large as the output.
+		contextWindow: facts.contextWindow ?? Math.max(model.contextWindow, maxTokens),
+		maxTokens: facts.contextWindow ? Math.min(maxTokens, facts.contextWindow) : maxTokens,
+		...(facts.maxTokens ? { outputLimitEstimated: false } : {}),
+		...(facts.cost ? { cost: facts.cost } : {}),
 	};
 }
+
+// ── Model directory ────────────────────────────────────────────────────
+
+let directoryMemo: { key: string; directory: ModelDirectory | undefined } | undefined;
+/** The saved directory, parsed once per file revision. */
+function loadDirectory(): ModelDirectory | undefined {
+	try {
+		const info = statSync(DIRECTORY_FILE);
+		const key = `${info.ino}:${info.size}:${info.mtimeMs}`;
+		if (directoryMemo?.key !== key) directoryMemo = { key, directory: parseDirectory(JSON.parse(readFileSync(DIRECTORY_FILE, "utf-8"))) };
+		return directoryMemo.directory;
+	} catch {
+		return undefined;
+	}
+}
+
+let directoryRefresh: Promise<boolean> | undefined;
+let directoryAttemptAt = 0;
+/** Fetch the directory when the saved copy is over a day old; resolves true
+ * when a new copy was saved. The session hooks own this request, so adapters
+ * only ever talk to their own provider, and facts are applied when a catalog
+ * is published, so a cached list gains them too. One request per process at a
+ * time, one attempt per hour after a failure, and never a thrown error: the
+ * saved copy, or none, is what the catalog then uses. */
+function refreshDirectory(signal: AbortSignal): Promise<boolean> {
+	const saved = loadDirectory();
+	const wanted: ProviderAddress[] = [...new Set([...Object.keys(DEFAULT_BASE_URLS), ...discoverableProviders([])])].map((id) => [id, wireFor(id).baseUrl]);
+	if (saved && directoryCovers(saved, wanted) && Date.now() - saved.fetchedAt < DIRECTORY_TTL_MS || Date.now() - directoryAttemptAt < 60 * 60 * 1000) return Promise.resolve(false);
+	directoryAttemptAt = Date.now();
+	return directoryRefresh ??= (async () => {
+		const tmp = `${DIRECTORY_FILE}.${process.pid}.tmp`;
+		try {
+			const raw = await fetchJson(DIRECTORY_URL, AbortSignal.any([signal, AbortSignal.timeout(DIRECTORY_TIMEOUT_MS)]));
+			writeFileSync(tmp, JSON.stringify(scopedDirectory(distillDirectory(raw, Date.now()), wanted)), { mode: 0o600 });
+			renameSync(tmp, DIRECTORY_FILE);
+			return true;
+		} catch {
+			rmSync(tmp, { force: true });
+			return false;
+		}
+	})().finally(() => { directoryRefresh = undefined; });
+}
+
+// ── Providers with no adapter of their own ─────────────────────────────
+
+/** A key from models.json that can be read without running anything: a
+ * literal or one environment variable. A `!command` value is never executed
+ * for discovery; the runtime's resolved credential covers that case. */
+function readableKey(raw: unknown): string | undefined {
+	if (typeof raw !== "string" || !raw || raw.startsWith("!")) return undefined;
+	const variable = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/.exec(raw);
+	if (variable) return process.env[variable[1]] || undefined;
+	return raw.includes("$") ? undefined : raw;
+}
+
+/** models.json providers that name a base URL and a wire API and have no adapter here. */
+function discoverableProviders(skip: readonly string[]): string[] {
+	try {
+		const providers = JSON.parse(readFileSync(MODELS_JSON, "utf-8"))?.providers;
+		if (!isRecord(providers)) return [];
+		return Object.entries(providers).flatMap(([id, config]) => {
+			if (Object.hasOwn(REFRESHERS, id) || skip.includes(id) || !isRecord(config) || config.oauth) return [];
+			if (typeof config.api !== "string" || !DISCOVERABLE_APIS.has(config.api) || typeof config.baseUrl !== "string") return [];
+			try { return ["https:", "http:"].includes(new URL(config.baseUrl).protocol) ? [id] : []; } catch { return []; }
+		});
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Ask a configured provider for its own model list. The key travels only to
+ * the base URL the user configured for inference. A host with no list, or one
+ * that refuses, simply contributes nothing: the models the user defined are
+ * untouched either way.
+ */
+async function refreshDiscovered(providerId: string, context: RefreshModelContext): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
+	const config = providerConfigJson(providerId);
+	const key = (context.credential?.type === "api_key" ? context.credential.key : undefined) || readableKey(config?.apiKey);
+	if (!config?.baseUrl || !key) throw new Error(`${providerId}: no base URL or readable key`);
+	const base = config.baseUrl.replace(/\/+$/, "");
+	const anthropic = config.api === "anthropic-messages";
+	const url = anthropic && !/\/v\d+$/.test(base) ? `${base}/v1/models` : `${base}/models`;
+	const signal = AbortSignal.any([context.signal, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)]);
+	const raw = await fetchJson(url, signal, { headers: { Authorization: `Bearer ${key}`, ...(anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : {}) } });
+	const rows = modelRows<{ id: string }>(isRecord(raw) ? raw.data ?? raw.models : raw);
+	const dropped = new Map<string, string>();
+	const models: LiveCatalogModel[] = [];
+	for (const row of rows) {
+		const { chat, ...listed } = catalogRowFacts(row);
+		if (chat === false) { noteUnavailable(dropped, row.id, "not a chat model"); continue; }
+		// What the host's row states is live; the directory fills the rest at publication.
+		models.push({ ...withFacts({
+			id: row.id, name: row.id, reasoning: false, input: ["text"],
+			// The same allowances a hand-written models.json entry gets when it names no limits.
+			contextWindow: 128_000, maxTokens: 16_384, outputLimitEstimated: true,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output"] },
+		}, listed), liveFields: Object.keys(listed) });
+	}
+	return { models, unavailable: unavailableRecord(dropped) };
+}
+
 
 /**
  * Refresh a provider whose catalog endpoint returns id-only entries
@@ -1419,7 +1556,7 @@ async function refreshCerebras(context: RefreshModelContext): Promise<{ models: 
             const input = p.prompt !== undefined ? toPerMillion(p.prompt) : p.input;
             const output = p.completion !== undefined ? toPerMillion(p.completion) : p.output;
             if (![input, output].every(v => typeof v === "number" && Number.isFinite(v) && v >= 0)) return normalizeModelLimits(model);
-            return normalizeModelLimits({ ...model, cost: { input, output,
+            return normalizeModelLimits({ ...model, liveFields: [...liveFields, "cost"], cost: { input, output,
                 cacheRead: p.input_cache_read !== undefined ? toPerMillion(p.input_cache_read) : input,
                 cacheWrite: p.input_cache_write !== undefined ? toPerMillion(p.input_cache_write) : input } });
         });
@@ -1450,7 +1587,7 @@ type Fetcher = (
 
 // Raw cache rows do not embed expiring snapshot overrides. Apply current
 // registry facts at publication so an old cache cannot extend their lifetime.
-const idOnlyFacts = (provider: string): Record<string, IdOnlyFacts> => currentModelFacts(provider)?.models ?? {};
+const idOnlyFacts = (provider: string): Record<string, IdOnlyFacts> => knownModelFacts(provider)?.models ?? {};
 const PROVIDER_AUTH: Record<string, {apiKey:string}> = {longcat:{apiKey:'${LONGCAT_API_KEY}'}};
 const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 	// Applies to fresh and cached catalogs; explicit model/provider overrides win.
@@ -1472,11 +1609,14 @@ function publishModels(
 	const store = idOnly || provider === "together" ? storeModels(provider) : undefined;
 	const config = providerConfigJson(provider);
 	const configuredCompat = providerJsonCompat(provider);
+	const discovered = !Object.hasOwn(REFRESHERS, provider);
+	const listing = idOnly || discovered ? directoryProvider(loadDirectory(), provider, wireFor(provider).baseUrl) : undefined;
+	if (discovered) models = models.filter((model) => directoryFacts(listing, model.id)?.chat !== false);
 	for (const key of outputFallbacks.keys()) if (key.startsWith(`${provider}/`)) outputFallbacks.delete(key);
 	return validModels(models).map((cachedModel) => {
 		const { outputLimitEstimated, ...cachedRaw } = cachedModel;
 		const historical = idOnly && (provider !== "deepseek" || officialDeepSeek) && Object.hasOwn(MODEL_FACTS[provider as "cerebras" | "deepseek"].models, cachedRaw.id);
-		const rawModel = historical && !Array.isArray(cachedRaw.liveFields) && !currentModelFacts(provider)
+		const rawModel = historical && !Array.isArray(cachedRaw.liveFields) && !knownModelFacts(provider)
 			? store?.get(cachedRaw.id) ?? minimalModel(cachedRaw.id, provider)
 			: cachedRaw;
 		// Probe results arrive after catalog persistence. Project them here so the
@@ -1500,6 +1640,13 @@ function publishModels(
 				: undefined;
         const facts = snapshotFacts && Object.fromEntries(Object.entries(snapshotFacts).filter(([key]) =>
             !Array.isArray(model.liveFields) || !model.liveFields.includes(key)));
+		// An id-only or discovered row has few facts of its own. The directory is
+		// re-read daily, so its values outrank the dated snapshot; what the
+		// provider's own row supplied (liveFields) outranks both.
+		const known = directoryFacts(listing, model.id);
+		const fresher: DirectoryFacts | undefined = known && Object.fromEntries((["contextWindow", "maxTokens", "reasoning", "input", "cost", "name"] as const)
+			.filter((key) => known[key] !== undefined && !(Array.isArray(model.liveFields) && model.liveFields.includes(key)) && (key !== "name" || model.name === model.id && !snapshotFacts?.name))
+			.map((key) => [key, known[key]]));
 		const explicit =
 			config?.modelOverrides?.[model.id]?.maxTokens ??
 			(Array.isArray(config?.models)
@@ -1508,6 +1655,7 @@ function publishModels(
 		if (
 			(outputLimitEstimated === true || outputLimitEstimated === undefined && (idOnly || provider === "together" && model.maxTokens === 8192)) &&
 			!facts?.maxTokens &&
+			!fresher?.maxTokens &&
 			!store?.get(model.id)?.maxTokens &&
 			!tokenLimit(explicit)
 		)
@@ -1525,9 +1673,10 @@ function publishModels(
             ? directDeepseekCost(model.id) : undefined;
 		return normalizeModelLimits({
 			...model,
-			...(provider === "runinfra" && !currentModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),
+			...(provider === "runinfra" && !knownModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),
 			...(directPeak ? { cost: directPeak } : {}),
 			...facts,
+			...fresher,
 			...(Object.keys(compat).length ? { compat } : {}),
 		});
 	});
@@ -1549,12 +1698,22 @@ const REFRESHERS: Record<string, Fetcher> = {
 function refreshFor(
 	providerId: string,
 ): NonNullable<ProviderConfig["refreshModels"]> {
+	const discovered = !Object.hasOwn(REFRESHERS, providerId);
+	const fetcher: Fetcher = discovered ? (context) => refreshDiscovered(providerId, context) : REFRESHERS[providerId];
+	const ttl = discovered ? CACHE_TTL_MS : ROUTER_CATALOG_TTL_MS;
+	let retryAt = 0;
 	return async (context: RefreshModelContext): Promise<LiveCatalogModel[]> => {
 		const cache = loadCache();
 		const cached = cache.providers[providerId];
 		// One fallback owner for offline restore AND failed refreshes. Serving
 		// stale data must never renew its six-hour freshness timestamp.
 		const previousModels = (failure?: CatalogHealth["failure"]) => {
+			// A discovered provider's baseline is models.json, so a host with no
+			// model list is not a degraded catalog and raises no warning.
+			if (discovered) {
+				if (!cached?.models) return [];
+				failure = undefined;
+			}
 			catalogHealth.set(providerId,{source:cached?.models ? "cache" : "fallback",observedAt:cached?.ts ?? 0,...(failure ? {failure} : {})});
 			if (cached?.models) return publishModels(providerId, cached.models, cached.probes);
 			if (providerId === "orcarouter")
@@ -1564,14 +1723,15 @@ function refreshFor(
 		if (context.allowNetwork === false || context.signal.aborted)
 			return previousModels();
 		const fresh =
-			cached && Date.now() - cached.ts < ROUTER_CATALOG_TTL_MS && context.force !== true;
+			cached && Date.now() - cached.ts < ttl && context.force !== true;
 		if (fresh) {
             catalogHealth.set(providerId,{source:"cache",observedAt:cached.ts});
             return publishModels(providerId, cached.models, cached.probes);
         }
 		const startedAt = Date.now();
+		if (startedAt < retryAt && context.force !== true) return previousModels();
 		try {
-			const fetched = await REFRESHERS[providerId](context, cached);
+			const fetched = await fetcher(context, cached);
 			const models = validModels(fetched.models);
 			if (context.signal.aborted) return previousModels();
 			if (models.length === 0)
@@ -1604,6 +1764,7 @@ function refreshFor(
 		} catch {
 			// Retain the previous list on failure (never throw: pi-ai treats
 			// a throwing refreshModels as "no models").
+			if (discovered && !context.signal.aborted) retryAt = Date.now() + CACHE_TTL_MS;
 			return previousModels(context.signal.aborted ? undefined : "refresh failed");
 		}
 	};
@@ -1619,7 +1780,8 @@ export function registerCachedChildModelProvider(pi: Pick<ExtensionAPI, "registe
 	const slash = route.indexOf("/");
 	if (slash < 1) return false;
 	const provider = route.slice(0, slash), id = route.slice(slash + 1);
-	if (!id || !Object.hasOwn(REFRESHERS, provider)) return false;
+	const adapter = Object.hasOwn(REFRESHERS, provider);
+	if (!id || !adapter && !discoverableProviders([]).includes(provider)) return false;
 	// The native composer already owns explicit models.json entries and their
 	// endpoint/compatibility overrides. Installing a cache-only refresh here
 	// would replace that valid list with [] when the cached route is absent.
@@ -1632,6 +1794,7 @@ export function registerCachedChildModelProvider(pi: Pick<ExtensionAPI, "registe
 		...PROVIDER_AUTH[provider],
 		baseUrl: wire.baseUrl,
 		api: wire.api,
+		...(adapter ? {} : { additive: true }),
 		refreshModels: async context => (await refresh({ ...context, allowNetwork: false }))
 			.filter(model => model.id === id),
 	} satisfies ProviderConfig);
@@ -1648,7 +1811,7 @@ export default async function registerLiveModels(
       if (args.trim() && args.trim() !== 'refresh') { ctx.ui.notify('Usage: /catalog-status [refresh]', 'info'); return; }
       if (args.trim() === 'refresh') {
         if (process.env.PI_OFFLINE === "1" || !ctx.model?.provider) { ctx.ui.notify('Model-list refresh needs an online session and a selected provider.', 'warning'); return; }
-        try { await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
+        try { await refreshDirectory(refreshController.signal); await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
         catch { ctx.ui.notify('Model-list refresh failed; the saved list remains available.', 'error'); }
         catalogStatus(ctx);
       }
@@ -1676,6 +1839,13 @@ export default async function registerLiveModels(
 			refreshModels: refreshFor(providerId),
 		} satisfies ProviderConfig);
 	}
+	// Every other configured provider is asked for its own list; what it
+	// returns is added to the models the user defined, never put in their place.
+	const discoveredProviderIds = process.env.PI_MODEL_DISCOVERY === "off" ? [] : discoverableProviders(localProviderIds);
+	for (const providerId of discoveredProviderIds) {
+		const wire = wireFor(providerId);
+		pi.registerProvider(providerId, { baseUrl: wire.baseUrl, api: wire.api, additive: true, refreshModels: refreshFor(providerId) } satisfies ProviderConfig);
+	}
 	// Auto-fresh so new models appear without `pi update --models` or manual
 	// work: every session start triggers a non-blocking network refresh scoped
 	// to live adapters and available native providers. Per-provider TTLs guard
@@ -1684,7 +1854,7 @@ export default async function registerLiveModels(
 	// the model catalog. Do not fan out background requests per worker/session.
 	const automaticRefreshAllowed = () => process.env.PI_OFFLINE !== "1" && process.env.PI_SUBAGENT_CHILD !== "1";
     const refreshScope = (ctx: ExtensionContext) => [...new Set([
-        ...REFRESHER_IDS, ...localProviderIds,
+        ...REFRESHER_IDS, ...localProviderIds, ...discoveredProviderIds,
         ...(ctx.modelRegistry.getAvailable?.() ?? []).map(model => model.provider),
         ...(ctx.model ? [ctx.model.provider] : []),
     ])];
@@ -1700,6 +1870,14 @@ export default async function registerLiveModels(
 		}
 		catalogStatus(ctx);
 	};
+	// A new directory copy changes limits and prices without any provider
+	// request: republish the saved catalogs once so the session sees them.
+	const refreshFacts = (ctx: ExtensionContext, generation: number) => {
+		const signal = refreshController.signal;
+		void refreshDirectory(signal).then((saved) => saved && generation === sessionGeneration
+			? ctx.modelRegistry.refresh({ allowNetwork: false, providers: refreshScope(ctx), signal }) : undefined)
+			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); }, () => {});
+	};
 	pi.on("session_start", (_event, ctx) => {
   refreshController.abort(); refreshController = new AbortController();
 		const generation = ++sessionGeneration;
@@ -1707,6 +1885,7 @@ export default async function registerLiveModels(
 		lastRouterRefresh = Date.now();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		routerRefreshPending = true;
+		refreshFacts(ctx, generation);
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal })
 			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
@@ -1723,6 +1902,7 @@ export default async function registerLiveModels(
 		lastRouterRefresh = timestamp;
 		routerRefreshPending = true;
 		const generation = sessionGeneration;
+		refreshFacts(ctx, generation);
 		void ctx.modelRegistry.refresh({allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal})
 			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })

@@ -1150,6 +1150,11 @@ export interface ProviderConfig {
     /** Models to register. If provided, replaces all existing models for this provider. */
     models?: ProviderModelConfig[];
     /**
+     * Add this extension's models to the provider's existing list instead of replacing it.
+     * A model the built-in catalog or models.json already defines keeps that definition.
+     */
+    additive?: boolean;
+    /**
      * Refresh this provider's model list. The returned list replaces extension-provided models.
      * Use context.publish({ persist: entry }) when the catalog should persist across sessions.
      */

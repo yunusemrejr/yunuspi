@@ -37,6 +37,8 @@ export interface ProviderConfigInput {
         headers?: Record<string, string>;
         compat?: Model<Api>["compat"];
     }>;
+    /** Add these models to the provider's existing list instead of replacing it. */
+    additive?: boolean;
     refreshModels?(context: RefreshModelsContext): Promise<NonNullable<ProviderConfigInput["models"]>>;
 }
 export type AuthStatus = {

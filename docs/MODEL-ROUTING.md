@@ -12,6 +12,22 @@ Search ranks matching configured, available routes before temporarily blocked ro
 
 The collapsed Routing diagnostics section reports bounded process-local samples for config load/save and actual HTTP model-search latency, plus child-route attempts. Samples reset with the harness process and do not include task text or credentials.
 
+## Adding a provider
+
+A provider needs three things in `models.json`: a base URL, the wire API it speaks, and a key.
+
+```json
+{ "providers": { "acme": { "baseUrl": "https://api.acme.example/v1", "api": "openai-completions", "apiKey": "${ACME_API_KEY}" } } }
+```
+
+That is enough. At the next start the harness asks the provider for its own model list (`GET <baseUrl>/models`, or `<baseUrl>/v1/models` for `anthropic-messages`) and every chat model it offers appears in `/model`. Models you list yourself under `models` keep exactly the definition you gave them; discovery only adds the ones you did not list. The key is sent to the base URL you configured and nowhere else, a key written as a `!command` is never run for discovery, and a provider that has no model list simply keeps the models you listed.
+
+A plain model list is ids and nothing more, so limits and prices come from the **model directory**: the public catalogue at [models.dev](https://models.dev), fetched without credentials at most once a day and cut down to the providers you have configured. A provider is recognised by the host of its base URL, so the name you give it does not matter. Where facts meet, the order is: your `models.json` values, then what the provider's own list states, then the directory, then a general allowance (128,000 tokens of context, 16,384 of output) that the status line marks as unverified. A price nobody states stays unknown; it is never shown as free. Models that do not write text (image, speech, embedding) are left out.
+
+`/catalog-status` shows the age of each list; `/catalog-status refresh` updates the selected provider's list and the directory now. `PI_MODEL_DISCOVERY=off` turns discovery off, and `PI_OFFLINE=1` stops every catalogue request.
+
+Dated facts shipped with the harness (the wire formats of DeepSeek and Cerebras, for example) carry the day they were checked. Past their review date they stay in force, because an old wire format is still the best evidence there is; only their prices stop being quoted, and the directory supplies current limits and prices instead.
+
 ## Provider capability updates
 
 The parent refreshes live catalogs and the existing native catalog adapters for available providers at startup and at prompt boundaries after 15 minutes. Each adapter retains its own TTL; workers and offline sessions do not start automatic network discovery. Shutdown cancels outstanding discovery. Completed refreshes update the selected route's capacities and supported thinking level before the next prompt's context checks. Catalog disappearance never silently switches the user's route.

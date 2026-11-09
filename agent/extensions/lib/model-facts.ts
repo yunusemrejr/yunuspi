@@ -1,6 +1,10 @@
-/** Versioned snapshots of facts the catalog endpoints cannot express. These
- * retain the original evidence dates; expiry means unknown, never free. Wire
- * protocol adapters and explicit user configuration are separate authorities. */
+/** Versioned snapshots of facts the catalog endpoints cannot express, with the
+ * dates they were checked. Past its window a snapshot is stale, not gone: its
+ * wire formats and limits stay the best evidence there is and keep applying
+ * (knownModelFacts), while its prices stop being quoted (currentModelFacts),
+ * so an old price is never shown as today's. The model directory supplies
+ * fresher limits and prices when it has them. Explicit user configuration is a
+ * separate authority and outranks both. */
 export const MODEL_FACTS_VERSION: number = 1;
 export interface ModelCostFacts {
   input: number;
@@ -40,6 +44,11 @@ export const MODEL_FACTS: Record<string, ModelFactsEntry> = {
 export function currentModelFacts(provider: string, now = Date.now()): ModelFactsEntry | undefined {
   const entry = Object.hasOwn(MODEL_FACTS,provider) ? MODEL_FACTS[provider] : undefined;
   return entry && Number.isFinite(now) && now >= Date.parse(entry.verifiedAt) && now < Date.parse(entry.expiresAt) ? entry : undefined;
+}
+/** The snapshot once its evidence date has passed, stale or not. */
+export function knownModelFacts(provider: string, now = Date.now()): ModelFactsEntry | undefined {
+  const entry = Object.hasOwn(MODEL_FACTS,provider) ? MODEL_FACTS[provider] : undefined;
+  return entry && Number.isFinite(now) && now >= Date.parse(entry.verifiedAt) ? entry : undefined;
 }
 export function directDeepseekCost(id: string, now = Date.now()): ModelCostFacts | undefined {
   if (!currentModelFacts("deepseek",now)) return undefined;
