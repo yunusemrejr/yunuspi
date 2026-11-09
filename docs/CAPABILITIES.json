@@ -3125,7 +3125,7 @@
       {
         "name": "bg_wait",
         "source": "agent/extensions/pi-subagents/src/runs/background/wait-tool.ts",
-        "line": 36,
+        "line": 25,
         "kind": "definition"
       },
       {
@@ -3917,7 +3917,7 @@
           "registration receives the source-owned primaryTool definition"
         ],
         "lines": [
-          42
+          31
         ],
         "knownNames": [
           "bg_wait"

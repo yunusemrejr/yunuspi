@@ -110,43 +110,43 @@ function optionalTrimmed(value: string): string | undefined {
 const BgRunParams = Type.Object({
   name: Type.String({
     description:
-      "Short human-readable task name shown in the bg footer dock. Required; use 2-6 words, not the raw command.",
+      "Required. 2 to 6 words, not the raw command.",
   }),
   command: Type.String({
-    description: "Shell command to start in the background",
+    description: "Shell command to run.",
   }),
   isAgent: Type.Boolean({
     description:
-      "Required. Set true only when this background task launches an LLM/agent process, such as a child `pi -p ...` or `pi --mode json ...`, so Pi-agent telemetry can be collected. Set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
+      "Required. true only for an LLM agent process (such as pi -p ...); false for scripts, servers and other shell commands.",
   }),
   description: Type.Optional(
     Type.String({
-      description: "Optional longer human-readable context for the task",
+      description: "Optional longer context.",
     }),
   ),
   timeoutSeconds: Type.Optional(
     Type.Number({
       exclusiveMinimum: 0,
       maximum: MAX_TASK_TIMEOUT_SECONDS,
-      description: "Optional timeout; task is failed and killed when exceeded",
+      description: "Optional. Above 0, at most 2147483.647. Expiry kills the task and marks it failed.",
     }),
   ),
   service: Type.Optional(
     Type.Boolean({
       description:
-        "Set true for a long-lived server or watcher (dev server, API probe server). Its exit never wakes the agent, the port it binds is recorded, and bg_kill with its name stops it cleanly. Default: false (auto-detected for common dev servers).",
+        "Long-lived server or watcher: its exit never wakes the agent. Default false; common dev servers are detected.",
     }),
   ),
   notifyOnCompletion: Type.Optional(
     Type.Boolean({
       description:
-        "Whether to deliver the durable terminal notification. Default: true; disable only when deliberately taking over completion monitoring.",
+        "Default true. Set false only if you will check completion yourself.",
     }),
   ),
   triggerOnCompletion: Type.Optional(
     Type.Boolean({
       description:
-        "Whether that notification should automatically trigger a follow-up agent turn. Default: true for finite work, false for recognized persistent servers; requires notifyOnCompletion.",
+        "Starts an agent turn on notify. Default true for finite work, false for servers. Requires notifyOnCompletion.",
     }),
   ),
 });
@@ -724,11 +724,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgRunParams, BgRunDetails>({
     name: "bg_run",
     label: "Background Run",
-    description: `Start a named long-running shell command in the explicit background-task registry; returns immediately with a task ID and output path. Terminal state (completed/failed/killed) is delivered as <background-task-notification>. Finite work defaults to one coalesced follow-up after it settles; recognized persistent services default to a durable UI/receipt update without waking the agent, and wake only when triggerOnCompletion:true is explicitly requested (errors/aborts preserve pause). Never sleep or poll to wait. Manage these IDs with bg_status/bg_logs/bg_kill; they do not appear in managed-bash's process tool. Logs are bounded to ${formatSize(MAX_LOG_BYTES)}.`,
+    description: `Start a long-running shell command in the background; returns at once with a task ID and output path. Its end arrives as a <background-task-notification>. Do not sleep or poll for it. Persistent services notify only the UI unless triggerOnCompletion is true. Manage tasks with bg_status, bg_logs and bg_kill, not the process tool. Log output is capped at ${formatSize(MAX_LOG_BYTES)}.`,
     promptSnippet:
-      "Start named background work; finite completion can wake once, while persistent services default to UI-only status",
+      "Start background work; finished tasks wake the agent once, services update only the UI",
     promptGuidelines: [
-      "Use bash for short commands and bg_run for long tests, builds and servers (isAgent only for LLM processes). A finished task notifies you once: do other work instead of polling, and report its result only after that notification.",
+      "Use bash for short commands and bg_run for long tests, builds and servers. Do other work while a task runs; report its result only after its notification.",
     ],
     parameters: BgRunParams,
     prepareArguments: prepareBgRunArguments,

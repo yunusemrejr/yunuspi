@@ -125,7 +125,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
 		description:
-			"Maintain hierarchical action plans. Batch edits are atomic; negative IDs alias earlier creates. list view=frontier shows active/ready work, tree shows hierarchy; get retrieves criteria and evidence. Reopen completed nodes when scope changes. Execution modes describe native orchestration intent.",
+			"Maintain a hierarchical plan of tasks. Use list with view frontier for ready and active work, tree for the full hierarchy, and get for a task's acceptance criteria and evidence. Batch operations are atomic. Reopen a completed task when the scope changes.",
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,

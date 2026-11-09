@@ -85,7 +85,7 @@ export function buildSystemPrompt(options) {
     addGuideline("Send every independent read, search or check you already know you need in one assistant turn, and chain dependent inspection steps into one shell command; each extra turn re-reads the whole conversation.");
     addGuideline("Do not repeat a file read or command whose result is already in context unless the file changed or a different range is needed.");
     addGuideline("Keep reasoning on routine tool continuations brief; reserve deep reasoning for design, diagnosis and failures.");
-    addGuideline("Change files with edit or write. Do not use bash heredocs, python -c, perl -pi or sed -i to author or rewrite file content; use one edit call with multiple edits[] for separate locations in the same file.");
+    addGuideline("Change files with edit or write, never by authoring or rewriting file content through bash heredocs, python -c, perl -pi or sed -i.");
     addGuideline("Be concise, and show file paths clearly when working with files.");
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
     const workingNotes = loadWorkingNotes(getAgentDir());
@@ -94,18 +94,10 @@ export function buildSystemPrompt(options) {
 Available tools:
 ${toolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
 Guidelines:
 ${guidelines}
 
-YunusPi documentation (read when the user asks about this harness, its SDK, extensions, themes, skills, or TUI):
-- Core package documentation: ${readmePath}
-- Maintained API reference: ${docsPath}
-- Resolve docs/... under the API reference directory, not the current working directory.
-- Relevant guides: extensions.md, themes.md, skills.md, prompt-templates.md, tui.md, keybindings.md, sdk.md, custom-provider.md, models.md, packages.md, environment-variables.md.
-- Read relevant guides before implementing SDK or extension changes. Historical links preserve the fork's origin; they are not installation or release authority.
-- YunusPi owns its core source and updates only from reviewed YunusPi releases. Never install or upgrade upstream Pi to repair or update this harness.`;
+YunusPi's own documentation (for questions about this harness, its SDK, extensions, themes, skills or TUI, and before changing any of them): ${readmePath} and the guides in ${docsPath} (extensions.md, themes.md, skills.md, prompt-templates.md, tui.md, keybindings.md, sdk.md, custom-provider.md, models.md, packages.md, environment-variables.md). A docs/... path resolves there, not in the working directory. YunusPi updates only from its own reviewed releases: never install or upgrade upstream Pi to repair or update it.`;
     if (workingNotes) {
         prompt += `\n\n${workingNotes}`;
     }

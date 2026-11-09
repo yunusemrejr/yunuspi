@@ -112,65 +112,65 @@ const MutationSchema = Type.Object({
 		"delete",
 		"clear",
 	] as const),
-	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent outcome id; null detaches. Negative ids must be declared as \"id\" on an earlier create in the same batch."})),
-	execution: Type.Optional(StringEnum(["self", "subagent", "fanout"] as const)),
+	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent task id; null detaches."})),
+	execution: Type.Optional(StringEnum(["self", "subagent", "fanout"] as const, {description: "How the task runs: self, subagent or fanout. Records intent for native orchestration."})),
 	files: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32})),
-	acceptance: Type.Optional(Type.String({maxLength:2000,description:"Concrete completion check"})),
-	evidence: Type.Optional(Type.String({maxLength:2000,description:"Observed verification and limitations; required to complete a task with acceptance"})),
-	refs: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32,description:"Project fact ids, observation ids or source references; no copied project map"})),
-	runId: Type.Optional(Type.String({maxLength:2000,description:"Native subagent/fanout run id; results still require review"})),
+	acceptance: Type.Optional(Type.String({maxLength:2000,description:"How to check the task is done."})),
+	evidence: Type.Optional(Type.String({maxLength:2000,description:"What you checked and its limits. Required to complete a task that has acceptance."})),
+	refs: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32,description:"Fact ids, observation ids or source references. Do not paste a project map."})),
+	runId: Type.Optional(Type.String({maxLength:2000,description:"Run id of a subagent or fanout. Its results still need review."})),
 	subject: Type.Optional(
-		Type.String({ description: "Task subject line (required for create)" }),
+		Type.String({ description: "Short title. Required for create." }),
 	),
 	description: Type.Optional(
-		Type.String({ description: "Long-form task description" }),
+		Type.String({ description: "Longer task details." }),
 	),
 	activeForm: Type.Optional(
 		Type.String({
 			description:
-				"Present-continuous spinner label shown while status is in_progress (e.g. 'writing tests')",
+				"Spinner label shown while in progress, in -ing form (e.g. 'writing tests').",
 		}),
 	),
 	status: Type.Optional(
 		StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
 			description:
-				"Set this task's status: one of pending, in_progress, completed, deleted. Create honors it as the initial status; update transitions it. When action is list, filters returned tasks by this status.",
+				"Create sets the starting status, update changes it, list filters by it.",
 		}),
 	),
 	blockedBy: Type.Optional(
 		Type.Array(Type.Number(), {
-			description: "Initial blockedBy ids (create only)",
+			description: "Task ids that block this one. Create only.",
 		}),
 	),
 	addBlockedBy: Type.Optional(
 		Type.Array(Type.Number(), {
-			description: "Task ids to add to blockedBy (update only, additive merge)",
+			description: "Task ids to add to blockedBy. Update only.",
 		}),
 	),
 	removeBlockedBy: Type.Optional(
 		Type.Array(Type.Number(), {
 			description:
-				"Task ids to remove from blockedBy (update only, additive merge)",
+				"Task ids to remove from blockedBy. Update only.",
 		}),
 	),
 	owner: Type.Optional(
-		Type.String({ description: "Agent/owner assigned to this task" }),
+		Type.String({ description: "Agent or person who owns the task." }),
 	),
 	metadata: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
 			description:
-				"Arbitrary metadata; pass null value for a key to delete that key on update",
+				"Free-form data. On update, a null value deletes that key.",
 		}),
 	),
 	id: Type.Optional(
 		Type.Number({
-			description: "Task id (required for update, get, delete)",
+			description: "Task id. Required for update, get and delete.",
 		}),
 	),
 	includeDeleted: Type.Optional(
 		Type.Boolean({
 			description:
-				"If true, list action returns deleted (tombstoned) tasks as well. Default: false.",
+				"With list, also return deleted tasks. Default false.",
 		}),
 	),
 });
@@ -187,9 +187,9 @@ function undescribed(schema: any): any {
 
 export const TodoParamsSchema = Type.Object({
  ...MutationSchema.properties,
- action: StringEnum(["create", "update", "list", "get", "delete", "clear", "batch"] as const),
- view: Type.Optional(StringEnum(["tree", "frontier"] as const, {description:"list projection; omitted means tree"})),
- operations: Type.Optional(Type.Array(Type.Object({...undescribed(MutationSchema.properties), action:StringEnum(["create", "update", "delete"] as const)}), {maxItems:32,minItems:1,description:"Atomic mutations with the top-level create/update/delete fields. Create may supply a unique negative id as a local alias; later operations reference it. Errors roll back the entire batch."})),
+ action: StringEnum(["create", "update", "list", "get", "delete", "clear", "batch"] as const, {description: "The operation. batch applies the operations list atomically."}),
+ view: Type.Optional(StringEnum(["tree", "frontier"] as const, {description:"For list: frontier (ready and active work) or tree (full hierarchy). Default tree."})),
+ operations: Type.Optional(Type.Array(Type.Object({...undescribed(MutationSchema.properties), action:StringEnum(["create", "update", "delete"] as const)}), {maxItems:32,minItems:1,description:"1 to 32 create, update or delete items using the fields above. A create may set a unique negative id as a local alias that later items use. Any error rolls back the whole batch."})),
 });
 
 export type TodoParams = Static<typeof TodoParamsSchema>;
