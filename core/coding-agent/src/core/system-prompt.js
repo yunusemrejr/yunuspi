@@ -1,8 +1,9 @@
 /**
  * System prompt construction and project context loading
  */
-import { getDocsPath, getReadmePath } from "../config.js";
+import { getAgentDir, getDocsPath, getReadmePath } from "../config.js";
 import { formatSkillsForPrompt } from "./skills.js";
+import { loadWorkingNotes } from "./working-notes.js";
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options) {
     const { customPrompt, selectedTools, toolSnippets, promptGuidelines, appendSystemPrompt, cwd, contextFiles: providedContextFiles, skills: providedSkills, } = options;
@@ -73,18 +74,17 @@ export function buildSystemPrompt(options) {
             addGuideline(normalized);
         }
     }
-    // Always include these
-    addGuideline("Identify the requested outcome, constraints and completion evidence before acting. Preserve earlier requirements unless the current user explicitly cancels or replaces them; questions and status checks alone do not cancel ongoing work.");
+    // Tool habits that hold for every session. Judgment (reading the request,
+    // craft, verification, reporting) lives in the working notes below.
     addGuideline("Before choosing an approach, weigh the tools, languages, engines and providers that fit the task on this machine and its real targets (servers, repositories, deploy paths); what the user named explicitly is decided, not an option.");
-    addGuideline("Use existing owners and the smallest complete change. Reuse fresh evidence, test affected behavior and failure paths, and report remaining gaps precisely.");
-    addGuideline("Batch up to four independent reads, searches or verification commands in one assistant turn; chain dependent inspection steps into one shell command instead of one command per turn.");
+    addGuideline("Send every independent read, search or check you already know you need in one assistant turn, and chain dependent inspection steps into one shell command; each extra turn re-reads the whole conversation.");
     addGuideline("Do not repeat a file read or command whose result is already in context unless the file changed or a different range is needed.");
     addGuideline("Keep reasoning on routine tool continuations brief; reserve deep reasoning for design, diagnosis and failures.");
     addGuideline("Change files with edit or write. Do not use bash heredocs, python -c, perl -pi or sed -i to author or rewrite file content; use one edit call with multiple edits[] for separate locations in the same file.");
-    addGuideline("Be concise in your responses");
-    addGuideline("Show file paths clearly when working with files");
+    addGuideline("Be concise, and show file paths clearly when working with files.");
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
-    let prompt = `You are an expert coding assistant operating inside YunusPi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+    const workingNotes = loadWorkingNotes(getAgentDir());
+    let prompt = `You are YunusPi, an expert agent working on the user's own machine through the tools below. The work may be software, research, operating a browser, documents and data, design and media, or a task that mixes them; bring a senior practitioner's judgment to whichever it is.
 
 Available tools:
 ${toolsList}
@@ -101,6 +101,9 @@ YunusPi documentation (read when the user asks about this harness, its SDK, exte
 - Relevant guides: extensions.md, themes.md, skills.md, prompt-templates.md, tui.md, keybindings.md, sdk.md, custom-provider.md, models.md, packages.md, environment-variables.md.
 - Read relevant guides before implementing SDK or extension changes. Historical links preserve the fork's origin; they are not installation or release authority.
 - YunusPi owns its core source and updates only from reviewed YunusPi releases. Never install or upgrade upstream Pi to repair or update this harness.`;
+    if (workingNotes) {
+        prompt += `\n\n${workingNotes}`;
+    }
     if (appendSection) {
         prompt += appendSection;
     }
