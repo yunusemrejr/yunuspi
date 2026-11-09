@@ -4,7 +4,7 @@ YunusPi makes films from code through one pipeline: a Remotion 4.0.529 project f
 
 The agent chooses the engine and the voice from the subject, the environment and the user's words; anything the user names explicitly wins. Remotion with three.js suits designed 3D subjects, type and motion graphics. Blender suits photoreal or heavy scenes, delivered as footage or as GLB ([3D studio](3D-STUDIO.md)). HyperFrames suits HTML and GSAP work, and FFmpeg suits footage the user supplied. No planning file or plan action is required before rendering.
 
-`/video <assignment>` (see [GOAL.md](GOAL.md#3d-video-anatomy-and-chaining)) boosts a film goal and chains with `/3d` and `/noslop`. The tools below can be found with `tool_search`.
+A `/goal` that asks for a film adopts the video standard on its own (see [GOAL.md](GOAL.md#standards-a-goal-adopts-on-its-own)); `/video <assignment>` insists on it and chains with `/3d` and `/noslop`. The tools below can be found with `tool_search`.
 
 ## Tools
 

@@ -23,10 +23,12 @@ Sessions combine one independent observer, project memory, local inference and b
 
 Start `yunuspi` in your project directory, choose an available model, and describe the work normally. You do not need to select a workflow or browse a catalog before every task.
 
+- **One command for work that matters.** `/goal <what you want done>` gives the session a definition of done and keeps it working until each part has evidence. A goal adopts the standards its work calls for on its own (interface design, slop removal, bug hunting, 3D, video, anatomy figures, web research, operating a website), so there is no second command to remember. [Goals](docs/GOAL.md)
+- **Judgment in every session.** Every model gets the same short working notes: find the goal behind the words, look before building, miss nothing that was asked, make visual work for its audience, check the real result, report plainly. Put your own in `NOTES.md` in the agent directory to replace them.
 - **Start small.** Main sessions expose core editing, inspection, coordination and quality tools. Specialized tool schemas and the full skill catalog stay out of the initial model context.
 - **Discover when useful.** The agent can browse capability groups, search short descriptions, and load selected tools or read a relevant skill. Direct search and activation are also available; browsing is optional.
 - **No ambient advice.** The harness adds no orientation note, capability hints or plan-every-request nudges to your prompts. The agent finds tools and skills when it needs them.
-- **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
+- **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; a command that publishes, deploys, sends or deletes beyond the project runs when your own words asked for it and otherwise waits for you ([Security](docs/SECURITY.md)); quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
 
 Enabled tools become available at the next model turn within the same request; discovery batches schema changes once after the current tool batch. Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
 

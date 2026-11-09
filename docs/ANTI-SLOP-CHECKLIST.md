@@ -5,9 +5,9 @@ chapter distills this list into reviewable passages; the `ui-design`
 skill covers the same failure modes. When they disagree about a specific page, this checklist wins
 for websites: it is the most specific rule set. To run a desloppify pass over
 an existing codebase — UI, copy, comments and dead or duplicate code alike —
-use `/noslop` (optionally with a focus, e.g. `/noslop the settings page`); it
-also cuts every screen down to the few things its user comes for and works as a goal whose fronts must each settle with evidence (see
-[GOAL.md](GOAL.md#noslop)).
+set a goal for it (`/goal desloppify the settings page`), which adopts the noslop standard on its own, or type `/noslop` to insist on it; it
+also cuts every screen down to the few things its user comes for and works as a goal whose checks must each settle with evidence (see
+[GOAL.md](GOAL.md#standards-a-goal-adopts-on-its-own)).
 
 Standing UI constraints also reject generic lightbulb branding, muddy orange/brass/brown default palettes, decorative colored dots before labels, and boxed icon badges. Necessary state and explicitly requested branding are contextual exceptions with evidence. A generated source comment asserting brand ownership is insufficient. Visual/3D/motion upgrades require baseline-versus-final inspection of the relevant states, not merely a new asset or passing tests.
 

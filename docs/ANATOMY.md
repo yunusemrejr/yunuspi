@@ -60,13 +60,16 @@ times `--dpr` (default 2, so 1080 wide); a 3 s 1:1 preview with
 `--step 40 --most 2 --dpr 0.5` renders in about 30 s, while the full blur
 render costs about two minutes per second of film.
 
-## /anatomy
+## In a goal
 
-`/anatomy <object, mechanism or system>` starts a goal that uses both skills
-and chooses between them by what the reader should understand. It chains like
-the other boosts (see [GOAL.md](GOAL.md)):
+A `/goal` whose work is a figure or film of a real object's parts, or of how a
+mechanism works, adopts the anatomy standard on its own (see
+[GOAL.md](GOAL.md#standards-a-goal-adopts-on-its-own)); it uses both skills and
+chooses between them by what the reader should understand. To insist on it,
+type the shortcut, alone or with others:
 
 ```
+/goal an interactive cutaway of a watch escapement            # adopts anatomy itself
 /anatomy an interactive cutaway of a watch escapement
 /anatomy /video a 10-second 1:1 reveal film of a Moka pot   # adds sound and a watched master
 /anatomy /3d /noslop replace the landing page's feature list with one take-apart figure
