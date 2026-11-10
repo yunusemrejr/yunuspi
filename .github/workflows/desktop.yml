@@ -23,8 +23,13 @@ jobs:
       - run: npm run setup:desktop
       - name: Install Linux desktop libraries
         run: |
-          sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libgbm1 libasound2t64
+          # A package mirror that drops one download must not fail the release: try the pair three times.
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=3 update &&
+              sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libgbm1 libasound2t64 && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 20
+          done
       - name: Exercise the real Electron and RPC lifecycle
         env:
           YUNUSPI_E2E_OUTPUT: /tmp/yunuspi-desktop-evidence
