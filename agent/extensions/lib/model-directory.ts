@@ -39,7 +39,7 @@ export interface ModelDirectory {
 }
 /** A configured provider as the directory is asked about it: local id and base URL. */
 export type ProviderAddress = readonly [id: string, baseUrl: string | undefined];
-const addressKey = ([id, baseUrl]: ProviderAddress): string => `${id} ${baseUrl ?? ""}`;
+const addressKey = ([id, baseUrl]: ProviderAddress): string => `${id} ${addressBase(baseUrl)}`;
 
 /** Provider ids that differ between the harness and the directory. */
 const DIRECTORY_IDS: Record<string, string> = { together: "togetherai" };
@@ -155,6 +155,11 @@ export function directoryCovers(directory: ModelDirectory, wanted: readonly Prov
 }
 
 const trimmedPath = (url: URL): string => url.pathname.replace(/\/+$/, "");
+/** The part of a base URL that is saved: origin and path. Userinfo, query and fragment can carry credentials. */
+function addressBase(baseUrl: string | undefined): string {
+	const url = httpUrl(baseUrl);
+	return url ? `${url.origin}${trimmedPath(url)}` : "";
+}
 
 /**
  * The directory entry for a configured provider. The base URL decides: an
@@ -178,16 +183,25 @@ function matchProvider(directory: ModelDirectory, providerId: string, baseUrl?: 
 	const named = own(providerId) ?? (Object.hasOwn(DIRECTORY_IDS, providerId) ? own(DIRECTORY_IDS[providerId]) : undefined);
 	const base = httpUrl(baseUrl);
 	if (!base) return named;
-	const sameHost = Object.entries(directory.providers).flatMap(([id, entry]) => {
+	const sameHost = Object.values(directory.providers).flatMap((entry) => {
 		const url = httpUrl(entry.url);
-		return url && url.host === base.host ? [{ id, entry, path: trimmedPath(url) }] : [];
+		return url && url.host === base.host ? [{ entry, path: trimmedPath(url) }] : [];
 	});
 	if (!sameHost.length) return named && !named.url ? named : undefined;
+	if (sameHost.length === 1) return sameHost[0].entry;
+	const local = sameHost.find((candidate) => candidate.entry === named);
+	if (local) return local.entry;
+	// Among several entries on one host, the path that shares the most segments with the configured one wins; a tie is no match.
 	const basePath = trimmedPath(base);
-	const nested = (path: string) => path === basePath || path.startsWith(`${basePath}/`) || basePath.startsWith(`${path}/`);
-	return (sameHost.find((candidate) => candidate.entry === named)
-		?? sameHost.filter((candidate) => nested(candidate.path)).sort((a, b) => a.id.localeCompare(b.id))[0]
-		?? sameHost.sort((a, b) => a.id.localeCompare(b.id))[0]).entry;
+	const shared = sameHost.flatMap(({ entry, path }) => {
+		const nested = path === basePath || path.startsWith(`${basePath}/`) || basePath.startsWith(`${path}/`);
+		return nested ? [{ entry, length: Math.min(path.length, basePath.length), exact: path === basePath }] : [];
+	});
+	const longest = Math.max(-1, ...shared.map((candidate) => candidate.length));
+	const top = shared.filter((candidate) => candidate.length === longest);
+	const exact = top.filter((candidate) => candidate.exact);
+	const pick = exact.length ? exact : top;
+	return pick.length === 1 ? pick[0].entry : undefined;
 }
 
 /** Directory facts for one model of a matched provider; ids compare without case. */

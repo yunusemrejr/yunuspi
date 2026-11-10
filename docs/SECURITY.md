@@ -38,11 +38,15 @@ Some commands are not dangerous to the files in front of them and still should n
 
 | The command | Examples | How it is settled |
 | --- | --- | --- |
-| discards uncommitted work that a snapshot can bring back | `git reset --hard`, `git checkout -- file`, `git restore file`, `git clean -fd` | The worktree is snapshotted into `refs/yunuspi/checkpoints/<session>` first, then the command runs. The tool result names the ref and the one-line restore. No prompt. |
-| publishes, deploys or sends | `git push`, `npm publish`, `cargo publish`, `docker push`, `gh pr create`, `vercel --prod`, `terraform apply`, `kubectl delete`, `helm upgrade`, an email | The user's own words decide (below). |
-| deletes what no snapshot covers | `git clean -x`, `git stash drop`, `docker compose down -v`, `aws … delete-*`, `DROP TABLE` sent to a database server, `ssh host rm …`, a whole-workspace wipe, `rsync --delete` | The user's own words decide. |
-| runs a download unread | `curl … \| sh`, `bash <(curl …)`, `sh -c "$(curl …)"` | The user's own words decide. Downloading to a file and reading it first is an ordinary command. |
-| runs a script, build or test as administrator | `sudo make install`, `sudo bash setup.sh` | The user's own words decide. |
+| discards uncommitted work that a snapshot can bring back | `git reset --hard`, `git checkout file`, `git checkout -- file`, `git restore file`, `git clean -fd` | The worktree the command acts on (`git -C dir …`, after a `cd`) is snapshotted into `refs/yunuspi/checkpoints/<session>` first, then the command runs. The tool result names the ref and the one-line restore. No prompt. When that directory cannot be read from the command (`cd "$(…)" && git reset --hard`, `GIT_DIR=…`), nothing can be saved first, so the user's own words decide. |
+| publishes, deploys or sends | `git push`, `npm publish`, `cargo publish`, `docker push`, `gh pr create`, `vercel --prod`, `terraform apply`, `kubectl delete`, `helm upgrade`, `rsync`/`scp` to another machine, `curl -X DELETE` to a remote host, an email | The user's own words decide (below). |
+| deletes what no snapshot covers | `git clean -x`, `git stash drop`, `git reflog expire`, `git gc --prune=now`, `docker compose down -v`, `aws … delete-*`, `DROP TABLE` sent to a database server, `ssh host rm …`, a whole-workspace wipe, `rsync --delete` | The user's own words decide. |
+| runs a download unread | `curl … \| sh`, `bash <(curl …)`, `sh -c "$(curl …)"`, `curl -o i.sh … && sh i.sh` | The user's own words decide. Downloading to a file and reading it first, in a separate command, is an ordinary command. |
+| runs as administrator | `sudo make install`, `sudo ./setup.sh`, `pkexec …`, `su -c "…"`, `sudo apt install …` | The user's own words decide. Commands that only read (`sudo cat`, `sudo journalctl`, `sudo systemctl status`, `sudo apt list`) run as before. |
+
+**Every effect is settled on its own.** A command line can do several of these things (`git reset --hard && git push --force`). Each one is named and cleared separately: the snapshot settles the lost edits and says nothing about the push, and a request to publish does not cover a force push on the same line. One dialog lists everything that still needs a say. A line with more than six such effects is not run as one command.
+
+**The same command in other clothes.** The effect is read through programs that only start another program (`time`, `timeout`, `env`, `nohup`, `flock`, `xargs`, `find -exec`, `systemd-run`, `{ …; }`, `eval "…"`), through launchers (`npx wrangler deploy`, `pnpm dlx vercel --prod`, `python -m twine upload`, `uv run …`), and through the project's own scripts: `npm run deploy`, `make release` and `./ship.sh` are read (package.json scripts with their `pre`/`post` steps, Makefile recipes with prerequisites, shell scripts up to 200 KB; three levels deep), and a push, publish, deploy, send or remote delete found inside needs the same say as the bare command, named with the script it came through.
 
 **The user's own words.** The hook collects the user's messages from the session (the first one and the latest five; a goal contributes the text the user typed, not the criteria wrapped around it) and asks one typed question: did the user ask for this effect? The typed judge answers when it is enabled; when it is not, or is unsure, the session's own model is asked in a separate request that carries only those messages, the command and its effect. Tool output, web pages and the command text are never evidence: a comment claiming permission proves nothing.
 
@@ -51,6 +55,10 @@ Some commands are not dangerous to the files in front of them and still should n
 - Not asked for it, with nobody to ask (print mode, a delegated task): the command is not run, and the model is told to finish the rest and report that the step waits for a go-ahead. A delegated task never clears one itself.
 
 `PI_COMMAND_JUDGE=off` skips both judges, so every such command is asked about or refused. No judge can lift a hard block: protected paths, power and network operations and unresolved targets are decided before it is consulted.
+
+A message the harness writes in the user's place (a follow-up prompt, a worker's result handed back) is marked when it is queued and is never counted among the user's words.
+
+**What this review does not see.** It reads commands and shell scripts, not programs: a script in another language (`node scripts/release.js`, `python deploy.py`) is not opened, so a push inside it is not named. A file downloaded in one command and run in a later one is no longer known to be a download. Inside a project script only what leaves the machine is judged; what the script does to local files is not. Tools the table does not know are ordinary commands. The review lowers the chance of an unasked publish or loss; credentials with narrow rights and protected branches remain the real boundary.
 
 Stopping processes by name (`pkill`, `killall`) is allowed when every process the pattern matches was started by this session, which the harness can show because its children inherit a per-process mark. A pattern that also matches anything else stays blocked, and the refusal says what it matched.
 

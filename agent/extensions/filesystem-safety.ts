@@ -3,10 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	commandConsequence, elevatedConsequence, pipelineConsequence, programOperands, substitutionConsequence,
+	commandConsequence, downloadConsequence, downloadedFiles, elevatedConsequence, isShell, makeRecipes, makeRequest, packageScript,
+	pipelineConsequence, programFile, programOperands, REACHES_OUT, substitutionConsequence,
 	type Consequence, type ParsedCommand,
 } from "./lib/command-consequence.ts";
-import { commandIntent, sessionModelAsker, userWords, type IntentReading } from "./lib/command-intent.ts";
+import { commandIntent, HARNESS_INPUT_ENTRY, inputDigest, sessionModelAsker, userWords, type IntentReading } from "./lib/command-intent.ts";
 import { hostOperationRisk } from "./lib/host-operation-safety.ts";
 import { isDirectReplyPrompt } from "./lib/intent-context.ts";
 import { askJev, jevEnabled } from "./lib/jev-client.ts";
@@ -76,6 +77,9 @@ type ShellRisk = {
 	consequence?: Consequence;
 	/** Where the command runs, for the snapshot a local loss needs. */
 	workdir?: string;
+	/** The other reviews the same command line needs. Each is cleared on its
+	 * own: a snapshot settles one effect, the user's request another. */
+	also?: ShellRisk[];
 };
 type ShellState = {
 	vars: Map<string, string | undefined>;
@@ -406,18 +410,68 @@ function agentMemoryRoots(): string[] {
 	});
 }
 
+/** More separate effects than this on one command line are not reviewed together. */
+const MAX_REVIEWS = 6;
+/** More effects than this go straight to the user instead of one judge call each. */
+const MAX_JUDGED = 3;
+/** How much of a project script is read for what it sends out of this machine. */
+const SCRIPT_BYTES = 200_000, SCRIPT_CHARS = 200_000, SCRIPT_DEPTH = 3;
+const readSmall = (file: string): string | undefined => {
+	try {
+		return fs.statSync(file).size <= SCRIPT_BYTES ? fs.readFileSync(file, "utf8") : undefined;
+	} catch { return undefined; }
+};
+/** Programs that only start another program. `valued` options take the next
+ * operand; `leading` counts the operands before the command (a lock file, a
+ * priority). The older wrappers keep their own handling below. */
+const MORE_WRAPPERS: Record<string, { valued: readonly string[]; leading: number }> = {
+	pkexec: { valued: ["--user"], leading: 0 },
+	time: { valued: ["-f", "--format", "-o", "--output"], leading: 0 },
+	ionice: { valued: ["-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"], leading: 0 },
+	chrt: { valued: ["-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"], leading: 1 },
+	taskset: { valued: [], leading: 1 },
+	flock: { valued: ["-w", "--wait", "--timeout", "-E", "--conflict-exit-code"], leading: 1 },
+	unbuffer: { valued: [], leading: 0 },
+	chronic: { valued: [], leading: 0 },
+	caffeinate: { valued: ["-t", "-w"], leading: 0 },
+	"systemd-run": { valued: ["-u", "--unit", "-p", "--property", "--description", "--slice", "--service-type", "--uid", "--gid", "--nice", "--working-directory", "-E", "--setenv", "-H", "--host", "-M", "--machine", "--on-active", "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive", "--on-calendar", "--timer-property", "--path-property", "--socket-property", "--background"], leading: 0 },
+	"xvfb-run": { valued: ["-n", "--server-num", "-s", "--server-args", "-f", "--auth-file", "-e", "--error-file", "-p", "--xauth-protocol", "-w", "--wait"], leading: 0 },
+	strace: { valued: ["-o", "-e", "-p", "-s", "-u", "-E", "-a", "-I", "-b", "-P", "-S", "-U", "-X"], leading: 0 },
+	ltrace: { valued: ["-o", "-e", "-p", "-s", "-u", "-a", "-n", "-l", "-x"], leading: 0 },
+};
+const WRAPPERS = new Set(["command", "exec", "sudo", "doas", "env", "nohup", "timeout", "nice", "stdbuf", "setsid", "busybox", ...Object.keys(MORE_WRAPPERS)]);
+
+/** The one answer the guard acts on: a block, or the first review with every
+ * further one behind it. */
 function assessShellMutation(
 	command: string,
 	cwd: string,
 	environment = process.env,
 	depth = 0,
 ): ShellRisk | undefined {
+	const { blocked, reviews } = assessShell(command, cwd, environment, depth);
+	if (blocked) return blocked;
+	if (!reviews.length) return undefined;
+	if (reviews.length > MAX_REVIEWS)
+		return { level: "block", resolved: true, target: `${reviews.length} effects`, reason: "This command line does more separate things that need a decision than can be reviewed at once; run them as separate commands" };
+	const [first, ...rest] = reviews;
+	return rest.length ? { ...first, also: rest } : first;
+}
+
+function assessShell(
+	command: string,
+	cwd: string,
+	environment = process.env,
+	depth = 0,
+): { blocked?: ShellRisk; reviews: ShellRisk[] } {
 	if (depth > 5)
 		return {
-			level: "review",
-			reason:
-				"Nested shell mutation exceeds the bounded analyzer; split the command",
-			resolved: false,
+			reviews: [{
+				level: "review",
+				reason:
+					"Nested shell mutation exceeds the bounded analyzer; split the command",
+				resolved: false,
+			}],
 		};
 	const state: ShellState = {
 		vars: new Map(),
@@ -432,24 +486,92 @@ function assessShellMutation(
 	}> = [];
 	let conditionalCd: string | undefined;
 	let mutationCwd: string | undefined = cwd;
-	let risk: ShellRisk | undefined;
+	let blocked: ShellRisk | undefined;
+	const reviews: ShellRisk[] = [];
+	// Every review is kept: one effect settled (a snapshot taken, a push asked
+	// for) says nothing about the next one on the same line.
 	const note = (next: ShellRisk | undefined) => {
-		if (next && (!risk || next.level === "block")) risk = next;
+		if (!next) return;
+		if (next.level === "block") { blocked = next; return; }
+		for (const { also: _further, ...one } of [next, ...(next.also ?? [])])
+			if (!reviews.some((kept) => kept.reason === one.reason && kept.target === one.target && kept.workdir === one.workdir)) reviews.push(one);
 	};
 	const uncertain = (
 		target: string,
 		reason = "unresolved shell variable or dynamic target",
 		resolved = false,
 	) => note({ level: "review", target, resolved, reason });
-	const consequential = (consequence: Consequence | undefined, target: string) => {
-		if (!consequence) return;
-		// "As administrator" is the least specific thing to say about a command.
-		if (risk?.level === "review" && risk.consequence?.kind === "privilege" && consequence.kind !== "privilege") risk = undefined;
-		let workdir = state.cwd;
-		try {
-			if (consequence.workdir !== undefined && state.cwd) workdir = canonicalMutationPath(consequence.workdir, state.cwd);
-		} catch { workdir = undefined; }
+	const consequential = (found: Consequence | undefined, target: string, relocated = false) => {
+		if (!found) return;
+		let consequence = found, workdir: string | undefined;
+		if (found.needs === "snapshot") {
+			// A snapshot is only worth something taken where the command acts. When
+			// that place cannot be read from the command, the user's say is needed.
+			try {
+				if (!found.unlocated && !relocated && mutationCwd)
+					workdir = found.workdir === undefined ? mutationCwd : canonicalMutationPath(found.workdir, mutationCwd);
+			} catch { workdir = undefined; }
+			if (!workdir) consequence = { ...found, needs: "request", effect: `${found.effect}, in a directory that cannot be read from the command ahead of time, so nothing can be saved first` };
+		}
 		note({ level: "review", target, resolved: true, reason: `This command ${consequence.effect}`, consequence, ...(workdir ? { workdir } : {}) });
+	};
+	/** Files this command line downloaded, by path, with the host they came from. */
+	const fetched = new Map<string, string | undefined>();
+	const placed = (file: string | undefined) => file === undefined || file === "" ? undefined
+		: path.isAbsolute(file) ? path.resolve(file) : mutationCwd ? path.resolve(mutationCwd, file) : undefined;
+	/** A download from earlier on this line, run before anyone has read it. */
+	const ranDownload = (invoked: string, name: string, values: readonly (string | undefined)[]): Consequence | undefined => {
+		if (!fetched.size) return;
+		for (const file of [invoked.includes("/") ? invoked : undefined, programFile(name, values)]) {
+			const full = placed(file);
+			if (full && fetched.has(full)) return downloadConsequence(fetched.get(full));
+		}
+	};
+	/** A project's own script is read for what it sends out of this machine
+	 * (`npm run deploy`, `make release`, `./deploy.sh`): that needs the same say
+	 * as the bare command. What the script does to local files is not judged. */
+	const through = (script: string, where: string, via: string, scriptEnvironment: NodeJS.ProcessEnv) => {
+		if (depth >= SCRIPT_DEPTH) return;
+		for (const one of assessShell(script.slice(0, SCRIPT_CHARS), where, scriptEnvironment, depth + 1).reviews) {
+			const found = one.consequence;
+			if (!found || !REACHES_OUT.has(found.kind)) continue;
+			const effect = found.effect.includes(" (through ") ? found.effect : `${found.effect} (through ${via})`;
+			note({ level: "review", target: via, resolved: true, reason: `This command ${effect}`, consequence: { ...found, effect } });
+		}
+	};
+	const projectScript = (invoked: string, name: string, values: readonly (string | undefined)[], scriptEnvironment: NodeJS.ProcessEnv) => {
+		const where = mutationCwd;
+		if (!where || depth >= SCRIPT_DEPTH) return;
+		const run = packageScript(name, values);
+		if (run) {
+			const dir = run.dir ? path.resolve(where, run.dir) : where;
+			let scripts: Record<string, unknown> | undefined;
+			try { scripts = JSON.parse(readSmall(path.join(dir, "package.json")) ?? "null")?.scripts; } catch { scripts = undefined; }
+			if (!scripts || typeof scripts !== "object") return;
+			for (const key of [`pre${run.script}`, run.script, `post${run.script}`]) {
+				const body = Object.hasOwn(scripts, key) ? scripts[key] : undefined;
+				if (typeof body === "string") through(body, dir, `the "${key}" script in package.json`, scriptEnvironment);
+			}
+			return;
+		}
+		if (name === "make" || name === "gmake") {
+			const asked = makeRequest(values);
+			if (!asked) return;
+			const dir = asked.dir ? path.resolve(where, asked.dir) : where;
+			const text = asked.file ? readSmall(path.resolve(dir, asked.file))
+				: ["GNUmakefile", "makefile", "Makefile"].map((file) => readSmall(path.join(dir, file))).find((found) => found !== undefined);
+			if (text) for (const { target, line } of makeRecipes(text, asked.targets)) through(line, dir, `make ${target}`, scriptEnvironment);
+			return;
+		}
+		// A shell script: run by its path, or handed to a shell.
+		const byPath = invoked.includes("/") && !/^\/(?:usr\/)?(?:local\/)?s?bin\//.test(invoked);
+		const file = isShell(name) || name === "source" || name === "." ? programFile(name, values) : byPath ? invoked : undefined;
+		if (!file) return;
+		const full = path.resolve(where, file), text = readSmall(full);
+		if (text === undefined) return;
+		const shebang = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(text);
+		const interpreter = shebang ? path.basename(/(?:^|\/)env$/.test(shebang[1]) ? shebang[2] ?? "" : shebang[1]) : "";
+		if (file !== invoked || (shebang ? isShell(interpreter) : /\.(?:sh|bash)$/.test(full))) through(text, where, path.basename(full), scriptEnvironment);
 	};
 	/** The command a substitution body runs first, behind any wrapper. */
 	const substituted = (body: string): ParsedCommand => {
@@ -572,7 +694,7 @@ function assessShellMutation(
 		}
 		for (const dest of redirects) check(dest);
 		let i = 0;
-		if (["then", "do", "else", "!"].includes(args[i])) i++;
+		while (["then", "do", "else", "!", "{"].includes(args[i])) i++;
 		const prefixVariables = new Map(state.vars);
 		const assignments: Array<[string, string | undefined]> = [];
 		const exportsVariables =
@@ -612,7 +734,8 @@ function assessShellMutation(
 			...Object.fromEntries(assignments),
 		};
 		let childCwd = state.cwd;
-		let name = path.basename(shellValue(args[i++], state) ?? "");
+		let invoked = shellValue(args[i++], state) ?? "";
+		let name = path.basename(invoked);
 		let elevated = false;
 		const envAssignment = (raw: string): [string, string | undefined] | undefined => {
 			const lexical = /^([A-Za-z_]\w*)=(.*)$/s.exec(raw);
@@ -620,22 +743,8 @@ function assessShellMutation(
 			const evaluated = /^([A-Za-z_]\w*)=(.*)$/s.exec(shellValue(raw, state) ?? "");
 			if (evaluated) return [evaluated[1], evaluated[2]];
 		};
-		while (
-			[
-				"command",
-				"exec",
-				"sudo",
-				"doas",
-				"env",
-				"nohup",
-				"timeout",
-				"nice",
-				"stdbuf",
-				"setsid",
-				"busybox",
-			].includes(name)
-		) {
-			if (name === "sudo" || name === "doas") elevated = true;
+		while (WRAPPERS.has(name)) {
+			if (name === "sudo" || name === "doas" || name === "pkexec") elevated = true;
 			while (
 				i < args.length &&
 				((shellValue(args[i], state) ?? "").startsWith("-") || /^[A-Za-z_]\w*=/.test(args[i]) || name === "env" && envAssignment(args[i]) !== undefined)
@@ -707,7 +816,8 @@ function assessShellMutation(
 					(name === "exec" && option === "-a") ||
 					(name === "nice" && ["-n", "--adjustment"].includes(option)) ||
 					(name === "stdbuf" && ["-i", "-o", "-e", "--input", "--output", "--error"].includes(option)) ||
-					(name === "timeout" && ["-s", "-k", "--signal", "--kill-after"].includes(option))
+					(name === "timeout" && ["-s", "-k", "--signal", "--kill-after"].includes(option)) ||
+					(Object.hasOwn(MORE_WRAPPERS, name) && MORE_WRAPPERS[name].valued.includes(option))
 				)
 					i++;
 			}
@@ -718,11 +828,18 @@ function assessShellMutation(
 				childEnvironment[assignment[0]] = assignment[1]; i++;
 			}
 			if (name === "timeout") i++;
+			if (Object.hasOwn(MORE_WRAPPERS, name)) i += MORE_WRAPPERS[name].leading;
+			// `flock file -c "…"` hands the string to a shell.
+			if (name === "flock" && ["-c", "--command"].includes(shellValue(args[i] ?? "", state) ?? "")) {
+				invoked = name = "sh";
+				continue;
+			}
 			if (i < args.length && shellValue(args[i], state) === undefined) {
 				uncertain(name, "Wrapped command or option is unresolved; use explicit operands");
 				return;
 			}
-			name = path.basename(shellValue(args[i++] ?? "", state) ?? "");
+			invoked = shellValue(args[i++] ?? "", state) ?? "";
+			name = path.basename(invoked);
 		}
 		mutationCwd = childCwd;
 		const operands = args.slice(i),
@@ -733,12 +850,29 @@ function assessShellMutation(
 		if (/^python[\d.]*$/.test(name) && values[0] === "-m" && values[1] === "esptool")
 			note(hostOperationRisk("esptool", values.slice(2)));
 		parsed = { name, values };
-		consequential(
-			commandConsequence(name, values) ??
-				substitutionConsequence(name, programOperands(name, values).flatMap((at) => shellSubstitutions(operands[at])).map(substituted)) ??
-				(elevated ? elevatedConsequence(name) : undefined),
-			name,
-		);
+		// `GIT_DIR=… git reset --hard` acts on another repository than the one a snapshot would cover.
+		const relocated = name === "git" && ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"].some((key) => childEnvironment[key] !== environment[key]);
+		const named = commandConsequence(name, values) ??
+			substitutionConsequence(name, programOperands(name, values).flatMap((at) => shellSubstitutions(operands[at])).map(substituted)) ??
+			ranDownload(invoked, name, values);
+		consequential(named, name, relocated);
+		// A snapshot settles lost edits, not the fact that the command ran as administrator.
+		if (elevated && (!named || named.needs === "snapshot")) consequential(elevatedConsequence(name, values, invoked), name);
+		if (name === "su" || name === "runuser") {
+			const at = values.findIndex((value) => ["-c", "--command", "--session-command"].includes(value ?? ""));
+			const script = at >= 0 ? values[at + 1] : values.map((value) => /^--(?:session-)?command=([\s\S]*)$/.exec(value ?? "")?.[1]).find((found) => found !== undefined);
+			if (script !== undefined) {
+				const first = substituted(script);
+				consequential(elevatedConsequence(first.name, first.values), name);
+				note(assessShellMutation(script, childCwd ?? cwd, childEnvironment, depth + 1));
+			} else if (at >= 0) uncertain(name, "The command run as another user is unresolved");
+		}
+		const download = downloadedFiles(name, values);
+		for (const file of download.files) {
+			const full = placed(file);
+			if (full) fetched.set(full, download.host);
+		}
+		projectScript(invoked, name, values, childEnvironment);
 		if (name === "find") {
 			for (let at = 0; at < operands.length; at++) {
 				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(values[at] ?? "")) continue;
@@ -746,6 +880,7 @@ function assessShellMutation(
 				while (end < operands.length && ![";", "+"].includes(values[end] ?? "")) end++;
 				const executable = path.basename(values[at + 1] ?? "");
 				note(hostOperationRisk(executable, values.slice(at + 2, end).map(value => value?.includes("{}") ? undefined : value)));
+				consequential(commandConsequence(executable, values.slice(at + 2, end)), executable);
 				// Filesystem operands from find remain owned by the scoped-root
 				// checks below; recursively inspect only command/shell wrappers.
 				if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(executable))
@@ -763,6 +898,7 @@ function assessShellMutation(
 			// Dynamic stdin operands cannot be resolved, but a literal dangerous
 			// executable must not evade host preflight by using an xargs wrapper.
 			note(hostOperationRisk(path.basename(values[at] ?? ""), [...values.slice(at + 1), undefined]));
+			consequential(commandConsequence(path.basename(values[at] ?? ""), [...values.slice(at + 1), undefined]), "xargs");
 			if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(path.basename(values[at] ?? "")))
 				note(assessShellMutation([...operands.slice(at), '"${__PI_XARGS_OPERAND}"'].join(" "), state.cwd ?? cwd,
 					{ ...childEnvironment, __PI_XARGS_OPERAND: undefined }, depth + 1));
@@ -833,6 +969,7 @@ function assessShellMutation(
 				"while",
 				"until",
 				"if",
+				"elif",
 				"case",
 				"eval",
 				"source",
@@ -842,10 +979,11 @@ function assessShellMutation(
 		) {
 			if (["for", "while", "until", "if", "case"].includes(name))
 				branches.push({ vars: new Map(state.vars), cwd: state.cwd });
-			if (["if", "while", "until"].includes(name))
+			// `eval` runs its operands as a command line; one that cannot be resolved stays unread.
+			if (["if", "elif", "while", "until"].includes(name) || name === "eval" && values.length > 0 && values.every((value) => value !== undefined))
 				note(
 					assessShellMutation(
-						operands.join(" "),
+						name === "eval" ? values.join(" ") : operands.join(" "),
 						state.cwd ?? cwd,
 						{ ...environment, ...Object.fromEntries(state.vars) },
 						depth + 1,
@@ -1130,7 +1268,7 @@ function assessShellMutation(
 		} else segment.push(token);
 	}
 	endSegment();
-	return risk;
+	return { blocked, reviews };
 }
 
 // Compatibility helpers for older callers; production uses the single assessor.
@@ -1640,8 +1778,12 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	};
 	pi.on("session_start", reset);
 	pi.on("session_shutdown", reset);
-	pi.on("input", () => {
+	pi.on("input", (event: any) => {
 		denied.clear();
+		// A message the harness wrote itself (a follow-up prompt, a worker's
+		// result) is marked so it is never read as the user asking for something.
+		if (event?.source === "extension" && typeof event.text === "string" && event.text.trim())
+			try { pi.appendEntry?.(HARNESS_INPUT_ENTRY, { digest: inputDigest(event.text) }); } catch { /* the message is then read as before */ }
 	});
 	// Confirm waits dominate this hook's measured wall time (one overnight
 	// session attributed 9.8h to 609 tool_call records with zero blocks: all
@@ -1687,10 +1829,13 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 
 		const risk = assessShellMutation(command, ctx.cwd);
 		if (!risk) return undefined;
-		const reason = `${risk.level === "review" ? "Review required" : "Blocked"}: ${risk.reason}${risk.target ? `: ${JSON.stringify(risk.target)}` : ""}${risk.expanded ? ` (resolves to ${JSON.stringify(risk.expanded)})` : ""}.`;
+		const describe = (one: ShellRisk) => `${one.level === "review" ? "Review required" : "Blocked"}: ${one.reason}${one.target ? `: ${JSON.stringify(one.target)}` : ""}${one.expanded ? ` (resolves to ${JSON.stringify(one.expanded)})` : ""}.`;
 		const narrow = " Use explicit, narrow targets or a preview before retrying; unresolved targets are never guessed from variable names.";
-		if (risk.level !== "review") return { block: true, reason };
-		if (!risk.resolved || ctx.signal?.aborted) return { block: true, reason: reason + narrow };
+		if (risk.level !== "review") return { block: true, reason: describe(risk) };
+		const { also = [], ...first } = risk;
+		const reviews: ShellRisk[] = [first, ...also];
+		const unresolved = reviews.find((one) => !one.resolved);
+		if (unresolved || ctx.signal?.aborted) return { block: true, reason: describe(unresolved ?? first) + narrow };
 
 		// Clearing a review covers this exact invocation only: the next one is
 		// read again. It never enlarges write scope or overrides a hard
@@ -1698,69 +1843,108 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		const epoch = generation;
 		const current = () => epoch === generation && !ctx.signal?.aborted &&
 			JSON.stringify(assessShellMutation(command, ctx.cwd)) === JSON.stringify(risk);
-		const consequence = risk.consequence;
-		const effect = consequence ? `This command ${consequence.effect}.` : `${risk.reason}.`;
-		const receipt = (outcome: string, reading: IntentReading = {}) => {
+		const sentence = (one: ShellRisk) => one.consequence ? `This command ${one.consequence.effect}.` : `${one.reason}.`;
+		const receipt = (one: ShellRisk, outcome: string, reading: IntentReading = {}) => {
 			try {
-				pi.appendEntry?.("command-review-v1", { target: risk.target, kind: consequence?.kind ?? "scope", needs: consequence?.needs ?? "request", intent: reading.intent, by: reading.by, outcome });
+				pi.appendEntry?.("command-review-v1", { target: one.target, kind: one.consequence?.kind ?? "scope", needs: one.consequence?.needs ?? "request", intent: reading.intent, by: reading.by, outcome });
 			} catch { /* diagnostics never block safety */ }
 		};
-
-		// A snapshot makes a local loss recoverable: take it and let the command run.
-		if (consequence?.needs === "snapshot") {
-			let sessionId = "";
-			try { sessionId = ctx.sessionManager?.getSessionId?.() ?? ""; } catch { /* the ref falls back to a fixed name */ }
-			const taken = await checkpointWorktree(risk.workdir ?? ctx.cwd, sessionId, `before ${risk.target}`, true);
-			if (taken.status === "clean" && current()) return undefined;
-			if (isSnapshotted(taken) && current()) {
-				const note = `Uncommitted work was snapshotted before this command ran: ${taken.ref} (${taken.changedCount} path(s)). Bring a file back with: git checkout ${taken.ref} -- <path>`;
-				if (event.toolCallId) snapshotNotes.set(event.toolCallId, note);
-				receipt("snapshot");
-				return undefined;
-			}
-		}
-
-		// The user's own words: a request clears it without a prompt. A delegated
-		// task carries no user words, so a child never clears one by itself.
+		// A delegated task carries no user words, so a child never clears a
+		// request by itself.
 		const child = process.env.PI_SUBAGENT_CHILD === "1";
-		let reading: IntentReading = {};
-		if (process.env.PI_COMMAND_JUDGE !== "off") {
-			let words: string[] = [];
-			try { words = child ? [] : userWords(ctx.sessionManager?.getBranch?.()); } catch { words = []; }
-			reading = await commandIntent(command, effect, words, {
-				judge: jevEnabled() ? (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: COMMAND_JUDGE_TIMEOUT_MS }) : undefined,
-				ask: sessionModelAsker(ctx),
-				signal: ctx.signal,
-			});
-		}
-		if (reading.intent === "requested" && current()) {
-			receipt("allowed", reading);
-			if (ctx.hasUI) ctx.ui.notify(`You asked for this, so it runs without a prompt. ${effect}`, "info");
-			return undefined;
-		}
-		if (ctx.hasUI && !ctx.signal?.aborted) {
-			const allowed = await confirmAccounted(
-				ctx,
-				consequence ? "Run this command?" : "Review destructive operation",
-				consequence
-					? `${effect}${reading.intent === "unrequested" ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
-					: `${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
-			);
-			if (allowed && current()) {
-				receipt("confirmed", reading);
+
+		/** Every effect in `asks` needs the user's say: their own words clear it
+		 * without a prompt, otherwise one prompt covers them all. Returns the
+		 * refusal, or nothing when the command may go on. */
+		const decided = async (asks: ShellRisk[]) => {
+			const readings = new Map<ShellRisk, IntentReading>();
+			if (process.env.PI_COMMAND_JUDGE !== "off" && asks.length <= MAX_JUDGED) {
+				let words: string[] = [];
+				try { words = child ? [] : userWords(ctx.sessionManager?.getBranch?.()); } catch { words = []; }
+				for (const one of asks) {
+					const reading = await commandIntent(command, sentence(one), words, {
+						judge: jevEnabled() ? (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: COMMAND_JUDGE_TIMEOUT_MS }) : undefined,
+						ask: sessionModelAsker(ctx),
+						signal: ctx.signal,
+					});
+					readings.set(one, reading);
+					// One effect the user did not ask for is enough to need their say.
+					if (reading.intent !== "requested") break;
+				}
+			}
+			const open = asks.filter((one) => readings.get(one)?.intent !== "requested");
+			const each = (outcome: string) => { for (const one of asks) receipt(one, outcome, readings.get(one)); };
+			if (!open.length && current()) {
+				each("allowed");
+				if (ctx.hasUI) ctx.ui.notify(`You asked for this, so it runs without a prompt. ${asks.map(sentence).join(" ")}`, "info");
 				return undefined;
 			}
-			receipt(allowed ? "stale" : "declined", reading);
-			if (!allowed && consequence)
-				return { block: true, reason: `Not run: the user said no to this command (it ${consequence.effect}). Do not retry it or reach the same effect another way; carry on with the rest, or ask what they would like instead.` };
-			return { block: true, reason: reason + narrow };
-		}
-		receipt("refused", reading);
-		if (!consequence) return { block: true, reason: reason + narrow };
-		return {
-			block: true,
-			reason: `Not run: this command ${consequence.effect}, and ${child ? "a delegated task cannot decide that" : "nothing in the user's messages asks for that"}. Leave this step out and finish the rest; in your report, say that it is waiting for ${child ? "the session that gave you this task" : "the user's go-ahead"}.`,
+			const named = asks.every((one) => one.consequence);
+			const effects = open.filter((one) => one.consequence).map((one) => one.consequence!.effect);
+			if (ctx.hasUI && !ctx.signal?.aborted) {
+				const unasked = (one: ShellRisk) => readings.get(one)?.intent === "unrequested";
+				const body = asks.length === 1
+					? named
+						? `${sentence(asks[0])}${unasked(asks[0]) ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
+						: `${describe(asks[0])}\n\nWorking directory: ${ctx.cwd}\n${command}`
+					: `This command line does ${asks.length} things that need your say:\n${asks.map((one) => `- ${sentence(one)}${unasked(one) ? " Your messages do not ask for that." : ""}`).join("\n")}\n\n${command}\n\nWorking directory: ${ctx.cwd}`;
+				const allowed = await confirmAccounted(ctx, named ? "Run this command?" : "Review destructive operation", body);
+				if (allowed && current()) {
+					each("confirmed");
+					return undefined;
+				}
+				each(allowed ? "stale" : "declined");
+				if (!allowed && effects.length)
+					return { block: true, reason: `Not run: the user said no to this command (it ${effects.join("; it ")}). Do not retry it or reach the same effect another way; carry on with the rest, or ask what they would like instead.` };
+				return { block: true, reason: describe(open.find((one) => !one.consequence) ?? asks[0]) + narrow };
+			}
+			each("refused");
+			const plain = open.find((one) => !one.consequence);
+			if (plain || !effects.length) return { block: true, reason: describe(plain ?? asks[0]) + narrow };
+			return {
+				block: true,
+				reason: `Not run: this command ${effects.join(", and it ")}, and ${child ? "a delegated task cannot decide that" : "nothing in the user's messages asks for that"}. Leave this step out and finish the rest; in your report, say that it is waiting for ${child ? "the session that gave you this task" : "the user's go-ahead"}.`,
+			};
 		};
+
+		// What only the user can clear is settled first, so a snapshot is taken
+		// as late as possible: right before the command runs.
+		const savable = (one: ShellRisk) => one.consequence?.needs === "snapshot" && one.workdir !== undefined;
+		const requests = reviews.filter((one) => !savable(one));
+		if (requests.length) {
+			const refusal = await decided(requests);
+			if (refusal) return refusal;
+		}
+		// A snapshot makes a local loss recoverable: take one where each such
+		// effect acts. One that cannot be taken leaves the effect with the user.
+		const unsaved: ShellRisk[] = [], notes: string[] = [], saved: ShellRisk[] = [];
+		const taken = new Map<string, Awaited<ReturnType<typeof checkpointWorktree>>>();
+		let sessionId = "";
+		try { sessionId = ctx.sessionManager?.getSessionId?.() ?? ""; } catch { /* the ref falls back to a fixed name */ }
+		for (const one of reviews.filter(savable)) {
+			const where = one.workdir!;
+			// A directory this command line has yet to create (a fresh clone) holds no earlier work.
+			if (!fs.existsSync(where)) continue;
+			let outcome = taken.get(where);
+			if (!outcome) {
+				outcome = await checkpointWorktree(where, sessionId, `before ${one.target}`, true);
+				taken.set(where, outcome);
+				if (isSnapshotted(outcome))
+					notes.push(`Uncommitted work${where === ctx.cwd ? "" : ` in ${where}`} was snapshotted before this command ran: ${outcome.ref} (${outcome.changedCount} path(s)). Bring a file back with: git${where === ctx.cwd ? "" : ` -C ${JSON.stringify(where)}`} checkout ${outcome.ref} -- <path>`);
+			}
+			// Nothing uncommitted, or no repository there for git to act on: nothing to lose.
+			if (outcome.status === "clean" || outcome.status === "not-git") continue;
+			if (isSnapshotted(outcome)) saved.push(one);
+			else unsaved.push({ ...one, consequence: { ...one.consequence!, needs: "request", effect: `${one.consequence!.effect}, and the snapshot that would save them first could not be taken (${outcome.reason ?? outcome.status})` } });
+		}
+		if (unsaved.length) {
+			const refusal = await decided(unsaved);
+			if (refusal) return refusal;
+		}
+		if (!current()) return { block: true, reason: describe(first) + narrow };
+		for (const one of saved) receipt(one, "snapshot");
+		if (notes.length && event.toolCallId) snapshotNotes.set(event.toolCallId, notes.join("\n"));
+		return undefined;
 	});
 
 	pi.on("tool_result", (event) => {

@@ -16,7 +16,8 @@ test('dated model facts have explicit provenance and expire without becoming fre
   assert.equal(currentModelFacts(provider,Date.parse(row.verifiedAt)-1),undefined);
  }
  assert.equal(currentModelFacts('__proto__'),undefined);
- assert.equal(directDeepseekCost('deepseek-flash',Date.parse('2026-11-12T00:00:00Z')),undefined);
+ assert.equal(directDeepseekCost('deepseek-flash',Date.parse(MODEL_FACTS.deepseek.expiresAt)),undefined);
+ assert.deepEqual(directDeepseekCost('deepseek-flash',Date.parse(MODEL_FACTS.deepseek.expiresAt)-1),{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0});
 });
 test('a snapshot past its window is stale, not gone: limits and wire formats keep applying, prices stop',()=>{
  for(const [provider,row] of Object.entries(MODEL_FACTS)){
@@ -33,5 +34,8 @@ test('versioned direct price schedule preserves its original boundary',()=>{
  const cutover=Date.parse('2026-09-14T04:00:00Z');
  assert.equal(directDeepseekCost('deepseek-v4-pro',cutover-1).input,1.32);
  assert.equal(directDeepseekCost('deepseek-v4-pro',cutover).input,0.3);
+ const back=Date.parse('2026-11-10T00:00:00Z');
+ assert.equal(directDeepseekCost('deepseek-v4-pro',back-1).input,0.3);
+ assert.deepEqual(directDeepseekCost('deepseek-v4-pro',back),{input:1.32,output:3.96,cacheRead:0.044,cacheWrite:0});
  assert.equal(directDeepseekCost('unknown',cutover),undefined);
 });

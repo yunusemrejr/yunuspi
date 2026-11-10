@@ -102,6 +102,9 @@ test('a delegated child gets the short notes after its role prompt, with the sam
   assert.ok(notes > prompt.indexOf('You are a worker.'), 'the role comes first');
   assert.ok(notes < prompt.indexOf('PROJECT-RULES'), 'project rules have the last word');
   assert.doesNotMatch(prompt, /Working notes \(/, 'not the full session notes');
+  const appended = buildSystemPrompt({ cwd: '/work/project', appendSystemPrompt: 'You are a worker.' });
+  assert.ok(appended.includes(DELEGATED_NOTES), 'a child whose role was appended to the base prompt gets the short form too');
+  assert.doesNotMatch(appended, /Working notes \(/);
   assert.ok(DELEGATED_NOTES.length < 1_400, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
   for (const anchor of ['The brief is the whole assignment', 'Never invent', 'waiting for the session that gave you the task', 'what was verified'])
     assert.ok(DELEGATED_NOTES.includes(anchor), anchor);

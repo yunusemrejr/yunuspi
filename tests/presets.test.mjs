@@ -148,6 +148,14 @@ test('a bare boost joins a live goal: fronts fill free slots before V, and a rep
   assert.ok(near.goal.text.length <= gs.MAX_GOAL_TEXT);
 });
 
+test('a standard the agent adopts leaves a paused goal paused; a boost the user typed resumes it', () => {
+  const paused = { ...gs.createPresetGoal('own work', ['one thing']), status: 'paused', note: 'paused by the user' };
+  const adopted = ps.addBoosts(paused, ['nobug'], Date.now(), false);
+  assert.deepEqual([adopted.fresh, adopted.goal.status, adopted.goal.note], [['nobug'], 'paused', 'paused by the user']);
+  assert.equal(ps.addBoosts(paused, ['nobug']).goal.status, 'active');
+  assert.equal(ps.addBoosts({ ...paused, status: 'active' }, ['nobug'], Date.now(), false).goal.status, 'active');
+});
+
 function harness() {
   const commands = {}, tools = {}, entries = [], sent = [], sentOptions = [], notes = [], hooks = new Map();
   const pi = {

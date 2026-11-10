@@ -88,7 +88,8 @@ export function buildSystemPrompt(options) {
     addGuideline("Change files with edit or write, never by authoring or rewriting file content through bash heredocs, python -c, perl -pi or sed -i.");
     addGuideline("Be concise, and show file paths clearly when working with files.");
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
-    const workingNotes = loadWorkingNotes(getAgentDir());
+    // A delegated child gets the short form whichever way its role prompt arrived.
+    const workingNotes = loadWorkingNotes(getAgentDir(), process.env, process.env.PI_SUBAGENT_CHILD === "1");
     let prompt = `You are YunusPi, an expert agent working on the user's own machine through the tools below. The work may be software, research, operating a browser, documents and data, design and media, or a task that mixes them; bring a senior practitioner's judgment to whichever it is.
 
 Available tools:

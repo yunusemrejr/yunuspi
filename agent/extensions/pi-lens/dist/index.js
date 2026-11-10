@@ -99618,6 +99618,41 @@ function getReadToolInput(toolName, input) {
     return void 0;
   return input;
 }
+// PI_LENS_READ_MANY_COVERAGE: read_many delivers files through the read tool
+// without a `read` tool call. A file it delivered whole (not capped, skipped or
+// failed) counts as read for the edit guard, exactly as a `read` would.
+var READ_TOOL_MAX_LINES = 2000;
+function recordReadManyCoverage(event, ctx, runtime2) {
+  const specs = Array.isArray(event?.input?.files) ? event.input.files : [];
+  const delivered = Array.isArray(event?.details?.files) ? event.details.files : [];
+  let recorded = 0;
+  for (let index = 0; index < specs.length; index++) {
+    const spec = specs[index], outcome = delivered[index];
+    if (typeof spec?.path !== "string" || !outcome || outcome.path !== spec.path.slice(0, 4096))
+      continue;
+    if (outcome.error || outcome.skipped || outcome.truncated || outcome.fullOutputPath)
+      continue;
+    const filePath = resolveToolCallFilePath(spec.path, ctx?.cwd, runtime2.projectRoot)?.path;
+    if (!filePath || !nodeFs12.existsSync(filePath) || isExternalOrVendorFile(filePath, runtime2.projectRoot))
+      continue;
+    const offset = Number.isSafeInteger(spec.offset) && spec.offset > 0 ? spec.offset : 1;
+    const limit = Number.isSafeInteger(spec.limit) && spec.limit > 0 ? Math.min(READ_TOOL_MAX_LINES, spec.limit) : void 0;
+    const effectiveLimit = Math.min(READ_TOOL_MAX_LINES, getEffectiveReadLimit(filePath, { offset, limit }) ?? 1);
+    runtime2.readGuard.recordRead({
+      filePath,
+      requestedOffset: offset,
+      requestedLimit: limit ?? effectiveLimit,
+      effectiveOffset: offset,
+      effectiveLimit,
+      expandedByLsp: false,
+      turnIndex: runtime2.turnIndex,
+      writeIndex: runtime2.peekWriteIndex(),
+      timestamp: Date.now()
+    });
+    recorded++;
+  }
+  return recorded;
+}
 function getEffectiveReadLimit(filePath, readInput) {
   if (!filePath || !readInput)
     return void 0;
@@ -114330,6 +114365,10 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
     updateRuntimeIdentityFromCtx(ctx);
     setAmbientAbortSignal(ctx?.signal);
     const rtToolName = event?.toolName;
+    if (rtToolName === "read_many") {
+      try { recordReadManyCoverage(event, ctx, runtime); } catch (err) { dbg(`read_many coverage failed: ${err}`); }
+      return;
+    }
     // PI_LENS_TOOL_RESULT_PROFILE_V1: numeric timing only; never command, path or output content.
     const resultProfileStart = performance.now();
     let resultProfileOutcome = "handler-error";

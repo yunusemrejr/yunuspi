@@ -441,9 +441,11 @@ export function goalAssignment(text: string): string {
  * fronts take the free criteria slots ahead of V. One already in force is
  * skipped; when nothing is new the goal comes back unchanged with `fresh`
  * empty. The continuation budget is re-armed because the goal has new work.
+ * A boost the user typed also resumes a paused goal; with `resume` false (a
+ * standard the agent adopted) a pause the user set stays in place.
  * `appended` is the text that joined the goal, for the caller to hand over.
  */
-export function addBoosts(goal: GoalState, presets: readonly StandardId[], now = Date.now()): { goal: GoalState; fresh: StandardId[]; fronts: number; clipped: boolean; appended: string } {
+export function addBoosts(goal: GoalState, presets: readonly StandardId[], now = Date.now(), resume = true): { goal: GoalState; fresh: StandardId[]; fronts: number; clipped: boolean; appended: string } {
 	const recorded = standardsInForce(goal);
 	const requested = [...new Set(presets)];
 	const all = [...new Set([...recorded, ...requested])];
@@ -469,7 +471,7 @@ export function addBoosts(goal: GoalState, presets: readonly StandardId[], now =
 		text: full.length > MAX_GOAL_TEXT ? `${full.slice(0, MAX_GOAL_TEXT - 1)}…` : full,
 		criteria: [...body, ...added, ...tail],
 		boosts: all,
-		status: "active", nudges: 0, progressMark: "", stalls: 0, note: undefined, updatedAt: now,
+		status: resume ? "active" : goal.status, nudges: 0, progressMark: "", stalls: 0, note: resume ? undefined : goal.note, updatedAt: now,
 	};
 	return { goal: next, fresh, fronts: added.length, clipped: full.length > MAX_GOAL_TEXT, appended };
 }

@@ -470,3 +470,39 @@ test('economy mode never flips thinking on a route where the change re-bills the
 		fs.rmSync(temp, { recursive: true, force: true });
 	}
 });
+
+test('a file read_many delivered whole counts as read for the edit guard; a capped, skipped or failed one does not', () => {
+	const bundle = fs.readFileSync(new URL('../agent/extensions/pi-lens/dist/index.js', import.meta.url), 'utf8');
+	const source = /var READ_TOOL_MAX_LINES = 2000;\nfunction recordReadManyCoverage\(event, ctx, runtime2\) \{[\s\S]*?\n\}\n(?=function getEffectiveReadLimit)/.exec(bundle)?.[0];
+	assert.ok(source, 'the lens carries the read_many coverage owner');
+	assert.match(bundle, /if \(rtToolName === "read_many"\) \{\s*try \{ recordReadManyCoverage\(event, ctx, runtime\); \}/, 'and its tool_result handler calls it');
+	const lines = { '/p/whole.js': 40, '/p/ranged.js': 900, '/p/huge.csv': 5000, '/p/capped.js': 800, '/p/vendor/x.js': 10 };
+	const recorded = [];
+	const record = new Function('resolveToolCallFilePath', 'nodeFs12', 'isExternalOrVendorFile', 'getEffectiveReadLimit', `${source}; return recordReadManyCoverage;`)(
+		(raw, cwd) => ({ path: raw.startsWith('/') ? raw : `${cwd}/${raw}` }),
+		{ existsSync: file => file in lines },
+		file => file.includes('/vendor/'),
+		(file, input) => input.limit ?? Math.max(1, lines[file] - (input.offset ?? 1) + 1),
+	);
+	const files = [
+		{ path: 'whole.js' }, { path: 'ranged.js', offset: 101, limit: 50 }, { path: 'huge.csv' }, { path: 'capped.js' },
+		{ path: 'vendor/x.js' }, { path: 'missing.js' }, { path: 'failed.js' }, { path: 'late.js' },
+	];
+	const details = { files: [
+		{ path: 'whole.js', chars: 900, truncated: false }, { path: 'ranged.js', chars: 2000, truncated: false }, { path: 'huge.csv', chars: 20000, truncated: false },
+		{ path: 'capped.js', chars: 24000, truncated: true }, { path: 'vendor/x.js', chars: 100, truncated: false }, { path: 'missing.js', chars: 10, truncated: false },
+		{ path: 'failed.js', error: 'ENOENT' }, { path: 'late.js', chars: 0, skipped: true },
+	] };
+	const runtime = { projectRoot: '/p', turnIndex: 3, peekWriteIndex: () => 7, readGuard: { recordRead: entry => recorded.push(entry) } };
+	assert.equal(record({ toolName: 'read_many', input: { files }, details }, { cwd: '/p' }, runtime), 3);
+	assert.deepEqual(recorded.map(({ timestamp, ...entry }) => entry), [
+		{ filePath: '/p/whole.js', requestedOffset: 1, requestedLimit: 40, effectiveOffset: 1, effectiveLimit: 40, expandedByLsp: false, turnIndex: 3, writeIndex: 7 },
+		{ filePath: '/p/ranged.js', requestedOffset: 101, requestedLimit: 50, effectiveOffset: 101, effectiveLimit: 50, expandedByLsp: false, turnIndex: 3, writeIndex: 7 },
+		// The read tool shows at most 2000 lines of a longer file, so no more than that is claimed.
+		{ filePath: '/p/huge.csv', requestedOffset: 1, requestedLimit: 2000, effectiveOffset: 1, effectiveLimit: 2000, expandedByLsp: false, turnIndex: 3, writeIndex: 7 },
+	]);
+	// A result whose details do not line up with the request records nothing.
+	recorded.length = 0;
+	assert.equal(record({ toolName: 'read_many', input: { files: [{ path: 'whole.js' }, { path: 'ranged.js' }] }, details: { files: [{ path: 'ranged.js', chars: 5 }] } }, { cwd: '/p' }, runtime), 0);
+	assert.equal(record({ toolName: 'read_many', input: {}, details: undefined }, { cwd: '/p' }, runtime), 0);
+});

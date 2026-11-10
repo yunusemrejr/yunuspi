@@ -12,6 +12,7 @@
  * Evidence is the user's messages only. Tool output, web pages and the
  * command text were not written by the user and are never read as permission.
  */
+import { createHash } from "node:crypto";
 import { goalUserWords } from "./goal-state.ts";
 import {
 	askTypedDecision, COMMAND_INTENTS, COMMAND_REQUEST_CRITERIA, COMMAND_REQUEST_INSTRUCTIONS,
@@ -39,19 +40,33 @@ const MODEL_ANSWER_MS = 25_000;
 
 const isIntent = (value: unknown): value is CommandIntent => (COMMAND_INTENTS as readonly unknown[]).includes(value);
 
+/** A session entry of this type marks a user-role message the harness wrote
+ * itself (a follow-up prompt, a worker's result): never the user's words. */
+export const HARNESS_INPUT_ENTRY = "harness-input-v1";
+const messageText = (content: unknown): string => typeof content === "string" ? content
+	: Array.isArray(content)
+		? content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n")
+		: "";
+/** What identifies one message across the input event and the session entry. */
+export const inputDigest = (text: string): string => createHash("sha256").update(text.trim()).digest("hex").slice(0, 24);
+
 /** The user's own messages on a session branch, oldest first, with secrets
  * masked. A message goal mode sent in the user's name contributes the goal
  * the user typed, not the criteria and instructions wrapped around it. */
 export function userWords(entries: unknown): string[] {
 	if (!Array.isArray(entries)) return [];
 	const texts: string[] = [];
+	// Counted, so a message the user later types with the same text still counts.
+	const harness = new Map<string, number>();
+	for (const entry of entries)
+		if (entry?.type === "custom" && entry.customType === HARNESS_INPUT_ENTRY && typeof entry.data?.digest === "string")
+			harness.set(entry.data.digest, (harness.get(entry.data.digest) ?? 0) + 1);
 	for (const entry of entries) {
 		const message = entry?.type === "message" ? entry.message : undefined;
 		if (message?.role !== "user") continue;
-		const raw = typeof message.content === "string" ? message.content
-			: Array.isArray(message.content)
-				? message.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n")
-				: "";
+		const raw = messageText(message.content);
+		const digest = harness.size ? inputDigest(raw) : "", written = harness.get(digest) ?? 0;
+		if (written > 0) { harness.set(digest, written - 1); continue; }
 		const goal = goalUserWords(raw);
 		const own = (goal === undefined ? raw : goalAssignment(goal)).trim();
 		if (own) texts.push(own);
@@ -71,11 +86,12 @@ function modelQuestion(state: { userMessages: readonly string[]; command: string
 	].join("\n\n");
 }
 
-/** One verdict word, or none when the reply names several or none. */
-function readModelAnswer(reply: string): CommandIntent | undefined {
-	const named = new Set((reply.toLowerCase().match(/\b(?:requested|unrequested)\b/g) ?? []));
-	const [only] = named;
-	return named.size === 1 && isIntent(only) ? only : undefined;
+/** The verdict word when the reply is that word and nothing else. "Not
+ * requested." names the word and means the opposite, so anything longer than
+ * the bare word is no answer. */
+export function readModelAnswer(reply: string): CommandIntent | undefined {
+	const word = reply.trim().toLowerCase().replace(/^[\s"'`*_([]+|[\s"'`*_.!)\]]+$/g, "");
+	return isIntent(word) ? word : undefined;
 }
 
 /**
@@ -84,7 +100,7 @@ function readModelAnswer(reply: string): CommandIntent | undefined {
  */
 export async function commandIntent(command: string, effect: string, words: readonly string[], ports: IntentPorts): Promise<IntentReading> {
 	if (!words.length) return { intent: "unrequested" };
-	const state = { userMessages: [...words], command: safeText(command, MAX_COMMAND_CHARS), effect: `This command ${effect}.` };
+	const state = { userMessages: [...words], command: safeText(command, MAX_COMMAND_CHARS), effect: /^this command /i.test(effect.trim()) ? effect.trim() : `This command ${effect.trim()}.` };
 	const typed = await askTypedDecision("command-request", { state }, { judge: ports.judge, signal: ports.signal });
 	const judged = typed.ok ? typed.verdict?.intent : undefined;
 	if (isIntent(judged)) return { intent: judged, by: "judge" };

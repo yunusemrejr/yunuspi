@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { composeModelProvider } from '../core/coding-agent/src/core/provider-composer.js';
-import { distillDirectory } from '../agent/extensions/lib/model-directory.ts';
+import { DIRECTORY_URL, distillDirectory } from '../agent/extensions/lib/model-directory.ts';
 
 // One agent directory for the file: the extension reads its location once.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-discovery-'));
@@ -25,8 +25,8 @@ writeConfig({
   deepseek: { modelOverrides: {} },
 });
 const { default: register, registerCachedChildModelProvider } = await import('../agent/extensions/live-models.ts');
-const providers = {};
-await register({ registerProvider: (id, config) => { providers[id] = config; }, registerCommand() {}, on() {} });
+const providers = {}, hooks = {}, commands = {};
+await register({ registerProvider: (id, config) => { providers[id] = config; }, registerCommand: (name, command) => { commands[name] = command; }, on: (event, handler) => { hooks[event] = handler; } });
 test.after(() => {
   globalThis.fetch = originalFetch;
   for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
@@ -147,3 +147,108 @@ test('dated facts keep applying after their window, and the directory supplies t
   assert.deepEqual(current.cost, { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0.15 });
   assert.equal(current.compat.thinkingFormat, 'deepseek'); assert.equal(current.name, 'DeepSeek V4.1 Flash');
 });
+
+test('inside its window the provider\'s own price list outranks the directory, which lists the off-peak rate', async t => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-20T12:00:00Z'));
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  saveDirectory({ deepseek: { api: 'https://api.deepseek.com', models: { 'deepseek-flash': { limit: { context: 1_048_576, output: 393_216 }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } } });
+  const current = (await providers.deepseek.refreshModels(context({ allowNetwork: false }))).find(model => model.id === 'deepseek-flash');
+  // Exactly the peak rates: the core halves them outside peak hours when it recognises them.
+  assert.deepEqual(current.cost, { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 });
+  assert.deepEqual([current.contextWindow, current.maxTokens], [1_048_576, 393_216], 'limits still come from the directory');
+});
+
+test('a model id listed twice is published once, with its first listing', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: [
+    { id: 'acme-twice', context_length: 111_000 }, { id: 'acme-twice', context_length: 222_000 }, { id: 'acme-other' },
+  ] }));
+  const models = await providers.acme.refreshModels(context({ force: true }));
+  assert.deepEqual(models.map(model => model.id), ['acme-twice', 'acme-other']);
+  assert.equal(models[0].contextWindow, 111_000);
+});
+
+test('an Anthropic-style list is read page by page until has_more is false', async () => {
+  const requested = [];
+  globalThis.fetch = async url => {
+    requested.push(String(url));
+    return new Response(JSON.stringify(String(url).endsWith('after_id=c-a')
+      ? { data: [{ id: 'c-b' }], has_more: false, last_id: 'c-b' }
+      : { data: [{ id: 'c-a' }], has_more: true, last_id: 'c-a' }));
+  };
+  const models = await providers.claudish.refreshModels(context({ force: true }));
+  assert.deepEqual(requested, ['https://claudish.example/anthropic/v1/models', 'https://claudish.example/anthropic/v1/models?after_id=c-a']);
+  assert.deepEqual(models.map(model => model.id), ['c-a', 'c-b']);
+});
+
+test('a page that repeats the last id ends the walk', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(JSON.stringify({ data: [{ id: 'c-x' }], has_more: true, last_id: 'c-x' })); };
+  const models = await providers.claudish.refreshModels(context({ force: true }));
+  assert.equal(calls, 2);
+  assert.deepEqual(models.map(model => model.id), ['c-x']);
+});
+
+const directoryFile = path.join(root, 'model-directory.json');
+const sessionContext = () => ({ hasUI: false, model: { provider: 'acme', id: 'acme-mine' }, modelRegistry: { refresh: async () => {}, getAvailable: () => [] } });
+const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+const directoryRequests = (urls) => urls.filter(url => url === DIRECTORY_URL);
+
+test('PI_MODEL_DISCOVERY=off: the models.dev directory is not requested at session start or on an explicit refresh', async () => {
+  fs.rmSync(directoryFile, { force: true });
+  const urls = [];
+  globalThis.fetch = async url => { urls.push(String(url)); return new Response(JSON.stringify({ data: [] })); };
+  process.env.PI_MODEL_DISCOVERY = 'off';
+  try {
+    const ctx = sessionContext();
+    await hooks.session_start({}, ctx);
+    await commands['catalog-status'].handler('refresh', ctx);
+    await settle();
+    assert.deepEqual(directoryRequests(urls), []);
+    assert.equal(fs.existsSync(directoryFile), false, 'nothing was saved');
+  } finally {
+    delete process.env.PI_MODEL_DISCOVERY;
+  }
+});
+
+// Runs before the explicit-refresh test: a successful attempt starts the hour too.
+test('a directory request cut short by its session is not counted as an attempt; a failed one is', async () => {
+  fs.rmSync(directoryFile, { force: true });
+  let mode = 'hang', requests = 0;
+  globalThis.fetch = (url, options) => {
+    if (String(url) !== DIRECTORY_URL) return Promise.resolve(new Response('{}'));
+    requests++;
+    if (mode === 'fail') return Promise.reject(new Error('network down'));
+    return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+  };
+  const ctx = sessionContext();
+  await hooks.session_start({}, ctx);
+  await hooks.session_shutdown({}, ctx);
+  await settle();
+  assert.equal(requests, 1);
+  mode = 'fail';
+  await hooks.session_start({}, ctx);
+  await settle();
+  assert.equal(requests, 2, 'the cut-short attempt did not block the next session');
+  await hooks.session_start({}, ctx);
+  await settle();
+  assert.equal(requests, 2, 'a failed attempt still waits an hour');
+  await hooks.session_shutdown({}, ctx);
+});
+
+test('an explicit refresh fetches the directory again, even when the saved copy is fresh', async () => {
+  saveDirectory({ deepseek: { api: 'https://api.deepseek.com', models: { 'deepseek-flash': { limit: { context: 500_000, output: 50_000 } } } } });
+  const urls = [];
+  globalThis.fetch = async url => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ deepseek: { api: 'https://api.deepseek.com', models: { 'deepseek-flash': { limit: { context: 600_000, output: 60_000 } } } } }));
+  };
+  const ctx = sessionContext();
+  await hooks.session_start({}, ctx);
+  await settle();
+  assert.deepEqual(directoryRequests(urls), [], 'a fresh saved copy is not requested at session start');
+  await commands['catalog-status'].handler('refresh', ctx);
+  await settle();
+  assert.deepEqual(directoryRequests(urls), [DIRECTORY_URL]);
+  assert.equal(JSON.parse(fs.readFileSync(directoryFile, 'utf8')).providers.deepseek.models['deepseek-flash'].contextWindow, 600_000);
+});
+

@@ -326,6 +326,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     );
   }
 
+  // The once-a-second tick sends the status line only when it changed: over RPC
+  // every send is a message the desktop has to process, and an idle session
+  // was sending two a second.
+  let shownStatus: string | undefined | null = null;
+  function showStatus(ctx: NonNullable<typeof currentCtx>, label: string | undefined): void {
+    if (label === shownStatus) return;
+    shownStatus = label;
+    ctx.ui.setWidget("background-tasks", undefined);
+    ctx.ui.setStatus("background-tasks", label);
+  }
+
   function updateUi(ctx = currentCtx): void {
     if (registry.isShuttingDown() || !ctx) return;
     try {
@@ -344,12 +355,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       const unseenFinishedCount =
         unseenFailed.length + unseenStopped.length + unseenDone.length;
       const updateSegment = "";
-      ctx.ui.setWidget("background-tasks", undefined);
       if (running.length === 0 && unseenFinishedCount === 0) {
-        ctx.ui.setStatus(
-          "background-tasks",
-          updateSegment ? lightBlue(` bg ${updateSegment} `) : undefined,
-        );
+        showStatus(ctx, updateSegment ? lightBlue(` bg ${updateSegment} `) : undefined);
         return;
       }
 
@@ -367,7 +374,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       const segments = [...parts, entryHint];
       if (updateSegment) segments.push(updateSegment);
       const label = ` bg ${segments.join(" · ")} `;
-      ctx.ui.setStatus("background-tasks", lightBlue(label));
+      showStatus(ctx, lightBlue(label));
     } catch (error) {
       console.error(
         `[background-tasks] UI update failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -543,6 +550,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     } catch { /* without a session identity bg_wait cannot scope this work; bg_status still reports it */ }
     registerContinuationNotice(ctx);
     await registry.ensureRuntimeDir(ctx);
+    shownStatus = null;
     updateUi(ctx);
     if (statusInterval) clearInterval(statusInterval);
     statusInterval = setInterval(() => {

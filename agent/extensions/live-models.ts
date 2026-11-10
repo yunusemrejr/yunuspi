@@ -1341,11 +1341,14 @@ let directoryAttemptAt = 0;
  * only ever talk to their own provider, and facts are applied when a catalog
  * is published, so a cached list gains them too. One request per process at a
  * time, one attempt per hour after a failure, and never a thrown error: the
- * saved copy, or none, is what the catalog then uses. */
-function refreshDirectory(signal: AbortSignal): Promise<boolean> {
+ * saved copy, or none, is what the catalog then uses. An explicit refresh
+ * ignores the freshness window and the hour. Discovery off means no request. */
+function refreshDirectory(signal: AbortSignal, explicit = false): Promise<boolean> {
+	if (process.env.PI_MODEL_DISCOVERY === "off") return Promise.resolve(false);
 	const saved = loadDirectory();
 	const wanted: ProviderAddress[] = [...new Set([...Object.keys(DEFAULT_BASE_URLS), ...discoverableProviders([])])].map((id) => [id, wireFor(id).baseUrl]);
-	if (saved && directoryCovers(saved, wanted) && Date.now() - saved.fetchedAt < DIRECTORY_TTL_MS || Date.now() - directoryAttemptAt < 60 * 60 * 1000) return Promise.resolve(false);
+	if (!explicit && (saved && directoryCovers(saved, wanted) && Date.now() - saved.fetchedAt < DIRECTORY_TTL_MS || Date.now() - directoryAttemptAt < 60 * 60 * 1000)) return Promise.resolve(false);
+	const previousAttemptAt = directoryAttemptAt;
 	directoryAttemptAt = Date.now();
 	return directoryRefresh ??= (async () => {
 		const tmp = `${DIRECTORY_FILE}.${process.pid}.tmp`;
@@ -1356,6 +1359,8 @@ function refreshDirectory(signal: AbortSignal): Promise<boolean> {
 			return true;
 		} catch {
 			rmSync(tmp, { force: true });
+			// A request cut short by its session is not a failure, so it does not start the hour.
+			if (signal.aborted) directoryAttemptAt = previousAttemptAt;
 			return false;
 		}
 	})().finally(() => { directoryRefresh = undefined; });
@@ -1402,11 +1407,27 @@ async function refreshDiscovered(providerId: string, context: RefreshModelContex
 	const anthropic = config.api === "anthropic-messages";
 	const url = anthropic && !/\/v\d+$/.test(base) ? `${base}/v1/models` : `${base}/models`;
 	const signal = AbortSignal.any([context.signal, AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)]);
-	const raw = await fetchJson(url, signal, { headers: { Authorization: `Bearer ${key}`, ...(anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : {}) } });
-	const rows = modelRows<{ id: string }>(isRecord(raw) ? raw.data ?? raw.models : raw);
+	const headers = { Authorization: `Bearer ${key}`, ...(anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : {}) };
+	// Anthropic-style lists continue after `last_id` while `has_more` is set; ten pages at most.
+	const allRows: { id: string }[] = [];
+	const cursors = new Set<string>();
+	let pageUrl = url;
+	for (let page = 0; page < 10; page++) {
+		const raw = await fetchJson(pageUrl, signal, { headers });
+		const rows = modelRows<{ id: string }>(isRecord(raw) ? raw.data ?? raw.models : raw);
+		allRows.push(...rows);
+		const cursor = anthropic && isRecord(raw) && raw.has_more === true && typeof raw.last_id === "string" ? raw.last_id : undefined;
+		if (!cursor || !rows.length || cursors.has(cursor)) break;
+		cursors.add(cursor);
+		pageUrl = `${url}?after_id=${encodeURIComponent(cursor)}`;
+	}
 	const dropped = new Map<string, string>();
 	const models: LiveCatalogModel[] = [];
-	for (const row of rows) {
+	const seen = new Set<string>();
+	for (const row of allRows) {
+		// A host that lists an id twice means it once; the first listing stands.
+		if (seen.has(row.id)) continue;
+		seen.add(row.id);
 		const { chat, ...listed } = catalogRowFacts(row);
 		if (chat === false) { noteUnavailable(dropped, row.id, "not a chat model"); continue; }
 		// What the host's row states is live; the directory fills the rest at publication.
@@ -1674,9 +1695,12 @@ function publishModels(
 		return normalizeModelLimits({
 			...model,
 			...(provider === "runinfra" && !knownModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),
-			...(directPeak ? { cost: directPeak } : {}),
 			...facts,
 			...fresher,
+			// The provider's own dated price list outranks the public directory while it is
+			// current: the directory lists the off-peak rate, and the core bills peak and
+			// off-peak hours only when it recognises exactly these rates.
+			...(directPeak ? { cost: directPeak } : {}),
 			...(Object.keys(compat).length ? { compat } : {}),
 		});
 	});
@@ -1811,7 +1835,7 @@ export default async function registerLiveModels(
       if (args.trim() && args.trim() !== 'refresh') { ctx.ui.notify('Usage: /catalog-status [refresh]', 'info'); return; }
       if (args.trim() === 'refresh') {
         if (process.env.PI_OFFLINE === "1" || !ctx.model?.provider) { ctx.ui.notify('Model-list refresh needs an online session and a selected provider.', 'warning'); return; }
-        try { await refreshDirectory(refreshController.signal); await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
+        try { await refreshDirectory(refreshController.signal, true); await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
         catch { ctx.ui.notify('Model-list refresh failed; the saved list remains available.', 'error'); }
         catalogStatus(ctx);
       }

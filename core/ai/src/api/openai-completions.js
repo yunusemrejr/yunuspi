@@ -1245,9 +1245,9 @@ usage.cost.source = 'estimate';
       usage.cost.total = rawUsage.estimated_cost;
       usage.cost.source = 'provider-estimate'; usage.cost.complete = true;
     }
-    // Published direct-API peak rates, verified 2026-09-10. Exact IDs only.
+    // Published direct-API peak rates, verified 2026-09-10 and re-read 2026-11-10. Exact IDs only.
     // Recognize the catalog snapshot so explicit custom rates still take precedence.
-    const peak = model.id === 'deepseek-v4-pro' ? (Date.now() >= Date.parse('2026-09-14T04:00:00Z') ? [0.3, 1.2, 0.006] : [1.32, 3.96, 0.044]) :
+    const peak = model.id === 'deepseek-v4-pro' ? (Date.now() >= Date.parse('2026-09-14T04:00:00Z') && Date.now() < Date.parse('2026-11-10T00:00:00Z') ? [0.3, 1.2, 0.006] : [1.32, 3.96, 0.044]) :
       ['deepseek-flash','deepseek-v4-flash','deepseek-v4-flash-vision-exp'].includes(model.id) ? [0.3, 1.2, 0.006] : undefined;
     if (model.provider === 'deepseek' && billingHost === 'api.deepseek.com' && peak &&
         model.cost.input === peak[0] && model.cost.output === peak[1] && model.cost.cacheRead === peak[2] && model.cost.cacheWrite === 0 && !model.cost.tiers?.length) {

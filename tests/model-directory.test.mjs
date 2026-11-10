@@ -95,3 +95,35 @@ test('a /models row contributes exactly what it states', () => {
   assert.deepEqual(catalogRowFacts({ id: 'f', capabilities: { vision: false, reasoning: true }, context_window: -5, pricing: { prompt: 'free' } }), { input: ['text'], reasoning: true });
   assert.deepEqual(catalogRowFacts('nope'), {});
 });
+
+test('several entries on one host: the longest shared path decides, and a host with no clear match gives none', () => {
+  const directory = distillDirectory({
+    alpha: { api: 'https://gateway.example/v1', models: { m: { limit: { context: 1000, output: 100 } } } },
+    zeta: { api: 'https://gateway.example/v1/beta', models: { m: { limit: { context: 2000, output: 200 } } } },
+    twin: { api: 'https://tied.example/v1', models: { m: { limit: { context: 3000, output: 300 } } } },
+    twin2: { api: 'https://tied.example/v1', models: { m: { limit: { context: 4000, output: 400 } } } },
+    solo: { api: 'https://single.example/other', models: { m: { limit: { context: 5000, output: 500 } } } },
+  }, 1);
+  const at = (id, url) => directoryProvider(directory, id, url);
+  assert.equal(at('mystery', 'https://gateway.example/v1/beta/chat'), directory.providers.zeta, 'the longer shared path beats the alphabetically first entry');
+  assert.equal(at('mystery', 'https://gateway.example/v1/other'), directory.providers.alpha, 'a single nested entry matches');
+  assert.equal(at('mystery', 'https://gateway.example/v2/x'), undefined, 'no path in common with several entries is no match');
+  assert.equal(at('mystery', 'https://tied.example/v1'), undefined, 'two entries with the same path are no match');
+  assert.equal(at('mystery', 'https://single.example/v1'), directory.providers.solo, 'a lone entry on the host still matches as before');
+});
+
+test('the saved scope keeps no userinfo, query or fragment from a base URL', () => {
+  const full = distillDirectory(RAW, 7);
+  const withCredentials = new URL('https://api.deepseek.com/v1');
+  Object.assign(withCredentials, { username: 'synthetic-user', password: 'synthetic-pass', search: '?token=synthetic-token', hash: 'synthetic-fragment' });
+  const secretive = [['deepseek', withCredentials.href], ['cerebras', 'https://api.cerebras.ai/v1']];
+  const cut = scopedDirectory(full, secretive);
+  const saved = JSON.stringify(cut);
+  for (const word of ['synthetic-user', 'synthetic-pass', 'synthetic-token', 'synthetic-fragment', '?', '#']) assert.equal(saved.includes(word), false, `${word} is not saved`);
+  assert.deepEqual(cut.scope, ['cerebras https://api.cerebras.ai/v1', 'deepseek https://api.deepseek.com/v1']);
+  const restored = parseDirectory(JSON.parse(saved));
+  assert.equal(directoryCovers(restored, [['deepseek', 'https://api.deepseek.com/v1'], ['cerebras', 'https://api.cerebras.ai/v1/']]), true, 'the same origin and path still fit');
+  const otherPath = new URL('https://api.deepseek.com/v2');
+  Object.assign(otherPath, { username: 'synthetic-other', password: 'synthetic-other-pass' });
+  assert.equal(directoryCovers(restored, [['deepseek', otherPath.href]]), false, 'a different path is not covered, whatever the credentials');
+});

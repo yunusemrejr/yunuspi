@@ -2750,12 +2750,12 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 599
+        "line": 607
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 633
+        "line": 641
       },
       {
         "name": "budget",
@@ -2765,7 +2765,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1808
+        "line": 1832
       },
       {
         "name": "claude-cache",
@@ -2830,62 +2830,62 @@
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 688
+        "line": 696
       },
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113941
+        "line": 113976
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113645
+        "line": 113680
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113702
+        "line": 113737
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113737
+        "line": 113772
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113714
+        "line": 113749
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113856
+        "line": 113891
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113670
+        "line": 113705
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113638
+        "line": 113673
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113875
+        "line": 113910
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113652
+        "line": 113687
       },
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 656
+        "line": 664
       },
       {
         "name": "memory-prime",
@@ -3015,7 +3015,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 625
+        "line": 633
       },
       {
         "name": "used",
@@ -3101,25 +3101,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 854,
+        "line": 862,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 811,
+        "line": 819,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 724,
+        "line": 732,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 783,
+        "line": 791,
         "kind": "literal"
       },
       {
@@ -3539,25 +3539,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 854,
+        "line": 862,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 811,
+        "line": 819,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 724,
+        "line": 732,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 783,
+        "line": 791,
         "kind": "literal"
       },
       {

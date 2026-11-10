@@ -33,7 +33,7 @@ export const MODEL_FACTS: Record<string, ModelFactsEntry> = {
     models:{"qwen-3.8-27b":{maxTokens:32_768},"gpt-oss-120b":{maxTokens:40_960}},
   },
   deepseek: {
-    verifiedAt:"2026-09-10", expiresAt:"2026-11-12T00:00:00Z", source:"https://api-docs.deepseek.com/quick_start/pricing/ (re-verified 2026-10-13; verifiedAt stays at first verification so historical price queries keep working)",
+    verifiedAt:"2026-09-10", expiresAt:"2026-12-12T00:00:00Z", source:"https://api-docs.deepseek.com/quick_start/pricing/ (re-verified 2026-11-10; verifiedAt stays at first verification so historical price queries keep working)",
     models:Object.fromEntries(["deepseek-flash","deepseek-v4-flash","deepseek-v4-flash-vision-exp"].map(id=>[id,deepseekFlash])),
   },
   runinfra: {
@@ -50,9 +50,13 @@ export function knownModelFacts(provider: string, now = Date.now()): ModelFactsE
   const entry = Object.hasOwn(MODEL_FACTS,provider) ? MODEL_FACTS[provider] : undefined;
   return entry && Number.isFinite(now) && now >= Date.parse(entry.verifiedAt) ? entry : undefined;
 }
+/** The direct API's peak rates. Off-peak hours (all but 01:00–04:00 and
+ * 06:00–10:00 UTC on weekdays) cost half; the core applies that per request. */
 export function directDeepseekCost(id: string, now = Date.now()): ModelCostFacts | undefined {
   if (!currentModelFacts("deepseek",now)) return undefined;
-  if (id === "deepseek-v4-pro") return now >= Date.parse("2026-09-14T04:00:00Z")
+  // The pro model was listed at the flash rate from 2026-09-14; the page read on
+  // 2026-11-10 shows its earlier rate again. The day it changed back is not known.
+  if (id === "deepseek-v4-pro") return now >= Date.parse("2026-09-14T04:00:00Z") && now < Date.parse("2026-11-10T00:00:00Z")
     ? {input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}
     : {input:1.32,output:3.96,cacheRead:0.044,cacheWrite:0};
   if (Object.hasOwn(MODEL_FACTS.deepseek.models,id)) return {input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0};

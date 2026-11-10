@@ -219,8 +219,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			command: String(event.input?.command ?? ""), tool: event.toolName });
 	});
 	// Adopting a standard: its text joins the goal, its fronts become criteria and its tools go on the wire.
-	const adopt = (live: GoalState, ids: readonly StandardId[], ctx: ExtensionContext) => {
-		const added = addBoosts(live, ids);
+	const adopt = (live: GoalState, ids: readonly StandardId[], ctx: ExtensionContext, resume = true) => {
+		const added = addBoosts(live, ids, Date.now(), resume);
 		if (!added.fresh.length) return added;
 		persist(added.goal, ctx);
 		try { pi.events?.emit?.("adaptive-pipeline-selection", { sessionManager: ctx.sessionManager, names: standardTools(added.fresh) }); } catch { /* tool_search still finds them */ }
@@ -492,7 +492,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const strangers = unknown.length ? `Not a standard: ${unknown.join(", ")}. ` : "";
 					if (!ids.length) return text(`${strangers}adopt takes standard names in items: ${STANDARD_IDS.join(", ")}.`);
 					const held = standardsInForce(goal);
-					const added = adopt(goal, ids, ctx);
+					// The agent's own call never lifts a pause the user set.
+					const added = adopt(goal, ids, ctx, false);
 					const again = ids.filter((id) => held.includes(id));
 					const criteria = added.goal.criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}`).join("\n");
 					return text([
