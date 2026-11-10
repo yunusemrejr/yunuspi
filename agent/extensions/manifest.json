@@ -197,6 +197,7 @@
     "video-review-evidence.ts",
     "video-color-evidence.ts",
     "video-studio.ts",
+    "workspace-page.ts",
     "workspace-write-lease.ts",
     "worktree-checkpoint.ts",
     "adaptive-execution.ts",

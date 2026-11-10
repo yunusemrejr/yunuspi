@@ -76,7 +76,7 @@ test('the default system prompt carries the notes before user and project additi
   resetWorkingNotesCache();
   t.after(resetWorkingNotesCache);
   const options = {
-    cwd: '/work/project', selectedTools: ['read', 'bash'], toolSnippets: { read: 'Read a file' },
+    cwd: '/work/project', selectedTools: ['read', 'bash'],
     appendSystemPrompt: 'APPENDED-BY-USER', contextFiles: [{ path: '/work/project/AGENTS.md', content: 'PROJECT-RULES' }],
   };
   const prompt = buildSystemPrompt(options);

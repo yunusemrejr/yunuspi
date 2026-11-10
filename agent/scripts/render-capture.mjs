@@ -317,6 +317,9 @@ export function inspectAnimationClock(timeMs) {
 const SOFTWARE_WEBGL_ARGS = ["--use-angle=swiftshader"];
 async function renderCaptureOnce(p, output, signal) {
   const software = p.webgl === "software";
+  // Every local file the page asked for, there or not yet there: what a later change must touch to alter the page.
+  // Unset for a page that is not local, and once the request cap hides what else was asked.
+  let asked;
   const errors = [],
     addError = (s) => {
       // Text inspection cannot echo arbitrary console values or query-bearing URLs.
@@ -469,6 +472,7 @@ async function renderCaptureOnce(p, output, signal) {
             "Unsupported local type: HTML, SVG, PNG/JPEG/GIF/WebP/BMP or PDF required",
           );
         root = path.dirname(target);
+        asked = new Set();
         if ((await fs.stat(target)).size > 20 * 1024 * 1024)
           throw Error("Input exceeds 20 MiB");
       } else {
@@ -554,6 +558,7 @@ async function renderCaptureOnce(p, output, signal) {
         const u = new URL(route.request().url());
         if (++requests > 200) {
           addError("Request cap exceeded");
+          asked = undefined;
           return route.abort();
         }
         if (!local) {
@@ -615,6 +620,10 @@ async function renderCaptureOnce(p, output, signal) {
         }
         try {
           const rel = decodeURIComponent(u.pathname).slice(1);
+          // A file this capture will not serve (data, a dependency folder) is still one the page asks for and a
+          // browser gives it, so it counts; a hidden or credential path is given to no page and is left alone.
+          if (!rel.split("/").some((s) => s.startsWith(".") || /^(auth\.json|models\.json|credentials.*)$/i.test(s)))
+            asked?.add(path.resolve(root, rel));
           if (
             rel
               .split("/")
@@ -859,7 +868,8 @@ async function renderCaptureOnce(p, output, signal) {
     const byteCap = p.rawBytes === true ? 20 * 1024 * 1024 : 1100000;
     if (image.length > byteCap)
       throw Error(byteCap === 1100000 ? "PNG exceeds 1.1 MB attachment cap; reduce viewport" : "PNG exceeds the 20 MB capture bound");
-    return boundedCaptureResult({
+    const localFiles = asked && p.rawBytes === true ? [...asked] : undefined;
+    return Object.assign(boundedCaptureResult({
       output,
       ...(pageState ? { pageState } : {}),
       ...(noise ? {noise} : {}),
@@ -878,7 +888,7 @@ async function renderCaptureOnce(p, output, signal) {
       limitations: software
         ? "Isolated unauthenticated browser; WebGL rendered in software (SwiftShader, no GPU access), WebGPU and workers rejected. The pixels are real, but frame timing and shader cost are not representative of a GPU, and a still frame is not playback proof. Capture is not proof of semantic correctness."
         : "Isolated unauthenticated browser; WebGL/GPU disabled and attempts rejected. Capture is not proof of semantic correctness. One PDF page per call.",
-    });
+    }), localFiles && JSON.stringify(localFiles).length <= 24000 ? { localFiles } : {});
   } catch (e) {
     await fs.unlink(output).catch(() => {});
     if (e.failure) throw e;
@@ -891,7 +901,7 @@ async function renderCaptureOnce(p, output, signal) {
     if (outputMode !== "image") {
       const reason = signal?.aborted ? "cancelled"
         : /Unsupported GPU\/WebGL/.test(String(e.message))
-        ? `unsupported GPU/WebGL page; ${/^https?:\/\//i.test(p.source) ? `open ${p.source} in browser_session` : "serve it over HTTP and open it in browser_session"} for WebGL-capable inspection`
+        ? `unsupported GPU/WebGL page; ${/^https?:\/\//i.test(p.source) ? `open ${p.source} in browser_session` : "open it in browser_session by its path"} for WebGL-capable inspection`
         : /ERR_CONNECTION_(?:REFUSED|RESET|CLOSED|TIMED_OUT)|ERR_NAME_NOT_RESOLVED|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED/.test(String(e.message))
           ? "navigation unreachable; check the server task and HTTP URL"
           : /strict mode violation/.test(String(e.message))

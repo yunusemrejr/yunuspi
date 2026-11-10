@@ -7,8 +7,6 @@ export interface BuildSystemPromptOptions {
     customPrompt?: string;
     /** Tools to include in prompt. Default: [read, bash, edit, write] */
     selectedTools?: string[];
-    /** Optional one-line tool snippets keyed by tool name. */
-    toolSnippets?: Record<string, string>;
     /** Additional guideline bullets appended to the default system prompt guidelines. */
     promptGuidelines?: string[];
     /** Text to append to system prompt. */

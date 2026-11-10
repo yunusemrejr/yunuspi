@@ -2064,6 +2064,7 @@
         "agent/extensions/pi-web-access/github-search.ts",
         "agent/extensions/pi-web-access/github-rest.ts",
         "agent/extensions/lib/browser-session.ts",
+        "agent/extensions/lib/workspace-page.ts",
         "agent/extensions/render-and-wait.ts",
         "agent/extensions/media-tools.ts"
       ],
@@ -2750,12 +2751,12 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 607
+        "line": 603
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 641
+        "line": 637
       },
       {
         "name": "budget",
@@ -2805,7 +2806,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 428
+        "line": 440
       },
       {
         "name": "google-account",
@@ -2830,7 +2831,7 @@
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 696
+        "line": 692
       },
       {
         "name": "lens-allow-edit",
@@ -2885,7 +2886,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 664
+        "line": 660
       },
       {
         "name": "memory-prime",
@@ -3015,7 +3016,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 633
+        "line": 629
       },
       {
         "name": "used",
@@ -3035,7 +3036,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          442
+          454
         ]
       },
       {
@@ -3053,7 +3054,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          177
+          180
         ]
       }
     ],
@@ -3070,7 +3071,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 465,
+        "line": 539,
         "kind": "factory"
       },
       {
@@ -3101,25 +3102,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 862,
+        "line": 858,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 819,
+        "line": 815,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 732,
+        "line": 728,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 791,
+        "line": 787,
         "kind": "literal"
       },
       {
@@ -3155,7 +3156,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 166,
+        "line": 193,
         "kind": "literal"
       },
       {
@@ -3179,7 +3180,7 @@
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 310,
+        "line": 378,
         "kind": "factory"
       },
       {
@@ -3217,7 +3218,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 453,
+        "line": 465,
         "kind": "literal"
       },
       {
@@ -3241,7 +3242,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 511,
+        "line": 585,
         "kind": "factory"
       },
       {
@@ -3337,7 +3338,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 789,
+        "line": 796,
         "kind": "literal"
       },
       {
@@ -3440,7 +3441,7 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 430,
+        "line": 504,
         "kind": "factory"
       },
       {
@@ -3458,7 +3459,7 @@
       {
         "name": "todo",
         "source": "agent/extensions/rpiv-todo/tool/types.ts",
-        "line": 11,
+        "line": 12,
         "kind": "constant"
       },
       {
@@ -3470,7 +3471,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 402,
+        "line": 474,
         "kind": "factory"
       },
       {
@@ -3506,7 +3507,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 352,
+        "line": 421,
         "kind": "factory"
       },
       {
@@ -3539,31 +3540,31 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 862,
+        "line": 858,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 819,
+        "line": 815,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 732,
+        "line": 728,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 791,
+        "line": 787,
         "kind": "literal"
       },
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 166,
+        "line": 193,
         "kind": "literal"
       },
       {
@@ -3593,7 +3594,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 453,
+        "line": 465,
         "kind": "literal"
       },
       {
@@ -3677,7 +3678,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 789,
+        "line": 796,
         "kind": "literal"
       },
       {
@@ -3793,7 +3794,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          276
+          342
         ],
         "knownNames": [
           "asset_register",
@@ -3956,7 +3957,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          124
+          125
         ],
         "knownNames": [
           "todo"
@@ -3994,7 +3995,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 650,
+      "sourceFiles": 651,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,
@@ -4877,6 +4878,10 @@
       },
       {
         "path": "agent/extensions/lib/wire-warmth.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/workspace-page.ts",
         "exists": true
       },
       {

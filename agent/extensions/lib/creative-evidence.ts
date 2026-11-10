@@ -14,7 +14,11 @@ export function createCreativeEvidence() {
   const judgments = new Map<string, { stamp: string; kind: 'ui' | 'svg'; blocking: number; source: string; controls: number }>();
   const geometry = new Map<string, { stamp: string; failures: number }>();
   const interactions = new Map<string, { stamp: string; actions: Set<string> }>();
-  let workspace = '', direction = 'null', overflow = false;
+  let workspace = '', seen = '', direction = 'null', overflow = false;
+  // The local files the reviewed pages asked for, each with the identity it had when first seen. While every review
+  // could name its files, evidence goes stale when one of them changes; once one could not, any workspace change counts.
+  const loaded = new Map<string, string>();
+  let unnamed = false, moved = 0;
   const stamp = () => createHash('sha256').update(JSON.stringify([workspace, direction, [...changes].sort()])).digest('hex').slice(0, 20);
   const current = (entry: { stamp: string } | undefined) => entry?.stamp === stamp();
   const interactionKey = (source: string) => /^https?:\/\//i.test(source) ? createHash('sha256').update(new URL(source).href).digest('hex') : source;
@@ -47,8 +51,10 @@ export function createCreativeEvidence() {
       const target = current(judgment) ? judgment : run ? { source: run.capture.source, controls: run.capture.dom?.controls } : undefined;
       if (target?.controls > 0) {
         const interaction = interactions.get(interactionKey(target.source));
-        if (!current(interaction) || !interaction!.actions.has('keyboard') || !interaction!.actions.has('verify'))
-          add(`interaction:${source}`, 'unresolved', `${target.source}: exercise the user task with browser_session, including keyboard/focus and verify the resulting state; screenshots alone are not interaction proof.`);
+        const done = current(interaction) ? interaction!.actions : new Set<string>();
+        // Name the missing action itself: "verify the state" read as evaluate or a screenshot, and each such guess cost a refused completion.
+        const missing = [!done.has('keyboard') && 'a Tab/Enter/Space/Escape key press', !done.has('verify') && 'a matching verify'].filter(Boolean);
+        if (missing.length) add(`interaction:${source}`, 'unresolved', `${target.source}: browser_session on this revision still needs ${missing.join(' and ')} (evaluate and screenshots do not count; a tab opened before the last edit shows the old page until it is reloaded).`);
       }
     }
     for (const source of surfaces('svg')) {
@@ -68,7 +74,27 @@ export function createCreativeEvidence() {
       if (changes.size >= 64 && !changes.has(file)) { overflow = true; return; }
       changes.set(file, { hash, kind });
     },
-    workspace(token: string) { workspace = token; },
+    /** A change somewhere in the workspace. It counts only while the files behind the reviews are not all known:
+     * notes, a licence or a script no reviewed page loads cannot have altered what was reviewed. */
+    workspace(token: string) {
+      if (token === seen) return;
+      seen = token;
+      if (unnamed || !loaded.size) workspace = token;
+    },
+    /** The local files a review's page asked for, each with its identity now. Without them the review could not
+     * name its files (a page served by something else, or too many requests). */
+    loaded(files?: Record<string, string>) {
+      const fresh = Object.entries(files ?? {}).filter(([file]) => !loaded.has(file));
+      if (!files || loaded.size + fresh.length > 512) { unnamed = true; return; }
+      for (const [file, identity] of fresh) loaded.set(file, identity);
+    },
+    loadedFiles: () => [...loaded.keys()],
+    /** The identity a loaded file has now; a new one makes the evidence stale. */
+    reloaded(file: string, identity: string) {
+      if (!loaded.has(file) || loaded.get(file) === identity) return;
+      loaded.set(file, identity);
+      workspace = `loaded:${++moved}`;
+    },
     direction(token: string) { direction = token; },
     run(capture: Capture, imageHash: string, seen: boolean, capturedStamp = stamp()) {
       if (!capture.consistent || capturedStamp !== stamp() || !imageHash) throw Error('Capture revision changed or is unavailable; run visual_review again on the final source.');
@@ -119,8 +145,13 @@ export function createCreativeEvidence() {
       const responsive = verdict.sections.find(section => section.id === 'responsive');
       if (responsive && !['UNKNOWN', 'FAIL'].includes(responsive.verdict)) {
         const matrix = matching(matrices, run.capture.surface ?? (surfaces('ui').includes(input.source) ? input.source : 'application'));
-        if (!current(matrix) || !matrix!.seen || !run.capture.responsiveHash || matrix!.imageHash !== run.capture.responsiveHash)
-          throw Error('Responsive judgment needs the current inspected ui_explore contact sheet captured by this review; run the matrix, inspect it and re-run visual_review.');
+        // The sheet has to show the page as it is now and has to have been looked at. Taken before or after this
+        // capture, it is the same evidence; one taken after was not in the capture's rubric, so a failure it measured
+        // is applied here.
+        if (!current(matrix)) throw Error('Responsive judgment needs a ui_explore contact sheet of the page as it is now: run ui_explore on it, look at the sheet, then record again with the same runId.');
+        if (!matrix!.seen) throw Error(`Responsive judgment needs the ui_explore contact sheet looked at${matrix!.file ? ` (${matrix!.file})` : ''}: read it or use image_understand, then record again with the same runId.`);
+        if (matrix!.imageHash !== run.capture.responsiveHash && matrix!.status === 'fail' && !input.dismissals?.some(d => d.id === 'responsive' && d.reason.trim().length >= 20))
+          throw Error('Measured responsive failure needs repair or an explicit evidence-based dismissal.');
       }
       if (run.capture.errors?.length && !input.dismissals?.some(d => d.id === 'load-errors' && d.reason.trim().length >= 20) && verdict.blocking === 0)
         throw Error('Capture has load/runtime errors; repair them or record a specific load-errors dismissal.');

@@ -14,13 +14,16 @@ import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.t
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 import { Type } from "typebox";
 import {
   directionSummary, normalizeDirection, projectDirectionPath, readProjectDirection, renderDirectionBrief,
   type CreativeDirection,
 } from "./lib/creative-direction.ts";
-import { creativeVerificationLines, sourceRevision, uiExploreRun, visualReviewRun, compactQAResult, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
+import { creativeVerificationLines, sourceRevision, uiExploreRun, visualReviewRun, compactQAResult, onceStanding, type QACapture, type VisualReceipt, localRenderPath } from "./lib/creative-qa.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
+import { workspacePagePath } from "./lib/workspace-page.ts";
 import { svgReviewRun } from "./lib/svg-analysis.ts";
 import { normalizeAssetInput, inspectAsset, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
 import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageRecoverRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
@@ -93,12 +96,13 @@ export default function artDirection(pi: any) {
   const anchor = createContextAnchor();
   const calls = new Map<string, { tool: string; input: any; session: any; epoch: number }>();
   const automatic = () => !['off', '0'].includes(process.env.PI_UI_VERIFICATION ?? 'on');
-  const sourceKey = (source: string, cwd: string) => /^https?:\/\//i.test(source) ? new URL(source).href : path.relative(cwd, localRenderPath(cwd, source).replace(/[?#].*$/, '')).replaceAll('\\', '/');
+  // One key per reviewed surface: a workspace page is its file whether it was named by path or by its workspace-origin URL.
+  const sourceKey = (source: string, cwd: string) => workspacePagePath(source) ?? (/^https?:\/\//i.test(source) ? new URL(source).href : path.relative(cwd, localRenderPath(cwd, source).replace(/[?#].*$/, '')).replaceAll('\\', '/'));
   const sessionOf = (ctx: any): { sid: string; state: SessionCreative } => {
     assertOwner(ctx);
     const sid = JSON.stringify([path.resolve(ctx.cwd), ctx?.sessionManager?.getSessionId?.() ?? '']);
     let state = sessions.get(sid);
-    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0, browserOrigins: new Map(), verifiedHashes: new Map() }; sessions.set(sid, state); }
+    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0, browserOrigins: new Map(), verifiedHashes: new Map(), loadedStats: new Map() }; sessions.set(sid, state); }
     while (sessions.size > 8) sessions.delete(sessions.keys().next().value!);
     if (activeKey !== sid || active?.sessionManager !== ctx.sessionManager) {
       disposeNotice?.(); active = ctx; activeKey = sid; epoch++;
@@ -112,6 +116,20 @@ export default function artDirection(pi: any) {
     }
     return { sid, state };
   };
+  // A page on the public web has nothing from the workspace behind it. A host that is, or resolves to, a loopback or
+  // private-range address may be this workspace's own server, and so may one that cannot be resolved.
+  const publicAddress = (address: string) => isIP(address) === 4
+    ? !/^(?:0|10|127)\.|^169\.254\.|^192\.168\.|^172\.(?:1[6-9]|2\d|3[01])\.|^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address)
+    : isIP(address) === 6 && !/^(?:::|f[cd]|fe[89ab])/i.test(address);
+  const isWebPage = async (source: string) => {
+    try {
+      const { protocol, hostname } = new URL(source), host = hostname.replace(/^\[|\]$/g, '');
+      if (!/^https?:$/.test(protocol)) return false;
+      if (isIP(host)) return publicAddress(host);
+      const found = await Promise.race([lookup(host, { all: true }), new Promise<never>((_, reject) => setTimeout(reject, 2000).unref())]);
+      return found.length > 0 && found.every(row => publicAddress(row.address));
+    } catch { return false; }
+  };
   const hashFile = async (file: string, cwd: string, maxBytes = 4 * 1024 * 1024) => {
     const root = await fs.realpath(cwd), resolved = await fs.realpath(path.resolve(cwd, file));
     const relative = path.relative(root, resolved);
@@ -121,6 +139,33 @@ export default function artDirection(pi: any) {
     const bytes = await fs.readFile(resolved);
     return { file: relative.replaceAll('\\', '/'), hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.subarray(0, 24000).toString('utf8') };
   };
+  // What a file a reviewed page loaded is now: its bytes (size and times for one over 8 MB), read again only when its
+  // size or times moved, so a rebuild or a touch that leaves the bytes alone changes nothing.
+  const identify = async (state: any, file: string): Promise<string> => {
+    try {
+      const stat = await fs.stat(file);
+      if (!stat.isFile()) return 'missing';
+      const key = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, known = state.loadedStats.get(file);
+      if (known?.key === key) return known.identity;
+      const identity = stat.size > 8 * 1024 * 1024 ? key : createHash('sha256').update(await fs.readFile(file)).digest('hex');
+      state.loadedStats.set(file, { key, identity });
+      return identity;
+    } catch { return 'missing'; }
+  };
+  /** Record what a review's page loaded. A page on the web loads nothing from the workspace; one served locally by
+   * something else may, and cannot say what. */
+  const recordLoaded = async (state: any, files: unknown, source?: string, since = Infinity) => {
+    if (!Array.isArray(files)) return state.evidence.loaded(source !== undefined && await isWebPage(source) ? {} : undefined);
+    const known = new Set(state.evidence.loadedFiles()), identities: Record<string, string> = {};
+    // One file at a time: a changed file is read whole, and a page may load hundreds.
+    for (const file of files) {
+      if (known.has(file) || typeof file !== 'string') continue;
+      const identity = await identify(state, file), stat = await fs.stat(file).catch(() => undefined);
+      // A file written after the page was given it is not what the page showed: the next check finds it changed.
+      identities[file] = stat && stat.mtimeMs >= since ? `written after it was loaded at ${since}` : identity;
+    }
+    state.evidence.loaded(identities);
+  };
   const refresh = async (ctx: any) => {
     const { state } = sessionOf(ctx);
     const ticket = epoch;
@@ -129,6 +174,11 @@ export default function artDirection(pi: any) {
       try { hash = (await hashFile(row.file, ctx.cwd)).hash; } catch (error: any) { if (error?.code === 'ENOENT') hash = 'missing'; }
       if (ticket !== epoch) return state;
       state.evidence.observe(row.file, hash, row.kind);
+    }
+    for (const file of state.evidence.loadedFiles()) {
+      const identity = await identify(state, file);
+      if (ticket !== epoch) return state;
+      state.evidence.reloaded(file, identity);
     }
     return state;
   };
@@ -162,8 +212,12 @@ export default function artDirection(pi: any) {
       } catch { /* gaps stay open; automatic checks never prevent the edit */ }
     }
   };
-  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); observationTail = Promise.resolve(); if (ctx?.cwd) sessionOf(ctx); });
-  pi.on?.('session_shutdown', () => { epoch++; calls.clear(); observationTail = Promise.resolve(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
+  // Standing caveats of the review tools already in this conversation; another conversation, or a
+  // compaction that dropped the replies carrying them, starts over.
+  const standing = new Set<string>();
+  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); standing.clear(); observationTail = Promise.resolve(); if (ctx?.cwd) sessionOf(ctx); });
+  pi.on?.('session_compact', () => { standing.clear(); });
+  pi.on?.('session_shutdown', () => { epoch++; calls.clear(); standing.clear(); observationTail = Promise.resolve(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
   pi.on?.('input', (event: any, ctx: any) => {
     if (event.source === 'extension' || !ctx?.cwd) return;
     const { state } = sessionOf(ctx);
@@ -172,6 +226,7 @@ export default function artDirection(pi: any) {
       for (const row of state.evidence.changed()) state.verifiedHashes.set(row.file, row.hash);
       while (state.verifiedHashes.size > 64) state.verifiedHashes.delete(state.verifiedHashes.keys().next().value!);
       state.evidence = createCreativeEvidence();
+      state.loadedStats.clear();
       state.browserOrigins.clear();
       state.uiPromptActive = false;
     }
@@ -228,20 +283,31 @@ export default function artDirection(pi: any) {
     if (event.toolName === 'read' && ctx.model?.input?.includes('image') && event.content?.some((part: any) => part.type === 'image')) {
       try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd, 20 * 1024 * 1024)).hash); } catch { /* unmatched pixels cannot certify a run */ }
     }
+    // What the browser answered a workspace page with is what that page depends on, whichever reply reports it.
+    if (event.toolName === 'browser_session' && event.details && 'localFiles' in event.details)
+      await recordLoaded(state, event.details.localFiles, undefined, typeof event.details.localFilesSince === 'number' ? event.details.localFilesSince : Infinity);
     if (event.toolName === 'browser_session' && event.details?.ok === true && typeof event.details.url === 'string') {
-      const action = call.input.action === 'press' && ['Tab', 'Shift+Tab', 'Enter', 'Space', 'Escape'].includes(call.input.key) ? 'keyboard' : call.input.action;
+      const kind = (step: any) => step?.action === 'press' && ['Tab', 'Shift+Tab', 'Enter', 'Space', 'Escape'].includes(step.key) ? 'keyboard' : String(step?.action ?? '');
+      // A batch is its steps: a key press or a matching verify inside one counts as it does alone.
+      const steps: Array<{ action: string; url?: unknown; passed: boolean }> = call.input.action === 'batch' && Array.isArray(call.input.steps)
+        ? call.input.steps.map((step: any, index: number) => ({ action: kind(step), url: step?.url, passed: kind(step) !== 'verify' || event.details.batch?.stepResults?.some((row: any) => row.step === index + 1 && row.matches === true) === true }))
+        : [{ action: kind(call.input), url: call.input.url, passed: kind(call.input) !== 'verify' || event.details.verification?.matches === true }];
       const handle = JSON.stringify([event.details.session, event.details.tab]);
-      if (typeof event.details.session === 'string' && ['open', 'new_tab', 'navigate', 'reload'].includes(action)) {
-        const source = typeof call.input.url === 'string' ? sourceKey(call.input.url, ctx.cwd) : state.browserOrigins.get(handle)?.source;
-        if (source) state.browserOrigins.set(handle, { source, stamp: state.evidence.stamp() });
-        while (state.browserOrigins.size > 8) state.browserOrigins.delete(state.browserOrigins.keys().next().value!);
-      }
-      if (action !== 'verify' || event.details.verification?.matches === true) {
-        state.evidence.interaction(event.details.url, action, event.details.pageIdentity);
+      const rows: any[] = Array.isArray(event.details.batch?.stepResults) ? event.details.batch.stepResults : [];
+      steps.forEach((step, index) => {
+        if (typeof event.details.session === 'string' && ['open', 'new_tab', 'navigate', 'reload'].includes(step.action)) {
+          const source = typeof step.url === 'string' ? sourceKey(step.url, ctx.cwd) : state.browserOrigins.get(handle)?.source;
+          if (source) state.browserOrigins.set(handle, { source, stamp: state.evidence.stamp() });
+          while (state.browserOrigins.size > 8) state.browserOrigins.delete(state.browserOrigins.keys().next().value!);
+        }
+        if (!step.passed) return;
+        // A batch step counts for the page it ran on, which a link or a navigate inside the batch may since have left.
+        const ranOn = call.input.action === 'batch' ? rows.find(row => row.step === index + 1)?.page : event.details.pageIdentity;
+        if (call.input.action !== 'batch' || typeof ranOn === 'string') state.evidence.interaction(event.details.url, step.action, ranOn);
         const origin = state.browserOrigins.get(handle);
-        if (origin?.stamp === state.evidence.stamp() && typeof event.details.pageIdentity === 'string') state.evidence.interaction(origin.source, action);
-      }
-      if (action === 'close') state.browserOrigins.delete(handle);
+        if (origin?.stamp === state.evidence.stamp() && typeof event.details.pageIdentity === 'string') state.evidence.interaction(origin.source, step.action);
+      });
+      if (call.input.action === 'close') state.browserOrigins.delete(handle);
     }
   });
   // The shared bus deliberately emits without awaiting listeners. Retain this
@@ -279,6 +345,8 @@ export default function artDirection(pi: any) {
         const deadline = AbortSignal.timeout(deadlineMs);
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
         const cwd = ctx?.cwd || process.cwd();
+        // The browser shows a workspace page under its workspace-origin URL; here that names the same file.
+        if (typeof params?.source === 'string') params = { ...params, source: workspacePagePath(params.source) ?? params.source };
         sessionOf({ ...ctx, cwd });
         const ticket = epoch;
         await observationTail;
@@ -299,7 +367,7 @@ export default function artDirection(pi: any) {
           }
           else result.pixels = `${pixels} (open with read/vision: this model was not served pixels inline)`;
         }
-        const textResult = params.detail === true ? result : compactQAResult(name, result);
+        const textResult = params.detail === true ? result : onceStanding(compactQAResult(name, result), standing);
         content.unshift({ type: 'text', text: JSON.stringify(textResult) });
         return { content, details: result };
       },
@@ -312,7 +380,8 @@ export default function artDirection(pi: any) {
     Type.Object({
       action: choices(["set", "get", "brief", "status", "clear"]),
       scope: Type.Optional(choices(["session", "project"])),
-      direction: Type.Optional(Type.Object({}, { additionalProperties: true } as any)),
+      // The shape is spelled out because the object itself is open: a guessed shape cost a refused first call, and keys outside it are dropped.
+      direction: Type.Optional(Type.Object({}, { additionalProperties: true, description: 'set: { name, intent: ["serious", "editorial"], hierarchy: { primary: "the one focal element", secondary, tertiary }, avoid: ["…"], ambition: "restrained" | "balanced" | "immersive", signature, visual: { density, geometry, depth, texture, illustration }, motion: { character, intensity, duration, continuous }, audio: { character, music, uiSfx }, references: ["…"] }. intent and hierarchy.primary are required; other keys are not kept.' } as any)),
     }),
     async (params, ctx) => {
       const { state } = sessionOf(ctx);
@@ -361,7 +430,8 @@ export default function artDirection(pi: any) {
       runId: Type.Optional(Type.String({ maxLength: 64 })),
       detail: Type.Optional(Type.Boolean({ description: 'Include full saved design measurements inline (default false); all rubric sections, defects and coverage remain in the compact reply' })),
       dismissals: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), reason: Type.String({ minLength: 20, maxLength: 600 }) }), { maxItems: 16 })),
-      verdict: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), verdict: Type.String({ maxLength: 16 }), evidence: Type.Array(Type.String({ maxLength: 300 })) }), { minItems: 1, maxItems: 16 })),
+      // The owner keeps the first 300 characters of an evidence line; refusing a longer one here only cost a retry turn.
+      verdict: Type.Optional(Type.Array(Type.Object({ id: Type.String({ maxLength: 64 }), verdict: Type.String({ maxLength: 16 }), evidence: Type.Array(Type.String({ maxLength: 4000 })) }), { minItems: 1, maxItems: 16, description: "record: one entry per rubric section from run; an evidence line is kept to 300 characters" })),
       note: Type.Optional(Type.String({ maxLength: 1000 })),
     }),
     async (params, ctx, signal) => {
@@ -375,9 +445,11 @@ export default function artDirection(pi: any) {
         assertOwner(ctx);
         const stamp = state.evidence.stamp();
         const responsive = state.evidence.responsive(surface ?? (state.evidence.changed().some(row => row.file === sourceKey(params.source, cwd)) ? sourceKey(params.source, cwd) : 'application'));
+        const began = Date.now();
         const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction, responsive }, cwd, signal, capture);
         await refresh(ctx);
         state.evidence.run({ ...run, originalSource: run.source, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, 20 * 1024 * 1024)).hash, false, stamp);
+        await recordLoaded(state, run.loaded, run.source, began);
         return { result: run, pixels: run.file };
       }
       if (params.action === "record") {
@@ -419,10 +491,12 @@ export default function artDirection(pi: any) {
       const surface = params.entrypoint ? (await hashFile(params.entrypoint, ctx.cwd)).file : sourceKey(params.source, ctx.cwd);
       assertOwner(ctx);
       const stamp = state.evidence.stamp();
+      const began = Date.now();
       const result = await uiExploreRun(params, ctx.cwd as string, signal, capture);
       await refresh(ctx);
       const hash = result.preview ? (await hashFile(result.preview, ctx.cwd, 20 * 1024 * 1024)).hash : '';
       state.evidence.matrix(surface, result, stamp, hash);
+      await recordLoaded(state, result.loaded, params.source, began);
       return { result, pixels: result.preview };
     }, 600_000);
 

@@ -242,27 +242,105 @@ export function summarizeNoise(noise: any): Array<{ key: string; detail: string 
   }));
 }
 
-/** Keep decisions, failures and provenance on the wire; repeated typography
- * and spacing tables stay in the already-written report. Details remain full
- * for native receipt consumers and detail:true is an explicit inspection path. */
+const OWN_CELL_KEYS = new Set(['viewport', 'width', 'height', 'state', 'file', 'ok']);
+const isPlain = (v: any): boolean => v !== null && typeof v === 'object' && !Array.isArray(v);
+function sameValue(a: any, b: any): boolean {
+  if (a === b || !a || !b || typeof a !== 'object' || typeof b !== 'object') return a === b;
+  const keys = Object.keys(a);
+  return Array.isArray(a) === Array.isArray(b) && keys.length === Object.keys(b).length
+    && keys.every((k) => Object.hasOwn(b, k) && sameValue(a[k], b[k]));
+}
+function prune(node: any): any {
+  const out: any = {};
+  for (const [k, v] of Object.entries(node)) {
+    const value = isPlain(v) ? prune(v) : v;
+    const empty = v === 0 || v === null || (Array.isArray(v) && v.length === 0) || (isPlain(value) && Object.keys(value).length === 0);
+    if (!empty) out[k] = value;
+  }
+  return out;
+}
+const collect = (value: any, into: Set<string>) => { for (const text of [value].flat()) if (text) into.add(String(text)); };
+function tidyDesign(design: any, texts: Set<string>): any {
+  const facts: any = { ...design };
+  collect(facts.limitations, texts);
+  for (const key of ['typography', 'spacing', 'limitations', 'limits', 'version', 'viewport']) delete facts[key];
+  if (isPlain(facts.svg)) { facts.svg = { ...facts.svg }; collect(facts.svg.limitations, texts); delete facts.svg.limitations; }
+  return prune(facts);
+}
+function tidyMeasures(node: any, texts: Set<string>): any {
+  const out = { ...node };
+  if (isPlain(out.dom)) out.dom = prune(out.dom);
+  if (isPlain(out.design)) out.design = tidyDesign(out.design, texts);
+  return out;
+}
+// Keys every item shares: equal values, or the equal sub-keys of objects that differ.
+function commonPart(items: any[], top = true): Record<string, any> {
+  const shared: Record<string, any> = {};
+  for (const key of Object.keys(items[0])) {
+    if ((top && OWN_CELL_KEYS.has(key)) || !items.every((item) => Object.hasOwn(item, key))) continue;
+    const values = items.map((item) => item[key]);
+    if (values.every((v) => sameValue(v, values[0]))) shared[key] = values[0];
+    else if (values.every(isPlain)) {
+      const part = commonPart(values, false);
+      if (Object.keys(part).length) shared[key] = part;
+    }
+  }
+  return shared;
+}
+function withoutShared(item: any, shared: any): any {
+  const out: any = {};
+  for (const [key, value] of Object.entries(item)) {
+    if (!Object.hasOwn(shared, key)) out[key] = value;
+    else if (isPlain(value) && !sameValue(value, shared[key])) {
+      const rest = withoutShared(value, shared[key]);
+      if (Object.keys(rest).length) out[key] = rest;
+    }
+  }
+  return out;
+}
+
+/** Compact reply for the model: keeps decisions, failures, coverage, truncation,
+ * findings and provenance. Zeros and empty lists go, each limitation text is listed
+ * once, and ui_explore moves what every successful viewport shares into `shared`,
+ * so the reply stays small. The full report on disk keeps everything. */
 export function compactQAResult(tool: string, result: any): any {
   if (!result || (tool !== 'ui_explore' && tool !== 'visual_review')) return result;
   if (tool === 'visual_review' && !result.runId) return result;
-  const limitations = new Set<string>();
-  const designFacts = (design: any) => {
-    if (!design || typeof design !== 'object') return design;
-    const { typography, spacing, limitations: bounds, ...facts } = design;
-    for (const bound of bounds ?? []) limitations.add(bound);
-    return facts;
-  };
-  const compact = tool === 'ui_explore'
-    ? { ...result, cells: (result.cells ?? []).map((cell: any) => {
-      const { typography, ...facts } = cell;
-      return { ...facts, ...(cell.design ? { design: designFacts(cell.design) } : {}) };
-    }) }
-    : { ...result, design: designFacts(result.design) };
-  return { ...compact, ...(limitations.size ? { measurementLimitations: [...limitations] } : {}),
-    detail: 'Typography and spacing tables remain in report; use read or detail:true. Defects, rubric sections and incomplete coverage are retained here.' };
+  const texts = new Set<string>();
+  const { at, previewOrder, responsiveHash, detail, measurementLimitations, loaded, ...top } = result;
+  if (top.initialRevision === top.revision) delete top.initialRevision;
+  if (top.sourceChanged === false) delete top.sourceChanged;
+  if (top.plan && top.plan.capped !== true && !top.plan.omitted?.length) delete top.plan;
+  const out = tidyMeasures(top, texts);
+  if (Array.isArray(top.cells)) {
+    const ok = (cell: any) => cell?.ok === true;
+    const filled = (cell: any) => Object.fromEntries(Object.entries(cell).filter(([, value]) => !(Array.isArray(value) && !value.length)));
+    const good = top.cells.filter(ok).map(({ typography, bytes, pixels, device, ...cell }: any) => filled(tidyMeasures(cell, texts)));
+    const shared = good.length >= 2 ? commonPart(good) : {};
+    let next = 0;
+    out.cells = top.cells.map((cell: any) => (ok(cell) ? withoutShared(good[next++], shared) : cell));
+    if (Object.keys(shared).length) out.shared = shared;
+  }
+  if (texts.size) out.measurementLimitations = [...texts];
+  out.detail = tool === 'ui_explore'
+    ? 'Measurements leave out zero counts and empty lists; shared holds what every captured viewport has in common. Typography and spacing tables are in the report file; detail:true returns everything.'
+    : 'Measurements leave out zero counts and empty lists. Typography and spacing tables are in the report file; detail:true returns everything.';
+  return out;
+}
+
+/** Caveats that stand for every capture are said once per conversation. `said` holds the texts
+ * already sent; a later reply carries only the new ones and a short pointer to the rest. The
+ * caller empties `said` when the conversation is compacted, so they are said once more. */
+export function onceStanding(reply: any, said: Set<string>): any {
+  if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return reply;
+  const out = { ...reply };
+  if (Array.isArray(out.measurementLimitations)) {
+    const fresh = out.measurementLimitations.filter((text: unknown) => typeof text === 'string' && !said.has(text));
+    for (const text of fresh) said.add(text);
+    if (fresh.length < out.measurementLimitations.length) out.measurementLimitations = fresh.length ? [...fresh, 'The rest as stated in earlier replies.'] : 'As stated in earlier replies.';
+  }
+  if (typeof out.detail === 'string') { if (said.has(out.detail)) delete out.detail; else said.add(out.detail); }
+  return out;
 }
 
 export async function uiExploreRun(
@@ -275,6 +353,8 @@ export async function uiExploreRun(
   const initialRevision = await sourceRevision(params.source,cwd);
   const dir = await qaFolder(params.outputDir, cwd, "ui-review", "matrix");
   const cells: any[] = [];
+  // The local files these captures asked for; undefined once one capture cannot say (a page over HTTP, a failed capture).
+  let loaded: Set<string> | undefined = new Set();
   for (const cell of plan.cells) {
     signal?.throwIfAborted();
     const dest = path.join(dir, cell.file);
@@ -289,8 +369,11 @@ export async function uiExploreRun(
     } catch (error: any) {
       if (signal?.aborted) throw error;
       cells.push({ ...cell, file: relative(cwd, dest), ok: false, error: String(error?.message ?? error).slice(0, 300) });
+      loaded = undefined;
       continue;
     }
+    if (loaded && Array.isArray(receipt?.localFiles)) for (const file of receipt.localFiles) loaded.add(file);
+    else loaded = undefined;
     const stat = await fs.stat(dest).catch(() => undefined);
     cells.push({
       ...cell, file: relative(cwd, dest), ok: true,
@@ -334,6 +417,19 @@ export async function uiExploreRun(
     await fs.writeFile(dest, await encodeImage({ width, height, data }, 'png', { maxWidth: 1920 }, signal), { flag: 'wx' });
     preview = relative(cwd, dest);
   }
+  // One line per distinct fact, naming every capture it holds for: the same missing alt text at four widths is one finding.
+  const facts = new Map<string, string[]>();
+  const fact = (cell: MatrixCell, text: string) => facts.set(text, [...(facts.get(text) ?? []), `${cell.viewport}/${cell.state}`]);
+  for (const c of overflowCells) fact(c, `horizontal overflow on ${c.dom.overflowElements} element(s), scope ${c.dom.scopeOverflowPx}px; inspect the capture (overflow may be intentional)`);
+  for (const c of altCells) fact(c, `${c.dom.missingAlt} of ${c.dom.images} sampled image(s) without alt text`);
+  for (const c of cells) {
+    if (!c.ok) continue;
+    if (c.dom.brokenImages) fact(c, `${c.dom.brokenImages} sampled image(s) failed to load`);
+    if (c.design?.contrast?.belowThreshold) fact(c, `${c.design.contrast.belowThreshold} measured solid-text contrast failure(s)`);
+    if (c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds) fact(c, `inline SVG has ${c.design.svg.unresolvedRefs} unresolved reference(s) and ${c.design.svg.duplicateIds} duplicate id(s)`);
+    if (c.dom.unnamedControls) fact(c, `${c.dom.unnamedControls} sampled control(s) without a DOM-derived name; inspect accessible names`);
+    if (c.dom.smallTargets) fact(c, `${c.dom.smallTargets} target(s) below 24 CSS px; check spacing, inline/equivalent/native-control exceptions before judging WCAG 2.5.8`);
+  }
   const report = {
     source: params.source, revision, initialRevision, sourceChanged, consistent, at: new Date().toISOString(),
     status: failed.length || defects.length ? "fail" : incomplete ? "incomplete" : cells.some(c => c.dom.scopeOverflowPx || c.dom.overflowElements || c.dom.unnamedControls || c.dom.smallTargets || c.noise.length || c.errors.length) ? "warn" : "measured",
@@ -342,20 +438,14 @@ export async function uiExploreRun(
     plan: { cells: plan.cells.length, requested: plan.requested, capped: plan.capped, omitted: plan.omitted, note: plan.capped ? `Matrix capped at ${MATRIX_MAX_CELLS} captures; omitted combinations remain unverified. Run again with narrower viewports/states.` : undefined },
     cells,
     findings: [
-      ...overflowCells.map((c) => `${c.viewport}/${c.state}: horizontal overflow on ${c.dom.overflowElements} element(s), scope ${c.dom.scopeOverflowPx}px — inspect ${c.file} (overflow may be intentional)`),
-      ...altCells.map((c) => `${c.viewport}/${c.state}: ${c.dom.missingAlt} of ${c.dom.images} sampled image(s) without alt text`),
-      ...cells.filter(c => c.ok && c.dom.brokenImages).map(c => `${c.viewport}/${c.state}: ${c.dom.brokenImages} sampled image(s) failed to load`),
-      ...cells.filter(c => c.ok && c.design?.contrast?.belowThreshold).map(c => `${c.viewport}/${c.state}: ${c.design.contrast.belowThreshold} measured solid-text contrast failure(s)`),
-      ...cells.filter(c => c.ok && (c.design?.svg?.unresolvedRefs || c.design?.svg?.duplicateIds)).map(c => `${c.viewport}/${c.state}: inline SVG has ${c.design.svg.unresolvedRefs} unresolved reference(s) and ${c.design.svg.duplicateIds} duplicate id(s)`),
-      ...cells.filter(c => c.ok && c.dom.unnamedControls).map(c => `${c.viewport}/${c.state}: ${c.dom.unnamedControls} sampled control(s) without a DOM-derived name; inspect accessible names`),
-      ...cells.filter(c => c.ok && c.dom.smallTargets).map(c => `${c.viewport}/${c.state}: ${c.dom.smallTargets} target(s) below 24 CSS px; check spacing, inline/equivalent/native-control exceptions before judging WCAG 2.5.8`),
+      ...[...facts].map(([text, where]) => `${where.join(", ")}: ${text}`),
       ...(!consistent ? ["Source changed during capture or its revision is unavailable; re-capture the final revision"] : []),
       ...failed.map((c) => `${c.viewport}/${c.state}: capture failed — ${c.error}`),
     ].slice(0, 24),
-    note: "The contact sheet includes every successful capture in row/column order; open the saved full-size PNGs for small text or long-page details. Viewport/state pixels plus DOM facts are not interaction proof: hover, focus, menus, loading/empty/error states and keyboard behavior need browser_session passes or follow-up inspection. Content stress (long titles, missing images, 100 cards, RTL) is not applied here; probe representative states explicitly.",
+    note: "The contact sheet shows every capture in row and column order; open a full-size PNG for small text. Pixels and DOM facts are not interaction proof: keyboard, focus, hover and loading, empty or error states need browser_session. Content stress (long titles, missing images, many items, right-to-left text) is not applied here.",
   };
   await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report, null, 1) + "\n", { flag: "wx" });
-  return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report };
+  return { dir: relative(cwd, dir), report: relative(cwd, path.join(dir, "report.json")), ...report, ...(loaded ? { loaded: [...loaded] } : {}) };
 }
 
 const INK_QUADRANTS = ["top-left", "top-right", "bottom-left", "bottom-right"];
@@ -494,11 +584,11 @@ export async function visualReviewRun(options: VisualRunOptions, cwd: string, si
     ...(options.responsive ? { responsiveHash: options.responsive.imageHash } : {}),
     sections: sectionsOut,
     blocking: sectionsOut.filter((s) => s.verdict === "FAIL").length,
-    next: "Judge the needsVision sections from the attached pixels (or open the capture), then record the verdict with visual_review action record. Deterministic PASS/FAIL stands unless the pixels prove otherwise; UNKNOWN must never be recorded as PASS without rendered judgment. For interactive local HTML, serve it on HTTP and review that URL with entrypoint before browser_session checks.",
+    next: "Judge the needsVision sections from the attached pixels (or open the capture), then record the verdict with visual_review action record. Deterministic PASS/FAIL stands unless the pixels prove otherwise; UNKNOWN must never be recorded as PASS without rendered judgment. A page with controls also needs a key press and a matching verify in browser_session: open the same file there by its path.",
   };
   Object.assign(run, { consistent: before === run.revision && run.revision !== "missing" && !run.revision.startsWith("unhashed-") });
   await fs.writeFile(path.join(dir, "review.json"), JSON.stringify(run, null, 1) + "\n", { flag: "wx" });
-  return { ...run, report: relative(cwd, path.join(dir, "review.json")) };
+  return { ...run, report: relative(cwd, path.join(dir, "review.json")), ...(Array.isArray(receipt?.localFiles) ? { loaded: receipt.localFiles as string[] } : {}) };
 }
 
 // ─────────────────────────── receipts ────────────────────────────────────
@@ -518,7 +608,7 @@ const VERDICTS = new Set(["PASS", "WARN", "FAIL", "UNKNOWN"]);
 /** Validate a recorded verdict. Pure. UNKNOWN sections stay open: recording
  * is evidence of review, not of quality. */
 export function normalizeVerdict(raw: unknown): { sections: QASection[]; blocking: number; improvements: number } {
-  if (!Array.isArray(raw) || !raw.length || raw.length > 16) throw new Error("verdict needs 1..16 rubric sections");
+  if (!Array.isArray(raw) || !raw.length || raw.length > 16) throw new Error('record needs verdict: one entry for each rubric section that run returned, as [{ id: "spacing", verdict: "PASS" | "WARN" | "FAIL" | "UNKNOWN", evidence: ["what was seen"] }]');
   const seen = new Set<string>();
   const sections: QASection[] = raw.map((entry: any, index: number) => {
     const id = String(entry?.id ?? "").trim().slice(0, 64);

@@ -178,6 +178,9 @@ export class ModelRuntime {
     }
     async runAvailabilityRefresh(seq, errorSeq, signal) {
         const providers = this.models.getProviders();
+        // A provider refreshed on its own while this pass reads holds something newer than
+        // the pass will read for it; the pass still owes every other provider its result.
+        const began = new Map(this.providerAvailabilitySeq);
         const [available, checks, credentials] = await Promise.all([
             this.models.getAvailable(undefined, { signal }),
             Promise.all(providers.map(async (provider) => [
@@ -188,16 +191,24 @@ export class ModelRuntime {
         ]);
         if (seq !== this.availabilityRefreshSeq)
             return;
-        const auth = new Map(checks);
-        const configuredProviders = new Set(checks
-            .filter((entry) => entry[1] !== undefined)
-            .map(([providerId]) => providerId));
+        const newer = (providerId) => this.providerAvailabilitySeq.get(providerId) !== began.get(providerId);
+        const current = this.snapshot;
+        const read = checks.filter(([providerId]) => !newer(providerId));
         this.snapshot = {
             all: [...this.models.getModels()],
-            available: [...available],
-            configuredProviders,
-            storedProviders: new Set(credentials.map((entry) => entry.providerId)),
-            auth,
+            available: [
+                ...available.filter((model) => !newer(model.provider)),
+                ...current.available.filter((model) => newer(model.provider)),
+            ],
+            configuredProviders: new Set([
+                ...read.filter((entry) => entry[1] !== undefined).map(([providerId]) => providerId),
+                ...[...current.configuredProviders].filter(newer),
+            ]),
+            storedProviders: new Set([
+                ...credentials.map((entry) => entry.providerId).filter((providerId) => !newer(providerId)),
+                ...[...current.storedProviders].filter(newer),
+            ]),
+            auth: new Map([...read, ...[...current.auth].filter(([providerId]) => newer(providerId))]),
         };
         if (errorSeq === this.availabilityErrorSeq)
             this.availabilityError = undefined;
@@ -217,8 +228,7 @@ export class ModelRuntime {
         });
     }
     async refreshProviderAvailability(providerId, signal) {
-        // Invalidate any full availability pass that started before this credential change.
-        ++this.availabilityRefreshSeq;
+        // A full pass that started before this change sees the new counter and leaves this provider alone.
         const providerSeq = (this.providerAvailabilitySeq.get(providerId) ?? 0) + 1;
         this.providerAvailabilitySeq.set(providerId, providerSeq);
         const errorSeq = ++this.availabilityErrorSeq;
@@ -518,8 +528,16 @@ export class ModelRuntime {
         });
     }
     async refresh(options = {}) {
+        const previous = this.config;
         this.config = await ModelConfig.load(this.modelsPath);
         this.configureRadiusProviders();
+        // Every provider is composed from the models file, so a few can be refreshed
+        // on their own only while that file reads as it did when the rest were composed.
+        if (options.providers &&
+            (previous.error !== this.config.error ||
+                JSON.stringify([...previous.providers]) !== JSON.stringify([...this.config.providers]))) {
+            options = { ...options, providers: undefined };
+        }
         if (options.providers) {
             for (const providerId of new Set(options.providers))
                 this.recomposeProvider(providerId);
@@ -569,7 +587,27 @@ export class ModelRuntime {
         this.nativeExtensionProviders.set(provider.id, provider);
         this.recomposeProvider(provider.id);
         this.updateModelSnapshot();
-        void this.refresh({ allowNetwork: false });
+        this.refreshAfterRegistration(provider.id);
+    }
+    /**
+     * A registration changes one provider, so only that provider is refreshed, and
+     * registrations made in the same tick share one pass. Each used to start a full
+     * refresh of every provider: an extension registering thirty providers at
+     * start-up read and copied every stored catalogue thirty times over.
+     */
+    refreshAfterRegistration(providerId) {
+        const pending = (this.registrationRefresh ??= new Set());
+        const scheduled = pending.size > 0;
+        pending.add(providerId);
+        if (scheduled)
+            return;
+        queueMicrotask(() => {
+            const providers = [...pending];
+            pending.clear();
+            void this.refresh({ allowNetwork: false, providers }).catch(() => {
+                // A failed refresh leaves the composed provider usable; the next refresh reports it.
+            });
+        });
     }
     registerProvider(providerId, config) {
         // Validate the incoming registration on its own, like the legacy registry:
@@ -605,13 +643,13 @@ export class ModelRuntime {
                 available: this.snapshot.all.filter((model) => configuredProviders.has(model.provider)),
             };
         }
-        void this.refresh({ allowNetwork: false });
+        this.refreshAfterRegistration(providerId);
     }
     unregisterProvider(providerId) {
         this.extensionProviders.delete(providerId);
         this.nativeExtensionProviders.delete(providerId);
         this.recomposeProvider(providerId);
         this.updateModelSnapshot();
-        void this.refresh({ allowNetwork: false });
+        this.refreshAfterRegistration(providerId);
     }
 }

@@ -33,8 +33,80 @@ test('compact UI reports retain failures, coverage, truncation and provenance wi
   assert.deepEqual(compact.cells[0].design.findings, design.findings);
   assert.deepEqual(compact.measurementLimitations, design.limitations);
   assert.equal(compact.cells[0].design.typography, undefined);
+  const plain = qa.compactQAResult('visual_review', { runId: 'run-2', design: { limitations: 'Bounded sample.', svg: { limitations: 'Inline SVG sample.' } } });
+  assert.deepEqual(plain.measurementLimitations, ['Bounded sample.', 'Inline SVG sample.'], 'string limitations are whole texts, not characters');
   assert.equal(qa.compactQAResult('visual_review', { receipts: [] }).receipts.length, 0);
   assert.equal(qa.compactQAResult('other', report), report);
+});
+
+test('standing caveats are sent once per conversation and again after it is compacted', () => {
+  const said = new Set();
+  const reply = () => ({ runId: 'r', measurementLimitations: ['Bounded sample.', 'Inline SVG sample.'], detail: 'Zero counts are left out.' });
+  assert.deepEqual(qa.onceStanding(reply(), said), reply(), 'the first reply carries them whole');
+  assert.deepEqual(qa.onceStanding(reply(), said), { runId: 'r', measurementLimitations: 'As stated in earlier replies.' });
+  const more = qa.onceStanding({ ...reply(), measurementLimitations: ['Bounded sample.', 'Frames need separate inspection.'] }, said);
+  assert.deepEqual(more.measurementLimitations, ['Frames need separate inspection.', 'The rest as stated in earlier replies.'], 'a caveat not yet said is said');
+  said.clear();
+  assert.deepEqual(qa.onceStanding(reply(), said), reply(), 'after a compaction they are said again');
+  assert.deepEqual(qa.onceStanding({ receipts: [] }, said), { receipts: [] });
+  assert.equal(qa.onceStanding(undefined, said), undefined);
+});
+
+test("compact UI matrix hoists what every viewport shares and keeps each cell's own difference", () => {
+  const viewport = (name, width, overflowElements) => ({
+    viewport: name, width, height: 800, state: 'default', colorScheme: 'light', file: `${name}.png`, ok: true,
+    bytes: 900, pixels: { width, height: 800 }, device: { devicePixelRatio: 1 }, documentSha256: 'abc',
+    inspectionIncomplete: false, errors: [], noise: [],
+    dom: { documentType: 'text/html', available: true, items: 28, overflowElements, missingAlt: 0, controls: 5, brokenImages: 0, truncated: false },
+    design: { version: 2, visited: 302, viewport: { width, height: 800 }, textElements: 158, surfacePatterns: { gradients: 1, shadows: 0 },
+      slopSignals: { pills: 0, glass: 0 }, contrast: { checked: 155, belowThreshold: 0, indeterminate: 3 }, findings: [],
+      svg: { sampled: 1, limitations: 'Inline SVG sample.' }, limits: { elements: 600 } },
+  });
+  const failed = { viewport: 'tablet', width: 834, height: 800, state: 'default', file: 'tablet.png', ok: false, error: 'capture timed out', bytes: 0, typography: [] };
+  const report = { source: 'page.html', revision: 'r1', initialRevision: 'r1', sourceChanged: false, at: '2026-11-10T00:00:00.000Z', status: 'incomplete',
+    responsiveHash: 'x', previewOrder: [{ viewport: 'narrow' }], plan: { cells: 4, requested: 4, capped: false, omitted: [] }, findings: [], detail: 'old',
+    cells: [viewport('narrow', 320, 1), viewport('mobile', 390, 1), viewport('desktop', 1440, 3), failed] };
+  const original = structuredClone(report), compact = qa.compactQAResult('ui_explore', report);
+  assert.deepEqual(report, original);
+  assert.deepEqual(compact.cells[0], { viewport: 'narrow', width: 320, height: 800, state: 'default', file: 'narrow.png', ok: true, dom: { overflowElements: 1 } });
+  assert.deepEqual(compact.cells[2], { viewport: 'desktop', width: 1440, height: 800, state: 'default', file: 'desktop.png', ok: true, dom: { overflowElements: 3 } });
+  assert.deepEqual(compact.cells[3], failed);
+  assert.deepEqual(compact.shared.dom, { documentType: 'text/html', available: true, items: 28, controls: 5, truncated: false });
+  assert.equal(compact.shared.documentSha256, 'abc');
+  assert.equal(compact.shared.colorScheme, 'light');
+  assert.deepEqual(compact.measurementLimitations, ['Inline SVG sample.']);
+  for (const key of ['at', 'previewOrder', 'responsiveHash', 'initialRevision', 'sourceChanged', 'plan']) assert.equal(key in compact, false, key);
+  assert.equal(compact.source, 'page.html');
+  assert.equal(compact.revision, 'r1');
+  assert.equal(compact.detail, 'Measurements leave out zero counts and empty lists; shared holds what every captured viewport has in common. Typography and spacing tables are in the report file; detail:true returns everything.');
+  const kept = qa.compactQAResult('ui_explore', { ...report, initialRevision: 'r0', sourceChanged: true, plan: { capped: true, omitted: [] } });
+  assert.equal(kept.initialRevision, 'r0');
+  assert.equal(kept.sourceChanged, true);
+  assert.deepEqual(kept.plan, { capped: true, omitted: [] });
+});
+
+test("compact visual review prunes zero measures, keeps sections and drops volatile keys", () => {
+  const review = {
+    runId: 'run-1', source: 'index.html', revision: 'abc', at: '2026-11-10T00:00:00.000Z', file: '.pi/ui-review/x/capture.png', dir: '.pi/ui-review/x',
+    pixels: { width: 1440, height: 900 }, palette: ['text: #111 (15:1)'], responsiveHash: 'hash', noise: [], errors: [], blocking: 0, next: 'done', consistent: true,
+    report: '.pi/ui-review/x/report.json',
+    dom: { items: 32, overflowElements: 0, missingAlt: 0, controls: 8, truncated: false },
+    design: { version: 2, visited: 302, viewport: { width: 1440, height: 900 }, contrast: { checked: 158, belowThreshold: 0 },
+      findings: [{ kind: 'slop-oversized-type', count: 2 }], slopSignals: { pills: 0, oversizedType: 2 },
+      svg: { sampled: 1, findings: [], limitations: 'Inline SVG sample.' }, limitations: ['Bounded sample.'], typography: [{ size: 16 }] },
+    sections: [{ id: 'spacing', verdict: 'PASS', evidence: ['2 distinct spacing values'] }],
+  };
+  const original = structuredClone(review), compact = qa.compactQAResult('visual_review', review);
+  assert.deepEqual(review, original);
+  assert.deepEqual(compact.sections, review.sections);
+  for (const key of ['at', 'responsiveHash', 'previewOrder']) assert.equal(key in compact, false, key);
+  assert.deepEqual(compact.dom, { items: 32, controls: 8, truncated: false });
+  assert.deepEqual(compact.design, { visited: 302, contrast: { checked: 158 }, findings: review.design.findings, slopSignals: { oversizedType: 2 }, svg: { sampled: 1 } });
+  assert.deepEqual(compact.measurementLimitations, ['Bounded sample.', 'Inline SVG sample.']);
+  assert.deepEqual(compact.pixels, review.pixels);
+  assert.equal(compact.runId, 'run-1');
+  assert.equal(compact.file, review.file);
+  assert.equal(compact.detail, 'Measurements leave out zero counts and empty lists. Typography and spacing tables are in the report file; detail:true returns everything.');
 });
 
 test("planUiMatrix expands viewports × states and caps at 12 captures", () => {
@@ -90,7 +162,7 @@ test("normalizeVerdict requires unique sections with evidence", () => {
   ]);
   assert.equal(verdict.blocking, 1);
   assert.equal(verdict.sections[0].verdict, "FAIL");
-  assert.throws(() => qa.normalizeVerdict([]), /1\.\.16/);
+  assert.throws(() => qa.normalizeVerdict([]), /one entry for each rubric section/, "an empty verdict is answered with the shape to send");
   assert.throws(() => qa.normalizeVerdict([{ id: "a", verdict: "PASS", evidence: ["x"] }, { id: "a", verdict: "PASS", evidence: ["y"] }]), /unique/);
   assert.throws(() => qa.normalizeVerdict([{ id: "a", verdict: "maybe", evidence: ["x"] }]), /PASS\|WARN\|FAIL\|UNKNOWN/);
   assert.throws(() => qa.normalizeVerdict([{ id: "a", verdict: "PASS", evidence: [] }]), /evidence/);

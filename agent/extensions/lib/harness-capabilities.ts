@@ -817,6 +817,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 				"agent/extensions/pi-web-access/github-search.ts",
 				"agent/extensions/pi-web-access/github-rest.ts",
 				"agent/extensions/lib/browser-session.ts",
+				"agent/extensions/lib/workspace-page.ts",
 				"agent/extensions/render-and-wait.ts",
 				"agent/extensions/media-tools.ts",
 		],

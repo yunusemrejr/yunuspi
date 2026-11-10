@@ -96,7 +96,9 @@ async function main() {
     const waitStart = performance.now();
     while (!raw.length && performance.now() - waitStart < 5000) await delay(20);
     if (!raw.length) throw Error('Browser produced no screencast frames');
-    const epoch = Date.now() / 1000, start = performance.now();
+    // The take starts now, and "now" can be no earlier than a frame already received: the
+    // browser stamps frames from its own clock, which can run a few milliseconds ahead of ours.
+    const epoch = Math.max(Date.now() / 1000, ...raw.map(frame => frame.timestamp)), start = performance.now();
     const time = () => (performance.now() - start) / 1000;
     const log = (kind, extra = {}) => events.push({ t: time(), kind, ...extra });
     let x = plan.width * 0.75, y = plan.height * 0.75;

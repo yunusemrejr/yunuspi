@@ -246,7 +246,6 @@ export declare class AgentSession {
     private _modelRuntime;
     private _toolRegistry;
     private _toolDefinitions;
-    private _toolPromptSnippets;
     private _toolPromptGuidelines;
     private _baseSystemPrompt;
     private _baseSystemPromptOptions;
@@ -353,7 +352,6 @@ export declare class AgentSession {
     }>): void;
     /** File-based prompt templates */
     get promptTemplates(): ReadonlyArray<PromptTemplate>;
-    private _normalizePromptSnippet;
     private _normalizePromptGuidelines;
     private _rebuildSystemPrompt;
     private _runAgentPrompt;

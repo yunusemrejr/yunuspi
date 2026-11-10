@@ -34,8 +34,12 @@ test("browser leases renew across long tasks, reserve reconciliation reads, and 
   now = 600_001; // Past the original process lifetime.
   lease.consume("fill");
   assert.equal(lease.receipt().actionsRemaining, 199);
-  assert.equal(lease.receipt().remainingMs, 599_998);
-  now = 1_199_999;
+  assert.equal(lease.receipt().remainingMs, 600_000, "the window runs from the last action");
+  now = 1_199_999; // A session in use does not end mid-task: a read keeps it open too.
+  lease.consume("snapshot");
+  assert.equal(lease.receipt().remainingMs, 600_000);
+  assert.equal(lease.receipt().actionsRemaining, 199, "and a read stays free");
+  now = 1_799_999; // Ten idle minutes end it.
   assert.throws(() => lease.consume("snapshot"), /expired/);
   assert.throws(() => lease.renew(), /expired/);
   lease.consume("close");

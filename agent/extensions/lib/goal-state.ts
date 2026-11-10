@@ -209,20 +209,23 @@ export interface CompletionContext {
 	unverifiedWrites: number;
 	/** Native write revision distinguishes fresh debt from a previously refused edit. */
 	writeRevision?: number;
+	/** A check that ran after the last change and proved nothing, with the reason. */
+	uncounted?: { command: string; reason: string };
 	/** Verification receipts already refused once, so the same request becomes a recorded waiver. */
 	refused: ReadonlySet<string>;
 	verification?: readonly GateReceipt[];
 }
 
 /** Receipts for what is still open on a goal: unmet criteria and file changes nobody has verified since. */
-export function goalCompletionReceipts(goal: GoalState, context: Pick<CompletionContext, "unverifiedWrites" | "writeRevision">): GateReceipt[] {
+export function goalCompletionReceipts(goal: GoalState, context: Pick<CompletionContext, "unverifiedWrites" | "writeRevision" | "uncounted">): GateReceipt[] {
 	const receipts: GateReceipt[] = open(goal).map((criterion) => ({
 		source: "goal", id: criterion.id, state: "open", line: `${criterion.id} open: ${criterion.text}`,
 	}));
 	if (context.unverifiedWrites > 0) {
 		receipts.push({
 			source: "goal", id: "writes", revision: String(context.writeRevision ?? goal.verification?.revision ?? 0), state: "unverified", count: context.unverifiedWrites,
-			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`,
+			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`
+				+ (context.uncounted ? `. The last run did not count (\`${clip(context.uncounted.command, 90)}\`): ${context.uncounted.reason}. Run the check command by itself` : ""),
 		});
 	}
 	return receipts;

@@ -26,10 +26,10 @@ function resolveTimeoutMs(timeout) {
     return timeoutMs;
 }
 const bashSchema = Type.Object({
-    command: Type.String({ description: "Shell command to execute" }),
-    timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
-    maxOutputBytes: Type.Optional(Type.Integer({ minimum: 256, maximum: DEFAULT_MAX_BYTES, description: "Returned output budget; default 51200. Use 8192 for verbose checks; complete output is saved locally." })),
-    outputMode: Type.Optional(Type.Union([Type.Literal("tail"), Type.Literal("head-tail")], { description: "tail (default), or beginning and end with an explicit omitted-middle marker" })),
+    command: Type.String(),
+    timeout: Type.Optional(Type.Number({ description: "Seconds." })),
+    maxOutputBytes: Type.Optional(Type.Integer({ minimum: 256, maximum: DEFAULT_MAX_BYTES, description: "Returned output budget; default 51200." })),
+    outputMode: Type.Optional(Type.Union([Type.Literal("tail"), Type.Literal("head-tail")], { description: "tail (default), or head-tail: the start and the end with a marker for the omitted middle." })),
 });
 export const bashToolSystemPromptContribution = {
     snippet: "Execute bash commands (ls, grep, find, etc.)",

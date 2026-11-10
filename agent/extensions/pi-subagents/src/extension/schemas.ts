@@ -99,11 +99,11 @@ export function createSubagentParamsSchema(): typeof SubagentParams {
 }
 
 const SubagentWaitParamsSchema = Type.Object({
-	id: Type.Optional(Type.String({ description: "Wait for one async/detached subagent run or one bg_run task by id or prefix. Ordinary async runs notify natively — use only for work without a native wake." })),
-	all: Type.Optional(Type.Boolean({ description: "Wait for ALL runs active at call start (same-turn need only)." })),
-	nonBlocking: Type.Optional(Type.Boolean({ description: "Resolve id once, persist a wake subscription, return immediately (detached/provider work without native delivery)." })),
-	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Give up after N ms (runs keep going); defaults to config waitTool.defaultTimeoutMs else 30m. Expiry is a non-error result." })),
-	stopOnAttention: Type.Optional(Type.Boolean({ description: "Blocking waits stop when a run needs attention (default true); false keeps waiting." })),
+	id: Type.Optional(Type.String({ description: "One run or bg_run task, by id or prefix." })),
+	all: Type.Optional(Type.Boolean({ description: "Wait for every run active now." })),
+	nonBlocking: Type.Optional(Type.Boolean({ description: "Register a wake for id and return at once." })),
+	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Stop waiting after N ms; the work keeps running. Default 30 minutes unless configured; expiry is not an error." })),
+	stopOnAttention: Type.Optional(Type.Boolean({ description: "Default true; false keeps waiting when a run needs attention." })),
 });
 
 export const SubagentWaitParams = keepTopLevelParameterDescriptions(SubagentWaitParamsSchema);

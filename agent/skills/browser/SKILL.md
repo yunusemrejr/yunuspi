@@ -5,7 +5,7 @@ description: "Operate a live website with browser_session: open, read, click, fi
 
 # Operating a website
 
-`browser_session` drives a real Chromium. If it is not among your tools, `tool_search` with its name enables it. For reading a static page use `fetch_content`; for a screenshot of a local file or a page that needs no interaction use `render_see`.
+`browser_session` drives a real Chromium. If it is not among your tools, `tool_search` with its name enables it. For reading a static page use `fetch_content`; for a screenshot of a local file or a page that needs no interaction use `render_see`. A page in the project opens by its path (`url:"index.html"`); it needs no server.
 
 ## The loop
 
@@ -31,7 +31,7 @@ Evidence when something is wrong: `screenshot`, `logs` (console), `network`. A n
 
 ## Limits worth knowing
 
-Two sessions at a time, eight tabs each. A session lasts ten minutes or 200 actions and `renew` extends it; reads are free. Downloads are not available. Session ids do not survive a restart, so `close` what you opened when you are done.
+Two sessions at a time, eight tabs each. A session stays open while it is used and closes after ten idle minutes. It has 200 actions, which `renew` restores; reads are free. Downloads are not available. Session ids do not survive a restart, so `close` what you opened when you are done.
 
 ## Reporting
 

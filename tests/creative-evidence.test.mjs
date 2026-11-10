@@ -19,6 +19,54 @@ test('run identity recovers only this session source and does not bypass stale o
   evidence.workspace('changed');
   assert.throws(() => evidence.record({ runId: 'run-1', source: evidence.sourceForRun('run-1'), revision: 'rev-1', verdict: verdict('PASS') }), /changed/);
 });
+test('once reviews have named the files their pages load, evidence goes stale with those files and not with the rest of the workspace', () => {
+  const evidence = createCreativeEvidence();
+  evidence.observe('index.html', 'h1', 'ui');
+  const start = evidence.stamp();
+  evidence.workspace('rev-1');
+  assert.notEqual(evidence.stamp(), start, 'before any review has named its files, every change counts');
+  const reviewed = evidence.stamp();
+  evidence.loaded({ '/site/index.html': 'a', '/site/styles.css': 'b', '/site/absent.js': 'missing' });
+  assert.equal(evidence.stamp(), reviewed, 'naming the files is not a change');
+  evidence.workspace('rev-2');
+  assert.equal(evidence.stamp(), reviewed, 'a change elsewhere in the workspace');
+  evidence.reloaded('/site/styles.css', 'b');
+  evidence.reloaded('/site/never-loaded.css', 'z');
+  assert.equal(evidence.stamp(), reviewed, 'the same bytes, and a file no page loaded');
+  evidence.reloaded('/site/styles.css', 'b2');
+  assert.notEqual(evidence.stamp(), reviewed, 'a loaded file changed');
+  let last = evidence.stamp();
+  evidence.reloaded('/site/absent.js', 'c');
+  assert.notEqual(evidence.stamp(), last, 'a file the page asked for and did not get now exists');
+  last = evidence.stamp();
+  evidence.loaded({ '/site/styles.css': 'b3' });
+  assert.equal(evidence.stamp(), last, 'a later review keeps the identity the earlier one saw');
+  evidence.reloaded('/site/styles.css', 'b3');
+  assert.notEqual(evidence.stamp(), last, 'so a file that changed between two reviews makes the earlier one stale');
+  last = evidence.stamp();
+  evidence.loaded(undefined);
+  assert.equal(evidence.stamp(), last);
+  evidence.workspace('rev-3');
+  assert.notEqual(evidence.stamp(), last, 'after a review that could not name its files, every change counts again');
+  last = evidence.stamp();
+  evidence.reloaded('/site/index.html', 'a2');
+  assert.notEqual(evidence.stamp(), last, 'and the files already named still count');
+});
+test('more loaded files than can be watched count as a review that could not name them', () => {
+  const evidence = createCreativeEvidence();
+  evidence.loaded({ '/site/index.html': 'a' });
+  evidence.workspace('rev-1');
+  const reviewed = evidence.stamp();
+  const parts = Object.fromEntries(Array.from({ length: 511 }, (_, index) => [`/site/part-${index}.js`, 'x']));
+  evidence.loaded(parts);
+  evidence.loaded(parts);
+  evidence.workspace('rev-2');
+  assert.equal(evidence.stamp(), reviewed, 'files named again are not counted twice');
+  evidence.loaded({ '/site/one-more.js': 'x' });
+  assert.equal(evidence.loadedFiles().length, 512);
+  evidence.workspace('rev-3');
+  assert.notEqual(evidence.stamp(), reviewed);
+});
 const matrix = (status = 'measured') => ({ consistent: true, status, cells: [320, 390, 834, 1440].map(width => ({ ok: true, width, dom: { available: true } })) });
 
 test('real DOM schema preserves native controls, names, broken images and page overflow', () => {
@@ -81,8 +129,10 @@ test('served entrypoint requires keyboard and a successful state verification; p
   evidence.run(capture({ source: url, surface: 'index.html', dom: { controls: 2 } }), 'png', true);
   evidence.matrix('index.html', matrix(), evidence.stamp(), 'matrix', true);
   evidence.record({ runId: 'run-1', source: url, revision: 'rev-1', verdict: verdict('PASS') });
-  evidence.interaction(url, 'snapshot'); evidence.interaction(url, 'keyboard');
-  assert.ok(evidence.gaps().some(line => line.includes('user task')));
+  evidence.interaction(url, 'snapshot');
+  assert.ok(evidence.gaps().some(line => line.includes('key press and a matching verify')), 'a snapshot is neither of the two');
+  evidence.interaction(url, 'keyboard');
+  assert.ok(evidence.gaps().some(line => line.includes('still needs a matching verify')), 'only the action still missing is named');
   evidence.interaction(url, 'verify'); assert.deepEqual(evidence.gaps(), []);
   evidence.workspace('new-tree'); assert.ok(evidence.gaps().some(line => line.includes('final revision')));
 });
@@ -127,13 +177,21 @@ test('desktop pixels cannot substitute for a current responsive visual judgment'
   const sections = [{ id: 'responsive', verdict: 'UNKNOWN', needsVision: true }];
   const record = { runId: 'run-1', source: 'index.html', revision: 'rev-1', verdict: [{ id: 'responsive', verdict: 'PASS', evidence: ['Narrow controls remain legible and the form reflows into one column.'] }] };
   evidence.run(capture({ sections }), 'desktop', true);
-  assert.throws(() => evidence.record(record), /current inspected ui_explore/);
+  assert.throws(() => evidence.record(record), /contact sheet of the page as it is now/);
+  evidence.matrix('index.html', matrix(), evidence.stamp(), 'matrix');
+  assert.throws(() => evidence.record(record), /contact sheet looked at/, 'a sheet nobody looked at judges nothing');
   evidence.matrix('index.html', matrix(), evidence.stamp(), 'matrix', true);
-  assert.throws(() => evidence.record(record), /current inspected ui_explore/);
+  assert.equal(evidence.record(record).blocking, 0, 'a sheet taken and inspected after the capture is the same evidence as one taken before');
   evidence.run(capture({ sections, responsiveHash: 'matrix' }), 'desktop', true);
   assert.equal(evidence.record(record).blocking, 0);
-  evidence.matrix('index.html', matrix(), evidence.stamp(), 'new-matrix', true);
-  assert.throws(() => evidence.record(record), /current inspected ui_explore/);
+  // A sheet taken after the capture was not in its rubric: a failure it measured still binds the verdict.
+  evidence.matrix('index.html', matrix('fail'), evidence.stamp(), 'failing', true);
+  assert.throws(() => evidence.record(record), /Measured responsive failure needs repair/);
+  assert.equal(evidence.record({ ...record, dismissals: [{ id: 'responsive', reason: 'The measured overflow is the price table, which scrolls sideways by design.' }] }).blocking, 0);
+  // A sheet of an earlier state of the page is no evidence for this one.
+  evidence.workspace('edited');
+  evidence.run(capture({ sections }), 'desktop', true);
+  assert.throws(() => evidence.record(record), /contact sheet of the page as it is now/);
 });
 
 test('interaction identity retains query and fragment state without exposing URL parameters', () => {
@@ -143,7 +201,7 @@ test('interaction identity retains query and fragment state without exposing URL
   evidence.run(capture({ source, surface: 'index.html', dom: { controls: 2 } }), 'png', true);
   evidence.record({ runId: 'run-1', source, revision: 'rev-1', verdict: verdict('PASS') });
   evidence.interaction('http://localhost/app?screen=other', 'keyboard'); evidence.interaction('http://localhost/app?screen=other', 'verify');
-  assert.ok(evidence.gaps().some(line => line.includes('user task')));
+  assert.ok(evidence.gaps().some(line => line.includes('key press and a matching verify')), 'another screen proves nothing about this one');
   evidence.interaction(source, 'keyboard'); evidence.interaction(source, 'verify');
   assert.deepEqual(evidence.gaps(), []);
 });

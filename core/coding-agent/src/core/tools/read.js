@@ -13,9 +13,9 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "
 import { spillToolOutput } from "./spill-output.js";
 import { documentReadEvidence } from "../guardian/guardian-prose.js";
 const readSchema = Type.Object({
-    path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
-    offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
-    limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+    path: Type.String({ description: "Relative or absolute." }),
+    offset: Type.Optional(Type.Number({ description: "First line, 1-indexed." })),
+    limit: Type.Optional(Type.Number({ description: "Maximum lines." })),
 });
 export const readToolSystemPromptContribution = {
     snippet: "Read file contents",
@@ -38,7 +38,7 @@ export function createReadToolDefinition(cwd, options) {
     return {
         name: "read",
         label: "read",
-        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. PDF, Word, Excel and PowerPoint files, archives and SQLite databases come back as readable text or a summary; for a long PDF continue with offset=page. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+        description: `Read a file. Text is cut at ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB: continue with offset and limit until you have what you need. Images (jpg, png, gif, webp, bmp) are attached. PDF, Word, Excel and PowerPoint files, archives and SQLite databases come back as text or a summary; continue a long PDF with offset=page.`,
         promptSnippet: readToolSystemPromptContribution.snippet,
         promptGuidelines: [...readToolSystemPromptContribution.guidelines],
         parameters: readSchema,

@@ -586,7 +586,7 @@ export default function (pi: ExtensionAPI) {
 	const register = (cwd: string) => {
 		const def = createBashToolDefinition(cwd, { operations });
 		def.description =
-			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; default last 2000 lines or 50KB. For verbose checks use maxOutputBytes:8192 and outputMode:head-tail. Truncated full output is saved privately; capture failures are explicit.";
+			"Run a bash command in the working directory and wait for it to finish, bounded by `timeout` (default 120 seconds, 180 for downloads). Returns stdout and stderr, by default the last 2000 lines or 50KB; when output is cut, the full text is saved and its path given. Long-running work belongs in bg_run.";
 		pi.registerTool(def);
 	};
 	register(process.cwd());

@@ -271,8 +271,18 @@ test('a chain that hides segments or changes the shell for later ones earns noth
    '. ./env.sh && npm test', 'source env.sh && npm test',
    'make && cd sub && ./app',                  // ./app ran in sub, not the project root
    'make && ./x || true', 'make; npm test', 'make & npm test',
+   'exit 0 && npm test', 'make && ! npm test',  // npm test never ran, or failed
   ]) assert.equal(andChainChecks(command,cwd,any),undefined,command);
   assert.ok(andChainChecks("make && node --test 'a#b.test.js'",cwd,any),'a quoted # is not a comment');
+  // A filtered check keeps its exit under pipefail wherever it stands. A filtered listing needs none, and the two
+  // together earn nothing when `head` could cut the listing's writer short.
+  const middle=andChainChecks('node --test 2>&1 | tail -25 && echo "===DIFF===" && git diff',cwd,any);
+  assert.deepEqual([middle?.checks.map(c=>c.label),middle?.pipefail],[['node --test'],true]);
+  assert.equal(andChainChecks('npm test && git diff',cwd,any)?.pipefail,false,'no filter, no pipefail');
+  assert.equal(andChainChecks('npm test && git log | head -3 && git status',cwd,any)?.pipefail,false,'a trimmed listing hides nothing about the check before it');
+  assert.equal(andChainChecks('npm test && git log | head -3',cwd,any)?.pipefail,false);
+  assert.equal(andChainChecks('npm test | tail -5 && git log | tail -3',cwd,any)?.pipefail,true);
+  assert.equal(andChainChecks('npm test | tail -5 && git log | head -3',cwd,any),undefined,'pipefail would fail the chain when head cuts git log short');
   assert.deepEqual(andChainChecks(`export PATH='/agent/film/venv/bin':"$PATH" && cd ${cwd} && python3 scripts/check-sync.py a.wav && npm test`,cwd,any)?.checks.map(c=>c.key),
    andChainChecks(`cd ${cwd} && python3 scripts/check-sync.py a.wav && npm test`,cwd,any)?.checks.map(c=>c.key),'the film PATH prefix leaves receipt keys unchanged');
   assert.equal(projectCheckCommand(`export PATH='/agent/film/venv/bin':"$PATH" && npm test`,cwd)?.key,projectCheckCommand('npm test',cwd)?.key,'a single prefixed check keeps its key');

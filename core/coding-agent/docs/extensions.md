@@ -542,7 +542,6 @@ pi.on("before_agent_start", async (event, ctx) => {
   // event.systemPromptOptions - structured options used to build the system prompt
   //   .customPrompt - any custom system prompt (from --system-prompt, SYSTEM.md, or custom templates)
   //   .selectedTools - tools currently active in the prompt
-  //   .toolSnippets - one-line descriptions for each tool
   //   .promptGuidelines - custom guideline bullets
   //   .appendSystemPrompt - text from --append-system-prompt flags
   //   .cwd - working directory
@@ -1372,7 +1371,7 @@ Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) fo
 
 Use `pi.setActiveTools()` to enable or disable tools (including dynamically added tools) at runtime.
 
-Use `promptSnippet` to opt a custom tool into a one-line entry in `Available tools`, and `promptGuidelines` to append tool-specific bullets to the default `Guidelines` section when the tool is active.
+Use `promptGuidelines` to append tool-specific bullets to the default `Guidelines` section when the tool is active. The system prompt no longer lists tools one by one, so the `description` is what tells the model what a tool does; `promptSnippet` is still accepted and has no effect.
 
 **Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
 
@@ -1386,7 +1385,6 @@ pi.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "What this tool does",
-  promptSnippet: "Summarize or transform text according to action",
   promptGuidelines: ["Use my_tool when the user asks to summarize previously generated text."],
   parameters: Type.Object({
     action: StringEnum(["list", "add"] as const),
@@ -1920,7 +1918,7 @@ export default function (pi: ExtensionAPI) {
 
 Register tools the LLM can call via `pi.registerTool()`. Tools appear in the system prompt and can have custom rendering.
 
-Use `promptSnippet` for a short one-line entry in the `Available tools` section in the default system prompt. If omitted, custom tools are left out of that section.
+The default system prompt has no per-tool list: the model learns what a tool does from its `description`. `promptSnippet` is still accepted and has no effect.
 
 Use `promptGuidelines` to add tool-specific bullets to the default system prompt `Guidelines` section. These bullets are included only while the tool is active (for example, after `pi.setActiveTools([...])`).
 
@@ -1969,7 +1967,6 @@ pi.registerTool({
   name: "my_tool",
   label: "My Tool",
   description: "What this tool does (shown to LLM)",
-  promptSnippet: "List or add items in the project todo list",
   promptGuidelines: [
     "Use my_tool for todo planning instead of direct file edits when the user asks for a task list."
   ],
@@ -2102,7 +2099,7 @@ See [examples/extensions/tool-override.ts](https://github.com/earendil-works/pi/
 
 **Rendering:** Built-in renderer inheritance is resolved per slot. Execution override and rendering override are independent. If your override omits `renderCall`, the built-in `renderCall` is used. If your override omits `renderResult`, the built-in `renderResult` is used. If your override omits both, the built-in renderer is used automatically (syntax highlighting, diffs, etc.). This lets you wrap built-in tools for logging or access control without reimplementing the UI.
 
-**Prompt metadata:** `promptSnippet` and `promptGuidelines` are not inherited from the built-in tool. If your override should keep those prompt instructions, define them on the override explicitly.
+**Prompt metadata:** `promptGuidelines` are not inherited from the built-in tool. If your override should keep those prompt instructions, define them on the override explicitly.
 
 **Your implementation must match the exact result shape**, including the `details` type. The UI and session logic depend on these shapes for rendering and state tracking.
 
@@ -2401,7 +2398,7 @@ For all other models and providers, dynamic activation still works: Pi sends the
 
 Pi also uses this safe fallback when the active set is not purely additive, such as replacing one group of tools with another. Tool removals therefore work, but they do not use deferred loading.
 
-For the best cache behavior, keep the loader tool active for the whole session and add tools instead of replacing the active set. Also note that activating a tool with `promptSnippet` or `promptGuidelines` rebuilds the system prompt; that system-prompt change can invalidate the prefix even when the provider supports deferred schemas. Lazily loaded tools should usually rely on their tool `description` and omit active-only prompt metadata.
+For the best cache behavior, keep the loader tool active for the whole session and add tools instead of replacing the active set. Also note that activating a tool with `promptGuidelines` rebuilds the system prompt; that system-prompt change can invalidate the prefix even when the provider supports deferred schemas. Lazily loaded tools should usually rely on their tool `description` and omit active-only prompt metadata.
 
 #### Search tool example
 
@@ -2444,7 +2441,6 @@ export default function (pi: ExtensionAPI) {
     name: "search_tools",
     label: "Search Tools",
     description: "Search for and enable tools relevant to a task",
-    promptSnippet: "Search for additional tools when the active tools cannot perform the task",
     promptGuidelines: [
       "Use search_tools when a task requires a capability that is not currently available.",
     ],

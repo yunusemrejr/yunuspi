@@ -126,8 +126,14 @@ export function renderNavigationFailure(error) {
   };
 }
 
+/** A fault in the request itself, worded by the browser runner: its text names the fix and is
+ * returned as `reason`. Any other error (Playwright's, the page's) can carry text the page wrote,
+ * so those are reported by kind and next step alone. */
+export class RequestFault extends Error {}
+
 export function browserFailure(error, stage, action, waitKind) {
   const text = String(error?.message ?? error);
+  const reason = error instanceof RequestFault ? text.slice(0, 300) : undefined;
   const kind = /Browser session lease expired/i.test(text)
     ? "expired"
     : /strict mode|resolved to \d+ elements/i.test(text)
@@ -154,6 +160,7 @@ export function browserFailure(error, stage, action, waitKind) {
   return {
     stage,
     kind,
+    ...(reason ? { reason } : {}),
     outcome: mutation ? "unknown; effects may have occurred" : "not-completed",
     nextStep:
       kind === "expired"

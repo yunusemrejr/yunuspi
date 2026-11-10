@@ -107,13 +107,13 @@ function reduceTaskMutation(
 			if (!params.subject?.trim()) {
 				return errorResult(state, "subject required for create");
 			}
-			if (params.blockedBy?.length) {
-				for (const dep of params.blockedBy) {
-					const depTask = state.tasks.find((t) => t.id === dep);
-					if (!depTask) return errorResult(state, `blockedBy: #${dep} not found`);
-					if (depTask.status === "deleted")
-						return errorResult(state, `blockedBy: #${dep} is deleted`);
-				}
+			const createBlockers = [...new Set([...(params.blockedBy ?? []), ...(params.addBlockedBy ?? [])])];
+			for (const dep of createBlockers) {
+				const label = params.blockedBy?.includes(dep) ? "blockedBy" : "addBlockedBy";
+				const depTask = state.tasks.find((t) => t.id === dep);
+				if (!depTask) return errorResult(state, `${label}: #${dep} not found`);
+				if (depTask.status === "deleted")
+					return errorResult(state, `${label}: #${dep} is deleted`);
 			}
 			if (params.status !== undefined && !isTransitionValid("pending", params.status))
 				return errorResult(state, `illegal initial status ${params.status}`);
@@ -124,7 +124,7 @@ function reduceTaskMutation(
 			};
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
-			if (params.blockedBy?.length) newTask.blockedBy = [...params.blockedBy];
+			if (createBlockers.length) newTask.blockedBy = createBlockers;
 			if (params.owner) newTask.owner = params.owner;
 			if (params.metadata) newTask.metadata = { ...params.metadata };
 			for (const key of PLAN_FIELDS) if (params[key] !== undefined) Object.assign(newTask, {[key]: structuredClone(params[key])});

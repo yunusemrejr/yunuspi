@@ -20,6 +20,8 @@ async function fixture(t, input = ['text']) {
   await fs.writeFile(path.join(cwd, 'index.html'), good);
   const server = createServer(async (request, response) => {
     if (request.url === '/missing.png') { response.writeHead(404); response.end(); return; }
+    if (request.url === '/redirect') { response.writeHead(302, { location: 'http://workspace.localhost/index.html?from=redirect' }); response.end(); return; }
+    if (request.url === '/steer') { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><title>Steer</title><script>opener.location = "http://workspace.localhost/index.html?from=popup";</script>'); return; }
     if (request.url === '/saved') { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><title>Saved contact</title><p id="result" role="status">Contact saved</p>'); return; }
     response.writeHead(200, { 'content-type': 'text/html' }); response.end(request.url === '/broken' ? bad : await fs.readFile(path.join(cwd, 'index.html')));
   });
@@ -66,9 +68,12 @@ test('native tools enforce current visual provenance and actual keyboard/state c
   const matrixSummary = JSON.parse(matrix.content.find(part => part.type === 'text').text);
   assert.deepEqual(matrixSummary.coverage, matrix.details.coverage);
   assert.deepEqual(matrixSummary.findings, matrix.details.findings);
-  assert.deepEqual(matrixSummary.cells[0].errors, matrix.details.cells[0].errors);
+  assert.deepEqual(matrixSummary.cells[0].errors ?? [], matrix.details.cells[0].errors, 'a capture with no errors carries no empty list');
   assert.equal(matrixSummary.cells[0].typography, undefined);
-  assert.equal(matrixSummary.cells[0].design.typography, undefined);
+  assert.equal(matrixSummary.cells[0].design?.typography ?? matrixSummary.shared.design?.typography, undefined);
+  assert.equal(matrixSummary.shared.dom.documentType, 'text/html', 'what every capture shares is stated once');
+  assert.ok(matrixSummary.cells.every(cell => cell.viewport && cell.file && cell.ok === true));
+  assert.ok(JSON.stringify(matrixSummary).length < JSON.stringify(matrix.details).length / 3, 'the reply is a fraction of the saved report');
   const savedMatrix = JSON.parse(await fs.readFile(path.resolve(f.cwd, matrix.details.report), 'utf8'));
   assert.deepEqual(savedMatrix.cells, matrix.details.cells, 'the saved report retains full measurements');
   const rendered = await f.run('visual_review', { action: 'run', source: f.url, entrypoint: 'index.html' });
@@ -180,7 +185,7 @@ test('browser task evidence follows a redirect in its own tab and retains privat
     await f.run('browser_session', { action: 'press', session, key: 'Tab' });
     await f.run('browser_session', { action: 'new_tab', session, url: f.url + 'saved' });
     await f.run('browser_session', { action: 'verify', session, selector: '#result', text: 'Contact saved' });
-    assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.some(line => line.includes('user task')), 'another tab cannot approve the contact task');
+    assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.some(line => line.includes('still needs a matching verify')), 'another tab cannot approve the contact task');
     await f.run('browser_session', { action: 'switch_tab', session, tab });
     await f.run('browser_session', { action: 'fill', session, selector: '#email', text: 'contact@example.com' });
     await f.run('browser_session', { action: 'press', session, key: 'Enter' });
@@ -192,5 +197,89 @@ test('browser task evidence follows a redirect in its own tab and retains privat
     assert.deepEqual((await f.run('visual_review', { action: 'status' })).details.gaps, [], 'completed UI work does not reopen for an unrelated request');
     await f.change('index.html', good);
     assert.ok((await f.run('visual_review', { action: 'status' })).details.gaps.length > 0, 'a real subsequent UI change receives fresh checks');
+  } finally { await f.run('browser_session', { action: 'close', session }); }
+});
+
+test('a file written while its page is being captured sends the capture back for another run', { timeout: 150000 }, async t => {
+  const f = await fixture(t, ['text', 'image']);
+  await fs.writeFile(path.join(f.cwd, 'late.js'), 'document.documentElement.dataset.late = "1"; fetch("data.json").catch(() => {});');
+  await fs.writeFile(path.join(f.cwd, 'data.json'), '{"rows":1}');
+  // The file's time says it was written after the capture began, as a write that lands mid-capture would.
+  const ahead = new Date(Date.now() + 120000);
+  await fs.utimes(path.join(f.cwd, 'late.js'), ahead, ahead);
+  await f.change('index.html', good + '<script src="late.js"></script>');
+  const stale = async () => (await f.run('visual_review', { action: 'status' })).details.gaps.some(line => line.includes('run ui_explore'));
+  await f.run('ui_explore', { source: 'index.html', viewports: ['narrow', 'desktop'] });
+  assert.equal(await stale(), true, 'the capture may not have seen the bytes now on disk');
+  await f.run('ui_explore', { source: 'index.html', viewports: ['narrow', 'desktop'] });
+  assert.equal(await stale(), false, 'the next capture is of the file as it now is');
+  await fs.writeFile(path.join(f.cwd, 'data.json'), '{"rows":2}');
+  assert.equal(await stale(), true, 'data the page asks for counts, though a capture serves no data files');
+});
+
+test('a workspace page opens by its path, and batched key presses and checks on it are interaction proof without a server', { timeout: 150000 }, async t => {
+  const f = await fixture(t, ['text', 'image']);
+  await fs.writeFile(path.join(f.cwd, 'app.js'), 'document.documentElement.dataset.app = "loaded";');
+  await f.change('index.html', good + '<script src="app.js"></script>');
+  await f.run('ui_explore', { source: 'index.html', viewports: ['narrow', 'desktop'] });
+  const review = (await f.run('visual_review', { action: 'run', source: 'index.html' })).details;
+  const verdict = review.sections.map(section => ({ id: section.id, verdict: 'PASS', evidence: [`${section.id}: current capture and responsive sheet of the contact form inspected in the fixture.`] }));
+  await f.run('visual_review', { action: 'record', runId: review.runId, verdict });
+  const gaps = async () => (await f.run('visual_review', { action: 'status' })).details.gaps;
+  assert.ok((await gaps()).some(line => line.includes('key press') && line.includes('a matching verify')), 'the gap names both missing actions');
+  const opened = (await f.run('browser_session', { action: 'open', url: 'index.html' })).details;
+  const session = opened.session;
+  try {
+    assert.equal(opened.url, 'http://workspace.localhost/index.html');
+    const own = (await f.run('browser_session', { action: 'evaluate', session, script: 'return document.documentElement.dataset.app' })).details;
+    assert.equal(own.evaluation.text, '"loaded"', 'files beside the page are answered from the workspace');
+    await fs.writeFile(path.join(f.cwd, '.env'), 'hidden'); await fs.writeFile(path.join(f.cwd, 'server.key'), 'hidden');
+    const handed = (await f.run('browser_session', { action: 'evaluate', session, script: `return (await Promise.all(['app.js', '.env', 'server.key', 'absent.js'].map(async name => (await fetch(name)).status))).join(' ')` })).details;
+    assert.equal(handed.evaluation.text, '"200 404 404 404"', 'hidden files and key material are not handed to a page');
+    const resized = (await f.run('browser_session', { action: 'batch', session, steps: [{ action: 'viewport', width: 390, height: 800 }, { action: 'reload' }] })).details;
+    assert.equal(resized.pageState.layout.viewportWidth, 390, 'a batch can resize and reload in one call');
+    const misfit = await f.tools.get('browser_session').execute('misfit', { action: 'batch', session, steps: [{ action: 'viewport', viewport: { width: 390, height: 800 } }] }, undefined, undefined, f.ctx);
+    assert.match(misfit.details.failure.reason, /^Viewport dimensions must be 240–2560 pixels/, 'a faulty step is answered with what is wrong with it');
+    assert.match(misfit.content.map(part => part.text ?? '').join(''), /Viewport dimensions must be 240–2560 pixels/, 'and the model reads it');
+    const unknown = await f.tools.get('browser_session').execute('unknown', { action: 'batch', session, steps: [{ action: 'screenshot' }] }, undefined, undefined, f.ctx);
+    assert.match(unknown.details.failure.reason, /A batch takes navigate, reload, viewport/, 'an unsupported step lists what a batch takes');
+    await f.run('browser_session', { action: 'press', session, key: 'Tab' });
+    assert.ok((await gaps()).some(line => line.includes('a matching verify') && !line.includes('key press')), 'only the action still missing is named');
+    const batch = (await f.run('browser_session', { action: 'batch', session, steps: [
+      { action: 'fill', selector: '#email', text: 'contact@example.com' }, { action: 'press', key: 'Enter' },
+      { action: 'verify', selector: '#result', text: 'Contact saved' } ] })).details;
+    assert.equal(batch.batch.stepResults.at(-1).matches, true);
+    assert.deepEqual(await gaps(), [], 'a matching verify inside a batch counts as it does alone');
+    await fs.writeFile(path.join(f.cwd, 'LICENSE.txt'), 'A licence the page never asks for.');
+    f.emit('project-source-observed', { ctx: f.ctx, revision: 11, tree: 'tree-11', complete: true, paths: [] });
+    assert.deepEqual(await gaps(), [], 'a change to files the reviewed page never asked for leaves its evidence standing');
+    await fs.writeFile(path.join(f.cwd, 'app.js'), 'document.documentElement.dataset.app = "changed";');
+    assert.ok((await gaps()).length > 0, 'a changed file the page loads makes the evidence stale');
+    const again = (await f.run('ui_explore', { source: opened.url, viewports: ['narrow', 'desktop'] })).details;
+    assert.equal(again.source, 'index.html', 'the review tools read the browser URL of a workspace page as the file');
+    const outside = await f.tools.get('browser_session').execute('outside', { action: 'navigate', session, url: '/etc/hostname' }, undefined, undefined, f.ctx);
+    assert.equal(outside.details.failure.kind, 'invalid-url', 'a file outside the workspace does not open');
+    const stray = await f.tools.get('browser_session').execute('stray', { action: 'batch', session, steps: [{ action: 'navigate', url: 'absent.html' }] }, undefined, undefined, f.ctx);
+    assert.match(stray.details.failure.nextStep, /^batch step 1: Use an HTTP\(S\) URL/, 'a batch step that names no page is told what a page address is');
+    await f.run('browser_session', { action: 'navigate', session, url: f.url });
+    const foreign = (await f.run('browser_session', { action: 'evaluate', session, script: `return await new Promise(done => { const tag = document.createElement('script'); tag.src = 'http://workspace.localhost/app.js'; tag.onload = () => done('served'); tag.onerror = () => done('refused'); document.head.append(tag); })` })).details;
+    assert.equal(foreign.evaluation.text, '"refused"', 'a page from elsewhere cannot pull workspace files through the origin');
+    await f.run('browser_session', { action: 'evaluate', session, script: `setTimeout(() => { location.href = 'http://workspace.localhost/index.html?from=web'; }, 0); return true` });
+    const gone = await f.tools.get('browser_session').execute('left', { action: 'wait', session, kind: 'function', script: `return !location.href.startsWith(${JSON.stringify(f.url)})`, timeoutMs: 5000 }, undefined, undefined, f.ctx);
+    const sent = await f.tools.get('browser_session').execute('sent', { action: 'evaluate', session, script: 'return [location.href.startsWith("http://workspace.localhost/"), !!document.querySelector("#email")].join(" ")' }, undefined, undefined, f.ctx);
+    assert.notEqual(sent.details?.evaluation?.text, '"true true"', 'nor send the tab to a workspace page');
+    const back = (await f.run('browser_session', { action: 'navigate', session, url: 'index.html' })).details;
+    assert.equal(back.url, 'http://workspace.localhost/index.html', 'the agent itself still opens it');
+    const call = (id, params) => f.tools.get('browser_session').execute(id, { session, ...params }, undefined, undefined, f.ctx);
+    const said = (...replies) => replies.some(reply => /refused/.test(reply?.details?.workspacePageRefused ?? ''));
+    assert.ok(said(gone, sent, { details: back }), 'and the next reply says a move to a workspace page was refused');
+    const redirected = await call('redirected', { action: 'navigate', url: f.url + 'redirect' });
+    assert.equal(redirected.details.failure?.kind, 'unreachable', 'a redirect from another server to a workspace address reaches nothing, whatever listens on this machine');
+    await f.run('browser_session', { action: 'navigate', session, url: 'index.html' });
+    await f.run('browser_session', { action: 'evaluate', session, script: `window.open(${JSON.stringify(f.url + 'steer')}); return true` });
+    const moved = await call('moved', { action: 'wait', kind: 'function', script: 'return !location.href.startsWith("http://workspace.localhost/")', timeoutMs: 5000 });
+    const steered = await call('steered', { action: 'tabs' });
+    assert.ok(said(moved, steered), 'a web page that a workspace page opened cannot steer it to a workspace page of its choosing');
+    assert.ok(!steered.details.tabs.find(tab => tab.active).url.startsWith('http://workspace.localhost/'), 'the tab it tried to move shows no workspace page');
   } finally { await f.run('browser_session', { action: 'close', session }); }
 });

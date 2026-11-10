@@ -661,15 +661,20 @@ function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<stri
 		...(agent.tools ?? []),
 		...(agent.mcpDirectTools ?? []).map((tool) => `mcp:${tool}`),
 	];
-	let tools = "none";
-	if (agent.tools === undefined && agent.mcpDirectTools === undefined) {
-		tools = "default/ambient";
-	} else if (declaredTools.length > 0) {
-		tools = declaredTools.join(", ");
+	// A line says only what sets its agent apart. The session model and per-run effort are the
+	// same for every agent and already stated by the tool itself, and most agents take the default
+	// tools, so repeating those on each line made a long list cost a third more to read.
+	const parts = [previewDisplayText(agent.description, 240)];
+	const ownTools = agent.tools !== undefined || (agent.mcpDirectTools?.length ?? 0) > 0;
+	if (ownTools || agent.excludeTools?.length) {
+		let tools = "default";
+		if (ownTools) tools = declaredTools.length > 0 ? declaredTools.join(", ") : "none";
+		if (agent.excludeTools?.length) tools = `${tools}, excluding ${agent.excludeTools.join(", ")}`;
+		parts.push(`Tools: ${tools}`);
 	}
-	if (agent.excludeTools?.length) tools = `${tools}; excludes: ${agent.excludeTools.join(", ")}`;
 	const constraints = agentCapabilityConstraints(agent);
-	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: session; Thinking: per-run effort controller${constraints.length ? `; Constraints: ${constraints.join(", ")}` : ""}`;
+	if (constraints.length) parts.push(`Constraints: ${constraints.join(", ")}`);
+	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): ${parts.join("; ")}`;
 }
 
 const EXTERNAL_JOB_CAPABILITIES = { stop: false, steer: false, resume: false, structuredOutput: false, toolEvents: false } as const;
@@ -889,7 +894,7 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	const capabilityMode = params.capabilities === true;
 	const formatLine = capabilityMode ? formatAgentCapabilitiesLine : formatAgentListLine;
 	const lines = [
-		capabilityMode ? "Executable agents (capabilities):" : "Executable agents:",
+		capabilityMode ? "Executable agents (capabilities; an agent has the session's default tools unless its line lists its own):" : "Executable agents:",
 		...formatAgentListSections(agents, providerNameSet, formatLine),
 	];
 	appendRestrictedAgentLines({ lines, agents: restrictedAgents, sources: restrictedSources, providerNames: providerNameSet, formatLine });

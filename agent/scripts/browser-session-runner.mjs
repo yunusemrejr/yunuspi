@@ -1,10 +1,13 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import { inspectPageState } from "./render-page-state.mjs";
 import { inspectNoiseState } from './render-noise-state.mjs';
 import { createBrowserLease } from "./browser-session-lease.mjs";
 import {
+  RequestFault,
   browserFailure,
   createBrowserEvents,
   diagnosticText,
@@ -23,6 +26,101 @@ export { safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
+const fault = (message) => new RequestFault(message);
+/** Pages in the workspace open at this origin, answered from the files themselves, so a
+ * local page needs no server. `.localhost` keeps the secure context a dev server has. */
+export const WORKSPACE_ORIGIN = "http://workspace.localhost";
+
+/** Names no page is handed: hidden files and folders, credential stores and key material. */
+const WORKSPACE_PRIVATE = /^(?:\..*|auth\.json|models\.json|credentials.*|.*\.(?:pem|key|crt|p12|pfx))$/i;
+const WORKSPACE_FILE_MAX_BYTES = 20 * 1024 * 1024;
+const workspaceUrl = (url) => typeof url === "string" && url.startsWith(WORKSPACE_ORIGIN + "/");
+const withoutHash = (url) => url.replace(/#.*$/s, "");
+const outside = (relative) => relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative);
+const privateName = (relative) => relative.split(path.sep).some((part) => WORKSPACE_PRIVATE.test(part));
+/** A document this runner answered: a workspace page, or a srcdoc frame that one wrote. */
+const ownDocument = (frame) => workspaceUrl(frame.url()) || (frame.url() === "about:srcdoc" && !!frame.parentFrame() && ownDocument(frame.parentFrame()));
+const WORKSPACE_REFUSAL = "A move to a workspace page was refused. One opens through this tool's open, navigate or new_tab, or through a same-tab link in a workspace page that sends its referrer; a redirect, a page from the web, a new-tab link and a noreferrer link do not open one. Use navigate with the page's path.";
+
+/** What the runner knows about its workspace pages: which tabs it is sending where, which
+ * addresses it has opened, and which files it has answered with since its last reply. */
+export function createWorkspaceTrust() {
+  const files = new Set();
+  let unnamed = false, since;
+  return {
+    refused: new WeakSet(), opening: new WeakMap(), traversing: new WeakSet(), opened: new Set(), turnedAway: false,
+    served(file) {
+      since ??= Date.now();
+      if (files.has(file)) return;
+      if (files.size >= 300) unnamed = true;
+      else files.add(file);
+    },
+    /** Files answered since the last call and when the first of them was; null when there were too many to name. */
+    takeServed() {
+      const list = unnamed ? null : [...files], from = since;
+      files.clear(); unnamed = false; since = undefined;
+      return list === null || list.length ? { localFiles: list, localFilesSince: from } : {};
+    },
+  };
+}
+
+/** Who may ask the workspace origin for a file. A document in a trusted workspace tab may, for
+ * what it loads. A tab or a frame comes to a workspace page only through a navigation this
+ * runner started, or one a workspace document started: that one names the document as its
+ * referrer, which no page from the web can do, be it in the tab, in a frame of a workspace page
+ * or in a tab one opened. A request that a redirect led here is never answered (this origin
+ * sends none, so another server sent it). A site on the web can therefore neither read local
+ * files through the origin nor send a tab to a local page of its choosing; the most it can do
+ * is return a workspace tab to an address that was opened before. */
+export function workspaceRequestAllowed(request, trust) {
+  const frame = request.frame(), page = frame.page(), main = page.mainFrame(), url = withoutHash(request.url());
+  const direct = !request.redirectedFrom();
+  const trusted = direct && workspaceUrl(main.url()) && !trust.refused.has(page);
+  if (!request.isNavigationRequest()) return trusted && ownDocument(frame);
+  const ownLink = trusted && workspaceUrl(request.headers().referer);
+  if (frame !== main) return ownLink;
+  // An address opened before is where a page going back or reloading itself asks to be, with no referrer to show.
+  const allowed = ownLink || (direct && (trust.opening.get(page) === url || ((trusted || trust.traversing.has(page)) && trust.opened.has(url))));
+  if (!allowed) { trust.refused.add(page); trust.turnedAway = true; }
+  else {
+    trust.refused.delete(page);
+    trust.opened.delete(url);
+    trust.opened.add(url);
+    if (trust.opened.size > 256) trust.opened.delete(trust.opened.values().next().value);
+  }
+  return allowed;
+}
+
+/** Answer a workspace-origin request from the workspace folder. */
+async function fulfilWorkspaceFile(route, root, trust) {
+  const request = route.request();
+  let allowed = false;
+  try { allowed = workspaceRequestAllowed(request, trust); } catch { /* a request with no frame belongs to no page */ }
+  // A refused navigation is dropped, so the tab does not come to rest on the address it was sent to.
+  if (!allowed && request.isNavigationRequest()) return route.abort("blockedbyclient").catch(() => {});
+  let asked;
+  try {
+    if (!allowed) throw Error("foreign page");
+    asked = path.resolve(root, decodeURIComponent(new URL(request.url()).pathname).replace(/^\/+/, ""));
+    if (outside(path.relative(root, asked))) { asked = undefined; throw Error("outside the workspace"); }
+    let file = await fs.realpath(asked), stat = await fs.stat(file);
+    if (stat.isDirectory()) {
+      asked = path.join(file, "index.html");
+      file = await fs.realpath(asked);
+      stat = await fs.stat(file);
+    }
+    const inside = path.relative(root, file);
+    if (outside(inside)) throw Error("outside the workspace");
+    if (privateName(inside) || privateName(path.relative(root, asked))) throw Error("private file");
+    if (!stat.isFile() || stat.size > WORKSPACE_FILE_MAX_BYTES) throw Error("not a servable file");
+    trust.served(file);
+    return await route.fulfill({ status: 200, path: file });
+  } catch (error) {
+    // A file the page asked for that is not there decides what the page shows once it exists.
+    if (asked && error?.code === "ENOENT" && !privateName(path.relative(root, asked))) trust.served(asked);
+    return route.fulfill({ status: 404, contentType: "text/plain; charset=utf-8", body: "No such file in the workspace" }).catch(() => {});
+  }
+}
 
 /** A lone expression such as `document.title` or `document.readyState ===
  * "complete"` is a common script shape; as a function body it returns
@@ -88,7 +186,7 @@ export function browserUrl(raw) {
     url.username ||
     url.password
   )
-    throw Error(
+    throw fault(
       "Browser navigation requires HTTP(S) without embedded credentials",
     );
   return url.href;
@@ -116,6 +214,7 @@ export async function runBrowserSession(input, output) {
     closing = false,
     attachedOverCdp = false,
     connectionMode = "isolated",
+    workspaceRoot,
     requestId = 0;
   const agentOwnedPages = new WeakSet();
   const lease = createBrowserLease();
@@ -132,6 +231,21 @@ export async function runBrowserSession(input, output) {
   const tabList = () => [...tabs.values()].map(tab => ({ tab: tab.id, active: tab.page === page, url: safeBrowserUrl(tab.page.url()), ...(tab.title ? { title: tab.title } : {}) }));
   const requests = new WeakMap();
   const record = (kind, extra) => logs?.record(kind, extra);
+  const workspaceTrust = createWorkspaceTrust();
+  const pageUrl = (raw) => {
+    const url = browserUrl(raw);
+    if (url.startsWith(WORKSPACE_ORIGIN + "/") && !workspaceRoot)
+      throw fault("A workspace page opens only in the harness's own browser; for an attached browser, serve the folder over HTTP");
+    return url;
+  };
+  /** Navigate a tab on the agent's request; a workspace address is answered for exactly this navigation. */
+  const goTo = async (target, raw, options) => {
+    const url = pageUrl(raw);
+    if (workspaceUrl(url)) workspaceTrust.opening.set(target, withoutHash(new URL(url).href));
+    try { return await target.goto(url, options); }
+    finally { workspaceTrust.opening.delete(target); }
+  };
+  const pageKey = (target) => createHash("sha256").update(new URL(target.url()).href).digest("hex");
   const close = async () => {
     if (closing) return;
     closing = true;
@@ -189,9 +303,10 @@ export async function runBrowserSession(input, output) {
         const p = request;
         // A caller-supplied predicate can have effects just like evaluate.
         lease.consume(action === 'verify' && p.kind === 'function' ? 'evaluate' : action);
+        armExpiry();
         const timeout = p.timeoutMs ?? 5000;
         if (!Number.isInteger(timeout) || timeout < 100 || timeout > 15000)
-          throw Error("Invalid timeoutMs: use 100–15000");
+          throw fault("Invalid timeoutMs: use 100–15000");
         if (action === "close") {
           await close();
           output.write(
@@ -200,11 +315,11 @@ export async function runBrowserSession(input, output) {
           break;
         }
         if (!browser) {
-          if (action !== "open") throw Error("Open the browser session first");
+          if (action !== "open") throw fault("Open the browser session first");
           if (p.url !== undefined) browserUrl(p.url);
           const requestedMode = p.connectionMode ?? (p.cdpUrl ? "cdp" : "isolated");
           if (p.visible && requestedMode === "isolated" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY)
-            throw Error("Visible browser requires a desktop display; omit visible for screenshots and text-based human help");
+            throw fault("Visible browser requires a desktop display; omit visible for screenshots and text-based human help");
           stage = "launch";
           const cdpCandidates = p.cdpUrl
             ? [p.cdpUrl]
@@ -220,7 +335,7 @@ export async function runBrowserSession(input, output) {
             } catch {}
           }
           if (!browser && (requestedMode === "cdp" || p.cdpUrl)) {
-            throw Error("Could not connect to browser CDP endpoint; launch the browser with --remote-debugging-port=9222 or use connectionMode:user");
+            throw fault("Could not connect to browser CDP endpoint; launch the browser with --remote-debugging-port=9222 or use connectionMode:user");
           }
           if (!browser) {
             browser = await chromium.launch({
@@ -228,6 +343,9 @@ export async function runBrowserSession(input, output) {
               headless: p.visible !== true,
               chromiumSandbox: true,
               timeout: 15_000,
+              // Only this runner answers for the workspace origin. A redirect to it is not routed
+              // and would reach whatever listens on this machine's port 80, so the name resolves nowhere.
+              args: [`--host-resolver-rules=MAP ${new URL(WORKSPACE_ORIGIN).hostname} ~NOTFOUND`],
             });
             connectionMode = Array.isArray(p.initialCookies) && p.initialCookies.length > 0 ? "user-cookies" : "isolated";
           }
@@ -244,7 +362,9 @@ export async function runBrowserSession(input, output) {
           }
           const pageLogs = createBrowserPageLogs(context);
           if (!attachedOverCdp) {
+            if (typeof p.localRoot === "string" && p.localRoot) workspaceRoot = await fs.realpath(p.localRoot).catch(() => undefined);
             await context.route("**/*", (route) => {
+              if (workspaceRoot && workspaceUrl(route.request().url())) return fulfilWorkspaceFile(route, workspaceRoot, workspaceTrust);
               try {
                 browserRequestAllowed(route.request().url(), route.request().isNavigationRequest());
                 return route.continue();
@@ -358,17 +478,17 @@ export async function runBrowserSession(input, output) {
         }
         if (p.tab) {
           const selected = tabs.get(p.tab);
-          if (!selected) throw Error("Unknown tab; use tabs to inspect live tab ids");
+          if (!selected) throw fault("Unknown tab; use tabs to inspect live tab ids");
           selectTab(selected);
         }
         if (action === "new_tab") {
-          if (tabs.size >= 8) throw Error("Browser tab limit is 8; close a tab first");
+          if (tabs.size >= 8) throw fault("Browser tab limit is 8; close a tab first");
           browserUrl(p.url); // Validate before allocating a page.
           const child = await context.newPage();
           agentOwnedPages.add(child);
           selectTab([...tabs.values()].find(tab => tab.page === child));
         }
-        if (!page && action !== "tabs") throw Error("No open tab; use new_tab with an HTTP(S) URL");
+        if (!page && action !== "tabs") throw fault("No open tab; use new_tab with an HTTP(S) URL");
         let surface = page;
         if (p.frame) {
           surface = page.frames().find(frame => frameIds.get(frame) === p.frame);
@@ -376,7 +496,7 @@ export async function runBrowserSession(input, output) {
             const element = await page.locator(p.frame).elementHandle({ timeout });
             try { surface = await element?.contentFrame(); } finally { await element?.dispose(); }
           }
-          if (!surface) throw Error("Unknown frame; inspect frames before selecting one");
+          if (!surface) throw fault("Unknown frame; inspect frames before selecting one");
         }
         const hasLocatorTarget = (q = p) =>
           typeof q.ref === "string" || Number.isInteger(q.marker) ||
@@ -400,8 +520,8 @@ export async function runBrowserSession(input, output) {
             const target = q.ref ? tab.refs.get(q.ref) ?? remapRetired(tab, q.ref) : tab.markers.get(q.marker);
             const validate = new Function("el", "expected", `const collect = ${collectBrowserTargets.toString()}; if (!el.isConnected) return false; const row = collect(el, { limit: 1 }).rows[0]; return !!row && row.tag === expected.tag && row.name === expected.name && row.role === expected.role;`);
             if (!target || !await target.handle.evaluate(validate, target.identity).catch(() => false))
-              throw Error("Stale browser reference; capture snapshot or markers again");
-            if (q.frame ?? p.frame) throw Error("References already identify their frame; omit frame");
+              throw fault("Stale browser reference; capture snapshot or markers again");
+            if (q.frame ?? p.frame) throw fault("References already identify their frame; omit frame");
             return target.handle;
           }
           if (
@@ -416,14 +536,14 @@ export async function runBrowserSession(input, output) {
             q.name.length <= 256
           )
             return surface.getByRole(q.role, { name: q.name, exact: true });
-          throw Error(
+          throw fault(
             "Use a marker id, selector or exact role/name observed in this browser session",
           );
         };
         const readCoords = (q = p) => {
-          if (q.frame ?? p.frame) throw Error("Coordinates address the main viewport; omit frame");
+          if (q.frame ?? p.frame) throw fault("Coordinates address the main viewport; omit frame");
           if (!Number.isInteger(q.x) || !Number.isInteger(q.y) || q.x < 0 || q.y < 0)
-            throw Error("Coordinate actions need integer x/y of at least 0 (CSS pixels)");
+            throw fault("Coordinate actions need integer x/y of at least 0 (CSS pixels)");
           return { x: q.x, y: q.y };
         };
         const snapshot = async () =>
@@ -473,7 +593,7 @@ export async function runBrowserSession(input, output) {
           record("blank-tab");
         } else if (["open", "navigate", "new_tab"].includes(action)) {
           stage = "navigation";
-          const response = await page.goto(browserUrl(p.url), {
+          const response = await goTo(page, p.url, {
             waitUntil: "domcontentloaded",
             timeout: 15000,
           });
@@ -484,16 +604,18 @@ export async function runBrowserSession(input, output) {
         } else if (action === "tabs") {
           result = { tabs: tabList(), limit: 8 };
         } else if (action === "switch_tab") {
-          if (!p.tab) throw Error("switch_tab requires tab from tabs");
+          if (!p.tab) throw fault("switch_tab requires tab from tabs");
           await page.bringToFront();
         } else if (action === "close_tab") {
           await page.close({ runBeforeUnload: false });
           result = { tabs: tabList(), closed: true };
         } else if (["back", "forward", "reload"].includes(action)) {
           const method = { back: "goBack", forward: "goForward", reload: "reload" }[action];
-          await page[method]({ waitUntil: "domcontentloaded", timeout });
+          workspaceTrust.traversing.add(page);
+          try { await page[method]({ waitUntil: "domcontentloaded", timeout }); }
+          finally { workspaceTrust.traversing.delete(page); }
         } else if (action === "dialog") {
-          if (!["accept", "dismiss", "clear"].includes(p.mode)) throw Error("dialog requires mode accept, dismiss or clear");
+          if (!["accept", "dismiss", "clear"].includes(p.mode)) throw fault("dialog requires mode accept, dismiss or clear");
           activeTab().dialog = p.mode === "clear" ? null : { mode: p.mode, text: p.text };
           result = { dialog: { mode: p.mode, scope: "Next dialog in this tab; consumed once. Default is dismiss. Use clear to disarm." } };
         } else if (action === "click") {
@@ -519,17 +641,17 @@ export async function runBrowserSession(input, output) {
             const dx = p.dx ?? 0;
             const dy = p.dy ?? page.viewportSize()?.height ?? 800;
             if (!Number.isInteger(dx) || !Number.isInteger(dy))
-              throw Error("Page scroll needs integer dx/dy wheel deltas");
+              throw fault("Page scroll needs integer dx/dy wheel deltas");
             await page.mouse.wheel(dx, dy);
           }
           record("scroll");
         } else if (action === "drag") {
           if (!Number.isInteger(p.toX) || !Number.isInteger(p.toY) || p.toX < 0 || p.toY < 0)
-            throw Error("drag needs integer toX/toY of at least 0 (CSS pixels)");
+            throw fault("drag needs integer toX/toY of at least 0 (CSS pixels)");
           let from;
           if (hasLocatorTarget()) {
             const box = await (await locate()).boundingBox({ timeout });
-            if (!box) throw Error("Drag source has no visible bounds");
+            if (!box) throw fault("Drag source has no visible bounds");
             from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
           } else {
             from = readCoords();
@@ -544,18 +666,18 @@ export async function runBrowserSession(input, output) {
           record("drag");
         } else if (action === "fill") {
           if (typeof p.text !== "string" || p.text.length > 8000)
-            throw Error("fill text limit is 8000 characters");
+            throw fault("fill text limit is 8000 characters");
           await (await locate()).fill(p.text, { timeout });
           record("fill");
         } else if (action === "press") {
           if (typeof p.key !== "string" || p.key.length > 80)
-            throw Error("Invalid key");
+            throw fault("Invalid key");
           if (hasLocatorTarget()) await (await locate()).press(p.key, { timeout });
           else await page.keyboard.press(p.key);
           record("press");
         } else if (action === "select") {
           if (typeof p.option !== "string" || p.option.length > 256)
-            throw Error("select requires an observed option label, at most 256 characters");
+            throw fault("select requires an observed option label, at most 256 characters");
           await (await locate()).evaluate((element, label) => {
             if (element.tagName !== "SELECT") throw Error("select requires a native select control");
             const options = Array.from(element.options).filter(option => option.label === label);
@@ -565,61 +687,61 @@ export async function runBrowserSession(input, output) {
           await (await locate()).selectOption({ label: p.option }, { timeout });
           record("select");
         } else if (action === "check") {
-          if (typeof p.checked !== "boolean") throw Error("check requires a boolean checked state");
+          if (typeof p.checked !== "boolean") throw fault("check requires a boolean checked state");
           await (await locate()).setChecked(p.checked, { timeout });
           record("check");
         } else if (action === "verify") {
           if (p.kind === 'function') {
             if (typeof p.script !== 'string' || !p.script || p.script.length > 8000 || p.text !== undefined || p.state !== undefined)
-              throw Error('Function verification requires script returning a boolean; omit text and state');
+              throw fault('Function verification requires script returning a boolean; omit text and state');
             const observed = await evaluateScript(surface, p.script, timeout, 100);
             if (!['true', 'false'].includes(observed.text) || observed.truncated)
-              throw Error('Function verification must return a boolean; truthy values are not proof');
+              throw fault('Function verification must return a boolean; truthy values are not proof');
             result = { verification: { matches: observed.text === 'true', comparison: 'boolean', evidence: 'Caller predicate observed on the current page; not proof of submission or publication' } };
           } else if (p.state !== undefined && p.text === undefined) {
             if (!['attached', 'detached', 'visible', 'hidden'].includes(p.state) || p.script !== undefined || p.kind && p.kind !== 'element')
-              throw Error('Element verification state must be attached, detached, visible or hidden');
+              throw fault('Element verification state must be attached, detached, visible or hidden');
             const target = await locate();
             const count = typeof target.count === 'function' ? await target.count() : 1;
-            if (count > 1) throw Error(`Verification resolved to ${count} elements; choose one exact target`);
+            if (count > 1) throw fault(`Verification resolved to ${count} elements; choose one exact target`);
             const visible = count === 1 && await target.isVisible();
             const matches = p.state === 'attached' ? count === 1 : p.state === 'detached' ? count === 0 : p.state === 'visible' ? visible : !visible;
             result = { verification: { matches, comparison: 'state', expected: p.state, observed: count === 0 ? 'detached' : visible ? 'visible' : 'hidden', evidence: 'Current target state only; not proof of submission or publication' } };
           } else {
             if (typeof p.text !== "string" || p.text.length > 8000 || p.script !== undefined || p.state !== undefined || p.kind && !['element', 'text'].includes(p.kind))
-              throw Error("verify requires text, an element state, or kind:function with script returning a boolean");
+              throw fault("verify requires text, an element state, or kind:function with script returning a boolean");
             result = { verification: await (await locate()).evaluate(verifyBrowserText, { text: p.text }, { timeout }) };
           }
         } else if (action === "wait") {
           const kind = p.kind ?? "element";
           if (kind === "url") {
-            if (typeof p.url !== "string") throw Error("URL wait requires url (exact URL or Playwright glob)");
+            if (typeof p.url !== "string") throw fault("URL wait requires url (exact URL or Playwright glob)");
             await surface.waitForURL(p.url, { timeout, waitUntil: "domcontentloaded" });
           } else if (kind === "load") {
-            if (!["domcontentloaded", "load", "networkidle"].includes(p.state ?? "load")) throw Error("Invalid load state");
+            if (!["domcontentloaded", "load", "networkidle"].includes(p.state ?? "load")) throw fault("Invalid load state");
             await surface.waitForLoadState(p.state ?? "load", { timeout });
           } else if (kind === "text") {
-            if (typeof p.text !== "string" || !p.text) throw Error("Text wait requires nonempty text");
+            if (typeof p.text !== "string" || !p.text) throw fault("Text wait requires nonempty text");
             await surface.getByText(p.text, { exact: false }).first().waitFor({ state: p.state ?? "visible", timeout });
           } else if (kind === "function") {
-            if (typeof p.script !== "string" || !p.script || p.script.length > 8000) throw Error("Function wait requires script (return a boolean)");
+            if (typeof p.script !== "string" || !p.script || p.script.length > 8000) throw fault("Function wait requires script (return a boolean)");
             const handle = await surface.waitForFunction(new Function(expressionBody(p.script, Function)), null, { timeout, polling: 100 });
             await handle.dispose();
           } else if (kind === "element") {
-            if (!["attached", "detached", "visible", "hidden"].includes(p.state ?? "visible")) throw Error("Invalid wait state");
+            if (!["attached", "detached", "visible", "hidden"].includes(p.state ?? "visible")) throw fault("Invalid wait state");
             const target = await locate();
             if (p.ref || p.marker) {
-              if (["attached", "detached"].includes(p.state)) throw Error("Use an observed selector for attached/detached waits");
+              if (["attached", "detached"].includes(p.state)) throw fault("Use an observed selector for attached/detached waits");
               await target.waitForElementState(p.state ?? "visible", { timeout });
             } else await target.waitFor({ state: p.state ?? "visible", timeout });
-          } else throw Error("Invalid wait kind");
+          } else throw fault("Invalid wait kind");
         } else if (action === "viewport") {
           if (
             ![p.width, p.height].every(
               (n) => Number.isInteger(n) && n >= 240 && n <= 2560,
             )
           )
-            throw Error("Viewport dimensions must be 240–2560 pixels");
+            throw fault("Viewport dimensions must be 240–2560 pixels");
           await page.setViewportSize({ width: p.width, height: p.height });
         } else if (action === "inspect") {
           result = {
@@ -631,16 +753,16 @@ export async function runBrowserSession(input, output) {
           };
         } else if (action === "evaluate") {
           if (typeof p.script !== "string" || p.script.length === 0 || p.script.length > 8000)
-            throw Error("evaluate requires a script of 1–8000 characters");
+            throw fault("evaluate requires a script of 1–8000 characters");
           const maxChars = p.maxChars ?? 8000;
           if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
-            throw Error("Invalid maxChars: use 100–64000");
+            throw fault("Invalid maxChars: use 100–64000");
           result = { evaluation: await evaluateScript(surface, p.script, timeout, maxChars) };
           record("evaluate");
         } else if (action === "html") {
           const maxChars = p.maxChars ?? 8000;
           if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
-            throw Error("Invalid maxChars: use 100–64000");
+            throw fault("Invalid maxChars: use 100–64000");
           result = await (await locate()).evaluate((el, maxChars) => {
             const markup = el.outerHTML;
             return { html: markup.slice(0, maxChars), truncated: markup.length > maxChars, chars: markup.length };
@@ -648,17 +770,17 @@ export async function runBrowserSession(input, output) {
         } else if (action === "read") {
           const maxChars = p.maxChars ?? 8000, offset = p.offset ?? 0;
           if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000 || !Number.isInteger(offset) || offset < 0)
-            throw Error("Invalid read offset or maxChars");
+            throw fault("Invalid read offset or maxChars");
           result = { reading: await (hasLocatorTarget() ? await locate() : surface.locator(":root")).evaluate(readBrowserPage, { offset, maxChars, query: p.query }) };
         } else if (action === "markers") {
           if (p.frame)
-            throw Error("markers captures the main frame; omit frame");
+            throw fault("markers captures the main frame; omit frame");
           const collected = await targets(true);
           try {
             await page.evaluate(paintMarkers, collected.rows);
             const png = await page.screenshot({ type: "png", timeout: 10000 });
             if (png.length > 1_100_000)
-              throw Error("Screenshot exceeds attachment limit");
+              throw fault("Screenshot exceeds attachment limit");
             result = {
               png: png.toString("base64"),
               mimeType: "image/png",
@@ -678,7 +800,7 @@ export async function runBrowserSession(input, output) {
             .evaluate(inspectPageState, {}, { timeout });
           const png = await page.screenshot({ type: "png", timeout: 10000 });
           if (png.length > 1_100_000)
-            throw Error("Screenshot exceeds attachment limit");
+            throw fault("Screenshot exceeds attachment limit");
           const cursor = logs.summary().cursor;
           const recent = logs.read({
             since: Math.max(0, cursor - 30),
@@ -713,27 +835,36 @@ export async function runBrowserSession(input, output) {
             hasLocatorTarget() ? await locate() : page
           ).screenshot({ type: "png", timeout: 10000 });
           if (png.length > 1_100_000)
-            throw Error("Screenshot exceeds attachment limit");
+            throw fault("Screenshot exceeds attachment limit");
           result = { png: png.toString("base64"), mimeType: "image/png" };
         } else if (action === "batch") {
           if (!Array.isArray(p.steps) || p.steps.length < 1 || p.steps.length > 10)
-            throw Error("batch requires steps array of 1–10 browser actions");
+            throw fault("batch requires steps array of 1–10 browser actions");
           const stepResults = [];
           for (let i = 0; i < p.steps.length; i++) {
             const s = p.steps[i];
             if (!s || typeof s !== "object" || typeof s.action !== "string")
-              throw Error(`batch step ${i + 1} requires an action`);
+              throw fault(`batch step ${i + 1} requires an action`);
             const stepAction = s.action;
-            if (!["navigate", "click", "fill", "press", "select", "check", "hover", "scroll", "drag", "wait", "verify", "evaluate", "dialog"].includes(stepAction))
-              throw Error(`Unsupported batch step action: ${stepAction}`);
+            // The page a step ran on; a link, a redirect or a navigate inside the batch may leave it.
+            const ranOn = pageKey(page);
+            if (!["navigate", "reload", "viewport", "click", "fill", "press", "select", "check", "hover", "scroll", "drag", "wait", "verify", "evaluate", "dialog"].includes(stepAction))
+              throw fault(`Unsupported batch step action: ${stepAction}. A batch takes navigate, reload, viewport, click, fill, press, select, check, hover, scroll, drag, wait, verify, evaluate and dialog; send anything else as its own call`);
             lease.consume(stepAction === "verify" && s.kind === "function" ? "evaluate" : stepAction);
             const stepTimeout = s.timeoutMs ?? timeout;
             stage = `batch:${stepAction}`;
             if (stepAction === "navigate") {
-              await page.goto(browserUrl(s.url), { waitUntil: "domcontentloaded", timeout: 15000 });
+              await goTo(page, s.url, { waitUntil: "domcontentloaded", timeout: 15000 });
               record("navigation", { url: safeBrowserUrl(page.url()) });
+            } else if (stepAction === "reload") {
+              workspaceTrust.traversing.add(page);
+              try { await page.reload({ waitUntil: "domcontentloaded", timeout: stepTimeout }); }
+              finally { workspaceTrust.traversing.delete(page); }
+            } else if (stepAction === "viewport") {
+              if (![s.width, s.height].every((n) => Number.isInteger(n) && n >= 240 && n <= 2560)) throw fault("Viewport dimensions must be 240–2560 pixels");
+              await page.setViewportSize({ width: s.width, height: s.height });
             } else if (stepAction === "dialog") {
-              if (!["accept", "dismiss", "clear"].includes(s.mode)) throw Error("dialog requires mode accept, dismiss or clear");
+              if (!["accept", "dismiss", "clear"].includes(s.mode)) throw fault("dialog requires mode accept, dismiss or clear");
               activeTab().dialog = s.mode === "clear" ? null : { mode: s.mode, text: s.text };
             } else if (stepAction === "click") {
               if (!hasLocatorTarget(s) && Number.isInteger(s.x) && Number.isInteger(s.y)) {
@@ -744,20 +875,20 @@ export async function runBrowserSession(input, output) {
               }
               record("click");
             } else if (stepAction === "fill") {
-              if (typeof s.text !== "string" || s.text.length > 8000) throw Error("fill text limit is 8000 characters");
+              if (typeof s.text !== "string" || s.text.length > 8000) throw fault("fill text limit is 8000 characters");
               await (await locate(s)).fill(s.text, { timeout: stepTimeout });
               record("fill");
             } else if (stepAction === "press") {
-              if (typeof s.key !== "string" || s.key.length > 80) throw Error("Invalid key");
+              if (typeof s.key !== "string" || s.key.length > 80) throw fault("Invalid key");
               if (hasLocatorTarget(s)) await (await locate(s)).press(s.key, { timeout: stepTimeout });
               else await page.keyboard.press(s.key);
               record("press");
             } else if (stepAction === "select") {
-              if (typeof s.option !== "string" || s.option.length > 256) throw Error("select requires an observed option label, at most 256 characters");
+              if (typeof s.option !== "string" || s.option.length > 256) throw fault("select requires an observed option label, at most 256 characters");
               await (await locate(s)).selectOption({ label: s.option }, { timeout: stepTimeout });
               record("select");
             } else if (stepAction === "check") {
-              if (typeof s.checked !== "boolean") throw Error("check requires a boolean checked state");
+              if (typeof s.checked !== "boolean") throw fault("check requires a boolean checked state");
               await (await locate(s)).setChecked(s.checked, { timeout: stepTimeout });
               record("check");
             } else if (stepAction === "hover") {
@@ -770,11 +901,11 @@ export async function runBrowserSession(input, output) {
               record("scroll");
             } else if (stepAction === "drag") {
               if (!Number.isInteger(s.toX) || !Number.isInteger(s.toY) || s.toX < 0 || s.toY < 0)
-                throw Error("drag needs integer toX/toY of at least 0 (CSS pixels)");
+                throw fault("drag needs integer toX/toY of at least 0 (CSS pixels)");
               let from;
               if (hasLocatorTarget(s)) {
                 const box = await (await locate(s)).boundingBox({ timeout: stepTimeout });
-                if (!box) throw Error("Drag source has no visible bounds");
+                if (!box) throw fault("Drag source has no visible bounds");
                 from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
               } else from = readCoords(s);
               await page.mouse.move(from.x, from.y);
@@ -798,20 +929,20 @@ export async function runBrowserSession(input, output) {
               if (s.kind === "function") {
                 const observed = await evaluateScript(surface, s.script, stepTimeout, 100);
                 if (!["true", "false"].includes(observed.text) || observed.truncated)
-                  throw Error("Function verification must return a boolean");
-                stepResults.push({ step: i + 1, action: "verify", matches: observed.text === "true" });
+                  throw fault("Function verification must return a boolean");
+                stepResults.push({ step: i + 1, action: "verify", matches: observed.text === "true", page: ranOn });
                 continue;
               }
               const ver = await (await locate(s)).evaluate(verifyBrowserText, { text: s.text }, { timeout: stepTimeout });
-              stepResults.push({ step: i + 1, action: "verify", matches: ver.matches });
+              stepResults.push({ step: i + 1, action: "verify", matches: ver.matches, page: ranOn });
               continue;
             } else if (stepAction === "evaluate") {
               const ev = await evaluateScript(surface, s.script, stepTimeout, s.maxChars ?? 2000);
               record("evaluate");
-              stepResults.push({ step: i + 1, action: "evaluate", evaluation: ev });
+              stepResults.push({ step: i + 1, action: "evaluate", evaluation: ev, page: ranOn });
               continue;
             }
-            stepResults.push({ step: i + 1, action: stepAction, ok: true });
+            stepResults.push({ step: i + 1, action: stepAction, ok: true, page: ranOn });
           }
           const state = await surface.locator(":root").evaluate(inspectPageState, { summary: true }, { timeout });
           result = {
@@ -820,7 +951,7 @@ export async function runBrowserSession(input, output) {
             frames: frameList(),
           };
         } else if (!["snapshot", "renew"].includes(action))
-          throw Error("Unsupported browser action");
+          throw fault("Unsupported browser action");
         if (!result) {
           stage = "observation";
           // Observe the whole document after mutations; a target may have disappeared.
@@ -856,12 +987,16 @@ export async function runBrowserSession(input, output) {
           lease.renew();
           armExpiry();
         }
+        const turnedAway = workspaceTrust.turnedAway;
+        workspaceTrust.turnedAway = false;
         result = {
           ok: true,
+          ...(turnedAway ? { workspacePageRefused: WORKSPACE_REFUSAL } : {}),
           ...(action === "open" ? { connectionMode } : {}),
           tab: activeTab()?.id,
           url: page ? safeBrowserUrl(page.url()) : undefined,
-          pageIdentity: page ? createHash('sha256').update(new URL(page.url()).href).digest('hex') : undefined,
+          pageIdentity: page ? pageKey(page) : undefined,
+          ...workspaceTrust.takeServed(),
           diagnostics: { logs: logs?.summary(), network: network?.summary() },
           untrusted: true,
           lease: lease.receipt(),

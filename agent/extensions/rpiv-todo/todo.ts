@@ -28,6 +28,7 @@ import {
 	TOOL_LABEL,
 	TOOL_NAME,
 	TodoParamsSchema,
+	unlistedFieldError,
 } from "./tool/types.js";
 import {
 	renderTodoCall,
@@ -125,7 +126,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
 		description:
-			"Maintain a hierarchical plan of tasks. Use list with view frontier for ready and active work, tree for the full hierarchy, and get for a task's acceptance criteria and evidence. Batch operations are atomic. Reopen a completed task when the scope changes.",
+			"Maintain a hierarchical plan of tasks. list shows the plan, get one task with its acceptance and evidence, batch several changes at once. Reopen a completed task when the scope changes.",
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
@@ -136,6 +137,8 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		executionMode: "sequential",
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const wrong = unlistedFieldError(params);
+			if (wrong) throw new Error(wrong);
 			const result = applyTaskMutation(
 				getState(sid(ctx)),
 				params.action,

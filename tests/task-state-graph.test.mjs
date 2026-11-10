@@ -401,6 +401,13 @@ test('a passing check is recognised across package managers, but only in command
     'npm test || true', 'npm test; echo done', 'npm test | tail -n 5', 'npm test | tee out.log',
     'npm test --help', 'node --test --listTests', 'cargo test --no-run', 'npm "test ; echo done"',
   ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
+  // A check that ran and could not count is told apart from a command that checks nothing, so a refusal can say why.
+  for (const command of ['npm test | tail -n 5', 'cd app && node --test 2>&1 | tail -25 && echo done && git diff', 'node --test 2>&1 | tail -12; git diff --stat'])
+    assert.match(ingest.uncountedCheckReason(command) ?? '', /piped/, command);
+  for (const command of ['npm test; echo done', 'npm test || true', 'git status && npm test && git diff', 'git stash && npm test && git log | head -3'])
+    assert.match(ingest.uncountedCheckReason(command) ?? '', /joined to other commands/, command);
+  for (const command of ['npm test', 'cd app && npm test', 'ls -la', 'echo "run npm test" | tail -2', 'git log --grep test', 'npm test --help'])
+    assert.equal(ingest.uncountedCheckReason(command), undefined, command);
 });
 
 test('a launched background suite is an attempt, not yet a passing check', () => {
@@ -427,6 +434,27 @@ test('harmless prefixes count as the same evidence check; a filtered run counts 
     'set -eo pipefail && npm test 2>&1 | tail -20',
     'npm test 2>&1',
   ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
+  // An && chain that exits 0 proves each step: plain commands after the check leave it standing, and a
+  // filtered check anywhere in the chain counts under pipefail.
+  for (const command of [
+    'npm test && git diff', 'cd app && npm test && echo done && git status --short', 'npm test 2>&1 && git diff --stat',
+    'set -o pipefail; cd app && node --test 2>&1 | tail -25 && echo "===DIFF===" && git diff && echo done',
+    'set -o pipefail; npm run lint 2>&1 | tail -5 && npm test | tail -20',
+    'npm test && git log | head -3', 'set -o pipefail; npm test && git log | head -3',   // a trimmed listing after the check hides nothing about it
+    'npm test && git log | head -3 && npm run lint',
+    'make test -j4', 'make test -Cnested', 'make test -fMakefile.ci', 'make test -ks', 'go test ./...', 'pytest -n 4',
+  ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
+  for (const command of [
+    'cd app && node --test 2>&1 | tail -25 && git diff',   // no pipefail: the exit seen is tail's
+    'git stash && npm test && git stash pop',              // the check ran on another tree
+    'echo start && npm test',
+    'cd app && git log | head -3 && npm test',             // a command before the check
+    'npm test | head -5 && git log | tail -3',             // the check's own exit is head's
+    'make test -n', 'make check -i', 'make test --just-print', 'make test -sn', 'go test -n ./...', 'ninja test -n',
+    'mvn test -fn', 'mvn test -Dmaven.test.failure.ignore=true',   // exit 0 whatever the check found
+    'npm test && git diff; true', 'npm test && git diff || true', 'npm test && echo $HOME', 'npm test && git diff > out.txt',
+    'cd app && git diff',
+  ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
   for (const command of [
     'npm test 2>&1 | tail -20',
     'npm test > /dev/null',

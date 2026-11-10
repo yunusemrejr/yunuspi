@@ -6,7 +6,7 @@ import { formatSkillsForPrompt } from "./skills.js";
 import { loadWorkingNotes } from "./working-notes.js";
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options) {
-    const { customPrompt, selectedTools, toolSnippets, promptGuidelines, appendSystemPrompt, cwd, contextFiles: providedContextFiles, skills: providedSkills, } = options;
+    const { customPrompt, selectedTools, promptGuidelines, appendSystemPrompt, cwd, contextFiles: providedContextFiles, skills: providedSkills, } = options;
     const promptCwd = cwd.replace(/\\/g, "/");
     const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
     const contextFiles = providedContextFiles ?? [];
@@ -42,10 +42,9 @@ export function buildSystemPrompt(options) {
     // Get absolute paths to documentation and examples
     const readmePath = getReadmePath();
     const docsPath = getDocsPath();
-    // Build tools list based on selected tools.
-    // A tool appears in Available tools only when the caller provides a one-line snippet.
-    const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
-    const toolsList = visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";
+    // The prompt carries no list of tools: every request already sends each active
+    // tool's name and description as its schema, and a second copy here cost about
+    // 900 characters per request and changed the prompt whenever a tool was enabled.
     // Build guidelines based on which tools are actually available
     const guidelinesList = [];
     const guidelinesSet = new Set();
@@ -90,15 +89,12 @@ export function buildSystemPrompt(options) {
     const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
     // A delegated child gets the short form whichever way its role prompt arrived.
     const workingNotes = loadWorkingNotes(getAgentDir(), process.env, process.env.PI_SUBAGENT_CHILD === "1");
-    let prompt = `You are YunusPi, an expert agent working on the user's own machine through the tools below. The work may be software, research, operating a browser, documents and data, design and media, or a task that mixes them; bring a senior practitioner's judgment to whichever it is.
-
-Available tools:
-${toolsList}
+    let prompt = `You are YunusPi, an expert agent working on the user's own machine through its tools. The work may be software, research, operating a browser, documents and data, design and media, or a task that mixes them; bring a senior practitioner's judgment to whichever it is.
 
 Guidelines:
 ${guidelines}
 
-YunusPi's own documentation (for questions about this harness, its SDK, extensions, themes, skills or TUI, and before changing any of them): ${readmePath} and the guides in ${docsPath} (extensions.md, themes.md, skills.md, prompt-templates.md, tui.md, keybindings.md, sdk.md, custom-provider.md, models.md, packages.md, environment-variables.md). A docs/... path resolves there, not in the working directory. YunusPi updates only from its own reviewed releases: never install or upgrade upstream Pi to repair or update it.`;
+YunusPi's own documentation, for questions about this harness and before changing it: ${readmePath} and ${docsPath} (extensions, themes, skills, prompt-templates, tui, keybindings, sdk, custom-provider, models, packages and environment-variables, each a .md). A docs/... path resolves there, not in the working directory. Never install or upgrade upstream Pi to repair or update YunusPi.`;
     if (workingNotes) {
         prompt += `\n\n${workingNotes}`;
     }

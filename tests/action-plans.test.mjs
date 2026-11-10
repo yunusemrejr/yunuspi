@@ -45,6 +45,22 @@ test('action plans reject deleting a task that still blocks live work',()=>{
  assert.equal(cleaned.state.tasks[1].blockedBy,undefined);
 });
 
+test('create honours addBlockedBy as a blocker and validates it',()=>{
+ const first=applyTaskMutation({tasks:[],nextId:1},'create',{subject:'Dependency'});
+ const second=applyTaskMutation(first.state,'create',{subject:'Dependent',addBlockedBy:[1]});
+ assert.equal(second.op.kind,'create');
+ assert.deepEqual(second.state.tasks[1].blockedBy,[1]);
+ const ghost=applyTaskMutation(first.state,'create',{subject:'Ghost',addBlockedBy:[99]});
+ assert.equal(ghost.op.kind,'error');
+ assert.match(ghost.op.message,/addBlockedBy: #99 not found/);
+});
+
+test('unlisted todo fields with the wrong shape name the expected shape',async()=>{
+ const {unlistedFieldError}=await load('tool/types.ts');
+ assert.equal(unlistedFieldError({action:'create',subject:'x',addBlockedBy:'1'}),'todo: "addBlockedBy" must be an array of task ids, like [1, 2].');
+ assert.equal(unlistedFieldError({action:'batch',operations:[{action:'update',id:1,owner:3}]}),'todo: "owner" must be a string, like "reviewer".');
+});
+
 const {miniSource,miniProjection,miniPotentialSavings,createMiniPreprocessor}=await import(pathToFileURL(path.join(agent,'extensions/lib/mini-preprocessor.ts')).href);
 const {scoreContext}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/context-salience.ts')).href);
 test('local selection protects evidence and supports meaningful free-route context savings',async()=>{

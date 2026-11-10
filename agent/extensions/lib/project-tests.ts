@@ -250,7 +250,7 @@ export function projectCheckCommandReason(command: unknown, cwd: string): string
   return 'reason' in verdict ? verdict.reason : null;
 }
 
-const SHELL_STATE = new Set(['cd', 'pushd', 'popd', 'export', 'unset', 'set', 'shopt', 'source', '.', 'eval', 'exec', 'alias', 'trap', 'declare', 'typeset', 'local', 'readonly', 'ulimit', 'umask', 'enable', 'builtin', 'command']);
+const SHELL_STATE = new Set(['cd', 'pushd', 'popd', 'export', 'unset', 'set', 'shopt', 'source', '.', 'eval', 'exec', 'alias', 'trap', 'declare', 'typeset', 'local', 'readonly', 'ulimit', 'umask', 'enable', 'builtin', 'command', 'exit', 'return', '!']);
 /** `make && ./build/app --forttest && git status`: an AND chain that exits 0
  * ran every segment and each one exited 0, so every check in it passed. Two
  * game sessions re-ran such chains three times and then waived the goal
@@ -258,8 +258,12 @@ const SHELL_STATE = new Set(['cd', 'pushd', 'popd', 'export', 'unset', 'set', 's
  * Returns the chain's non-reconnaissance segments, each a check when
  * `isCheck` accepts it and otherwise observed evidence an exact later plan can
  * adopt (a leading `cd <dir>` scopes the rest), or undefined when any segment is not a
- * simple command: `;`, `||`, `&` or a pipe could hide an earlier exit. Only
- * the last segment may end in a `| tail|head N` filter, which needs pipefail.
+ * simple command: `;`, `||`, `&` or a pipe could hide an earlier exit. A check
+ * may end in a `| tail|head N` filter wherever it stands; it needs pipefail to
+ * keep its exit. A filtered listing (`git log | head -3`) needs none, because
+ * `&&` reached it only when everything before it had exited 0. A chain with
+ * both a filtered check and a listing cut by `head` earns nothing: the pipefail
+ * the check needs would turn a writer cut short by `head` into a failed chain.
  * A chain that changes the shell for the segments after it (export, set,
  * source, a later cd, a bare assignment) or hides segments behind a `#`
  * comment earns nothing: its later checks did not run as their keys say. */
@@ -268,14 +272,12 @@ export function andChainChecks(command: unknown, cwd: string, isCheck: (check: {
   if (/(?:^|\s)#/.test(command.replace(/\\[\s\S]|"(?:\\[\s\S]|[^"\\])*"|'[^']*'/g, '_'))) return undefined;
   const parts = checkSegments(command).map(part => part.trim());
   if (parts.length < 2 || parts.some(part => !part)) return undefined;
-  let prefix = '', pipefail = false, leading = true;
+  let prefix = '', pipefail = false, cutListing = false, leading = true;
   const checks: { key: string; label: string; observeOnly: boolean }[] = [];
-  for (const [index, raw] of parts.entries()) {
+  for (const raw of parts) {
     let part = raw;
-    if (index === parts.length - 1) {
-      const filter = PIPED_FILTER.exec(part);
-      if (filter) { part = part.slice(0, filter.index); pipefail = true; }
-    }
+    const filter = PIPED_FILTER.exec(part);
+    if (filter) part = part.slice(0, filter.index);
     let previous = '';
     while (previous !== part) {
       previous = part;
@@ -289,10 +291,15 @@ export function andChainChecks(command: unknown, cwd: string, isCheck: (check: {
     leading = false;
     const program = argv.find(token => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
     if (!program || SHELL_STATE.has(program)) return undefined;
-    const check = projectCheckCommand(prefix + part, cwd, true);
-    if (check && !reconCommand(part) && !checks.some(c => c.key === check.key)) checks.push({ ...check, observeOnly: !isCheck(check) });
+    const found = projectCheckCommand(prefix + part, cwd, true);
+    const check = found && !reconCommand(part) ? found : null;
+    if (filter) {
+      if (check) pipefail = true;
+      else if (/\bhead\b/.test(filter[0])) cutListing = true;
+    }
+    if (check && !checks.some(c => c.key === check.key)) checks.push({ ...check, observeOnly: !isCheck(check) });
   }
-  return checks.length ? { checks, pipefail } : undefined;
+  return checks.length && !(pipefail && cutListing) ? { checks, pipefail } : undefined;
 }
 
 function currentProjectCheck(state: State, key: string) {
@@ -788,11 +795,11 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
-    description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
+    description: 'Inspect the local test setup, the code changes observed and the receipts of commands that really ran, then choose verification in proportion to the change; add a regression test for changed behaviour or a demonstrated defect. This tool runs nothing: outcomes come only from observed bash, bg_run and process results. assess with disposition required keeps a follow-up pending until the planned commands pass after the latest edit; not_needed or blocked needs a concrete reason. Reassess after edits; exit zero alone is not coverage.',
     parameters: Type.Object({ action: choices(['inspect', 'assess']), view: Type.Optional(choices(['compact', 'detailed'])),
       disposition: Type.Optional(choices(['required', 'not_needed', 'blocked'])),
       reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 * RATIONALE_INTAKE })),
-      commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test. Put explanations in reason, never append prose or parenthetical notes. Inspect returns the exact planned commands and their receipts.' }), { maxItems: 8 })) }),
+      commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test; explanations go in reason.' }), { maxItems: 8 })) }),
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
       const ticket = epoch;
       signal?.throwIfAborted(); await scan(ctx); signal?.throwIfAborted();

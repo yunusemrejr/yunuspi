@@ -149,7 +149,6 @@ export class AgentSession {
     // Tool registry for extension getTools/setTools
     _toolRegistry = new Map();
     _toolDefinitions = new Map();
-    _toolPromptSnippets = new Map();
     _toolPromptGuidelines = new Map();
     // Base system prompt (without extension appends) - used to apply fresh appends each turn
     _baseSystemPrompt = "";
@@ -830,15 +829,6 @@ export class AgentSession {
     get promptTemplates() {
         return this._resourceLoader.getPrompts().prompts;
     }
-    _normalizePromptSnippet(text) {
-        if (!text)
-            return undefined;
-        const oneLine = text
-            .replace(/[\r\n]+/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        return oneLine.length > 0 ? oneLine : undefined;
-    }
     _normalizePromptGuidelines(guidelines) {
         if (!guidelines || guidelines.length === 0) {
             return [];
@@ -854,13 +844,8 @@ export class AgentSession {
     }
     _rebuildSystemPrompt(toolNames) {
         const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
-        const toolSnippets = {};
         const promptGuidelines = [];
         for (const name of validToolNames) {
-            const snippet = this._toolPromptSnippets.get(name);
-            if (snippet) {
-                toolSnippets[name] = snippet;
-            }
             const toolGuidelines = this._toolPromptGuidelines.get(name);
             if (toolGuidelines) {
                 promptGuidelines.push(...toolGuidelines);
@@ -878,7 +863,6 @@ export class AgentSession {
             customPrompt: loaderSystemPrompt,
             appendSystemPrompt,
             selectedTools: validToolNames,
-            toolSnippets,
             promptGuidelines,
         };
         return buildSystemPrompt(this._baseSystemPromptOptions);
@@ -2427,12 +2411,6 @@ export class AgentSession {
             });
         }
         this._toolDefinitions = definitionRegistry;
-        this._toolPromptSnippets = new Map(Array.from(definitionRegistry.values())
-            .map(({ definition }) => {
-            const snippet = this._normalizePromptSnippet(definition.promptSnippet);
-            return snippet ? [definition.name, snippet] : undefined;
-        })
-            .filter((entry) => entry !== undefined));
         this._toolPromptGuidelines = new Map(Array.from(definitionRegistry.values())
             .map(({ definition }) => {
             const guidelines = this._normalizePromptGuidelines(definition.promptGuidelines);

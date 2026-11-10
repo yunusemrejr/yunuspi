@@ -457,11 +457,31 @@ test('goal check lists criteria and unverified edits, then reports every step se
  const edited=await h.call({action:'check'});
  assert.match(edited,/\[!\] 1 file change\(s\) since the last passing test/);
  assert.doesNotMatch(edited,/Every step is settled/);
+ assert.doesNotMatch(edited,/did not count/);
+ await h.emit('tool_call',{toolName:'bash',toolCallId:'t0',input:{command:'npm test 2>&1 | tail -20 && git diff'}});
+ await h.emit('tool_result',{toolName:'bash',toolCallId:'t0',input:{command:'npm test 2>&1 | tail -20 && git diff'},details:{exitCode:0}});
+ assert.match(await h.call({action:'check'}),/The last run did not count \(`npm test 2>&1 \| tail -20 && git diff`\): its output is piped, which hides whether it passed\. Run the check command by itself/,'a check that could not count is named with the reason');
  await h.emit('tool_call',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'}});
  await h.emit('tool_result',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'},details:{exitCode:0}});
  const settled=await h.call({action:'check'});
  assert.match(settled,/Every step is settled; call goal complete\./);
  assert.match(await h.call({action:'complete'}),/Goal achieved/);
+});
+
+test('a filtered check inside a chain counts as it ran, with the pipefail prefix project tests put in front',async()=>{
+ const command='cd app && node --test 2>&1 | tail -25 && echo "===DIFF===" && git diff';
+ for(const [exitCode,settled] of [[0,true],[1,false]]){
+  const h=harness();
+  await h.commands.goal.handler('Ship the exporter',h.ctx);
+  for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
+  await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
+  // The call is seen as the model wrote it; the result carries the command that ran.
+  await h.emit('tool_call',{toolName:'bash',toolCallId:'c0',input:{command}});
+  await h.emit('tool_result',{toolName:'bash',toolCallId:'c0',input:{command:`set -o pipefail; ${command}`},details:{exitCode}});
+  const text=await h.call({action:'check'});
+  if(settled)assert.match(text,/Every step is settled; call goal complete\./);
+  else assert.match(text,/\[!\] 1 file change\(s\) since the last passing test/);
+ }
 });
 
 test('one completion call records criterion results atomically and still refuses unverified edits',async()=>{

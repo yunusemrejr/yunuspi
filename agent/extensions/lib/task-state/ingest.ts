@@ -326,6 +326,16 @@ const NON_VERIFY_FLAG = /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--
 /** Output filter that keeps a check's exit observable only with pipefail. */
 export const PIPED_FILTER = /\s*\|\s*(?:tail|head)(?:\s+-n)?\s+-?\d+\s*$/;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/** Flags with which these tools exit 0 whatever the check found: a dry run (`make test -n`), errors
+ * ignored (`make test -i`, `mvn test -fn`). The short forms mean other things to other runners
+ * (`pytest -n 4` sets the worker count), so they are held per tool. */
+const NO_VERDICT_FLAG: Record<string, RegExp> = {
+	// A cluster of make's argument-less short flags holding n, i, t or q; `-fMakefile` or `-Cnested` is not one.
+	make: /^(?:-[bBdehikLmnpqrRsStvw]*[nitq][bBdehikLmnpqrRsStvw]*|--just-print|--recon|--ignore-errors|--touch|--question)$/,
+	go: /^-n$/,
+	ninja: /^-n$/,
+	mvn: /^(?:-fn|--fail-never|-Dmaven\.test\.failure\.ignore(?:=true)?)$/,
+};
 const PREFIX_LIMIT = 4;
 const SHELL_OPERATORS = "|&;<>()`";
 export type CheckPrefix = { cd?: string; env: string[]; command: string; pipefail: boolean };
@@ -443,7 +453,10 @@ function isSingleTestStep(step: string): boolean {
 	if (executable === "npx" || executable === "bunx") return RUNNER.test(args[args[0] === "--no-install" ? 1 : 0] ?? "");
 	if ((executable === "uv" || executable === "poetry") && args[0] === "run") return RUNNER.test(args[1] ?? "");
 	if (executable === "bundle" && args[0] === "exec") return RUNNER.test(args[1] ?? "") || (args[1] === "rake" && CHECK_TASK.test(args[2] ?? "test"));
-	if (/^(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)$/.test(executable)) return CHECK_TASK.test(args[0] ?? "");
+	if (/^(?:mvn|gradlew?|make|just|composer|cargo|go|swift|dotnet|rake|meson|ninja)$/.test(executable)) {
+		const noVerdict = NO_VERDICT_FLAG[executable];
+		return CHECK_TASK.test(args[0] ?? "") && !(noVerdict && args.some(arg => noVerdict.test(arg)));
+	}
 	if (executable === "deno") return /^(?:test|check|lint|fmt)$/.test(args[0] ?? "");
 	if (/^python3?(?:\.\d+)?$/.test(executable)) return args[0] === "-m" && /^(?:pytest|unittest|tox|ruff|mypy)$/.test(args[1] ?? "");
 	if (executable === "node") {
@@ -459,15 +472,7 @@ export function isTestLikeCommand(command: string): boolean {
 	if (!raw || raw.length > 2000) return false;
 	const peeled = peelCheckPrefix(raw);
 	if (!peeled) return false;
-	// `2>&1` never masks the exit. A `| tail|head N` filter does, unless the
-	// same command sets pipefail in its own prefix.
-	let remainder = peeled.command;
-	const filter = PIPED_FILTER.exec(remainder);
-	if (filter) {
-		if (!peeled.pipefail) return false;
-		remainder = remainder.slice(0, filter.index);
-	}
-	const body = joinCheckBody(peeled, remainder.replace(/\s+2>&1\s*$/, "").trim());
+	const body = joinCheckBody(peeled);
 	const parts: string[] = [];
 	let start = 0;
 	for (const match of body.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&/g)) {
@@ -475,13 +480,45 @@ export function isTestLikeCommand(command: string): boolean {
 		parts.push(body.slice(start, match.index)); start = match.index! + 2;
 	}
 	parts.push(body.slice(start));
-	if (parts.length > 4) return false;
-	for (let i = 0; i < parts.length - 1; i++) {
-		const prefix = tokenizeSimple(parts[i].trim());
-		const isCd = prefix?.length === 2 && prefix[0] === "cd";
-		if (!isCd && !isSingleTestStep(parts[i])) return false;
+	if (parts.length > 8) return false;
+	// An `&&` chain that exits 0 ran every step and each one exited 0. Before the first check only
+	// `cd DIR` may stand, so the check ran on the tree as it is. What follows a check (a diff, a status
+	// line) cannot change what it proved, but has to be a plain command: `;`, `||` or a pipe there
+	// would hide an exit.
+	let checks = 0;
+	for (const part of parts) {
+		let step = part.trim();
+		// `2>&1` never masks the exit. A `| tail|head N` filter on a check does, unless the same command
+		// sets pipefail in its own prefix. On a command after the check it hides nothing about the check:
+		// `&&` let that command start only because the check had exited 0.
+		const filter = PIPED_FILTER.exec(step);
+		if (filter) step = step.slice(0, filter.index);
+		step = step.replace(/\s+2>&1\s*$/, "").trim();
+		if (isSingleTestStep(step)) {
+			if (filter && !peeled.pipefail) return false;
+			checks++; continue;
+		}
+		const words = tokenizeSimple(step);
+		if (!words) return false;
+		if (checks === 0 && (filter || !(words.length === 2 && words[0] === "cd"))) return false;
 	}
-	return isSingleTestStep(parts.at(-1)!);
+	return checks > 0;
+}
+
+/** Why a command that runs a check still proves nothing, said to the model so it does not run the same line again. */
+export function uncountedCheckReason(command: string): string | undefined {
+	const raw = String(command ?? "").trim();
+	if (!raw || raw.length > 2000 || isTestLikeCommand(raw)) return undefined;
+	const steps: string[] = [], seps: string[] = [];
+	let start = 0;
+	for (const match of raw.matchAll(/"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[\s\S]|&&|\|\||[;|\n]/g)) {
+		if (/^["'\\]/.test(match[0])) continue;
+		steps.push(raw.slice(start, match.index)); seps.push(match[0]); start = match.index! + match[0].length;
+	}
+	steps.push(raw.slice(start));
+	const checks = steps.map((step, index) => isSingleTestStep(step.replace(/\s+2>&1\s*$/, "")) ? index : -1).filter(index => index >= 0);
+	if (!checks.length) return undefined;
+	return checks.some(index => seps[index] === "|") ? "its output is piped, which hides whether it passed" : "it is joined to other commands, so its own exit status is not seen";
 }
 
 /** Bash results become attempt/evidence/failure entities with family keys.

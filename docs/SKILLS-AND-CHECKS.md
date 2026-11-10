@@ -133,10 +133,16 @@ disclose the gap, and finish when the actual requirements are met.
 Native PHP test scripts such as `php tests/run-tests.php` are recognized before
 coverage is declared, so a later assessment can use the observed run. Lint-only
 commands and shell commands that mask failures do not become test receipts.
-For a reliable receipt, run the simple test command directly; piping into
-`tail`/`grep` or appending `echo` can hide its exit status. Missing-evidence
-guidance explains this rather than treating a successful output-filter command
-as a passing test.
+A run counts when its exit status proves the check passed: the check alone, or
+an `&&` chain with only `cd DIR` before the check and plain commands after it
+(`npm test && git diff`). A check that ends in `| tail N` or `| head N` is run
+under `pipefail`, wherever it stands in the chain, so its own exit status is
+kept; a trimmed listing after the check (`npm test && git log | head -3`)
+needs nothing. A dry run or a run told to ignore errors (`make test -n`,
+`mvn test -fn`) is not a check. A `;`, `||`, a pipe into `grep` or `tee`, or a command before the check
+that could change the tree (`git stash && npm test`) hides or weakens the
+result, so such a run earns nothing; a refused completion names that run and
+says why.
 
 On-write formatting honors the nearest `.prettierignore`, disables Prettier's
 embedded-language reformatting, and skips HTML containing inline SVG to preserve

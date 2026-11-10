@@ -110,43 +110,39 @@ function optionalTrimmed(value: string): string | undefined {
 const BgRunParams = Type.Object({
   name: Type.String({
     description:
-      "Required. 2 to 6 words, not the raw command.",
+      "2 to 6 words, not the raw command.",
   }),
   command: Type.String({
     description: "Shell command to run.",
   }),
   isAgent: Type.Boolean({
     description:
-      "Required. true only for an LLM agent process (such as pi -p ...); false for scripts, servers and other shell commands.",
+      "true only for an LLM agent process (such as pi -p ...); false for everything else.",
   }),
-  description: Type.Optional(
-    Type.String({
-      description: "Optional longer context.",
-    }),
-  ),
+  description: Type.Optional(Type.String()),
   timeoutSeconds: Type.Optional(
     Type.Number({
       exclusiveMinimum: 0,
       maximum: MAX_TASK_TIMEOUT_SECONDS,
-      description: "Optional. Above 0, at most 2147483.647. Expiry kills the task and marks it failed.",
+      description: "Expiry kills the task and marks it failed.",
     }),
   ),
   service: Type.Optional(
     Type.Boolean({
       description:
-        "Long-lived server or watcher: its exit never wakes the agent. Default false; common dev servers are detected.",
+        "Long-lived server or watcher: its exit never wakes the agent. Common dev servers are detected.",
     }),
   ),
   notifyOnCompletion: Type.Optional(
     Type.Boolean({
       description:
-        "Default true. Set false only if you will check completion yourself.",
+        "Default true.",
     }),
   ),
   triggerOnCompletion: Type.Optional(
     Type.Boolean({
       description:
-        "Starts an agent turn on notify. Default true for finite work, false for servers. Requires notifyOnCompletion.",
+        "Start an agent turn when it ends. Default true for finite work, false for services. Requires notifyOnCompletion.",
     }),
   ),
 });
@@ -155,28 +151,28 @@ const BgStatusParams = Type.Object({
   taskId: Type.Optional(
     Type.String({
       description:
-        "Optional task ID or unambiguous prefix. If omitted, all running/recent tasks are returned.",
+        "Task ID or unambiguous prefix; omit for all running and recent tasks.",
     }),
   ),
 });
 
 const BgLogsParams = Type.Object({
-  taskId: Type.String({ description: "Task ID, unambiguous prefix or task name" }),
+  taskId: Type.String({ description: "Task ID, prefix or name." }),
   maxBytes: Type.Optional(
     Type.Number({
-      description: `Maximum bytes to return, capped at ${formatSize(MAX_LOG_BYTES)}. Default: ${formatSize(DEFAULT_LOG_BYTES)}.`,
+      description: `Default ${formatSize(DEFAULT_LOG_BYTES)}.`,
     }),
   ),
   tail: Type.Optional(
     Type.Boolean({
       description:
-        "Read the tail of the log when true, head when false. Default: true.",
+        "true (default) reads the end, false the start.",
     }),
   ),
 });
 
 const BgKillParams = Type.Object({
-  taskId: Type.String({ description: "Task ID, unambiguous prefix or task name to stop" }),
+  taskId: Type.String({ description: "Task ID, prefix or name." }),
 });
 
 type BgRunParamsValue = Static<typeof BgRunParams>;
@@ -732,7 +728,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgRunParams, BgRunDetails>({
     name: "bg_run",
     label: "Background Run",
-    description: `Start a long-running shell command in the background; returns at once with a task ID and output path. Its end arrives as a <background-task-notification>. Do not sleep or poll for it. Persistent services notify only the UI unless triggerOnCompletion is true. Manage tasks with bg_status, bg_logs and bg_kill, not the process tool. Log output is capped at ${formatSize(MAX_LOG_BYTES)}.`,
+    description: "Start a long-running shell command in the background and return at once with a task ID and output path. Its end arrives as a <background-task-notification>; do not sleep or poll for it. Manage it with bg_status, bg_logs and bg_kill.",
     promptSnippet:
       "Start background work; finished tasks wake the agent once, services update only the UI",
     promptGuidelines: [
@@ -792,7 +788,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     name: "bg_status",
     label: "Background Status",
     description:
-      "Inspect one explicit bg_run task or list all running/recent tasks in the background-task registry. Managed-bash helper jobs belong to the process tool. This is a point-in-time inspection tool, not a waiting primitive.",
+      "Status of one bg_run task, or of every running and recent one. A look at this moment, not a way to wait.",
     promptSnippet:
       "Inspect point-in-time status for one or all background tasks; never poll it as a wait loop",
     parameters: BgStatusParams,
@@ -819,7 +815,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgLogsParams, BgLogsDetails>({
     name: "bg_logs",
     label: "Background Logs",
-    description: `Read bounded output from an explicit bg_run task for deliberate inspection, not as a waiting primitive; capped at ${formatSize(MAX_LOG_BYTES)}, with a pointer to the full file when truncated. Managed-bash helper output belongs to the process tool.`,
+    description: `Read the output of a bg_run task, capped at ${formatSize(MAX_LOG_BYTES)}; a cut read points to the full file. Not a way to wait.`,
     promptSnippet:
       "Read bounded task output when needed; never tail it repeatedly as a wait loop",
     parameters: BgLogsParams,
@@ -863,7 +859,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     name: "bg_kill",
     label: "Background Kill",
     description:
-      "Stop a running background task by ID. Fails loudly if the task is unknown; a task that already finished is reported with its terminal state and nothing is signalled.",
+      "Stop a running background task. An unknown task is an error; a finished one is reported as it ended.",
     promptSnippet: "Stop a running background task by ID",
     parameters: BgKillParams,
     async execute(_toolCallId, params) {

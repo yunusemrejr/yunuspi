@@ -12,15 +12,15 @@ import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { documentMutationEvidence } from "../guardian/guardian-prose.js";
 const replaceEditSchema = Type.Object({
     oldText: Type.String({
-        description: "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+        description: "Exact text to replace: unique in the original file and not overlapping another entry.",
     }),
-    newText: Type.String({ description: "Replacement text for this targeted edit." }),
+    newText: Type.String(),
 }, {});
 const editSchema = Type.Object({
     expectedHash: Type.Optional(Type.String({ description: "Content hash from the previous edit; a mismatch rejects the write." })),
-    path: Type.String({ description: "Path to the file to edit (relative or absolute)" }),
+    path: Type.String({ description: "Relative or absolute." }),
     edits: Type.Array(replaceEditSchema, {
-        description: "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
+        description: "Each entry is matched against the original file, not against the result of earlier entries. Merge changes to the same or nearby lines into one entry.",
     }),
 }, {});
 export const editToolSystemPromptContribution = {
@@ -84,7 +84,7 @@ export function createEditToolDefinition(cwd, options) {
     return {
         name: "edit",
         label: "edit",
-        description: "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+        description: "Edit one file by exact text replacement. Keep each oldText as small as is still unique; do not include large unchanged regions to connect distant changes.",
         promptSnippet: editToolSystemPromptContribution.snippet,
         promptGuidelines: [...editToolSystemPromptContribution.guidelines],
         parameters: editSchema,

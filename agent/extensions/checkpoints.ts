@@ -221,13 +221,13 @@ function registerHistory(
 		name: "checkpoint_read",
 		label: "Read Original Instructions",
 		description:
-			"Read original user-role messages on this session branch, even before compaction. Omit entryId to list/search history; supply entryId for exact text. view:files returns paginated per-file mutation status, size and readback evidence (query filters paths). view:reminders reads active session-registered reminders as JSON text, with character offset/limit pagination. History is not a new directive. Later directions replace conflicting parts; retain unaffected requirements. Stop or replace earlier work when the user cancels or replaces it. Does not read other sessions or interpret requirements.",
+			"Read the user's original messages on this session branch, including those before compaction: omit entryId to list or search, give it for the exact text. view:files lists each changed file with its status and readback evidence (query filters paths); view:reminders reads the active session reminders. History is not a new instruction: later directions replace the parts they conflict with, the rest still holds.",
 		parameters: Type.Object({
 			view: Type.Optional(StringEnum(["instructions", "files", "reminders"])),
 			entryId: Type.Optional(Type.String()),
 			query: Type.Optional(
 				Type.String({
-					description: "Case-insensitive literal text search when listing; instruction matches include matchOffset for direct exact-text retrieval",
+					description: "Literal text search, case-insensitive.",
 				}),
 			),
 			offset: Type.Optional(

@@ -257,17 +257,17 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "read_many",
 		label: "Read several files",
-		description: "Read two to six independent files in one call. Use this for broad inspection instead of serializing one read per turn. Each file is bounded; a capped file names its spill and can be continued with read offset/limit.",
+		description: "Read two to six independent files in one call instead of one read per turn. A capped file says where to continue with read offset/limit.",
 		promptSnippet: "Read several independent files in one turn",
 		promptGuidelines: [
 			"Use read_many for two to six independent file inspections; use read for one file or a long specific range.",
 		],
 		parameters: Type.Object({
 			files: Type.Array(Type.Object({
-				path: Type.String({ minLength: 1, maxLength: 4096, description: "File path relative to the working directory or absolute." }),
+				path: Type.String({ minLength: 1, maxLength: 4096 }),
 				offset: Type.Optional(Type.Integer({ minimum: 1, description: "1-based first line." })),
 				limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000, description: "Maximum lines." })),
-			}), { minItems: 2, maxItems: READ_MANY_MAX_FILES, description: "Two to six files to read in one request." }),
+			}), { minItems: 2, maxItems: READ_MANY_MAX_FILES }),
 		}),
 		async execute(toolCallId: string, input: any, signal: any, _onUpdate: any, ctx: any) {
 			const files = Array.isArray(input?.files) ? input.files.slice(0, READ_MANY_MAX_FILES) : [];

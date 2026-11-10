@@ -41,6 +41,33 @@ test("invalid user overrides retain the builtin and expose the broken file", () 
 	}
 });
 
+test("the capability list states shared facts once and each agent's own tools on its line", () => {
+	const directory = path.join(process.env.PI_CODING_AGENT_DIR, "agents");
+	fs.mkdirSync(directory, { recursive: true });
+	const files = {
+		"list-plain.md": "---\nname: list-plain\ndescription: Answers one question\n---\nPlain\n",
+		"list-narrow.md": "---\nname: list-narrow\ndescription: Reads and searches\ntools: read, grep\n---\nNarrow\n",
+		"list-fenced.md": "---\nname: list-fenced\ndescription: Works without a shell\nexcludeTools: bash\n---\nFenced\n",
+	};
+	for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(directory, name), body);
+	test.after(() => { for (const name of Object.keys(files)) fs.rmSync(path.join(directory, name), { force: true }); });
+	discovery.clearAgentDiscoveryCache();
+	const context = { cwd: work, modelRegistry: { getAvailable: () => [] } };
+	const text = (params) => handleManagementAction("list", params, context).content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+	const lines = text({ capabilities: true, agentScope: "user" }).split("\n");
+	assert.match(lines[0], /default tools unless its line lists its own/);
+	assert.ok(lines.includes("- list-plain (user): Answers one question"), lines.filter((line) => line.includes("list-")).join(" | "));
+	assert.ok(lines.includes("- list-narrow (user): Reads and searches; Tools: read, grep"));
+	assert.ok(lines.includes("- list-fenced (user): Works without a shell; Tools: default, excluding bash"));
+	// Nothing that holds for every agent is repeated per line.
+	const repeated = lines.filter((line) => line.startsWith("- ") && /Model: session|effort controller|default\/ambient/.test(line));
+	assert.deepEqual(repeated, []);
+	// The plain list keeps its own header and never carries tool notes.
+	const plain = text({ agentScope: "user" }).split("\n");
+	assert.equal(plain[0], "Executable agents:");
+	assert.ok(plain.includes("- list-narrow (user): Reads and searches"));
+});
+
 test("fallback diagnostics follow aliases and preserve package namespaces", () => {
 	const worker = { name: "worker", aliases: ["helper"], source: "builtin" };
 	const broken = { name: "worker", source: "user", filePath: "/test/worker.md", error: "invalid tools" };

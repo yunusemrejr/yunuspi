@@ -1,4 +1,6 @@
-// A renewable resource window, independent of the logical task lifetime.
+// A resource window, independent of the logical task lifetime. It runs from the last action, so a
+// session in use does not end in the middle of a task and one left idle for ten minutes does. The
+// action budget is what a long task has to renew.
 // The runner owns the expiry timer; a fake clock exercises boundary behavior.
 export function createBrowserLease(now = Date.now) {
   const durationMs = 10 * 60_000, actionLimit = 200;
@@ -11,6 +13,7 @@ export function createBrowserLease(now = Date.now) {
     consume(action) {
       if (action === "close") return;
       assertLive();
+      expiresAt = now() + durationMs;
       // Recovery reads, renewal, and the outer batch container (whose steps are budgeted individually) remain free.
       if (["tabs", "switch_tab", "close_tab", "read", "renew", "snapshot", "inspect", "verify", "logs", "network", "screenshot", "markers", "observe", "html", "batch"].includes(action)) return;
       if (actions >= actionLimit) throw Error("Browser session action limit reached; inspect current state and renew before continuing");

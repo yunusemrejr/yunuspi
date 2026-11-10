@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
 import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
-import { isTestLikeCommand } from "./lib/task-state/ingest.ts";
+import { isTestLikeCommand, uncountedCheckReason } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
 import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
 import { selfVerificationPrompt } from "./lib/lean-policy.ts";
@@ -196,8 +196,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	 * background suite then still left the goal free to close. The terminal receipt
 	 * carries the original command and the real exit state, so verify there instead.
 	 */
+	// A check run since the last change that could not count, kept so a refusal can say why.
+	let uncounted: { command: string; reason: string } | undefined;
 	const cover = (start: CheckStart | undefined, ctx: ExtensionContext) => {
 		if (!goalIsLive(goal) || !start || start.goalId !== goal.id) return;
+		uncounted = undefined;
 		const revision = goal.verification?.revision ?? 0;
 		const checked = Math.max(goal.verification?.checked ?? 0, Math.min(revision, start.revision));
 		if (checked !== (goal.verification?.checked ?? 0)) persist({ ...goal, verification: { revision, checked } }, ctx);
@@ -240,12 +243,19 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				void Promise.resolve(pi.sendUserMessage(`[goal ${added.goal.id}] ${added.appended}`, { deliverAs: "steer" })).catch(() => { /* the goal anchor still names the standard */ });
 			}
 		}
-		const observed = start ?? { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: String(event.input?.command ?? ""), tool: name };
+		// The command as it ran: project tests may have put `set -o pipefail;` in front of it after this
+		// extension saw the call, and whether a filtered check counts turns on that prefix.
+		const ran = typeof event.input?.command === "string" ? event.input.command : undefined;
+		const observed = start ? (ran === undefined ? start : { ...start, command: ran })
+			: { goalId: goal.id, revision: goal.verification?.revision ?? 0, command: ran ?? "", tool: name };
 		if (WRITE_TOOLS.has(name)) {
 			const file = event.details?.fileMutation?.resolved ?? event.input?.path;
 			// Reading the final documentation diff satisfies V; appending release notes after a green check
 			// must not manufacture another test run. Executable MDX and unknown/batched paths stay conservative.
-			if (typeof file !== "string" || !/\.(?:md|markdown|rst)$/i.test(file)) persist({ ...goal, verification: { revision: (goal.verification?.revision ?? 0) + 1, checked: goal.verification?.checked ?? 0 } }, ctx);
+			if (typeof file !== "string" || !/\.(?:md|markdown|rst)$/i.test(file)) {
+				uncounted = undefined;
+				persist({ ...goal, verification: { revision: (goal.verification?.revision ?? 0) + 1, checked: goal.verification?.checked ?? 0 } }, ctx);
+			}
 		}
 		else if (name === "bg_run" && isTestLikeCommand(observed.command)) {
 			if (event.toolCallId && !start) return;
@@ -260,6 +270,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// by project tests, which announces the call that passed the whole plan.
 			remember(planCandidates, event.toolCallId, observed);
 			lastCtx = ctx;
+			const reason = event.details?.exitCode === undefined || event.details.exitCode === 0 ? uncountedCheckReason(observed.command) : undefined;
+			if (reason) uncounted = { command: observed.command, reason };
 			const passed = passedPlanCalls.get(event.toolCallId);
 			if (passed) { passedPlanCalls.delete(event.toolCallId); cover(observed, ctx); }
 		}
@@ -475,7 +487,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 				case "status": return text(goalSummary(goal));
 				case "check": {
 					// The one completion check: criteria plus every test, review, delivery, media, audit and syntax step.
-					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await checkStatic(ctx.cwd, signal)];
+					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, uncounted }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await checkStatic(ctx.cwd, signal)];
 					const report = completionReport(goal.criteria, receipts);
 					const advisories = await staticAdvisories(ctx.cwd, signal);
 					// Same-model self-verification replaces external quality/observer gates:
@@ -535,7 +547,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					// footer; gating on them paged three at a time through every refusal.
 					const receipts = collectVerificationReceipts(32, ctx.sessionManager).filter((receipt) => receipt.source !== "deliverables");
 					const gated = [...receipts, ...verification];
-					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, refused, verification: gated });
+					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, uncounted, refused, verification: gated });
 					const why = String(params.reason ?? "").trim();
 					// After one refusal, a reasoned call closes the goal even when the list of
 					// gaps changed: checks that unfold one after another (capture, review,

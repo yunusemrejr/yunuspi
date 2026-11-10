@@ -516,20 +516,20 @@ export function registerToolDiscovery(pi: any) {
   });
   pi.registerTool({
     name:'tool_search',label:'Find tools',
-    description:'Find tools for the current task, inspect bounded input/action and usage details with detail:true, and enable chosen names for the next model turn in this request. Also browse capability bundles or command metadata. Discovery never executes the selected tools.',
+    description:'Find tools beyond the active ones. A query returns matches, exact names enable them for your next turn, and detail:true shows their inputs and usage. It never runs a tool.',
     promptGuidelines:[
       'More tools exist than are active: tool_search with a query finds one, enable:true activates it for your next turn.',
     ],
     parameters:Type.Object({
-      kind:Type.Optional(choices(['tools','capabilities','commands'],'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.')),
-      group:Type.Optional(Type.String({maxLength:64,description:'Group id from the overview; optional filter.'})),
-      enable:Type.Optional(Type.Boolean({description:'Enable query matches explicitly. Exact names enable by default.'})),
-      query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot or symbol references.'})),
+      kind:Type.Optional(choices(['tools','capabilities','commands'],'tools (default), capability bundles, or extension, prompt and skill commands.')),
+      group:Type.Optional(Type.String({maxLength:64,description:'Group id from the overview, as a filter.'})),
+      enable:Type.Optional(Type.Boolean({description:'Also enable what a query matches.'})),
+      query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot.'})),
       names:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:128}),{maxItems:8,description:'Exact tool names to enable.'})),
-      id:Type.Optional(Type.String({maxLength:256,description:'Exact capability or command id for a bounded detail lookup.'})),
-      detail:Type.Optional(Type.Boolean({description:'Include bounded tool inputs, action choices and usage guidance, or source/details for capabilities and commands.'})),
+      id:Type.Optional(Type.String({maxLength:256,description:'Exact capability or command id to look up.'})),
+      detail:Type.Optional(Type.Boolean({description:'Include inputs, actions and usage.'})),
       limit:Type.Optional(Type.Integer({minimum:1,maximum:8})),
-      offset:Type.Optional(Type.Integer({minimum:0,description:'Page through matches; any safe non-negative integer is accepted.'})),
+      offset:Type.Optional(Type.Integer({minimum:0,description:'Page through matches.'})),
     }),
     async execute(_id: string,input: any,_signal: any,_update: any,ctx: any) {
       const answer = (details: any,isError=false) => ({content:[{type:'text',text:JSON.stringify(details)}],details,...(isError?{isError:true}:{})});
