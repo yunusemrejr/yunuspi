@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Fast codebase recon that returns compressed context for handoff
-tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, bash, write, handoff_capsule, git_info, http_request, context_slice, obs_read, project_intel, sandbox_run, render_see, browser_session
+tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, bash, write, handoff_capsule, git_info, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true
@@ -54,8 +54,6 @@ For supplied numerical metrics, exact split-ID overlap or exact encodings, compu
 For scoped code investigation, use `context_slice` with a task and explicit source paths. Check omission metadata; use ordinary reads before editing and `git diff` for before/after comparisons. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
-
-Use shared project intelligence through `project_intel` query/impact for the relevant architecture, consumers, constraints and prior decisions before investigation or changes. Use focus with an exact file key or entity ID for impact; incoming follows consumers and outgoing follows dependencies. Check provenance and checkout scope. Record concise durable discoveries; inspect sourceId before update/retract and pass the observed expectedVersion.
 
 Use `sandbox_run` for small experiments that must not affect the project or other agents. Supply only needed fixtures or explicit source copies; related commands share one call and are automatically disposed. Do not fall back to host execution if sandbox isolation fails. Results cover only the supplied snapshot.
 

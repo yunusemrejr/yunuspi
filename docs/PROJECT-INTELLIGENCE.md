@@ -2,6 +2,10 @@
 
 Conversation branches, native checkpoints and project Git references remain separate, with explicit links when the harness observes their relationship.
 
+This layer is off in a default install: no project model is built and the
+`project_intel` tool and `/graph` do not exist. Start the harness with
+`PI_LEAN_GATES=on` to turn it on; everything below describes it switched on.
+
 YunusPi builds a private, persistent project model automatically. Start Pi in a
 project and discovery begins in a worker. Returning sessions reuse the model and
 refresh changed evidence. `/graph` opens its live interactive view in a separate
@@ -132,11 +136,13 @@ evidence into child handoffs. The viewer is an optional inspection surface.
   These record observed writes, not a claim that tests or deployment succeeded.
 - Git, shell, memory and child completion events schedule a debounced refresh.
   A 30-second heartbeat catches external edits and changes from other sessions.
-- Built-in scout, worker, reviewer, researcher, delegate and oracle profiles
-  load the capability. Fan-out workers using those profiles
-  share the same project domain. Explicit custom extension/tool restrictions
-  continue to apply. Read-only helpers can query; they return proposed
-  manual knowledge changes to their parent.
+- The built-in scout, worker, reviewer, researcher, delegate and oracle
+  profiles do not list `project_intel`, because a child that lists a tool its
+  session does not register is reported as failed. To let a delegated child
+  query the model, copy the profile into your own agents directory and add
+  `project_intel` to its `tools`. Children that have it share the same project
+  domain. Read-only helpers can query; they return proposed manual knowledge
+  changes to their parent.
 - Curated project memory and recent curated daily notes contribute selected
   historical decisions and constraints. Raw transcripts are not imported.
   Bounded Git history adds commit observations, without claiming those commits

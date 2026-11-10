@@ -11,9 +11,11 @@ const agentsDir = path.join(root, 'agent/extensions/pi-subagents/agents');
 // Provided by core or by the child runtime bridge rather than by an extension in the installed graph.
 const CORE = new Set(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls', 'contact_supervisor', 'intercom']);
 
-// A child that lists a tool nobody registers fails with "requested unavailable child tools" and never runs, so a
+// A child that lists a tool nobody registers is reported as failed with "requested unavailable child tools", so a
 // refactor that retires an extension must not silently drop tools that built-in agents are allowed to call.
-test('every tool a built-in agent allows is registered by the installed extension graph', { timeout: 90000 }, () => {
+// The graph is loaded the way a child loads it in a default install: as a subagent process, with no opt-in gate set.
+// Loading it with PI_LEAN_GATES=on once hid `project_intel`, a tool only that gate registers, in all six agents.
+test('every tool a built-in agent allows is registered in a default child session', { timeout: 90000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-agent-tools-'));
   const agentDir = path.join(dir, 'agent');
   fs.mkdirSync(agentDir);
@@ -25,7 +27,6 @@ test('every tool a built-in agent allows is registered by the installed extensio
     const script = `
       import {DefaultResourceLoader} from ${JSON.stringify(loaderUrl)};
       import {SettingsManager} from ${JSON.stringify(settingsUrl)};
-process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer explicitly
       const loader = new DefaultResourceLoader({cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR,
         settingsManager: SettingsManager.inMemory({packages: []}), noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true});
       await loader.reload();
@@ -34,13 +35,14 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
       process.exit(0);
     `;
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-      cwd: dir, env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', PI_SUBAGENT_CHILD: '0' },
+      cwd: dir, env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1', PI_SUBAGENT_CHILD: '1', PI_LEAN_GATES: '' },
       encoding: 'utf8', timeout: 80000, maxBuffer: 1024 * 1024,
     });
     assert.ifError(child.error);
     assert.equal(child.status, 0, child.stderr);
     const graph = JSON.parse(child.stdout.trim().split('\n').at(-1));
     assert.deepEqual(graph.errors, []);
+    assert.ok(graph.tools.includes('workspace_search'), 'the extension graph loaded');
     const registered = new Set([...graph.tools, ...CORE]);
     const missing = [];
     for (const file of fs.readdirSync(agentsDir).filter(name => name.endsWith('.md'))) {
