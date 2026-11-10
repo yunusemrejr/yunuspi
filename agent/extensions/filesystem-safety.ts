@@ -3,8 +3,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	commandConsequence, downloadConsequence, downloadedFiles, elevatedConsequence, isShell, makeRecipes, makeRequest, packageScript,
-	pipelineConsequence, programFile, programOperands, REACHES_OUT, substitutionConsequence,
+	commandConsequence, downloadConsequence, downloadedFiles, downloadHost, elevatedConsequence, gitConsequence, gitVerb, isDownloader, isShell,
+	makeRecipes, makeRequest, packageScript, pipedProgram, pipelineConsequence, pipelineDownloads, programFile, programOperands, REACHES_OUT,
+	shellReadsStdin, substitutionConsequence,
 	type Consequence, type ParsedCommand,
 } from "./lib/command-consequence.ts";
 import { commandIntent, HARNESS_INPUT_ENTRY, inputDigest, sessionModelAsker, userWords, type IntentReading } from "./lib/command-intent.ts";
@@ -439,7 +440,69 @@ const MORE_WRAPPERS: Record<string, { valued: readonly string[]; leading: number
 	strace: { valued: ["-o", "-e", "-p", "-s", "-u", "-E", "-a", "-I", "-b", "-P", "-S", "-U", "-X"], leading: 0 },
 	ltrace: { valued: ["-o", "-e", "-p", "-s", "-u", "-a", "-n", "-l", "-x"], leading: 0 },
 };
-const WRAPPERS = new Set(["command", "exec", "sudo", "doas", "env", "nohup", "timeout", "nice", "stdbuf", "setsid", "busybox", ...Object.keys(MORE_WRAPPERS)]);
+const WRAPPERS = new Set(["command", "builtin", "exec", "sudo", "doas", "env", "nohup", "timeout", "nice", "stdbuf", "setsid", "busybox", ...Object.keys(MORE_WRAPPERS)]);
+
+/** What the nested readings of one command line share. */
+interface LineFacts {
+	/** The environment the line starts with. */
+	base: NodeJS.ProcessEnv;
+	/** Files this line downloaded, by path, with the host they came from. */
+	fetched: Map<string, string | undefined>;
+	/** Variables that hold a download (`x=$(curl …)`), with the host. */
+	fetchedVars: Map<string, string | undefined>;
+	/** What each project script was found to send out, so one is read once. */
+	scripts: Map<string, Consequence[]>;
+	/** git aliases this line defines. */
+	aliases: Map<string, string>;
+}
+
+/** A workspace run (`pnpm -r run x`, `npm run x -w pkg`) can reach any package
+ * of the project: the root and every package.json up to three levels below it. */
+function packageDirs(root: string): string[] {
+	const found = [root];
+	let budget = 3000;
+	const walk = (dir: string, level: number) => {
+		let entries: fs.Dirent[];
+		try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+		for (const entry of entries) {
+			if (budget-- <= 0 || found.length >= 80) return;
+			if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue;
+			const next = path.join(dir, entry.name);
+			if (fs.existsSync(path.join(next, "package.json"))) found.push(next);
+			if (level < 3) walk(next, level + 1);
+		}
+	};
+	walk(root, 1);
+	return found;
+}
+
+/** A git alias of this name from the repository's or the user's own
+ * configuration. Files those include are not followed. */
+function configuredGitAlias(dir: string, verb: string): string | undefined {
+	const files: string[] = [];
+	for (let at = dir; ; at = path.dirname(at)) {
+		const dot = path.join(at, ".git");
+		if (fs.existsSync(dot)) {
+			const link = /^gitdir:\s*(.+)$/m.exec(readSmall(dot) ?? "")?.[1];
+			const gitDir = link ? path.resolve(at, link.trim()) : dot;
+			const common = readSmall(path.join(gitDir, "commondir"))?.trim();
+			files.push(path.join(common ? path.resolve(gitDir, common) : gitDir, "config"));
+			break;
+		}
+		if (path.dirname(at) === at) break;
+	}
+	files.push(path.join(HOME, ".gitconfig"), path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, ".config"), "git", "config"));
+	for (const file of files) {
+		let inAlias = false, found: string | undefined;
+		for (const line of (readSmall(file) ?? "").split(/\r?\n/)) {
+			const section = /^\s*\[\s*([^\]\s"]+)/.exec(line);
+			if (section) { inAlias = section[1].toLowerCase() === "alias"; continue; }
+			const entry = inAlias ? /^\s*([\w-]+)\s*=\s*(.*?)\s*$/.exec(line) : null;
+			if (entry && entry[1].toLowerCase() === verb.toLowerCase()) found = entry[2].replace(/^"(.*)"$/s, "$1").replace(/\\(["\\])/g, "$1");
+		}
+		if (found) return found;
+	}
+}
 
 /** The one answer the guard acts on: a block, or the first review with every
  * further one behind it. */
@@ -448,8 +511,9 @@ function assessShellMutation(
 	cwd: string,
 	environment = process.env,
 	depth = 0,
+	facts?: LineFacts,
 ): ShellRisk | undefined {
-	const { blocked, reviews } = assessShell(command, cwd, environment, depth);
+	const { blocked, reviews } = assessShell(command, cwd, environment, depth, facts);
 	if (blocked) return blocked;
 	if (!reviews.length) return undefined;
 	if (reviews.length > MAX_REVIEWS)
@@ -463,7 +527,8 @@ function assessShell(
 	cwd: string,
 	environment = process.env,
 	depth = 0,
-): { blocked?: ShellRisk; reviews: ShellRisk[] } {
+	facts: LineFacts = { base: environment, fetched: new Map(), fetchedVars: new Map(), scripts: new Map(), aliases: new Map() },
+): { blocked?: ShellRisk; reviews: ShellRisk[]; cwd?: string } {
 	if (depth > 5)
 		return {
 			reviews: [{
@@ -485,6 +550,8 @@ function assessShell(
 		cwd: string | undefined;
 	}> = [];
 	let conditionalCd: string | undefined;
+	/** Where `pushd` came from, for `popd`. */
+	const dirs: (string | undefined)[] = [];
 	let mutationCwd: string | undefined = cwd;
 	let blocked: ShellRisk | undefined;
 	const reviews: ShellRisk[] = [];
@@ -515,42 +582,64 @@ function assessShell(
 		}
 		note({ level: "review", target, resolved: true, reason: `This command ${consequence.effect}`, consequence, ...(workdir ? { workdir } : {}) });
 	};
-	/** Files this command line downloaded, by path, with the host they came from. */
-	const fetched = new Map<string, string | undefined>();
+	const fetched = facts.fetched;
 	const placed = (file: string | undefined) => file === undefined || file === "" ? undefined
 		: path.isAbsolute(file) ? path.resolve(file) : mutationCwd ? path.resolve(mutationCwd, file) : undefined;
 	/** A download from earlier on this line, run before anyone has read it. */
-	const ranDownload = (invoked: string, name: string, values: readonly (string | undefined)[]): Consequence | undefined => {
+	const ranDownload = (invoked: string, name: string, values: readonly (string | undefined)[], stdin?: string): Consequence | undefined => {
 		if (!fetched.size) return;
-		for (const file of [invoked.includes("/") ? invoked : undefined, programFile(name, values)]) {
+		for (const file of [invoked.includes("/") ? invoked : undefined, programFile(name, values), stdin]) {
 			const full = placed(file);
 			if (full && fetched.has(full)) return downloadConsequence(fetched.get(full));
 		}
+	};
+	/** A program operand that is a variable holding a download (`x=$(curl …); sh -c "$x"`).
+	 * The variable inside a longer program (`sh -c "echo $x"`) is data. */
+	const holdsDownload = (raw: string | undefined): Consequence | undefined => {
+		const key = /^"?\$(?:(\w+)|\{(\w+)\})"?$/.exec(raw ?? "");
+		const name = key?.[1] ?? key?.[2];
+		if (name && facts.fetchedVars.has(name)) return downloadConsequence(facts.fetchedVars.get(name));
 	};
 	/** A project's own script is read for what it sends out of this machine
 	 * (`npm run deploy`, `make release`, `./deploy.sh`): that needs the same say
 	 * as the bare command. What the script does to local files is not judged. */
 	const through = (script: string, where: string, via: string, scriptEnvironment: NodeJS.ProcessEnv) => {
 		if (depth >= SCRIPT_DEPTH) return;
-		for (const one of assessShell(script.slice(0, SCRIPT_CHARS), where, scriptEnvironment, depth + 1).reviews) {
-			const found = one.consequence;
-			if (!found || !REACHES_OUT.has(found.kind)) continue;
+		// One script is read once per line, however many times the line reaches it.
+		const text = script.slice(0, SCRIPT_CHARS);
+		let key = `${depth}\0${where}\0${text}`;
+		for (const name of new Set([...Object.keys(scriptEnvironment), ...Object.keys(facts.base)]))
+			if (scriptEnvironment[name] !== facts.base[name]) key += `\0${name}=${scriptEnvironment[name]}`;
+		let sent = facts.scripts.get(key);
+		if (!sent) {
+			sent = assessShell(text, where, scriptEnvironment, depth + 1, facts).reviews
+				.flatMap((one) => one.consequence && REACHES_OUT.has(one.consequence.kind) ? [one.consequence] : []);
+			facts.scripts.set(key, sent);
+		}
+		for (const found of sent) {
 			const effect = found.effect.includes(" (through ") ? found.effect : `${found.effect} (through ${via})`;
 			note({ level: "review", target: via, resolved: true, reason: `This command ${effect}`, consequence: { ...found, effect } });
 		}
 	};
-	const projectScript = (invoked: string, name: string, values: readonly (string | undefined)[], scriptEnvironment: NodeJS.ProcessEnv) => {
+	const projectScript = (invoked: string, name: string, values: readonly (string | undefined)[], scriptEnvironment: NodeJS.ProcessEnv, stdin?: string) => {
 		const where = mutationCwd;
 		if (!where || depth >= SCRIPT_DEPTH) return;
 		const run = packageScript(name, values);
 		if (run) {
-			const dir = run.dir ? path.resolve(where, run.dir) : where;
-			let scripts: Record<string, unknown> | undefined;
-			try { scripts = JSON.parse(readSmall(path.join(dir, "package.json")) ?? "null")?.scripts; } catch { scripts = undefined; }
-			if (!scripts || typeof scripts !== "object") return;
-			for (const key of [`pre${run.script}`, run.script, `post${run.script}`]) {
-				const body = Object.hasOwn(scripts, key) ? scripts[key] : undefined;
-				if (typeof body === "string") through(body, dir, `the "${key}" script in package.json`, scriptEnvironment);
+			const root = run.dir ? path.resolve(where, run.dir) : where;
+			const packages = (run.spread ? packageDirs(root) : [root]).map((dir) => {
+				try { return { dir, manifest: JSON.parse(readSmall(path.join(dir, "package.json")) ?? "null") }; } catch { return { dir, manifest: undefined }; }
+			});
+			// The packages the command names; when none can be told apart, every one.
+			const named = packages.filter(({ dir, manifest }) => run.spread?.some((want) => want === manifest?.name || path.resolve(root, want) === dir));
+			for (const { dir, manifest } of named.length ? named : packages) {
+				const scripts: Record<string, unknown> | undefined = manifest?.scripts;
+				if (!scripts || typeof scripts !== "object") continue;
+				const file = path.relative(where, path.join(dir, "package.json"));
+				for (const key of [`pre${run.script}`, run.script, `post${run.script}`]) {
+					const body = Object.hasOwn(scripts, key) ? scripts[key] : undefined;
+					if (typeof body === "string") through(body, dir, `the "${key}" script in ${file}`, scriptEnvironment);
+				}
 			}
 			return;
 		}
@@ -565,13 +654,14 @@ function assessShell(
 		}
 		// A shell script: run by its path, or handed to a shell.
 		const byPath = invoked.includes("/") && !/^\/(?:usr\/)?(?:local\/)?s?bin\//.test(invoked);
-		const file = isShell(name) || name === "source" || name === "." ? programFile(name, values) : byPath ? invoked : undefined;
+		const file = isShell(name) || name === "source" || name === "." ? programFile(name, values) ?? stdin : byPath ? invoked : undefined;
 		if (!file) return;
 		const full = path.resolve(where, file), text = readSmall(full);
 		if (text === undefined) return;
 		const shebang = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(text);
 		const interpreter = shebang ? path.basename(/(?:^|\/)env$/.test(shebang[1]) ? shebang[2] ?? "" : shebang[1]) : "";
-		if (file !== invoked || (shebang ? isShell(interpreter) : /\.(?:sh|bash)$/.test(full))) through(text, where, path.basename(full), scriptEnvironment);
+		// A file run by its path with no `#!` line is run by the shell as a shell script.
+		if (file !== invoked || (shebang ? isShell(interpreter) : !text.includes("\0"))) through(text, where, path.basename(full), scriptEnvironment);
 	};
 	/** The command a substitution body runs first, behind any wrapper. */
 	const substituted = (body: string): ParsedCommand => {
@@ -676,15 +766,19 @@ function assessShell(
 						state.cwd ?? cwd,
 						{ ...environment, ...Object.fromEntries(state.vars) },
 						depth + 1,
+						facts,
 					),
 				);
 		}
 		const args: string[] = [],
 			redirects: string[] = [];
+		let stdinFile: string | undefined, hereString: string | undefined;
 		for (let i = 0; i < tokens.length; i++) {
 			if (tokens[i].operator && /^[<>]/.test(tokens[i].raw)) {
 				const op = tokens[i].raw,
 					operand = tokens[++i]?.raw;
+				if (op === "<<" && operand === "<") hereString = tokens[++i]?.raw;
+				else if (op === "<" && operand && !tokens[i].operator) stdinFile = operand;
 				if (operand && [">", ">>"].includes(op)) {
 					if (args.length && /^\d+$/.test(args.at(-1)!)) args.pop();
 					if (operand !== "/dev/null" && !/^\d+$/.test(operand))
@@ -709,6 +803,9 @@ function assessShell(
 			const m = /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(args[i]);
 			if (!m) break;
 			const value = shellValue(m[2], state);
+			const source = shellSubstitutions(m[2]).map(substituted).find((run) => isDownloader(run.name));
+			if (source) facts.fetchedVars.set(m[1], downloadHost(source.values));
+			else facts.fetchedVars.delete(m[1]);
 			assignments.push([m[1], value]);
 			state.vars.set(m[1], value);
 			i++;
@@ -781,6 +878,7 @@ function assessShell(
 									childCwd ?? cwd,
 									childEnvironment,
 									depth + 1,
+									facts,
 								),
 							);
 						return;
@@ -849,22 +947,65 @@ function assessShell(
 		note(hostOperationRisk(name, values));
 		if (/^python[\d.]*$/.test(name) && values[0] === "-m" && values[1] === "esptool")
 			note(hostOperationRisk("esptool", values.slice(2)));
-		parsed = { name, values };
+		parsed = {
+			name, values,
+			writes: [...redirects, ...(name === "tee" ? operands.filter((_arg, at) => !(values[at] ?? "-").startsWith("-")) : [])]
+				.flatMap((raw) => placed(shellValue(raw, state)) ?? []),
+		};
+		// A shell given no script reads one from stdin: `bash < deploy.sh`, `sh <<< "…"`.
+		const stdinProgram = shellReadsStdin(name, values);
+		const stdin = stdinProgram && stdinFile ? shellValue(stdinFile, state) : undefined;
 		// `GIT_DIR=… git reset --hard` acts on another repository than the one a snapshot would cover.
 		const relocated = name === "git" && ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"].some((key) => childEnvironment[key] !== environment[key]);
-		const named = commandConsequence(name, values) ??
+		// `git --git-dir="$d" status`: an option whose value is unknown is still that option.
+		const read = name === "git" ? values.map((value, at) => value ?? /^--?[\w-]+=?/.exec(operands[at])?.[0]) : values;
+		const named = commandConsequence(name, read) ??
 			substitutionConsequence(name, programOperands(name, values).flatMap((at) => shellSubstitutions(operands[at])).map(substituted)) ??
-			ranDownload(invoked, name, values);
+			programOperands(name, values).map((at) => holdsDownload(operands[at])).find(Boolean) ??
+			(stdinProgram ? holdsDownload(hereString) : undefined) ??
+			ranDownload(invoked, name, values, stdin);
 		consequential(named, name, relocated);
-		// A snapshot settles lost edits, not the fact that the command ran as administrator.
-		if (elevated && (!named || named.needs === "snapshot")) consequential(elevatedConsequence(name, values, invoked), name);
+		// Running as administrator is its own effect: asking for a push is not asking for a push as root.
+		if (elevated) consequential(elevatedConsequence(name, values, invoked), name);
+		if (stdinProgram && hereString !== undefined) {
+			const text = shellValue(hereString, state);
+			if (text !== undefined) note(assessShellMutation(text, childCwd ?? cwd, childEnvironment, depth + 1, facts));
+		}
+		const git = name === "git" ? gitVerb(read) : undefined;
+		if (git?.unread) uncertain("git", "The git subcommand is not written out, so what this command does cannot be read; write the command explicitly");
+		else if (git?.verb && !named && mutationCwd) {
+			// An alias stands for another git command or, behind `!`, a shell command.
+			git.head.forEach((option, at) => {
+				const set = option === "-c" ? /^alias\.([\w-]+)=([\s\S]*)$/i.exec(git.head[at + 1] ?? "") : null;
+				if (set) facts.aliases.set(set[1], set[2]);
+			});
+			const [key, value] = git.verb === "config" ? git.rest.filter((word) => word !== undefined && !word.startsWith("-")) : [];
+			const defined = /^alias\.([\w-]+)$/i.exec(key ?? "");
+			if (defined && value) facts.aliases.set(defined[1], value);
+			const home = path.resolve(mutationCwd, git.workdir ?? ".");
+			const aliased = (verb: string | undefined) => verb === undefined ? undefined : facts.aliases.get(verb) ?? configuredGitAlias(home, verb);
+			const via = `the git alias "${git.verb}"`;
+			// An alias may begin with another alias; git follows the chain.
+			let words: (string | undefined)[] = [git.verb, ...git.rest], shell: string | undefined;
+			for (let hop = 0; hop < 4 && shell === undefined; hop++) {
+				const alias = aliased(words[0]);
+				if (!alias) break;
+				if (alias.startsWith("!")) shell = alias.slice(1);
+				else words = [...alias.split(/\s+/).filter(Boolean), ...words.slice(1)];
+			}
+			if (shell !== undefined) through(shell, home, via, childEnvironment);
+			else if (words[0] !== git.verb) {
+				const found = gitConsequence([...git.head, ...words]);
+				if (found) consequential({ ...found, effect: `${found.effect} (through ${via})` }, name, relocated);
+			}
+		}
 		if (name === "su" || name === "runuser") {
 			const at = values.findIndex((value) => ["-c", "--command", "--session-command"].includes(value ?? ""));
 			const script = at >= 0 ? values[at + 1] : values.map((value) => /^--(?:session-)?command=([\s\S]*)$/.exec(value ?? "")?.[1]).find((found) => found !== undefined);
 			if (script !== undefined) {
 				const first = substituted(script);
 				consequential(elevatedConsequence(first.name, first.values), name);
-				note(assessShellMutation(script, childCwd ?? cwd, childEnvironment, depth + 1));
+				note(assessShellMutation(script, childCwd ?? cwd, childEnvironment, depth + 1, facts));
 			} else if (at >= 0) uncertain(name, "The command run as another user is unresolved");
 		}
 		const download = downloadedFiles(name, values);
@@ -872,7 +1013,7 @@ function assessShell(
 			const full = placed(file);
 			if (full) fetched.set(full, download.host);
 		}
-		projectScript(invoked, name, values, childEnvironment);
+		projectScript(invoked, name, values, childEnvironment, stdin);
 		if (name === "find") {
 			for (let at = 0; at < operands.length; at++) {
 				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(values[at] ?? "")) continue;
@@ -884,7 +1025,7 @@ function assessShell(
 				// Filesystem operands from find remain owned by the scoped-root
 				// checks below; recursively inspect only command/shell wrappers.
 				if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(executable))
-					note(assessShellMutation(operands.slice(at + 1, end).join(" "), state.cwd ?? cwd, childEnvironment, depth + 1));
+					note(assessShellMutation(operands.slice(at + 1, end).join(" "), state.cwd ?? cwd, childEnvironment, depth + 1, facts));
 				at = end;
 			}
 		}
@@ -901,9 +1042,14 @@ function assessShell(
 			consequential(commandConsequence(path.basename(values[at] ?? ""), [...values.slice(at + 1), undefined]), "xargs");
 			if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(path.basename(values[at] ?? "")))
 				note(assessShellMutation([...operands.slice(at), '"${__PI_XARGS_OPERAND}"'].join(" "), state.cwd ?? cwd,
-					{ ...childEnvironment, __PI_XARGS_OPERAND: undefined }, depth + 1));
+					{ ...childEnvironment, __PI_XARGS_OPERAND: undefined }, depth + 1, facts));
 		}
-		if (name === "cd") {
+		if (name === "popd") {
+			if (dirs.length) state.cwd = dirs.pop();
+			return;
+		}
+		if (name === "cd" || name === "pushd") {
+			if (name === "pushd") dirs.push(state.cwd);
 			const dest = shellValue(
 				operands.find((a) => a !== "--" && a !== "-P" && a !== "-L") ?? "~",
 				state,
@@ -980,15 +1126,19 @@ function assessShell(
 			if (["for", "while", "until", "if", "case"].includes(name))
 				branches.push({ vars: new Map(state.vars), cwd: state.cwd });
 			// `eval` runs its operands as a command line; one that cannot be resolved stays unread.
-			if (["if", "elif", "while", "until"].includes(name) || name === "eval" && values.length > 0 && values.every((value) => value !== undefined))
-				note(
-					assessShellMutation(
-						name === "eval" ? values.join(" ") : operands.join(" "),
-						state.cwd ?? cwd,
-						{ ...environment, ...Object.fromEntries(state.vars) },
-						depth + 1,
-					),
+			if (["if", "elif", "while", "until"].includes(name) || name === "eval" && values.length > 0 && values.every((value) => value !== undefined)) {
+				const inner = assessShell(
+					name === "eval" ? values.join(" ") : operands.join(" "),
+					state.cwd ?? cwd,
+					{ ...environment, ...Object.fromEntries(state.vars) },
+					depth + 1,
+					facts,
 				);
+				note(inner.blocked);
+				for (const one of inner.reviews) note(one);
+				// `if cd build; then …`: what follows runs where the condition left it.
+				if (state.cwd && inner.cwd !== state.cwd) state.cwd = inner.cwd;
+			}
 			// No inference of branch or sourced assignments; dependent targets need review.
 			for (const key of state.vars.keys()) state.vars.set(key, undefined);
 			if (name === "for" || name === "read")
@@ -1009,6 +1159,7 @@ function assessShell(
 							childCwd ?? cwd,
 							childEnvironment,
 							depth + 1,
+							facts,
 						),
 					);
 			}
@@ -1234,6 +1385,10 @@ function assessShell(
 		if (run) stages.push(run);
 		if (operator !== "|") {
 			consequential(pipelineConsequence(stages), "pipeline");
+			const landed = pipelineDownloads(stages);
+			for (const file of landed.files) fetched.set(file, landed.host);
+			const text = pipedProgram(stages);
+			if (text !== undefined) note(assessShellMutation(text, state.cwd ?? cwd, environment, depth + 1, facts));
 			stages.length = 0;
 		}
 		if (operator === "(") feeds.push(substitutes ? run : undefined);
@@ -1268,7 +1423,7 @@ function assessShell(
 		} else segment.push(token);
 	}
 	endSegment();
-	return { blocked, reviews };
+	return { blocked, reviews, ...(state.cwd ? { cwd: state.cwd } : {}) };
 }
 
 // Compatibility helpers for older callers; production uses the single assessor.
@@ -1374,6 +1529,8 @@ function stripShellData(
 						break;
 					}
 				}
+				// `cat <<EOF | sh`: the body reaches a shell through the pipe.
+				if (/\|\s*(?:(?:sudo|env|nohup)\s+)*(?:\S*\/)?(?:ba|z|k|da|a)?sh(?:\s|$)/.test(command.slice(i, lineEnd))) shellConsumer = true;
 				// Locate the terminator line.
 				const bodyStart = lineEnd + 1;
 				let bodyEnd = bodyStart;

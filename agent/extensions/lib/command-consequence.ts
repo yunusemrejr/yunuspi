@@ -64,8 +64,8 @@ const base = (value: string) => value.slice(value.lastIndexOf("/") + 1);
 
 const GIT_GLOBAL_VALUED = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"];
 
-/** `git <verb>`: pushes, and the verbs that discard uncommitted work. */
-export function gitConsequence(values: Operands): Consequence | undefined {
+/** The options before git's verb: where the verb sits and which repository they point at. */
+function gitHead(values: Operands) {
 	const args = values.map((value) => value ?? "");
 	let at = 0, workdir: string | undefined, unlocated = false;
 	while (at < args.length && args[at].startsWith("-")) {
@@ -76,10 +76,28 @@ export function gitConsequence(values: Operands): Consequence | undefined {
 			if (next === undefined) unlocated = true;
 			else workdir = workdir === undefined || next.startsWith("/") ? next : `${workdir}/${next}`;
 		}
-		if (/^--(?:git-dir|work-tree)(?:=|$)/.test(option)) unlocated = true;
+		if (/^--(?:git-dir|work-tree)(?:=|$)/.test(option) || option === "-c" && /^core\.(?:worktree|bare)=/i.test(args[at + 1] ?? "")) unlocated = true;
 		at += GIT_GLOBAL_VALUED.includes(option) ? 2 : 1;
 	}
+	return { args, at, workdir, unlocated };
+}
+
+/** git's verb as written, and where its own operands start. `unread` when the
+ * verb is a variable, a substitution or a pattern: nothing can be said about
+ * what such a command does. */
+export function gitVerb(values: Operands): { verb?: string; unread: boolean; head: Operands; rest: Operands; workdir?: string } {
+	const { at, workdir } = gitHead(values);
+	const verb = values[at];
+	const unread = at < values.length && (verb === undefined || /[{}*?[\]]/.test(verb));
+	return { ...(verb === undefined ? {} : { verb }), unread, head: values.slice(0, at), rest: values.slice(at + 1), ...(workdir === undefined ? {} : { workdir }) };
+}
+
+/** `git <verb>`: pushes, and the verbs that discard uncommitted work. */
+export function gitConsequence(values: Operands): Consequence | undefined {
+	const { args, at, workdir, unlocated } = gitHead(values);
 	const verb = args[at], rest = args.slice(at + 1);
+	// `git push -h` prints usage and does nothing else.
+	if (rest.slice(0, rest.includes("--") ? rest.indexOf("--") : rest.length).includes("-h")) return;
 	const local = (effect: string, needs: Consequence["needs"] = "snapshot"): Consequence => ({
 		kind: "local-loss", effect, needs, ...(workdir === undefined ? {} : { workdir }), ...(unlocated ? { unlocated: true as const } : {}),
 	});
@@ -112,6 +130,10 @@ export function gitConsequence(values: Operands): Consequence | undefined {
 		return local("overwrites uncommitted changes in the working tree");
 	if (verb === "switch" && (any(rest, "--discard-changes") || forced))
 		return local("discards uncommitted changes while switching branches");
+	if (verb === "rm" && forced && !any(rest, "--cached", "--dry-run") && !cluster(rest, "n"))
+		return local("deletes files together with any uncommitted changes in them");
+	if (verb === "submodule" && words(rest)[0] === "deinit" && forced)
+		return local("removes a submodule's files together with any uncommitted changes in them, which a snapshot of this repository does not cover", "request");
 	if (verb === "stash" && ["drop", "clear"].includes(words(rest)[0] ?? ""))
 		return local("deletes stashed work", "request");
 	if (verb === "worktree" && words(rest)[0] === "remove" && forced)
@@ -146,7 +168,7 @@ const RULES: Record<string, readonly Rule[]> = {};
 const rule = (names: string, ...rules: Rule[]) => { for (const name of names.split(" ")) RULES[name] = rules; };
 
 rule("npm pnpm bun yarn",
-	{ kind: "publish", effect: "publishes this package to a package registry, where anyone can install it", when: (list, args) => !dry(args) && (starts(list, "publish") || starts(list, "npm", "publish")) },
+	{ kind: "publish", effect: "publishes this package to a package registry, where anyone can install it", when: (list, args) => !dry(args) && (starts(list, "publish") || starts(list, "npm", "publish") || starts(list, "workspace") && (list[2] === "publish" || list[2] === "npm" && list[3] === "publish")) },
 	{ kind: "publish", effect: "changes a package that is already published (removal, deprecation, tags or owners)", when: (list) => starts(list, ["unpublish", "deprecate"]) || starts(list, ["dist-tag", "owner", "access"], ["add", "rm", "remove", "set", "grant", "revoke"]) });
 rule("cargo",
 	{ kind: "publish", effect: "publishes this crate to crates.io; a published version cannot be deleted", when: (list, args) => !dry(args) && starts(list, ["publish", "yank"]) });
@@ -157,7 +179,7 @@ rule("flutter dart", { kind: "publish", effect: "publishes this package to pub.d
 rule("dotnet nuget", { kind: "publish", effect: "publishes a package to a NuGet feed", when: (list) => starts(list, "nuget", "push") || starts(list, "push") });
 rule("mvn mvnw gradle gradlew", { kind: "publish", effect: "publishes build artifacts to a remote repository", when: (list, args) => !dry(args) && !cluster(args, "m") && list.some((word) => /^(?:deploy(?::[\w-]+)?|release:perform|(?:[\w-]*:)*publish(?!ToMavenLocal$)\w*|closeAndReleaseRepository)$/.test(word)) });
 rule("docker podman",
-	{ kind: "publish", effect: "uploads an image to a container registry", when: (list, args) => starts(list, "push") || starts(list, ["image", "manifest", "compose"], "push") || starts(list, ["build", "buildx"]) && any(args, "--push") },
+	{ kind: "publish", effect: "uploads an image to a container registry", when: (list, args) => starts(list, "push") || starts(list, ["image", "manifest", "compose"], "push") || starts(list, ["build", "buildx"]) && (any(args, "--push") || args.some((arg, at) => (["--output", "-o"].includes(args[at - 1]) || arg.startsWith("--output=")) && /(?:^|[=,])(?:type=registry|push=true)(?:,|$)/.test(arg))) },
 	{ kind: "local-loss", effect: "deletes Docker volumes and the data stored in them", when: (list, args) => starts(list, "system", "prune") && any(args, "--volumes") || starts(list, "volume", ["rm", "remove", "prune"]) || starts(list, "compose", "down") && (any(args, "--volumes") || cluster(args, "v")) });
 rule("docker-compose",
 	{ kind: "publish", effect: "uploads an image to a container registry", when: (list) => starts(list, "push") },
@@ -250,20 +272,56 @@ function httpDelete(args: readonly string[]): Consequence | undefined {
 	const at = args.findIndex((arg) => arg === "-X" || arg === "--request");
 	const method = at >= 0 ? args[at + 1] : args.map((arg) => /^(?:-X|--request=)(\w+)$/.exec(arg)?.[1]).find(Boolean);
 	if (!/^delete$/i.test(method ?? "")) return;
-	const target = sourceHost(args) ?? args.filter((arg) => !arg.startsWith("-")).map((arg) => /^([\w.-]+|\[[\da-f:]+\])(?::\d+)?(?:\/|$)/i.exec(arg)?.[1]).filter(Boolean).at(-1)?.toLowerCase();
+	const target = targetHost(args);
 	if (target && LOCAL_HOST.test(target)) return;
 	return { kind: "remote-delete", needs: "request", effect: `sends a DELETE request to ${target ?? "a server"}, removing something there` };
 }
 
+/** The address a transfer tool talks to, when the command names one. */
+const targetHost = (args: readonly string[]) => sourceHost(args) ??
+	args.filter((arg) => !arg.startsWith("-")).map((arg) => /^([\w.-]+|\[[\da-f:]+\])(?::\d+)?(?:\/|$)/i.exec(arg)?.[1]).filter(Boolean).at(-1)?.toLowerCase();
+
+/** `curl -T file`, `curl -F f=@file`, `curl -d @file`, `wget --post-file`: a
+ * local file's contents leave for a host that is not this machine. */
+function httpUpload(name: string, args: readonly string[]): Consequence | undefined {
+	let file: string | undefined;
+	for (let at = 0; at < args.length && !file; at++) {
+		const arg = args[at], next = args[at + 1] ?? "";
+		// `-T file`, `-sT file`, `-Tfile`, `--upload-file file`, `--upload-file=file`.
+		const value = (...flags: string[]) => flags.map((flag) => {
+			if (flag.startsWith("--")) return arg === flag ? next : arg.startsWith(`${flag}=`) ? arg.slice(flag.length + 1) : undefined;
+			const short = arg.startsWith("--") ? null : new RegExp(`^-[A-Za-z]*${flag[1]}(.*)$`).exec(arg);
+			return short ? short[1] || next : undefined;
+		}).find((found) => found !== undefined);
+		if (name === "wget") file = value("--post-file", "--body-file");
+		else {
+			file = value("-T", "--upload-file");
+			// `@file` after a data option, `name@file` after --data-urlencode, `field=@file` in a form.
+			file ??= /^@(.+)$/.exec(value("-d", "--data", "--data-binary", "--data-ascii", "--json") ?? "")?.[1] ??
+				/^[^=@]*@(.+)$/.exec(value("--data-urlencode") ?? "")?.[1] ?? /^[^=]*=[@<]([^;]+)/.exec(value("-F", "--form") ?? "")?.[1];
+		}
+		if (file === "") file = undefined;
+	}
+	if (!file) return;
+	const target = targetHost(args);
+	if (target && LOCAL_HOST.test(target)) return;
+	// `-` is stdin: whatever the pipeline feeds in (`cat report.json | curl -d @- …`).
+	return { kind: "send", needs: "request", effect: `uploads ${file === "-" ? "the data piped into it" : `the local file "${file}"`} to ${target ?? "a server"}` };
+}
+
 /** The consequence of one command, from its executable name and operands. */
 export function commandConsequence(name: string, values: Operands): Consequence | undefined {
-	if (name === "git") return gitConsequence(values);
 	const args = values.map((value) => value ?? "");
+	// `--help` ahead of any `--` makes a tool print its usage and stop.
+	const help = args.indexOf("--help"), dashes = args.indexOf("--");
+	if (help >= 0 && (dashes < 0 || help < dashes)) return;
+	if (name === "git") return gitConsequence(values);
 	for (const inner of launched(name, args)) {
 		const found = commandConsequence(inner.name, inner.args);
 		if (found) return found;
 	}
-	if (name === "curl") return httpDelete(args);
+	if (name === "curl") return httpDelete(args) ?? httpUpload(name, args);
+	if (name === "wget") return httpUpload(name, args);
 	const rules = Object.hasOwn(RULES, name) ? RULES[name] : undefined;
 	if (!rules) return;
 	const valued = Object.hasOwn(VALUED, name) ? VALUED[name] : [];
@@ -277,20 +335,32 @@ export function commandConsequence(name: string, values: Operands): Consequence 
 }
 
 /** Where a package manager runs a script from the project's own package.json:
- * the script's name and the directory option given, if any. */
-export function packageScript(name: string, values: Operands): { script: string; dir?: string } | undefined {
+ * the script's name and the directory option given, if any. `spread` when the
+ * script runs in workspace packages instead: the packages the command names
+ * (by name or path), or none named when it runs in all of them. */
+export function packageScript(name: string, values: Operands): { script: string; dir?: string; spread?: string[] } | undefined {
 	if (!["npm", "pnpm", "yarn", "bun"].includes(name) || values.includes(undefined)) return;
 	const args = values as readonly string[];
 	const DIR = ["--prefix", "-C", "--dir", "--cwd"];
-	const at = wordsAt(args, [...DIR, "-w", "--workspace", "--filter", "-F"]);
-	if (any(args, "-w", "--workspace", "--workspaces", "--filter", "-F", "-r", "--recursive")) return;
-	const list = at.map((index) => args[index]);
+	// pnpm's `-w` is a switch (the workspace root); npm's names a workspace.
+	const PICK = name === "npm" ? ["-w", "--workspace"] : ["--filter", "-F"];
+	const at = wordsAt(args, [...DIR, ...PICK, "--include", "--exclude", "--from", "-j", "--jobs"]);
+	const picked = args.flatMap((arg, index) => PICK.includes(arg) ? [args[index + 1] ?? ""] : PICK.flatMap((flag) => flag.startsWith("--") && arg.startsWith(`${flag}=`) ? [arg.slice(flag.length + 1)] : []));
+	let spread = picked.length > 0 || any(args, "--workspaces", "-ws", "-r", "--recursive");
+	let list = at.map((index) => args[index]);
+	// `yarn workspace web deploy`, `yarn workspaces foreach run deploy`.
+	if (name === "yarn" && ["workspace", "workspaces"].includes(list[0] ?? "")) {
+		if (list[0] === "workspace" && list[1]) picked.push(list[1]);
+		list = list.slice(list[0] === "workspace" || list[1] === "foreach" ? 2 : 1);
+		spread = true;
+	}
 	const runs = ["run", "run-script", "rum", "urn"].includes(list[0] ?? "");
 	const script = runs ? list[1] : name === "npm" ? ({ t: "test", tst: "test", test: "test", start: "start", stop: "stop", restart: "restart", version: "version" } as Record<string, string>)[list[0] ?? ""] : list[0];
 	if (!script) return;
 	const flag = args.findIndex((arg) => DIR.includes(arg));
 	const dir = flag >= 0 ? args[flag + 1] : args.map((arg) => /^--(?:prefix|dir|cwd)=(.+)$/.exec(arg)?.[1]).find(Boolean);
-	return { script, ...(dir ? { dir } : {}) };
+	// A pattern (`./packages/*`, `web...`) can match any package.
+	return { script, ...(dir ? { dir } : {}), ...(spread ? { spread: picked.some((want) => /[^\w@/.-]|\.\.\./.test(want)) ? [] : picked } : {}) };
 }
 
 /** What `make` was asked to build: targets, the directory and the makefile named. Undefined for a dry run. */
@@ -360,7 +430,7 @@ const STDIN_PROGRAM = (name: string, args: readonly string[]) => {
 };
 const sourceHost = (values: Operands) => {
 	for (const value of values) {
-		const match = /^[a-z][a-z0-9+.-]*:\/\/([^/\s?#@]*@)?([^/\s?#:]+)/i.exec(value ?? "");
+		const match = /^[a-z][a-z0-9+.-]*:\/\/([^/\s?#@]*@)?(\[[^\]\s]+\]|[^/\s?#:]+)/i.exec(value ?? "");
 		if (match) return match[2].toLowerCase();
 	}
 };
@@ -369,7 +439,33 @@ const remoteCode = (host: string | undefined): Consequence => ({
 	effect: `downloads a program from ${host ?? "the network"} and runs it at once, before anyone has read it`,
 });
 
-export interface ParsedCommand { name: string; values: Operands }
+export interface ParsedCommand {
+	name: string; values: Operands;
+	/** The files this command writes through a redirect or as `tee` output, as full paths. */
+	writes?: readonly string[];
+}
+export const isDownloader = (name: string) => DOWNLOADERS.has(name);
+export const downloadHost = (values: Operands) => sourceHost(values);
+/** A shell started without a script to run reads its program from stdin (`bash < deploy.sh`, `… | sh`). */
+export const shellReadsStdin = (name: string, values: Operands) => SHELL.test(name) && STDIN_PROGRAM(name, values.map((value) => value ?? ""));
+
+/** The files a pipeline fills with what it downloads: the downloader's own
+ * redirect (`curl … > i.sh`) and what later stages write (`curl … | tee i.sh`). */
+export function pipelineDownloads(stages: readonly ParsedCommand[]): { files: string[]; host?: string } {
+	const from = stages.findIndex((stage) => DOWNLOADERS.has(stage.name));
+	if (from < 0) return { files: [] };
+	const host = sourceHost(stages[from].values);
+	return { files: stages.slice(from).flatMap((stage) => stage.writes ?? []), ...(host ? { host } : {}) };
+}
+
+/** Text a pipeline hands to a shell as its program: `echo 'git push' | sh`. */
+export function pipedProgram(stages: readonly ParsedCommand[]): string | undefined {
+	for (let at = 1; at < stages.length; at++) {
+		const from = stages[at - 1];
+		if (!shellReadsStdin(stages[at].name, stages[at].values) || !["echo", "printf"].includes(from.name) || from.values.includes(undefined)) continue;
+		return (from.values as string[]).filter((value, index) => index > 0 || !/^-[neE]+$/.test(value)).join(" ");
+	}
+}
 
 /** A pipeline whose download feeds an interpreter (`curl … | sh`). */
 export function pipelineConsequence(stages: readonly ParsedCommand[]): Consequence | undefined {
@@ -451,6 +547,8 @@ const CHANGING_OPTION: Record<string, RegExp> = {
 	find: /^-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/,
 	journalctl: /^--(?:vacuum-\w+|rotate|flush|relinquish-var)(?:=|$)/,
 	dmesg: /^(?:-[a-zA-Z]*[cCnDE][a-zA-Z]*|--(?:clear|read-clear|console-level|console-off|console-on)(?:=.*)?)$/,
+	ss: /^(?:-[a-zA-Z]*K[a-zA-Z]*|--kill)$/,
+	ip: /^(?:exec|-b|-batch|-force)$/,
 };
 const BUILDS = /^(?:bash|sh|dash|zsh|ksh|fish|python[\d.]*|node|deno|bun|npm|npx|pnpm|yarn|pytest|make|cmake|ninja|ctest|cargo|go|pip[\d.]*|gem|perl|ruby|php)$/;
 
