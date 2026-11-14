@@ -21,6 +21,7 @@ import {
 	type ChildToolDiagnostic,
 } from "./tool-availability.ts";
 import { TOKEN_BUDGET_ENV, TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
+import { registerRunAwareness } from "./run-awareness.ts";
 import type { JsonSchemaObject, ResolvedToolBudget, SubagentState } from "../../shared/types.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
 import { getAgentDir, resolveWatchPath } from "../../shared/utils.ts";
@@ -826,6 +827,9 @@ export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): P
 	registerGitAuthorityGate(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
 	registerTokenBudget(pi, Number(process.env[TOKEN_BUDGET_ENV]));
+	// A child has no facts line of its own; it hears its time and spend from
+	// this note instead, rarely enough to never be noise.
+	if (process.env.PI_SUBAGENT_CHILD === "1") registerRunAwareness(pi);
 	registerChildWatchdog(pi);
 	registerSubagentModelRouteOverride(pi);
 	const waitToolConfig = resolveWaitToolConfig();

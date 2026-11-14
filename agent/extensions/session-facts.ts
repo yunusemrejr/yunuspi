@@ -1,7 +1,8 @@
 /**
  * Session facts — one stored, model-only line at each human message: local
  * time, session spend, context occupancy, prompt-cache hits and the last run's
- * time and cost, followed by one sentence of standing method.
+ * time and cost, followed by one sentence of standing method. A message that
+ * asks for speed adds the haste sentence to that same line, once.
  *
  * The line is returned once from before_agent_start and stored in the session,
  * so later requests replay the same bytes. Regenerating it per request would
@@ -31,6 +32,45 @@ const BUDGET_NOTE_TYPE = "run-budget";
 const GAP_MS = 10 * 60_000;
 const METHOD =
 	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to subagents.";
+
+/** A message asking for speed, in English or Turkish. */
+const HURRY_PATTERNS: RegExp[] = [
+	/\brush\b/,
+	/\bhurry\b/,
+	/\bbe quick\b/,
+	/\bquickly\b/,
+	/\bfaster\b/,
+	/\basap\b/,
+	/\btaking (?:too|so) long\b/,
+	/\bwe don'?t have all day\b/,
+	/\bno time\b/,
+	/\bacele\b/,
+	/çabuk/,
+	/\bhızlı ol\b/,
+	/\bhemen\b/,
+	/\buzun sürdü/,
+	/\bvakit yok\b/,
+];
+
+/**
+ * True when the message asks for speed. Code is not prose, and a technical
+ * term that merely contains one of the words ("faster-whisper") is not a
+ * request to hurry.
+ */
+export function hurryRequested(text: unknown): boolean {
+	if (typeof text !== "string" || !text) return false;
+	const prose = text
+		.replace(/```[\s\S]*?```/g, " ")
+		.replace(/`[^`\n]*`/g, " ")
+		.replace(/faster[-_](?:whisper|than)/gi, " ");
+	// Turkish lowercases I to ı: fold both spellings so an upper-case message matches too.
+	const folded = prose.replace(/İ/g, "i").replace(/I/g, "ı").toLowerCase();
+	return HURRY_PATTERNS.some((pattern) => pattern.test(folded));
+}
+
+/** Granted once, with the message that asked for speed. */
+export const HURRY_NOTE =
+	"The user wants speed now. Finish the open demands with the fewest steps: no new surveys, no optional checks or polish, one final check of what changed, then report. Stop subagents whose part is no longer needed.";
 
 /** Whole minutes, rounded; at least 1 once the run has any time. */
 export function wholeMinutes(ms: number): number {
@@ -100,7 +140,7 @@ export const limitText = (limits: RunBudget, joiner: string): string =>
 /** The one note per budget level; level 2 is twice the budget. */
 export function runBudgetNote(level: 1 | 2, minutes: number, usd: number | undefined, limits: RunBudget): string {
 	if (level === 2) return `[run budget] ${minutes} min and ${noteSpend(usd)} since the user's last message, twice the budget. End the run now: stop background work nobody needs, and report the state as it is, naming what is unverified.`;
-	return `[run budget] This run has worked for ${minutes} min and spent ${noteSpend(usd)} since the user's last message (budget: ${limitText(limits, " or ")}). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.`;
+	return `[run budget] You do not have much time left: this run has worked for ${minutes} min and spent ${noteSpend(usd)} since the user's last message (budget: ${limitText(limits, " or ")}). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.`;
 }
 
 interface Run {
@@ -217,7 +257,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		return undefined;
 	});
 
-	pi.on("before_agent_start", (_event: any, ctx: any) => {
+	pi.on("before_agent_start", (event: any, ctx: any) => {
 		try {
 			touch(ctx);
 			if (run) run.resting = false;
@@ -245,7 +285,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				cachePercent,
 				lastRun,
 			});
-			return { message: { customType: CUSTOM_TYPE, content, display: false } };
+			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
+			return { message: { customType: CUSTOM_TYPE, content: content + hurry, display: false } };
 		} catch {
 			return undefined;
 		}

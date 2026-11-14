@@ -8,7 +8,7 @@ import { SessionManager, sessionEntryToContextMessages } from '../core/coding-ag
 
 const root = path.resolve(import.meta.dirname, '..');
 const extensionUrl = pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href;
-const { default: registerSessionFacts } = await import(extensionUrl);
+const { default: registerSessionFacts, hurryRequested, HURRY_NOTE } = await import(extensionUrl);
 
 const METHOD = 'For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to subagents.';
 
@@ -183,7 +183,7 @@ test('the first run of a session is measured from zero, and small amounts stay r
 	// The first priced request arrives after the run began: the run has a cost
 	// from then on, so its budget can be passed and the next line can report it.
 	f.entries.push(assistantEntry({ total: 0.002 }));
-	assert.match(await f.toolResult('c1'), /^\[run budget\] This run has worked for \d+ min and spent \$0\.002 since the user's last message \(budget: \$0\.0015\)\./);
+	assert.match(await f.toolResult('c1'), /^\[run budget\] You do not have much time left: this run has worked for \d+ min and spent \$0\.002 since the user's last message \(budget: \$0\.0015\)\./);
 	const [second] = await f.humanMessage('Thanks.');
 	assert.match(second.message.content, /Session: \$0\.002, .*Last run: \d+ min, \$0\.002\./);
 
@@ -235,7 +235,7 @@ test('the run budget notes, active minutes and run reset', async (t) => {
 	assert.equal(await call('c1'), undefined, 'nothing is sent before the budget is reached');
 
 	clock.at += 60_000;
-	assert.equal(await call('c2'), '[run budget] This run has worked for 2 min and spent $0.002 since the user\'s last message (budget: 2 min or $0.50). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.');
+	assert.equal(await call('c2'), '[run budget] You do not have much time left: this run has worked for 2 min and spent $0.002 since the user\'s last message (budget: 2 min or $0.50). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.');
 
 	clock.at += 60_000;
 	assert.equal(await call('c3'), undefined, 'the first note is sent once');
@@ -267,7 +267,7 @@ test('a limit of 0 is off and is not mentioned', async (t) => {
 	await usdOnly.humanMessage('Ship it.');
 	usdOnly.entries.push(assistantEntry({ total: 0.5 }));
 	clock.at += 60_000;
-	assert.equal(await usdOnly.toolResult('c1'), '[run budget] This run has worked for 1 min and spent $0.50 since the user\'s last message (budget: $0.40). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.');
+	assert.equal(await usdOnly.toolResult('c1'), '[run budget] You do not have much time left: this run has worked for 1 min and spent $0.50 since the user\'s last message (budget: $0.40). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.');
 
 	const off = fixture(t, { settings: { run: { softMinutes: 0, softUsd: 0 } }, entries: [assistantEntry({ total: 0.01 })] });
 	registerSessionFacts(off.pi);
@@ -291,7 +291,7 @@ test('a gap longer than 10 minutes is idle time, not run time', async (t) => {
 	assert.equal(await f.toolResult('c1'), undefined, 'the 11-minute gap counts as zero active minutes');
 
 	clock.at += 119_000;
-	assert.match(await f.toolResult('c2'), /^\[run budget\] This run has worked for 2 min /);
+	assert.match(await f.toolResult('c2'), /^\[run budget\] You do not have much time left: this run has worked for 2 min /);
 });
 
 test('waiting for the user after the agent stopped is not run time', async (t) => {
@@ -323,6 +323,49 @@ test('waiting for the user after the agent stopped is not run time', async (t) =
 	clock.at += 60_000;
 	await f.toolResult('c3');
 	assert.equal(liveRun().minutes, 2, 'the pause between two stretches of the same run is left out');
+});
+
+test('a message that asks for speed carries one speed note with it', async (t) => {
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+	const [plain] = await f.humanMessage('Add a retry to the uploader.');
+	assert.doesNotMatch(plain.message.content, /The user wants speed now/, 'a plain message carries no speed note');
+
+	const [hurry] = await f.humanMessage('Hurry up, this is taking too long.');
+	assert.ok(hurry.message.content.endsWith(`\n${HURRY_NOTE}`), 'the speed note goes with the message that asked for speed');
+
+	const [next] = await f.humanMessage('Now update the changelog.');
+	assert.doesNotMatch(next.message.content, /The user wants speed now/, 'the note is granted once, with its own message');
+});
+
+test('speed detection reads prose in both languages and not a technical term', async () => {
+	for (const text of [
+		'Please rush, the build is waiting.',
+		'Hurry, we ship at noon.',
+		'be quick about it',
+		'Do this quickly.',
+		'Can you go faster?',
+		'asap please',
+		'This is taking too long.',
+		"we don't have all day",
+		'there is no time for a survey',
+		'acele et',
+		'çabuk ol',
+		'lütfen hızlı ol',
+		'hemen yap',
+		'çok uzun sürdü',
+		'vakit yok',
+		'ACELE ET, HIZLI OL',
+	]) assert.equal(hurryRequested(text), true, text);
+	for (const text of [
+		'Implement a quick sort for the numbers.',
+		'Use fast mode for this run.',
+		'/fast',
+		'Install faster-whisper and use it.',
+		'Sort the list and update the README.',
+		'```\nmake it faster\n```',
+		'Call `faster()` in the loop.',
+	]) assert.equal(hurryRequested(text), false, text);
 });
 
 test('/budget prints the live run line', async (t) => {

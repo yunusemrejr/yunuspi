@@ -1123,7 +1123,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `skill_review` — [`agent/extensions/lib/skill-review.ts`](../agent/extensions/lib/skill-review.ts) (line 59; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
-- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 887; literal)
+- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 891; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 779; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
@@ -1664,7 +1664,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 28 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 29 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1687,6 +1687,7 @@ The exporter includes 28 public skill directories. This list is a path inventory
 - `networking` — [`agent/skills/networking/SKILL.md`](../agent/skills/networking/SKILL.md)
 - `office-documents` — [`agent/skills/office-documents/SKILL.md`](../agent/skills/office-documents/SKILL.md)
 - `operate` — [`agent/skills/operate/SKILL.md`](../agent/skills/operate/SKILL.md)
+- `painterly-canvas` — [`agent/skills/painterly-canvas/SKILL.md`](../agent/skills/painterly-canvas/SKILL.md)
 - `research` — [`agent/skills/research/SKILL.md`](../agent/skills/research/SKILL.md)
 - `research-writing` — [`agent/skills/research-writing/SKILL.md`](../agent/skills/research-writing/SKILL.md)
 - `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../agent/skills/signature-experience/SKILL.md)

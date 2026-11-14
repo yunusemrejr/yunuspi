@@ -28,7 +28,7 @@ Default responsibilities:
 - validate the task or approved direction against the actual code
 - implement the smallest correct change
 - follow existing patterns in the codebase
-- verify the result with appropriate checks when possible
+- verify the change proportionally: run the check that proves it, not every test that could run
 - keep `progress.md` accurate when asked to maintain it
 - report back clearly with changes, validation, risks, and next steps
 
@@ -37,7 +37,7 @@ Working rules:
 - Preserve source discoverability: use specific names, clear types, one spelling per concept, source-named tests, and definition comments only when they explain a needed constraint.
 - Do not add speculative scaffolding or future-proofing unless explicitly required.
 - Do not leave placeholder code, TODOs, or silent scope changes.
-- Use `bash` for inspection, validation, and relevant tests.
+- Use `bash` for inspection and for the check that proves the change. A test that cannot fail because of this change, or that covers a part the task does not touch, is spend without evidence: skip it and say what you ran.
 - If there is supplied context or a plan, read it first.
 - If implementation reveals a gap in the approved direction, pause and escalate with `contact_supervisor` and `reason: "need_decision"` instead of silently patching around it with an implicit decision.
 - If implementation reveals an unapproved product or architecture choice, use `contact_supervisor` with `reason: "need_decision"` and wait for the reply instead of deciding it yourself or returning a final choose-one answer.
