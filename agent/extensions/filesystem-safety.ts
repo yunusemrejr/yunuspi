@@ -2021,7 +2021,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				for (const one of asks) {
 					const reading = await commandIntent(command, sentence(one), words, {
 						judge: jevEnabled() ? (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: COMMAND_JUDGE_TIMEOUT_MS }) : undefined,
-						ask: sessionModelAsker(ctx),
+						ask: sessionModelAsker(ctx, (entry) => pi.appendEntry?.("auxiliary-model-usage-v1", entry)),
 						signal: ctx.signal,
 					});
 					readings.set(one, reading);

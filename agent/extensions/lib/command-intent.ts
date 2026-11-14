@@ -115,7 +115,7 @@ export async function commandIntent(command: string, effect: string, words: read
 
 /** The session model as the fallback judge: one bounded request that carries
  * only the question, through the registry's own credentials. */
-export function sessionModelAsker(ctx: any): IntentPorts["ask"] {
+export function sessionModelAsker(ctx: any, record?: (entry: Record<string, unknown>) => void): IntentPorts["ask"] {
 	const model = ctx?.model, registry = ctx?.modelRegistry;
 	if (typeof model?.id !== "string" || typeof registry?.completeSimple !== "function") return undefined;
 	return async (prompt, signal) => {
@@ -123,6 +123,10 @@ export function sessionModelAsker(ctx: any): IntentPorts["ask"] {
 		const response = await registry.completeSimple(model, {
 			messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
 		}, { maxTokens: 1024, maxRetries: 0, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+		// The session's cost total includes this judge: one usage entry per answered request.
+		try {
+			if (response?.usage) record?.({ id: `command-judge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, owner: "command-judge", provider: model.provider, model: model.id, status: response.stopReason === "error" || response.stopReason === "aborted" ? "failed" : "completed", usage: response.usage });
+		} catch { /* accounting never blocks the judgment */ }
 		if (response?.stopReason === "error" || response?.stopReason === "aborted") throw Error(response.errorMessage || "no answer");
 		return (response?.content ?? []).filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n");
 	};

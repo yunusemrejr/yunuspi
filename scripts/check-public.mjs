@@ -16,6 +16,10 @@ const PUBLIC_BINARY_SHA256 = {
     "f25c2043ba71b940a7ca88e02e06ed7bb4e5103279fceca09678df1cc6618712",
   "docs/assets/metrics-demo.png":
     "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
+  // The painterly-canvas skill's example render (720x1240), drawn by its
+  // sibling examples/evening-field.js; no external or third-party content.
+  "agent/skills/painterly-canvas/examples/evening-field.jpg":
+    "3261d57c6a013b006077eda49886ddd1ad1325366e137273c97c0a06a405b66e",
   // The next four entries are not mirror handling: the removed release-template/
   // folder left these exact blobs in reachable Git history, and scanGit() checks
   // that history. Each is exempt only at its legacy path with its exact digest.
