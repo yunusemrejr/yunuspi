@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { clampThinkingLevel } from '@yunuspi/ai';
 
 const root = path.resolve(import.meta.dirname, '..');
 const lib = await import(pathToFileURL(path.join(root, 'agent/extensions/lib/context-governor.ts')).href);
@@ -156,11 +157,13 @@ function largeConversation(cycles = 140, chars = 4000) {
 	return messages;
 }
 
-function fakePi() {
+// `route` stands in for the core: it clamps a level the model lacks and reports a change only when the level moved.
+function fakePi(route) {
 	const hooks = new Map();
 	const commands = new Map();
 	const entries = [];
 	const tools = new Map();
+	const sets = [];
 	let thinking = 'max';
 	const pi = {
 		on(event, handler) {
@@ -172,12 +175,14 @@ function fakePi() {
 		appendEntry(type, data) { entries.push({ type, data }); },
 		getThinkingLevel() { return thinking; },
 		setThinkingLevel(level) {
+			sets.push(level);
 			const previous = thinking;
-			thinking = level;
-			for (const handler of hooks.get('thinking_level_select') ?? []) handler({ type: 'thinking_level_select', level, previousLevel: previous });
+			thinking = route ? clampThinkingLevel(route.model, level) : level;
+			if (route && thinking === previous) return;
+			for (const handler of hooks.get('thinking_level_select') ?? []) handler({ type: 'thinking_level_select', level: thinking, previousLevel: previous });
 		},
 	};
-	return { pi, hooks, commands, entries, tools, thinking: () => thinking };
+	return { pi, hooks, commands, entries, tools, sets, thinking: () => thinking };
 }
 
 function fakeCtx(overrides = {}) {
@@ -185,7 +190,7 @@ function fakeCtx(overrides = {}) {
 	return {
 		hasUI: true,
 		ui: { notify: (text, kind) => notifications.push({ text, kind }) },
-		model: { provider: 'deepseek', id: 'deepseek-flash', contextWindow: 1_000_000, maxTokens: 384_000, input: ['text'] },
+		model: { provider: 'deepseek', id: 'deepseek-flash', reasoning: true, thinkingLevelMap: { max: 'max' }, contextWindow: 1_000_000, maxTokens: 384_000, input: ['text'] },
 		sessionManager: { getSessionId: () => 'synthetic-session', getBranch: () => [] },
 		cwd: process.cwd(),
 		notifications,
@@ -420,7 +425,7 @@ test('economy mode lowers routine tool-continuation thinking, restores on errors
 		const { pi, hooks, thinking } = fakePi();
 		register(pi);
 		// A route whose cache does not key on the thinking mode may step down; DeepSeek, Anthropic and Qwen templates may not.
-		const ctx = fakeCtx({ model: { provider: 'openai', id: 'gpt-5', contextWindow: 400_000, maxTokens: 64_000, input: ['text'] } });
+		const ctx = fakeCtx({ model: { provider: 'openai', id: 'gpt-5', reasoning: true, thinkingLevelMap: { max: 'max' }, contextWindow: 400_000, maxTokens: 64_000, input: ['text'] } });
 		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
 		assert.equal(thinking(), 'max');
 		hooks.get('message_end')[0]({ message: { role: 'assistant', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.002 } } } }, ctx);
@@ -443,6 +448,40 @@ test('economy mode lowers routine tool-continuation thinking, restores on errors
 		pi.setThinkingLevel('medium');
 		hooks.get('turn_end')[0](turn('bash'), ctx);
 		assert.equal(thinking(), 'medium', 'a manual selection disables automatic effort');
+	} finally {
+		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+		Object.assign(process.env, saved);
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test('a model switch to a route lacking the configured level runs its clamp without re-applying the level every turn, and keeps the ceiling', async () => {
+	const saved = { ...process.env };
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
+	process.env.PI_COST_BUDGET_USD = '0.001';
+	process.env.PI_CODING_AGENT_DIR = temp;
+	try {
+		const { default: register } = await import(extensionUrl);
+		const withMax = { provider: 'openai', id: 'gpt-5', reasoning: true, thinkingLevelMap: { max: 'max' }, contextWindow: 400_000, maxTokens: 64_000, input: ['text'] };
+		const upToHigh = { provider: 'openai', id: 'gpt-mini', reasoning: true, contextWindow: 400_000, maxTokens: 64_000, input: ['text'] };
+		const route = { model: withMax };
+		const { pi, hooks, entries, sets, thinking } = fakePi(route);
+		register(pi);
+		const ctx = fakeCtx({ model: withMax });
+		hooks.get('session_start').forEach((handler) => handler({ type: 'session_start' }, ctx));
+		hooks.get('message_end')[0]({ message: { role: 'assistant', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.002 } } } }, ctx);
+		const routine = { type: 'turn_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'bash', arguments: { command: 'ls' } }] }, toolResults: [{ isError: false }] };
+		hooks.get('turn_end')[0](routine, ctx);
+		assert.equal(thinking(), 'high', 'economy stepped the level down from max');
+		route.model = upToHigh;
+		const next = fakeCtx({ model: upToHigh });
+		for (const handler of hooks.get('model_select')) handler({ type: 'model_select', model: upToHigh, previousModel: withMax, source: 'set' }, next);
+		const saves = () => entries.filter((entry) => entry.type === 'jev-effort-v1');
+		assert.ok(saves().every((entry) => entry.data.ceiling === 'max'), 'the configured ceiling is kept for a later switch back');
+		const settled = { saves: saves().length, sets: sets.length };
+		for (let i = 0; i < 3; i++) hooks.get('turn_end')[0]({ ...routine, message: { ...routine.message, content: [{ type: 'toolCall', name: 'write', arguments: {} }] } }, next);
+		assert.deepEqual({ saves: saves().length, sets: sets.length }, settled, 'later turns neither set the level again nor persist it');
+		assert.equal(thinking(), 'high');
 	} finally {
 		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
 		Object.assign(process.env, saved);

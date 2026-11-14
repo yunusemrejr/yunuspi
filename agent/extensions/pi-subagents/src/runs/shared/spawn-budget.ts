@@ -66,7 +66,7 @@ export function preflightSpawnBudget(
 	if (requested <= 0 || snapshot.limit === null || requested <= (snapshot.remaining ?? 0)) return { snapshot };
 	return {
 		snapshot,
-		error: `Subagent spawn limit reached for this session (${snapshot.used}/${snapshot.limit} used, ${requested} requested). ${snapshot.remaining} remaining; the declared run cannot fit, so no children were started. Grant budget explicitly from the root interactive session or start a new session.`,
+		error: `Subagent spawn limit reached for this session (${snapshot.used}/${snapshot.limit} used, ${requested} requested). ${snapshot.remaining} remaining; the declared run cannot fit, so no children were started. The root session can add up to ${snapshot.grantRemaining} more with action='grant-spawn-budget'; otherwise start a new session.`,
 	};
 }
 

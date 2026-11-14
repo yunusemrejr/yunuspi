@@ -705,8 +705,14 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		pending.clear();
 		return content || undefined;
 	});
+	// One reminder per message from the user when a run changed files and no check passed after.
+	let verifyNudged = false;
+	let runMutations = 0;
+	pi.on("message_end", (event: any) => {
+		if (event?.message?.customType === "project-test-followup") verifyNudged = true;
+	});
 	pi.on("input", (event, ctx) => {
-		if (event.source !== "extension") { try { noteUserInput(Date.now(), event); } catch { /* automation control never breaks input */ } }
+		if (event.source !== "extension") { verifyNudged = false; runMutations = 0; try { noteUserInput(Date.now(), event); } catch { /* automation control never breaks input */ } }
 		projectTests.input(event); quality.input(event); stopInputUnlocks(event, ctx);
 	});
 	pi.on("agent_settled", async (event, ctx) => {
@@ -714,6 +720,18 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		if (isSessionStopped(ctx)) return;
 		await projectTests.settled(event, ctx);
 		await quality.settled(event, ctx);
+		// A child's caller checks its work; a test follow-up already asked for the same thing.
+		try {
+			const s = load(sidOf(ctx));
+			if (SHADOW || verifyNudged || process.env.PI_SUBAGENT_CHILD === "1" || runMutations === 0 || s.editsSinceCommand === 0) return;
+			if (ctx?.signal?.aborted || ctx?.hasPendingMessages?.() || ctx?.isIdle?.() === false || isSessionStopped(ctx)) return;
+			verifyNudged = true;
+			await pi.sendMessage({
+				customType: "checkpoints",
+				content: `[checkpoints] This run made ${s.editsSinceCommand} change(s) and no check has passed since. Before reporting, run the one check that proves the change (the focused test, the program, the rendered page), or say plainly that it is unverified.`,
+				display: false,
+			}, { deliverAs: "followUp", triggerTurn: true });
+		} catch { /* a reminder never breaks settling */ }
 	});
 	pi.on("before_agent_start", async (_event, ctx) => {
 		pending.delete("unverified-edits");
@@ -860,6 +878,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			if (event.toolName === "edit" || event.toolName === "write") {
 				if (event.isError) return;
 				mutationVersion++;
+				runMutations++;
 				lastMutationBatch = batchOf(ctx);
 				if (typeof event.input.path === "string")
 					s.pendingReadbackPaths = [

@@ -5,10 +5,11 @@
  * call, not a turn: its spend is recorded as auxiliary model usage so /cost
  * shows it under the advisor's route.
  *
- * The tool list must never change in the middle of a session (that re-bills the
- * provider's prompt cache), so the tool is registered once, at the first
- * session start, and the decision is never revisited. Child processes never get
- * it: their model should not spend on a second opinion the parent cannot see.
+ * The tool is registered once: at session start, or at the next message after
+ * team.advisor changes from off to a model (the one change to the tool list the
+ * provider's prompt cache pays for). It is never removed; when the advisor goes
+ * off a call is refused. Child processes never get it: their model should not
+ * spend on a second opinion the parent cannot see.
  *
  * Limits: 3 per run (a run is everything after one human message), 12 per
  * session, one at a time. The session count is read back from the session
@@ -76,7 +77,7 @@ function recordedCalls(ctx: any): number {
 }
 
 export default function advisorExtension(pi: any) {
-	let decided = false;
+	let registered = false;
 	let runUsed = 0;
 	let sessionUsed = 0;
 	let inFlight = false;
@@ -91,13 +92,8 @@ export default function advisorExtension(pi: any) {
 		}
 	};
 
-	pi.on("session_start", (_event: any, ctx: any) => {
-		// A reload of the same session must not hand out fresh session budget.
-		sessionUsed = recordedCalls(ctx);
-		runUsed = 0;
-		if (decided) return;
-		decided = true;
-		if (process.env.PI_SUBAGENT_CHILD === "1") return;
+	const offerTool = (ctx: any) => {
+		if (registered || process.env.PI_SUBAGENT_CHILD === "1") return;
 		let advisor = "off";
 		try {
 			advisor = loadTeamConfig(ctx?.cwd ?? process.cwd()).team.advisor;
@@ -106,6 +102,7 @@ export default function advisorExtension(pi: any) {
 			return;
 		}
 		if (advisor === "off") return;
+		registered = true;
 		pi.registerTool({
 			name: "ask_advisor",
 			label: "Ask Advisor",
@@ -205,7 +202,16 @@ export default function advisorExtension(pi: any) {
 				};
 			},
 		});
+	};
+
+	pi.on("session_start", (_event: any, ctx: any) => {
+		// A reload of the same session must not hand out fresh session budget.
+		sessionUsed = recordedCalls(ctx);
+		runUsed = 0;
+		offerTool(ctx);
 	});
+	// A settings file read per human message is all it costs to notice a new advisor.
+	pi.on("before_agent_start", (_event: any, ctx: any) => offerTool(ctx));
 
 	// A human message starts a new run; extension-delivered messages do not.
 	pi.on("input", (event: any) => {

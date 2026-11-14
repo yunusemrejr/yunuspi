@@ -94,6 +94,36 @@ test('the tool list does not change after the first session start', (t) => withA
 	assert.deepEqual([...pi.tools.keys()], ['ask_advisor']);
 }));
 
+test('an advisor set mid-session is added once at the next message; turning it off keeps the tool and refuses', (t) => withAgentDir(t, undefined, async () => {
+	const { pi, ctx, run } = harness();
+	const settings = path.join(process.env.PI_CODING_AGENT_DIR, 'settings.json');
+	let registrations = 0;
+	const register = pi.registerTool;
+	pi.registerTool = (tool) => { registrations++; register(tool); };
+	const message = () => pi.handlers.get('before_agent_start')({ type: 'before_agent_start', prompt: 'next' }, ctx);
+	message();
+	assert.deepEqual([...pi.tools.keys()], [], 'an advisor that is still off adds nothing');
+	fs.writeFileSync(settings, JSON.stringify({ team: { advisor: ROUTE } }));
+	message();
+	message();
+	assert.deepEqual([...pi.tools.keys()], ['ask_advisor']);
+	assert.equal(registrations, 1, 'the tool is registered once');
+	fs.writeFileSync(settings, JSON.stringify({ team: { advisor: 'off' } }));
+	message();
+	assert.deepEqual([...pi.tools.keys()], ['ask_advisor'], 'turning the advisor off does not change the tool list');
+	const refused = await run({ question: 'Which plan?' });
+	assert.equal(refused.isError, true);
+	assert.match(refused.content[0].text, /team\.advisor is off/);
+}));
+
+test('a child process is not offered the tool at the next message either', (t) => withAgentDir(t, undefined, () => {
+	const { pi, ctx } = harness();
+	fs.writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, 'settings.json'), JSON.stringify({ team: { advisor: ROUTE } }));
+	process.env.PI_SUBAGENT_CHILD = '1';
+	try { pi.handlers.get('before_agent_start')({ type: 'before_agent_start', prompt: 'next' }, ctx); } finally { delete process.env.PI_SUBAGENT_CHILD; }
+	assert.deepEqual([...pi.tools.keys()], []);
+}));
+
 test('a question over 1,500 characters is refused naming the limit', (t) => withAgentDir(t, 'example/advisor-1', async () => {
 	const { run } = harness();
 	const result = await run({ question: 'x'.repeat(1_501) });

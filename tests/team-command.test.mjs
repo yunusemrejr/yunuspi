@@ -183,7 +183,7 @@ test('the advisor note appears only when the advisor value changed', async () =>
     ],
   });
   await advisor.command.handler('', advisor.ctx);
-  assert.match(advisor.notices.at(-1).message, /The advisor tool appears or disappears at the next session start\./);
+  assert.match(advisor.notices.at(-1).message, /The advisor tool is added at your next message if it is missing; turning the advisor off makes its calls refuse\./);
   assert.equal(readAgentSettings().team.advisor, 'test/model-c');
 });
 

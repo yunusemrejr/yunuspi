@@ -39,6 +39,7 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { createReadToolDefinition } from "@yunuspi/coding-agent";
+import { clampThinkingLevel } from "@yunuspi/ai";
 import { Type } from "typebox";
 import {
 	assignmentExcerpt,
@@ -478,6 +479,9 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		}
 	};
 
+	/** The level a route really runs: the core clamps one its model lacks. */
+	const levelInForce = (level: string, model: any): string => (model ? clampThinkingLevel(model, level as any) : level);
+
 	const applyEffort = (level: string | undefined, ctx?: any, reason?: string, source: "economy" | "jev" | "restore" = "economy") => {
 		if (!level) return;
 		let current = "";
@@ -486,13 +490,15 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		} catch {
 			return;
 		}
-		if (current === level) {
-			effortLevelUsed = level;
+		// A level the model lacks is already in force as its clamp: nothing to set, persist or announce.
+		const forced = levelInForce(level, ctx?.model);
+		if (current === forced) {
+			effortLevelUsed = current;
 			effortAuto = level === effortCeiling ? undefined : level;
 			effortAutoSource = effortAuto ? source : undefined;
 			return;
 		}
-		effortPending.push(level);
+		effortPending.push(forced);
 		try {
 			pi.setThinkingLevel(level as any);
 			effortAuto = level === effortCeiling ? undefined : level;
@@ -506,7 +512,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				notify(ctx, `Cost governor: economy mode is setting routine tool continuations to ${level} thinking; deep, judgment, error and large-change turns keep ${effortCeiling}. Set PI_ADAPTIVE_EFFORT=off to disable.`);
 			}
 		} catch {
-			const index = effortPending.lastIndexOf(level);
+			const index = effortPending.lastIndexOf(forced);
 			if (index >= 0) effortPending.splice(index, 1);
 		}
 	};
@@ -584,6 +590,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		effortCacheCold = true;
 		effortTurnErrors = 0;
 		if (!effortInitialized || effortManual) return;
+		// The configured ceiling stays the human's: a route lacking it runs its clamp
+		// (applyEffort compares against that), and switching back restores the full level.
 		// A route switch remaps the level. An automatic step-down belongs to the
 		// old route; return to the human's ceiling instead of carrying it over.
 		if (effortAuto && effortCeiling) applyEffort(effortCeiling, ctx, "model changed; configured level restored", "restore");

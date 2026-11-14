@@ -426,7 +426,7 @@ async function openPicker(ctx: ExtensionCommandContext): Promise<void> {
 			continue;
 		}
 		const lines = ["Change saved; it applies to children launched from now on."];
-		if (change.row === "advisor") lines.push("The advisor tool appears or disappears at the next session start.");
+		if (change.row === "advisor") lines.push("The advisor tool is added at your next message if it is missing; turning the advisor off makes its calls refuse.");
 		const note = projectOverrideNote(ctx.cwd, change);
 		if (note) lines.push(note);
 		ctx.ui.notify(lines.join(" "), "info");

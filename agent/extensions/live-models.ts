@@ -1886,6 +1886,13 @@ export default async function registerLiveModels(
  let refreshController = new AbortController();
 	let lastRouterRefresh = 0;
 	let routerRefreshPending = false;
+	// When each provider last had a refresh requested, so a model switch asks
+	// only for a provider that no refresh in this session has covered recently.
+	const providerRefreshedAt = new Map<string, number>();
+	const markRefreshed = (ctx: ExtensionContext) => {
+		const requestedAt = Date.now();
+		for (const provider of refreshScope(ctx)) providerRefreshedAt.set(provider, requestedAt);
+	};
 	const failedRegistryRefresh = (ctx: ExtensionContext) => {
 		const cached = loadCache();
 		for (const provider of REFRESHER_IDS) {
@@ -1907,8 +1914,10 @@ export default async function registerLiveModels(
 		const generation = ++sessionGeneration;
 		routerRefreshPending = false;
 		lastRouterRefresh = Date.now();
+		providerRefreshedAt.clear();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		routerRefreshPending = true;
+		markRefreshed(ctx);
 		refreshFacts(ctx, generation);
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal })
@@ -1925,6 +1934,7 @@ export default async function registerLiveModels(
 		if (routerRefreshPending || timestamp - lastRouterRefresh < ROUTER_CATALOG_TTL_MS) return;
 		lastRouterRefresh = timestamp;
 		routerRefreshPending = true;
+		markRefreshed(ctx);
 		const generation = sessionGeneration;
 		refreshFacts(ctx, generation);
 		void ctx.modelRegistry.refresh({allowNetwork: true, providers: refreshScope(ctx), signal: refreshController.signal})
@@ -1934,6 +1944,21 @@ export default async function registerLiveModels(
 	};
 	pi.on("before_agent_start", refreshDuringSession);
 	pi.on("turn_end", refreshDuringSession);
-	pi.on("model_select", (_event, ctx) => outputLimitStatus(ctx));
+	// A model picked mid-session may belong to a provider no refresh has covered
+	// yet: ask for that one provider, within the same per-provider interval,
+	// without waiting for the switch or for the next turn-boundary refresh.
+	pi.on("model_select", (event, ctx) => {
+		outputLimitStatus(ctx);
+		const provider = event.model?.provider;
+		if (!provider || !automaticRefreshAllowed()) return;
+		const requestedAt = Date.now();
+		if (requestedAt - (providerRefreshedAt.get(provider) ?? 0) < ROUTER_CATALOG_TTL_MS) return;
+		providerRefreshedAt.set(provider, requestedAt);
+		const generation = sessionGeneration;
+		void ctx.modelRegistry
+			.refresh({ allowNetwork: true, providers: [provider], signal: refreshController.signal })
+			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
+			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); });
+	});
 	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; refreshController.abort(); if (ctx.hasUI) { ctx.ui.setStatus("model-output-limit", undefined); ctx.ui.setStatus("model-catalog", undefined); } });
 }

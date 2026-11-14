@@ -86,7 +86,7 @@ const SubagentParamProperties = {
 	at: Type.Optional(Type.String({ description: "schedule.create one-shot trigger: '+10m' or ISO timestamp." })),
 	every: Type.Optional(Type.String({ description: "schedule.create recurring interval: '30m', '6h', '2d', '2w'." })),
 	sessionOnly: Type.Optional(Type.Boolean({ description: "schedule.create: record creating session only." })),
-	additional: Type.Optional(Type.Integer({ minimum: 1, description: "grant-spawn-budget: launches to add (root parent, user-confirmed only)." })),
+	additional: Type.Optional(Type.Integer({ minimum: 1, description: "grant-spawn-budget: launches to add (root parent session only)." })),
 	focus: Type.Optional(Type.Boolean({ description: "Focus the new Herdr pane for inspector.open/project.open." })),
 	config: Type.Optional(Type.Unsafe({ anyOf: [{ type: "object", additionalProperties: true }, { type: "string" }], description: "Agent config for create/update: object or JSON string." })),
 };

@@ -39,3 +39,31 @@ test('long active sessions refresh catalogs at turn boundaries with one bounded 
     await fs.rm(directory,{recursive:true,force:true});
   }
 });
+
+test('a model picked mid-session refreshes only its own provider, once per interval, without blocking the switch', async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'catalog-model-select-'));
+  const savedEnv=Object.fromEntries(['PI_CODING_AGENT_DIR','PI_MODEL_RESEARCH','PI_OFFLINE','PI_SUBAGENT_CHILD'].map(key=>[key,process.env[key]]));
+  const originalNow=Date.now;
+  let now=1_800_000_000_000;Date.now=()=>now;
+  process.env.PI_CODING_AGENT_DIR=directory;process.env.PI_MODEL_RESEARCH='off';delete process.env.PI_OFFLINE;delete process.env.PI_SUBAGENT_CHILD;
+  try {
+    await fs.writeFile(path.join(directory,'models.json'),'{}');
+    const {default:register}=await import('../agent/extensions/live-models.ts');
+    const hooks={},refreshes=[];
+    await register({registerProvider(){},registerCommand(){},on:(name,handler)=>hooks[name]=handler});
+    const ctx={hasUI:false,model:{provider:'deepseek'},modelRegistry:{getAvailable:()=>[{provider:'openai-codex'}],refresh:options=>{refreshes.push(options);return new Promise(()=>{});}}};
+    hooks.session_start({},ctx);assert.equal(refreshes.length,1);
+    hooks.model_select({model:{provider:'openai-codex'}},ctx);assert.equal(refreshes.length,1,'a provider the startup refresh already covered is not asked again');
+    hooks.model_select({model:{provider:'openrouter'}},ctx);assert.equal(refreshes.length,1,'a router the startup refresh covered is not asked again');
+    hooks.model_select({model:{provider:'zhipu-new'}},ctx);
+    assert.equal(refreshes.length,2);assert.deepEqual(refreshes[1].providers,['zhipu-new']);assert.equal(refreshes[1].allowNetwork,true);
+    hooks.model_select({model:{provider:'zhipu-new'}},ctx);assert.equal(refreshes.length,2,'switching back inside the interval does not loop');
+    now+=15*60_000;hooks.model_select({model:{provider:'zhipu-new'}},ctx);assert.equal(refreshes.length,3,'a later interval may ask again');
+    process.env.PI_OFFLINE='1';now+=15*60_000;hooks.model_select({model:{provider:'zhipu-new'}},ctx);assert.equal(refreshes.length,3);delete process.env.PI_OFFLINE;
+    hooks.session_shutdown({},ctx);assert.equal(refreshes.at(-1).signal.aborted,true);
+  } finally {
+    Date.now=originalNow;
+    for(const [key,value]of Object.entries(savedEnv))if(value===undefined)delete process.env[key];else process.env[key]=value;
+    await fs.rm(directory,{recursive:true,force:true});
+  }
+});

@@ -14,7 +14,7 @@ export type AuthorityPolicyConfig = Partial<Record<AuthorityAction, AuthorityDec
 const DEFAULT_AUTHORITY_POLICY: Record<AuthorityAction, AuthorityDecision> = {
 	discardWorktree: "confirm",
 	destructiveCleanup: "confirm",
-	spawnBudgetGrant: "confirm",
+	spawnBudgetGrant: "auto",
 	scheduleCreate: "auto",
 	stopRun: "auto",
 	steerRun: "auto",

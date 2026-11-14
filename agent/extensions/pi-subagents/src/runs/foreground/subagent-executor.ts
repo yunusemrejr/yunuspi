@@ -5870,7 +5870,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				});
 			}
 			if (action === "grant-spawn-budget") {
-				if (deps.allowMutatingManagementActions === false || !ctx.hasUI) {
+				const authority = resolveAuthorityDecision({ action: "spawnBudgetGrant", ...(deps.config.authorityPolicy === undefined ? {} : { policy: deps.config.authorityPolicy }) });
+				// A grant is bounded by the configured limit (preflightSpawnBudgetGrant), so only a child or a "confirm" policy without a UI is refused.
+				if (deps.allowMutatingManagementActions === false || process.env.PI_SUBAGENT_CHILD === "1" || (authority === "confirm" && !ctx.hasUI)) {
 					return {
 						content: [{ type: "text", text: "Action 'grant-spawn-budget' is available only from the root interactive parent session." }],
 						isError: true,
@@ -5903,7 +5905,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						details: { mode: "management", results: [], spawnBudget: preview.snapshot },
 					};
 				}
-				const authority = resolveAuthorityDecision({ action: "spawnBudgetGrant", ...(deps.config.authorityPolicy === undefined ? {} : { policy: deps.config.authorityPolicy }) });
 				if (authority === "forbid") {
 					return {
 						content: [{ type: "text", text: "Authority policy forbids spawn budget grants." }],

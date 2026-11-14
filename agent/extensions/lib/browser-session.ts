@@ -51,10 +51,21 @@ const ACTIONS_WITH_FOLLOWUP_OBSERVATION = new Set([
  * interface and for evidence; the text leaves out what repeats on every call and changes
  * nothing the model does next: page hashes, the local files a workspace page was answered
  * with, a lease that is nowhere near its end, a lone tab or frame, empty defaults and the
- * standing note on what DOM geometry cannot show. */
-export function browserReplyText(details: any, action?: unknown): string {
+ * standing note on what DOM geometry cannot show. `targetsMemo` does the same for the
+ * element list: when the rows are identical to the last list sent for this session, tab and
+ * page, the text names the new ref for each old one instead of repeating the ~8 KB. */
+/** Every capture hands out fresh refs, so an unchanged list still names its new refs: as a range when they run in order. */
+function unchangedTargets(targets: any[]): string {
+  const refs = targets.map((row) => String(row?.ref ?? ""));
+  const numbers = refs.map((ref) => Number(/^ref-(\d+)$/.exec(ref)?.[1]));
+  const consecutive = numbers.every((n, i) => Number.isInteger(n) && (i === 0 || n === numbers[i - 1] + 1));
+  const named = consecutive && refs.length > 1 ? `${refs[0]} to ${refs.at(-1)}` : refs.join(", ");
+  return `same ${refs.length} elements as the last reply, in the same order; their refs are now ${named}`;
+}
+
+export function browserReplyText(details: any, action?: unknown, targetsMemo?: Map<string, { page: string; json: string; refs: any[] }>): string {
   if (!details || typeof details !== "object" || details.ok !== true) return JSON.stringify(details);
-  const { pageIdentity, localFiles, localFilesSince, lease, frames, tabs, humanHelp, targetsTruncated, sessionResolved, pageState, ...rest } = details;
+  const { pageIdentity, localFiles, localFilesSince, lease, frames, tabs, humanHelp, targetsTruncated, sessionResolved, pageState, targets, ...rest } = details;
   if (Array.isArray(rest.batch?.stepResults)) rest.batch = { ...rest.batch, stepResults: rest.batch.stepResults.map(({ page: _page, ...row }: any) => row) };
   const arriving = ["open", "navigate", "new_tab", "snapshot", "observe"].includes(String(action));
   const page = pageState && typeof pageState === "object" ? (({ limitations, location, ...state }) => ({
@@ -62,8 +73,21 @@ export function browserReplyText(details: any, action?: unknown): string {
     ...(location && (location.url !== details.url || location.parametersOmitted) ? { location } : {}),
     ...(arriving && limitations ? { limitations } : {}),
   }))(pageState) : pageState;
+  // Only a reply that can be named as "this tab of this session, still this page" may be
+  // shortened; an arriving action or a renew restarts the list so the model reads it whole.
+  // Refs are numbered per capture, so the list is compared without them: same elements,
+  // same order, same geometry: only the new refs are sent.
+  const rows = Array.isArray(targets) ? targets.map(({ ref: _ref, ...row }: any) => row) : targets;
+  const serialized = targets === undefined ? "" : JSON.stringify(rows);
+  const stamp = targetsMemo && serialized && details.session != null && details.tab != null && typeof pageIdentity === "string"
+    ? `${details.session}\0${details.tab}`
+    : "";
+  const remembered = stamp && !arriving && String(action) !== "renew" ? targetsMemo!.get(stamp) : undefined;
+  const unchanged = !!remembered && remembered.page === pageIdentity && remembered.json === serialized;
+  if (stamp) targetsMemo!.set(stamp, { page: pageIdentity, json: serialized });
   return JSON.stringify({
     ...rest,
+    ...(targets === undefined ? {} : unchanged ? { targets: unchangedTargets(targets) } : { targets }),
     ...(page === undefined ? {} : { pageState: page }),
     ...(Array.isArray(frames) && frames.length > 1 ? { frames } : {}),
     ...(Array.isArray(tabs) && (tabs.length > 1 || ["tabs", "new_tab", "switch_tab", "close_tab"].includes(String(action))) ? { tabs } : {}),
@@ -159,10 +183,15 @@ export function registerBrowserSession(pi: any) {
   let helping = false;
   // Handles and aliases this owner closed are never redirected to another session.
   const retired = new Set<string>();
+  // The element list a model already read is not sent twice: keyed "session\0tab", it holds
+  // the last full targets JSON for one page so a repeat reply can be shortened. Bounded by
+  // the two sessions and eight tabs each; every close forgets it.
+  const targetMemo = new Map<string, { page: string; json: string }>();
   async function close(id: string) {
     const session = sessions.get(id);
     if (!session) return;
     sessions.delete(id);
+    for (const key of targetMemo.keys()) if (key.startsWith(`${id}\0`)) targetMemo.delete(key);
     retired.add(id);
     if (session.alias) retired.add(session.alias);
     if (session.alias && aliases.get(session.alias) === id) aliases.delete(session.alias);
@@ -306,7 +335,7 @@ export function registerBrowserSession(pi: any) {
       const reply = (details: any, images: any[] = []) => {
         if (resolved && details && typeof details === "object") details = { ...details, sessionResolved: resolved };
         return {
-        content: [{ type: "text", text: browserReplyText(details, p.action) }, ...images],
+        content: [{ type: "text", text: browserReplyText(details, p.action, targetMemo) }, ...images],
         details,
         ...(details.ok === false ? { isError: true } : {}),
         };
@@ -338,7 +367,7 @@ export function registerBrowserSession(pi: any) {
           const alias = typeof p.session === "string" && p.session.trim() && p.session.length <= 64 ? p.session : undefined;
           const opened = await execute(_id, { action: "open", url: p.url, visible: p.visible, session: alias }, signal, _update, ctx);
           if (!opened.isError) opened.details = { ...opened.details, sessionResolved: { from: p.session ?? null, reason: "no session was open; navigate opened one" } };
-          if (!opened.isError) opened.content = [{ type: "text", text: browserReplyText(opened.details, "open") }, ...opened.content.slice(1)];
+          if (!opened.isError) opened.content = [{ type: "text", text: browserReplyText(opened.details, "open", targetMemo) }, ...opened.content.slice(1)];
           return opened;
         }
       }
