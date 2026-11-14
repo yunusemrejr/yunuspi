@@ -34,11 +34,17 @@ export function teamOptions(role, models = [], saved) {
     const value = teamValue(model);
     if (seen.has(value)) continue;
     seen.add(value);
-    options.push({ value, label: teamLabel(model) });
+    options.push({ value, label: teamLabel(model), ...(typeof model.name === 'string' && model.name && model.name !== model.id ? { name: model.name } : {}) });
   }
   const selected = typeof saved === 'string' && saved.trim() ? saved : role.first.value;
   if (!seen.has(selected)) options.push({ value: selected, label: selected });
   return options.map(option => ({ ...option, selected: option.value === selected }));
+}
+
+/** Every word of the query appears somewhere in the text: "codex", "openrouter qwen", "gpt 5". */
+export function matchesQuery(text, query) {
+  const haystack = String(text).toLocaleLowerCase();
+  return String(query).toLocaleLowerCase().split(/\s+/).filter(Boolean).every(word => haystack.includes(word));
 }
 
 /** `inherit` and `off` only for the role that means them; anything else is provider/model-id. */

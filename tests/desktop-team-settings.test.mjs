@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TEAM_ROLES, applyTeamValue, readTeam, teamOptions, validTeamValue } from '../desktop/renderer/team-settings.mjs';
+import { TEAM_ROLES, applyTeamValue, matchesQuery, readTeam, teamOptions, validTeamValue } from '../desktop/renderer/team-settings.mjs';
 import { SettingsManager } from '../core/coding-agent/dist/core/settings-manager.js';
 
 const role = key => TEAM_ROLES.find(candidate => candidate.key === key);
@@ -77,4 +77,11 @@ test('an invalid value is refused before anything is written', () => {
   const manager = SettingsManager.inMemory({ team: { helper: 'inherit' } });
   assert.throws(() => applyTeamValue(manager, 'helper', 'off'), /Choose a model/);
   assert.throws(() => applyTeamValue(manager, 'nobody', 'inherit'), /Unknown Team role/);
+});
+
+test('the model search needs every word somewhere in provider, id or name', () => {
+  assert.equal(matchesQuery('openai-codex · gpt-5.5', 'codex'), true);
+  assert.equal(matchesQuery('openrouter · qwen/qwen3-coder Qwen3 Coder', 'OpenRouter qwen'), true);
+  assert.equal(matchesQuery('openrouter · qwen/qwen3-coder', 'openrouter llama'), false);
+  assert.equal(matchesQuery('anything', '   '), true);
 });

@@ -1633,6 +1633,55 @@ kbd {
   letter-spacing:-.2px;
   margin:24px 0 0
 }
+.team-picker {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  width:100%;
+  min-height:40px;
+  background:var(--surface);
+  color:var(--ink);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:10px;
+  font-size:12px;
+  text-align:left
+}
+.team-picker>span {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.team-picker>svg {
+  flex:none;
+  width:14px;
+  height:14px;
+  color:var(--muted);
+  transition:transform .15s ease
+}
+.team-picker[aria-expanded="true"]>svg {
+  transform:rotate(180deg)
+}
+.team-picker:hover:not(:disabled) {
+  background:var(--surface-hover)
+}
+.team-picker[aria-busy="true"] {
+  opacity:.7
+}
+.team-panel {
+  margin-top:6px;
+  padding:8px;
+  border:1px solid var(--line);
+  border-radius:8px
+}
+.team-panel .dialog-search {
+  margin-bottom:6px
+}
+.team-panel .dialog-list {
+  max-height:240px
+}
 .team-hint {
   display:block;
   margin-top:6px;

@@ -243,3 +243,13 @@ test('an unknown argument gets the one-line usage', async () => {
   await f.command.handler('sideways', f.ctx);
   assert.deepEqual(f.notices.map((notice) => notice.message), ['Usage: /team [show]']);
 });
+
+test('the /team model search keeps every option holding each word, and falls back to fuzzy for a typo', () => {
+  const options = ['Same as the session', 'openai-codex/gpt-5.5', 'openrouter/qwen/qwen3-coder', 'openrouter/meta/llama-4', 'deepseek/deepseek-v4-flash'];
+  const names = new Map([['openrouter/qwen/qwen3-coder', 'Qwen3 Coder']]);
+  assert.deepEqual(team.filterModelOptions(options, ''), options);
+  assert.deepEqual(team.filterModelOptions(options, 'codex'), ['openai-codex/gpt-5.5']);
+  assert.deepEqual(team.filterModelOptions(options, 'OpenRouter'), ['openrouter/qwen/qwen3-coder', 'openrouter/meta/llama-4']);
+  assert.deepEqual(team.filterModelOptions(options, 'openrouter coder', names), ['openrouter/qwen/qwen3-coder']);
+  assert.ok(team.filterModelOptions(options, 'deepsek').includes('deepseek/deepseek-v4-flash'));
+});

@@ -7,7 +7,16 @@
  * locked writer, and keeps every key it does not touch. `/team show` prints
  * the same values as text; without a UI that is all the command can do.
  */
-import { SettingsManager, getAgentDir, type ExtensionAPI, type ExtensionCommandContext } from "@yunuspi/coding-agent";
+import {
+	DynamicBorder,
+	SettingsManager,
+	getAgentDir,
+	getSelectListTheme,
+	rawKeyHint,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+} from "@yunuspi/coding-agent";
+import { Container, Input, SelectList, Spacer, Text, fuzzyFilter, getKeybindings } from "@yunuspi/tui";
 import {
 	BUILTIN_AGENT_ROLES,
 	SIDE_CALL_PLACES,
@@ -149,6 +158,86 @@ export function modelChoiceValue(option: string): string {
 	return option;
 }
 
+/** A model as the picker searches it: the route plus the display name the registry gives it. */
+export interface ModelEntry {
+	route: string;
+	name?: string;
+}
+
+/**
+ * The options a search leaves, best first. Every word must appear in the
+ * provider, id or name ("codex", "openrouter qwen", "gpt-5"); when no option
+ * holds every word, a looser fuzzy match runs so a typo still finds something.
+ * The role's first option (session model / off) stays at the top of an empty search.
+ */
+export function filterModelOptions(options: readonly string[], query: string, names: ReadonlyMap<string, string> = new Map()): string[] {
+	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	if (!words.length) return [...options];
+	const text = (option: string) => `${option} ${names.get(option) ?? ""}`.toLowerCase();
+	const exact = options.filter((option) => words.every((word) => text(option).includes(word)));
+	if (exact.length) return exact;
+	return fuzzyFilter([...options], query, text);
+}
+
+/** The model picker: type to narrow the list, arrows to move, Enter to choose. */
+function pickModel(ctx: ExtensionCommandContext, title: string, options: string[], current: string, names: ReadonlyMap<string, string>): Promise<string | undefined> {
+	return ctx.ui.custom<string | undefined>((tui, theme, _keys, done) => {
+		const box = new Container();
+		const input = new Input();
+		const listArea = new Container();
+		let list: SelectList | undefined;
+		let query = "";
+		input.focused = true;
+		const fill = () => {
+			listArea.clear();
+			const shown = filterModelOptions(options, query, names);
+			if (!shown.length) {
+				list = undefined;
+				listArea.addChild(new Text(theme.fg("muted", "  No model matches."), 0, 0));
+				return;
+			}
+			list = new SelectList(
+				shown.map((option) => ({ value: option, label: option, description: option === current ? "current" : names.get(option) })),
+				12,
+				getSelectListTheme(),
+			);
+			const at = query ? 0 : shown.indexOf(current);
+			if (at > 0) list.setSelectedIndex(at);
+			list.onSelect = (item) => done(item.value);
+			list.onCancel = () => done(undefined);
+			listArea.addChild(list);
+		};
+		box.addChild(new DynamicBorder());
+		box.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
+		box.addChild(new Spacer(1));
+		box.addChild(input);
+		box.addChild(new Spacer(1));
+		box.addChild(listArea);
+		box.addChild(new Spacer(1));
+		box.addChild(new Text(rawKeyHint("type", "search") + "  " + rawKeyHint("↑↓", "move") + "  " + rawKeyHint("enter", "choose") + "  " + rawKeyHint("esc", "back"), 1, 0));
+		box.addChild(new DynamicBorder());
+		fill();
+		return {
+			render: (width: number) => box.render(width),
+			invalidate: () => box.invalidate(),
+			handleInput(data: string) {
+				const keys = getKeybindings();
+				if (keys.matches(data, "tui.select.cancel")) return done(undefined);
+				if (keys.matches(data, "tui.select.up") || keys.matches(data, "tui.select.down") || keys.matches(data, "tui.select.confirm")) {
+					list?.handleInput(data);
+				} else {
+					input.handleInput(data);
+					if (input.getValue() !== query) {
+						query = input.getValue();
+						fill();
+					}
+				}
+				tui.requestRender();
+			},
+		};
+	});
+}
+
 /** A run-budget answer: a finite number of 0 or more, or null when it is refused. */
 export function parseBudgetValue(text: string): number | null {
 	const trimmed = text.trim();
@@ -231,15 +320,21 @@ async function chooseChange(
 	ctx: ExtensionCommandContext,
 	row: TeamRow,
 	config: TeamConfig,
-	models: readonly string[],
+	models: readonly ModelEntry[],
 ): Promise<TeamChange | undefined> {
 	switch (row.id) {
 		case "helper":
 		case "legwork":
 		case "advisor": {
 			const current = config.team[row.id];
-			const options = modelChoices(row.id, current, models);
-			const picked = await ctx.ui.select(row.label, options);
+			const options = modelChoices(row.id, current, models.map((model) => model.route));
+			const names = new Map(models.filter((model) => model.name && model.name !== model.route).map((model) => [model.route, model.name as string]));
+			// RPC clients (the desktop app) draw their own pickers and only answer plain selects.
+			const shownCurrent = current === "inherit" || current === "off" ? options[0] : current;
+			const picked =
+				ctx.mode === "rpc" || typeof ctx.ui.custom !== "function"
+					? await ctx.ui.select(row.label, options)
+					: await pickModel(ctx, row.label, options, shownCurrent, names);
 			if (!picked || !options.includes(picked)) return undefined;
 			return { row: row.id, value: modelChoiceValue(picked) };
 		}
@@ -321,7 +416,7 @@ async function openPicker(ctx: ExtensionCommandContext): Promise<void> {
 		if (!picked || picked === done) return;
 		const row = rows[rowTexts.indexOf(picked)];
 		if (!row) return;
-		const models = (ctx.modelRegistry?.getAvailable() ?? []).map((model) => `${model.provider}/${model.id}`);
+		const models: ModelEntry[] = (ctx.modelRegistry?.getAvailable() ?? []).map((model) => ({ route: `${model.provider}/${model.id}`, name: model.name }));
 		const change = await chooseChange(ctx, row, config, models);
 		if (!change) continue;
 		try {

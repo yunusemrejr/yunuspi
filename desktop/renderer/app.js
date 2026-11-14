@@ -1,7 +1,7 @@
 import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
-import { TEAM_ROLES, readTeam, teamOptions } from './team-settings.mjs';
+import { TEAM_ROLES, matchesQuery, readTeam, teamOptions } from './team-settings.mjs';
 
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
@@ -670,8 +670,8 @@ async function showModels() {
     const search = element('input', 'dialog-search'); search.type = 'search'; search.placeholder = 'Search models or providers'; search.setAttribute('aria-label', 'Search models');
     const list = element('div', 'dialog-list');
     const draw = () => {
-      list.replaceChildren(); const query = search.value.toLocaleLowerCase();
-      for (const model of models.filter(m => `${m.name} ${m.id} ${m.provider}`.toLocaleLowerCase().includes(query)).slice(0, 150)) {
+      list.replaceChildren(); const query = search.value;
+      for (const model of models.filter(m => matchesQuery(`${m.name || ''} ${m.provider}/${m.id} ${m.provider} ${m.id}`, query)).slice(0, 150)) {
         const button = element('button'), name = element('span', '', model.name || model.id); name.append(element('small', '', `${model.provider} · ${model.id}`)); button.append(name);
         if (conversationOf(id).model?.id === model.id && conversationOf(id).model?.provider === model.provider) button.append(icon('check'));
         button.onclick = () => tryAction(async () => { button.disabled = true; button.setAttribute('aria-busy', 'true'); try { await api.setModel(id, model.provider, model.id); closeModal(false); } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }); list.append(button);
@@ -812,25 +812,60 @@ function acceptCommand() {
 function teamSection() {
   const section = element('section', 'team-section');
   section.append(element('h3', 'dialog-section', 'Team'));
-  const selects = new Map();
+  const pickers = new Map();
+  let open = null;
+  const close = () => { if (!open) return; open.panel.hidden = true; open.toggle.setAttribute('aria-expanded', 'false'); open = null; };
   for (const role of TEAM_ROLES) {
-    const label = element('label', '', role.title), select = element('select'), hint = element('small', 'team-hint', role.hint);
-    select.id = `team-${role.key}`; select.disabled = true; label.htmlFor = select.id;
-    hint.id = `${select.id}-hint`; select.setAttribute('aria-describedby', hint.id);
-    select.onchange = () => {
-      const value = select.value;
-      void api.setTeam(role.key, value).then(() => { select.dataset.saved = value; })
-        .catch(error => { if (select.value === value) select.value = select.dataset.saved; toast(safeError(error), 'error'); });
+    const label = element('label', '', role.title), toggle = element('button', 'team-picker'), current = element('span', '', 'Loading…'), hint = element('small', 'team-hint', role.hint);
+    toggle.type = 'button'; toggle.id = `team-${role.key}`; toggle.disabled = true; label.htmlFor = toggle.id;
+    hint.id = `${toggle.id}-hint`; toggle.setAttribute('aria-describedby', hint.id); toggle.setAttribute('aria-expanded', 'false');
+    toggle.append(current, icon('down'));
+    const panel = element('div', 'team-panel'), search = element('input', 'dialog-search'), list = element('div', 'dialog-list');
+    panel.hidden = true; search.type = 'search'; search.placeholder = 'Search: a model, openrouter, codex…'; search.setAttribute('aria-label', `Search models for ${role.title}`);
+    panel.append(search, list);
+    const picker = { role, toggle, current, panel, search, list, options: [], saved: role.first.value };
+    const draw = () => {
+      list.replaceChildren();
+      for (const option of picker.options.filter(o => matchesQuery(`${o.label} ${o.value} ${o.name || ''}`, search.value)).slice(0, 150)) {
+        const button = element('button'), text = element('span', '', option.name || option.label);
+        if (option.name) text.append(element('small', '', option.label));
+        button.type = 'button'; button.append(text);
+        if (option.value === picker.saved) button.append(icon('check'));
+        button.onclick = () => choose(picker, option);
+        list.append(button);
+      }
+      if (!list.childNodes.length) list.append(element('p', 'empty-hint', 'No model matches.'));
     };
-    selects.set(role.key, select); section.append(label, select, hint);
+    picker.draw = draw;
+    search.oninput = draw;
+    search.onkeydown = event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); toggle.focus(); }
+      if (event.key === 'Enter') { event.preventDefault(); list.querySelector('button')?.click(); }
+    };
+    toggle.onclick = () => {
+      if (open === picker) { close(); return; }
+      close(); open = picker; panel.hidden = false; toggle.setAttribute('aria-expanded', 'true');
+      search.value = ''; draw(); search.focus();
+    };
+    pickers.set(role.key, picker); section.append(label, toggle, hint, panel);
   }
-  // A saved value the list does not reach stays selected, shown as its raw provider/id.
+  const show = picker => { const option = picker.options.find(o => o.value === picker.saved); picker.current.textContent = option ? (option.name ? `${option.name} · ${option.label}` : option.label) : picker.saved; };
+  // Saved the moment it is chosen; on failure the earlier choice stays shown.
+  const choose = (picker, option) => {
+    close(); picker.toggle.focus();
+    if (option.value === picker.saved) return;
+    const before = picker.saved; picker.saved = option.value; show(picker); picker.toggle.setAttribute('aria-busy', 'true');
+    void api.setTeam(picker.role.key, option.value)
+      .catch(error => { if (picker.saved === option.value) { picker.saved = before; show(picker); } toast(safeError(error), 'error'); })
+      .finally(() => picker.toggle.removeAttribute('aria-busy'));
+  };
+  // A saved value the list does not reach stays chosen, shown as its raw provider/id.
   api.teamSettings().then(({ team, models }) => {
     if (!$('dialog').open) return;
     for (const role of TEAM_ROLES) {
-      const select = selects.get(role.key), saved = team[role.key];
-      select.replaceChildren(...teamOptions(role, models, saved).map(option => { const node = element('option', '', option.label); node.value = option.value; node.selected = option.selected; return node; }));
-      select.dataset.saved = saved; select.disabled = false;
+      const picker = pickers.get(role.key);
+      picker.saved = team[role.key]; picker.options = teamOptions(role, models, picker.saved);
+      show(picker); picker.toggle.disabled = false;
     }
   }).catch(error => { if ($('dialog').open) toast(safeError(error), 'error'); });
   return section;
