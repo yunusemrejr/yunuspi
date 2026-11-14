@@ -64,7 +64,7 @@ A run is everything the session does after one message from you. When a run pass
 
 ## Advisor
 
-When `team.advisor` names a model, the session has a tool `ask_advisor`. It sends one question of at most 1,500 characters, and nothing else, to that model and returns a few lines. Limits: 3 per run, 12 per session, one at a time. Its cost is recorded under the advisor's model. The tool is added or removed at the next session start; children never have it.
+When `team.advisor` names a model, the session has a tool `ask_advisor`. It sends one question of at most 1,500 characters, and nothing else, to that model and returns a few lines. Limits: 3 per run, 12 per session, one at a time. Each question is rated by the decision model: an easy one thinks at a lower level, and a question it cannot rate thinks at medium; never above the session's own level. Its cost is recorded under the advisor's model. The tool is added or removed at the next session start; children never have it.
 
 ## /team
 

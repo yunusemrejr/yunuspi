@@ -455,3 +455,22 @@ test('the main session is unchanged: a long request with code goes to the ceilin
     assert.match(JSON.stringify(calls[0].questions), /Is this request simple, mechanical or conversational/, 'the user-request wording is still used outside a child');
   } finally { f.cleanup(); }
 });
+
+test('a forked child keeps the launch level and a task context block does not decide the level', async () => {
+  const calls = mockJev();
+  await asChild(async () => {
+    const forked = await start({ ctx: { sessionManager: { getSessionId: () => 'fork', getBranch: () => [{ type: 'message', message: { role: 'assistant', usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: { total: 0.0001 } } } }] } } });
+    try {
+      await forked.turn('list the exports of the loader');
+      assert.equal(calls.length, 0, 'the replayed history is cached at the launch level: no judge call');
+      assert.equal(forked.thinking(), 'high');
+    } finally { forked.cleanup(); }
+    const f = await start();
+    try {
+      await f.turn('list the exports of the loader\n\nTask context (shared Task State Graph, advisory — verify before relying):\naudit the security of the billing flow');
+      assert.equal(calls.length, 1, 'cue words in the appended context do not skip the judge');
+      assert.doesNotMatch(JSON.stringify(calls[0].state), /billing/);
+      assert.equal(f.thinking(), 'minimal', 'a short plain easy brief steps to minimal');
+    } finally { f.cleanup(); }
+  });
+});

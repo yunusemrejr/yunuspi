@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createJiti } from 'jiti';
 
 const jiti = createJiti(import.meta.dirname);
-const { launchChildren, rememberLaunch, refuseTwinLaunch, withSiblingBlocks } =
+const { launchChildren, rememberLaunch, refuseTwinLaunch, withSiblingBlocks, ownBrief } =
   await jiti.import('../agent/extensions/pi-subagents/src/runs/shared/session-siblings.ts');
 
 const newState = () => ({ asyncJobs: new Map() });
@@ -129,4 +129,13 @@ test('a mark belongs to the run it was set for: it is dropped when that run ends
   alive(state, 'run-2');
   assert.match(refuseTwinLaunch(state, children), /already running as run-2/, 'the old mark does not excuse a duplicate of a newer run');
   assert.equal(refuseTwinLaunch(state, children), undefined, 'and that one is refused once, as well');
+});
+
+test('copies of one task are one sibling line, and the harness blocks are not part of the brief', () => {
+  const params = { tasks: [{ agent: 'scout', task: 'list the exports' }, { agent: 'scout', task: 'list the exports' }, { agent: 'scout', task: 'list the exports' }] };
+  const out = withSiblingBlocks(newState(), params, launchChildren(params));
+  assert.equal(out.tasks[0].task, `list the exports\n\n${BLOCK}\n- scout: list the exports (2 copies)`);
+  const withSlice = `read the loader\n\nTask context (shared Task State Graph, advisory — verify before relying):\naudit security\n\n${BLOCK}\n- scout: x`;
+  assert.equal(ownBrief(withSlice), 'read the loader');
+  assert.equal(ownBrief('read the loader'), 'read the loader');
 });

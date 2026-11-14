@@ -16,7 +16,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
+import { effortLevelForTier } from "./lib/effort-policy.mjs";
+import { askJev } from "./lib/jev-client.ts";
+import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import { loadTeamConfig } from "./lib/team.ts";
+import { intersectThinkingCeilings, sessionThinkingCeiling } from "./pi-subagents/src/shared/thinking-ceiling.ts";
 
 export const ADVISOR_ENTRY = "advisor-v1";
 const OWNER = "advisor";
@@ -27,12 +31,39 @@ const PER_SESSION = 12;
 const ANSWER_TOKENS = 1_200;
 const THINKING_HEADROOM = 4_096;
 const DEADLINE_MS = 180_000;
+/** The advisor thinks at this level unless the decision model finds the question simple. */
+const BASE_LEVEL = "medium";
+/** A slow judge falls back to the base level rather than delay the question. */
+const JEV_TIMEOUT_MS = 3_500;
 const SYSTEM =
 	"You advise another model that is in the middle of a task. Answer in at most 120 words: the recommendation first, then the reason, then the one risk to watch.";
 const DESCRIPTION =
 	"Put one question (at most 1,500 characters) to a stronger model and get a few lines back. It sees only the question: state the goal, what is known, the options and the one thing to decide. Ask when its judgment can change the outcome: before committing to an approach on a hard or costly task, after two failed attempts at the same problem, before reporting a large piece of work as done. Never for a fact a lookup answers. 3 per run, 12 per session.";
 
 const routeOf = (model: any) => `${model?.provider}/${model?.id}`;
+
+/**
+ * Thinking level of one question: the base level, or lower when the decision
+ * model (Jev) finds the question simple; never above the session's own ceiling.
+ * When Jev cannot answer the base level stands.
+ */
+async function questionLevel(pi: any, ctx: any, question: string, signal: AbortSignal): Promise<string> {
+	let ceiling: string = BASE_LEVEL;
+	try {
+		const session = sessionThinkingCeiling(ctx?.sessionManager?.getBranch?.(), pi.getThinkingLevel?.());
+		ceiling = intersectThinkingCeilings(BASE_LEVEL, session) ?? BASE_LEVEL;
+		if (ceiling === "off") return ceiling;
+		const judged = await askTypedDecision(
+			"effort-tier",
+			{ state: { request: question } },
+			{ judge: (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: JEV_TIMEOUT_MS }), signal },
+		);
+		const tier = judged.ok ? judged.verdict?.tier : undefined;
+		return tier === "easy" || tier === "moderate" ? effortLevelForTier(tier, ceiling) : ceiling;
+	} catch {
+		return ceiling;
+	}
+}
 
 /** Every accepted call leaves one entry; a reload counts them back. */
 function recordedCalls(ctx: any): number {
@@ -128,6 +159,7 @@ export default function advisorExtension(pi: any) {
 				const thinking = model.reasoning === true && model.thinkingLevelMap?.medium !== null;
 				const ceiling = ANSWER_TOKENS + (thinking ? THINKING_HEADROOM : 0);
 				usage("pending");
+				const level = thinking ? await questionLevel(pi, ctx, asked, bounded) : "off";
 				let response: any;
 				try {
 					response = await ctx.modelRegistry.completeSimple(
@@ -137,7 +169,7 @@ export default function advisorExtension(pi: any) {
 							signal: bounded,
 							maxRetries: 0,
 							maxTokens: Math.min(ceiling, Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : ceiling),
-							...(thinking ? { reasoning: "medium" } : {}),
+							...(level !== "off" ? { reasoning: level } : {}),
 						},
 					);
 				} catch (error) {

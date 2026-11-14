@@ -9,6 +9,7 @@
  * ends.
  */
 import type { SubagentState } from "../../shared/types.ts";
+import { TASK_CONTEXT_MARK } from "./common-task.ts";
 
 /** A native child a call names: `key` is set only when it has a task of its own. */
 export interface LaunchedChild {
@@ -34,6 +35,8 @@ const MAX_LINES = 4;
 const LABEL_CHARS = 100;
 /** Where the child's own task starts after a `commonTask` expansion. */
 const CHILD_TASK_MARK = "\n\nChild task:\n";
+/** Starts the sibling block appended to a brief. */
+const SIBLINGS_MARK = "\n\nAlso at work in this session:\n";
 const memories = new WeakMap<object, Memory>();
 
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
@@ -124,6 +127,12 @@ export function refuseTwinLaunch(state: SessionState, children: LaunchedChild[])
 	return `already running as ${id} since ${minutes} min; its report will arrive; send the call again to run a second one`;
 }
 
+/** What the caller wrote in a child's brief, without the blocks the harness appended after it. */
+export function ownBrief(brief: string): string {
+	const cuts = [TASK_CONTEXT_MARK, SIBLINGS_MARK].map((mark) => brief.indexOf(mark)).filter((at) => at >= 0);
+	return cuts.length ? brief.slice(0, Math.min(...cuts)) : brief;
+}
+
 /**
  * Add to each child's brief the block naming the others at work: the other
  * children of the same `tasks` batch, then the children still running from
@@ -136,7 +145,10 @@ export function withSiblingBlocks<T extends object>(state: SessionState, params:
 		if (typeof item.task !== "string" || !item.task.trim()) return item;
 		const others = [...(batch ? children.filter((_, other) => other !== index) : []), ...earlier].filter((child) => child.label);
 		if (!others.length) return item;
-		const lines = others.slice(0, MAX_LINES).map((child) => `- ${child.agent}: ${child.label}`);
-		return { ...item, task: `${item.task}\n\nAlso at work in this session:\n${lines.join("\n")}` };
+		// Copies of one task (`count`) are one line, not four identical ones.
+		const copies = new Map<string, number>();
+		for (const child of others) copies.set(`${child.agent}: ${child.label}`, (copies.get(`${child.agent}: ${child.label}`) ?? 0) + 1);
+		const lines = [...copies].slice(0, MAX_LINES).map(([line, count]) => `- ${line}${count > 1 ? ` (${count} copies)` : ""}`);
+		return { ...item, task: `${item.task}${SIBLINGS_MARK}${lines.join("\n")}` };
 	});
 }

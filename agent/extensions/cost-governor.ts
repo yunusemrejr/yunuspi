@@ -56,6 +56,7 @@ import { createCacheSentinel, describeCacheMisses } from "./lib/cache-sentinel.t
 import { cacheProfileFor } from "./lib/lean-policy.ts";
 import { askJev, jevEnabled } from "./lib/jev-client.ts";
 import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
+import { ownBrief } from "./pi-subagents/src/runs/shared/session-siblings.ts";
 import {
 	applyFold,
 	capText,
@@ -642,10 +643,14 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		}
 		if (!effortInitialized) initEffort();
 		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy) return;
+		// A forked or resumed child replays history that is cached at its launch level: it keeps that level.
+		if (assignment && resumed) return;
 		// A child launches at the ceiling its role allows and steps down here
 		// like a main-session turn, judged on its assignment.
 		if (ctx?.model?.reasoning === false) return;
-		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+		// The judge reads what the caller wrote; the task context and sibling lines the harness appends are not the assignment.
+		const raw = typeof event?.prompt === "string" ? event.prompt : "";
+		const prompt = assignment ? ownBrief(raw) : raw;
 		if (!prompt.trim()) return;
 		if (levelRank(effortCeiling) < EFFORT_MIN_CEILING_RANK) return;
 		let current = "";

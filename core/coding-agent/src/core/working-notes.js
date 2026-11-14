@@ -8,7 +8,7 @@
  * user's behalf and reporting. `<agentDir>/NOTES.md` replaces the built-in text
  * when the user keeps their own; `PI_WORKING_NOTES=0` removes the section.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** A user's own notes are bounded so one pasted document cannot crowd the prompt. */
@@ -111,13 +111,39 @@ export const GUIDE_ROUTES = [
 /** The guide index for the skills actually installed under `skillsDir`. */
 export function guideIndex(skillsDir, installed = (name) => existsSync(join(skillsDir, name, "SKILL.md"))) {
     const rows = GUIDE_ROUTES.filter((route) => route.guides.every(installed));
-    if (!rows.length)
+    const others = unlistedGuides(skillsDir, new Set(GUIDE_ROUTES.flatMap((route) => route.guides)));
+    if (!rows.length && !others.length)
         return "";
     const root = String(skillsDir).replace(/\\/g, "/");
     return [
         `Guides (when the work matches a row, read ${root}/<name>/SKILL.md before choosing the approach; the user does not have to name it)`,
         ...rows.map((route) => `- ${route.work}: ${route.guides.join(", ")}`),
+        ...(others.length ? [`- work these names cover: ${others.join(", ")}`] : []),
     ].join("\n");
+}
+
+/**
+ * Installed guides kept out of the skill list (disable-model-invocation) and not
+ * routed above. Without this line a session never learns they exist.
+ */
+function unlistedGuides(skillsDir, routed) {
+    let names;
+    try {
+        names = readdirSync(skillsDir);
+    }
+    catch {
+        return [];
+    }
+    return names.filter((name) => {
+        if (routed.has(name))
+            return false;
+        try {
+            return /^disable-model-invocation:\s*true\s*$/m.test(readFileSync(join(skillsDir, name, "SKILL.md"), "utf8").slice(0, 2000));
+        }
+        catch {
+            return false;
+        }
+    }).sort();
 }
 
 const cache = new Map();

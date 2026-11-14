@@ -5,6 +5,9 @@
  * subagent provenance, never as verified facts. Fail-open: any graph trouble
  * leaves the brief untouched.
  */
+/** Starts the slice block appended to a brief; whatever follows it is the harness's, not the brief's. */
+export const TASK_CONTEXT_MARK = "\n\nTask context (shared Task State Graph";
+
 export function attachTaskStateSlice<T extends { task?: string }>(input: T, slice?: () => string): T {
 	if (typeof input.task !== "string" || !input.task.trim()) return input;
 	let text = "";
@@ -14,8 +17,8 @@ export function attachTaskStateSlice<T extends { task?: string }>(input: T, slic
 		return input;
 	}
 	if (!text || !text.trim() || text === "(task state unavailable)") return input;
-	const block = `\n\nTask context (shared Task State Graph, advisory — verify before relying):\n${text.slice(0, 1500)}`;
-	if (input.task.includes("Task context (shared Task State Graph")) return input;
+	const block = `${TASK_CONTEXT_MARK}, advisory — verify before relying):\n${text.slice(0, 1500)}`;
+	if (input.task.includes(TASK_CONTEXT_MARK.trimStart())) return input;
 	if (input.task.length + block.length > 48_000) return input;
 	return { ...input, task: `${input.task}${block}` };
 }

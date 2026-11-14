@@ -350,7 +350,7 @@ export function goalRestoreNotice(goal: GoalState | undefined): string | undefin
 	if (!goal || !["active", "paused", "blocked"].includes(goal.status)) return undefined;
 	const settled = goal.criteria.filter((criterion) => criterion.status !== "open").length;
 	const progress = `${settled}/${goal.criteria.length} criteria settled`;
-	if (goal.status === "active") return `Goal ${goal.id} is still open in this session (${progress}). Your next message continues it; /goal resume continues it now, /goal shows the criteria.`;
+	if (goal.status === "active") return `Goal ${goal.id} is still open in this session (${progress}). /goal resume continues it, /goal clear drops it, /goal shows the criteria.`;
 	if (goal.status === "paused") return `Goal ${goal.id} is paused (${progress}). /goal resume continues it, /goal clear drops it.`;
 	return `Goal ${goal.id} stalled (${progress})${goal.note ? `: ${goal.note}` : "."} /goal retry gives it another try, /goal clear drops it.`;
 }

@@ -88,10 +88,19 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// kickoff for a goal that is no longer active is dropped, and so is a copy
 	// of one already waiting in the queue; delivery forgets the waiting copy.
 	const queuedKickoffs = new Set<string>();
+	let humanRun = false;
 	pi.on("input", (event: any) => {
 		const text = typeof event?.text === "string" ? event.text : "";
+		// A continuation queued for a goal that was cleared or replaced is dropped too.
+		const continued = /^\[goal (\S+), continuation /.exec(text)?.[1];
+		if (continued) return goal?.id !== continued || goal.status !== "active" ? { action: "handled" as const } : undefined;
 		const id = /^\[goal-tracked (\S+)\]/.exec(text)?.[1];
-		if (!id) return undefined;
+		if (!id) {
+			// A message of the user's own that starts a run (not a steer into a running one) may be about
+			// something else entirely; that run is not followed by an automatic goal continuation.
+			if ((event?.source === "interactive" || event?.source === "rpc") && !event.streamingBehavior && !text.startsWith("/")) humanRun = true;
+			return undefined;
+		}
 		if (goal?.id !== id || goal.status !== "active" || queuedKickoffs.has(text)) return { action: "handled" as const };
 		if (event.streamingBehavior) queuedKickoffs.add(text);
 		return undefined;
@@ -296,6 +305,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			persistPending();
 			const stop = lastStop;
 			lastStop = undefined;
+			const fromUser = humanRun;
+			humanRun = false;
 			// Recording the last criterion used to wake a model just to call complete. Close that exact checked goal
 			// here instead; unresolved receipts still take the normal bounded continuation path, never an auto-waiver.
 			if (stop === "stop" && goal?.status === "active" && !ctx.hasPendingMessages() && !debt() && goal.criteria.every(c => c.status !== "open")) {
@@ -310,6 +321,11 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					ctx.ui?.notify?.(`Goal ${goal.id} achieved.`, "info");
 					return;
 				}
+			}
+			// The user switched to other work mid-goal: answer them, keep the goal open, do not drag the session back.
+			if (fromUser && stop === "stop" && goal?.status === "active") {
+				ctx.ui?.notify?.(`Goal ${goal.id} is still open (${goal.criteria.filter((c) => c.status === "open").length} criteria). /goal resume continues it, /goal clear drops it.`, "info");
+				return;
 			}
 			const decision = stopGate(goal, { lastStop: stop, hasPendingMessages: ctx.hasPendingMessages() });
 			if (!decision) return;
@@ -359,7 +375,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const found = extractPresetTokens(command.text);
 					if (found.presets.length && found.task) return startBoosted(found, ctx);
 					if (found.presets.length) return startPreset(found.presets[0])(found.presets.slice(1).map((id) => `/${id}`).join(" "), ctx);
+					const replaced = goalIsLive(goal) ? goal : undefined;
 					const next = createGoal(command.text);
+					if (replaced) notify(`Goal ${replaced.id} replaced (${replaced.criteria.filter((c) => c.status === "open").length} criteria were open).`);
 					checkStatic = createStaticCompletionCheck();
 					checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
 					refused.clear();

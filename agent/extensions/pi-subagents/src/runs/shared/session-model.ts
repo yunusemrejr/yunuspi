@@ -54,9 +54,11 @@ export function resolveChildRoute(input: {
 	const role = resolveAgentRole(input.agent, team, input.callRole);
 	const maxThinking = roleThinkingCeiling(role, team);
 	const model = resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	// A configured role model needs no session model; only the comparison with it does.
+	const onSessionModel = input.parentModel !== undefined && model === sessionChildModel(input.parentModel);
 	return {
 		model,
-		...(model !== sessionChildModel(input.parentModel) ? { shownRole: role } : {}),
+		...(!onSessionModel ? { shownRole: role } : {}),
 		...(maxThinking ? { maxThinking } : {}),
 	};
 }

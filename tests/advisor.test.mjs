@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import advisorExtension from '../agent/extensions/advisor.ts';
 import { collectSessionCost } from '../core/coding-agent/src/core/session-accounting.js';
+import { configureJevClient, resetJevClient } from '../agent/extensions/lib/jev-client.ts';
+
+// No test here may reach the decision model over the network.
+process.env.PI_JEV = 'off';
 
 const SYSTEM = 'You advise another model that is in the middle of a task. Answer in at most 120 words: the recommendation first, then the reason, then the one risk to watch.';
 const DESCRIPTION = 'Put one question (at most 1,500 characters) to a stronger model and get a few lines back. It sees only the question: state the goal, what is known, the options and the one thing to decide. Ask when its judgment can change the outcome: before committing to an approach on a hard or costly task, after two failed attempts at the same problem, before reporting a large piece of work as done. Never for a fact a lookup answers. 3 per run, 12 per session.';
@@ -197,4 +201,54 @@ test('an unavailable advisor model gives the one-line settings error', (t) => wi
 	const result = await run({ question: 'Any advice?' });
 	assert.equal(result.isError, true);
 	assert.equal(result.content[0].text, `team.advisor is set to 'example/advisor-1', which is not among the available models. Pick another with /team.`);
+}));
+
+/** Jev answers every question with these two scores; the calls are returned. */
+function mockJev(simple, deep) {
+	const calls = [];
+	resetJevClient();
+	configureJevClient({
+		fetchImpl: async (url, options) => {
+			if (String(url).includes('/api/v1/models')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+			calls.push(JSON.parse(options.body));
+			return { ok: true, status: 200, json: async () => ({ model: 'typesafe/jev-1.14-20261014', answers: { simple: { type: 'noul', noul: simple }, deep: { type: 'noul', noul: deep } }, usage: { input_tokens: 10, cost: 0 } }) };
+		},
+		now: () => Date.now(),
+		schedule: () => ({}),
+		openMs: 50,
+		requestTimeoutMs: 5_000,
+	});
+	return calls;
+}
+
+/** Ask one question with the decision model on; returns the reasoning level the advisor call used. */
+async function reasoningFor(t, { simple, deep, sessionLevel }) {
+	const saved = { jev: process.env.PI_JEV, key: process.env.OPENROUTER_API_KEY };
+	process.env.PI_JEV = 'on';
+	process.env.OPENROUTER_API_KEY = 'sk-or-test';
+	t.after(() => {
+		for (const [name, value] of [['PI_JEV', saved.jev], ['OPENROUTER_API_KEY', saved.key]]) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+		resetJevClient();
+	});
+	const calls = mockJev(simple, deep);
+	let seen;
+	const h = harness({ complete: async (_model, _context, options) => { seen = options; return { content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', usage: {} }; } });
+	h.pi.getThinkingLevel = () => sessionLevel;
+	await h.run({ question: 'Which of these two names is clearer?' });
+	return { reasoning: seen.reasoning, asked: calls.length };
+}
+
+test('the decision model sets the advisor thinking level per question and never above the session level', (t) => withAgentDir(t, 'example/advisor-1', async () => {
+	assert.deepEqual(await reasoningFor(t, { simple: 0.94, deep: 0.04, sessionLevel: 'high' }), { reasoning: 'low', asked: 1 }, 'an easy question thinks less');
+	assert.deepEqual(await reasoningFor(t, { simple: 0.65, deep: 0.28, sessionLevel: 'high' }), { reasoning: 'medium', asked: 1 });
+	assert.deepEqual(await reasoningFor(t, { simple: 0.6, deep: 0.55, sessionLevel: 'high' }), { reasoning: 'medium', asked: 1 }, 'an unclear answer keeps the fixed level');
+	assert.deepEqual(await reasoningFor(t, { simple: 0.6, deep: 0.55, sessionLevel: 'low' }), { reasoning: 'low', asked: 1 }, 'a session set to low caps the advisor at low');
+	assert.equal((await reasoningFor(t, { simple: 0.6, deep: 0.55, sessionLevel: 'off' })).reasoning, undefined, 'a session with thinking off sends no reasoning level');
+}));
+
+test('with the decision model off the advisor keeps its fixed level and no judge call is made', (t) => withAgentDir(t, 'example/advisor-1', async () => {
+	let seen;
+	const { run } = harness({ complete: async (_model, _context, options) => { seen = options; return { content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', usage: {} }; } });
+	await run({ question: 'Which name is clearer?' });
+	assert.equal(seen.reasoning, 'medium');
 }));
