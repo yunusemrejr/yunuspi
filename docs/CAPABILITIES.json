@@ -2763,7 +2763,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 911
+        "line": 916
       },
       {
         "name": "catalog-status",
@@ -2808,7 +2808,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 450
+        "line": 468
       },
       {
         "name": "google-account",
@@ -3023,7 +3023,7 @@
       {
         "name": "team",
         "source": "agent/extensions/team-command.ts",
-        "line": 342
+        "line": 437
       },
       {
         "name": "used",
@@ -3043,7 +3043,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          464
+          482
         ]
       },
       {
@@ -3078,7 +3078,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 78,
+        "line": 109,
         "kind": "literal"
       },
       {
@@ -3357,7 +3357,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 258,
+        "line": 259,
         "kind": "literal"
       },
       {
@@ -3547,7 +3547,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 78,
+        "line": 109,
         "kind": "literal"
       },
       {
@@ -3697,7 +3697,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 258,
+        "line": 259,
         "kind": "literal"
       },
       {
@@ -6111,6 +6111,12 @@
       }
     ],
     "serviceOwners": [
+      {
+        "source": "agent/extensions/advisor.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
       {
         "source": "agent/extensions/checkpoints.ts",
         "signals": [

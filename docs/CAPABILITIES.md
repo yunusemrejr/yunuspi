@@ -1066,7 +1066,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `ask_advisor` — [`agent/extensions/advisor.ts`](../agent/extensions/advisor.ts) (line 78; literal)
+- `ask_advisor` — [`agent/extensions/advisor.ts`](../agent/extensions/advisor.ts) (line 109; literal)
 - `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 539; factory)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 161; factory)
 - `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 81; factory)
@@ -1112,7 +1112,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_intel` — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 691; literal)
 - `project_tests` — [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts) (line 796; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 811; literal)
-- `read_many` — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 258; literal)
+- `read_many` — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 259; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 242; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2258; literal)
@@ -1167,7 +1167,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 603)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 637)
-- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 911)
+- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 916)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1832)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1827)
@@ -1176,7 +1176,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 49)
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1791)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
-- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 450)
+- /goal — [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) (line 468)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3325)
 - /graph — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 807)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
@@ -1219,13 +1219,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1740)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 629)
-- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 342)
+- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 437)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1759)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3028)
 
 ### Dynamic command owners
 
-- [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) — registerCommand() receives a computed name (lines 464)
+- [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) — registerCommand() receives a computed name (lines 482)
 - [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 180)
 
@@ -1233,6 +1233,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
+- [`agent/extensions/advisor.ts`](../agent/extensions/advisor.ts) — `wrapper/adapter`
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) — `wrapper/adapter`
 - [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) — `wrapper/adapter`
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
