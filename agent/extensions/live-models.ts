@@ -1,5 +1,5 @@
 import { acquireCatalogCacheLock } from "./lib/catalog-cache-lock.ts";
-import { MODEL_FACTS, currentModelFacts, directDeepseekCost, knownModelFacts } from "./lib/model-facts.ts";
+import { MODEL_FACTS, antLingCost, antLingRetired, currentModelFacts, directDeepseekCost, knownModelFacts } from "./lib/model-facts.ts";
 import {
 	DIRECTORY_TTL_MS, DIRECTORY_URL, catalogRowFacts, directoryCovers, directoryFacts, directoryProvider, distillDirectory, parseDirectory,
 	scopedDirectory, type DirectoryFacts, type ModelDirectory, type ProviderAddress,
@@ -79,6 +79,7 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 	cerebras: "https://api.cerebras.ai/v1",
 	deepseek: "https://api.deepseek.com/v1",
 	longcat: "https://api.longcat.chat/openai/v1",
+	"ant-ling": "https://api.ant-ling.com/v1",
 	runinfra: "https://api.runinfra.ai/v1",
 	meta: "https://api.meta.ai/v1",
 };
@@ -1500,6 +1501,22 @@ async function refreshLongCat(context: RefreshModelContext): Promise<{ models: L
   })};
 }
 
+/** Ant Ling's authenticated /models lists ids only; limits, vision, thinking and
+ * prices come from dated facts at publication. The Ming models hear, speak and
+ * draw, so they are no chat route. */
+async function refreshAntLing(context: RefreshModelContext): Promise<{ models: LiveCatalogModel[]; unavailable?: UnavailableMap }> {
+  const key = resolvedCatalogApiKey('ant-ling', context);
+  if (!key) throw new Error('Ant Ling catalog credential unavailable');
+  const raw = await fetchJson(`${DEFAULT_BASE_URLS['ant-ling']}/models`, context.signal, {headers:{Authorization:`Bearer ${key}`}}) as any;
+  const dropped = new Map<string, string>();
+  const models: LiveCatalogModel[] = [];
+  for (const row of modelRows<{id:string}>(raw?.data)) {
+    if (row.id.startsWith('Ming-')) noteUnavailable(dropped, row.id, 'not a chat model');
+    else models.push(minimalModel(row.id, 'ant-ling'));
+  }
+  return {models, unavailable: unavailableRecord(dropped)};
+}
+
 /** Meta's subscription catalog is id-only and OAuth-gated, and the pi.dev
  * store lags new releases (the Wonder family shipped with no store entry).
  * New chat ids are templated from the newest curated store sibling in the
@@ -1597,6 +1614,7 @@ const REFRESHER_IDS = [
 	"cerebras",
 	"deepseek",
 	"longcat",
+	"ant-ling",
 	"runinfra",
 	"meta",
 ] as const;
@@ -1622,7 +1640,7 @@ function publishModels(
 	models: LiveCatalogModel[],
 	probes?: CacheEntry["probes"],
 ): LiveCatalogModel[] {
-	const idOnly = ["cerebras", "deepseek"].includes(provider);
+	const idOnly = ["cerebras", "deepseek", "ant-ling"].includes(provider);
     const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""));
     // Publish the documented canonical ID even when an old cache predates release.
     if (officialDeepSeek && idOnlyFacts("deepseek")["deepseek-flash"] && !models.some(m => m.id === "deepseek-flash"))
@@ -1633,6 +1651,8 @@ function publishModels(
 	const discovered = !Object.hasOwn(REFRESHERS, provider);
 	const listing = idOnly || discovered ? directoryProvider(loadDirectory(), provider, wireFor(provider).baseUrl) : undefined;
 	if (discovered) models = models.filter((model) => directoryFacts(listing, model.id)?.chat !== false);
+	// The built-in catalog and /models can both outlive a model the vendor has withdrawn.
+	if (provider === "ant-ling") models = models.filter((model) => !antLingRetired(model.id));
 	for (const key of outputFallbacks.keys()) if (key.startsWith(`${provider}/`)) outputFallbacks.delete(key);
 	return validModels(models).map((cachedModel) => {
 		const { outputLimitEstimated, ...cachedRaw } = cachedModel;
@@ -1692,6 +1712,7 @@ function publishModels(
 		);
 		const directPeak = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))
             ? directDeepseekCost(model.id) : undefined;
+		const antLingPrice = provider === "ant-ling" ? antLingCost(model.id) : undefined;
 		return normalizeModelLimits({
 			...model,
 			...(provider === "runinfra" && !knownModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),
@@ -1701,6 +1722,7 @@ function publishModels(
 			// current: the directory lists the off-peak rate, and the core bills peak and
 			// off-peak hours only when it recognises exactly these rates.
 			...(directPeak ? { cost: directPeak } : {}),
+			...(antLingPrice ? { cost: antLingPrice } : {}),
 			...(Object.keys(compat).length ? { compat } : {}),
 		});
 	});
@@ -1715,6 +1737,7 @@ const REFRESHERS: Record<string, Fetcher> = {
 	deepseek: (ctx, _cached) =>
 		refreshIdOnlyCatalog("deepseek", "https://api.deepseek.com/v1/models", ctx, idOnlyFacts("deepseek")),
 	longcat: refreshLongCat,
+	"ant-ling": refreshAntLing,
 	runinfra: refreshRunInfra,
 	meta: refreshMeta,
 };
@@ -1851,6 +1874,7 @@ export default async function registerLiveModels(
 		["cerebras", "Cerebras"],
 		["deepseek", "DeepSeek"],
 		["longcat", "LongCat"],
+		["ant-ling", "Ant Ling"],
 		["runinfra", "RunInfra"],
 		["meta", "Meta"],
 	] as const) {

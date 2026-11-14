@@ -39,6 +39,17 @@ test('binary thinking uses only the documented enabled/disabled object, includin
  assert.deepEqual(off.thinking,{type:'disabled'});assert.equal(off.reasoning_effort,undefined);
 });
 
+test('Ant Ling 3.x requests carry the binary thinking object, a system role and max_tokens',async()=>{
+ const {MODEL_FACTS}=await import(pathToFileURL(path.join(agent,'extensions/lib/model-facts.ts')));
+ const {name,...facts}=MODEL_FACTS['ant-ling'].models['Ling-3.2-flash'];
+ const ling={...model,...facts,id:'Ling-3.2-flash',name,provider:'ant-ling',baseUrl:'https://api.ant-ling.com/v1'};
+ const on=await request(chat,ling,{reasoning:'medium'},true);
+ assert.deepEqual(on.thinking,{type:'enabled'});assert.equal(on.reasoning,undefined);assert.equal(on.reasoning_effort,undefined);
+ assert.equal(on.max_tokens,8192);assert.equal(on.store,undefined);assert.equal(on.messages[0].role,'system');
+ const off=await request(chat,ling,{reasoning:'off'},true);
+ assert.deepEqual(off.thinking,{type:'disabled'});assert.equal(off.reasoning,undefined);assert.equal(off.reasoning_effort,undefined);
+});
+
 test('direct calls and simple calls obey the same reasoning enum across request families',async()=>{
  for(const [driver,api] of [[chat,'openai-completions'],[responses,'openai-responses'],[codex,'openai-codex-responses']]){
   const m={...model,api};

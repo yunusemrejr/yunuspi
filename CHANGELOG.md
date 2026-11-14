@@ -1,3 +1,7 @@
+## Unreleased
+
+**Ant Ling works with its current models.** The built-in Ant Ling list was from September and held only Ling-2.6-1T, Ling-2.6-flash and Ring-2.6-1T, all withdrawn on 14 Nov 2026. Ant Ling now joins live model discovery: the models offered are the ones its authenticated catalog lists, with Ling-3.2-flash, Ling-3.1-flash, Ling-3.0-flash, Ling-3.0-flash-VL and Ling-3.0-tiny carrying dated facts for context size, image input, thinking and prices. The 3.x models offer off and medium thinking, sent as the documented `thinking` enabled/disabled field. The withdrawn models and the `Ming-*` speech and image models are not offered. Prices are the published promotional ones converted from yuan and are quoted only until their review date; Ling-3.2-flash shows as free until 18 Nov 2026 and unknown afterwards. The key comes from `auth.json` or `ANT_LING_API_KEY`. A new test suite covers the list, the key paths and the price dates; a streamed tool call to Ling-3.2-flash with thinking off was checked live.
+
 ## 0.54.0 — Time, spend and speed in the agent's own words
 
 Three additions. A child agent now learns what it has spent in time and money while it still can change how it works; a message that asks you to go faster is passed on as a rule; and painting a picture on a canvas is a shipped skill.

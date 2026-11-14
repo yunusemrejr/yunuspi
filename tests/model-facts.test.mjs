@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 const template=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/model-facts.ts')));
-const {MODEL_FACTS_VERSION,MODEL_FACTS,currentModelFacts,knownModelFacts,directDeepseekCost}=await import(pathToFileURL(path.join(agent,'extensions/lib/model-facts.ts')));
+const {MODEL_FACTS_VERSION,MODEL_FACTS,currentModelFacts,knownModelFacts,directDeepseekCost,antLingCost,antLingRetired}=await import(pathToFileURL(path.join(agent,'extensions/lib/model-facts.ts')));
 test('dated model facts have explicit provenance and expire without becoming free evidence',()=>{
  assert.equal(MODEL_FACTS_VERSION,1);
  for(const [provider,row] of Object.entries(MODEL_FACTS)){
@@ -38,4 +38,16 @@ test('versioned direct price schedule preserves its original boundary',()=>{
  assert.equal(directDeepseekCost('deepseek-v4-pro',back-1).input,0.3);
  assert.deepEqual(directDeepseekCost('deepseek-v4-pro',back),{input:1.32,output:3.96,cacheRead:0.044,cacheWrite:0});
  assert.equal(directDeepseekCost('unknown',cutover),undefined);
+});
+test('Ant Ling prices stop at their review dates and withdrawn models stop at the vendor\'s moment',()=>{
+ const day=iso=>Date.parse(iso);
+ assert.deepEqual(antLingCost('Ling-3.2-flash',day('2026-11-17T23:59:59Z')),{input:0,output:0,cacheRead:0,cacheWrite:0,knownFree:true});
+ assert.equal(antLingCost('Ling-3.2-flash',day('2026-11-18T00:00:00Z')),undefined,'the price after the free fortnight is not published');
+ assert.equal(antLingCost('Ling-3.1-flash',day('2026-11-27T23:59:59Z')).input,0.07494);
+ assert.equal(antLingCost('Ling-3.1-flash',day('2026-11-28T00:00:00Z')),undefined);
+ assert.equal(antLingCost('Ling-3.0-tiny',day('2026-11-15T00:00:00Z')),undefined,'unpublished stays unknown');
+ assert.equal(antLingCost('__proto__',day('2026-11-15T00:00:00Z')),undefined);
+ assert.equal(antLingRetired('Ling-2.6-flash',day('2026-11-14T15:59:59Z')),false);
+ for(const id of ['Ling-2.6-1T','Ling-2.6-flash','Ring-2.6-1T'])assert.equal(antLingRetired(id,day('2026-11-14T16:00:00Z')),true);
+ assert.equal(antLingRetired('Ling-3.1-flash',day('2030-01-01T00:00:00Z')),false);
 });
