@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig, type AgentScope, type UnknownAgentDiagnosticContext } from "../agents/agents.ts";
 import { normalizeSkillInput } from "../agents/skills.ts";
+import type { TeamRole } from "../../../lib/team.ts";
 import { normalizeOutputOverride, type OutputOverrideInput, type ResolvedStepBehavior } from "../runs/shared/child-launch-plan.ts";
 import { CHAIN_RUNS_DIR, type AcceptanceInput, type AgentContract, type ChainGateLayer, type JsonSchemaObject, type OutputMode, type ToolBudgetConfig } from "./types.ts";
 const CHAIN_DIR_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -29,6 +30,7 @@ export type { ChildLaunchPlan, ChildLaunchPlanInput, OutputOverrideInput, Resolv
 export interface SequentialStep {
 	agent: string;
 	task?: string;
+	role?: TeamRole;
 	phase?: string;
 	label?: string;
 	as?: string;
@@ -54,6 +56,7 @@ export interface SequentialStep {
 export interface ParallelTaskItem {
 	agent: string;
 	task?: string;
+	role?: TeamRole;
 	phase?: string;
 	label?: string;
 	as?: string;

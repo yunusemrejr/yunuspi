@@ -305,7 +305,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "agent-model-management",
 		group: "models",
-		summary: "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
+		summary: "List executable agents and their capabilities and inspect or edit scoped definitions. Each agent has a role (main, helper or legwork) that runs on the model set with /team, the session's model unless set; its thinking level starts at the session ceiling and Jev steps it down once, from the brief.",
 		entrypoints: ["subagent", "action:list", "action:get", "action:create", "action:update"],
 		tools: ["subagent"],
 		commands: ["subagents", "subagents-doctor"],
@@ -436,7 +436,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"todos", "memory-prime", "bg", "tasks", "bg-clear", "logs", "kill",
 			"subagents", "run", "subagents-doctor", "subagents-inspect-rpc", "subagents-refine", "subagents-fleet",
 			"subagents-detach", "subagents-stop", "subagents-steer", "subagents-watchdog", "prompt-workflow", "google-account",
-			"sys-prompt", "used", "errors", "commands", "guardian", "observer-book",
+			"sys-prompt", "used", "errors", "commands", "guardian", "observer-book", "team",
 		],
 		options: [
 			option("pi.getCommands()", "Read the live command registry; command availability can depend on loaded extensions and configuration."),
@@ -452,6 +452,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		sourceFiles: [
 			"agent/extensions/session-signals.ts",
 			"agent/extensions/model-routing-config.ts",
+			"agent/extensions/team-command.ts",
 			"agent/extensions/lib/session-telemetry.ts",
 			"agent/extensions/thinking.ts",
 			"agent/extensions/project-intelligence.ts",

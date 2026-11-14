@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('yunuspi', Object.freeze({
   importSession: () => invoke('importSession'),
   exportSession: id => invoke('exportSession', { id }),
   saveCredential: (provider, key) => invoke('saveCredential', { provider, key }),
+  teamSettings: () => invoke('teamSettings'),
+  setTeam: (role, value) => invoke('setTeam', { role, value }),
   onEvent: callback => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('yunuspi:event', listener);

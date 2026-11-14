@@ -20,7 +20,7 @@ const { SessionManager } = await import("../core/coding-agent/src/core/session-m
 const { createEventBus } = await import("../core/coding-agent/src/core/event-bus.js");
 const { failureOf, projectRunEvidence } = await import(pathToFileURL(path.join(base, "runs/shared/run-history.ts")).href);
 const { resultFilePath } = await import(pathToFileURL(path.join(base, "runs/background/result-files.ts")).href);
-const { DIRS } = await import(pathToFileURL(path.join(base, "shared/types.ts")).href);
+const { DIRS, SUBAGENT_ASYNC_STARTED_EVENT } = await import(pathToFileURL(path.join(base, "shared/types.ts")).href);
 
 const route = "openrouter/org/executor-fixture";
 const model = { provider: "openrouter", id: "org/executor-fixture", name: "Executor fixture", fullId: route,
@@ -32,7 +32,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking, asyncByDefault = false, agentFields = {} } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking, asyncByDefault = false, agentFields = {}, models = [] } = {}) {
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
   const fakePi = path.join(cwd, "fixture-pi.mjs");
@@ -44,7 +44,8 @@ const { registerSubagentModelRouteOverride } = await import(pathToFileURL(${JSON
 const handlers = new Map();
 registerSubagentModelRouteOverride({ on: (name, handler) => handlers.set(name, handler) });
 const candidate = JSON.parse(process.env.PI_SUBAGENT_MODEL_ROUTE_CANDIDATE || "null");
-const model = { provider: "openrouter", id: "org/executor-fixture" };
+const launched = (process.argv[process.argv.indexOf("--model") + 1] ?? "openrouter/org/executor-fixture").replace(/:(off|minimal|low|medium|high|xhigh|max)$/, "");
+const model = { provider: launched.split("/")[0], id: launched.split("/").slice(1).join("/") };
 const payload = { model: model.id, messages: [] };
 const request = handlers.get("before_provider_request")?.({ type: "before_provider_request", payload }, { model }) ?? payload;
 appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider${captureNative ? ', argv:process.argv.slice(2), phase:"start", pid:process.pid, timestamp:Date.now()' : ''} }) + "\\n");
@@ -77,9 +78,9 @@ ${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
     tempArtifactsDir: path.join(cwd, "artifacts"), getSubagentSessionRoot: () => path.join(cwd, "sessions"),
     expandTilde: value => value, discoverAgents: () => ({ agents: [agent] }) });
   const sessionManager = SessionManager.inMemory(cwd);
-  const ctx = { cwd, hasUI: false, model: runtimeModel, sessionManager, modelRegistry: { getAvailable: () => [runtimeModel] }, getSystemPrompt: () => "", isIdle: () => true };
+  const ctx = { cwd, hasUI: false, model: runtimeModel, sessionManager, modelRegistry: { getAvailable: () => [runtimeModel, ...models] }, getSystemPrompt: () => "", isIdle: () => true };
   t.after(() => { for (const timer of state.cleanupTimers.values()) clearTimeout(timer); });
-  return { cwd, agent, executor, ctx, entries, hasLaunched: () => fs.existsSync(recordPath), records: () => fs.readFileSync(recordPath, "utf8").trim().split("\n").map(line => JSON.parse(line)) };
+  return { cwd, agent, executor, ctx, entries, state, pi, hasLaunched: () => fs.existsSync(recordPath), records: () => fs.readFileSync(recordPath, "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
 
 async function awaitNativeBackground(f, result) {
@@ -330,4 +331,149 @@ test("external runner errors cannot assert native no-process evidence", async t 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Synthetic external dispatch failure/);
   assert.equal(result.details.launchFailure, undefined);
+});
+
+// A child runs on the model of its role. The fixture agent takes the name of a built-in agent so the
+// built-in role table applies; the real launcher records the model and thinking it was started with.
+const legworkRoute = "openrouter/org/legwork-fixture";
+const legworkModel = { ...model, id: "org/legwork-fixture", name: "Legwork fixture", fullId: legworkRoute, reasoning: true };
+function useTeam(t, settings) {
+  const file = path.join(root, "settings.json");
+  fs.writeFileSync(file, JSON.stringify(settings));
+  t.after(() => fs.rmSync(file, { force: true }));
+}
+const launchModel = row => row.argv[row.argv.indexOf("--model") + 1].replace(/:(off|minimal|low|medium|high|xhigh|max)$/, "");
+const lastStart = f => f.records().filter(row => row.phase === "start").at(-1);
+const scoutCall = (extra = {}) => ({ agent: "scout", task: "Read the source and return a concise observation", context: "fresh", async: false, artifacts: false,
+  acceptance: { level: "none", reason: "Read-only fixture; no implementation deliverable." }, ...extra });
+const runCall = (f, call) => f.executor.execute("role-" + Math.random().toString(36).slice(2), call, new AbortController().signal, undefined, f.ctx);
+
+test("with no team settings a child runs on the session model at the session ceiling", { timeout: 30_000 }, async t => {
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout" } });
+  const result = await runCall(f, scoutCall());
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  assert.equal(launchModel(lastStart(f)), route);
+  assert.equal(launchThinking(lastStart(f)), "high");
+});
+
+test("a legwork child runs on the legwork model under the legwork thinking ceiling, and the call's role can override it", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute, maxThinking: { legwork: "low" } } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout" } });
+  const first = await runCall(f, scoutCall());
+  assert.notEqual(first.isError, true, JSON.stringify(first.content));
+  assert.equal(launchModel(lastStart(f)), legworkRoute, "scout is a legwork agent");
+  assert.equal(launchThinking(lastStart(f)), "low", "the legwork ceiling is below the session's");
+  const second = await runCall(f, scoutCall({ role: "main" }));
+  assert.notEqual(second.isError, true, JSON.stringify(second.content));
+  assert.equal(launchModel(lastStart(f)), route, "role:main on the call keeps the child on the session model");
+  assert.equal(launchThinking(lastStart(f)), "high");
+  const refused = await runCall(f, scoutCall({ role: "boss" }));
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /role must be main, helper, legwork\./);
+});
+
+test("a legwork model that is not available stops the launch with one line naming the setting", { timeout: 30_000 }, async t => {
+  useTeam(t, { team: { legwork: "openrouter/org/not-installed" } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout" } });
+  const result = await runCall(f, scoutCall());
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /team\.legwork is set to 'openrouter\/org\/not-installed', which is not among the available models/);
+  assert.equal(f.hasLaunched(), false, "no child was started");
+});
+
+// A fork replays a persisted parent session.
+function persistParentSession(f) {
+  f.ctx.sessionManager = SessionManager.create(f.cwd, path.join(f.cwd, "parent-sessions"));
+  f.ctx.sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "Earlier conversation" }], timestamp: Date.now() });
+  f.ctx.sessionManager.appendMessage({ role: "assistant", content: [{ type: "text", text: "Earlier answer" }], api: "openai-completions", provider: "openrouter", model: "org/executor-fixture",
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() });
+}
+
+test("a forked child keeps the session model; an agent that only forks by default starts fresh on its role's model", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute, maxThinking: { legwork: "low" } } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout", defaultContext: "fork" } });
+  persistParentSession(f);
+  const implicit = await runCall(f, scoutCall({ context: undefined }));
+  assert.notEqual(implicit.isError, true, JSON.stringify(implicit.content));
+  assert.equal(launchModel(lastStart(f)), legworkRoute, "the agent's own fork default gives way to its role's model");
+  const forked = await runCall(f, scoutCall({ context: "fork" }));
+  assert.notEqual(forked.isError, true, JSON.stringify(forked.content));
+  assert.equal(launchModel(lastStart(f)), route, "context:fork on the call keeps the session model");
+  assert.equal(launchThinking(lastStart(f)), "high", "and the role's thinking ceiling does not apply to it");
+});
+
+test("an identical launch is refused once while its twin runs, and a child's brief names the others at work", { timeout: 90_000 }, async t => {
+  const f = fixture(t, { captureNative: true, childDelayMs: 4000, agentFields: { name: "scout" } });
+  // The job tracker lists a run as soon as the launcher announces it; the fixture has no tracker.
+  f.pi.events.on(SUBAGENT_ASYNC_STARTED_EVENT, info => f.state.asyncJobs.set(info.id, { asyncId: info.id, status: "running" }));
+  // Only the tool a model calls (executePublic) refuses a twin or adds the block.
+  const send = task => f.executor.executePublic("public-" + Math.random().toString(36).slice(2), scoutCall({ async: true, task }), new AbortController().signal, undefined, f.ctx);
+  const first = await send("Find where the loader\n reads its settings");
+  assert.notEqual(first.isError, true, JSON.stringify(first.content));
+  const refused = await send("Find where the loader reads   its settings");
+  assert.equal(refused.isError, true);
+  assert.equal(refused.content[0].text, `already running as ${first.details.asyncId} since 1 min; its report will arrive; send the call again to run a second one`);
+  const second = await send("Find where the loader reads its settings");
+  assert.notEqual(second.isError, true, "the same call sent again runs");
+  assert.notEqual(second.details.asyncId, first.details.asyncId);
+  await awaitNativeBackground(f, first);
+  await awaitNativeBackground(f, second);
+  const briefs = f.records().filter(row => row.phase === "start").map(row => row.argv.join("\n"));
+  assert.equal(briefs.length, 2);
+  // The two processes start together, so which record comes first is not fixed.
+  const told = briefs.filter(brief => /Also at work in this session:\n- scout: Find where the loader reads its settings/.test(brief));
+  assert.equal(told.length, 1, "the second child is told about the first, and the first had no one beside it");
+});
+
+test("the call's role is the default of every tasks item and chain step; an item's own role wins", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "oracle" } });
+  const { agent: _agent, task: _task, ...base } = scoutCall();
+  const tasks = await runCall(f, { ...base, async: true, role: "legwork", tasks: [{ agent: "oracle", task: "one" }, { agent: "oracle", task: "two", role: "main" }] });
+  await awaitNativeBackground(f, tasks);
+  const starts = () => f.records().filter(row => row.phase === "start").map(launchModel);
+  assert.deepEqual(starts().sort(), [legworkRoute, route].sort(), "oracle is a main agent: the item without a role takes the call's, the other keeps its own");
+  const chain = await runCall(f, { ...base, async: true, role: "legwork", chain: [{ agent: "oracle", task: "first" }, { parallel: [{ agent: "oracle", task: "second" }] }] });
+  await awaitNativeBackground(f, chain);
+  assert.deepEqual(starts().slice(2), [legworkRoute, legworkRoute], "every chain step, parallel members included, takes the call's role");
+});
+
+test("an explicit fork launches on the session model whatever its role's model or role line says", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: "openrouter/org/not-installed" } });
+  for (const agentFields of [{ name: "scout" }, { name: "oracle", extraFields: { role: "boss" } }]) {
+    const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields });
+    persistParentSession(f);
+    const forked = await runCall(f, scoutCall({ agent: agentFields.name, context: "fork" }));
+    assert.notEqual(forked.isError, true, JSON.stringify(forked.content));
+    assert.equal(launchModel(lastStart(f)), route);
+    const fresh = await runCall(f, scoutCall({ agent: agentFields.name, context: "fresh" }));
+    assert.equal(fresh.isError, true, "a child that does not fork still needs a usable role");
+  }
+});
+
+test("one launch reads the team settings of its own directory", { timeout: 60_000 }, async t => {
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout" } });
+  const project = path.join(f.cwd, "elsewhere");
+  fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
+  fs.writeFileSync(path.join(project, ".pi", "settings.json"), JSON.stringify({ team: { legwork: legworkRoute } }));
+  const { agent: _agent, task: _task, ...base } = scoutCall();
+  const launched = await runCall(f, { ...base, cwd: project, async: true, chain: [{ agent: "scout", task: "look" }] });
+  await awaitNativeBackground(f, launched);
+  assert.equal(launchModel(lastStart(f)), legworkRoute, "the chain child runs on the model the launch's own directory sets");
+});
+
+test("a step appended to a running chain is capped like any other child", { timeout: 90_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute, maxThinking: { legwork: "low" } } });
+  const f = fixture(t, { reasoning: true, captureNative: true, childDelayMs: 3000, sessionThinking: "high", models: [legworkModel], agentFields: { name: "scout" } });
+  const { agent: _agent, task: _task, ...base } = scoutCall();
+  const launched = await runCall(f, { ...base, async: true, chain: [{ agent: "scout", task: "first" }] });
+  assert.notEqual(launched.isError, true, JSON.stringify(launched.content));
+  const appended = await runCall(f, { action: "append-step", id: launched.details.asyncId, step: { agent: "scout", task: "second", acceptance: { level: "none", reason: "Read-only fixture; no implementation deliverable." } } });
+  assert.notEqual(appended.isError, true, JSON.stringify(appended.content));
+  const status = await awaitNativeBackground(f, launched);
+  assert.deepEqual(status.steps.map(step => step.role), ["legwork", "legwork"], "the appended step's row carries its role, as the first one does");
+  const starts = f.records().filter(row => row.phase === "start");
+  assert.equal(starts.length, 2);
+  assert.equal(launchModel(starts[1]), legworkRoute);
+  assert.equal(launchThinking(starts[1]), "low", "the legwork ceiling applies to the appended step");
 });

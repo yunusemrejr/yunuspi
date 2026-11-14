@@ -31,6 +31,7 @@ import { projectMemoryKey } from './project-identity.ts';
 import { acquireMemoryMutation, readMemoryForMutation, replaceMemoryFile } from './mutation.ts';
 import { checkpointWorktree, exitFallbackSummary } from "../lib/worktree-checkpoint.ts";
 import { readRemindersRestore } from "../lib/reminders-state.ts";
+import { sideCallModel } from "../lib/team.ts";
 import { type ExecFileOptions, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -457,6 +458,8 @@ interface ExitSummaryResult {
 	error?: string;
 	hasMessages: boolean;
 	sourceMessageId?: string;
+	/** What the summary call cost and on which model, whether or not its text was kept. */
+	spend?: { provider: string; model: string; usage: unknown };
 }
 
 function formatExitSummaryReason(reason: ExitSummaryReason): string {
@@ -615,7 +618,12 @@ async function generateExitSummary(
 		return { summary: null, hasMessages: false };
 	}
 
-	const model = ctx.model;
+	// The exit summary is a background side call: it runs on the legwork model
+	// when team settings name one, else the session model. An unreadable
+	// settings file must not cost the session its memory, so a failed lookup
+	// falls back to the session model.
+	let model = ctx.model;
+	try { model = sideCallModel(ctx) ?? ctx.model; } catch { /* Best-effort summary. */ }
 	if (!model) {
 		return { summary: null, error: "No active model", hasMessages: true };
 	}
@@ -665,8 +673,9 @@ async function generateExitSummary(
 			{ apiKey, ...(model.thinkingLevelMap?.off === null ? { reasoningEffort: "low" as const } : {}), maxTokens: Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? Math.min(2048, model.maxTokens) : 2048, signal },
 		);
 
+		const spend = { provider: model.provider, model: model.id, usage: response.usage };
 		if (signal.aborted || ["error", "aborted", "length"].includes(response.stopReason)) {
-			return { summary: null, error: "Summary did not complete", hasMessages: true };
+			return { summary: null, error: "Summary did not complete", hasMessages: true, spend };
 		}
 		const summaryText = response.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -675,10 +684,10 @@ async function generateExitSummary(
 			.trim();
 
 		if (!summaryText) {
-			return { summary: null, error: "Summary was empty", hasMessages: true };
+			return { summary: null, error: "Summary was empty", hasMessages: true, spend };
 		}
 
-		return { summary: summaryText, hasMessages: true, sourceMessageId };
+		return { summary: summaryText, hasMessages: true, sourceMessageId, spend };
 	} catch (err) {
 		return {
 			summary: null,
@@ -1915,6 +1924,10 @@ export default function (pi: ExtensionAPI) {
 					summaryTimer = setTimeout(() => { summaryAbort.abort(); resolve(null); }, getExitSummaryTimeoutMs());
 				}) : undefined;
 				const modelResult = summaryWork && expired ? await Promise.race([summaryWork, expired]) : undefined;
+				if (modelResult?.spend) {
+					try { pi.appendEntry("auxiliary-model-usage-v1", { id: randomUUID(), owner: "memory-exit-summary", ...modelResult.spend, status: modelResult.summary ? "completed" : "failed" }); }
+					catch { /* Accounting never costs the session its memory. */ }
+				}
 				// An expired or failed model summary on a substantive session gets a
 				// deterministic, content-bearing fallback (demand, todos, worktree
 				// snapshot) so a killed run never leaves the next session nothing.

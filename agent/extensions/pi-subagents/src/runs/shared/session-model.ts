@@ -1,8 +1,12 @@
-/** Every subagent and reviewer runs on the parent session's own model.
- * There is no per-call, per-agent, per-role or fallback model: the child gets
- * the session's provider/id, and its own effort controller (Jev) picks the
- * thinking level from the session's ceiling. */
-import { splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
+/** The model route of a child. Each agent has a role (main, helper or legwork);
+ * a role runs on the model the user set for it in the `team` settings, and on
+ * the session's own model unless set. A child that forks the conversation
+ * always runs on the session's model: the history it replays is cached only
+ * there. Its effort controller (Jev) picks the thinking level at launch, from
+ * the session's ceiling lowered by the caps and the role's own ceiling. */
+import { loadTeamConfig, resolveAgentRole, resolveRoleRoute, roleThinkingCeiling, TEAM_ROLES, type TeamRole, type TeamSettings } from "../../../../lib/team.ts";
+import { mapChildren } from "./session-siblings.ts";
+import { splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo, type ThinkingLevel } from "../../shared/model-info.ts";
 
 export type { AvailableModelInfo };
 
@@ -20,12 +24,64 @@ export function normalizeParentModel(model: unknown): ParentModel | undefined {
 	return { provider: candidate.provider, id: candidate.id };
 }
 
-/** The child's model route: the session's own provider/id. An explicit
- * `provider/id` keeps each session's children on that session's model instead
- * of the shared settings default another open session may have changed. */
+/** The session's own provider/id. An explicit `provider/id` keeps each session's
+ * children on that session's model instead of the shared settings default
+ * another open session may have changed. */
 export function sessionChildModel(parentModel: ParentModel | undefined): string {
 	if (!parentModel) throw new Error("Subagents run on the session's model, and this session has no model selected.");
 	return `${parentModel.provider}/${parentModel.id}`;
+}
+
+export interface ChildRoute {
+	model: string;
+	/** The role, only when the child runs on another model than the session's: what a line about the child shows. */
+	shownRole?: TeamRole;
+	/** The role's thinking ceiling; none for a forked child and for the main role. */
+	maxThinking?: ThinkingLevel;
+}
+
+export function resolveChildRoute(input: {
+	agent: { name: string; extraFields?: Record<string, string> };
+	callRole?: TeamRole;
+	forked: boolean;
+	parentModel: ParentModel | undefined;
+	availableModels?: AvailableModelInfo[] | (() => AvailableModelInfo[]);
+	cwd: string;
+	team?: TeamSettings;
+}): ChildRoute {
+	if (input.forked) return { model: sessionChildModel(input.parentModel) };
+	const team = input.team ?? loadTeamConfig(input.cwd).team;
+	const role = resolveAgentRole(input.agent, team, input.callRole);
+	const maxThinking = roleThinkingCeiling(role, team);
+	const model = resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	return {
+		model,
+		...(model !== sessionChildModel(input.parentModel) ? { shownRole: role } : {}),
+		...(maxThinking ? { maxThinking } : {}),
+	};
+}
+
+/** The call's `role` as the default of every `tasks` item and `chain` step that has none of its own. */
+export function withCallRole<T extends { role?: TeamRole }>(params: T): T {
+	const { role } = params;
+	if (!role) return params;
+	return mapChildren(params, (item) => (item.role === undefined ? { ...item, role } : item));
+}
+
+/** Refuse a `role` that is not main, helper or legwork on the call or on any task or step. */
+export function validateCallRoles(params: { role?: unknown; tasks?: unknown[]; chain?: unknown[] }): string | undefined {
+	const values: unknown[] = [params.role];
+	const visit = (item: unknown): void => {
+		if (!item || typeof item !== "object") return;
+		values.push((item as { role?: unknown }).role);
+		const group = (item as { parallel?: unknown }).parallel;
+		if (Array.isArray(group)) group.forEach(visit);
+		else if (group) visit(group);
+	};
+	params.tasks?.forEach(visit);
+	params.chain?.forEach(visit);
+	const valid = (value: unknown): boolean => value === undefined || (TEAM_ROLES as readonly unknown[]).includes(value);
+	return values.every(valid) ? undefined : `role must be ${TEAM_ROLES.join(", ")}.`;
 }
 
 export function splitThinkingSuffix(model: string): { baseModel: string; thinkingSuffix: string } {
@@ -47,7 +103,7 @@ export function formatSubagentModelVerificationError(expectedModel: string, obse
 		const expectedFullIdLeaf = expectedEntry.fullId.slice(expectedEntry.fullId.lastIndexOf("/") + 1);
 		if (expectedIdLeaf === observedBase || expectedFullIdLeaf === observedBase) return undefined;
 	}
-	return `model_verification_failed: child reported a different model than the session model. Expected '${expectedModel}' but observed '${observedModel}'.`;
+	return `model_verification_failed: child reported a different model than the one it was launched on. Expected '${expectedModel}' but observed '${observedModel}'.`;
 }
 
 /**

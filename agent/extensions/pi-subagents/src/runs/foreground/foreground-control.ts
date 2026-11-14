@@ -12,6 +12,7 @@ interface BeginForegroundChildInput {
 	rerun?: PromptAuditRerunContract;
 	model?: string;
 	thinking?: string;
+	role?: string;
 	interrupt: () => boolean;
 	detach?: () => boolean;
 }
@@ -55,6 +56,7 @@ function syncCurrentChild(control: ForegroundRunControl, child: ForegroundChildC
 	control.windowPeak = child.windowPeak;
 	control.model = child.model;
 	control.thinking = child.thinking;
+	control.role = child.role;
 	control.toolCount = child.toolCount;
 	control.interrupt = child.interrupt;
 	control.detach = child.detach;
@@ -79,6 +81,7 @@ function clearCurrentChild(control: ForegroundRunControl): void {
 	control.windowPeak = undefined;
 	control.model = undefined;
 	control.thinking = undefined;
+	control.role = undefined;
 	control.toolCount = undefined;
 	control.interrupt = undefined;
 	control.detach = undefined;
@@ -108,6 +111,7 @@ export function beginForegroundChild(control: ForegroundRunControl, input: Begin
 		updatedAt: now,
 		...(input.model ? { model: input.model } : {}),
 		...(input.thinking ? { thinking: input.thinking } : {}),
+		...(input.role ? { role: input.role } : {}),
 	};
 	child.interrupt = () => {
 		if (!input.interrupt()) return false;

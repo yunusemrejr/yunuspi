@@ -53,6 +53,8 @@ export type AsyncResumeTarget = {
 	cwd?: string;
 	sessionFile?: string;
 	model?: string;
+	/** The role shown beside the model, when the child ran on another model than the session's. */
+	role?: string;
 	thinking?: string;
 	thinkingCeiling?: ThinkingLevel;
 	recoveryDescriptor?: SteeringRecoveryDescriptor;
@@ -630,6 +632,7 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 		...(resumeCwd ? { cwd: resumeCwd } : {}),
 		...(resolvedSessionFile ? { sessionFile: resolvedSessionFile } : {}),
 		...(stepModel ? { model: stepModel } : {}),
+		...(statusSteps[index]?.role ? { role: statusSteps[index]!.role } : {}),
 		...(stepThinking ? { thinking: stepThinking } : {}),
 		launchContractDigest: statusSteps[index]?.launchContractDigest ?? resultSteps[index]?.launchContractDigest ?? result?.launchContractDigest ?? recoveryDescriptor?.launchContractDigest,
 		...(statusSteps[index]?.runner ? { runner: statusSteps[index]!.runner } : {}),

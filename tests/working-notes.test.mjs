@@ -20,12 +20,12 @@ const installGuide = (dir, name) => {
 };
 
 test('the built-in notes cover every area a session needs judgment in', () => {
-  for (const heading of ['Understand the request', 'Craft', 'Explaining', 'Nothing leaks', 'Visual work',
+  for (const heading of ['Where you are', 'Understand the request', 'Working as a team', 'Craft', 'Explaining', 'Nothing leaks', 'Visual work',
     'Numbers and logic', 'Code and shipping', 'Acting for the user', 'Reporting']) {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 8_000, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 10_400, `notes are ${WORKING_NOTES.length} chars`);
 });
 
 test('a session with no personal notes gets the built-in ones', t => {

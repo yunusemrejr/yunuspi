@@ -17,7 +17,7 @@ import { planChildLaunch, resolveStepBehavior, suppressProgressForReadOnlyTask, 
 import { applyThinkingSuffix, projectLaunchResolvedChildExtensions, resolvePiLaunchToolPlan } from "../shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { buildChainInstructions, isDynamicParallelStep, isParallelStep, resolveExistingReadPaths, writeInitialProgressFile, type ChainStep, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
-import type { RunnerStep } from "../shared/parallel-utils.ts";
+import { isDynamicRunnerGroup, isParallelGroup, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "../shared/pi-spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
@@ -26,7 +26,8 @@ import { backgroundProcessOptions } from "../shared/background-process-options.t
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
-import { sessionChildModel, type AvailableModelInfo, type ParentModel } from "../shared/session-model.ts";
+import { resolveChildRoute, type AvailableModelInfo, type ParentModel } from "../shared/session-model.ts";
+import { formatModelThinking } from "../../shared/formatters.ts";
 import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 import { resolveToolTimeoutMs, toolTimeoutFromEnv } from "../shared/tool-timeout.ts";
 import { findModelInfo, resolveEffectiveThinking } from "../../shared/model-info.ts";
@@ -233,6 +234,8 @@ interface AsyncSingleParams {
 	agentContract?: AgentContract;
 	structuredOutputSchema?: JsonSchemaObject;
 	modelOverride?: string;
+	/** The role to show beside the model when the caller supplied the model itself. */
+	role?: string;
 	modelRouteCandidates?: ModelRouteCandidate[];
 	fast?: boolean;
 	thinkingOverride?: string | false;
@@ -875,8 +878,11 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const task = namespaceOutputPath ? taskText : injectSingleOutputInstruction(taskText, outputPath, a);
 
 		let primaryModel: string | undefined;
+		let shownRole: string | undefined;
 		try {
-			primaryModel = externalRunner ? undefined : sessionChildModel(ctx.currentModel);
+			const route = externalRunner ? undefined : resolveChildRoute({ agent: a, callRole: s.role, forked: params.contextForAgent?.(s.agent) === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
+			primaryModel = route?.model;
+			shownRole = route?.shownRole;
 		} catch (error) {
 			throw new AsyncStartValidationError(error instanceof Error ? error.message : String(error));
 		}
@@ -955,6 +961,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			cwd: stepCwd,
 			requestedCwd: s.cwd ?? stepCwd,
 			model,
+			...(shownRole ? { role: shownRole } : {}),
 			...(contextLimit !== undefined ? { contextLimit } : {}),
 			...(fast !== undefined ? { fast } : {}),
 			thinking: resolveEffectiveThinking(model, effectiveThinking),
@@ -1456,10 +1463,21 @@ export function executeAsyncChain(
 		});
 	}
 
+	const chainStepOffset = params.attachRoot ? 1 : 0;
+	const chainLabel = (agentName: string, step: RunnerSubagentStep | undefined): string =>
+		step?.role ? `${agentName} · ${formatModelThinking(step.model, undefined, "short", step.role)}` : agentName;
 	const chainDesc = chain
-		.map((s) =>
-			isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : isDynamicParallelStep(s) ? `expand:${s.parallel.agent}` : (s as SequentialStep).agent,
-		)
+		.map((s, stepIndex) => {
+			const builtStep = steps[stepIndex + chainStepOffset];
+			if (isParallelStep(s)) {
+				const group = builtStep && isParallelGroup(builtStep) ? builtStep.parallel : undefined;
+				return `[${s.parallel.map((t, taskIndex) => chainLabel(t.agent, group?.[taskIndex])).join("+")}]`;
+			}
+			if (isDynamicParallelStep(s)) {
+				return `expand:${chainLabel(s.parallel.agent, builtStep && isDynamicRunnerGroup(builtStep) ? builtStep.parallel : undefined)}`;
+			}
+			return chainLabel((s as SequentialStep).agent, builtStep && !isParallelGroup(builtStep) && !isDynamicRunnerGroup(builtStep) ? builtStep : undefined);
+		})
 		.join(" -> ");
 
 	return {
@@ -1599,8 +1617,18 @@ export function executeAsyncSingle(
 		: "";
 	const taskText = readsInstruction + taskWithOutputInstruction;
 	let primaryModel: string | undefined;
+	let shownRole: string | undefined;
 	try {
-		primaryModel = externalRunner ? undefined : params.modelOverride ?? sessionChildModel(ctx.currentModel);
+		if (externalRunner) {
+			primaryModel = undefined;
+		} else if (params.modelOverride !== undefined) {
+			primaryModel = params.modelOverride;
+			shownRole = params.role;
+		} else {
+			const route = resolveChildRoute({ agent: agentConfig, forked: params.context === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
+			primaryModel = route.model;
+			shownRole = route.shownRole;
+		}
 	} catch (error) {
 		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
 	}
@@ -1796,6 +1824,7 @@ export function executeAsyncSingle(
 						cwd: runnerCwd,
 						requestedCwd: params.requestedCwd ?? runnerCwd,
 						model,
+						...(shownRole ? { role: shownRole } : {}),
 						...(contextLimit !== undefined ? { contextLimit } : {}),
 						...(params.fast ?? agentConfig.fast ? { fast: params.fast ?? agentConfig.fast } : {}),
 						thinking: resolveEffectiveThinking(model, effectiveThinking),
@@ -1983,8 +2012,9 @@ export function executeAsyncSingle(
 		});
 	}
 
+	const launchLabel = shownRole ? `${agent} · ${formatModelThinking(model, undefined, "short", shownRole)}` : agent;
 	return {
-		content: [{ type: "text", text: formatAsyncStartedMessage(`Async: ${agent} [${id}]`, ctx.interactive === true) }],
+		content: [{ type: "text", text: formatAsyncStartedMessage(`Async: ${launchLabel} [${id}]`, ctx.interactive === true) }],
 		details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, launchContractDigest, launchResolvedExtensions, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.toolBudget ? { toolBudget: resolvedToolBudget.budget ?? params.toolBudget } : {}), ...(initialUsageBudget ? { usageBudget: initialUsageBudget } : {}) } as Details,
 	};
 }

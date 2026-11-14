@@ -68,6 +68,27 @@ test("the capability list states shared facts once and each agent's own tools on
 	assert.ok(plain.includes("- list-narrow (user): Reads and searches"));
 });
 
+test("one agent with a bad role line or a bad team block never takes the capability list down", () => {
+	const directory = path.join(process.env.PI_CODING_AGENT_DIR, "agents");
+	fs.mkdirSync(directory, { recursive: true });
+	const settings = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+	fs.writeFileSync(path.join(directory, "list-badrole.md"), "---\nname: list-badrole\ndescription: Has a bad role line\nrole: boss\n---\nBad\n");
+	fs.writeFileSync(path.join(directory, "list-goodrole.md"), "---\nname: list-goodrole\ndescription: Has a good role line\nrole: legwork\n---\nGood\n");
+	test.after(() => { for (const name of ["list-badrole.md", "list-goodrole.md"]) fs.rmSync(path.join(directory, name), { force: true }); fs.rmSync(settings, { force: true }); });
+	discovery.clearAgentDiscoveryCache();
+	const context = { cwd: work, model: { provider: "test", id: "main-model" }, modelRegistry: { getAvailable: () => [] } };
+	const lines = () => {
+		const result = handleManagementAction("list", { capabilities: true, agentScope: "user" }, context);
+		assert.notEqual(result.isError, true);
+		return result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n").split("\n");
+	};
+	fs.writeFileSync(settings, JSON.stringify({ team: { legwork: "test/small-model" } }));
+	assert.ok(lines().includes("- list-goodrole (user): Has a good role line; Runs as legwork on test/small-model"), "a good role shows its note");
+	assert.ok(lines().includes("- list-badrole (user): Has a bad role line"), "the bad role line costs only that agent its note");
+	fs.writeFileSync(settings, JSON.stringify({ team: { legwork: "nonsense" } }));
+	assert.ok(lines().includes("- list-goodrole (user): Has a good role line"), "an invalid team block leaves the notes out, not the list");
+});
+
 test("fallback diagnostics follow aliases and preserve package namespaces", () => {
 	const worker = { name: "worker", aliases: ["helper"], source: "builtin" };
 	const broken = { name: "worker", source: "user", filePath: "/test/worker.md", error: "invalid tools" };
@@ -194,7 +215,7 @@ test("native parallel recovery preserves each child contract, rejects swapped id
   const sessions = [0,1].map(index => {const file=path.join(dir,`child-${index}.jsonl`);fs.writeFileSync(file,"{}\n");return file;});
   const now=Date.now();
   const status={runId,sessionId:"recovery-session",mode:"parallel",state:"failed",startedAt:now-20,lastUpdate:now,endedAt:now,
-   steps:[{agent:"worker",status:"complete",sessionFile:sessions[0],exitCode:0},{agent:"worker",status:"stopped",sessionFile:sessions[1],stopped:true}]};
+   steps:[{agent:"worker",status:"complete",sessionFile:sessions[0],exitCode:0},{agent:"worker",status:"stopped",sessionFile:sessions[1],stopped:true,role:"legwork"}]};
   fs.writeFileSync(path.join(dir,"status.json"),JSON.stringify(status));
   const deps={asyncDirRoot,resultsDir};
   const missing=resolveAsyncResumeTarget({id:runId,index:0},deps);
@@ -212,6 +233,7 @@ test("native parallel recovery preserves each child contract, rejects swapped id
    assert.equal(asyncReviveRequiresRecoveryDescriptor(target),false);
    assert.equal(target.recoveryDescriptor.childIndex,index);
    assert.equal(target.recoveryDescriptor.model,`fixture/model-${index}`);
+   assert.equal(target.role,index===1?"legwork":undefined,"a revived child keeps the role its row showed");
    assert.equal(target.recoveryDescriptor.runFanoutBudget.directory,runFanoutBudget.directory);
    assert.equal(target.recoveryDescriptor.runFanoutBudget.parentPath,`tasks[${index}]`);
    assert.equal(fs.statSync(path.join(dir,`recovery-descriptor-${index}.json`)).mode&0o777,0o600);

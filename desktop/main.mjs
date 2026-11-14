@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { SessionStore } from './session-store.mjs';
 import { AgentWorker } from './agent-worker.mjs';
 import { readHistory, closeHistoryReaders, cancelPendingHistoryReads } from './history-reader.mjs';
+import { applyTeamValue, readTeam } from './renderer/team-settings.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
@@ -57,6 +58,27 @@ const text = (value, max = 100_000) => {
 };
 const idle = worker => { if (worker.busy) throw Error('Stop the current turn before changing this session.'); };
 const coreModule = name => import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core', name)).href);
+// Team settings in Settings: which model takes each kind of delegated work. The
+// harness's own settings owner writes the global file, so every other key — of
+// "team" and of the file — is kept as the locked writer finds it on disk.
+let teamRuntime = null;
+async function availableForTeam() {
+  const modelsPath = path.join(agentDir, 'models.json');
+  let signature = 'absent';
+  try { signature = String(fs.statSync(modelsPath).mtimeMs); } catch { /* a harness without models.json still has built-ins */ }
+  if (!teamRuntime || teamRuntime.signature !== signature) {
+    const { ModelRuntime } = await coreModule('model-runtime.js');
+    const runtime = await ModelRuntime.create({ modelsPath, authPath: path.join(agentDir, 'auth.json') });
+    teamRuntime = { signature, runtime };
+  }
+  // Exactly what a session's model menu lists: the available models of this agent directory.
+  return teamRuntime.runtime.getAvailableSnapshot().map(model => ({ provider: model.provider, id: model.id }));
+}
+async function teamSettingsManager() {
+  const { SettingsManager } = await coreModule('settings-manager.js');
+  // Only the global file is read and written here; the project scope stays untouched.
+  return SettingsManager.create(agentDir, agentDir);
+}
 // Commands the renderer answers itself; they never reach the core.
 const DESKTOP_COMMANDS = ['model', 'models', 'metrics', 'cost', 'self', 'session', 'skills', 'tools', 'help', 'new', 'name'];
 
@@ -370,7 +392,21 @@ async function dispatch(action, input = {}) {
       if (!/^[a-z0-9][a-z0-9._-]*$/i.test(provider) || !key) throw Error('Enter a provider ID and API key.');
       const { AuthStorage } = await import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core/auth-storage.js')).href);
       await AuthStorage.create(path.join(agentDir, 'auth.json')).modify(provider, () => ({ type: 'api_key', key }));
+      teamRuntime = null;
       return;
+    }
+    case 'teamSettings': {
+      const manager = await teamSettingsManager();
+      return { team: readTeam(manager.getGlobalSettings().team), models: await availableForTeam() };
+    }
+    case 'setTeam': {
+      const role = text(input.role, 20), value = text(input.value, 300);
+      applyTeamValue(await teamSettingsManager(), role, value);
+      // The writer reports storage failures instead of throwing; read the file
+      // back so a change that did not land is never shown as saved.
+      const saved = readTeam((await teamSettingsManager()).getGlobalSettings().team);
+      if (saved[role] !== value) throw Error('The team setting could not be saved. Check that the harness settings file is writable.');
+      return saved;
     }
     default: throw Error('Unknown desktop action.');
   }

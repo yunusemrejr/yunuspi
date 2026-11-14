@@ -91,6 +91,8 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
 export const CORE_TOOLS = new Set([
   'read','read_many','bash','edit','write','grep','find','ls','tool_search',
   'session_self','subagent','bg_wait','quality_review','skill_review',
+  // Registered only when the user set team.advisor; then it is meant to be asked, not discovered.
+  'ask_advisor',
   // These readers are dependencies of existing context/safety hook owners.
   'project_intel','project_tests','obs_read','checkpoint_read','todo',
   'project_report','module_report','symbol_search','context_slice',

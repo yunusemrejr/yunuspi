@@ -965,6 +965,14 @@ export class SettingsManager {
         this.markModified("treeFilterMode");
         this.save();
     }
+    /** Replace the global `team` and `run` blocks (the /team command's single write). */
+    setTeamSettings(team, run) {
+        this.globalSettings.team = team;
+        this.globalSettings.run = run;
+        this.markModified("team");
+        this.markModified("run");
+        this.save();
+    }
     getShowHardwareCursor() {
         return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
     }

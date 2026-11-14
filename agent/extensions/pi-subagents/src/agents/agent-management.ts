@@ -31,6 +31,7 @@ import {
 } from "./proactive-skills.ts";
 import { parseFrontmatter, parseFrontmatterList } from "./frontmatter.ts";
 import { validateToolBudgetConfig } from "../runs/shared/tool-budget.ts";
+import { normalizeParentModel, resolveChildRoute } from "../runs/shared/session-model.ts";
 import { validateAcceptanceInput } from "../runs/shared/acceptance.ts";
 import { CODE_OWNED_EXTERNAL_CLI_ADAPTER_LABEL, isCodeOwnedExternalCliAdapterId, resolveExternalCliRunnerStatus, validateCodeOwnedProfileRunner } from "../runs/shared/external-cli-contract.ts";
 import type { AcceptanceInput, AgentCapabilitiesSnapshot, AgentCapabilityRow, Details, ExtensionConfig, ToolBudgetConfig } from "../shared/types.ts";
@@ -656,15 +657,32 @@ function formatAgentListLine(agent: AgentConfig, providerNames: Set<string> | un
 	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): ${agent.description}`;
 }
 
-function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<string> | undefined): string {
+/**
+ * "legwork on provider/model" when the agent's role runs on another model than the session's.
+ * A bad role or team setting leaves the note out; the launch itself reports it.
+ */
+function agentRoleNote(agent: AgentConfig, ctx: ManagementContext): string | undefined {
+	const parentModel = normalizeParentModel(ctx.model);
+	if (!parentModel || agent.runner?.type === "external-cli" || agent.runner?.type === "external-job") return undefined;
+	try {
+		const { shownRole, model } = resolveChildRoute({ agent, forked: false, parentModel, cwd: ctx.cwd });
+		return shownRole ? `${shownRole} on ${model}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<string> | undefined, roleNote?: string): string {
 	const declaredTools = [
 		...(agent.tools ?? []),
 		...(agent.mcpDirectTools ?? []).map((tool) => `mcp:${tool}`),
 	];
 	// A line says only what sets its agent apart. The session model and per-run effort are the
 	// same for every agent and already stated by the tool itself, and most agents take the default
-	// tools, so repeating those on each line made a long list cost a third more to read.
+	// tools, so repeating those on each line made a long list cost a third more to read. A role
+	// that runs on another model than the session's does set its agent apart.
 	const parts = [previewDisplayText(agent.description, 240)];
+	if (roleNote) parts.push(`Runs as ${roleNote}`);
 	const ownTools = agent.tools !== undefined || (agent.mcpDirectTools?.length ?? 0) > 0;
 	if (ownTools || agent.excludeTools?.length) {
 		let tools = "default";
@@ -892,7 +910,9 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	const providerStatus = registeredExternalJobProviderStatus();
 	const providerNameSet = providerNames(providerStatus);
 	const capabilityMode = params.capabilities === true;
-	const formatLine = capabilityMode ? formatAgentCapabilitiesLine : formatAgentListLine;
+	const formatLine = capabilityMode
+		? (agent: AgentConfig, names: Set<string> | undefined) => formatAgentCapabilitiesLine(agent, names, agentRoleNote(agent, ctx))
+		: formatAgentListLine;
 	const lines = [
 		capabilityMode ? "Executable agents (capabilities; an agent has the session's default tools unless its line lists its own):" : "Executable agents:",
 		...formatAgentListSections(agents, providerNameSet, formatLine),

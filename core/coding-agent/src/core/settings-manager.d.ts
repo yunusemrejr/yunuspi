@@ -68,6 +68,8 @@ export type PackageSource = string | {
 };
 import type { MediaModelSelections } from "./media-models.js";
 export interface Settings {
+    team?: Record<string, unknown>;
+    run?: Record<string, unknown>;
     mediaModels?: MediaModelSelections;
     lastChangelogVersion?: string;
     defaultProvider?: string;
@@ -319,6 +321,8 @@ export declare class SettingsManager {
     setEnabledModels(patterns: string[] | undefined): void;
     getDoubleEscapeAction(): "fork" | "tree" | "none";
     setDoubleEscapeAction(action: "fork" | "tree" | "none"): void;
+    /** Replace the global `team` and `run` blocks. */
+    setTeamSettings(team: Record<string, unknown>, run: Record<string, unknown>): void;
     getTreeFilterMode(): "default" | "no-tools" | "user-only" | "labeled-only" | "all";
     setTreeFilterMode(mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all"): void;
     getShowHardwareCursor(): boolean;

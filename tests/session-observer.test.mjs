@@ -816,3 +816,57 @@ test('the observer packet carries one stable time-ledger row from measured tool 
   assert.match(row.text, /1 calls?, 4s summed tool time: bash×1\/4s/);
   h.close();
 });
+
+// The reviewer is a background side call: it runs on the legwork model when the
+// team settings name one that is available, and on the session model otherwise.
+const legworkModel = { provider: 'example', id: 'legwork-1', name: 'Synthetic legwork route', api: 'openai-completions', baseUrl: 'https://legwork.invalid/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, input: ['text'], cost: { input: 0.01, output: 0.02 } };
+function useTeamSettings(t, settings) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-team-'));
+  if (settings !== undefined) fs.writeFileSync(path.join(dir, 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
+async function reviewedRoute(t, settings, available = [model, legworkModel]) {
+  useTeamSettings(t, settings);
+  const routes = [];
+  const h = harness(async (route) => { routes.push(route); return reply(); });
+  h.ctx.modelRegistry = { getAvailable: () => available };
+  h.input('Fix parser validation.');
+  await h.advance(30000);
+  h.close();
+  const usage = h.receipts.filter(([type]) => type === 'auxiliary-model-usage-v1').map(([, data]) => data);
+  return { routes, usage, sent: h.sent };
+}
+test('the observer runs on the session model with no team block', async (t) => {
+  const { routes, usage } = await reviewedRoute(t, undefined);
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].route, 'deepseek/deepseek-flash');
+  assert.deepEqual(usage.map(data => `${data.provider}/${data.model}`), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash']);
+  assert.equal(usage.at(-1).status, 'completed');
+});
+test('the observer runs on the configured, available legwork model and bills that route', async (t) => {
+  const { routes, usage } = await reviewedRoute(t, { team: { legwork: 'example/legwork-1' } });
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].model.id, 'legwork-1');
+  assert.equal(routes[0].route, 'example/legwork-1');
+  assert.deepEqual(usage.map(data => `${data.provider}/${data.model}`), ['example/legwork-1', 'example/legwork-1']);
+  assert.equal(usage.at(-1).status, 'completed');
+});
+test('team.sideCalls "session" keeps the observer on the session model', async (t) => {
+  const { routes, usage } = await reviewedRoute(t, { team: { legwork: 'example/legwork-1', sideCalls: 'session' } });
+  assert.equal(routes[0].route, 'deepseek/deepseek-flash');
+  assert.deepEqual(usage.map(data => `${data.provider}/${data.model}`), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash']);
+});
+test('an unavailable legwork model and an unreadable team file leave the observer on the session model', async (t) => {
+  const missing = await reviewedRoute(t, { team: { legwork: 'example/missing' } });
+  assert.equal(missing.routes[0].route, 'deepseek/deepseek-flash');
+  assert.deepEqual(missing.usage.map(data => `${data.provider}/${data.model}`), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash']);
+  const broken = await reviewedRoute(t, '{ "team": { "sideCalls": "elsewhere" } }');
+  assert.equal(broken.routes.length, 1, 'an invalid team settings file does not stop the review');
+  assert.equal(broken.routes[0].route, 'deepseek/deepseek-flash');
+  assert.match(broken.sent.at(-1)[0].content, /Observer returned a note/);
+});

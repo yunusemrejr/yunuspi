@@ -1254,6 +1254,8 @@ export interface SingleResult {
 	model?: string;
 	/** Effective thinking level used by this foreground child, when known. */
 	thinking?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];
 	controlEvents?: ControlEvent[];
@@ -1585,6 +1587,8 @@ export interface NestedStepSummary {
 	sessionName?: string;
 	status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected";
 	model?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	thinking?: string;
 	sessionFile?: string;
 	transcriptPath?: string;
@@ -1638,6 +1642,8 @@ export interface NestedRunSummary extends NestedRunAddress {
 	sessionName?: string;
 	agents?: string[];
 	model?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	thinking?: string;
 	currentStep?: number;
 	chainStepCount?: number;
@@ -1965,6 +1971,8 @@ export interface AsyncStatus {
 		tokens?: TokenUsage;
 		skills?: string[];
 		model?: string;
+		/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+		role?: string;
 		thinking?: string;
 		contextLimit?: number;
 		thinkingCeiling?: ThinkingLevel;
@@ -2161,6 +2169,8 @@ export interface ForegroundChildControl {
 	windowPeak?: number;
 	model?: string;
 	thinking?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	toolCount?: number;
 	interrupt?: () => boolean;
 	detach?: () => boolean;
@@ -2201,6 +2211,8 @@ export interface ForegroundRunControl {
 	windowPeak?: number;
 	model?: string;
 	thinking?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	toolCount?: number;
 	/** Independently tracked children for foreground parallel work and fleet inspection. */
 	activeChildren?: Map<number, ForegroundChildControl>;
@@ -2445,6 +2457,8 @@ export interface RunSyncOptions {
 	nestedRoute?: NestedRouteInfo;
 	/** Override the agent's default model (format: "provider/id" or just "id") */
 	modelOverride?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	/** Exact ordered model/upstream routes persisted for this run's retries. */
 	modelRouteCandidates?: import("./model-route.ts").ModelRouteCandidate[];
 	/** Opt into priority service tier for supported native OpenAI-Codex launches. */

@@ -5,7 +5,7 @@ import { discoverAgentSnapshot, findBlockingAgentDiagnostic, findShadowedAgentDi
 import { resolveExecutionAgentScope } from "../agents/agent-scope.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
-import { sessionChildModel, type ParentModel } from "../runs/shared/session-model.ts";
+import { resolveChildRoute, type ChildRoute, type ParentModel } from "../runs/shared/session-model.ts";
 import type { ModelRouteCandidate } from "../shared/model-route.ts";
 import { applyThinkingSuffix, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, normalizeSingleOutputOverride, resolveSingleOutputPath } from "../runs/shared/single-output.ts";
@@ -39,6 +39,7 @@ export type SubagentLaunchContractReasonCode =
 	| "restricted_agent"
 	| "thinking_ceiling"
 	| "missing_session_model"
+	| "invalid_team_settings"
 	| "invalid_extension_bindings";
 
 export type SubagentLaunchContractDiagnosticCode = SubagentLaunchContractReasonCode | "host_required" | "snapshot_warning" | "workspace_scope_authority";
@@ -190,12 +191,24 @@ function digestContract(contract: Omit<SubagentLaunchContract, "digest">): strin
 	return stableJsonDigest(contract);
 }
 
-function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent: AgentConfig): "fresh" | "fork" {
+/** An agent that forks only by its own default starts fresh when its role runs on another model than the session's, as at launch. */
+function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent: AgentConfig, cwd: string): "fresh" | "fork" {
+	const externalRunner = agent.runner?.type === "external-cli" || agent.runner?.type === "external-job";
+	let roleRunsElsewhere = false;
+	// An explicit context never looks at the role's model, so it cannot fail here.
+	if (input.context === undefined && !externalRunner) {
+		try {
+			roleRunsElsewhere = resolveChildRoute({ agent, forked: false, parentModel: input.parentModel, cwd }).shownRole !== undefined;
+		} catch {
+			// The launch fails on this route; it is no fork, so the route below reports it.
+			return "fresh";
+		}
+	}
 	return resolveSubagentLaunchContext({
 		explicitContext: input.context,
 		agentDefaultContext: agent.defaultContext,
 		defaultSubagentContext: loadConfig().defaultSubagentContext,
-		canUseImplicitFork: canPreferForkFromSnapshot({
+		canUseImplicitFork: !roleRunsElsewhere && canPreferForkFromSnapshot({
 			parentSessionFile: input.parentSessionFile,
 			leafId: input.parentLeafId,
 		}),
@@ -284,7 +297,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	if (extensionBindings !== undefined && (agent.runner?.type === "external-cli" || agent.runner?.type === "external-job")) {
 		return { ok: false, code: "unsupported_mode", message: `extensionBindings is not supported for runner.type='${agent.runner.type}'.`, diagnostics };
 	}
-	const context = resolveLaunchContractContext(input, agent);
+	const context = resolveLaunchContractContext(input, agent, effectiveCwd);
 	if (context === "fork") {
 		diagnostics.push({ code: "host_required", severity: "host-required", message: "Exact fork session branching and fork-thinking downgrade checks require Pi host session and model-registry snapshots." });
 	}
@@ -314,18 +327,21 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 
 	const externalRunner = agent.runner?.type === "external-cli" || agent.runner?.type === "external-job";
 	const thinkingOverride = input.thinking;
-	let sessionRoute: string | undefined;
+	let route: ChildRoute | undefined;
 	if (!externalRunner) {
 		try {
-			sessionRoute = sessionChildModel(input.parentModel);
+			route = resolveChildRoute({ agent, forked: context === "fork", parentModel: input.parentModel, cwd: effectiveCwd });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			diagnostics.push({ code: "missing_session_model", severity: "error", message });
-			return { ok: false, code: "missing_session_model", message, diagnostics };
+			const code = input.parentModel ? "invalid_team_settings" : "missing_session_model";
+			diagnostics.push({ code, severity: "error", message });
+			return { ok: false, code, message, diagnostics };
 		}
 	}
+	const sessionRoute = route?.model;
 	const thinkingCeiling = externalRunner ? undefined : intersectThinkingCeilings(
 		discovered.maxThinking,
+		route?.maxThinking,
 		input.thinkingCeiling,
 		input.inheritedThinkingCeiling,
 		decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]),

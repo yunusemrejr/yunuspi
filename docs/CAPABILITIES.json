@@ -488,7 +488,7 @@
     {
       "id": "agent-model-management",
       "group": "models",
-      "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Every agent runs on the session's model; its thinking level starts at the session ceiling and Jev steps it down per task.",
+      "summary": "List executable agents and their capabilities and inspect or edit scoped definitions. Each agent has a role (main, helper or legwork) that runs on the model set with /team, the session's model unless set; its thinking level starts at the session ceiling and Jev steps it down once, from the brief.",
       "entrypoints": [
         "subagent",
         "action:list",
@@ -875,7 +875,8 @@
         "errors",
         "commands",
         "guardian",
-        "observer-book"
+        "observer-book",
+        "team"
       ],
       "options": [
         {
@@ -920,6 +921,7 @@
       "sourceFiles": [
         "agent/extensions/session-signals.ts",
         "agent/extensions/model-routing-config.ts",
+        "agent/extensions/team-command.ts",
         "agent/extensions/lib/session-telemetry.ts",
         "agent/extensions/thinking.ts",
         "agent/extensions/project-intelligence.ts",
@@ -2761,7 +2763,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 902
+        "line": 911
       },
       {
         "name": "catalog-status",
@@ -2806,7 +2808,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 440
+        "line": 450
       },
       {
         "name": "google-account",
@@ -2836,52 +2838,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113976
+        "line": 113996
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113680
+        "line": 113700
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113737
+        "line": 113757
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113772
+        "line": 113792
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113749
+        "line": 113769
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113891
+        "line": 113911
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113705
+        "line": 113725
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113673
+        "line": 113693
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113910
+        "line": 113930
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113687
+        "line": 113707
       },
       {
         "name": "logs",
@@ -2911,7 +2913,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/lib/session-observer-impl.ts",
-        "line": 514
+        "line": 520
       },
       {
         "name": "project-memory",
@@ -3019,6 +3021,11 @@
         "line": 629
       },
       {
+        "name": "team",
+        "source": "agent/extensions/team-command.ts",
+        "line": 342
+      },
+      {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
         "line": 1759
@@ -3036,7 +3043,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          454
+          464
         ]
       },
       {
@@ -3068,6 +3075,12 @@
       "ls"
     ],
     "stableRegistrations": [
+      {
+        "name": "ask_advisor",
+        "source": "agent/extensions/advisor.ts",
+        "line": 78,
+        "kind": "literal"
+      },
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
@@ -3216,12 +3229,6 @@
         "kind": "literal"
       },
       {
-        "name": "goal",
-        "source": "agent/extensions/goal.ts",
-        "line": 465,
-        "kind": "literal"
-      },
-      {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 8,
@@ -3260,37 +3267,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2572,
+        "line": 2585,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2432,
+        "line": 2445,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2715,
+        "line": 2728,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2814,
+        "line": 2827,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2969,
+        "line": 2982,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2084,
+        "line": 2097,
         "kind": "literal"
       },
       {
@@ -3350,7 +3357,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 257,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -3368,7 +3375,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2245,
+        "line": 2258,
         "kind": "literal"
       },
       {
@@ -3465,7 +3472,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 517,
+        "line": 519,
         "kind": "literal"
       },
       {
@@ -3538,6 +3545,12 @@
     ],
     "literalRegistrations": [
       {
+        "name": "ask_advisor",
+        "source": "agent/extensions/advisor.ts",
+        "line": 78,
+        "kind": "literal"
+      },
+      {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 858,
@@ -3592,12 +3605,6 @@
         "kind": "literal"
       },
       {
-        "name": "goal",
-        "source": "agent/extensions/goal.ts",
-        "line": 465,
-        "kind": "literal"
-      },
-      {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 8,
@@ -3612,37 +3619,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2572,
+        "line": 2585,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2432,
+        "line": 2445,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2715,
+        "line": 2728,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2814,
+        "line": 2827,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2969,
+        "line": 2982,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2084,
+        "line": 2097,
         "kind": "literal"
       },
       {
@@ -3690,7 +3697,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 257,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -3708,7 +3715,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2245,
+        "line": 2258,
         "kind": "literal"
       },
       {
@@ -3762,7 +3769,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 517,
+        "line": 519,
         "kind": "literal"
       },
       {
@@ -3995,7 +4002,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 651,
+      "sourceFiles": 656,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,
@@ -4012,6 +4019,10 @@
     "extensions": [
       {
         "path": "agent/extensions/adaptive-workflows.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/advisor.ts",
         "exists": true
       },
       {
@@ -4135,6 +4146,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/session-facts.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/session-hooks.ts",
         "exists": true
       },
@@ -4152,6 +4167,10 @@
       },
       {
         "path": "agent/extensions/task-state.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/team-command.ts",
         "exists": true
       },
       {
@@ -4822,6 +4841,10 @@
       },
       {
         "path": "agent/extensions/lib/task-pipelines.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/team.ts",
         "exists": true
       },
       {
@@ -6777,6 +6800,10 @@
       {
         "name": "TASK-STATE-GRAPH.md",
         "path": "docs/TASK-STATE-GRAPH.md"
+      },
+      {
+        "name": "TEAM.md",
+        "path": "docs/TEAM.md"
       },
       {
         "name": "TERMINAL-INTERFACE.md",

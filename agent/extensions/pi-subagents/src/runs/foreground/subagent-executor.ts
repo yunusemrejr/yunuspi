@@ -1,5 +1,6 @@
 import { fileVerificationSummary } from "../shared/file-verification.ts";
 import { attachTaskStateSliceDeep, expandCommonTask, taskSliceFocus } from "../shared/common-task.ts";
+import { launchChildren, refuseTwinLaunch, rememberLaunch, withSiblingBlocks } from "../shared/session-siblings.ts";
 import { currentTaskStateService } from "../../../../lib/task-state/service.ts";
 import { currentExecutionProfile } from "../../../../lib/adaptive-execution.ts";
 import { adaptiveDispatchDefaults } from "../shared/adaptive-dispatch.ts";
@@ -19,7 +20,7 @@ import { createCapacityResilientJsonWriter } from "../../shared/capacity-resilie
 import { isStorageCapacityError } from "../../shared/file-system-retry.ts";
 import { writeGuardedStatus, type RevisionedStatus } from "../shared/status-revision.ts";
 import { resolveEffectiveThinking, toModelInfo, type ModelInfo } from "../../shared/model-info.ts";
-import { sessionThinkingCeiling } from "../../shared/thinking-ceiling.ts";
+import { intersectThinkingCeilings, sessionThinkingCeiling, type ThinkingLevel } from "../../shared/thinking-ceiling.ts";
 import {
 	beginForegroundChild,
 	finishForegroundChild,
@@ -37,7 +38,8 @@ import { normalizePublicSubagentExecution, validateWorkflowCapacityOverrides } f
 import { runSync } from "./execution.ts";
 import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
-import { normalizeParentModel, sessionChildModel, type ParentModel } from "../shared/session-model.ts";
+import { normalizeParentModel, resolveChildRoute, sessionChildModel, validateCallRoles, withCallRole, type ChildRoute, type ParentModel } from "../shared/session-model.ts";
+import type { TeamRole } from "../../../../lib/team.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
 import { recordRun } from "../shared/run-history.ts";
 import {
@@ -283,6 +285,7 @@ function compactOptional<T extends object>(
 interface TaskParam {
 	agent: string;
 	task: string;
+	role?: TeamRole;
 	cwd?: string;
 	count?: number;
 	output?: string | boolean;
@@ -301,6 +304,7 @@ interface TaskParam {
 }
 
 export interface SubagentParamsLike {
+	role?: TeamRole;
 	commonTask?: string;
 	action?: string;
 	id?: string;
@@ -453,7 +457,7 @@ interface ExecutorDeps {
 
 type ForkSessionFileForTask = (agentName: string, idx?: number) => string | undefined;
 type PrepareForkSessionForTask = (agentName: string, idx?: number) => Promise<void>;
-type ForkThinkingOverrideForTask = (agentName: string, idx?: number) => string | false | undefined;
+type ForkThinkingOverrideForTask = (agentName: string, idx?: number, roleCeiling?: ThinkingLevel) => string | false | undefined;
 
 interface ExecutionContextData {
 	/** Set only when a process start or successful background launch is observed. */
@@ -1326,6 +1330,7 @@ function appendStepToAsyncChain(input: {
 		availableModels: input.ctx.modelRegistry.getAvailable().map(toModelInfo),
 		unknownAgentDiagnosticContext: diagnosticContextFromDiscovery(discoveredForAppend, input.requestCwd, scope),
 		cwd: status.cwd ?? input.requestCwd,
+		thinkingOverridesByFlatIndex: chainThinkingOverrides({ chain, agents, ctx: input.ctx, deps: input.deps, parentModel, effectiveCwd: status.cwd ?? input.requestCwd, contextPolicy }),
 		chainSkills,
 		dynamicFanoutMaxItems: input.deps.config.chain?.dynamicFanout?.maxItems,
 		maxSubagentDepth: resolveCurrentMaxSubagentDepth(input.deps.config.maxSubagentDepth),
@@ -1934,6 +1939,7 @@ async function resumeAsyncRun(input: {
 			}),
 			availableModels,
 			cwd: effectiveCwd,
+			thinkingOverridesByFlatIndex: chainThinkingOverrides({ chain: attachChain, agents, ctx: input.ctx, deps: input.deps, parentModel, effectiveCwd, contextPolicy }),
 			maxOutput: input.params.maxOutput,
 			artifactsDir: getArtifactsDir(parentSessionFile, effectiveCwd, artifactConfig.dir),
 			artifactConfig,
@@ -2048,6 +2054,7 @@ async function resumeAsyncRun(input: {
 		},
 		context: recoveryContext,
 		modelOverride: recoveryDescriptor?.model ?? target.model,
+		...(target.role ? { role: target.role } : {}),
 		fast: recoveryDescriptor?.fast,
 		modelRouteCandidates: recoveryDescriptor?.modelRouteCandidates,
 		thinkingOverride: recoveryDescriptor?.thinking ?? target.thinking,
@@ -2560,11 +2567,37 @@ interface AgentDefaultContextPolicy {
 
 type AgentDefaultContextPolicyResult = AgentDefaultContextPolicy | { error: string };
 
+/** A fork replays history cached only on the session's model, so an agent whose role
+ * runs on another model starts fresh unless the call itself asked for context:"fork". */
+function agentsStartingFresh(
+	params: SubagentParamsLike,
+	agents: AgentConfig[],
+	parentModel: ParentModel | undefined,
+	availableModels: () => ModelInfo[],
+	cwd: string,
+): Set<string> {
+	const fresh = new Set<string>();
+	const check = (agentName: string, role: TeamRole | undefined): void => {
+		const agent = agents.find((candidate) => candidate.name === agentName);
+		if (!agent || agent.runner?.type === "external-cli" || agent.runner?.type === "external-job") return;
+		if (resolveChildRoute({ agent, callRole: role, forked: false, parentModel, availableModels, cwd }).model !== sessionChildModel(parentModel)) fresh.add(agentName);
+	};
+	if (params.agent) check(params.agent, params.role);
+	for (const task of params.tasks ?? []) check(task.agent, task.role);
+	for (const step of params.chain ?? []) {
+		if (isParallelStep(step)) for (const task of step.parallel) check(task.agent, task.role);
+		else if (isDynamicParallelStep(step)) check(step.parallel.agent, step.parallel.role);
+		else check((step as SequentialStep).agent, (step as SequentialStep).role);
+	}
+	return fresh;
+}
+
 function resolveAgentDefaultContextPolicy(
 	params: SubagentParamsLike,
 	agents: AgentConfig[],
 	defaultSubagentContext: ExtensionConfig["defaultSubagentContext"],
 	canUseDefaultFork = false,
+	freshAgents: ReadonlySet<string> = new Set(),
 ): AgentDefaultContextPolicyResult {
 	if (params.context === "profile") {
 		const byName = new Map(agents.map((agent) => [agent.name, agent]));
@@ -2577,7 +2610,7 @@ function resolveAgentDefaultContextPolicy(
 		const contextForAgent = (agentName: string): ContextMode => {
 			const context = byName.get(agentName)?.defaultContext;
 			if (context === undefined) throw new Error(`context: "profile" requires agent '${agentName}' to declare defaultContext.`);
-			return context;
+			return freshAgents.has(agentName) ? "fresh" : context;
 		};
 		const contextSummary = summarizeContextModes(collectRequestedAgentNames(params).map(contextForAgent));
 		return {
@@ -2594,7 +2627,7 @@ function resolveAgentDefaultContextPolicy(
 			explicitContext: undefined,
 			agentDefaultContext: byName.get(agentName)?.defaultContext,
 			defaultSubagentContext,
-			canUseImplicitFork: canUseDefaultFork,
+			canUseImplicitFork: canUseDefaultFork && !freshAgents.has(agentName),
 		});
 	const requestedAgentNames = collectRequestedAgentNames(params);
 	const contextSummary = summarizeContextModes(requestedAgentNames.map((name) => contextForAgent(name)));
@@ -2892,23 +2925,71 @@ function toExecutionErrorResult(params: SubagentParamsLike, error: unknown, cont
 	);
 }
 
-type StaticLaunchSummary = { agent: string; model?: string; thinking?: string };
+type StaticLaunchSummary = { agent: string; role?: TeamRole; model?: string; thinking?: string; maxThinking?: ThinkingLevel };
+type ChildRouteForAgent = (agent: AgentConfig, callRole: TeamRole | undefined) => ChildRoute;
+
+/** The route a child of this run takes: its role's model, or the session's for a forked child. */
+function childRouteResolver(data: Pick<ExecutionContextData, "ctx" | "parentModel" | "effectiveCwd" | "contextPolicy">): ChildRouteForAgent {
+	return (agent, callRole) => resolveChildRoute({
+		agent,
+		callRole,
+		forked: shouldForkAgent(data.contextPolicy, agent.name),
+		parentModel: data.parentModel,
+		availableModels: () => data.ctx.modelRegistry.getAvailable().map(toModelInfo),
+		cwd: data.effectiveCwd,
+	});
+}
+
+/**
+ * Thinking per flat step of a chain launched outside `execute` (append-step, attach as root):
+ * the session's ceiling lowered by the role's and the agent's caps, as `execute` does. A route
+ * that cannot be resolved is left to the launcher, which reports it.
+ */
+function chainThinkingOverrides(input: {
+	chain: ChainStep[];
+	agents: AgentConfig[];
+	ctx: ExtensionContext;
+	deps: ExecutorDeps;
+	parentModel: ParentModel | undefined;
+	effectiveCwd: string;
+	contextPolicy: AgentDefaultContextPolicy;
+}): (string | false | undefined)[] | undefined {
+	const sessionThinking = sessionThinkingCeiling(input.ctx.sessionManager.getBranch?.(), input.deps.pi.getThinkingLevel?.());
+	const thinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, _index, roleCeiling) => shouldForkAgent(input.contextPolicy, agentName)
+		? sessionThinking
+		: intersectThinkingCeilings(sessionThinking, roleCeiling, input.agents.find((agent) => agent.name === agentName)?.maxThinking);
+	try {
+		const launches = collectStaticLaunchSummaries({
+			params: { chain: input.chain },
+			agents: input.agents,
+			childRoute: childRouteResolver(input),
+			thinkingOverrideForTask,
+			dynamicFanoutMaxItems: input.deps.config.chain?.dynamicFanout?.maxItems,
+		});
+		return launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index, launch.maxThinking));
+	} catch {
+		return undefined;
+	}
+}
 
 function resolveStaticLaunchSummary(input: {
 	agent: string;
+	callRole?: TeamRole;
 	index: number;
 	agents: AgentConfig[];
-	parentModel?: ParentModel;
+	childRoute: ChildRouteForAgent;
 	thinkingOverrideForTask: ForkThinkingOverrideForTask;
 }): StaticLaunchSummary {
 	const agentConfig = input.agents.find((agent) => agent.name === input.agent);
-	const externalRunner = agentConfig?.runner?.type === "external-cli" || agentConfig?.runner?.type === "external-job";
-	const model = externalRunner ? undefined : sessionChildModel(input.parentModel);
-	const thinkingOverride = externalRunner ? undefined : input.thinkingOverrideForTask(input.agent, input.index);
-	const thinking = externalRunner ? undefined : resolveEffectiveThinking(model, thinkingOverride);
+	const externalRunner = !agentConfig || agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job";
+	const route = externalRunner ? undefined : input.childRoute(agentConfig, input.callRole);
+	const thinkingOverride = route ? input.thinkingOverrideForTask(input.agent, input.index, route.maxThinking) : undefined;
+	const thinking = route ? resolveEffectiveThinking(route.model, thinkingOverride) : undefined;
 	return {
 		agent: input.agent,
-		...(model ? { model } : {}),
+		...(route ? { model: route.model } : {}),
+		...(route?.shownRole ? { role: route.shownRole } : {}),
+		...(route?.maxThinking ? { maxThinking: route.maxThinking } : {}),
 		...(thinking ? { thinking } : {}),
 	};
 }
@@ -2916,25 +2997,26 @@ function resolveStaticLaunchSummary(input: {
 function collectStaticLaunchSummaries(input: {
 	params: SubagentParamsLike;
 	agents: AgentConfig[];
-	parentModel?: ParentModel;
+	childRoute: ChildRouteForAgent;
 	thinkingOverrideForTask: ForkThinkingOverrideForTask;
 	dynamicFanoutMaxItems?: number;
 }): StaticLaunchSummary[] {
-	const summary = (agent: string, index: number) => resolveStaticLaunchSummary({
+	const summary = (agent: string, callRole: TeamRole | undefined, index: number) => resolveStaticLaunchSummary({
 		agent,
+		callRole,
 		index,
 		agents: input.agents,
-		parentModel: input.parentModel,
+		childRoute: input.childRoute,
 		thinkingOverrideForTask: input.thinkingOverrideForTask,
 	});
-	if (input.params.tasks) return input.params.tasks.map((task, index) => summary(task.agent, index));
+	if (input.params.tasks) return input.params.tasks.map((task, index) => summary(task.agent, task.role, index));
 	if (input.params.chain?.length) {
 		const launches: StaticLaunchSummary[] = [];
 		let flatIndex = 0;
 		for (const step of input.params.chain) {
 			if (isParallelStep(step)) {
 				for (const task of step.parallel) {
-					launches.push(summary(task.agent, flatIndex));
+					launches.push(summary(task.agent, task.role, flatIndex));
 					flatIndex++;
 				}
 				continue;
@@ -2942,18 +3024,18 @@ function collectStaticLaunchSummaries(input: {
 			if (isDynamicParallelStep(step)) {
 				const maxItems = step.expand.maxItems ?? input.dynamicFanoutMaxItems ?? 0;
 				for (let itemIndex = 0; itemIndex < maxItems; itemIndex++) {
-					launches.push(summary(step.parallel.agent, flatIndex));
+					launches.push(summary(step.parallel.agent, step.parallel.role, flatIndex));
 					flatIndex++;
 				}
 				continue;
 			}
 			const sequential = step as SequentialStep;
-			launches.push(summary(sequential.agent, flatIndex));
+			launches.push(summary(sequential.agent, sequential.role, flatIndex));
 			flatIndex++;
 		}
 		return launches;
 	}
-	return input.params.agent ? [summary(input.params.agent, 0)] : [];
+	return input.params.agent ? [summary(input.params.agent, input.params.role, 0)] : [];
 }
 
 function firstRawChainTask(chain: ChainStep[]): string | undefined {
@@ -3154,6 +3236,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 	}
 	const id = data.asyncRunId;
 	const parentModel = data.parentModel;
+	const childRoute = childRouteResolver(data);
 	const asyncCtx = compactOptional<Parameters<typeof executeAsyncSingle>[1]["ctx"]>({
 		pi: deps.pi,
 		cwd: ctx.cwd,
@@ -3183,14 +3266,14 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 				: isDynamicParallelStep(step) ? { ...step, parallel: defaults(step.parallel) }
 				: { ...defaults(step), worktree: step.worktree ?? params.worktree });
 		const chain = wrapChainTasksForFork(rawChain, contextPolicy);
-		const launches = collectStaticLaunchSummaries({ params: { chain: rawChain }, agents, parentModel, thinkingOverrideForTask, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems });
+		const launches = collectStaticLaunchSummaries({ params: { chain: rawChain }, agents, childRoute, thinkingOverrideForTask, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems });
 		const normalizedSkills = normalizeSkillInput(params.skill);
 		return executeAsyncChain(id, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
 			chain, resultMode: hasTasks ? "parallel" : "chain", goal: resolveAsyncEventGoal(undefined, rawChain),
 			agents, unknownAgentDiagnosticContext, ctx: asyncCtx, availableModels, cwd: effectiveCwd,
 			maxOutput: params.maxOutput, artifactsDir: artifactConfig.enabled ? artifactsDir : undefined, artifactConfig, shareEnabled,
 			sessionRoot, sessionFilesByFlatIndex: launches.map((launch, index) => sessionFileForTask(launch.agent, index)),
-			thinkingOverridesByFlatIndex: launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index)),
+			thinkingOverridesByFlatIndex: launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index, launch.maxThinking)),
 			contextForAgent: contextPolicy.contextForAgent, chainSkills: normalizedSkills === false ? [] : normalizedSkills,
 			agentContract: params.agentContract, fast: params.fast, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems,
 			maxSubagentDepth: currentMaxSubagentDepth, waitToolEnabled: deps.waitToolEnabled, waitToolDefaultTimeoutMs: deps.waitToolDefaultTimeoutMs,
@@ -3222,7 +3305,8 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		if ((a.runner?.type === "external-cli" || a.runner?.type === "external-job") && (params.fast ?? a.fast) === true) {
 			return buildRequestedModeError(params, `Agent '${a.name}' uses runner.type='${a.runner.type}' and does not support fast mode.`);
 		}
-		const modelOverride = a.runner?.type === "external-cli" || a.runner?.type === "external-job" ? undefined : sessionChildModel(parentModel);
+		const route = a.runner?.type === "external-cli" || a.runner?.type === "external-job" ? undefined : childRoute(a, params.role);
+		const modelOverride = route?.model;
 		const launchOptions = compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
 			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
@@ -3248,9 +3332,10 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			...(params.reads !== undefined ? { reads: params.reads } : {}),
 			outputBaseDir: resolveSingleRunOutputBaseDir(deps, artifactsDir, id),
 			modelOverride,
+			role: route?.shownRole,
 			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
-			thinkingOverride: modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0),
+			thinkingOverride: route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined,
 			thinkingCeiling: a.maxThinking,
 			maxSubagentDepth,
 			waitToolEnabled: deps.waitToolEnabled,
@@ -3631,7 +3716,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	const currentProvider = parentModel?.provider;
 	const availableModels: ModelInfo[] = ctx.modelRegistry.getAvailable().map(toModelInfo);
 	let task = typeof params.task === "string" ? params.task : "";
-	const modelOverride = agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job" ? undefined : sessionChildModel(parentModel);
+	const route = agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job" ? undefined : childRouteResolver(data)(agentConfig, params.role);
+	const modelOverride = route?.model;
 	let skillOverride: string[] | false | undefined = normalizeSkillInput(params.skill);
 	let readsOverride: string[] | false | undefined = params.reads;
 	const rawOutput = params.output !== undefined ? params.output : agentConfig.output;
@@ -3702,7 +3788,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	let detachForeground: ((reason?: string) => boolean) | undefined;
 	const foregroundControl = deps.state.foregroundControls.get(runId);
 	if (foregroundControl) {
-		const thinking = resolveEffectiveThinking(modelOverride, modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0));
+		const thinking = resolveEffectiveThinking(modelOverride, route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined);
 		beginForegroundChild(foregroundControl, omitUndefinedProperties({
 			index: 0,
 			agent: params.agent!,
@@ -3714,6 +3800,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			description: foregroundControl.description,
 			...(modelOverride ? { model: modelOverride } : {}),
 			...(thinking ? { thinking } : {}),
+			...(route?.shownRole ? { role: route.shownRole } : {}),
 			interrupt: () => {
 				if (interruptController.signal.aborted) return false;
 				interruptController.abort();
@@ -3778,9 +3865,10 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			nestedRoute: foregroundControl?.nestedRoute,
 			index: 0,
 			modelOverride,
+			role: route?.shownRole,
 			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
-			thinkingOverride: modelOverride === undefined ? undefined : thinkingOverrideForTask(params.agent!, 0),
+			thinkingOverride: route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined,
 			thinkingCeiling: agentConfig.maxThinking,
 			extensionBindings: params.extensionBindings,
 			availableModels,
@@ -4685,6 +4773,12 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		}
 		try { requestParams = expandCommonTask(requestParams); }
 		catch (error) { return buildRequestedModeError(requestParams, error instanceof Error ? error.message : String(error)); }
+		// A model's launch of the same agent and task as a child still running is refused once;
+		// the children it names are remembered when the run starts (see below).
+		const launchesChildren = publicExecution && !delegatedExecution && !requestParams.action && requestParams.workflowScript === undefined;
+		const launchedChildren = launchesChildren ? launchChildren(requestParams) : [];
+		const twinRefusal = launchesChildren ? refuseTwinLaunch(deps.state, launchedChildren) : undefined;
+		if (twinRefusal) return buildRequestedModeError(requestParams, twinRefusal);
 		try {
 			// Advisory task-state slice on every native child brief; children
 			// stay read-only and verify before relying on it.
@@ -4693,6 +4787,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		} catch {
 			/* dispatch never fails because of the slice */
 		}
+		if (launchesChildren) requestParams = withSiblingBlocks(deps.state, requestParams, launchedChildren);
 		const capacityOverrideError = validateWorkflowCapacityOverrides(requestParams);
 		if (capacityOverrideError) return buildRequestedModeError(requestParams, capacityOverrideError);
 		let workflowPreflight: import("../../shared/types.ts").WorkflowPreflightV1 | undefined;
@@ -6275,6 +6370,16 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		if (canonicalParams.error) return buildRequestedModeError(effectiveParams, canonicalParams.error);
 		effectiveParams = canonicalParams.params!;
 		effectiveParams = applySingleAgentLaunchDefaults(effectiveParams, discoveredAgents);
+		const roleError = validateCallRoles(effectiveParams);
+		if (roleError) return buildRequestedModeError(effectiveParams, roleError);
+		effectiveParams = withCallRole(effectiveParams);
+		// An explicit fork keeps the session's model, so no role's model is looked at.
+		let freshAgents = new Set<string>();
+		try {
+			if (effectiveParams.context !== "fork") freshAgents = agentsStartingFresh(effectiveParams, discoveredAgents, requestParentModel, () => ctx.modelRegistry.getAvailable().map(toModelInfo), effectiveCwd);
+		} catch (error) {
+			return buildRequestedModeError(effectiveParams, error instanceof Error ? error.message : String(error));
+		}
 		// An agent-level defaultContext is a preference, unlike an explicit request.
 		// Prefer fork only when the parent session is persisted and has a current leaf;
 		// otherwise use fresh immediately instead of launching a guaranteed-to-fail fork.
@@ -6284,6 +6389,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			discoveredAgents,
 			deps.config.defaultSubagentContext,
 			canPreferFork(ctx.sessionManager),
+			freshAgents,
 		);
 		if ("error" in contextPolicyResult) return buildRequestedModeError(effectiveParams, contextPolicyResult.error);
 		const contextPolicy = contextPolicyResult;
@@ -6472,8 +6578,8 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		// Every helper starts at the session's thinking ceiling; its own effort
 		// controller (Jev) steps down per task. A sanitized fork still forces off.
 		const sessionThinking = sessionThinkingCeiling(ctx.sessionManager.getBranch?.(), deps.pi.getThinkingLevel?.());
-		const forkThinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, idx = 0) => {
-			if (!shouldForkAgent(contextPolicy, agentName)) return sessionThinking;
+		const forkThinkingOverrideForTask: ForkThinkingOverrideForTask = (agentName, idx = 0, roleCeiling) => {
+			if (!shouldForkAgent(contextPolicy, agentName)) return intersectThinkingCeilings(sessionThinking, roleCeiling, agents.find((agent) => agent.name === agentName)?.maxThinking);
 			prepareForkThinking(agentName, idx);
 			const override = forkThinkingOverrideForIndex(idx);
 			if (override === "off") forkThinkingDowngrades.set(idx, agentName);
@@ -6687,9 +6793,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				startedLaunches = collectStaticLaunchSummaries({
 					params: effectiveParams,
 					agents,
-					parentModel: requestParentModel,
-					availableModels: ctx.modelRegistry.getAvailable().map(toModelInfo),
-					currentProvider: requestParentModel?.provider,
+					childRoute: childRouteResolver({ ctx, parentModel: requestParentModel, effectiveCwd, contextPolicy }),
 					thinkingOverrideForTask: forkThinkingOverrideForTask,
 					dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems,
 				});
@@ -6723,6 +6827,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						...(details?.results.length === 1 && details.results[0]?.sessionName ? { sessionName: details.results[0].sessionName } : {}),
 						agents: agentsForSummary,
 						...(agentsForSummary.length === 1 && (type === "subagent.nested.started" ? startedLaunches[0]?.model : details?.results[0]?.model) ? { model: type === "subagent.nested.started" ? startedLaunches[0]?.model : details?.results[0]?.model } : {}),
+						...(agentsForSummary.length === 1 && (type === "subagent.nested.started" ? startedLaunches[0]?.role : details?.results[0]?.role) ? { role: type === "subagent.nested.started" ? startedLaunches[0]?.role : details?.results[0]?.role } : {}),
 						...(agentsForSummary.length === 1 && (type === "subagent.nested.started" ? startedLaunches[0]?.thinking : details?.results[0]?.thinking) ? { thinking: type === "subagent.nested.started" ? startedLaunches[0]?.thinking : details?.results[0]?.thinking } : {}),
 						startedAt: foregroundControl?.startedAt ?? now,
 						...(state !== "running" ? { endedAt: now } : {}),
@@ -6734,6 +6839,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 								agent: launch.agent,
 								status: "running" as const,
 								...(launch.model ? { model: launch.model } : {}),
+								...(launch.role ? { role: launch.role } : {}),
 								...(launch.thinking ? { thinking: launch.thinking } : {}),
 							})) }
 							: details?.results.length
@@ -6742,6 +6848,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 									...(child.sessionName ? { sessionName: child.sessionName } : {}),
 									status: child.interrupted || child.detached ? "paused" as const : child.exitCode === 0 ? "complete" as const : "failed" as const,
 									...(child.model ? { model: child.model } : {}),
+									...(child.role ? { role: child.role } : {}),
 									...(child.thinking ? { thinking: child.thinking } : {}),
 									...(child.sessionFile ? { sessionFile: child.sessionFile } : {}),
 									...(child.error ? { error: child.error } : {}),
@@ -6781,6 +6888,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			const asyncResult = await runAsyncPath(execData, deps);
 			if (asyncResult) {
 				asyncLaunchFailed = asyncResult.isError === true;
+				if (!asyncLaunchFailed) rememberLaunch(deps.state, asyncRunId, launchedChildren);
 				return attachMission(withRunFanoutBudget(withResolvedContext(withForkThinkingNotes(asyncResult, forkThinkingDowngrades), contextPolicy.contextSummary), runFanoutBudget));
 			}
 			if (foregroundControl) {

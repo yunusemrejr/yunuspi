@@ -27,7 +27,7 @@ const judgeWith = (answers, usage = { inputTokens: 12, cached: false, costUsd: 0
 test("registry names every decision type with owners", () => {
   const ids = Object.keys(TYPED_DECISIONS).sort();
   assert.deepEqual(ids, [
-    "claim-verification", "command-request", "delegation-topology", "effort-tier", "evidence-relevance",
+    "assignment-tier", "claim-verification", "command-request", "delegation-topology", "effort-tier", "evidence-relevance",
     "memory-admission", "observer-admission", "observer-focus",
     "recovery-strategy", "review-aspects",
     "tool-skill-shortlist", "ui-work",

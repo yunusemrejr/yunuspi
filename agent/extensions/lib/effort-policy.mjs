@@ -320,7 +320,7 @@ const EFFORT_ACK = /^\s*(?:ok(?:ay)?|yes|yep|yeah|sure|go on|go ahead|continue|p
  * - `judge`: ask Jev whether the request is genuinely simple.
  * `mechanical` is only a hint; Jev still has to agree before anything moves.
  */
-export const classifyEffortRequest = (text, { source = "human", priorFailures = 0 } = {}) => {
+export const classifyEffortRequest = (text, { source = "human", priorFailures = 0, assignment = false } = {}) => {
 	const prompt = String(text ?? "").replace(/\u0000/g, "");
 	const flat = prompt.replace(/```[\s\S]*?(?:```|$)/g, " ").trim();
 	const reasons = [];
@@ -330,6 +330,9 @@ export const classifyEffortRequest = (text, { source = "human", priorFailures = 
 	if (EFFORT_ACK.test(flat) && flat.length <= 80) return { kind: "inherit", reasons: ["short acknowledgement"] };
 	if (EFFORT_CRITICAL.test(flat)) return { kind: "ceiling", reasons: ["critical-area cue"] };
 	if (EFFORT_COMPLEX.test(flat)) return { kind: "ceiling", reasons: ["complexity cue"] };
+	// A subagent's assignment is a written brief: its length and code say how
+	// much was explained, not how hard the work is, so the judge decides.
+	if (assignment) return { kind: "judge", reasons: ["assignment"] };
 	if (prompt.length > 1500 || /```/.test(prompt) || /\bat \S+:\d+:\d+\)?$/m.test(prompt)) return { kind: "ceiling", reasons: ["long input, code or stack trace"] };
 	if (flat.length <= 300 && EFFORT_MECHANICAL.test(flat)) return { kind: "judge", reasons: ["mechanical cue"], mechanical: true };
 	if (flat.length <= 160 && !EFFORT_WORK.test(flat)) return { kind: "judge", reasons: ["short question"], mechanical: true };
@@ -344,6 +347,19 @@ export const effortQuestions = () => ({
 	deep: { type: "noul", instructions: "Does settling this request need careful multi-step reasoning, such as debugging, design, algorithm work, changes across several files, or verifying subtle behavior?" },
 	simple: { type: "noul", instructions: "Is this request simple, mechanical or conversational, so that a quick answer or one small edit would settle it (rename, formatting, short factual question, trivial lookup)?" },
 });
+
+/** The same two scores asked of a subagent's assignment instead of a user's request. */
+export const assignmentQuestions = () => ({
+	deep: { type: "noul", instructions: "Does this assignment need careful multi-step reasoning: diagnosing a fault, designing something, weighing trade-offs, or verifying subtle behaviour?" },
+	simple: { type: "noul", instructions: "Is this assignment mechanical: find, read, list or extract something, run a given command, or apply an edit that is already specified?" },
+});
+
+/** A long brief reaches the judge as its first 2000 and last 1000 characters. */
+export const ASSIGNMENT_EXCERPT_MARK = " [...] ";
+export const assignmentExcerpt = (brief) => {
+	const flat = String(brief ?? "").replace(/\s+/g, " ").trim();
+	return flat.length > 3000 ? `${flat.slice(0, 2000)}${ASSIGNMENT_EXCERPT_MARK}${flat.slice(-1000)}` : flat;
+};
 
 const effortScore = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined);
 

@@ -41,6 +41,7 @@ import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { createReadToolDefinition } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import {
+	assignmentExcerpt,
 	classifyEffortRequest,
 	createEffortController,
 	EFFORT_SWITCH_BUDGET_TOKENS,
@@ -350,6 +351,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	let effort: ReturnType<typeof createEffortController> | undefined;
 	let effortManual = false;
 	let effortInitialized = false;
+	let assignmentJudged = false;
 	let effortAuto: string | undefined;
 	/** Who applied `effortAuto`: economy step-downs restore at the next human
 	 * turn; a Jev decision is re-judged at the next turn instead. */
@@ -631,10 +633,17 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	 * a warm DeepSeek prefix exactly like the economy step-down does.
 	 */
 	const judgeEffort = async (event: any, ctx: any): Promise<void> => {
+		// A subagent judges its assignment once, on its first turn: later turns
+		// are follow-ups to work already under way, not a new assignment.
+		const assignment = process.env.PI_SUBAGENT_CHILD === "1";
+		if (assignment) {
+			if (assignmentJudged) return;
+			assignmentJudged = true;
+		}
 		if (!effortInitialized) initEffort();
 		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy) return;
-		// Children judge their own task too: a helper launches at the session's
-		// ceiling and steps down here exactly like a main-session turn.
+		// A child launches at the ceiling its role allows and steps down here
+		// like a main-session turn, judged on its assignment.
 		if (ctx?.model?.reasoning === false) return;
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		if (!prompt.trim()) return;
@@ -661,7 +670,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			}
 			applyEffort(effortCeiling, ctx, message, "jev");
 		};
-		const classification = classifyEffortRequest(prompt);
+		const classification = classifyEffortRequest(prompt, { assignment });
 		if (classification.kind === "ceiling") {
 			restoreCeiling(`jev effort kept at the ceiling · ${classification.reasons[0] ?? "no easy evidence"}`);
 			return;
@@ -670,8 +679,8 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		const flat = prompt.replace(/\s+/g, " ").trim();
 		const shortPlain = flat.length <= 400;
 		const judged = await askTypedDecision(
-			"effort-tier",
-			{ state: { request: flat.slice(0, 3000) } },
+			assignment ? "assignment-tier" : "effort-tier",
+			{ state: { request: assignment ? assignmentExcerpt(prompt) : flat.slice(0, 3000) } },
 			{
 				judge: (site, state, questions, options) => askJev(site, state, questions, {
 					pi,
@@ -943,8 +952,16 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			const hit = prompt > 0 ? (totals.cacheRead / prompt) * 100 : 0;
 			const budget = currentBudget();
 			const status = budget > 0 ? `${fmtUsd(totals.cost)} / ${fmtUsd(budget)} (${Math.min(999, Math.round((totals.cost / budget) * 100))}%)` : `${fmtUsd(totals.cost)} / off`;
+			// The live run (time and spend since the user's last message) is owned by
+			// session-facts.ts; each extension has its own module copy, so it is read
+			// from the shared symbol rather than imported.
+			const runState = (globalThis as any)[Symbol.for("yunus-pi.run.v1")];
+			const liveRun = typeof runState === "function" ? runState() : undefined;
+			const runCaps: string = liveRun?.budget ?? "";
+			const runLine = liveRun ? `Run: ${liveRun.minutes} min, ${liveRun.usd === undefined ? "$?" : `$${liveRun.usd.toFixed(3)}`}${runCaps ? ` of ${runCaps}` : ""}` : undefined;
 			const lines = [
 				`Cost governor · ${status}${economy ? " · economy mode" : ""}`,
+				...(runLine ? [runLine] : []),
 				`Model: ${ctx?.model?.provider ?? "?"}/${ctx?.model?.id ?? "?"} · window ${fmtTokens(num(ctx?.model?.contextWindow))} · context ${fmtTokens(totals.lastPromptTokens)}`,
 				`Turns: ${totals.turns} · input ${fmtTokens(totals.input)} · output ${fmtTokens(totals.output)} · cache read ${fmtTokens(totals.cacheRead)} (${hit.toFixed(1)}% hit) · reasoning ${fmtTokens(totals.reasoning)}`,
 				describeCacheMisses(sentinel.summary(), fmtTokens, fmtUsd),

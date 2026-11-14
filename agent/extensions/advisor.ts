@@ -1,0 +1,188 @@
+/**
+ * ask_advisor — one question to the stronger model configured as `team.advisor`.
+ *
+ * The advisor sees only the question: no conversation, no tools. It is a side
+ * call, not a turn: its spend is recorded as auxiliary model usage so /cost
+ * shows it under the advisor's route.
+ *
+ * The tool list must never change in the middle of a session (that re-bills the
+ * provider's prompt cache), so the tool is registered once, at the first
+ * session start, and the decision is never revisited. Child processes never get
+ * it: their model should not spend on a second opinion the parent cannot see.
+ *
+ * Limits: 3 per run (a run is everything after one human message), 12 per
+ * session, one at a time. The session count is read back from the session
+ * entries on every start, so a reload does not hand out fresh budget.
+ */
+import { randomUUID } from "node:crypto";
+import { Type } from "typebox";
+import { loadTeamConfig } from "./lib/team.ts";
+
+export const ADVISOR_ENTRY = "advisor-v1";
+const OWNER = "advisor";
+const MAX_QUESTION = 1_500;
+const PER_RUN = 3;
+const PER_SESSION = 12;
+/** The answer allowance; reasoning shares it, so a thinking model gets headroom. */
+const ANSWER_TOKENS = 1_200;
+const THINKING_HEADROOM = 4_096;
+const DEADLINE_MS = 180_000;
+const SYSTEM =
+	"You advise another model that is in the middle of a task. Answer in at most 120 words: the recommendation first, then the reason, then the one risk to watch.";
+const DESCRIPTION =
+	"Put one question (at most 1,500 characters) to a stronger model and get a few lines back. It sees only the question: state the goal, what is known, the options and the one thing to decide. Ask when its judgment can change the outcome: before committing to an approach on a hard or costly task, after two failed attempts at the same problem, before reporting a large piece of work as done. Never for a fact a lookup answers. 3 per run, 12 per session.";
+
+const routeOf = (model: any) => `${model?.provider}/${model?.id}`;
+
+/** Every accepted call leaves one entry; a reload counts them back. */
+function recordedCalls(ctx: any): number {
+	try {
+		const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+		return entries.filter((entry: any) => entry?.type === "custom" && entry.customType === ADVISOR_ENTRY).length;
+	} catch {
+		return 0;
+	}
+}
+
+export default function advisorExtension(pi: any) {
+	let decided = false;
+	let runUsed = 0;
+	let sessionUsed = 0;
+	let inFlight = false;
+
+	const refuse = (text: string) => ({ isError: true, content: [{ type: "text", text }] });
+
+	const record = (data: any) => {
+		try {
+			pi.appendEntry?.(ADVISOR_ENTRY, data);
+		} catch {
+			/* The limit counter stays right in-process; a lost entry only undercounts after a reload. */
+		}
+	};
+
+	pi.on("session_start", (_event: any, ctx: any) => {
+		// A reload of the same session must not hand out fresh session budget.
+		sessionUsed = recordedCalls(ctx);
+		runUsed = 0;
+		if (decided) return;
+		decided = true;
+		if (process.env.PI_SUBAGENT_CHILD === "1") return;
+		let advisor = "off";
+		try {
+			advisor = loadTeamConfig(ctx?.cwd ?? process.cwd()).team.advisor;
+		} catch {
+			// Invalid team settings are reported where they are edited; an optional tool stays absent.
+			return;
+		}
+		if (advisor === "off") return;
+		pi.registerTool({
+			name: "ask_advisor",
+			label: "Ask Advisor",
+			description: DESCRIPTION,
+			parameters: Type.Object(
+				{
+					question: Type.String({
+						description: "One question, at most 1,500 characters: the goal, what is known, the options and the one thing to decide.",
+					}),
+				},
+				{ additionalProperties: false },
+			),
+			async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
+				const question = typeof params?.question === "string" ? params.question : "";
+				const asked = question.trim();
+				if (question.length > MAX_QUESTION) {
+					return refuse(`The question is ${question.length} characters; ask_advisor accepts at most 1,500 characters.`);
+				}
+				if (!asked) return refuse("ask_advisor needs a question.");
+				if (inFlight) return refuse("Another ask_advisor call is still running; one at a time.");
+				if (runUsed >= PER_RUN) return refuse(`${PER_RUN} per run reached. Ask again after the next user message.`);
+				if (sessionUsed >= PER_SESSION) return refuse(`${PER_SESSION} per session reached.`);
+
+				const advisor = loadTeamConfig(ctx?.cwd ?? process.cwd()).team.advisor;
+				if (advisor === "off") return refuse("team.advisor is off; set an advisor model with /team.");
+				const model = ctx?.modelRegistry?.getAvailable?.().find((candidate: any) => routeOf(candidate) === advisor);
+				if (!model) {
+					return refuse(`team.advisor is set to '${advisor}', which is not among the available models. Pick another with /team.`);
+				}
+
+				runUsed++;
+				sessionUsed++;
+				inFlight = true;
+				const id = randomUUID();
+				const usage = (status: string, raw?: any) => {
+					try {
+						pi.appendEntry?.("auxiliary-model-usage-v1", {
+							id,
+							owner: OWNER,
+							provider: model.provider,
+							model: model.id,
+							status,
+							...(raw === undefined ? {} : { usage: raw }),
+						});
+					} catch {
+						/* Accounting never discards an answer. */
+					}
+				};
+				const timeout = AbortSignal.timeout(DEADLINE_MS);
+				const bounded = signal ? AbortSignal.any([signal, timeout]) : timeout;
+				const thinking = model.reasoning === true && model.thinkingLevelMap?.medium !== null;
+				const ceiling = ANSWER_TOKENS + (thinking ? THINKING_HEADROOM : 0);
+				usage("pending");
+				let response: any;
+				try {
+					response = await ctx.modelRegistry.completeSimple(
+						model,
+						{ systemPrompt: SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: asked }], timestamp: Date.now() }] },
+						{
+							signal: bounded,
+							maxRetries: 0,
+							maxTokens: Math.min(ceiling, Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : ceiling),
+							...(thinking ? { reasoning: "medium" } : {}),
+						},
+					);
+				} catch (error) {
+					usage(bounded.aborted ? "cancelled" : "failed");
+					record({ at: Date.now(), route: advisor, status: "failed" });
+					inFlight = false;
+					return refuse(`The advisor call failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				inFlight = false;
+				if (bounded.aborted || ["error", "aborted"].includes(response?.stopReason)) {
+					usage(bounded.aborted ? "cancelled" : "failed", response?.usage);
+					record({ at: Date.now(), route: advisor, status: "failed" });
+					const why = bounded.aborted ? "was cancelled or timed out" : `failed: ${String(response?.errorMessage ?? response?.stopReason).slice(0, 300)}`;
+					return refuse(`The advisor call ${why}.`);
+				}
+				usage("completed", response?.usage);
+				const text = (response?.content ?? [])
+					.filter((part: any) => part?.type === "text")
+					.map((part: any) => part.text)
+					.join("\n")
+					.trim();
+				if (!text) {
+					record({ at: Date.now(), route: advisor, status: "failed" });
+					return refuse(
+						response?.stopReason === "length"
+							? "The advisor spent its whole output allowance before answering; try a shorter question."
+							: "The advisor returned no text.",
+					);
+				}
+				record({ at: Date.now(), route: advisor, status: "answered" });
+				return {
+					content: [{ type: "text", text: response?.stopReason === "length" ? `${text}\n\n(Answer cut at the 1,200-token cap.)` : text }],
+				};
+			},
+		});
+	});
+
+	// A human message starts a new run; extension-delivered messages do not.
+	pi.on("input", (event: any) => {
+		if (event?.source !== "extension") runUsed = 0;
+	});
+	const reseed = (_event: any, ctx: any) => {
+		sessionUsed = recordedCalls(ctx);
+		runUsed = 0;
+	};
+	pi.on("session_switch", reseed);
+	pi.on("session_tree", reseed);
+}

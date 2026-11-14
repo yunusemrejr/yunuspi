@@ -104,6 +104,16 @@ earlier message re-bills the whole cached transcript at the fresh-input rate
   the first bytes a session receives are the bytes it keeps, recorded in the
   session as `head-latch-v1`. In a warm session a new addition is delivered as
   one persisted hidden message instead.
+- **A stored message is replayed, never regenerated.** The line with the time,
+  session spend, context and cache hits that follows each human message is
+  returned once from `before_agent_start` and kept in the session as a hidden
+  message, so every later request carries the same bytes. A figure that changes
+  per request would re-bill the transcript after it. The `ask_advisor` tool is
+  registered once at the first session start and only when `team.advisor`
+  names a model, so the tool list is fixed for the session; a child process
+  never gets it. A child's route is fixed at launch, and a child that forks the
+  session stays on the session model because the history it replays is cached
+  only there.
 - **Small notes ride the tail.** `createContextAnchor` places a block under
   6,000 characters at the end of every request. A block kept at its first
   boundary re-bills everything appended since when its content changes or it
@@ -154,7 +164,12 @@ budget applies to a warm prefix only: the session's first request, a compacted
 prefix and a route switch have no provider cache to lose, so the decision is
 not blocked there even when the system prompt is large. Goal
 rounds, preset briefs, complex or critical wording, long input, code, prior tool
-failures and an ambiguous/failed judge keep the ceiling. A step up is always
+failures and an ambiguous/failed judge keep the ceiling. A subagent's assignment
+is judged the same way, once, on the child's first turn, with questions about
+the assignment (diagnosing or designing, or finding, listing and applying an
+edit that is already specified): the first 2,000 and last 1,000 characters of a
+longer brief are sent, and neither its length nor code in it keeps the ceiling.
+A step up is always
 allowed, and a burst of two tool errors restores the ceiling immediately.
 `PIJEV_EFFORT=off` (or `PI_JEV=off`, `PI_OFFLINE=1`) disables the router; a
 manual `/effort` or `/thinking` selection wins for the rest of the session. The

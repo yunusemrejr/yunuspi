@@ -152,10 +152,13 @@ try {
   assert.equal(await block.locator('.work-body').isVisible(), false);
   const headline = await block.locator('.work-head').innerText();
   assert.match(headline, /Worked/); assert.match(headline, /read 1 file/); assert.match(headline, /1 failed on the way/);
+  await page.screenshot({ path: path.join(output, 'desktop-work-folded.png') }); report.screenshots.push('desktop-work-folded.png');
   assert.match(await page.locator('#messages > .message.assistant').last().innerText(), /Desktop verified/);
   assert.equal(await block.locator('.message.assistant').count(), 3, 'the narration of each step belongs to the block');
   await block.locator('.work-head').click();
   assert.equal(await block.getAttribute('data-open'), 'true');
+  await block.locator('.work-head').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(output, 'desktop-work-open.png') }); report.screenshots.push('desktop-work-open.png');
   assert.equal(await block.locator('.tool-card').count(), 3);
   assert.equal(await block.locator('.tool-card[data-status="error"]').count(), 1);
   assert.match(await block.locator('.tool-card[data-status="error"] .tool-trouble').innerText(), /missing\.txt|ENOENT|not found|no such file/i, 'a failed step says what failed without being opened');
@@ -329,6 +332,50 @@ try {
   assert.equal(await page.locator('#provider-key').evaluate(node => node === document.activeElement), true);
   await page.keyboard.press('Escape'); assert.equal(await page.locator('#dialog').evaluate(node => node.open), false);
   check('dialog keyboard focus and Escape close work');
+  // Team models: each choice is written at once through the harness settings owner,
+  // and comes back selected when Settings is opened again.
+  const ready = () => page.waitForFunction(() => { const select = document.getElementById('team-legwork'); return select && !select.disabled; }, { timeout: 60_000 });
+  await page.locator('#settings').click(); await ready();
+  await page.locator('#team-helper').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(output, 'desktop-settings-team.png') }); report.screenshots.push('desktop-settings-team.png');
+  await page.locator('#team-helper').focus(); await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'team-legwork');
+  const focusRing = await page.locator('#team-legwork').evaluate(node => { const style = getComputedStyle(node); return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) }; });
+  assert.equal(focusRing.style, 'solid', 'a focused dropdown shows the dialog focus ring');
+  assert.ok(focusRing.width >= 1.5, `the focus ring is drawn (${focusRing.width}px)`);
+  await page.screenshot({ path: path.join(output, 'desktop-settings-team-focus.png') }); report.screenshots.push('desktop-settings-team-focus.png');
+  // The dropdowns answer the keyboard on their own: arrows pick, and the change is saved.
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(() => document.getElementById('team-legwork')?.dataset.saved !== 'inherit');
+  assert.match(await page.locator('#team-legwork').inputValue(), /^[^/]+\/.+/, 'an arrow key picks a model and saves it');
+  const teamWindow = await electron.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0], size = window.getContentSize();
+    window.setMinimumSize(360, 320); window.setContentSize(400, 700); return size;
+  });
+  await page.waitForTimeout(150);
+  const fit = await page.evaluate(() => {
+    const content = document.getElementById('dialog-content').getBoundingClientRect();
+    const outside = [...document.querySelectorAll('.team-section select')].filter(select => {
+      const box = select.getBoundingClientRect(); return box.left < content.left - 1 || box.right > content.right + 1;
+    });
+    return { width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, outside: outside.length };
+  });
+  assert.ok(fit.overflow <= 1 && fit.outside === 0, `the Team section fits a ${fit.width}px window without sideways scrolling`);
+  await page.screenshot({ path: path.join(output, 'desktop-settings-team-narrow.png') }); report.screenshots.push('desktop-settings-team-narrow.png');
+  await electron.evaluate(({ BrowserWindow }, size) => { const window = BrowserWindow.getAllWindows()[0]; window.setMinimumSize(560, 420); window.setContentSize(size[0], size[1]); }, teamWindow);
+  await page.waitForTimeout(150);
+  await page.locator('#team-legwork').selectOption('desktop-example/desktop-fixture');
+  await page.waitForFunction(() => document.getElementById('team-legwork')?.dataset.saved === 'desktop-example/desktop-fixture');
+  await page.keyboard.press('Escape'); assert.equal(await page.locator('#dialog').evaluate(node => node.open), false);
+  await page.locator('#settings').click(); await ready();
+  assert.equal(await page.locator('#team-legwork').inputValue(), 'desktop-example/desktop-fixture', 'the saved model stays selected after reopening Settings');
+  assert.equal(await page.locator('#team-legwork option:checked').innerText(), 'desktop-example · desktop-fixture');
+  await page.keyboard.press('Escape');
+  const teamFile = JSON.parse(fs.readFileSync(path.join(agentDir, 'settings.json'), 'utf8'));
+  assert.equal(teamFile.team.legwork, 'desktop-example/desktop-fixture');
+  assert.equal(teamFile.defaultProvider, 'desktop-example', 'writing a team role keeps the rest of the settings file');
+  assert.equal(teamFile.retry.enabled, false);
+  check('Team choices save at once, fit a narrow window and come back selected after reopening Settings');
   await electron.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1 }); });
   await page.evaluate(id => window.yunuspi.sessionAction(id, 'delete'), second.id);
   assert.ok(!new SessionStore(dataDir).data.sessions.some(session => session.id === second.id));

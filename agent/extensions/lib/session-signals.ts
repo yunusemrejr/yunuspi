@@ -126,18 +126,31 @@ export class PressureThresholds {
     return crossed.at(-1) ?? null;
   }
 }
+/** The local time zone and where it came from: PI_TIMEZONE, or the system
+ * zone (also the fallback when PI_TIMEZONE names an invalid zone). */
+export function resolveTimeZone(
+  timezone = process.env.PI_TIMEZONE,
+): { zone: string; source: string } {
+  if (!timezone)
+    return {
+      zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      source: "system fallback",
+    };
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone }).format();
+  } catch {
+    return {
+      zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      source: "system fallback (invalid PI_TIMEZONE)",
+    };
+  }
+  return { zone: timezone, source: "PI_TIMEZONE" };
+}
 export function dateAnchor(
   now = new Date(),
   timezone = process.env.PI_TIMEZONE,
 ) {
-  let zone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    source = timezone ? "PI_TIMEZONE" : "system fallback";
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: zone }).format(now);
-  } catch {
-    zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    source = "system fallback (invalid PI_TIMEZONE)";
-  }
+  const { zone, source } = resolveTimeZone(timezone);
   const date = new Intl.DateTimeFormat("en-CA", {
     timeZone: zone,
     year: "numeric",

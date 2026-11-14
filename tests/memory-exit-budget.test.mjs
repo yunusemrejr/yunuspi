@@ -23,10 +23,10 @@ delete process.env.PI_OFFLINE;
 process.env.PI_MEMORY_EXIT_SUMMARY='1';
 process.env.PI_MEMORY_QMD_UPDATE='off';
 process.env.PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS='20';
-function fixture(branch, model = {provider:"fixture",id:"costly"}, getApiKey = async()=> "fixture-only", ui = true){
+function fixture(branch, model = {provider:"fixture",id:"costly"}, getApiKey = async()=> "fixture-only", ui = true, getAvailable = ()=>[]){
  const hooks={};memory._setBaseDir(root);
  memory.default({on:(name,fn)=>{hooks[name]=fn},registerTool(){},registerCommand(){},appendEntry:(customType,data)=>branch?.push({type:"custom",customType,data})});
- const ctx={cwd:root,hasUI:ui,model,modelRegistry:{getApiKey,find:()=>undefined},sessionManager:{getSessionId:()=> 'fixture',getBranch:()=>branch??Array.from({length:4},()=>({type:'message',message:{role:'user',content:'fixture'}}))}};
+ const ctx={cwd:root,hasUI:ui,model,modelRegistry:{getApiKey,find:()=>undefined,getAvailable},sessionManager:{getSessionId:()=> 'fixture',getBranch:()=>branch??Array.from({length:4},()=>({type:'message',message:{role:'user',content:'fixture'}}))}};
  return (name='session_shutdown')=>hooks[name]({reason:'quit'},ctx);
 }
 test.after(()=>{fs.rmSync(root,{recursive:true,force:true});delete globalThis.__exitBudgetComplete;for(const[k,v]of Object.entries(original))v===undefined?delete process.env[k]:process.env[k]=v;});
@@ -228,4 +228,55 @@ test('a child session never makes a model summary request either',async()=>{
  const before=process.env.PI_SUBAGENT_CHILD;process.env.PI_SUBAGENT_CHILD='1';
  try{const branch=Array.from({length:6},(_,i)=>({type:'message',id:`child-${i}`,message:{role:'user',content:'child work'}}));await fixture(branch)();assert.equal(calls,0);}
  finally{if(before===undefined)delete process.env.PI_SUBAGENT_CHILD;else process.env.PI_SUBAGENT_CHILD=before;}
+});
+
+// The exit summary is a background side call: it runs on the legwork model when
+// the team settings name one that is available, and on the session model otherwise.
+const legworkModel = {provider:'example',id:'legwork-1',maxTokens:4096};
+function useTeamSettings(t, settings) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memory-team-'));
+  if (settings !== undefined) fs.writeFileSync(path.join(dir, 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+    fs.rmSync(dir, {recursive:true,force:true});
+  });
+}
+async function summarizedWith(t, settings, getAvailable = () => [legworkModel]) {
+  useTeamSettings(t, settings);
+  const branch = Array.from({length:4},(_,i)=>({type:'message',id:`team-${i}`,message:{role:'user',content:'fixture'}}));
+  const used = [], keyedFor = [];
+  globalThis.__exitBudgetComplete = async (selected) => { used.push(`${selected.provider}/${selected.id}`); return {content:[{type:'text',text:'### Decisions\n- TEAM_ROUTE_SUMMARY'}],stopReason:'stop',usage:{input:10,output:5,totalTokens:15}}; };
+  const getApiKey = async (selected) => { keyedFor.push(`${selected.provider}/${selected.id}`); return 'fixture-only'; };
+  await fixture(branch, {provider:'fixture',id:'session-model',maxTokens:4096}, getApiKey, true, getAvailable)();
+  const daily = fs.readdirSync(root,{recursive:true}).filter(f=>String(f).endsWith('.md')).map(f=>fs.readFileSync(path.join(root,String(f)),'utf8')).join('\n');
+  return {used, keyedFor, persisted: daily.includes('TEAM_ROUTE_SUMMARY'), recorded: branch.some(e=>e.customType==='memory-exit-summary-v1'), spend: branch.filter(e=>e.customType==='auxiliary-model-usage-v1').map(e=>`${e.data.owner} ${e.data.provider}/${e.data.model} ${e.data.status}`)};
+}
+test('the exit summary runs on the session model with no team block', async (t) => {
+  const run = await summarizedWith(t, undefined);
+  assert.deepEqual(run.used, ['fixture/session-model']);
+  assert.deepEqual(run.keyedFor, ['fixture/session-model']);
+  assert.ok(run.persisted && run.recorded);
+  assert.deepEqual(run.spend, ['memory-exit-summary fixture/session-model completed']);
+});
+test('the exit summary runs on the configured, available legwork model with its own credential lookup', async (t) => {
+  const run = await summarizedWith(t, {team: {legwork: 'example/legwork-1'}});
+  assert.deepEqual(run.used, ['example/legwork-1']);
+  assert.deepEqual(run.keyedFor, ['example/legwork-1']);
+  assert.ok(run.persisted && run.recorded);
+  assert.deepEqual(run.spend, ['memory-exit-summary example/legwork-1 completed'], 'its spend is recorded under the model that ran');
+});
+test('team.sideCalls "session" keeps the exit summary on the session model', async (t) => {
+  const run = await summarizedWith(t, {team: {legwork: 'example/legwork-1', sideCalls: 'session'}});
+  assert.deepEqual(run.used, ['fixture/session-model']);
+  assert.ok(run.persisted && run.recorded);
+});
+test('an unavailable legwork model and an unreadable team file keep the exit summary on the session model', async (t) => {
+  const missing = await summarizedWith(t, {team: {legwork: 'example/missing'}});
+  assert.deepEqual(missing.used, ['fixture/session-model']);
+  assert.ok(missing.persisted && missing.recorded);
+  const broken = await summarizedWith(t, '{ "team": { "sideCalls": "elsewhere" } }');
+  assert.deepEqual(broken.used, ['fixture/session-model'], 'an invalid team settings file must not cost the session its memory summary');
+  assert.ok(broken.persisted && broken.recorded);
 });

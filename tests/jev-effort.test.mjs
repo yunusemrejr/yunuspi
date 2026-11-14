@@ -323,3 +323,135 @@ test('the first request may step down even when its system prompt is large: noth
     assert.equal(calls.length, 1);
   } finally { f.cleanup(); }
 });
+
+// A subagent's assignment is judged by the decision model on the child's first
+// turn only; length and code in the brief no longer send it to the ceiling.
+async function asChild(run) {
+  const previous = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = '1';
+  try { return await run(); } finally {
+    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = previous;
+  }
+}
+const LONG_CODE_BRIEF = `Read the loader and list every exported function with its file and line.\n\`\`\`ts\nexport const load = () => 1;\n\`\`\`\n${'Report each name once, in source order, with its line number. '.repeat(40)}`;
+
+test('assignment classification ignores length and code but keeps the critical and goal cues', () => {
+  assert.ok(LONG_CODE_BRIEF.length > 1500);
+  assert.equal(effort.classifyEffortRequest(LONG_CODE_BRIEF).kind, 'ceiling', 'a user request this long still skips the judge');
+  assert.equal(effort.classifyEffortRequest(LONG_CODE_BRIEF, { assignment: true }).kind, 'judge');
+  assert.equal(effort.classifyEffortRequest('Find the files that read the settings and list them, then summarise each in two lines of plain words so the caller can pick.', { assignment: true }).kind, 'judge');
+  assert.equal(effort.classifyEffortRequest('Rotate the production credentials in the billing service', { assignment: true }).kind, 'ceiling');
+  assert.equal(effort.classifyEffortRequest('[goal gabc, continuation 2/6] keep going', { assignment: true }).kind, 'ceiling');
+});
+
+test('the assignment excerpt keeps the first 2000 and last 1000 characters of a brief over 3000', () => {
+  const brief = `${'a'.repeat(2000)}${'m'.repeat(900)}${'z'.repeat(1000)}`;
+  assert.equal(brief.length, 3900);
+  const excerpt = effort.assignmentExcerpt(brief);
+  assert.ok(excerpt.startsWith('a'.repeat(2000)) && excerpt.endsWith('z'.repeat(1000)));
+  assert.equal(excerpt.includes('m'), false);
+  assert.equal(excerpt.length, 3000 + effort.ASSIGNMENT_EXCERPT_MARK.length);
+  const exactly = 'x'.repeat(3000);
+  assert.equal(effort.assignmentExcerpt(exactly), exactly);
+});
+
+test('the assignment-tier decision reads the same bars as effort-tier and asks about the assignment', async () => {
+  const asked = [];
+  const judge = (answers) => async (_site, _state, questions) => {
+    asked.push(questions);
+    return { ok: true, answers, usage: { model: 'x', inputTokens: 1, ms: 1, cached: false } };
+  };
+  const easy = await decisions.askTypedDecision('assignment-tier', { state: { request: 'list the exports' } }, { judge: judge(ANSWERS()) });
+  assert.equal(easy.verdict.tier, 'easy');
+  const moderate = await decisions.askTypedDecision('assignment-tier', { state: { request: 'list the exports' } }, { judge: judge(ANSWERS(0.65, 0.28)) });
+  assert.equal(moderate.verdict.tier, 'moderate');
+  const unsure = await decisions.askTypedDecision('assignment-tier', { state: { request: 'list the exports' } }, { judge: judge(ANSWERS(0.6, 0.55)) });
+  assert.equal(unsure.ok, false);
+  assert.match(asked[0].deep.instructions, /^Does this assignment need careful multi-step reasoning: diagnosing a fault, designing something, weighing trade-offs, or verifying subtle behaviour\?$/);
+  assert.match(asked[0].simple.instructions, /^Is this assignment mechanical: find, read, list or extract something, run a given command, or apply an edit that is already specified\?$/);
+});
+
+test('a child with a long brief that holds code steps down when the decision model calls it mechanical', async () => {
+  const calls = mockJev();
+  await asChild(async () => {
+    const f = await start();
+    try {
+      await f.turn(LONG_CODE_BRIEF);
+      assert.equal(calls.length, 1, 'the judge is asked even though the brief is long and holds code');
+      assert.match(JSON.stringify(calls[0].questions), /Is this assignment mechanical/);
+      assert.equal(f.thinking(), 'low', 'an easy assignment that is not short steps to low');
+      assert.ok(f.health.some(event => event.kind === 'effort.change' && event.data.to === 'low'));
+      assert.ok(f.entries.some(entry => entry.type === 'jev-effort-v1' && entry.data.autoLevel === 'low'));
+    } finally { f.cleanup(); }
+  });
+});
+
+test('a child steps to medium for a moderate verdict and never below the configured floor', async () => {
+  mockJev(async () => ({ model: 'typesafe/jev-1.14-20261014', answers: ANSWERS(0.65, 0.28), usage: { input_tokens: 10, cost: 0 } }));
+  await asChild(async () => {
+    const f = await start({ initial: 'xhigh' });
+    try {
+      await f.turn(LONG_CODE_BRIEF);
+      assert.equal(f.thinking(), 'medium');
+    } finally { f.cleanup(); }
+  });
+  mockJev();
+  await asChild(async () => {
+    const f = await start({ initial: 'minimal' });
+    try {
+      await f.turn(LONG_CODE_BRIEF);
+      assert.equal(f.thinking(), 'minimal', 'a launch level below the judge floor is never raised or turned off');
+    } finally { f.cleanup(); }
+  });
+});
+
+test('a child keeps its launch level when the decision model abstains or fails', async () => {
+  mockJev(async () => ({ model: 'typesafe/jev-1.14-20261014', answers: ANSWERS(0.62, 0.5), usage: { input_tokens: 10, cost: 0 } }));
+  await asChild(async () => {
+    const f = await start();
+    try {
+      await f.turn(LONG_CODE_BRIEF);
+      assert.equal(f.thinking(), 'high');
+    } finally { f.cleanup(); }
+  });
+  const failed = mockJev(async () => ({ status: 500, body: 'upstream error' }));
+  await asChild(async () => {
+    const f = await start();
+    try {
+      await f.turn(LONG_CODE_BRIEF);
+      assert.equal(f.thinking(), 'high');
+      assert.equal(failed.length, 2);
+    } finally { f.cleanup(); }
+  });
+});
+
+test('a child judges its first turn only and sends a long brief as its head and tail', async () => {
+  const calls = mockJev();
+  await asChild(async () => {
+    const f = await start();
+    try {
+      const brief = `HEAD ${'a'.repeat(2100)} MIDDLE-MARKER ${'b'.repeat(900)} ${'c'.repeat(1100)} TAIL`;
+      await f.turn(brief);
+      assert.equal(calls.length, 1);
+      const sent = calls[0].state.request;
+      assert.ok(sent.startsWith('HEAD ') && sent.endsWith(' TAIL'));
+      assert.equal(sent.includes('MIDDLE-MARKER'), false, 'the middle of a long brief is not sent');
+      assert.equal(sent.length, 3000 + effort.ASSIGNMENT_EXCERPT_MARK.length);
+      await f.turn('and now list the exports of the loader');
+      assert.equal(calls.length, 1, 'a later turn of the same child is not judged again');
+      assert.equal(f.thinking(), 'low');
+    } finally { f.cleanup(); }
+  });
+});
+
+test('the main session is unchanged: a long request with code goes to the ceiling without a judge call', async () => {
+  const calls = mockJev();
+  const f = await start();
+  try {
+    await f.turn(LONG_CODE_BRIEF);
+    assert.equal(calls.length, 0);
+    assert.equal(f.thinking(), 'high');
+    await f.turn('what does the json flag mean');
+    assert.match(JSON.stringify(calls[0].questions), /Is this request simple, mechanical or conversational/, 'the user-request wording is still used outside a child');
+  } finally { f.cleanup(); }
+});

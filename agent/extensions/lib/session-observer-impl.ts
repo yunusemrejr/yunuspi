@@ -17,6 +17,8 @@ import path from 'node:path';
 import { createObserverJournal } from './observer-journal.ts';
 import { displayText, messageText, renderHarnessNotice } from './harness-notice.ts';
 import { readRemindersState } from './reminders-state.ts';
+import { sideCallModel } from './team.ts';
+import { clampThinkingLevel } from '@yunuspi/ai';
 import { currentTaskStateService } from './task-state/service.ts';
 
 /** Shared task-state projection for the reviewer packet; empty when the graph is unavailable. */
@@ -295,13 +297,17 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // Cold paths (no usable session model) send one minimal packet. The
       // dispatch path below builds the full packet exactly once.
       const routePacket = () => buildObserverPacket(request, evidence, tools, skills, { requirements: brief() || undefined });
-      // The reviewer is the session model and no other: it is never chosen.
-      const model = ctx.model;
+      // Reviews are background side calls: the legwork model when team settings
+      // name one, else the session model. An unreadable settings file must not
+      // stop the observer, so a failed lookup falls back to the session model.
+      let model = ctx.model;
+      try { model = sideCallModel(ctx) ?? ctx.model; } catch { /* Best-effort review. */ }
       if (!model?.provider || !model?.id) return { packet: routePacket(), reason: 'Session model unavailable' };
       if (!Number.isSafeInteger(model.maxTokens) || model.maxTokens < 4096) return { packet: routePacket(), reason: 'Session model lacks output capacity' };
       const routeName = `${model.provider}/${model.id}`;
       // Reviews take the session's own thinking level as their ceiling: a timeout or a truncated reply steps it down for later reviews.
-      const reviewThinking = (() => { try { return pi.getThinkingLevel?.(); } catch { return undefined; } })();
+      // On the legwork model that level may not exist, so it is fitted to the model that runs the review.
+      const reviewThinking = (() => { try { const level = pi.getThinkingLevel?.(); return typeof level === 'string' && model !== ctx.model ? clampThinkingLevel(model, level) : level; } catch { return undefined; } })();
       if (dropped !== reportedDropped) {
         reportedDropped = dropped;
         pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer coverage: ${dropped} older events summarized into a digest; full text stays searchable.`, display: true, excludeFromContext: true, details: { status: 'coverage', dropped } }, { triggerTurn: false });

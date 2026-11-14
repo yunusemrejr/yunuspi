@@ -14,7 +14,7 @@ const expected = [
   "logs", "memory-prime", "metrics", "nobug", "noslop", "obs", "observer-book", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
   "models", "subagent-cost", "subagents", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-inspect-rpc",
   "subagents-refine", "subagents-steer", "subagents-stop", "subagents-watchdog",
-  "sys-prompt", "tasks", "task-state", "todos", "used", "video", "websearch",
+  "sys-prompt", "tasks", "task-state", "team", "todos", "used", "video", "websearch",
 ].sort();
 
 test("the installed extension graph registers every shipped command without load errors", { timeout: 90000 }, () => {
@@ -60,7 +60,7 @@ process.env.PI_LEAN_GATES ??= 'on'; // these tests exercise the lean-gated layer
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
     assert.deepEqual(result.badEnums, []);
-    assert.equal(result.extensions, 48);
+    assert.equal(result.extensions, 51);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

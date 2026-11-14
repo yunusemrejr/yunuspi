@@ -555,6 +555,7 @@ async function runSingleAttempt(
 		messages: [],
 		usage: emptyUsage(),
 		model: modelArg,
+		...(options.role ? { role: options.role } : {}),
 		...(resolvedThinking ? { thinking: resolvedThinking } : {}),
 		artifactPaths: shared.artifactPaths,
 		transcriptPath: shared.transcriptWriter ? shared.artifactPaths?.transcriptPath : undefined,

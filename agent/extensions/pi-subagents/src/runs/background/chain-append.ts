@@ -174,6 +174,7 @@ function statusStepForTask(task: RunnerSubagentStep): StatusStep {
 		...(sessionName ? { sessionName } : {}),
 		...(description ? { description } : {}),
 		...(task.context ? { context: task.context } : {}),
+		...(task.role ? { role: task.role } : {}),
 		phase: task.phase,
 		label: task.label,
 		outputName: task.outputName,

@@ -1627,6 +1627,19 @@ kbd {
   line-height:1.7;
   color:var(--muted)
 }
+.dialog-section {
+  font-size:13px;
+  font-weight:550;
+  letter-spacing:-.2px;
+  margin:24px 0 0
+}
+.team-hint {
+  display:block;
+  margin-top:6px;
+  font-size:11px;
+  line-height:1.5;
+  color:var(--faint)
+}
 .dialog label {
   display:block;
   font-size:11px;

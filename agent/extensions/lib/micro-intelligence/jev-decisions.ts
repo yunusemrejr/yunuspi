@@ -13,7 +13,7 @@
 import { microMetrics } from "./metrics.ts";
 import type { JudgeFn } from "./review.ts";
 import { readJevChoice } from "../jev-client.ts";
-import { effortQuestions, interpretEffortAnswers } from "../effort-policy.mjs";
+import { ASSIGNMENT_EXCERPT_MARK, assignmentQuestions, effortQuestions, interpretEffortAnswers } from "../effort-policy.mjs";
 
 export type TypedDecisionId =
   | "claim-verification"
@@ -28,7 +28,8 @@ export type TypedDecisionId =
   | "evidence-relevance"
   | "tool-skill-shortlist"
   | "ui-work"
-  | "effort-tier";
+  | "effort-tier"
+  | "assignment-tier";
 
 export interface TypedDecisionContext {
   /** Bounded state excerpt the judge reads (already trimmed by caller). */
@@ -134,6 +135,17 @@ function interpretReviewAdmission(answers: Record<string, TypedAnswer>): TypedVe
   if (worthwhile <= ADMISSION_DEFER_WORTHWHILE && typeof routine === 'number' && routine >= ADMISSION_DEFER_ROUTINE && routine <= 1)
     return { ok: true, verdict: { supported: false, label: 'review-unneeded' }, confidence: Math.min(1 - worthwhile, routine) };
   return { ok: false, reason: 'low-confidence' };
+}
+
+// Thresholds and the "both scores agree" rule live in effort-policy.mjs; the
+// registry only routes the typed answer through the shared judge so /metrics
+// and the Jev ledger treat effort like every other site. A subagent's
+// assignment uses the same bars and tiers as a user's request.
+function interpretEffortTier(answers: Record<string, TypedAnswer>): TypedVerdict {
+  const judged = interpretEffortAnswers(answers as Record<string, { noul?: number }>) as { tier?: "easy" | "moderate"; confidence?: number };
+  return judged.tier
+    ? { ok: true, verdict: { tier: judged.tier }, confidence: judged.confidence ?? 0 }
+    : { ok: false, reason: "low-confidence" };
 }
 
 export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
@@ -290,15 +302,14 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
     owner: "cost-governor owns the thinking level; Jev may only lower it when the request is clearly simple and not deep, and the cache gate passes",
     maxStateChars: 3000,
     questions: () => effortQuestions(),
-    interpret: (answers) => {
-      // Thresholds and the "both scores agree" rule live in effort-policy.mjs;
-      // this registry entry only routes the typed answer through the shared
-      // judge so /metrics and the Jev ledger treat effort like every other site.
-      const judged = interpretEffortAnswers(answers as Record<string, { noul?: number }>) as { tier?: "easy" | "moderate"; confidence?: number };
-      return judged.tier
-        ? { ok: true, verdict: { tier: judged.tier }, confidence: judged.confidence ?? 0 }
-        : { ok: false, reason: "low-confidence" };
-    },
+    interpret: interpretEffortTier,
+  },
+  "assignment-tier": {
+    site: "effort",
+    owner: "cost-governor owns a subagent's thinking level; Jev may only lower it when its assignment is clearly mechanical and not deep, once, on the child's first turn",
+    maxStateChars: 3000 + ASSIGNMENT_EXCERPT_MARK.length,
+    questions: () => assignmentQuestions(),
+    interpret: interpretEffortTier,
   },
 };
 

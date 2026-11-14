@@ -1,6 +1,7 @@
 import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
+import { TEAM_ROLES, readTeam, teamOptions } from './team-settings.mjs';
 
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
@@ -806,11 +807,40 @@ function acceptCommand() {
   setEditorDraft(activeId, value, true);
   prompt.selectionStart = prompt.selectionEnd = from + insert.length;
 }
+// Team: the model that takes each kind of delegated work. Each choice is saved the
+// moment it is made, through the harness's own settings writer; the dialog keeps no copy.
+function teamSection() {
+  const section = element('section', 'team-section');
+  section.append(element('h3', 'dialog-section', 'Team'));
+  const selects = new Map();
+  for (const role of TEAM_ROLES) {
+    const label = element('label', '', role.title), select = element('select'), hint = element('small', 'team-hint', role.hint);
+    select.id = `team-${role.key}`; select.disabled = true; label.htmlFor = select.id;
+    hint.id = `${select.id}-hint`; select.setAttribute('aria-describedby', hint.id);
+    select.onchange = () => {
+      const value = select.value;
+      void api.setTeam(role.key, value).then(() => { select.dataset.saved = value; })
+        .catch(error => { if (select.value === value) select.value = select.dataset.saved; toast(safeError(error), 'error'); });
+    };
+    selects.set(role.key, select); section.append(label, select, hint);
+  }
+  // A saved value the list does not reach stays selected, shown as its raw provider/id.
+  api.teamSettings().then(({ team, models }) => {
+    if (!$('dialog').open) return;
+    for (const role of TEAM_ROLES) {
+      const select = selects.get(role.key), saved = team[role.key];
+      select.replaceChildren(...teamOptions(role, models, saved).map(option => { const node = element('option', '', option.label); node.value = option.value; node.selected = option.selected; return node; }));
+      select.dataset.saved = saved; select.disabled = false;
+    }
+  }).catch(error => { if ($('dialog').open) toast(safeError(error), 'error'); });
+  return section;
+}
 function showSettings() {
   modal('Settings', content => {
     content.append(element('p', '', `YunusPi ${workspace.version || ''} · Desktop`));
     const data = element('button', 'quiet-button'); data.append(icon('folder'), document.createTextNode('Open workspace data')); data.onclick = () => tryAction(() => api.openData()); content.append(data);
     const imported = element('button', 'quiet-button'); imported.append(icon('restore'), document.createTextNode('Import existing session…')); imported.onclick = () => { closeModal(false); tryAction(importSession); }; content.append(imported);
+    content.append(teamSection());
     content.append(element('p', '', 'Existing provider credentials are reused. Add an API key to the harness’s locked credential store.'));
     const form = element('form'), providerLabel = element('label', '', 'Provider ID'), provider = element('input'); provider.id = 'provider-id'; provider.placeholder = 'openai, anthropic, openrouter…'; provider.autocomplete = 'off'; providerLabel.htmlFor = provider.id;
     const keyLabel = element('label', '', 'API key'), key = element('input'); key.id = 'provider-key'; key.type = 'password'; key.autocomplete = 'new-password'; keyLabel.htmlFor = key.id;
@@ -931,7 +961,9 @@ api.onEvent(value => {
         if (view.pendingHistory) view.replay.push({ event: value.event, sequence: value.sequence });
         applyAgentEvent(conversationOf(value.sessionId), value.event);
       }
-      if (value.sessionId === activeId) scheduleRender();
+      // The end of a turn is the moment its steps fold. Draw it now rather than
+      // after the debounce, so the transcript never lags behind the stop signal.
+      if (value.sessionId === activeId) { if (value.event.type === 'agent_end') renderMessages(); else scheduleRender(); }
       break;
     }
     case 'state': {

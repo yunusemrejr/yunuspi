@@ -52,8 +52,10 @@ or cleanup work; expected transient failures (rate limits, quota, budget);
 repeated successful commands; harmless iteration. Deliberate invocation
 always stays available regardless of these gates.
 
-Reviewers, councils and other children run on the session model; the effort
-controller chooses their thinking level. See [Model routing](MODEL-ROUTING.md).
+Reviewers, councils and other children run on the model of their role (the
+session model unless the `team` settings name another); the effort controller
+chooses their thinking level. See [Model routing](MODEL-ROUTING.md) and
+[Team](TEAM.md).
 
 Short follow-ups such as “keep going” retain the current task. A model,
 provider or thinking change is not a new project objective; a genuine task

@@ -33,6 +33,8 @@ export interface RunnerSubagentStep {
 	/** Original cwd input retained for launch diagnostics. */
 	requestedCwd?: string;
 	model?: string;
+	/** The role shown beside the model at launch, only when the child runs on another model than the session's. */
+	role?: string;
 	contextLimit?: number;
 	fast?: boolean;
 	thinking?: string;
