@@ -1168,7 +1168,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 603)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 637)
 - /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 924)
-- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1832)
+- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1855)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1827)
 - /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1377)
