@@ -63,7 +63,7 @@ function unchangedTargets(targets: any[]): string {
   return `same ${refs.length} elements as the last reply, in the same order; their refs are now ${named}`;
 }
 
-export function browserReplyText(details: any, action?: unknown, targetsMemo?: Map<string, { page: string; json: string; refs: any[] }>): string {
+export function browserReplyText(details: any, action?: unknown, targetsMemo?: Map<string, { page: string; json: string }>): string {
   if (!details || typeof details !== "object" || details.ok !== true) return JSON.stringify(details);
   const { pageIdentity, localFiles, localFilesSince, lease, frames, tabs, humanHelp, targetsTruncated, sessionResolved, pageState, targets, ...rest } = details;
   if (Array.isArray(rest.batch?.stepResults)) rest.batch = { ...rest.batch, stepResults: rest.batch.stepResults.map(({ page: _page, ...row }: any) => row) };

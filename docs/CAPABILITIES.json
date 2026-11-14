@@ -2763,7 +2763,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 916
+        "line": 924
       },
       {
         "name": "catalog-status",
@@ -3078,7 +3078,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 109,
+        "line": 106,
         "kind": "literal"
       },
       {
@@ -3169,7 +3169,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 193,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -3357,7 +3357,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 259,
+        "line": 260,
         "kind": "literal"
       },
       {
@@ -3547,7 +3547,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 109,
+        "line": 106,
         "kind": "literal"
       },
       {
@@ -3577,7 +3577,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 193,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -3697,7 +3697,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 259,
+        "line": 260,
         "kind": "literal"
       },
       {
