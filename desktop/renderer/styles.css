@@ -629,50 +629,189 @@ kbd {
   line-height:1.7;
   margin-top:9px
 }
-.tool-card {
+.work {
+  margin:10px 0 22px;
+  min-width:0
+}
+.work-head {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  width:100%;
+  padding:9px 12px;
   border:1px solid var(--line);
   border-radius:10px;
-  margin:8px 0;
-  overflow:hidden;
-  font-size:12px
+  text-align:left;
+  font-size:12px;
+  line-height:1.55;
+  color:var(--muted)
+}
+.work-head:hover {
+  background:var(--surface)
+}
+.work-head>svg {
+  width:15px;
+  height:15px;
+  flex:none;
+  margin-top:2px
+}
+.work-mark {
+  color:var(--success)
+}
+.work[data-state="live"] .work-mark {
+  color:var(--accent)
+}
+.work[data-state="failed"] .work-mark {
+  color:var(--danger)
+}
+.work[data-state="stopped"] .work-mark,.work-chevron {
+  color:var(--faint)
+}
+.work-line {
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-wrap:wrap;
+  column-gap:8px;
+  overflow-wrap:anywhere
+}
+.work-title {
+  color:var(--ink);
+  font-weight:600
+}
+.work-flag {
+  flex-basis:100%;
+  font-size:11.5px;
+  color:var(--warning)
+}
+.work-flag[data-tone="error"] {
+  color:var(--danger)
+}
+.work-count {
+  flex:none;
+  font-size:11px;
+  color:var(--faint);
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
+}
+.work-chevron {
+  transition:transform .15s ease
+}
+.work[data-open="true"] .work-chevron {
+  transform:rotate(180deg)
+}
+.work-body {
+  margin:6px 0 0 19px;
+  padding-left:14px;
+  border-left:1px solid var(--line)
+}
+.work.bare .work-body {
+  margin:0;
+  padding:0;
+  border:0
+}
+.work-body>.message {
+  margin:1px 0
+}
+.work-body>.message.assistant {
+  margin:9px 0 7px 8px;
+  font-size:13px;
+  line-height:1.65;
+  color:var(--muted)
+}
+.work.bare .work-body>.message.assistant {
+  margin-left:0
+}
+.work-body>.message.assistant .assistant-label {
+  display:none
+}
+.work-body>.message.activity {
+  margin:5px 0 5px 8px
+}
+.tool-card {
+  font-size:12px;
+  min-width:0
 }
 .tool-card summary {
-  display:flex;
+  display:grid;
+  grid-template-columns:15px minmax(0,1fr) auto 15px;
+  column-gap:10px;
   align-items:center;
-  gap:9px;
-  padding:11px 13px;
+  padding:6px 8px;
+  border-radius:8px;
   cursor:pointer;
-  list-style:none;
-  min-width:0
+  list-style:none
+}
+.tool-card summary:hover,.tool-card[open] summary {
+  background:var(--surface)
 }
 .tool-card summary::-webkit-details-marker {
   display:none
-}
-.tool-card summary>.tool-title {
-  flex:1;
-  min-width:0;
-  text-overflow:ellipsis;
-  overflow:hidden;
-  white-space:nowrap;
-  color:var(--muted)
 }
 .tool-card summary>svg {
   width:15px;
   height:15px;
   color:var(--faint)
 }
-.tool-card[data-status="running"] .tool-state {
+.tool-title {
+  display:flex;
+  align-items:baseline;
+  gap:7px;
+  min-width:0
+}
+.tool-verb {
+  flex:none;
+  font-weight:600;
+  color:var(--ink);
+  white-space:nowrap
+}
+.tool-detail {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--muted)
+}
+.tool-detail.code {
+  font:11.5px/1.5 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace
+}
+.tool-time {
+  grid-column:3;
+  font-size:10.5px;
+  color:var(--faint);
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
+}
+.tool-card summary>.tool-state {
+  grid-column:4;
+  width:13px;
+  height:13px
+}
+.tool-card[data-status="running"] summary>.tool-state {
   color:var(--accent)
 }
-.tool-card[data-status="done"] .tool-state {
-  color:var(--success)
-}
-.tool-card[data-status="error"] .tool-state {
+.tool-card[data-status="error"] summary>.tool-state,.tool-card[data-status="error"] summary>svg:first-child {
   color:var(--danger)
 }
+.work:not([data-state="live"]) .tool-card[data-status="running"] summary>.tool-state {
+  color:var(--faint)
+}
+.tool-trouble {
+  grid-column:2 / 5;
+  grid-row:2;
+  padding-top:1px;
+  font-size:11.5px;
+  line-height:1.5;
+  color:var(--danger);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
 .tool-output {
-  border-top:1px solid var(--line);
-  padding:12px;
+  margin:4px 0 8px 33px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:10px 12px;
   max-height:300px;
   overflow:auto;
   overscroll-behavior:contain;
@@ -680,6 +819,9 @@ kbd {
   overflow-wrap:anywhere;
   font:11px/1.7 ui-monospace,monospace;
   color:var(--muted)
+}
+.tool-card>.message-images {
+  margin-left:33px
 }
 .message.notice,.message.goal-continuation {
   display:flex;
@@ -858,6 +1000,13 @@ kbd {
   font-size:11px;
   min-height:28px;
   padding-left:4px
+}
+.turn-status>span:last-child {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
 }
 .working-mark {
   display:flex;
@@ -1328,14 +1477,14 @@ kbd {
   display:flex;
   align-items:flex-start;
   gap:10px;
-  padding:12px 0;
+  padding:9px 0;
   border-bottom:1px solid var(--line);
   font-size:11px
 }
 .activity-row>svg {
   width:15px;
   height:15px;
-  color:var(--accent);
+  color:var(--faint);
   margin-top:2px
 }
 .activity-row span {
@@ -1347,6 +1496,21 @@ kbd {
   color:var(--faint);
   margin-top:5px;
   display:block
+}
+.activity-row[data-status="error"]>svg,.activity-row[data-status="error"] small {
+  color:var(--danger)
+}
+.activity-row[data-status="running"]>svg {
+  color:var(--accent)
+}
+.activity-row span.code {
+  font:11px/1.6 "JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace
+}
+.activity-heading {
+  margin:16px 0 2px;
+  font-size:11px;
+  font-weight:550;
+  color:var(--muted)
 }
 .context-card {
   border-bottom:1px solid var(--line);

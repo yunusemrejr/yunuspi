@@ -32,7 +32,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking, asyncByDefault = false, agentFields = {} } = {}) {
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
   const fakePi = path.join(cwd, "fixture-pi.mjs");
@@ -67,13 +67,13 @@ ${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
   process.env.PI_SUBAGENT_PI_BINARY = fakePi;
   const agent = { name: "route-fixture", description: "Read-only route fixture", source: "runtime",
     filePath: path.join(cwd, "agent.md"), systemPrompt: "Return the observation.", systemPromptMode: "replace",
-    inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, extensions: [], tools: [], model: route };
+    inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, extensions: [], tools: [], model: route, ...agentFields };
   const state = { baseCwd: cwd, currentSessionId: null, subagentInProgress: false,
     subagentSpawns: { sessionId: null, count: 0 }, asyncJobs: new Map(), foregroundRuns: new Map(), foregroundControls: new Map(),
     cleanupTimers: new Map(), completionSeen: new Map(), resultFileCoalescer: { schedule: () => false, clear() {} } };
   const runtimeModel = { ...model, reasoning }, entries = [];
   const pi = { events: createEventBus(), appendEntry(type, data) { entries.push({type,data}); }, getActiveTools: () => [], getModel: () => runtimeModel, getThinkingLevel: () => sessionThinking, getSessionName: () => "Executor fixture" };
-  const executor = createSubagentExecutor({ state, pi, config, asyncByDefault: false,
+  const executor = createSubagentExecutor({ state, pi, config, asyncByDefault,
     tempArtifactsDir: path.join(cwd, "artifacts"), getSubagentSessionRoot: () => path.join(cwd, "sessions"),
     expandTilde: value => value, discoverAgents: () => ({ agents: [agent] }) });
   const sessionManager = SessionManager.inMemory(cwd);
@@ -146,6 +146,27 @@ test('adaptive native arrays retain explicit configured parallel capacity',{time
   assert.equal(f.records().filter(row=>row.phase==='start').length,4);
   assert.equal(active,0,'every configured-capacity child reaches its end');
   assert.equal(status.steps.length,4);
+});
+
+test('a call that names no mode runs in the agent\'s own: blocking returns the answer, background returns a run',{timeout:60_000},async t=>{
+  const call={agent:'route-fixture',task:'Read the source and return a concise observation',context:'fresh',artifacts:false,
+    acceptance:{level:'none',reason:'Read-only fixture; no implementation deliverable.'}};
+  const run=(f,extra={})=>f.executor.execute('mode-'+Math.random().toString(36).slice(2),{...call,...extra},new AbortController().signal,undefined,f.ctx);
+  const text=result=>result.content.map(part=>part.text??'').join('\n');
+  // The harness default is background; an agent that declares async:false answers in the call.
+  const blocking=fixture(t,{asyncByDefault:true,agentFields:{defaultAsync:false}});
+  const answered=await run(blocking);
+  assert.notEqual(answered.isError,true,JSON.stringify(answered));
+  assert.equal(answered.details.asyncId,undefined);
+  assert.match(text(answered),/Child completed/);
+  // The call can still ask for the background, and an agent with no mode of its own gets the default.
+  for(const [f,extra] of [[blocking,{async:true}],[fixture(t,{asyncByDefault:true}),{}]]){
+    const launched=await run(f,extra);
+    assert.ok(launched.details.asyncId,JSON.stringify(launched.details));
+    assert.match(text(launched),/Running in the background/);
+    assert.doesNotMatch(text(launched),/Child completed/);
+    await awaitNativeBackground(f,launched);
+  }
 });
 
 test('adaptive native rollback restores unconfigured child launch defaults',{timeout:15_000},async t=>{

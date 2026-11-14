@@ -459,8 +459,11 @@ test('goal check lists criteria and unverified edits, then reports every step se
  assert.doesNotMatch(edited,/Every step is settled/);
  assert.doesNotMatch(edited,/did not count/);
  await h.emit('tool_call',{toolName:'bash',toolCallId:'t0',input:{command:'npm test 2>&1 | tail -20 && git diff'}});
- await h.emit('tool_result',{toolName:'bash',toolCallId:'t0',input:{command:'npm test 2>&1 | tail -20 && git diff'},details:{exitCode:0}});
- assert.match(await h.call({action:'check'}),/The last run did not count \(`npm test 2>&1 \| tail -20 && git diff`\): its output is piped, which hides whether it passed\. Run the check command by itself/,'a check that could not count is named with the reason');
+ const noted=await h.emit('tool_result',{toolName:'bash',toolCallId:'t0',input:{command:'npm test 2>&1 | tail -20 && git diff'},content:[{type:'text',text:'9 passed'}],details:{exitCode:0}});
+ assert.deepEqual(noted.content.map(part=>part.text),['9 passed','[goal] This run does not count as the check for your last change: its output is piped, which hides whether it passed. Run `npm test` as its own command before completing the goal.'],'the run itself says it cannot count and names the command that would');
+ await h.emit('tool_call',{toolName:'bash',toolCallId:'t0b',input:{command:'cd app; npm test; echo "exit=$?"'}});
+ assert.equal(await h.emit('tool_result',{toolName:'bash',toolCallId:'t0b',input:{command:'cd app; npm test; echo "exit=$?"'},content:[],details:{exitCode:0}}),undefined,'said once per change, not on every run');
+ assert.match(await h.call({action:'check'}),/The last run did not count \(`cd app; npm test; echo "exit=\$\?"`\): it is joined to other commands, so its own exit status is not seen\. Run `cd app && npm test` as its own command/,'a check that could not count is named with the reason and the command to run');
  await h.emit('tool_call',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'}});
  await h.emit('tool_result',{toolName:'bash',toolCallId:'t1',input:{command:'npm test'},details:{exitCode:0}});
  const settled=await h.call({action:'check'});

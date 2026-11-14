@@ -2681,7 +2681,9 @@ function applySingleAgentLaunchDefaults(params: SubagentParamsLike, agents: Agen
 		: undefined;
 	return {
 		...params,
-		...(params.async === undefined && agent.defaultAsync !== undefined ? { async: agent.defaultAsync } : {}),
+		// A workflow child already bound to a background run keeps that mode: the agent's own default
+		// applies to a launch nothing has decided yet.
+		...(params.async === undefined && agent.defaultAsync !== undefined && params.workflowChildAsyncId === undefined ? { async: agent.defaultAsync } : {}),
 		...(params.timeoutMs === undefined && params.maxRuntimeMs === undefined && agent.defaultTimeoutMs !== undefined
 			? { timeoutMs: agent.defaultTimeoutMs }
 			: {}),

@@ -506,3 +506,29 @@ test('a file read_many delivered whole counts as read for the edit guard; a capp
 	assert.equal(record({ toolName: 'read_many', input: { files: [{ path: 'whole.js' }, { path: 'ranged.js' }] }, details: { files: [{ path: 'ranged.js', chars: 5 }] } }, { cwd: '/p' }, runtime), 0);
 	assert.equal(record({ toolName: 'read_many', input: {}, details: undefined }, { cwd: '/p' }, runtime), 0);
 });
+
+test('a shell read counts for the edit guard when it names files by a glob or after a cd', () => {
+	const bundle = fs.readFileSync(new URL('../agent/extensions/pi-lens/dist/index.js', import.meta.url), 'utf8');
+	const slice = (from, to) => { const start = bundle.indexOf(from), end = bundle.indexOf(to, start); assert.ok(start > 0 && end > start, from); return bundle.slice(start, end); };
+	const source = slice('function stripQuotes(token) {', 'function commandSegments(command) {') + slice('function extractReadPathsFromCommand(command, cwd) {', 'function grepHasLineNumbers(args) {');
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-shell-read-'));
+	try {
+		fs.mkdirSync(path.join(temp, 'src')); fs.mkdirSync(path.join(temp, 'app/lib'), { recursive: true }); fs.mkdirSync(path.join(temp, 'many'));
+		for (const [file, lines] of [['src/cart.js', 12], ['src/price.js', 4], ['src/notes.bin', 3], ['app/lib/a.js', 30], ['top.js', 5]]) fs.writeFileSync(path.join(temp, file), 'x\n'.repeat(lines - 1) + 'x');
+		for (let i = 0; i < 20; i++) fs.writeFileSync(path.join(temp, 'many', `f${i}.js`), 'x');
+		const extract = new Function('nodeFs2', 'path72', 'isReadableSourceFile', 'countFileLines', `${source}; return extractReadPathsFromCommand;`)(
+			fs, path, file => /\.js$/.test(file), file => fs.readFileSync(file, 'utf8').split('\n').length);
+		const spans = command => extract(command, temp).map(span => `${path.relative(temp, span.filePath)}:${span.offset}+${span.limit}`);
+		assert.deepEqual(spans('cat src/cart.js'), ['src/cart.js:1+12']);
+		// The trial that showed the gap: every file the glob printed was read.
+		assert.deepEqual(spans('find src -type f | head -50 && echo "---" && cat src/*.js'), ['src/cart.js:1+12', 'src/price.js:1+4']);
+		assert.deepEqual(spans('cd app && cat lib/a.js'), ['app/lib/a.js:1+30']);
+		assert.deepEqual(spans('cd app/lib && head -n 10 *.js'), ['app/lib/a.js:1+10']);
+		assert.deepEqual(spans(`cd ${temp}/app && sed -n '5,9p' lib/a.js && cd .. && cat top.js`), ['app/lib/a.js:5+5', 'top.js:1+5']);
+		// Nothing is claimed for a pattern that matched more than a reply shows whole, one that descends, or one that matched nothing.
+		assert.deepEqual(spans('cat many/*.js'), []);
+		assert.deepEqual(spans('cat **/*.js'), []);
+		assert.deepEqual(spans('cat src/*.ts'), []);
+		assert.deepEqual(spans('cd nowhere && cat top.js'), []);
+	} finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});

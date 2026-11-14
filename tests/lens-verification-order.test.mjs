@@ -144,6 +144,19 @@ test('verification admission preserves owner/workspace fencing and ignores read-
   assert.equal(f.runtime.pendingDeferredMutationCount,1,'another owner remains queued');
 });
 
+test('a check the completion gate counts settles deferred source work first, whatever its shape',async t=>{
+  // Formatting applied after such a run made it stale, and the goal asked for the same check again.
+  for (const command of ['node --test 2>&1 | tail -25 && echo DIFF && git diff','set -o pipefail; npm test 2>&1 | tail -20','cd . && node --test && git status']) {
+    const f=fixture(t);f.queue();
+    await flushLensBeforeVerification(event('bash',command),f.ctx);
+    assert.match(fs.readFileSync(f.file,'utf8'),/value = 1/,command);assert.equal(f.runtime.pendingDeferredMutationCount,0,command);
+  }
+  for (const command of ['git diff | tail -20','echo node --test','ls && cat range.js']) {
+    const f=fixture(t);f.queue();
+    await flushLensBeforeVerification(event('bash',command),f.ctx);
+    assert.equal(f.order.length,0,command);assert.equal(f.runtime.pendingDeferredMutationCount,1,command);
+  }
+});
 test('cancelled or replaced sessions leave deferred work unstarted',async t=>{
   const cancelled=fixture(t);cancelled.queue();cancelled.abort.abort();
   await flushLensBeforeVerification(event(),cancelled.ctx);

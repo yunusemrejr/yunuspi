@@ -10,7 +10,7 @@ const local=await load('extensions/lib/local-intelligence.mjs');
 const mini=await load('extensions/lib/mini-preprocessor.ts');
 const {outputLineDelta}=await load('extensions/lib/output-distiller.ts');
 const {addCompactionSalience,makeCapsule}=await load('extensions/pi-memory/context-salience.ts');
-const {finalizeSingleOutput}=await load('extensions/pi-subagents/src/runs/shared/single-output.ts');
+const {finalizeSingleOutput,injectSingleOutputInstruction,requestedOutputPathFromTask}=await load('extensions/pi-subagents/src/runs/shared/single-output.ts');
 const {default:observations}=await load('extensions/pi-observations.ts');
 // Deterministic observation pins: Jev chunk selection needs ambient network
 // and is covered by its own mocked tests in jev-client.test.mjs.
@@ -83,6 +83,34 @@ test('child selection requires successful persisted output and retains the compl
   assert.equal(finalizeSingleOutput({...params,savedPath:undefined}).displayOutput,report);
   assert.equal(finalizeSingleOutput({...params,exitCode:1}).displayOutput,report);
   assert.equal(finalizeSingleOutput({...params,outputMode:'file-only'}).displayOutput,result.outputReference.message);
+});
+
+test('a short complete child answer is returned as it is; a pointer to the saved copy is for a long or partial one',()=>{
+  const saved='/tmp/example-child-answer.md';
+  const short='`src/math.js:1` exports mean, median and clamp.';
+  const done=finalizeSingleOutput({fullOutput:short,task:'which functions does src/math.js export',savedPath:saved,exitCode:0});
+  assert.equal(done.displayOutput,short);
+  assert.equal(done.savedPath,saved,'the copy is still recorded for the run');
+  assert.ok(done.outputReference.message.includes(saved));
+  const long=Array.from({length:40},(_,i)=>`src/file-${i}.js:${i+1} exports handler${i}, a distinct entry point.`).join('\n');
+  assert.ok(long.length>1500);
+  assert.ok(finalizeSingleOutput({fullOutput:long,savedPath:saved,exitCode:0}).displayOutput.endsWith(done.outputReference.message.replace(/\(.*$/,'')) === false);
+  assert.ok(finalizeSingleOutput({fullOutput:long,savedPath:saved,exitCode:0}).displayOutput.includes(`Output saved to: ${saved}`));
+  assert.ok(finalizeSingleOutput({fullOutput:short,truncatedOutput:short.slice(0,20),savedPath:saved,exitCode:0}).displayOutput.includes(`Output saved to: ${saved}`),'a cut reply names the full copy');
+  assert.equal(finalizeSingleOutput({fullOutput:short,savedPath:saved,exitCode:0,outputMode:'file-only'}).displayOutput,done.outputReference.message);
+});
+
+test('a child with an output path is asked for its answer, not for a write call',()=>{
+  const target='/tmp/run/outputs/context.md';
+  for(const capabilities of [undefined,{tools:['read','grep','bash']},{tools:['read','grep']}]){
+    const task=injectSingleOutputInstruction('List the exported functions.',target,capabilities);
+    assert.match(task,/Return the complete artifact in your final response\./);
+    assert.doesNotMatch(task,/Write your findings to/);
+    assert.equal(requestedOutputPathFromTask(task),target);
+  }
+  assert.match(injectSingleOutputInstruction('x',target,{tools:['read','bash']}),/Do not write that file yourself\./);
+  assert.doesNotMatch(injectSingleOutputInstruction('x',target,{tools:['read','grep']}),/Do not write that file yourself\./);
+  assert.equal(injectSingleOutputInstruction('x',undefined),'x');
 });
 
 test('sparse exact deltas retain PID, metrics, polarity and ordering changes',()=>{

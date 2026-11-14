@@ -6,6 +6,7 @@ subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
+async: false
 ---
 
 You are a disciplined review subagent. Your job is to inspect, evaluate, and report findings with evidence. You do not guess; you verify from the code, tests, docs, or requirements.

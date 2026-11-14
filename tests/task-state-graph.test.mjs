@@ -408,6 +408,15 @@ test('a passing check is recognised across package managers, but only in command
     assert.match(ingest.uncountedCheckReason(command) ?? '', /joined to other commands/, command);
   for (const command of ['npm test', 'cd app && npm test', 'ls -la', 'echo "run npm test" | tail -2', 'git log --grep test', 'npm test --help'])
     assert.equal(ingest.uncountedCheckReason(command), undefined, command);
+  // The check as one command that would count, taken from the run: a leading cd is kept, nothing else is.
+  for (const [command, alone] of [
+    ['npm test | tail -n 5', 'npm test'],
+    ["cd /srv/app && node --test 2>&1 | tail -15 && echo '--- edge ---' && node -e '\nimport(\"./src/a.js\")\n'", 'cd /srv/app && node --test'],
+    ['cd app; node --test >/tmp/t.log 2>&1; echo "exit=$?"', undefined],
+    ['cd app; npm test; echo "exit=$?"', 'cd app && npm test'],
+    ['git stash && npm test && git stash pop', 'npm test'],
+    ['npm run lint; npm test || true', 'npm run lint && npm test'],
+  ]) assert.equal(ingest.uncountedCheck(command)?.alone, alone, command);
 });
 
 test('a launched background suite is an attempt, not yet a passing check', () => {
@@ -464,7 +473,19 @@ test('harmless prefixes count as the same evidence check; a filtered run counts 
     'echo $HOME; npm test',
     'PATH=$HOME/bin npm test $FLAGS',
     'set -o pipefail; npm test | tee out.log',
-    'set -o pipefail; npm test 2>&1 | grep ok',
+    'npm test 2>&1 | grep ok',                                  // no pipefail: the exit seen is grep's
+    'set -o pipefail; npm test | grep ok | wc -l',
+    'set -o pipefail; npm test | grep "$PATTERN"',
+    'set -o pipefail; npm test | grep ok ; echo "exit: ${PIPESTATUS[0]}"',
+    'set -o pipefail; npm test | grep',
     'export A=1; export B=2; export C=3; export D=4; export E=5; npm test',
   ]) assert.equal(ingest.isTestLikeCommand(command), false, `must not count as a check: ${command}`);
+  // A grep over the check's output only reads it: under pipefail an exit of 0 is still the check's.
+  for (const command of [
+    'set -o pipefail; npm test 2>&1 | grep ok',
+    'set -o pipefail; npm test 2>&1 | grep -E "^(✔|✖|ℹ (tests|pass|fail))"',
+    "set -o pipefail; npm test 2>&1 | grep -E '^(✖|✔|test at)' | head -30",
+    'set -o pipefail; cd app && node --test 2>&1 | grep -c -i pass && git diff',
+    'set -o pipefail; npm test 2>&1 | grep -A 3 fail | tail -n 20',
+  ]) assert.equal(ingest.isTestLikeCommand(command), true, `should count as a check: ${command}`);
 });

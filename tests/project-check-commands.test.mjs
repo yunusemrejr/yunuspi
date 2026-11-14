@@ -81,8 +81,11 @@ test('harmless prefixes (cd, export, set -o pipefail, inline assignments) are re
   'set -o pipefail; npm test 2>&1 | tail -20',
   'set -euo pipefail; npm test | head -5',
   'set -eo pipefail && npm test 2>&1 | tail -20',
+  'set -o pipefail; npm test 2>&1 | grep ok',
+  'set -o pipefail; npm test 2>&1 | grep -E "^(✔|✖|ℹ (tests|pass|fail))" | head -30',
   'export A=1; export B=2; export C=3; export D=4; npm test',
  ]) assert.ok(recognize(command,cwd),command);
+ assert.deepEqual(checkInvocation("npm test 2>&1 | grep -E '^(✖|✔)' | head -30"),{body:'npm test',pipefail:true,pipefailSet:false});
  for(const command of [
   `cd ${cwd} && npm test 2>&1 | tail -20`,
   'npm test | tail -20',
@@ -117,7 +120,8 @@ test('expansion, substitution, operators and extra prefix items are still reject
   'npm test || true',
   'npm test "$X"',
   'set -o pipefail; npm test | tee out.log',
-  'set -o pipefail; npm test 2>&1 | grep ok',
+  'set -o pipefail; npm test 2>&1 | grep "$PATTERN"',
+  'set -o pipefail; npm test 2>&1 | grep ok | wc -l',
   'set -o pipefail; npm test | tail -20 | wc -l',
   `cd ${cwd} && cd ${cwd} && npm test`,
   'export A=1; export B=2; export C=3; export D=4; export E=5; npm test',

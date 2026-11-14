@@ -279,6 +279,10 @@ test('a chain that hides segments or changes the shell for later ones earns noth
   const middle=andChainChecks('node --test 2>&1 | tail -25 && echo "===DIFF===" && git diff',cwd,any);
   assert.deepEqual([middle?.checks.map(c=>c.label),middle?.pipefail],[['node --test'],true]);
   assert.equal(andChainChecks('npm test && git diff',cwd,any)?.pipefail,false,'no filter, no pipefail');
+  const grepped=andChainChecks('node --test 2>&1 | grep -E "^(✔|✖|ℹ (tests|pass|fail))" && git diff',cwd,any);
+  assert.deepEqual([grepped?.checks.map(c=>c.label),grepped?.pipefail],[['node --test'],true],'a grep over the check output is a filter like tail');
+  assert.equal(andChainChecks('npm test && git log | grep fix',cwd,any)?.pipefail,false,'a grepped listing hides nothing about the check before it');
+  assert.equal(andChainChecks('npm test | grep ok | wc -l && git diff',cwd,any),undefined,'a pipeline that is more than output filters earns nothing');
   assert.equal(andChainChecks('npm test && git log | head -3 && git status',cwd,any)?.pipefail,false,'a trimmed listing hides nothing about the check before it');
   assert.equal(andChainChecks('npm test && git log | head -3',cwd,any)?.pipefail,false);
   assert.equal(andChainChecks('npm test | tail -5 && git log | tail -3',cwd,any)?.pipefail,true);

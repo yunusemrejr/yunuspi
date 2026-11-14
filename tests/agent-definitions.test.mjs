@@ -35,6 +35,23 @@ test('built-in agent definitions declare no per-agent model or thinking', () => 
   }
 });
 
+// A scout launched in the background cost a launch reply, a wait call and often a status call for a twenty-second answer.
+// Agents whose answer the caller needs before it can go on block; agents that work for minutes stay in the background.
+test('read-and-answer agents return in the same call; long-running agents start in the background', async () => {
+  const discovery = await import(pathToFileURL(path.join(repo, 'agent/extensions/pi-subagents/src/agents/agents.ts')).href);
+  discovery.clearAgentDiscoveryCache();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-agent-modes-'));
+  try {
+    const builtin = new Map(discovery.discoverAgents(work, 'user').agents.filter((agent) => agent.source === 'builtin').map((agent) => [agent.name, agent]));
+    for (const name of ['scout', 'reviewer', 'oracle']) assert.equal(builtin.get(name)?.defaultAsync, false, name);
+    for (const name of ['worker', 'delegate', 'researcher']) assert.equal(builtin.get(name)?.defaultAsync, undefined, name);
+    const scout = builtin.get('scout');
+    assert.ok(!scout.tools.includes('write') && !scout.tools.includes('edit'), 'a scout changes nothing');
+    assert.match(scout.systemPrompt, /A direct question[^\n]*gets a direct answer/);
+    assert.match(scout.systemPrompt, /A request to map an area[^\n]*gets a handoff/);
+  } finally { fs.rmSync(work, { recursive: true, force: true }); discovery.clearAgentDiscoveryCache(); }
+});
+
 // Agent files and settings written before per-agent model and thinking were retired must keep loading.
 test('retired model and thinking keys are ignored: old agent files and settings still load', async () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-retired-agent-fields-'));

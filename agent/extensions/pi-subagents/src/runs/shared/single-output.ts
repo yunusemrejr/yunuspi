@@ -94,13 +94,15 @@ interface OutputInstructionCapabilities {
 }
 
 function formatOutputPathInstruction(outputPath: string, capabilities?: OutputInstructionCapabilities): string {
-	const delivery = !capabilities || hasMutationToolCapability(capabilities.tools, capabilities.mcpDirectTools)
-		? `Write your findings to exactly this path: ${outputPath}`
-		: [
-			"Return the complete artifact in your final response.",
-			`The runtime will persist it to exactly this path: ${outputPath}`,
-			"Do not call contact_supervisor merely because no write-capable tool is available.",
-		].join("\n");
+	// The runtime saves the final response to the path whether or not the child can write, so no
+	// child is asked to spend a turn on a write call.
+	const delivery = [
+		"Return the complete artifact in your final response.",
+		`The runtime will persist it to exactly this path: ${outputPath}`,
+		...(!capabilities || hasMutationToolCapability(capabilities.tools, capabilities.mcpDirectTools)
+			? ["Do not write that file yourself."]
+			: ["Do not call contact_supervisor merely because no write-capable tool is available."]),
+	].join("\n");
 	return [
 		delivery,
 		"This path is authoritative for this run.",
@@ -153,6 +155,8 @@ function formatByteSize(bytes: number): string {
 	}
 	return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
+
+const SHORT_REPORT_CHARS = 1500;
 
 export function formatSavedOutputReference(savedPath: string, fullOutput: string): SavedOutputReference {
 	const absolutePath = path.resolve(savedPath);
@@ -302,7 +306,10 @@ export function finalizeSingleOutput(params: {
 			const selected=selectEvidence(params.fullOutput,params.task,budget);
 			if(selected && selected.text.length+160<displayOutput.length) displayOutput=`[Child report incomplete; full report: ${params.savedPath}]\n${selected.text}`;
 		}
-		if (!displayOutput.includes(outputReference.message)) displayOutput += `\n\n${outputReference.message}`;
+		// The pointer to the saved copy is for a reply that is not the whole report, or a report long
+		// enough that passing the path on beats repeating it. A short complete answer needs neither.
+		const whole = displayOutput === params.fullOutput && params.fullOutput.length <= SHORT_REPORT_CHARS;
+		if (!whole && !displayOutput.includes(outputReference.message)) displayOutput += `\n\n${outputReference.message}`;
 		return { displayOutput, savedPath: params.savedPath, outputReference };
 	}
 	if (params.exitCode === 0 && params.saveError && params.outputPath) {

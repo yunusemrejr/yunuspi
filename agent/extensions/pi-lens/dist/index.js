@@ -60934,7 +60934,7 @@ var init_read_guard = __esm({
             });
             return verdict3;
           }
-          const verdict2 = this.blockOrWarn("zero-read", `\u{1F504} RETRYABLE \u2014 No verified read-tool coverage for \`${filePath}\`. Read the target range with the read tool (or a Lens source-reading tool), then retry. Shell cat/sed/grep output does not establish read-guard coverage. Use: \`read path="${filePath}"\`.`, void 0, effectiveMode);
+          const verdict2 = this.blockOrWarn("zero-read", `\u{1F504} RETRYABLE \u2014 No verified read-tool coverage for \`${filePath}\`. Read the target range with the read tool, then retry: \`read path="${filePath}"\`.`, void 0, effectiveMode);
           this.recordVerdict(filePath, "edit", touchedLines, verdict2, {
             reasonKind: "zero_read"
           });
@@ -88982,8 +88982,10 @@ function extractRedirectTargets(command) {
 function extractReadPathsFromCommand(command, cwd) {
   const spans = [];
   const seen = /* @__PURE__ */ new Set();
+  // The directory the command reads from: the workspace, or where a leading `cd DIR &&` took it.
+  let base = cwd;
   const resolveFile2 = (token) => {
-    const abs = resolveCandidate(token, cwd);
+    const abs = resolveCandidate(token, base);
     if (!abs)
       return null;
     try {
@@ -88993,6 +88995,18 @@ function extractReadPathsFromCommand(command, cwd) {
       return null;
     }
     return { abs, total: countFileLines(abs) };
+  };
+  // `cat src/*.js` prints every match, so each match was read. The shell does not descend on `**`
+  // by default, and a pattern with more matches than a reply shows whole is left uncredited.
+  const expandGlob = (token) => {
+    if (!/[*?[]/.test(token) || token.includes("**") || typeof nodeFs2.globSync !== "function")
+      return [token];
+    try {
+      const found = nodeFs2.globSync(token, { cwd: base }).slice(0, 17);
+      return found.length > 0 && found.length <= 16 ? found.sort() : [token];
+    } catch {
+      return [token];
+    }
   };
   const addSpan = (token, start, count) => {
     const file = resolveFile2(token);
@@ -89008,11 +89022,17 @@ function extractReadPathsFromCommand(command, cwd) {
     seen.add(key3);
     spans.push({ filePath: file.abs, offset, limit });
   };
-  for (const tokens of commandSegments(command)) {
+  for (const segment of tokenizeShellCommand(command)) {
+    const tokens = segment.tokens;
     if (tokens.length === 0)
       continue;
     const verb = path72.basename(tokens[0] ?? "");
-    const args = tokens.slice(1);
+    if (verb === "cd") {
+      if (tokens.length === 2 && !segment.unsupported)
+        base = path72.resolve(base, tokens[1]);
+      continue;
+    }
+    const args = tokens.slice(1).flatMap(expandGlob);
     if (["cat", "bat", "less", "more", "nl"].includes(verb)) {
       for (const a of args)
         addSpan(a, 1, Number.MAX_SAFE_INTEGER);

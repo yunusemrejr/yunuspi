@@ -53,7 +53,7 @@ const SubagentParamProperties = {
 	concurrency: Type.Optional(Type.Integer({ minimum: 1, description: "Native tasks/chain parallel width. Explicit values stay exact; absent defaults adapt to child complexity and configured capacity. All requested children still run." })),
 	chain: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native sequential steps: [{agent,task},...]; {previous} carries prior output. Supports nested parallel groups." })),
 	action: Type.Optional(Type.String({ minLength: 1, description: "Management/control action (list, get, status, resume, steer, create/update/delete, mission.*, watchdog.*, schedule.*). Omit for execution." })),
-	async: Type.Optional(Type.Boolean({ description: "Run in background (default unless asyncByDefault:false). false only when the parent must block." })),
+	async: Type.Optional(Type.Boolean({ description: "true: background, a completion notification wakes you. false: block and return the result in this call. Default is the agent's own." })),
 	context: Type.Optional(Type.String({ enum: ["fresh", "fork", "profile"], description: "fresh/fork branch from the parent session; profile uses the agent's declared defaultContext. Omitted: config defaultSubagentContext wins." })),
 	cwd: Type.Optional(Type.String({ description: "Execution cwd (or target project directory for project.* actions)." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Managed isolation: each workflow child gets a separate git worktree; per-child override allowed." })),

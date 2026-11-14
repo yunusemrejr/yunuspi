@@ -246,7 +246,9 @@ test('conversation reducers isolate simultaneous sessions and reconcile streamed
   assert.equal(first.messages.filter(message => message.kind === 'tool').length, 1);
   assert.equal(first.messages[1].output, 'contents');
   assert.equal(first.messages[1].status, 'done');
-  assert.equal(first.activities[0].status, 'done');
+  assert.ok(Number.isFinite(first.messages[1].startedAt) && Number.isFinite(first.messages[1].at));
+  assert.ok(first.messages[1].at >= first.messages[1].startedAt);
+  assert.equal(first.activities, undefined);
   assert.equal(first.streaming, null);
   assert.equal(first.busy, false);
 });

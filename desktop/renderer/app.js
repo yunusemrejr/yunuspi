@@ -1,4 +1,4 @@
-import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon } from './conversation.mjs';
+import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
 
@@ -11,7 +11,7 @@ const safeError = error => String(error?.message ?? error).replace(/^Error invok
 const current = () => workspace.sessions.find(s => s.id === activeId);
 const projectOf = session => workspace.projects.find(p => p.id === session?.projectId);
 const conversationOf = id => { if (!conversations.has(id)) conversations.set(id, createConversation()); return conversations.get(id); };
-const viewOf = id => { if (!views.has(id)) views.set(id, { pinned: true, top: 0, limit: 80, nodes: new Map(), widgets: new Map() }); return views.get(id); };
+const viewOf = id => { if (!views.has(id)) views.set(id, { pinned: true, top: 0, limit: 80, nodes: new Map(), widgets: new Map(), work: new Map() }); return views.get(id); };
 const strip = value => String(value ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
 // The core's cost label is a compact footer token ("sub", "$?", "$~1.20+?"); spell it out here.
 const costText = stats => {
@@ -124,7 +124,7 @@ function renderChrome() {
   $('connection').querySelector('span').textContent = { error: 'Needs attention', working: 'Working', connecting: 'Connecting…', ready: 'Ready' }[status] || 'Local workspace';
   $('turn-status').hidden = !busy;
   renderGoal();
-  $('turn-status').lastElementChild.textContent = state?.compacting ? 'Making room in context' : state?.retrying ? `Retrying · ${state.retrying}` : 'Working';
+  renderTurnStatus();
   const error = state?.error || '';
   $('session-error').hidden = !error; $('session-error').querySelector('span').textContent = strip(error);
   const peers = project ? workspace.runtime.filter(r => r.id !== activeId && workspace.sessions.find(s => s.id === r.id)?.projectId === project.id) : [];
@@ -164,14 +164,14 @@ async function openSession(id) {
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
     if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
     state.loaded = true;
-    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, activities: previous.activities, stats: previous.stats });
+    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, stats: previous.stats });
     if (state.busy) {
       const last = [...state.messages].reverse().find(m => m.kind === 'assistant');
       if (last) state.streaming = last.key;
     }
     for (const item of pendingView.replay) if (item.event.type === 'notice' || (result.messages && item.sequence > result.sequence)) applyAgentEvent(state, item.event);
     pendingView.pendingHistory = false; pendingView.replay = [];
-    conversations.set(id, state); viewOf(id).nodes.clear();
+    conversations.set(id, state); viewOf(id).nodes.clear(); $('messages').replaceChildren();
     // Keep at most eight loaded transcript caches. Closed/archived sessions are
     // released immediately; all history remains in the core's JSONL files.
     const other = [...conversations.keys()].filter(key => key !== id);
@@ -187,6 +187,15 @@ async function openSession(id) {
     if (version === switchVersion && activeId === id) { opening = false; renderChrome(); }
   }
 }
+// Under the transcript while a turn runs: that it is working and for how long. The step itself is the
+// last row of the block above, said in the present.
+function renderTurnStatus() {
+  const state = activeId ? conversations.get(activeId) : null;
+  if (!state || $('turn-status').hidden) return;
+  const doing = state.compacting ? 'Making room in context' : state.retrying ? `Retrying · ${state.retrying}` : 'Working';
+  $('turn-status').lastElementChild.textContent = [doing, state.busy ? duration(Date.now() - state.turnStarted) : ''].filter(Boolean).join(' · ');
+}
+setInterval(renderTurnStatus, 1000);
 function refreshStats(id) {
   const state = conversationOf(id);
   return api.stats(id).then(stats => { if (stats && conversations.get(id) === state) { state.stats = stats; if (activeId === id) { renderChrome(); renderContext(); } } }).catch(() => {});
@@ -204,10 +213,47 @@ function imageNodes(images) {
   }
   return group;
 }
-function toolSummary(message) {
-  const args = message.args || {};
-  const detail = args.path || args.file || args.query || args.command || args.action || '';
-  return `${message.name || 'Tool'}${detail ? ` · ${strip(detail).slice(0, 130).replace(/\s+/g, ' ')}` : ''}`;
+// Puts `node` after `previous` inside `parent`, moving it only when it is somewhere else.
+function place(node, parent, previous) {
+  const next = previous ? previous.nextSibling : parent.firstChild;
+  if (next !== node) parent.insertBefore(node, next);
+}
+// One block of work: a header that says what it came to, and the steps behind it. A block still running
+// or with only a step or two stays open; a finished longer one folds to its header, and the user's own
+// click on the header wins over both.
+function renderWork(block, view) {
+  const node = view.nodes.get(block.key) || element('section', 'work');
+  let head = node.firstElementChild, body = node.lastElementChild;
+  if (!head) {
+    head = element('button', 'work-head'); head.type = 'button'; body = element('div', 'work-body'); node.append(head, body);
+    head.onclick = () => { view.work.set(node.dataset.key, node.dataset.open !== 'true'); renderMessages(); };
+  }
+  const summary = workSummary(block.steps, block.live);
+  const open = block.bare || (view.work.get(block.key) ?? block.live);
+  // A block that grew past two steps gets its header while it runs; the steps stay where they were.
+  node.dataset.key = block.key; node.dataset.state = summary.state; node.dataset.open = String(open);
+  node.classList.toggle('bare', block.bare); head.hidden = block.bare; head.setAttribute('aria-expanded', String(open)); body.hidden = !open;
+  const trouble = summary.state === 'failed' ? toolTrouble(summary.last) : '';
+  const title = summary.state === 'live' ? 'So far' : summary.state === 'stopped' ? 'Stopped' : `Worked${summary.ms >= 1000 ? ` for ${duration(summary.ms)}` : ''}`;
+  const text = summary.phrase;
+  const flag = summary.state === 'failed' ? `ended on a failed step${trouble ? `: ${trouble}` : ''}` : summary.failed ? `${summary.failed} failed on the way` : '';
+  const signature = JSON.stringify([summary.state, open, title, text, flag, summary.tools]);
+  if (head.dataset.signature !== signature) {
+    head.dataset.signature = signature;
+    const line = element('span', 'work-line'); line.append(element('b', 'work-title', title), element('span', 'work-text', text));
+    head.replaceChildren(icon(summary.state === 'live' ? 'pulse' : summary.state === 'failed' ? 'alert' : summary.state === 'stopped' ? 'stop' : 'check', 'work-mark'), line);
+    if (flag) { const note = element('small', 'work-flag', flag); note.dataset.tone = summary.state === 'failed' ? 'error' : 'warning'; line.append(note); }
+    head.append(element('small', 'work-count', `${summary.tools} ${summary.tools === 1 ? 'step' : 'steps'}`), icon('down', 'work-chevron'));
+    head.setAttribute('aria-label', `${title}${text ? `, ${text}` : ''}${flag ? `, ${flag}` : ''}. ${open ? 'Hide' : 'Show'} the ${summary.tools} steps`);
+  }
+  if (open) {
+    let previous = null;
+    for (const step of block.steps) {
+      const child = renderMessage(step, view.nodes.get(step.key)); view.nodes.set(step.key, child);
+      place(child, body, previous); previous = child;
+    }
+  }
+  return node;
 }
 function renderMessage(message, existing) {
   const node = existing || element('article', message.goal ? `message goal-${message.goal.type}` : `message ${message.kind}`);
@@ -217,9 +263,16 @@ function renderMessage(message, existing) {
   const oldDetails = node.querySelector('.thinking')?.open;
   node.replaceChildren(); node.dataset.revision = String(message.revision);
   if (message.kind === 'tool') {
+    const line = toolLine(message), trouble = toolTrouble(message), took = duration(message.at - message.startedAt);
     const details = element('details', 'tool-card'); details.open = wasOpen || false; details.dataset.status = message.status;
-    const summary = element('summary'); summary.append(icon(toolIcon(message.name)), element('span', 'tool-title', toolSummary(message)), icon(message.status === 'done' ? 'check' : message.status === 'error' ? 'close' : 'dots', 'tool-state'));
-    summary.setAttribute('aria-label', `${toolSummary(message)}, ${message.status}`);
+    const summary = element('summary'), title = element('span', 'tool-title');
+    title.append(element('b', 'tool-verb', line.verb)); if (line.detail) title.append(element('span', line.code ? 'tool-detail code' : 'tool-detail', line.detail));
+    summary.append(icon(toolIcon(message.name)), title);
+    if (took) summary.append(element('small', 'tool-time', took));
+    summary.append(icon(message.status === 'done' ? 'check' : message.status === 'error' ? 'close' : 'dots', 'tool-state'));
+    // A failed step says why on its own row, so nobody has to open it to find out.
+    if (trouble) summary.append(element('span', 'tool-trouble', trouble));
+    summary.setAttribute('aria-label', `${line.verb} ${line.detail}, ${message.status === 'error' ? `failed${trouble ? `: ${trouble}` : ''}` : message.status}`);
     const output = element('div', 'tool-output', strip(message.output) || (message.status === 'running' ? 'Running…' : 'Complete'));
     details.append(summary, output); if (message.images?.length) details.append(imageNodes(message.images)); node.append(details);
   } else if (message.kind === 'notice') {
@@ -305,14 +358,14 @@ function renderMessages(restore = false) {
   const anchor = [...$('messages').children].find(node => node.getBoundingClientRect().bottom > scrollerTop);
   const anchorTop = anchor?.getBoundingClientRect().top;
   const visible = state.messages.slice(-view.limit).filter(message => message.kind !== 'assistant' || messageText(message) || imageParts(message).length || (Array.isArray(message.content) && message.content.some(part => part?.type === 'thinking' && part.thinking)));
-  const keep = new Set(visible.map(m => m.key));
+  const items = workBlocks(visible, state.busy);
+  const keep = new Set(visible.map(m => m.key)); for (const item of items) keep.add(item.key);
   for (const [key, node] of view.nodes) if (!keep.has(key)) { node.remove(); view.nodes.delete(key); }
+  for (const key of view.work.keys()) if (!keep.has(key)) view.work.delete(key);
   let previous = null;
-  for (const message of visible) {
-    const node = renderMessage(message, view.nodes.get(message.key)); view.nodes.set(message.key, node);
-    if (node.parentNode !== $('messages')) $('messages').append(node);
-    else if (previous && previous.nextSibling !== node) previous.after(node);
-    previous = node;
+  for (const item of items) {
+    const node = item.kind === 'work' ? renderWork(item, view) : renderMessage(item, view.nodes.get(item.key)); view.nodes.set(item.key, node);
+    place(node, $('messages'), previous); previous = node;
   }
   $('load-earlier').hidden = !state.hasMore && state.messages.length <= view.limit;
   renderChrome();
@@ -337,12 +390,25 @@ function updateJumpPosition() {
   $('jump-bottom').style.top = `${Math.max(6, scroller.bottom - shell.top - 42)}px`;
 }
 function renderActivity() {
-  const list = $('activity-list'), state = activeId ? conversationOf(activeId) : null;
-  if (!state?.activities.length) { list.replaceChildren(element('p', 'empty-hint', 'Tool runs and file changes appear here.')); return; }
-  const fragment = document.createDocumentFragment();
-  for (const activity of state.activities) {
-    const row = element('div', 'activity-row'); row.append(icon(toolIcon(activity.name)));
-    const detail = element('div'); detail.append(element('span', '', activity.name), element('small', '', strip(activity.path).slice(0, 100) || activity.status)); row.append(detail); fragment.append(row);
+  // Read from the transcript, newest first, so a reopened session lists what it did as a running one does.
+  const list = $('activity-list'), tools = activeId ? conversationOf(activeId).messages.filter(message => message.kind === 'tool').slice(-80).reverse() : [];
+  const signature = tools.map(tool => `${tool.key}:${tool.revision}`).join(' ');
+  if (list.dataset.signature === signature && list.childElementCount) return;
+  list.dataset.signature = signature;
+  if (!tools.length) { list.replaceChildren(element('p', 'empty-hint', 'Tool runs and file changes appear here.')); return; }
+  const fragment = document.createDocumentFragment(), changed = filesChanged(conversationOf(activeId).messages).reverse();
+  if (changed.length) {
+    fragment.append(element('h3', 'activity-heading', `Files changed · ${changed.length}`));
+    for (const file of changed.slice(0, 40)) {
+      const row = element('div', 'activity-row'); row.append(icon('code'));
+      const detail = element('div'); detail.append(element('span', 'code', file.path)); if (file.edits > 1) detail.append(element('small', '', `${file.edits} edits`)); row.append(detail); fragment.append(row);
+    }
+    fragment.append(element('h3', 'activity-heading', 'Steps, newest first'));
+  }
+  for (const tool of tools) {
+    const line = toolLine(tool), trouble = toolTrouble(tool), row = element('div', 'activity-row'); row.dataset.status = tool.status; row.append(icon(toolIcon(tool.name)));
+    const detail = element('div'), note = trouble || (tool.status === 'error' ? 'Failed' : duration(tool.at - tool.startedAt));
+    detail.append(element('span', '', `${line.verb} ${line.detail}`.trim())); if (note) detail.append(element('small', '', note)); row.append(detail); fragment.append(row);
   }
   list.replaceChildren(fragment);
 }

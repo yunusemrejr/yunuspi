@@ -247,8 +247,14 @@ test("async launch notices preserve independent work and native wake without pol
  assert.match(notice,/Continue useful independent work/);
  assert.match(notice,/only when the remaining work depends on its result/);
  assert.match(notice,/native completion notification/);
- assert.match(notice,/Do not run sleep\/polling loops/);
+ assert.match(notice,/no bg_wait, no sleep, no status loop/);
  assert.doesNotMatch(notice,/Return control to the user now/);
+ // Read as "now wait", the old five sentences cost a wait call and a status call per launch.
+ assert.ok(notice.length<520,`launch notice is ${notice.length} characters`);
+ assert.doesNotMatch(notice,/call blocking bg_wait/);
+ const headless=formatAsyncStartedMessage("Started",false);
+ assert.match(headless,/waits for it when your turn ends/);
+ assert.ok(headless.length<420,`headless launch notice is ${headless.length} characters`);
 });
 
 test("a workflowScript calling an undefined helper is told which globals exist", async () => {

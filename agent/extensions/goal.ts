@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
 import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
-import { isTestLikeCommand, uncountedCheckReason } from "./lib/task-state/ingest.ts";
+import { isTestLikeCommand, uncountedCheck } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
 import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
 import { selfVerificationPrompt } from "./lib/lean-policy.ts";
@@ -197,7 +197,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	 * carries the original command and the real exit state, so verify there instead.
 	 */
 	// A check run since the last change that could not count, kept so a refusal can say why.
-	let uncounted: { command: string; reason: string } | undefined;
+	let uncounted: { command: string; reason: string; alone?: string } | undefined;
+	// The write revision an uncounted run was last pointed out for, so the note is said once per change.
+	let pointedOut = -1;
 	const cover = (start: CheckStart | undefined, ctx: ExtensionContext) => {
 		if (!goalIsLive(goal) || !start || start.goalId !== goal.id) return;
 		uncounted = undefined;
@@ -270,10 +272,18 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			// by project tests, which announces the call that passed the whole plan.
 			remember(planCandidates, event.toolCallId, observed);
 			lastCtx = ctx;
-			const reason = event.details?.exitCode === undefined || event.details.exitCode === 0 ? uncountedCheckReason(observed.command) : undefined;
-			if (reason) uncounted = { command: observed.command, reason };
+			const missed = event.details?.exitCode === undefined || event.details.exitCode === 0 ? uncountedCheck(observed.command) : undefined;
+			if (missed) uncounted = { command: observed.command, ...missed };
 			const passed = passedPlanCalls.get(event.toolCallId);
 			if (passed) { passedPlanCalls.delete(event.toolCallId); cover(observed, ctx); }
+			// Said with the run's own output, where the model can act on it at once. Left for the completion
+			// call, the same fact cost a refused completion and a second reading of the whole gap list.
+			const revision = goal.verification?.revision ?? 0;
+			if (missed && !passed && debt() > 0 && pointedOut !== revision) {
+				pointedOut = revision;
+				const note = `[goal] This run does not count as the check for your last change: ${missed.reason}. ${missed.alone ? `Run \`${missed.alone}\` as its own command` : "Run the check command by itself"} before completing the goal.`;
+				return { content: [...((event as any).content ?? []), { type: "text" as const, text: note }] };
+			}
 		}
 		else if (name === "project_tests" && event.details?.need === null && event.details?.projectTests?.plannedChecks?.length
 			&& event.details.projectTests.plannedChecks.every((check: any) => check.outcome === "passed")) cover(observed, ctx);

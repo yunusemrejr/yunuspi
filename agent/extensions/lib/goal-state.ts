@@ -210,7 +210,7 @@ export interface CompletionContext {
 	/** Native write revision distinguishes fresh debt from a previously refused edit. */
 	writeRevision?: number;
 	/** A check that ran after the last change and proved nothing, with the reason. */
-	uncounted?: { command: string; reason: string };
+	uncounted?: { command: string; reason: string; alone?: string };
 	/** Verification receipts already refused once, so the same request becomes a recorded waiver. */
 	refused: ReadonlySet<string>;
 	verification?: readonly GateReceipt[];
@@ -225,7 +225,7 @@ export function goalCompletionReceipts(goal: GoalState, context: Pick<Completion
 		receipts.push({
 			source: "goal", id: "writes", revision: String(context.writeRevision ?? goal.verification?.revision ?? 0), state: "unverified", count: context.unverifiedWrites,
 			line: `${context.unverifiedWrites} file change(s) since the last passing test/build/run; verify again before claiming completion`
-				+ (context.uncounted ? `. The last run did not count (\`${clip(context.uncounted.command, 90)}\`): ${context.uncounted.reason}. Run the check command by itself` : ""),
+				+ (context.uncounted ? `. The last run did not count (\`${clip(context.uncounted.command, 90)}\`): ${context.uncounted.reason}. Run ${context.uncounted.alone ? `\`${clip(context.uncounted.alone, 160)}\` as its own command` : "the check command by itself"}` : ""),
 		});
 	}
 	return receipts;

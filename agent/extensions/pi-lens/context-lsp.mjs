@@ -2,6 +2,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { projectCheckCommand, checkInvocation } from '../lib/project-tests.ts';
+import { isTestLikeCommand } from '../lib/task-state/ingest.ts';
 let selectClients;
 const pending=new WeakSet();
 export function configureContextLsp(selector) {selectClients=selector;}
@@ -32,7 +33,11 @@ export async function flushLensBeforeVerification(event, ctx, declaredCheck = fa
   if (!record || record.owner === undefined || record.owner !== mutationOwner(ctx) || ctx.signal?.aborted) return;
   const name = event?.toolName;
   const command = event?.input?.command;
-  const check = ['bash','bg_run'].includes(name) && projectCheckCommand(checkInvocation(command)?.body ?? command,ctx.cwd,declaredCheck);
+  // Every run the completion gate counts as a check, a chain included (`npm test | tail -5 && git diff`,
+  // which the check owner runs under pipefail): source formatted after such a run would make it stale
+  // and the same check would be asked for again.
+  const check = ['bash','bg_run'].includes(name) && (projectCheckCommand(checkInvocation(command)?.body ?? command,ctx.cwd,declaredCheck)
+    || isTestLikeCommand(command) || isTestLikeCommand(`set -o pipefail; ${command}`));
   try {
     let readbackPath;
     if (name==='read' && typeof event.input?.path==='string' && /\.(?:md|rst|txt)$/i.test(event.input.path)) {

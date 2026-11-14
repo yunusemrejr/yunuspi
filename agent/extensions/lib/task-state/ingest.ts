@@ -323,8 +323,13 @@ const RUNNER = /^(?:vitest|jest|eslint|tsc|biome|pytest|tox|mypy|ruff|phpstan|ph
 const CHECK_TASK = /^(?:test|tests|check|lint|typecheck|build|verify)(?::[\w.-]+)?$/;
 const NON_VERIFY_FLAG = /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|--if-present|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/;
 
-/** Output filter that keeps a check's exit observable only with pipefail. */
-export const PIPED_FILTER = /\s*\|\s*(?:tail|head)(?:\s+-n)?\s+-?\d+\s*$/;
+/** Output filters that keep a check's exit observable only with pipefail: `| tail|head N` and
+ * `| grep [flags] PATTERN`, one or several in a row. Each only reads its input, so under pipefail an
+ * exit of 0 means the check itself exited 0. A pattern with `$`, a backtick or a backslash in double
+ * quotes is left out (the shell would expand it), as are filters that write (`tee`) or count (`wc`). */
+const TRIM_FILTER = String.raw`(?:tail|head)(?:\s+-n)?\s+-?\d+`;
+const GREP_FILTER = String.raw`grep(?:\s+-[A-Za-z]+(?:\s+\d+)?)*\s+(?:"[^"\\$\x60]*"|'[^']*'|[\w.^:=+,%/@-]+)`;
+export const PIPED_FILTER = new RegExp(String.raw`(?:\s*\|\s*(?:${TRIM_FILTER}|${GREP_FILTER}))+\s*$`);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 /** Flags with which these tools exit 0 whatever the check found: a dry run (`make test -n`), errors
  * ignored (`make test -i`, `mvn test -fn`). The short forms mean other things to other runners
@@ -507,6 +512,12 @@ export function isTestLikeCommand(command: string): boolean {
 
 /** Why a command that runs a check still proves nothing, said to the model so it does not run the same line again. */
 export function uncountedCheckReason(command: string): string | undefined {
+	return uncountedCheck(command)?.reason;
+}
+
+/** The same verdict with `alone`: the check as one command that would count (`cd app && npm test`), taken
+ * from the run itself so the model is told what to run and does not have to work out which part mattered. */
+export function uncountedCheck(command: string): { reason: string; alone?: string } | undefined {
 	const raw = String(command ?? "").trim();
 	if (!raw || raw.length > 2000 || isTestLikeCommand(raw)) return undefined;
 	const steps: string[] = [], seps: string[] = [];
@@ -516,9 +527,15 @@ export function uncountedCheckReason(command: string): string | undefined {
 		steps.push(raw.slice(start, match.index)); seps.push(match[0]); start = match.index! + match[0].length;
 	}
 	steps.push(raw.slice(start));
-	const checks = steps.map((step, index) => isSingleTestStep(step.replace(/\s+2>&1\s*$/, "")) ? index : -1).filter(index => index >= 0);
+	const bare = (step: string) => step.replace(/\s+2>&1\s*$/, "").trim();
+	const checks = steps.map((step, index) => isSingleTestStep(bare(step)) ? index : -1).filter(index => index >= 0);
 	if (!checks.length) return undefined;
-	return checks.some(index => seps[index] === "|") ? "its output is piped, which hides whether it passed" : "it is joined to other commands, so its own exit status is not seen";
+	const reason = checks.some(index => seps[index] === "|") ? "its output is piped, which hides whether it passed" : "it is joined to other commands, so its own exit status is not seen";
+	// A leading `cd DIR` is where the check ran; anything else in front of it is not carried over.
+	const first = tokenizeSimple(steps[0].trim());
+	const cd = checks[0] > 0 && first?.length === 2 && first[0] === "cd" && (seps[0] === "&&" || seps[0] === ";") ? `${steps[0].trim()} && ` : "";
+	const alone = cd + [...new Set(checks.slice(0, 3).map(index => bare(steps[index])))].join(" && ");
+	return { reason, ...(isTestLikeCommand(alone) ? { alone } : {}) };
 }
 
 /** Bash results become attempt/evidence/failure entities with family keys.

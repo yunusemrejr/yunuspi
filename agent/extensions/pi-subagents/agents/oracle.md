@@ -7,6 +7,7 @@ subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
+async: false
 defaultContext: fork
 ---
 

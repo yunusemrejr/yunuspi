@@ -337,16 +337,14 @@ export type AsyncRunnerStepBuildResult =
 export function formatAsyncStartedMessage(headline: string, interactive: boolean): string {
 	const guidance = interactive
 		? [
-			"The async run is detached and running in the background.",
-			"Continue useful independent work while this subagent runs. Yield control only when the remaining work depends on its result; Pi will wake you through the native completion notification when it completes or needs attention. Do not run sleep/polling loops to wait for this async subagent; it does not need a wait call.",
-			"Use bg_wait only for provider, detached, or other background work that lacks a native completion notification.",
-			"If the current turn must receive results from work without a native notification before it ends, call blocking bg_wait(); ordinary async subagent runs do not need a wait call because their completion is delivered natively.",
-			"Otherwise, continue any independent work or return control to the user. Use subagent({ action: \"status\", id: \"...\" }) for a one-shot status/result or to inspect a blocked/stale run, never as a wait loop.",
+			"Running in the background. Its result arrives here by itself, as a native completion notification, when it finishes or needs attention.",
+			"Continue useful independent work meanwhile, and end your turn only when the remaining work depends on its result. It needs no wait call: no bg_wait, no sleep, no status loop.",
+			"subagent({ action: \"status\", id: \"...\" }) gives one status reading, for a run that looks stuck.",
 		]
 		: [
-			"The async run is detached. Do not run sleep timers or polling loops just to wait for it.",
-			"This is a non-interactive run: Pi auto-drains current-session subagent work at agent_end so detached children are not abandoned. Use bg_wait only when this turn must receive provider, detached, or other background-work results that have no native completion notification.",
-			"Use subagent({ action: \"status\", id: \"...\" }) when you need a one-shot status/result or to inspect a blocked/stale run; do not poll in a loop.",
+			"Running in the background. This run has no one at the keyboard, so the harness waits for it when your turn ends; it is not abandoned.",
+			"Continue useful independent work meanwhile. It needs no sleep and no status loop.",
+			"subagent({ action: \"status\", id: \"...\" }) gives one status reading, for a run that looks stuck.",
 		];
 	return [headline, "", ...guidance].join("\n");
 }

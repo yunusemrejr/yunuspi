@@ -32,6 +32,15 @@ const server = http.createServer(async (req, res) => {
   const finish = reason => {
     res.write(`data: ${JSON.stringify({ id: 'synthetic-desktop', choices: [{ index: 0, delta: {}, finish_reason: reason }], usage: { prompt_tokens: 25, completion_tokens: 30, total_tokens: 55 } })}\n\ndata: [DONE]\n\n`); res.end();
   };
+  // A turn of several steps: narration and one read per request, the second read failing, then the answer.
+  if (prompt.includes('STEPS')) {
+    const ran = input.messages.slice(input.messages.map(m => m.role).lastIndexOf('user') + 1).filter(m => m.role === 'tool').length;
+    const target = ['sample.txt', 'missing.txt', 'sample.txt'][ran];
+    if (target) {
+      chunk({ role: 'assistant', content: `Step ${ran + 1}: reading ${target}.` });
+      chunk({ tool_calls: [{ index: 0, id: `desktop-step-${ran}`, type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: path.join(alpha, target) }) } }] }); finish('tool_calls'); return;
+    }
+  }
   if (prompt.includes('TOOL') && input.messages.at(-1)?.role !== 'tool') {
     chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'desktop-read', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: path.join(alpha, 'sample.txt') }) } }] }); finish('tool_calls'); return;
   }
@@ -135,6 +144,29 @@ try {
   await page.locator('.tool-card summary').last().click();
   assert.match(await page.locator('.tool-output').last().innerText(), /desktop tool fixture is readable/);
   check('real core tool execution expands in the GUI');
+  // A turn of several steps folds into one block once it is done; the answer stays outside it.
+  await send('STEPS over the fixture'); await done();
+  const block = page.locator('.work').last();
+  assert.equal(await block.getAttribute('data-state'), 'done');
+  assert.equal(await block.getAttribute('data-open'), 'false', 'a finished turn of three steps is folded');
+  assert.equal(await block.locator('.work-body').isVisible(), false);
+  const headline = await block.locator('.work-head').innerText();
+  assert.match(headline, /Worked/); assert.match(headline, /read 1 file/); assert.match(headline, /1 failed on the way/);
+  assert.match(await page.locator('#messages > .message.assistant').last().innerText(), /Desktop verified/);
+  assert.equal(await block.locator('.message.assistant').count(), 3, 'the narration of each step belongs to the block');
+  await block.locator('.work-head').click();
+  assert.equal(await block.getAttribute('data-open'), 'true');
+  assert.equal(await block.locator('.tool-card').count(), 3);
+  assert.equal(await block.locator('.tool-card[data-status="error"]').count(), 1);
+  assert.match(await block.locator('.tool-card[data-status="error"] .tool-trouble').innerText(), /missing\.txt|ENOENT|not found|no such file/i, 'a failed step says what failed without being opened');
+  assert.match(await block.locator('.tool-card').first().locator('.tool-title').innerText(), /^Read\s+.*sample\.txt/);
+  check('a turn of several steps folds into one block that names what was done and what failed');
+  // Coming back to a session already in memory draws each message once, and keeps the block as the user left it.
+  await open(second.id); await open(first.id);
+  assert.equal(await page.locator('#messages .message.user', { hasText: 'STEPS over the fixture' }).count(), 1);
+  assert.equal(await page.locator('#messages .tool-card[data-status="error"]').count(), 1);
+  assert.equal(await page.locator('.work').last().getAttribute('data-open'), 'true', 'the block stays open after switching sessions');
+  check('re-opening a session shows its transcript once');
   const commandList = await page.evaluate(id => window.yunuspi.commands(id), first.id);
   assert.ok(commandList.commands.some(command => command.name === 'desktop-confirm'), 'fixture extension command must load');
   await send('/desktop-confirm');
