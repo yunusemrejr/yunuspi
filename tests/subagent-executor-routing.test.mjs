@@ -438,6 +438,60 @@ test("the call's role is the default of every tasks item and chain step; an item
   assert.deepEqual(starts().slice(2), [legworkRoute, legworkRoute], "every chain step, parallel members included, takes the call's role");
 });
 
+test("a child with no agent, or one named only by its role, runs that role's default agent", { timeout: 90_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "delegate" } });
+  const { agent: _agent, ...noAgent } = scoutCall();
+  const modelOf = async call => {
+    const result = await runCall(f, call);
+    assert.notEqual(result.isError, true, JSON.stringify(result.content));
+    return launchModel(lastStart(f));
+  };
+  assert.equal(await modelOf(noAgent), legworkRoute, "no agent, no role: delegate, a legwork agent");
+  assert.equal(await modelOf({ ...noAgent, role: "main" }), route, "no agent with role main: delegate on the session model");
+  assert.equal(await modelOf(scoutCall({ agent: "legwork" })), legworkRoute, "agent given as a role name");
+  assert.equal(await modelOf(scoutCall({ agent: "main" })), route, "agent main: delegate with role main");
+  assert.equal(await modelOf(scoutCall({ agent: "Main", role: "legwork" })), legworkRoute, "the call's own role wins over the one the name stood for");
+  const { agent: _a, task: _t, ...base } = scoutCall();
+  const tasks = await runCall(f, { ...base, async: true, tasks: [{ task: "one" }, { agent: "main", task: "two" }] });
+  await awaitNativeBackground(f, tasks);
+  assert.deepEqual(f.records().filter(row => row.phase === "start").map(launchModel).slice(5).sort(), [legworkRoute, route].sort(), "tasks items default the same way");
+  const chain = await runCall(f, { ...base, async: true, chain: [{ task: "first" }, { parallel: [{ agent: "legwork", task: "second" }] }] });
+  await awaitNativeBackground(f, chain);
+  assert.deepEqual(f.records().filter(row => row.phase === "start").map(launchModel).slice(7), [legworkRoute, legworkRoute], "chain steps and their parallel members too");
+});
+
+test("malformed children are reported or defaulted, never thrown", { timeout: 60_000 }, async t => {
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", agentFields: { name: "delegate" } });
+  const { agent: _agent, task: _task, ...base } = scoutCall();
+  const bad = await runCall(f, { ...base, async: true, chain: [{ task: "x", agent: 5 }] });
+  assert.equal(bad.isError, true, JSON.stringify(bad.content));
+  assert.match(bad.content[0].text, /agent must be a string \(step 1\)/);
+  assert.equal(f.hasLaunched(), false, "nothing launched for a non-string agent");
+  const badTask = await runCall(f, { ...base, async: true, tasks: [{ task: "x", agent: 5 }] });
+  assert.equal(badTask.isError, true, JSON.stringify(badTask.content));
+  const nulled = await runCall(f, { ...base, async: true, tasks: [{ task: "x", agent: null }] });
+  await awaitNativeBackground(f, nulled);
+  const chain = await runCall(f, { ...base, async: true, chain: [{ task: "x" }] });
+  await awaitNativeBackground(f, chain);
+  assert.equal(f.records().filter(row => row.phase === "start").length, 2, "agent:null and a step with no agent each ran delegate");
+});
+
+test("the helper role defaults to worker, and an agent that really has a role's name keeps its own", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { helper: legworkRoute } });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "worker" } });
+  const { agent: _agent, ...noAgent } = scoutCall();
+  for (const call of [{ ...noAgent, role: "helper" }, scoutCall({ agent: "helper" })]) {
+    const result = await runCall(f, call);
+    assert.notEqual(result.isError, true, JSON.stringify(result.content));
+    assert.equal(launchModel(lastStart(f)), legworkRoute, "worker is a helper agent");
+  }
+  const own = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "helper" } });
+  const result = await runCall(own, scoutCall({ agent: "helper" }));
+  assert.notEqual(result.isError, true, JSON.stringify(result.content));
+  assert.equal(launchModel(lastStart(own)), route, "an existing agent named helper runs as written, not as worker");
+});
+
 test("an explicit fork launches on the session model whatever its role's model or role line says", { timeout: 60_000 }, async t => {
   useTeam(t, { team: { legwork: "openrouter/org/not-installed" } });
   for (const agentFields of [{ name: "scout" }, { name: "oracle", extraFields: { role: "boss" } }]) {

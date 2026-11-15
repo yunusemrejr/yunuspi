@@ -61,6 +61,9 @@ try {
  const expanded=expandCommonTask(fan);assert.equal(normalizePublicSubagentExecution(fan).ok,true);assert.equal(normalizePublicSubagentExecution({chain:[{agent:'worker'}]}).ok,true);
  assert.equal(normalizePublicSubagentExecution({...fan,action:'status'}).ok,false);assert.equal(normalizePublicSubagentExecution({...fan,workflowScript:'x'}).ok,false);
  assert.equal(normalizePublicSubagentExecution({parallel:[]}).ok,false);
+ const noAgent=normalizePublicSubagentExecution({task:'T'});assert.equal(noAgent.ok,true);assert.equal('agent' in noAgent.params,false);assert.equal(noAgent.params.output,true);
+ for(const bad of [{agent:' ',task:'T'},{agent:3,task:'T'},{role:'helper'}]) assert.equal(normalizePublicSubagentExecution(bad).ok,false);
+ assert.match(expandCommonTask({commonTask:'S',task:'T'}).task,/Shared brief:\nS\n\nChild task:\nT/);
  assert.equal(fan.tasks[0].task,'A');assert.equal(expanded.commonTask,undefined);
  assert.ok(expanded.tasks.every(t=>(t.task.match(/SHARED/g)||[]).length===1));assert.equal(expandCommonTask(expanded),expanded);
  assert.equal(expanded.tasks[0].acceptance,fan.tasks[0].acceptance);

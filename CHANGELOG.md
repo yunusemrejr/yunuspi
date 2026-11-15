@@ -1,3 +1,23 @@
+## 0.55.1 — Shorter waits after a rate limit, and a subagent tool a goal can use
+
+This release comes from reading the goal session of 15 Nov 2026: two and a half hours on Ling 3.2 Flash, 59 answered requests, 13 rate-limit errors, stopped by hand before the goal closed. Each change answers something that went wrong there.
+
+**A rate-limit error on Ling costs about 25 seconds instead of up to two minutes.** Ling limits requests per second, not tokens per minute, and its 429 carries no Retry-After. The gate treated it as a token limit and waited 40 to 125 seconds, longer the larger the prompt; the 13 errors of that session cost about 14 minutes, and the long waits failed as often as any request. Measured against the provider, a retry 5 to 8 seconds after the error goes through, with an 18k-token prompt and a 60k-token one alike. For a provider known to limit by request rate the gate's cooldown is now 8 seconds, plus the usual step when errors repeat, with no pacing by prompt size. The turn's own 25-second pause before it retries stays.
+
+**A goal has the `subagent` tool from its first request.** Short direct tasks run without `subagent` on the wire and a goal runs with it. The check looked for the goal marker in the user's bare words, where it never is, so the goal started with 20 tools and no `subagent`, while the facts line of every message told the agent to hand legwork to it. The delivered kickoff text decides now (29 tools, `subagent` among them), and the facts line names the tool only when it is active.
+
+**`subagent` runs a child that names no agent.** Once the agent had found the tool, `{task, role:"legwork"}` was refused ("requires agent") and `agent:"legwork"` was an unknown agent: the description speaks of roles, and the agent took the role for the name. A child with no agent now runs `delegate`, or `worker` for `role:"helper"`, and a role written as the agent name means that role's default agent. This holds for one child, for parallel tasks and for the steps of a chain.
+
+**A background process that ends with the call says so.** `nohup … &` inside `bash` was stopped when the call returned, without a word, and the agent waited for output that never came. Such a call now ends with a note that the process was stopped and that `bg_run` starts work that must outlive the call.
+
+**The memory section names the project file only when it exists.** The system prompt listed the memory file of a project that had none yet, and the agent's first read of it failed. Until the first write the line says that the file is not created yet and where it will go.
+
+**The requirement ledger says that it is not a message.** The ledger reaches the model as the last user-role message of every request, and Ling answered it ("Ledger received") turn after turn. Its first line now says that it is a standing note from the harness, repeated with every request and not to be acknowledged. A comparison of six replies per wording on Ling did not reproduce the acknowledgement with either one, so this is a precaution, not a measured fix.
+
+**A cache miss the provider causes is labelled as the provider's.** Ling's prompt cache becomes readable about 30 seconds after a prefix was first sent and answers only part of the time after that: 20% of that session's input was read from cache, where the same harness reaches 97 to 98% on DeepSeek. The cache sentinel blamed each of those misses on a changed history or system prompt, because some message always differs from the request before. It does so now only when the unchanged part is under 60% of the previous request; otherwise the cause is the provider.
+
+**What a release cannot change.** Ling's cache follows no request setting (`user`, `prompt_cache_key` and session headers were tried), and the model's long thinking and slow generation are its own. For a long goal, a provider with a working cache is faster and cheaper.
+
 ## 0.55.0 — Green checks count, and the right guide and helper for the job
 
 This release comes from reading the three goal sessions of 14 Nov 2026 (420 tool calls). Each change answers something that went wrong there.

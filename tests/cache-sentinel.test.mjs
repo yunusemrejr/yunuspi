@@ -130,3 +130,23 @@ test("a system miss names the paragraph that changed and how it began", () => {
  const b = run([[anthropic([{ type: "text", text: "Base.\n\nMemory: v1" }]), 40000, 0], [anthropic([{ type: "text", text: "Base.\n\nMemory: v2" }]), 41000, 0]]);
  assert.deepEqual(b.misses[1].systemChange, { paragraph: 1, before: "Memory: v1", after: "Memory: v2" });
 });
+
+test("a miss that leaves most of the previous prompt identical is the provider's, not history", () => {
+ const tools = [tool("read")];
+ const big = { role: "system", content: "You are an agent.\n\n" + "rule. ".repeat(400) };
+ const prev = body(tools, big, turn(1), { role: "user", content: "standing note v1" });
+ const next = body(tools, big, turn(1), { role: "user", content: "newer" }, { role: "user", content: "newest" }, { role: "user", content: "standing note v2" });
+ const { misses } = run([[prev, 20000, 0], [next, 41000, 0]]);
+ assert.equal(misses[1].cause, "provider", "the intact prefix would have been served from cache");
+ assert.equal(misses[1].atMessage, undefined);
+});
+
+test("a divergence early enough that the intact prefix could not have hit is a history miss", () => {
+ const tools = [tool("read")];
+ const context = { role: "user", content: "context ".repeat(400) };
+ const prev = body(tools, context, turn(1), turn(2));
+ const next = body(tools, { ...context, content: "rewritten context" }, turn(1), turn(2));
+ const { misses } = run([[prev, 20000, 0], [next, 41000, 0]]);
+ assert.equal(misses[1].cause, "history");
+ assert.equal(misses[1].atMessage, 1);
+});

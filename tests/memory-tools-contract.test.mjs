@@ -86,3 +86,30 @@ test("memory reads reject FIFOs and oversized files without blocking", { skip: p
   fs.writeFileSync(fifo, Buffer.alloc(8 * 1024 * 1024 + 1));
   assert.equal(memory.readFileSafe(fifo), null, "unbounded memory files are not loaded into the harness");
 });
+
+test("the system prompt names the project memory file only once it exists", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-header-"));
+  const previousUpdateMode = process.env.PI_MEMORY_QMD_UPDATE;
+  process.env.PI_MEMORY_QMD_UPDATE = "off";
+  memory._setBaseDir(dir);
+  try {
+    const { tools, events } = harness();
+    const cwd = path.join(dir, "demo-project");
+    fs.mkdirSync(cwd);
+    const ctx = { cwd, sessionManager: { getSessionId: () => "session-12345678" } };
+    const header = async () => (await events.get("before_agent_start")({ prompt: "start", systemPrompt: "" }, ctx)).systemPrompt;
+    const file = (text) => text.match(/^- Project memory: .*?(\/\S+\.md)/m)?.[1];
+    const before = await header();
+    assert.match(before, /^- Project memory: not created yet; its first write goes to \S+\.md\.$/m, "a missing file is not offered for reading");
+    await tools.get("memory_write").execute("id", { target: "project", content: "fact" }, undefined, undefined, ctx);
+    const after = await header();
+    assert.match(after, /^- Project memory: \/\S+\.md$/m);
+    assert.equal(file(after), file(before), "the same path before and after the first write");
+    assert.ok(fs.existsSync(file(after)));
+  } finally {
+    if (previousUpdateMode === undefined) delete process.env.PI_MEMORY_QMD_UPDATE;
+    else process.env.PI_MEMORY_QMD_UPDATE = previousUpdateMode;
+    memory._resetBaseDir();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -131,4 +131,31 @@ test('a sibling cooldown published during admission lock wait prevents HTTP disp
   assert.equal(health.readHealth().providers.p.requests.length, 0, 'denied work never counts as traffic');
 });
 
+test('request-rate providers get the short hold, not token pacing', () => {
+  const rate = { kind: 'quota-rate', scope: 'provider', retryAfterMs: null };
+  assert.equal(health.cooldownFor(rate, 100_000, 1, 'ant-ling'), health.REQUEST_RATE_COOLDOWN_MS);
+  assert.equal(health.cooldownFor(rate, 100_000, 2, 'ant-ling'), 18_000);
+  assert.equal(health.cooldownFor(rate, 100_000, 9, 'ant-ling'), 38_000);
+  // Every other provider keeps the old 25s + token pacing math.
+  assert.equal(health.cooldownFor(rate, 100_000, 1, 'deepseek'), health.COOLDOWN_MS + 45_000);
+  // A provider hint and an account hold still come before the request-rate hold.
+  assert.equal(health.cooldownFor({ ...rate, retryAfterMs: 3_000 }, 100_000, 1, 'ant-ling'), 3_000);
+  assert.equal(health.cooldownFor({ ...rate, billing: true }, 100_000, 1, 'ant-ling'), health.ACCOUNT_HOLD_MS);
+  assert.equal(health.cooldownFor(health.classifyFailure('401: Incorrect API key provided'), 100_000, 1, 'ant-ling'), health.ACCOUNT_HOLD_MS);
+});
+
+test('a recorded ant-ling 429 holds the provider for the request-rate cooldown', () => {
+  reset();
+  const now = Date.now();
+  health.recordFailure({
+    provider: 'ant-ling',
+    model: 'Ling-3.2-flash',
+    errorMessage: '429: {"code":429,"message":"Rate Limit Exceeded","type":"openai_rate_limit"}',
+    estTokens: 100_000,
+    now,
+  });
+  const entry = health.readHealth().providers['ant-ling'];
+  assert.equal(entry.cooldownUntil - now, health.REQUEST_RATE_COOLDOWN_MS);
+});
+
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -96,7 +96,8 @@ export function foldRequirements(ledger: RequirementLedger, prompt: string): { l
 export function renderRequirementLedger(ledger: RequirementLedger): string | undefined {
 	if (!ledger.items.length && !ledger.unbounded) return undefined;
 	const lines = [
-		"Requirement ledger (deterministic split of the user's own words; the literal prompts stay authoritative, and a later correction supersedes the part it changes):",
+		// The ledger reaches the model as the last user-role message of every request; without this line a weak model answered "Ledger received" on each turn.
+		"Requirement ledger: a standing note from the harness, repeated with every request. It is not a new message, so do not acknowledge or answer it; keep working. (Deterministic split of the user's own words; the literal prompts stay authoritative, and a later correction supersedes the part it changes.)",
 		...ledger.items.map((item) => `${item.id}: ${item.text}`),
 	];
 	if (ledger.subjective.length) lines.push(`Subjective criteria (${ledger.subjective.map((s) => `"${s}"`).join(", ")}): before claiming them, define each as a concrete observable check (a rendered capture judged against named criteria, a count, a diff, a test) and record its result.`);

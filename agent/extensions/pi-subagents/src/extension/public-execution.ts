@@ -200,8 +200,8 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 		return { ok: false, error: "Structured single-child execution cannot be combined with workflow, workflowScript, or workflowScriptPath.", mode: "workflow" };
 	}
 	if (params.agent !== undefined || params.task !== undefined) {
-		if (typeof params.agent !== "string" || !params.agent.trim()) {
-			return { ok: false, error: "Structured single-child execution requires agent to be a non-empty string.", mode: "workflow" };
+		if (params.agent !== undefined && (typeof params.agent !== "string" || !params.agent.trim())) {
+			return { ok: false, error: "Structured single-child agent must be a non-empty string when provided.", mode: "workflow" };
 		}
 		if (params.task !== undefined && typeof params.task !== "string") {
 			return { ok: false, error: "Structured single-child task must be a string when provided.", mode: "workflow" };
@@ -210,13 +210,13 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 			ok: true,
 			params: {
 				...params,
-				agent: params.agent.trim(),
+				...(params.agent !== undefined ? { agent: params.agent.trim() } : {}),
 				output: params.output === undefined ? true : params.output,
 			} as T,
 		};
 	}
 	if (!hasValidWorkflowInput) {
-		return { ok: false, error: "Execution requires either { agent, task? } for one child, native tasks/chain, a named workflow resource, or a non-empty workflowScript or workflowScriptPath for orchestration.", mode: "workflow" };
+		return { ok: false, error: "Execution requires either { task } or { agent, task? } for one child, native tasks/chain, a named workflow resource, or a non-empty workflowScript or workflowScriptPath for orchestration.", mode: "workflow" };
 	}
 	return { ok: true, params };
 }

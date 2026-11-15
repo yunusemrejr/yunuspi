@@ -730,6 +730,31 @@ test('a goal kickoff stages the whole core wire even at the direct tier', async 
  assert.ok(!plain.active().includes('subagent'),'a plain direct message still gets the direct wire');
 });
 
+test('an authored goal kickoff keeps the whole core wire although routing sees only the user\'s words', async () => {
+ const {CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const words='Correct the typo in README.md.';
+ const kickoff=`[goal-tracked g1] Goal: ${words}\n\nAcceptance criteria:\n- a1: typo corrected\n\nWork autonomously until all are verified with evidence.`;
+ const make=()=>fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ // /goal sends the kickoff as the user's own input: handlers get the delivered text and, as originalText, the bare words.
+ const goal=make();
+ goal.hooks.input({source:'interactive',text:kickoff,originalText:words,requestId:'r1'}, goal.ctx);
+ goal.hooks.before_agent_start({prompt:kickoff}, goal.ctx);
+ goal.events['adaptive-pipeline-selection']({sessionManager:goal.ctx.sessionManager,tier:'direct',task:words,names:[],beforeStart:true,scope:'task'});
+ assert.ok(goal.active().includes('subagent'),'the first request of a goal carries subagent');
+ // the same words typed by hand are a direct task and get the direct wire
+ const typed=make();
+ typed.hooks.input({source:'interactive',text:words,requestId:'r1'}, typed.ctx);
+ typed.hooks.before_agent_start({prompt:words}, typed.ctx);
+ typed.events['adaptive-pipeline-selection']({sessionManager:typed.ctx.sessionManager,tier:'direct',task:words,names:[],beforeStart:true,scope:'task'});
+ assert.ok(!typed.active().includes('subagent'));
+ // a later plain message is not part of the goal run
+ goal.hooks.input({source:'interactive',text:words,requestId:'r2'}, goal.ctx);
+ goal.hooks.before_agent_start({prompt:words}, goal.ctx);
+ goal.events['adaptive-pipeline-selection']({sessionManager:goal.ctx.sessionManager,tier:'direct',task:words,names:[],beforeStart:true,scope:'task'});
+ goal.hooks.turn_end({toolResults:[]},goal.ctx);
+ assert.ok(!goal.active().includes('subagent'),'the goal marker belongs to its own run only');
+});
+
 test('a warm cached prefix keeps the wire: it never shrinks, and tier upgrades wait for the model to ask', async () => {
  const {CORE_TOOLS,DIRECT_CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
  const model={provider:'deepseek',id:'deepseek-flash',cost:{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}};

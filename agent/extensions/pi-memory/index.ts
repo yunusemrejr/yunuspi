@@ -1999,7 +1999,10 @@ export default function (pi: ExtensionAPI) {
 			`- Long-term memory: ${MEMORY_FILE}`,
 			`- Scratchpad: ${SCRATCHPAD_FILE}`,
 			`- Daily logs (this project): ${projectDailyDir()}/<YYYY-MM-DD>.md`,
-			`- Project memory: ${projectMemoryFile()}`,
+			// A path that is not there yet is a read the model will try and fail.
+			fs.existsSync(projectMemoryFile())
+				? `- Project memory: ${projectMemoryFile()}`
+				: `- Project memory: not created yet; its first write goes to ${projectMemoryFile()}.`,
 			'- If someone says "remember this," write it immediately via memory_write.',
 		];
 

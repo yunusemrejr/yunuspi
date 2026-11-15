@@ -101,6 +101,6 @@ export function expandCommonTask<T extends { commonTask?: string; task?: string;
 			return child(step, "{previous}");
 		}) } as T;
 	}
-	if (!input.agent) throw new Error("commonTask requires a native agent, tasks, or chain.");
+	if (!input.agent && input.task === undefined) throw new Error("commonTask requires a native agent, tasks, or chain.");
 	return { ...rest, task: prefix(input.task) } as T;
 }

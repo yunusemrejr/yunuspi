@@ -46,8 +46,8 @@ function Loose(description?: string) {
 }
 
 const SubagentParamProperties = {
-	agent: Type.Optional(Type.String({ description: "Agent for one-child execution, or target for agent management actions." })),
-	task: Type.Optional(Type.String({ description: "Optional one-child task; requires agent. Cannot combine with action, workflowScript, or workflowScriptPath." })),
+	agent: Type.Optional(Type.String({ description: "Agent for one-child execution (omit for the role's default), or target for agent management actions." })),
+	task: Type.Optional(Type.String({ description: "Optional one-child task. Cannot combine with action, workflowScript, or workflowScriptPath." })),
 	commonTask: Type.Optional(Type.String({ minLength: 1, maxLength: 48000, description: "Shared brief supplied once for native agent/tasks/chain; injected into every child task. Saves parent request duplication, not child input tokens." })),
 	tasks: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native parallel children: [{agent,task,acceptance?,cwd?},...]. Use commonTask for the shared brief and short branch-specific tasks." })),
 	concurrency: Type.Optional(Type.Integer({ minimum: 1, description: "Native tasks/chain parallel width. Explicit values stay exact; absent defaults adapt to child complexity and configured capacity. All requested children still run." })),

@@ -88,6 +88,8 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
   for (const name of [...recent, ...pending.values()]) selected.add(name);
   return selected;
 }
+/** A goal's kickoff message begins with this marker (lib/goal-state.ts). */
+const GOAL_KICKOFF = '[goal-tracked ';
 export const CORE_TOOLS = new Set([
   'read','read_many','bash','edit','write','grep','find','ls','tool_search',
   'session_self','subagent','bg_wait','quality_review','skill_review',
@@ -319,7 +321,8 @@ export function registerToolDiscovery(pi: any) {
   // from an extension never inherits a stale answer. The first task of a session is always cold.
   let lastCtx: any;
   const wireIsWarm = () => { if (!started) return false; try { return wireWarmth(lastCtx).warm; } catch { return false; } };
-  let pendingInput: { id: string; text: string; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '';
+  // The kickoff of a goal is authored input: routing sees only the user's words, so the delivered text decides.
+  let pendingInput: { id: string; text: string; goal: boolean; signal?: AbortSignal } | undefined, routingTask = '', authoredTask = '', goalRun = false;
   const excluded = (name: string, prompt = routingTask) => pipelineToolExcluded(prompt, name) || pipelineToolExcluded(authoredTask, name);
   let sessionController = new AbortController();
   const invalidate = () => { generation++; sessionController.abort(); sessionController = new AbortController(); };
@@ -381,7 +384,7 @@ export function registerToolDiscovery(pi: any) {
     if (!adaptiveExecutionEnabled()) return;
     // A goal is the long work where delegation pays, and the kickoff is the
     // session's first request, so the tool list does not change later.
-    const base = tier === 'direct' && !prompt.startsWith('[goal-tracked ') ? DIRECT_CORE_TOOLS : CORE_TOOLS;
+    const base = tier === 'direct' && !goalRun ? DIRECT_CORE_TOOLS : CORE_TOOLS;
     const warm = wireIsWarm();
     for (const name of CORE_TOOLS) {
       if (!allowed.has(name)) continue;
@@ -413,7 +416,7 @@ export function registerToolDiscovery(pi: any) {
     owner = identity(ctx);
     manager = ctx.sessionManager;
     sessionSelections.clear(); lastCtx = ctx;
-    pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = '';
+    pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = ''; goalRun = false;
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
@@ -461,6 +464,7 @@ export function registerToolDiscovery(pi: any) {
           for (const name of expected) if (pipelineToolExcluded(routingTask, name)) expected.delete(name);
           // While the wire is held, inferred schemas stay tracked so a later cold task can still release them.
           if (!warm) automatic.clear();
+          goalRun = pendingInput?.goal ?? fallbackPrompt.startsWith(GOAL_KICKOFF);
           usedCore.clear(); namedCore.clear(); stageCore(classifyExecution({task:routingTask}).tier, routingTask); wireDirty = !same(expected, flushed);
           acceptedInput = pendingInput?.id ?? ''; started = true;
         }
@@ -479,7 +483,7 @@ export function registerToolDiscovery(pi: any) {
   pi.on('input', (event: any, ctx: any) => {
     if (!['interactive', 'rpc'].includes(event.source)) return;
     const text = typeof event.originalText === 'string' ? event.originalText : event.text;
-    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, text, signal: event.signal };
+    if (typeof text === 'string' && text.trim()) pendingInput = { id: event.requestId ?? `input-${++inputSequence}`, text, goal: String(event.text).startsWith(GOAL_KICKOFF), signal: event.signal };
     // A queued steer or follow-up belongs to a run that is already streaming, and a prompt sent while the agent is busy
     // is rejected by the host; only an idle prompt starts a new head.
     let idle = true;

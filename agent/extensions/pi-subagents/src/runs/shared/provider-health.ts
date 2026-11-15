@@ -96,6 +96,12 @@ export const SELF_COOLDOWN_CAP_MS = 120_000;
 /** Bounded escalation per additional consecutive failure without metadata. */
 export const CONSECUTIVE_ESCALATION_MS = 10_000;
 export const CONSECUTIVE_ESCALATION_CAP_MS = 30_000;
+/** Providers whose documented limit is a REQUEST rate (ant-ling: 2 req/s), not
+ *  tokens/min, and whose 429 carries no Retry-After. Measured 15 Nov 2026: a
+ *  retry 5-8s after a 429 succeeded (18k and 60k-token prompts), while the
+ *  40-125s token-paced waits of a real session failed as often as any request. */
+export const REQUEST_RATE_COOLDOWN_MS = 8_000;
+export const REQUEST_RATE_PROVIDERS: ReadonlySet<string> = new Set(["ant-ling"]);
 /** Deterministic rejections: short route-level hold (retry loops fail fast anyway). */
 export const DETERMINISTIC_COOLDOWN_MS = 60_000;
 /** Exhausted credit/billing (402) and rejected credentials (401) cannot heal
@@ -321,11 +327,12 @@ export function classifyFailure(errorMessage: string | undefined | null): Failur
 	return undefined;
 }
 
-/** Provider metadata wins; otherwise pace large quota requests and bounded repeats. */
+/** Provider metadata wins; otherwise pace large quota requests and bounded repeats (request-rate providers get a short fixed hold, no token pacing). */
 export function cooldownFor(
  classification: FailureClassification,
  estTokens: number | undefined,
  consecutive: number,
+ provider?: string,
 ): number {
  if (classification.kind === "deterministic") return DETERMINISTIC_COOLDOWN_MS;
  if (classification.kind === "provider-auth" || classification.billing) return ACCOUNT_HOLD_MS;
@@ -333,11 +340,13 @@ export function cooldownFor(
  const hint = classification.retryAfterMs;
  if (typeof hint === "number" && Number.isFinite(hint) && hint >= 0)
   return Math.min(RETRY_AFTER_CEILING_MS, hint);
+ const repeats = Number.isFinite(consecutive) ? Math.max(0, Math.floor(consecutive) - 1) : 0;
+ const escalation = Math.min(CONSECUTIVE_ESCALATION_CAP_MS, repeats * CONSECUTIVE_ESCALATION_MS);
+ if (classification.kind === "quota-rate" && provider !== undefined && REQUEST_RATE_PROVIDERS.has(provider))
+  return Math.min(SELF_COOLDOWN_CAP_MS, REQUEST_RATE_COOLDOWN_MS + escalation);
  const pacing = classification.kind === "quota-rate" && Number.isFinite(estTokens) && estTokens! >= TOKEN_PACING_MIN_TOKENS
   ? Math.ceil((estTokens! - TOKEN_PACING_MIN_TOKENS) / TOKEN_PACING_STEP_TOKENS) * TOKEN_PACING_STEP_MS
   : 0;
- const repeats = Number.isFinite(consecutive) ? Math.max(0, Math.floor(consecutive) - 1) : 0;
- const escalation = Math.min(CONSECUTIVE_ESCALATION_CAP_MS, repeats * CONSECUTIVE_ESCALATION_MS);
  return Math.min(SELF_COOLDOWN_CAP_MS, COOLDOWN_MS + pacing + escalation);
 }
 
@@ -622,7 +631,7 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
 				: entry.requests.length
 					? entry.requests[entry.requests.length - 1]!.estTokens
 					: undefined;
-		const cooldownMs = cooldownFor(classification, estTokens, consecutive);
+		const cooldownMs = cooldownFor(classification, estTokens, consecutive, input.provider);
 		const cooldownUntil = now + cooldownMs;
 		const record: FailureRecord = {
 			kind: classification.kind,

@@ -173,3 +173,21 @@ test('a team setting the launch cannot use is reported under its own code, not a
   assert.equal(forked.ok, true, 'an explicit fork never looks at the role\'s model');
   assert.equal(forked.contract.context, 'fork');
 });
+
+test('a child with no agent, or one named only by its role, gets that role\'s default agent', () => {
+  const none = () => false;
+  assert.deepEqual(team.agentForRole(undefined, undefined, none), { agent: 'delegate' });
+  assert.deepEqual(team.agentForRole(undefined, 'legwork', none), { agent: 'delegate' });
+  assert.deepEqual(team.agentForRole(undefined, 'helper', none), { agent: 'worker' });
+  assert.deepEqual(team.agentForRole(undefined, 'main', none), { agent: 'delegate' });
+  assert.deepEqual(team.agentForRole('legwork', undefined, none), { agent: 'delegate', role: 'legwork' });
+  assert.deepEqual(team.agentForRole(' Helper ', undefined, none), { agent: 'worker', role: 'helper' });
+  assert.deepEqual(team.agentForRole('main', undefined, none), { agent: 'delegate', role: 'main' });
+  assert.deepEqual(team.agentForRole('helper', 'legwork', none), { agent: 'worker', role: 'legwork' }, 'an explicit role wins');
+  assert.equal(team.agentForRole('helper', undefined, name => name === 'helper'), undefined, 'a real agent of that name runs as written');
+  assert.equal(team.agentForRole('scout', undefined, none), undefined, 'any other name is left to the agent lookup');
+  assert.deepEqual(team.agentForRole(undefined, 'boss', none), { agent: 'delegate' }, 'a bad role is left for the role check');
+  assert.deepEqual(team.agentForRole(null, 'helper', none), { agent: 'worker' }, 'null is no agent');
+  assert.equal(team.agentForRole(7, 'helper', none), undefined, 'an agent that is not a string is left for the caller to refuse');
+  assert.deepEqual(Object.keys(team.ROLE_DEFAULT_AGENT).sort(), [...team.TEAM_ROLES].sort());
+});

@@ -39,7 +39,7 @@ import { runSync } from "./execution.ts";
 import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
 import { normalizeParentModel, resolveChildRoute, sessionChildModel, validateCallRoles, withCallRole, type ChildRoute, type ParentModel } from "../shared/session-model.ts";
-import type { TeamRole } from "../../../../lib/team.ts";
+import { agentForRole, type TeamRole } from "../../../../lib/team.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
 import { recordRun } from "../shared/run-history.ts";
 import {
@@ -2351,9 +2351,20 @@ function canonicalizeAgentName(name: string, agents: AgentConfig[], diagnostics:
 
 function canonicalizeExecutionParams(params: SubagentParamsLike, agents: AgentConfig[], diagnostics: AgentDiscoveryDiagnostic[] | undefined, context: UnknownAgentDiagnosticContext): { params?: SubagentParamsLike; error?: string } {
 	const resolve = (name: string, location?: string): { name?: string; error?: string } => {
+		if (typeof name !== "string") return { error: `agent must be a string${location ? ` (${location})` : ""}.` };
 		const result = canonicalizeAgentName(name, agents, diagnostics, context);
 		return result.error && location ? { error: `${result.error} (${location})` } : result;
 	};
+	const isAgent = (name: string): boolean => {
+		const found = resolveAgentName(name, agents);
+		return Boolean(found.agent || found.error);
+	};
+	// A child with no agent, or one named only by its role, runs that role's default agent.
+	const withRoleAgent = <T extends { agent?: string; role?: TeamRole }>(child: T): T => {
+		const chosen = agentForRole(child.agent, child.role ?? params.role, isAgent);
+		return chosen ? { ...child, agent: chosen.agent, ...(chosen.role ? { role: chosen.role } : {}) } : child;
+	};
+	if (!params.tasks && !params.chain && (params.agent !== undefined || params.task !== undefined)) params = withRoleAgent(params);
 	if (params.agent) {
 		const result = resolve(params.agent);
 		if (result.error) return { error: result.error };
@@ -2371,7 +2382,7 @@ function canonicalizeExecutionParams(params: SubagentParamsLike, agents: AgentCo
 	if (params.tasks) {
 		const tasks: TaskParam[] = [];
 		for (let index = 0; index < params.tasks.length; index++) {
-			const task = params.tasks[index]!;
+			const task = withRoleAgent(params.tasks[index]!);
 			const result = resolve(task.agent, `task ${index + 1}`);
 			if (result.error) return { error: result.error };
 			tasks.push({ ...task, agent: result.name! });
@@ -2385,7 +2396,7 @@ function canonicalizeExecutionParams(params: SubagentParamsLike, agents: AgentCo
 			if (isParallelStep(step)) {
 				const parallel: ParallelTaskItem[] = [];
 				for (let taskIndex = 0; taskIndex < step.parallel.length; taskIndex++) {
-					const task = step.parallel[taskIndex]!;
+					const task = withRoleAgent(step.parallel[taskIndex]!);
 					const result = resolve(task.agent, `step ${index + 1}, task ${taskIndex + 1}`);
 					if (result.error) return { error: result.error };
 					parallel.push({ ...task, agent: result.name! });
@@ -2394,18 +2405,16 @@ function canonicalizeExecutionParams(params: SubagentParamsLike, agents: AgentCo
 				continue;
 			}
 			if (isDynamicParallelStep(step)) {
-				const result = resolve(step.parallel.agent, `step ${index + 1}`);
+				const template = withRoleAgent(step.parallel);
+				const result = resolve(template.agent, `step ${index + 1}`);
 				if (result.error) return { error: result.error };
-				chain.push({ ...step, parallel: { ...step.parallel, agent: result.name! } });
+				chain.push({ ...step, parallel: { ...template, agent: result.name! } });
 				continue;
 			}
-			if ("agent" in step && typeof step.agent === "string") {
-				const result = resolve(step.agent, `step ${index + 1}`);
-				if (result.error) return { error: result.error };
-				chain.push({ ...step, agent: result.name! });
-				continue;
-			}
-			chain.push(step);
+			const sequential = withRoleAgent(step);
+			const result = resolve(sequential.agent, `step ${index + 1}`);
+			if (result.error) return { error: result.error };
+			chain.push({ ...sequential, agent: result.name! });
 		}
 		params = { ...params, chain };
 	}

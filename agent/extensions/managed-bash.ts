@@ -56,6 +56,9 @@ const KILL_TERM_GRACE_MS = 3000;
 const MAX_FINISHED_JOBS = 32;
 /** Hard bound for live managed helper processes; finished-job retention is a separate limit. */
 export const MAX_ACTIVE_JOBS = 8;
+// WHY detected in the shell: the sandbox's PID namespace ends a command's background
+// children before Node sees the shell exit, so only bash still sees the job; a command's own EXIT trap replaces this one.
+const BACKGROUND_JOB_EXIT_TRAP = `trap '[ -z "$(jobs -pr 2>/dev/null)" ] || echo "[managed bash] A process this command left running in the background (with & or nohup) was stopped when the call returned, so its work did not finish. Start work that must outlive the call with bg_run." >&2' EXIT; `;
 
 type JobState = "running" | "completed" | "failed" | "timed_out" | "killed";
 
@@ -246,7 +249,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			const shellConfig = getShellConfig();
 			// WHY: an unbounded writer (ffmpeg apad) once filled the SSD; cap single files in-shell.
 			const diskLimits = getDiskLimits();
-			const shellCommand = fileSizeLimitPrefix(diskLimits) + command;
+			const shellCommand = BACKGROUND_JOB_EXIT_TRAP + fileSizeLimitPrefix(diskLimits) + command;
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
 			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, shellCommand]);
 			const child = spawn(

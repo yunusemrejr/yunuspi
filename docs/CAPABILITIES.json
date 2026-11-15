@@ -3108,7 +3108,7 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 587,
+        "line": 590,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -3267,37 +3267,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2585,
+        "line": 2588,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2445,
+        "line": 2448,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2728,
+        "line": 2731,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2827,
+        "line": 2830,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2982,
+        "line": 2985,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2097,
+        "line": 2100,
         "kind": "literal"
       },
       {
@@ -3333,7 +3333,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 632,
+        "line": 635,
         "kind": "literal"
       },
       {
@@ -3375,7 +3375,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2258,
+        "line": 2261,
         "kind": "literal"
       },
       {
@@ -3472,7 +3472,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 521,
+        "line": 525,
         "kind": "literal"
       },
       {
@@ -3619,37 +3619,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2585,
+        "line": 2588,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2445,
+        "line": 2448,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2728,
+        "line": 2731,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2827,
+        "line": 2830,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2982,
+        "line": 2985,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2097,
+        "line": 2100,
         "kind": "literal"
       },
       {
@@ -3673,7 +3673,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 632,
+        "line": 635,
         "kind": "literal"
       },
       {
@@ -3715,7 +3715,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2258,
+        "line": 2261,
         "kind": "literal"
       },
       {
@@ -3769,7 +3769,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 521,
+        "line": 525,
         "kind": "literal"
       },
       {
@@ -3846,7 +3846,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          590
+          593
         ],
         "knownNames": [
           "bash",

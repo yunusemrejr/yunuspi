@@ -36,7 +36,9 @@ const HURRY_NOTE_TYPE = "session-hurry";
 /** Events further apart than this are idle time, not run time. */
 const GAP_MS = 10 * 60_000;
 const METHOD =
-	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to the subagent tool.";
+	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look";
+/** Said only when the tool is on the wire: pointing at a tool the model cannot call costs it a failed call. */
+const DELEGATE = "; hand legwork to the subagent tool";
 
 /** A message asking for speed, in English or Turkish. */
 const HURRY_PATTERNS: RegExp[] = [
@@ -117,6 +119,8 @@ export interface SessionFactsInput {
 	lastRun?: { minutes: number; usd?: number };
 	/** Installed guides that match the request; the line is left out when there are none. */
 	guides?: readonly CatalogSkill[];
+	/** The subagent tool is active for this run. */
+	delegate?: boolean;
 }
 
 /** `name: description clipped at a word (file)`, as the facts line lists a guide. */
@@ -142,7 +146,7 @@ export function sessionFactsText(input: SessionFactsInput): string {
 	const guides = input.guides?.length
 		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
 		: "";
-	return `${line}\n${METHOD}${guides}`;
+	return `${line}\n${METHOD}${input.delegate ? DELEGATE : ""}.${guides}`;
 }
 
 /**
@@ -334,6 +338,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				cachePercent,
 				lastRun,
 				guides: matchingGuidesFor(event),
+				delegate: pi.getActiveTools().includes("subagent"),
 			});
 			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
 			if (hurry) hurrySent = true;

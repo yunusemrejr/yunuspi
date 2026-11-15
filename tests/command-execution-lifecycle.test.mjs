@@ -180,3 +180,20 @@ test('an unavailable optional crash reaper cannot crash an otherwise successful 
     if (prevDir === undefined) delete process.env.PI_OWNER_DIR; else process.env.PI_OWNER_DIR = prevDir;
   }
 });
+
+test('managed bash reports a background job it stopped when the call returned', async () => {
+  const { runManagedCommand } = await import('../agent/extensions/managed-bash.ts');
+  const note = '[managed bash] A process this command left running in the background (with & or nohup) was stopped when the call returned, so its work did not finish. Start work that must outlive the call with bg_run.';
+  const left = await runManagedCommand('sleep 30 &', scratch, 10, undefined, Infinity);
+  assert.equal(left.exitCode, 0);
+  assert.ok(left.output.includes(note), `a stopped background job went unreported: ${left.output}`);
+  const waited = await runManagedCommand('sleep 0.2 & wait; echo done', scratch, 10, undefined, Infinity);
+  assert.equal(waited.exitCode, 0);
+  assert.match(waited.output, /done/);
+  assert.ok(!waited.output.includes(note), `a waited-for job was reported as stopped: ${waited.output}`);
+  const plain = await runManagedCommand('echo hi', scratch, 10, undefined, Infinity);
+  assert.equal(plain.output.trim(), 'hi');
+  const failed = await runManagedCommand('sleep 30 & exit 3', scratch, 10, undefined, Infinity);
+  assert.equal(failed.exitCode, 3);
+  assert.ok(failed.output.includes(note), `a failing command's background job went unreported: ${failed.output}`);
+});

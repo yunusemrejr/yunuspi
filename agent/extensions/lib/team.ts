@@ -26,6 +26,32 @@ export const BUILTIN_AGENT_ROLES: Readonly<Record<string, TeamRole>> = Object.fr
 	oracle: "main",
 });
 
+/** The agent a child runs when it names none, or names only a role: the plain worker of that role. */
+export const ROLE_DEFAULT_AGENT: Readonly<Record<TeamRole, string>> = Object.freeze({
+	legwork: "delegate",
+	helper: "worker",
+	main: "delegate",
+});
+
+const isTeamRole = (value: unknown): value is TeamRole => (TEAM_ROLES as readonly unknown[]).includes(value);
+
+/**
+ * The agent for a child that gave no `agent`, or gave a role name ("legwork",
+ * "helper", "main") that no agent answers to, with the role that name stood for
+ * unless the child or call already set one. Undefined when `agent` names a real
+ * agent, or is not a string at all: it runs as written and the caller's own
+ * checks report it. A `role` that is not a role is ignored here and refused
+ * later by the caller's own role check.
+ */
+export function agentForRole(agent: unknown, role: unknown, isAgent: (name: string) => boolean): { agent: string; role?: TeamRole } | undefined {
+	const given = isTeamRole(role) ? role : undefined;
+	if (agent === undefined || agent === null) return { agent: ROLE_DEFAULT_AGENT[given ?? "legwork"] };
+	if (typeof agent !== "string") return undefined;
+	const named = agent.trim().toLowerCase();
+	if (!isTeamRole(named) || isAgent(agent)) return undefined;
+	return { agent: ROLE_DEFAULT_AGENT[named], role: given ?? named };
+}
+
 export interface TeamSettings {
 	/** "inherit" (the session's model) or "provider/model-id". */
 	helper: string;

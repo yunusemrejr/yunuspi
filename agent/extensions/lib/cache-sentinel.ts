@@ -46,6 +46,10 @@ interface Fingerprint {
 	systemParts: Array<[string, string]>;
 	toolNames: string[];
 	messages: string[];
+	/** Serialized length of each message, to tell a tail divergence from a real prefix change. */
+	sizes: number[];
+	/** Serialized length of the tool schemas plus the system prompt (the same strings `tools` and `system` hash). */
+	headSize: number;
 	roles: string[];
 }
 
@@ -59,20 +63,24 @@ const HIT_FRACTION = 0.6;
 
 const sha = (text: string): string => createHash("sha1").update(text).digest("base64url").slice(0, 16);
 
-// Per-object digest memo: several provider paths hand the same message/tool
-// objects to before_provider_request on every request, and re-stringifying +
-// re-hashing the whole history per request grows linearly with session size
-// (~18ms at 800 messages). Identity-keyed, so a replaced object re-hashes; a
-// mutated-in-place object would keep its old digest (payloads are built, not
-// mutated, after this hook).
-const digestMemo = new WeakMap<object, string>();
-function digestOf(value: unknown): string {
-	if (!value || typeof value !== "object") return sha(JSON.stringify(value) ?? "");
-	const hit = digestMemo.get(value);
+// Per-object identity memo (digest + serialized size): several provider paths hand
+// the same message/tool objects to before_provider_request on every request, and
+// re-stringifying + re-hashing the whole history per request grows linearly with
+// session size (~18ms at 800 messages). Identity-keyed, so a replaced object
+// re-hashes; a mutated-in-place object would keep its old digest (payloads are
+// built, not mutated, after this hook).
+const identityMemo = new WeakMap<object, { digest: string; size: number }>();
+function identityOf(value: unknown): { digest: string; size: number } {
+	if (!value || typeof value !== "object") {
+		const text = JSON.stringify(value) ?? "";
+		return { digest: sha(text), size: text.length };
+	}
+	const hit = identityMemo.get(value);
 	if (hit !== undefined) return hit;
-	const digest = sha(JSON.stringify(value) ?? "");
-	digestMemo.set(value, digest);
-	return digest;
+	const text = JSON.stringify(value) ?? "";
+	const identity = { digest: sha(text), size: text.length };
+	identityMemo.set(value, identity);
+	return identity;
 }
 
 const textOf = (value: unknown): string => typeof value === "string" ? value
@@ -95,12 +103,16 @@ export function fingerprintPayload(payload: any): Fingerprint | undefined {
 	const list: any[] = payload[key];
 	const lead = list[0];
 	const systemText = Object.keys(system).length ? textOf(Object.values(system)) : /^(?:system|developer)$/.test(String(lead?.role ?? "")) ? textOf(lead.content) : "";
+	const toolsJson = JSON.stringify(tools), systemJson = JSON.stringify(system);
+	const identities = list.map((message) => identityOf(message));
 	return {
 		systemParts: systemText.split(/\n{2,}/).slice(0, 400).map((part) => [sha(part), part.trim().replace(/\s+/g, " ").slice(0, 60)]),
-		tools: sha(JSON.stringify(tools)),
-		system: sha(JSON.stringify(system)),
+		tools: sha(toolsJson),
+		system: sha(systemJson),
 		toolNames,
-		messages: list.map((message) => digestOf(message)),
+		messages: identities.map((identity) => identity.digest),
+		sizes: identities.map((identity) => identity.size),
+		headSize: toolsJson.length + systemJson.length,
 		roles: list.map((message) => String(message?.role ?? message?.type ?? "")),
 	};
 }
@@ -162,9 +174,19 @@ export function createCacheSentinel(options: { ttlMs?: number } = {}) {
 			const shared = Math.min(before.fp.messages.length, sent.fp.messages.length);
 			while (index < shared && before.fp.messages[index] === sent.fp.messages[index]) index++;
 			if (index < before.fp.messages.length) {
-				miss.cause = /^(?:system|developer)$/.test(sent.fp.roles[index] ?? "") ? "system" : "history";
-				miss.atMessage = index;
-				if (miss.cause === "system") noteSystemChange(miss, before.fp, sent.fp);
+				// The standing notes are re-sent after the newest message, so every request differs
+				// near the tail; only a prefix too short to have been served from cache blames the
+				// harness, and a longer intact one means the provider missed.
+				let intact = before.fp.headSize, whole = before.fp.headSize;
+				for (let i = 0; i < before.fp.sizes.length; i++) {
+					whole += before.fp.sizes[i];
+					if (i < index) intact += before.fp.sizes[i];
+				}
+				if (intact < whole * HIT_FRACTION) {
+					miss.cause = /^(?:system|developer)$/.test(sent.fp.roles[index] ?? "") ? "system" : "history";
+					miss.atMessage = index;
+					if (miss.cause === "system") noteSystemChange(miss, before.fp, sent.fp);
+				}
 			}
 		}
 		summary.misses += 1;
