@@ -596,6 +596,15 @@ export default function (pi: ExtensionAPI) {
 			if (command) event.input.command = command;
 		}
 		if (event.toolName !== "bash") return;
+		// Models pass bg_run's arguments to bash; the bash schema keeps the
+		// unknown keys, so refuse before anything runs instead of letting the
+		// call run unbounded in the foreground and die at the default timeout.
+		if (event.input?.run_in_background === true || event.input?.background === true)
+			return {
+				block: true,
+				reason:
+					"bash has no run_in_background. Start a long command with bg_run({ command, name }): it returns at once and reports when the command finishes. To keep it in the foreground, pass timeout in seconds.",
+			};
 		event.input.timeout = positiveSeconds(event.input.timeout) ?? (DOWNLOAD_COMMAND_RE.test(String(event.input.command ?? "")) ? DEFAULT_DOWNLOAD_TIMEOUT_SECONDS : DEFAULT_BASH_TIMEOUT_SECONDS);
 	});
 	pi.on("session_start", (_event, ctx) => {

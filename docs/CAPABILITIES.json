@@ -2838,52 +2838,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113996
+        "line": 114001
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113700
+        "line": 113705
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113757
+        "line": 113762
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113792
+        "line": 113797
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113769
+        "line": 113774
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113911
+        "line": 113916
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113725
+        "line": 113730
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113693
+        "line": 113698
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113930
+        "line": 113935
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113707
+        "line": 113712
       },
       {
         "name": "logs",
@@ -3333,7 +3333,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 623,
+        "line": 632,
         "kind": "literal"
       },
       {
@@ -3345,7 +3345,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 796,
+        "line": 807,
         "kind": "literal"
       },
       {
@@ -3405,7 +3405,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/skill-review.ts",
-        "line": 59,
+        "line": 95,
         "kind": "literal"
       },
       {
@@ -3472,7 +3472,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 519,
+        "line": 521,
         "kind": "literal"
       },
       {
@@ -3673,7 +3673,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 623,
+        "line": 632,
         "kind": "literal"
       },
       {
@@ -3685,7 +3685,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 796,
+        "line": 807,
         "kind": "literal"
       },
       {
@@ -3745,7 +3745,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/skill-review.ts",
-        "line": 59,
+        "line": 95,
         "kind": "literal"
       },
       {
@@ -3769,7 +3769,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 519,
+        "line": 521,
         "kind": "literal"
       },
       {

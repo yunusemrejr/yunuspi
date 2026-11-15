@@ -258,6 +258,31 @@ test('an AND chain that exits 0 earns a receipt for every check in it; masked or
  assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['passed','passed','passed']);
 });
 
+test('a bounded or linted check piped through tail runs under pipefail, and a run the bash timeout cut off is no failed check', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-timeout-pipe-')),tools={};
+ const ctx={cwd},api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix and verify the suite'});
+ for(const command of [
+  `cd ${cwd} && timeout 900 python -m pytest -q -p no:cacheprovider 2>&1 | tail -4`,
+  `cd ${cwd} && timeout 900 python3 -m unittest discover -s tests -t . -q 2>&1 | tail -6`,
+  `cd ${cwd} && timeout 110 python3 -m unittest tests.test_a tests.test_b -q 2>&1 | tail -4`,
+  `cd ${cwd} && ruff check . --output-format concise 2>&1 | tail -5`,
+  `cd ${cwd} && timeout 60 python3 -m pytest -q 2>&1 | tail -4 && echo done && git status --short`,
+ ]){
+  const event={toolName:'bash',toolCallId:'pipe',input:{command}};
+  await api.call(event,ctx);
+  assert.equal(event.input.command,`set -o pipefail; ${command}`,command);
+ }
+ fs.writeFileSync(path.join(cwd,'value.js'),'export const value=1;');
+ await api.result({toolName:'write',toolCallId:'write',input:{path:'value.js'},isError:false},ctx);
+ await tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The focused check covers the change.',commands:['node --test']},undefined,undefined,ctx);
+ const event={toolName:'bash',toolCallId:'cut',input:{command:'node --test'}};
+ await api.call(event,ctx);
+ await api.result({...event,isError:true,details:{},content:[{type:'text',text:'Command timed out after 120 seconds and was stopped. Check its partial output files before rerunning.'}]},ctx);
+ assert.equal(api.snapshot().need,'missing','a run cut off by the timeout proved nothing either way');
+});
+
 test('a chain that hides segments or changes the shell for later ones earns nothing', () => {
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-chain-shape-'));
  try {

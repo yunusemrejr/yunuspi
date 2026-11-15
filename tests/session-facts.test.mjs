@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const extensionUrl = pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href;
 const { default: registerSessionFacts, hurryRequested, HURRY_NOTE } = await import(extensionUrl);
 
-const METHOD = 'For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to subagents.';
+const METHOD = 'For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to the subagent tool.';
 
 /** An assistant message entry with usage, as the session file stores it. */
 const assistantEntry = ({ input = 4000, output = 200, cacheRead = 96000, total = 0.012 } = {}) => ({
@@ -93,7 +93,7 @@ function fixture(t, { settings, entries = [] } = {}) {
 		assert.deepEqual({ customType: message.customType, display: message.display, options }, { customType: 'run-budget', display: true, options: { deliverAs: 'steer' } });
 		return message.content;
 	};
-	return { pi, hooks, emit, ctx, humanMessage, store, stored, manager, notifications, entries, toolResult };
+	return { pi, hooks, emit, ctx, humanMessage, store, stored, manager, notifications, entries, toolResult, sent };
 }
 
 const NOW_SHAPE = /^Now: [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2} \([A-Za-z/_+0-9]+\)\./;
@@ -368,6 +368,63 @@ test('speed detection reads prose in both languages and not a technical term', a
 	]) assert.equal(hurryRequested(text), false, text);
 });
 
+test('a hurry steer into a running run sends the speed note once', async (t) => {
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+
+	// The run started with a plain message; the user then steers speed into it.
+	const [first] = await f.humanMessage('Add a retry to the uploader.');
+	assert.doesNotMatch(first.message.content, /The user wants speed now/);
+	const steer = async (text) => {
+		const before = f.sent.length;
+		const responses = await f.emit('input', { type: 'input', text, source: 'interactive', streamingBehavior: 'steer' });
+		assert.equal(responses.length, 0, 'the input handler alters nothing');
+		const made = f.sent.length - before;
+		if (made > 0) {
+			assert.equal(made, 1, 'one note, as its own message');
+			const { message, options } = f.sent.at(-1);
+			assert.deepEqual({ customType: message.customType, display: message.display, options }, { customType: 'session-hurry', display: false, options: { deliverAs: 'steer' } });
+			return message.content;
+		}
+		return undefined;
+	};
+	assert.equal(await steer('be quick'), HURRY_NOTE);
+	assert.equal(await steer('also be quick'), undefined, 'a second hurry steer in the same run sends nothing more');
+	assert.equal(await steer('also fix the footer'), undefined, 'a plain steer sends nothing');
+
+	// An input with no streamingBehavior starts a run of its own: the run path
+	// carries the note, and the steer path does not send it again.
+	const beforeNewRun = f.sent.length;
+	const [replies] = await f.humanMessage('hurry, one more thing');
+	assert.ok(replies.message.content.endsWith(`\n${HURRY_NOTE}`), 'a run-starting hurry still carries the note');
+	assert.equal(f.sent.length, beforeNewRun, 'no steer note for a run that started with hurry');
+	assert.equal(await steer('be quick'), undefined, 'the note already went with this run');
+
+	// Once the run ends, a new one may be hurried by a steer again.
+	await f.emit('agent_end', { type: 'agent_end', messages: [] });
+	await f.emit('input', { type: 'input', text: 'Next thing.', source: 'interactive' });
+	assert.equal(await steer('hurry up'), HURRY_NOTE, 'a later run can be steered into speed again');
+});
+
+test('rpc is the user’s own message; other sources are not steered into speed', async (t) => {
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+	await f.humanMessage('Fix the failing test.');
+	const rpc = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(rpc.pi);
+	await rpc.humanMessage('Fix the failing test.');
+	await rpc.emit('input', { type: 'input', text: 'be quick', source: 'rpc', streamingBehavior: 'steer' });
+	assert.equal(rpc.sent.length, 1);
+	assert.equal(rpc.sent[0].message.content, HURRY_NOTE);
+	assert.deepEqual(rpc.sent[0].options, { deliverAs: 'steer' });
+
+	await f.emit('input', { type: 'input', text: 'be quick', source: 'extension', streamingBehavior: 'steer' });
+	assert.equal(f.sent.length, 0, 'a harness message is not the user asking for speed');
+
+	await f.emit('input', { type: 'input', text: 'be quick', source: 'interactive' });
+	assert.equal(f.sent.length, 0, 'without streamingBehavior the run path carries it, not the steer path');
+});
+
 test('/budget prints the live run line', async (t) => {
 	const clock = { at: Date.UTC(2026, 10, 14, 13, 0, 0) };
 	const realNow = Date.now;
@@ -395,4 +452,50 @@ test('/budget prints the live run line', async (t) => {
 	assert.match(await budgetLine({ run: { softMinutes: 2, softUsd: 0 } }), /Run: 1 min, \$0\.001 of 2 min\n/);
 	assert.match(await budgetLine({ run: { softMinutes: 0, softUsd: 0 } }), /Run: 1 min, \$0\.001\n/, 'the run line drops the budget part when both limits are off');
 	assert.match(await budgetLine({ run: { softMinutes: 0, softUsd: 0.0015 } }), /Run: 1 min, \$0\.001 of \$0\.0015\n/, 'a limit below one cent is shown as it was set');
+});
+
+test('a request that names a subject gets the installed guides that match it, once and stored', async (t) => {
+	const skills = [
+		{ name: 'motion-graphics-production', description: 'Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds, explainers and audio-reactive visuals.', filePath: '/fixture/skills/motion-graphics-production/SKILL.md' },
+		{ name: 'video-captions', description: 'Burn captions into video and check their timing.', filePath: '/fixture/skills/video-captions/SKILL.md' },
+		{ name: 'database-migration', description: 'Plan schema migrations for a relational database.', filePath: '/fixture/skills/database-migration/SKILL.md' },
+		{ name: 'git-github', description: 'Commit discipline, push rules and pull requests.', filePath: '/fixture/skills/git-github/SKILL.md' },
+	];
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+	const ask = async (text) => {
+		await f.emit('input', { type: 'input', text, source: 'interactive' });
+		const [reply] = await f.emit('before_agent_start', { type: 'before_agent_start', prompt: text, systemPrompt: 'BASE', systemPromptOptions: { skills } });
+		return reply.message.content;
+	};
+	const withLine = await ask('Make a motion graphics video with kinetic typography and captions for the launch.');
+	const lines = withLine.split('\n');
+	assert.equal(lines[1], METHOD, 'the guides follow the method sentence');
+	assert.equal(lines[2], 'Guides that match this request (read the ones that bear on it before choosing the approach): motion-graphics-production: Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds,… (/fixture/skills/motion-graphics-production/SKILL.md); video-captions: Burn captions into video and check their timing. (/fixture/skills/video-captions/SKILL.md)', 'a long description is clipped at a word, a short one kept whole');
+	assert.doesNotMatch(withLine, /database-migration|git-github/, 'only skills that bear on the request');
+
+	for (const plain of ['be quick', 'commit and push', 'why did that test fail?', 'thanks', 'continue']) {
+		assert.doesNotMatch(await ask(plain), /Guides that match/, plain);
+	}
+});
+
+test('a goal kickoff is matched on the goal sentence, not its criteria and standards', async (t) => {
+	const skills = [
+		{ name: 'motion-graphics-production', description: 'Produce timed motion graphics for video, including kinetic typography.', filePath: '/fixture/skills/motion-graphics-production/SKILL.md' },
+		{ name: 'database-migration', description: 'Plan schema migrations for a relational database with rollback checks.', filePath: '/fixture/skills/database-migration/SKILL.md' },
+	];
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+	const kickoff = (sentence, criteria) => `[goal-tracked gmx1] Goal: ${sentence}\n\nAcceptance criteria (refine with goal({action:"criteria", items:[…]}) if they miss something; keep it to what the user asked):\n- C1: ${criteria}\n- V: Result checked end to end.\n\nWork autonomously until all are verified with evidence.\n\nStandards: before starting, adopt each one this goal's work calls for.\n- video: a finished video with motion graphics and kinetic typography`;
+	const ask = async (text) => {
+		await f.emit('input', { type: 'input', text, source: 'interactive' });
+		const [reply] = await f.emit('before_agent_start', { type: 'before_agent_start', prompt: text, systemPrompt: 'BASE', systemPromptOptions: { skills } });
+		return reply.message.content;
+	};
+	const sentence = 'Plan the database migration with a rollback';
+	const matched = await ask(kickoff(sentence, sentence));
+	assert.match(matched, /Guides that match this request .*: database-migration: /);
+	assert.doesNotMatch(matched, /motion-graphics-production/, 'the standards text about video does not pick a video guide');
+	const other = 'rename the uploader retry settings';
+	assert.doesNotMatch(await ask(kickoff(other, `${other}; a motion graphics video with kinetic typography`)), /Guides that match/, 'a criterion that mentions video is not the request');
 });

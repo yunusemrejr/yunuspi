@@ -27302,12 +27302,15 @@ function getAutofixPolicyForFile(filePath, context = {}) {
     };
   }
   if ([".md", ".mdx"].includes(ext2)) {
+    // markdownlint --fix rewrites lines the edit never touched (MD004 turns a
+    // file's minority bullet style into its majority one), so like prettier on
+    // markdown it only runs when the project configures markdownlint itself.
     return {
       toolNames: ["markdownlint"],
-      preferredTools: ["markdownlint"],
+      preferredTools: context.hasMarkdownlintConfig ? ["markdownlint"] : [],
       defaultTool: "markdownlint",
-      defaultWhenUnconfigured: true,
-      gate: "smart-default",
+      defaultWhenUnconfigured: false,
+      gate: "config-first",
       safe: true
     };
   }
@@ -93144,7 +93147,8 @@ async function runAutofix(filePath, cwd, getFlag, dbg2, deps, getFlagSource) {
     hasDetektConfig: hasDetektConfig(cwd),
     hasKtfmtConfig: hasKtfmtConfig(cwd),
     hasKtlintConfig: hasKtlintConfig(cwd),
-    hasOxlintConfig: hasOxlintConfig(cwd)
+    hasOxlintConfig: hasOxlintConfig(cwd),
+    hasMarkdownlintConfig: hasMarkdownlintConfig(cwd)
   };
   const autofixPolicy = getAutofixPolicyForFile(filePath, autofixContext);
   const preferredAutofixTools = autofixPolicy?.safe ? getPreferredAutofixTools(filePath, autofixContext) : [];
@@ -94019,7 +94023,8 @@ async function handleAgentEnd({ ctxCwd, getFlag, getFlagSource, notify, dbg: dbg
       hasDetektConfig: hasDetektConfig(record2.cwd),
       hasOxlintConfig: hasOxlintConfig(record2.cwd),
       hasKtfmtConfig: hasKtfmtConfig(record2.cwd),
-      hasKtlintConfig: hasKtlintConfig(record2.cwd)
+      hasKtlintConfig: hasKtlintConfig(record2.cwd),
+      hasMarkdownlintConfig: hasMarkdownlintConfig(record2.cwd)
     });
     const scopeKey = policy?.scope && policy.scope !== "file" ? `${policy.defaultTool ?? "unknown"}:${path153.resolve(record2.cwd)}` : `${policy?.defaultTool ?? "unknown"}:${filePath}`;
     if (executedAutofixScopes.has(scopeKey))

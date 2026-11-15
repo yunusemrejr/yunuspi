@@ -313,7 +313,7 @@ export function createShellToolDefinition(cwd, config, options) {
                         const timeoutSecs = err.message.split(":")[1];
                         // Renders and builds were rerun in the foreground with a guessed timeout and
                         // killed near the end; say the process is gone and where long work belongs.
-                        throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds and was stopped. Check its partial output files before rerunning; run renders, builds and other long jobs with bg_run, which reports back when they finish.`));
+                        throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds and was stopped. Check its partial output files before rerunning; run renders, builds and other long jobs with bg_run, which reports back when they finish. A process left behind with \`&\` or nohup is killed when the call returns; setsid is not a reliable way around it.`));
                     }
                     throw err;
                 }

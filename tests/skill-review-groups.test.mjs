@@ -4,7 +4,7 @@ import path from "node:path";
 import {pathToFileURL} from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const {registerSkillReview} = await import(pathToFileURL(path.join(root, "agent/extensions/lib/skill-review.ts")));
+const {registerSkillReview, rankCatalog, matchingGuides} = await import(pathToFileURL(path.join(root, "agent/extensions/lib/skill-review.ts")));
 const {CAPABILITY_GROUPS, capabilityGroup, groupOverview} = await import(pathToFileURL(path.join(root, "agent/extensions/lib/capability-groups.ts")));
 
 const names = [
@@ -112,4 +112,37 @@ test("explicit discovery keeps short domain names ahead of incidental descriptio
   const api = await f.review.execute('search',{action:'search',query:'API',limit:8});
   assert.deepEqual(api.details.results.map(skill=>skill.name),['api-security']);
   assert.equal(f.entries.length,before,'search does not create review obligations or delivery receipts');
+});
+
+const guideCatalog = [
+  {name:'database-migration',description:'Plan and run schema migrations for a relational database with rollback checks.',file:'/fixture/skills/database-migration/SKILL.md'},
+  {name:'video-editing',description:'Cut, caption and encode video with ffmpeg; mix audio and music.',file:'/fixture/skills/video-editing/SKILL.md'},
+  {name:'motion-graphics',description:'Timed motion graphics for video: title sequences and kinetic typography.',file:'/fixture/skills/motion-graphics/SKILL.md'},
+  {name:'video-captions',description:'Burn captions into video and check their timing against the audio.',file:'/fixture/skills/video-captions/SKILL.md'},
+  {name:'video-codecs',description:'Choose a video codec and bitrate for audio and video delivery.',file:'/fixture/skills/video-codecs/SKILL.md'},
+  {name:'git-github',description:'Commit discipline, push rules and pull requests on GitHub.',file:'/fixture/skills/git-github/SKILL.md'},
+];
+
+test("a shortlist needs two subject words of the request in a skill and caps at three", () => {
+  assert.deepEqual(matchingGuides(guideCatalog, 'plan the database migration with a rollback').map(skill => skill.name), ['database-migration']);
+  const video = matchingGuides(guideCatalog, 'encode the video with ffmpeg and mix the audio and music');
+  assert.equal(video.length, 3);
+  assert.ok(video.every(skill => /video/.test(skill.name)));
+  // Every message brings the catalogue as new objects; the shortlist is the same one.
+  const again = matchingGuides(guideCatalog.map(skill => ({...skill})), 'encode the video with ffmpeg and mix the audio and music');
+  assert.deepEqual(again.map(skill => skill.name), video.map(skill => skill.name));
+  // One word in a skill's name is not enough, and neither are fewer than three subject words.
+  assert.deepEqual(matchingGuides(guideCatalog, 'dashboard for the database office'), []);
+  assert.deepEqual(matchingGuides(guideCatalog, 'commit and push'), []);
+  assert.deepEqual(matchingGuides(guideCatalog, 'make it much better and handle everything'), []);
+  // An inflection still reaches the skill: "animated" is "animation".
+  assert.deepEqual(matchingGuides([{name:'animation-libraries',description:'Which web animation library to reach for.',file:'/f/a/SKILL.md'}], 'an animated library for the interface').map(skill => skill.name), ['animation-libraries']);
+});
+
+test("the shortlist and skill_review search share one ranking", async () => {
+  const f = fixture(guideCatalog.map(skill => skill.name));
+  const query = 'video captions audio';
+  const searched = await f.review.execute('search', {action:'search', query, limit: 8});
+  const shared = rankCatalog(guideCatalog.map(({name}) => ({name, description: name.replaceAll('-', ' '), file: `/fixture/skills/${name}/SKILL.md`})), query);
+  assert.deepEqual(searched.details.results.map(result => result.name), shared.slice(0, 8).map(skill => skill.name));
 });

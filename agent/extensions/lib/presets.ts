@@ -197,12 +197,12 @@ export const NOSLOP_CRITERIA: readonly string[] = [
 
 const BOOSTS: Record<StandardId, Boost> = {
 	design: {
-		standard: `Design: an interface made for this subject and its users, not a template. Read the guide first (${skill("ui-design")}). Before any code, write who uses this and what they come for, then the palette, the type and the layout, each with a reason taken from the subject or the existing brand. Inside an existing product, extend its tokens, components and voice instead of restyling it. Real content only: no invented metrics, testimonials or placeholder copy. Design every state a user can reach (empty, loading, error, long text). Render it in a real browser at 360, 768 and 1440 px (render_see), look at the screenshots, and fix what a designer would reject before reporting.`,
+		standard: `Design: an interface made for this subject and its users, not a template. Read the guide first (${skill("ui-design")}). Before any code, write who uses this and what they come for, then the palette, the type and the layout, each with a reason taken from the subject or the existing brand. Inside an existing product, extend its tokens, components and voice instead of restyling it. Real content only: no invented metrics, testimonials or placeholder copy. Design every state a user can reach (empty, loading, error, long text). Before hand-rolling an effect, a component or motion, search the installed guides for a library or pattern that does it better (skill_review). Render it where it runs and look at the result: a web page in a real browser at 360, 768 and 1440 px (render_see); a terminal app in a real terminal at 80 and 120 columns, also with NO_COLOR set; a document or deck as its exported pages. Fix what a designer would reject before reporting.`,
 		when: "building or redesigning an interface, page, deck or other visual surface",
 		kind: "",
 		fronts: [
 			"Palette, type and layout each have a stated reason from the subject or the existing brand; no template look, invented content or decorative filler.",
-			"Rendered in a real browser at phone, tablet and desktop width and the screenshots looked at; nothing overflows, overlaps or shifts on hover and focus.",
+			"Rendered where it runs (a browser at phone, tablet and desktop width; a terminal narrow and wide; exported pages) and the result looked at; nothing overflows, overlaps or shifts on hover and focus.",
 			"Empty, loading, error and long-content states work; keyboard focus is visible and text contrast is readable.",
 		],
 		tools: ["render_see"],

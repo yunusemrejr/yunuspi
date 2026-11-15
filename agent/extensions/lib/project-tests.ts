@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
 import { tokenizeSimple } from './bash-routing.ts';
-import { commandArgv, joinCheckBody, peelCheckPrefix, PIPED_FILTER } from './task-state/ingest.ts';
+import { commandArgv, isTestLikeCommand, joinCheckBody, peelCheckPrefix, PIPED_FILTER } from './task-state/ingest.ts';
 import { registerContinuationSource, resumesElsewhere } from './continuation-notice.ts';
 import { isSessionStopped } from './session-stop.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
@@ -653,6 +653,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     async start(ctx: any) { await scan(ctx); },
     async call(event: any, ctx: any) {
       if (!enabled() || !['bash', 'bg_run'].includes(event.toolName) || event.input?.isAgent === true) return;
+      // managed-bash refuses a bash call that asks for the background; a command that never ran is no check.
+      if (event.toolName === 'bash' && (event.input?.run_in_background === true || event.input?.background === true)) return;
       lastCtx = ctx;
       let candidate = projectCheckCommand(event.input?.command, ctx.cwd, true);
       let chain: ReturnType<typeof andChainChecks>;
@@ -664,8 +666,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         const bare = projectCheckCommand(shaped.body, ctx.cwd, true);
         if (bare && (state.assessment?.checks.some(c => c.key === bare.key) || projectCheckCommand(shaped.body, ctx.cwd))) {
           candidate = bare;
-          if (shaped.pipefail && !shaped.pipefailSet && typeof event.input?.command === 'string') event.input.command = `set -o pipefail; ${event.input.command}`;
         }
+        // A runner the goal gate recognises (ruff, a bounded pytest) earns its receipt only when its exit is
+        // observable, planned or not.
+        if (shaped.pipefail && !shaped.pipefailSet && (candidate || isTestLikeCommand(shaped.body)) && typeof event.input?.command === 'string') event.input.command = `set -o pipefail; ${event.input.command}`;
       }
       const check = candidate && (state.assessment?.checks.some(c => c.key === candidate!.key) ? candidate : projectCheckCommand(shaped && candidate ? shaped.body : event.input?.command, ctx.cwd));
       if (candidate && (check || !reconCommand(candidate.label))) {
@@ -687,6 +691,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           if (raw && !unmatched.commands.includes(raw) && unmatched.commands.length < 3) unmatched.commands.push(raw);
         }
       }
+      // An unplanned runner inside an `&&` chain (`pytest -q 2>&1 | tail -4 && git diff`) needs its exit
+      // observable as well; this comes last, because the planned-chain reading above takes the command as typed.
+      if (!candidate && typeof event.input?.command === 'string' && !/^\s*set -o pipefail\b/.test(event.input.command)
+        && andChainChecks(event.input.command, ctx.cwd, c => isTestLikeCommand(c.label))?.pipefail) event.input.command = `set -o pipefail; ${event.input.command}`;
     },
     async result(event: any, ctx: any) {
       if ((!enabled() && !options.onFacts) || !active) return;
@@ -738,7 +746,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         } else {
           const noTests = /\bno tests? (?:found|ran|collected|to run)|\btests? (?:are )?skipped\b|\b(?:tests?|pass|passed|passing)\s*[:=]?\s*0\b|\b(?:Ran 0 tests?|0 passing)\b/i.test(text);
           const exit = event.details?.execution?.exitCode ?? event.details?.exitCode ?? event.details?.exit_code;
-          const failed = event.isError || typeof exit === 'number' && exit !== 0 || !!(event.details?.execution?.signal ?? event.details?.signal);
+          // The bash timeout cutting a run off is no verdict: it neither passed nor failed the check.
+          // The notice closes the result, so a test that merely prints these words is not read as cut off.
+          const cutOff = /Command timed out after \d+ seconds and was stopped\./.test(text.slice(-600));
+          const failed = !cutOff && (event.isError || typeof exit === 'number' && exit !== 0 || !!(event.details?.execution?.signal ?? event.details?.signal));
           receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed', undefined, testDiagnostics(text));
           if (!start.observeOnly) planPassedBy(event.toolCallId, [start.check.key]);
         }

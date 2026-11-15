@@ -430,7 +430,19 @@ export function peelCheckPrefix(command: string): CheckPrefix | null {
 		env.push(...scan.words.slice(0, k).map(w => remainder.slice(w.start, w.end)));
 		remainder = remainder.slice(scan.words[k].start);
 	}
+	const wrapped = scanWords(remainder);
+	const bounded = wrapped ? timeoutWrapperLength(wrapped.words.map(w => w.value)) : 0;
+	if (bounded) remainder = remainder.slice(wrapped!.words[bounded].start);
 	return { cd, env, command: remainder, pipefail };
+}
+
+/** Words taken by a leading `timeout [OPTION]... DURATION` wrapper, 0 when there is none or no command follows.
+ * It only bounds the run (exit 124 when it cuts it off), so the check inside it is the same check. */
+function timeoutWrapperLength(words: string[]): number {
+	if (words[0] !== "timeout") return 0;
+	let i = 1;
+	while (/^-/.test(words[i] ?? "")) i += /^(?:-[ks]|--(?:kill-after|signal))$/.test(words[i]) ? 2 : 1;
+	return /^\d+(?:\.\d+)?[smhd]?$/.test(words[i] ?? "") && i + 1 < words.length ? i + 1 : 0;
 }
 
 /** Rebuilds the peeled command as `cd DIR && NAME=VALUE... command`, the shape
@@ -447,6 +459,7 @@ function isSingleTestStep(step: string): boolean {
 	const index = argv.findIndex(token => !ASSIGNMENT.test(token));
 	if (index < 0) return false;
 	const tokens = argv.slice(index);
+	tokens.splice(0, timeoutWrapperLength(tokens));
 	if (tokens.some(token => NON_VERIFY_FLAG.test(token))) return false;
 	const executable = tokens[0].split("/").at(-1)!;
 	const args = tokens.slice(1);

@@ -92,8 +92,11 @@ export function createStaticCompletionCheck(check = checkSourceText) {
 					brief: `${failed.length} changed file(s) do not parse`,
 				});
 			}
-			if (unknown.length || files.length > MAX_STATIC_FILES || files.filter(sourceCheckSupported).length > MAX_SYNTAX_FILES) {
-				receipts.push({ source: "static-check", id: "coverage", revision, state: "unknown", line: `static check coverage is partial${unknown.length ? `: ${unknown.slice(0, MAX_LISTED).join(", ")}` : ""}; at most ${MAX_STATIC_FILES} files audited and ${MAX_SYNTAX_FILES} parsed. Use current project checks or disclose the remaining coverage.`, brief: "static check coverage partial" });
+			// Only files that could not be read or parsed are a gap. The size caps are this check's own budget:
+			// a large change is verified by the project's checks, and refusing completion over the cap made
+			// the agent waive a harness limit in front of the user.
+			if (unknown.length) {
+				receipts.push({ source: "static-check", id: "coverage", revision, state: "unknown", line: `static check coverage is partial: ${unknown.slice(0, MAX_LISTED).join(", ")}. Use current project checks or disclose the remaining coverage.`, brief: "static check coverage partial" });
 			}
 		} catch (error) {
 			signal?.throwIfAborted();

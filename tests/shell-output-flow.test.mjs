@@ -93,6 +93,26 @@ test('installed-style managed bash uses bounded capture and preserves both real 
  try{assert.match(result.content[0].text,/BEGIN/);assert.match(result.content[0].text,/END/);assert.equal(result.details.captureError,undefined);assert.equal(fs.statSync(result.details.fullOutputPath).size,3000011);}finally{remove(result);}
 });
 
+test('bash refuses bg_run arguments before running the command',async()=>{
+ const {default:register}=await import('../agent/extensions/managed-bash.ts');
+ const tools=new Map(),hooks={};register({registerTool:tool=>tools.set(tool.name,tool),on:(name,handler)=>{hooks[name]=handler;}});
+ const marker=path.join(scratch,'bg-argument-must-not-run');
+ const tool=tools.get('bash');
+ // The bash schema keeps bg_run's keys, so the tool_call hook sees them; the
+ // runner turns {block:true, reason} into an immediate error without executing.
+ const {prepareToolCall}=await import('../core/agent/src/harness/execution/tools.js');
+ const args=extra=>{const prepared=prepareToolCall({id:'bg',name:'bash',arguments:{command:`touch ${quote(marker)}`,...extra}},[tool]);assert.ok(prepared.args,'the args reach the tool_call hook unchanged');return prepared.args;};
+ for(const extra of [{run_in_background:true,name:'baseline tests',isAgent:false},{background:true}]){
+  const blocked=hooks.tool_call({toolName:'bash',input:args(extra)});
+  assert.equal(blocked?.block,true);
+  assert.equal(blocked.reason,'bash has no run_in_background. Start a long command with bg_run({ command, name }): it returns at once and reports when the command finishes. To keep it in the foreground, pass timeout in seconds.');
+  assert.equal(fs.existsSync(marker),false,'the refused call never ran the command');
+ }
+ assert.equal(hooks.tool_call({toolName:'bash',input:args({})}),undefined,'an ordinary call passes');
+ const result=await tool.execute('normal',args({}),undefined,undefined,context);
+ assert.equal(result.details.execution.exitCode,0);assert.equal(fs.existsSync(marker),true,'the ordinary call runs');
+});
+
 test('abort during asynchronous cwd admission prevents core and managed shell spawn',async()=>{
  const {default:register}=await import('../agent/extensions/managed-bash.ts');
  const tools=new Map();register({registerTool:tool=>tools.set(tool.name,tool),on(){}});

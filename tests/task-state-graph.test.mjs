@@ -416,6 +416,7 @@ test('a passing check is recognised across package managers, but only in command
     ['cd app; npm test; echo "exit=$?"', 'cd app && npm test'],
     ['git stash && npm test && git stash pop', 'npm test'],
     ['npm run lint; npm test || true', 'npm run lint && npm test'],
+    ['cd /srv/app && timeout 900 python -m pytest -q 2>&1 | tail -4', 'cd /srv/app && timeout 900 python -m pytest -q'],
   ]) assert.equal(ingest.uncountedCheck(command)?.alone, alone, command);
 });
 

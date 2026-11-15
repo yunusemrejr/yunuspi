@@ -2,7 +2,8 @@
  * Session facts — one stored, model-only line at each human message: local
  * time, session spend, context occupancy, prompt-cache hits and the last run's
  * time and cost, followed by one sentence of standing method. A message that
- * asks for speed adds the haste sentence to that same line, once.
+ * asks for speed adds the haste sentence to that same line, once; a request that
+ * names a subject adds the installed guides that match it (at most three).
  *
  * The line is returned once from before_agent_start and stored in the session,
  * so later requests replay the same bytes. Regenerating it per request would
@@ -24,14 +25,18 @@ import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { collectSessionCost, collectSessionMetrics } from "@yunuspi/coding-agent/session-accounting";
 import { DEFAULT_TEAM_CONFIG, loadTeamConfig, type RunBudget } from "./lib/team.ts";
 import { resolveTimeZone } from "./lib/session-signals.ts";
+import { goalUserWords } from "./lib/goal-state.ts";
+import { goalAssignment } from "./lib/presets.ts";
+import { catalogSkills, matchingGuides, type CatalogSkill } from "./lib/skill-review.ts";
 
 const RUN_STATE = Symbol.for("yunus-pi.run.v1");
 const CUSTOM_TYPE = "session-facts";
 const BUDGET_NOTE_TYPE = "run-budget";
+const HURRY_NOTE_TYPE = "session-hurry";
 /** Events further apart than this are idle time, not run time. */
 const GAP_MS = 10 * 60_000;
 const METHOD =
-	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to subagents.";
+	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look; hand legwork to the subagent tool.";
 
 /** A message asking for speed, in English or Turkish. */
 const HURRY_PATTERNS: RegExp[] = [
@@ -110,6 +115,15 @@ export interface SessionFactsInput {
 	/** Share of prompt tokens served from the provider cache. */
 	cachePercent?: number;
 	lastRun?: { minutes: number; usd?: number };
+	/** Installed guides that match the request; the line is left out when there are none. */
+	guides?: readonly CatalogSkill[];
+}
+
+/** `name: description clipped at a word (file)`, as the facts line lists a guide. */
+function guideText(skill: CatalogSkill): string {
+	const flat = skill.description.replace(/\s+/g, " ").trim();
+	const description = flat.length > 110 ? `${flat.slice(0, 109).replace(/\s+\S*$/, "")}…` : flat;
+	return `${skill.name}: ${description} (${skill.file})`;
 }
 
 /** The stored facts line: unknown figures drop out, the time is always there. */
@@ -125,7 +139,25 @@ export function sessionFactsText(input: SessionFactsInput): string {
 		const spend = input.lastRun.usd === undefined ? "" : money(input.lastRun.usd);
 		line += ` Last run: ${input.lastRun.minutes} min${spend ? `, ${spend}` : ""}.`;
 	}
-	return `${line}\n${METHOD}`;
+	const guides = input.guides?.length
+		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
+		: "";
+	return `${line}\n${METHOD}${guides}`;
+}
+
+/**
+ * The guides that fit what the user asked. A goal kickoff is matched on the
+ * goal sentence only: its criteria and standards would match every skill. The
+ * line is advisory, so a failure here leaves it out and not the facts.
+ */
+function matchingGuidesFor(event: any): CatalogSkill[] {
+	try {
+		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+		const words = goalUserWords(prompt);
+		return matchingGuides(catalogSkills(event), words === undefined ? prompt : goalAssignment(words));
+	} catch {
+		return [];
+	}
 }
 
 /** Spend in a budget note; `$?` when no price is known. */
@@ -169,6 +201,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	 * leave its line behind for a message the harness sends later.
 	 */
 	let pending = false;
+	/** True once the speed note reached this run, on either path. */
+	let hurrySent = false;
 
 	const entriesOf = (ctx: any): any[] => {
 		try {
@@ -214,6 +248,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		run = undefined;
 		lastRun = undefined;
 		pending = false;
+		hurrySent = false;
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
@@ -249,8 +284,22 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			}
 			// Before the first priced request nothing has been spent: the run starts
 			// at zero, and its spend appears with the first usage that carries a price.
+			// A steer joins the run in progress, so it does not reset the speed
+			// note; a message that starts a run clears it.
+			const steer = (event?.source === "interactive" || event?.source === "rpc") && Boolean(event?.streamingBehavior);
+			if (!steer) hurrySent = false;
 			run = { startedUsd: sessionUsd(entriesOf(ctx)) ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
 			pending = true;
+			// A speed request steered into the running run never reaches
+			// before_agent_start, so the note goes as its own message.
+			if (steer && !hurrySent && hurryRequested(event?.text)) {
+				hurrySent = true;
+				void Promise.resolve(
+					pi.sendMessage({ customType: HURRY_NOTE_TYPE, content: HURRY_NOTE, display: false }, { deliverAs: "steer" }),
+				).catch(() => {
+					/* a note that could not be queued changes nothing about the run */
+				});
+			}
 		} catch {
 			/* facts are advisory; a failure must not break the prompt */
 		}
@@ -284,8 +333,10 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				context,
 				cachePercent,
 				lastRun,
+				guides: matchingGuidesFor(event),
 			});
 			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
+			if (hurry) hurrySent = true;
 			return { message: { customType: CUSTOM_TYPE, content: content + hurry, display: false } };
 		} catch {
 			return undefined;
@@ -304,6 +355,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		try {
 			touch(ctx);
 			if (run) run.resting = true;
+			// The run is over: a run the harness starts next may be hurried again.
+			hurrySent = false;
 		} catch {
 			/* timing is advisory */
 		}

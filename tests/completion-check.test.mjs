@@ -126,10 +126,10 @@ test('unavailable parsers are explicit gaps and are retried instead of cached as
   assert.equal(calls,2);
 });
 
-test('bounded syntax coverage is disclosed and caller cancellation does not become a passing receipt', async t => {
+test('the check\'s own size cap is not a gap and caller cancellation does not become a passing receipt', async t => {
   const dir=repo(t);
   for(let i=0;i<21;i++)fs.writeFileSync(path.join(dir,`extra-${i}.js`),`export const x=${i};\n`);
-  assert.equal((await staticCompletionSteps(dir)).find(r=>r.source==='static-check')?.state,'unknown');
+  assert.equal((await staticCompletionSteps(dir)).find(r=>r.source==='static-check'),undefined,'a change larger than the cap is left to the project checks');
   const abort=new AbortController();
   const check=createStaticCompletionCheck(async()=>{abort.abort();abort.signal.throwIfAborted();});
   await assert.rejects(check(dir,abort.signal),/abort/i);

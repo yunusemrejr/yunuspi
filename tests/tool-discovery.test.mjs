@@ -719,6 +719,17 @@ test('direct schemas shrink without dropping checks, explicit choices or host re
  assert.deepEqual(f.active(),['read','tool_search'],'schema routing never expands a host restriction');
 });
 
+test('a goal kickoff stages the whole core wire even at the direct tier', async () => {
+ const {CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const kickoff='[goal-tracked g1] Goal: Correct the typo in README.md.\n\nAcceptance criteria (refine with goal({action:"criteria", items:[…]}) if they miss something; keep it to what the user asked):\n- a1: typo corrected\n\nWork autonomously until all are verified with evidence.';
+ const goal=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ goal.hooks.before_agent_start({prompt:kickoff}, goal.ctx);
+ assert.ok(goal.active().includes('subagent'),'a goal is the long work where delegation pays');
+ const plain=fixture([...CORE_TOOLS].map(name=>({name,description:name,parameters:{type:'object'}})));
+ plain.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'}, plain.ctx);
+ assert.ok(!plain.active().includes('subagent'),'a plain direct message still gets the direct wire');
+});
+
 test('a warm cached prefix keeps the wire: it never shrinks, and tier upgrades wait for the model to ask', async () => {
  const {CORE_TOOLS,DIRECT_CORE_TOOLS}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
  const model={provider:'deepseek',id:'deepseek-flash',cost:{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0}};

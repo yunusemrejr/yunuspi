@@ -758,7 +758,7 @@ export function formatSnapshotList(
   now = Date.now(),
 ): string {
   if (tasks.length === 0)
-    return "No background tasks in this Pi extension runtime.";
+    return "No background tasks are running. Start one with bg_run.";
   return tasks
     .map((task) => {
       const statusIcon =

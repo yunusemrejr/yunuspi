@@ -8,7 +8,7 @@
 import { Type } from "typebox";
 import { choices } from "./tool-schema.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
-import { buildSkillIndex, rankSkills } from "./skill-relevance.ts";
+import { buildSkillIndex, rankSkills, skillCatalogFingerprint, skillTerms } from "./skill-relevance.ts";
 
 export type CatalogSkill = { name: string; description: string; file: string };
 
@@ -29,27 +29,63 @@ export function catalogSkills(event: { systemPromptOptions?: { skills?: unknown 
 	});
 }
 
+let indexed: ReturnType<typeof buildSkillIndex> | undefined;
+
+/** The relevance index of a catalogue, rebuilt only when the catalogue changes. */
+function catalogIndex(skills: CatalogSkill[]): ReturnType<typeof buildSkillIndex> {
+	if (indexed?.fingerprint !== skillCatalogFingerprint(skills)) indexed = buildSkillIndex(skills);
+	return indexed;
+}
+
+/** The skills `keep` allows, in the order skill_review search lists them: name and description matches first, then the rarity ranking. */
+export function rankCatalog(skills: CatalogSkill[], query: string, keep: (skill: CatalogSkill) => boolean = () => true): CatalogSkill[] {
+	const candidates = skills.filter(keep);
+	let ordered = [...candidates].sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));
+	if (query) {
+		const ranked = rankSkills(catalogIndex(skills), query, Math.min(256, Math.max(8, skills.length))).map((item: any) => item.skill as CatalogSkill).filter(keep);
+		ordered = [...searchCapabilityMetadata(candidates, query), ...ranked];
+	}
+	const seen = new Set<string>();
+	return ordered.filter((skill) => !seen.has(skill.file) && Boolean(seen.add(skill.file)));
+}
+
+// Words that grade or hedge a request without naming its subject; skillTerms already drops the plain stop words.
+const GENERIC = new Set(("able handle handles improve improved improving improvement amazing awesome perfect perfectly terrible bad deeply tremendously substantially "
+	+ "completely totally entirely fully truly really everything anything something nothing actually instead every whole find replace remove harder easier faster "
+	+ "quickly looking looks look blazing tons lots stuff").split(" "));
+/** Fewer subject words than this say nothing about which approach to take ("commit and push"). */
+const MIN_SUBJECT_WORDS = 3;
+const MAX_SHORTLIST = 3;
+/** One inflection off a longer word, so "animated" reaches "animation" by prefix. */
+const stemOf = (word: string) => { const stem = word.replace(/(?:ing|ed|es|s)$/, ""); return stem.length >= 5 ? stem : word; };
+
+/**
+ * The installed guides that bear on a request: at most three, in skill_review's
+ * order, and only those where two different subject words of the request
+ * appear in the skill's name or description. A lone word, even one in a skill's
+ * name, is how "build" or "github" would pick a guide for a game map; a request
+ * with fewer than three subject words picks none.
+ */
+export function matchingGuides(skills: CatalogSkill[], request: string): CatalogSkill[] {
+	const terms = skillTerms(request.slice(0, 800), 24).filter((term) => !GENERIC.has(term));
+	const stems = [...new Set(terms.map(stemOf))];
+	if (stems.length < MIN_SUBJECT_WORDS) return [];
+	// By file, not by object: the ranking returns the skills of the cached index, and every message brings a fresh catalogue.
+	// One of the two words has to be in the name, which is the skill's subject: a description alone
+	// shares "calc" and "table" with a request about a Python file and offers the spreadsheet guide.
+	const hits = (text: string) => { const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? []; return stems.filter((stem) => words.some((word) => word === stem || (stem.length >= 4 && word.startsWith(stem)))).length; };
+	const clears = new Set(skills.filter((skill) => hits(skill.name) >= 1 && hits(`${skill.name} ${skill.description}`) >= 2).map((skill) => skill.file));
+	return clears.size ? rankCatalog(skills, [...new Set([...terms, ...stems])].join(" "), (skill) => clears.has(skill.file)).slice(0, MAX_SHORTLIST) : [];
+}
+
 export function registerSkillReview(pi: any): void {
 	let skills: CatalogSkill[] = [];
-	let index: ReturnType<typeof buildSkillIndex> | undefined;
 	pi.on?.("before_agent_start", (event: any) => {
 		const next = catalogSkills(event);
-		if (next.length && JSON.stringify(next) !== JSON.stringify(skills)) {
-			skills = next;
-			index = undefined;
-		}
+		if (next.length && JSON.stringify(next) !== JSON.stringify(skills)) skills = next;
 	});
 	const search = (query: string, group: string, limit: number, offset: number) => {
-		const candidates = skills.filter((skill) => !group || capabilityGroup(skill.name, skill.description) === group);
-		let ordered = [...candidates].sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));
-		if (query) {
-			index ??= buildSkillIndex(skills);
-			const ranked = rankSkills(index, query, Math.min(256, Math.max(8, skills.length))).map((item: any) => item.skill as CatalogSkill)
-				.filter((skill) => !group || capabilityGroup(skill.name, skill.description) === group);
-			ordered = [...searchCapabilityMetadata(candidates, query), ...ranked];
-		}
-		const seen = new Set<string>();
-		const unique = ordered.filter((skill) => !seen.has(skill.file) && Boolean(seen.add(skill.file)));
+		const unique = rankCatalog(skills, query, (skill) => !group || capabilityGroup(skill.name, skill.description) === group);
 		const page = unique.slice(offset, offset + limit);
 		return {
 			results: page.map((skill) => ({ name: skill.name, path: skill.file, description: skill.description.slice(0, 240) })),

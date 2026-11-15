@@ -59,7 +59,7 @@ function fixture(t,{noFormat=false,autofix=false,failFormat=false,deferredFlush,
     getLensFlagSource:()=>undefined,
     notifyUi(){},dbg(){},loadBootstrapClients:async()=>({biomeClient:{},ruffClient:{}}),
   };
-  for(const name of ['Eslint','Stylelint','Sqlfluff','Rubocop','Biome','Golangci','Detekt','Oxlint','Ktfmt','Ktlint'])environment[`has${name}Config`]=()=>false;
+  for(const name of ['Eslint','Stylelint','Sqlfluff','Rubocop','Biome','Golangci','Detekt','Oxlint','Ktfmt','Ktlint','Markdownlint'])environment[`has${name}Config`]=()=>false;
   environment.PathKeyedMap=vm.runInNewContext(`(${expression(bundle,'PathKeyedMap = class', 'PathKeyedMap = '.length)})`,environment);
   const Runtime=vm.runInNewContext(`(${expression(bundle,'var RuntimeCoordinator = class','var RuntimeCoordinator = '.length)})`,environment);
   const runtime=new Runtime();runtime.projectRoot=cwd;

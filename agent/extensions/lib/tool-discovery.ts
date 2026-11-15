@@ -379,7 +379,9 @@ export function registerToolDiscovery(pi: any) {
   };
   const stageCore = (tier: string, prompt = '') => {
     if (!adaptiveExecutionEnabled()) return;
-    const base = tier === 'direct' ? DIRECT_CORE_TOOLS : CORE_TOOLS;
+    // A goal is the long work where delegation pays, and the kickoff is the
+    // session's first request, so the tool list does not change later.
+    const base = tier === 'direct' && !prompt.startsWith('[goal-tracked ') ? DIRECT_CORE_TOOLS : CORE_TOOLS;
     const warm = wireIsWarm();
     for (const name of CORE_TOOLS) {
       if (!allowed.has(name)) continue;
