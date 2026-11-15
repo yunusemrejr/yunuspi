@@ -334,20 +334,25 @@ try {
   check('dialog keyboard focus and Escape close work');
   // Team models: each choice is written at once through the harness settings owner,
   // and comes back selected when Settings is opened again.
-  const ready = () => page.waitForFunction(() => { const select = document.getElementById('team-legwork'); return select && !select.disabled; }, { timeout: 60_000 });
+  const ready = () => page.waitForFunction(() => { const picker = document.getElementById('team-legwork'); return picker && !picker.disabled; }, { timeout: 60_000 });
   await page.locator('#settings').click(); await ready();
   await page.locator('#team-helper').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(output, 'desktop-settings-team.png') }); report.screenshots.push('desktop-settings-team.png');
   await page.locator('#team-helper').focus(); await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'team-legwork');
   const focusRing = await page.locator('#team-legwork').evaluate(node => { const style = getComputedStyle(node); return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) }; });
-  assert.equal(focusRing.style, 'solid', 'a focused dropdown shows the dialog focus ring');
+  assert.equal(focusRing.style, 'solid', 'a focused model picker shows the dialog focus ring');
   assert.ok(focusRing.width >= 1.5, `the focus ring is drawn (${focusRing.width}px)`);
   await page.screenshot({ path: path.join(output, 'desktop-settings-team-focus.png') }); report.screenshots.push('desktop-settings-team-focus.png');
-  // The dropdowns answer the keyboard on their own: arrows pick, and the change is saved.
-  await page.keyboard.press('ArrowDown');
-  await page.waitForFunction(() => document.getElementById('team-legwork')?.dataset.saved !== 'inherit');
-  assert.match(await page.locator('#team-legwork').inputValue(), /^[^/]+\/.+/, 'an arrow key picks a model and saves it');
+  // The pickers answer the keyboard on their own: Enter opens one on its search box, every typed word
+  // must match, and Enter on the search picks the first match and saves it.
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.closest('.team-panel') !== null), true, 'opening a picker puts the cursor in its search box');
+  await page.keyboard.type('fixture desktop');
+  assert.equal(await page.locator('#team-legwork + .team-hint + .team-panel .dialog-list button').count(), 1, 'a search of two words keeps the one model that has both');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !document.getElementById('team-legwork').hasAttribute('aria-busy'));
+  assert.match(await page.locator('#team-legwork').innerText(), /desktop-example · desktop-fixture$/, 'Enter on the search picks the model and saves it');
   const teamWindow = await electron.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0], size = window.getContentSize();
     window.setMinimumSize(360, 320); window.setContentSize(400, 700); return size;
@@ -355,8 +360,9 @@ try {
   await page.waitForTimeout(150);
   const fit = await page.evaluate(() => {
     const content = document.getElementById('dialog-content').getBoundingClientRect();
-    const outside = [...document.querySelectorAll('.team-section select')].filter(select => {
-      const box = select.getBoundingClientRect(); return box.left < content.left - 1 || box.right > content.right + 1;
+    document.getElementById('team-helper').click();
+    const outside = [...document.querySelectorAll('.team-section .team-picker, .team-section .team-panel:not([hidden])')].filter(node => {
+      const box = node.getBoundingClientRect(); return box.left < content.left - 1 || box.right > content.right + 1;
     });
     return { width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, outside: outside.length };
   });
@@ -364,12 +370,14 @@ try {
   await page.screenshot({ path: path.join(output, 'desktop-settings-team-narrow.png') }); report.screenshots.push('desktop-settings-team-narrow.png');
   await electron.evaluate(({ BrowserWindow }, size) => { const window = BrowserWindow.getAllWindows()[0]; window.setMinimumSize(560, 420); window.setContentSize(size[0], size[1]); }, teamWindow);
   await page.waitForTimeout(150);
-  await page.locator('#team-legwork').selectOption('desktop-example/desktop-fixture');
-  await page.waitForFunction(() => document.getElementById('team-legwork')?.dataset.saved === 'desktop-example/desktop-fixture');
+  // Escape inside an open picker closes only the picker; the next one closes the dialog.
+  assert.equal(await page.locator('#team-helper').getAttribute('aria-expanded'), 'true');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#team-helper').getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('#dialog').evaluate(node => node.open), true, 'Escape in a picker leaves Settings open');
   await page.keyboard.press('Escape'); assert.equal(await page.locator('#dialog').evaluate(node => node.open), false);
   await page.locator('#settings').click(); await ready();
-  assert.equal(await page.locator('#team-legwork').inputValue(), 'desktop-example/desktop-fixture', 'the saved model stays selected after reopening Settings');
-  assert.equal(await page.locator('#team-legwork option:checked').innerText(), 'desktop-example · desktop-fixture');
+  assert.match(await page.locator('#team-legwork').innerText(), /desktop-example · desktop-fixture$/, 'the saved model stays chosen after reopening Settings');
   await page.keyboard.press('Escape');
   const teamFile = JSON.parse(fs.readFileSync(path.join(agentDir, 'settings.json'), 'utf8'));
   assert.equal(teamFile.team.legwork, 'desktop-example/desktop-fixture');
