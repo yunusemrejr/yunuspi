@@ -104,7 +104,7 @@ export class AgentSession {
     /** Tracks pending follow-up messages for UI display. Removed when delivered. */
     _followUpMessages = [];
     /** Messages queued to be included with the next user prompt as context ("asides"). */
-    _pendingNextTurnMessages = [];
+    _pendingNextTurnMessages = new Set();
     /** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
     _pendingCustomMessages = [];
     // Compaction state
@@ -163,7 +163,11 @@ export class AgentSession {
         this.agent.canDeliverMessage = (message, signal) => {
             if (previousDeliveryCheck?.(message, signal) === false) return false;
             const check = this._customMessageDeliveryChecks.get(message);
-            return !check || (!signal?.aborted && this._canDeliverCustomMessage(check));
+            const pending = this._pendingNextTurnMessages.has(message);
+            if (signal?.aborted) return !pending && !check;
+            if (this._canDeliverCustomMessage(check)) return true;
+            this._pendingNextTurnMessages.delete(message);
+            return false;
         };
         this.sessionManager = config.sessionManager;
         this.settingsManager = config.settingsManager;
@@ -1084,11 +1088,12 @@ export class AgentSession {
                 content: userContent,
                 timestamp: Date.now(),
             }, requestMessageMeta));
-            // Inject any pending "nextTurn" messages as context alongside the user message
-            for (const msg of this._pendingNextTurnMessages) {
+            // Snapshot this prompt's messages without consuming them. A Stop
+            // during preflight or startup can still prevent the durable append.
+            for (const msg of [...this._pendingNextTurnMessages]) {
                 if (this._canDeliverCustomMessage(this._customMessageDeliveryChecks.get(msg))) messages.push(msg);
+                else this._pendingNextTurnMessages.delete(msg);
             }
-            this._pendingNextTurnMessages = [];
             // Reset per-turn system prompt override before before_agent_start so setActiveTools
             // inside before_agent_start updates this.systemPrompt immediately. The carried
             // prompt is set aside too: extensions build on the base, never on last run's result.
@@ -1359,7 +1364,7 @@ export class AgentSession {
         if (options?.onAccepted) this._customMessageAcceptances.set(appMessage, options.onAccepted);
         if (options?.canDeliver) this._customMessageDeliveryChecks.set(appMessage, options.canDeliver);
         if (options?.deliverAs === "nextTurn") {
-            this._pendingNextTurnMessages.push(appMessage);
+            this._pendingNextTurnMessages.add(appMessage);
         }
         else if (this.isStreaming && options?.triggerTurn !== false) {
             if (options?.deliverAs === "followUp") {
@@ -1398,7 +1403,10 @@ export class AgentSession {
     }
     _persistCustomMessage(appMessage) {
         try {
-            this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display, appMessage.details, appMessage.excludeFromContext, this._customMessageAcceptances.has(appMessage));
+            const nextTurn = this._pendingNextTurnMessages.has(appMessage);
+            this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display,
+                appMessage.details, appMessage.excludeFromContext, nextTurn || this._customMessageAcceptances.has(appMessage));
+            this._pendingNextTurnMessages.delete(appMessage);
             this._acknowledgeCustomMessage(appMessage);
         }
         catch (error) {

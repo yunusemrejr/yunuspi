@@ -1,6 +1,6 @@
 import { uuidv7 } from "@yunuspi/ai/utils/uuid";
 import { randomUUID } from "crypto";
-import { appendFileSync, closeSync, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync, } from "fs";
+import { appendFileSync, closeSync, constants, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync, } from "fs";
 import { readdir, stat } from "fs/promises";
 import { dirname, join, resolve } from "path";
 import { createInterface } from "readline";
@@ -122,8 +122,11 @@ function buildEntryIndex(entries, byId) {
     }
     return index;
 }
+function isRecoveredChildCost(entry) {
+    return entry.type === "custom" && entry.customType === "subagent-cost-v1" && typeof entry.data?.recoveredForSessionId === "string";
+}
 export function isAccountingOnlySessionEntry(entry) {
-    return entry.type === "custom" && entry.customType === "auxiliary-model-usage-v1" && entry.accountingOnly === true;
+    return isRecoveredChildCost(entry) || entry.type === "custom" && entry.customType === "auxiliary-model-usage-v1" && entry.accountingOnly === true;
 }
 function buildSessionPath(entries, leafId, byId) {
     const index = buildEntryIndex(entries, byId);
@@ -279,41 +282,98 @@ function parseSessionEntryLine(line) {
         return null;
     }
 }
-/** Exported for testing */
+class SessionReadBoundsError extends Error {
+    constructor(code, message) {
+        super(message);
+        this.code = code;
+    }
+}
+function sessionReadChanged() {
+    return new SessionReadBoundsError("SESSION_READ_CHANGED", "The transcript changed while opening or reading it.");
+}
+function verifySessionReadStat(current, expected) {
+    if (!current?.isFile() || current.dev !== expected.dev || current.ino !== expected.ino || current.size !== expected.size ||
+        current.mtimeNs !== expected.mtimeNs || current.ctimeNs !== expected.ctimeNs) throw sessionReadChanged();
+}
+
+/** Load entries, optionally verifying and reading a bounded immutable snapshot. */
 export function loadEntriesFromFile(filePath, options) {
     const resolvedFilePath = normalizePath(filePath);
+    const bounds = options?.bounds;
+    if (bounds !== undefined) {
+        if (!bounds || options.readOnly !== true || !Number.isSafeInteger(bounds.maxBytes) || bounds.maxBytes < 0 ||
+            !Number.isSafeInteger(bounds.maxRecords) || bounds.maxRecords < 0 || typeof bounds.expected?.size !== "bigint" ||
+            bounds.expected.size < 0n) {
+            throw new TypeError("Bounded session reads need readOnly, bigint file stats, and nonnegative integer limits.");
+        }
+        if (!bounds.expected.isFile()) throw sessionReadChanged();
+        if (bounds.expected.size > BigInt(bounds.maxBytes)) {
+            throw new SessionReadBoundsError("SESSION_READ_BYTE_LIMIT", "The transcript exceeds the byte limit for this read.");
+        }
+        if (!Number.isInteger(constants.O_NOFOLLOW) || !Number.isInteger(constants.O_NONBLOCK)) {
+            throw new Error("Bounded session reads require no-follow and non-blocking file opens.");
+        }
+        try {
+            return loadEntriesUnlocked(resolvedFilePath, false, bounds);
+        }
+        catch (error) {
+            if (["ENOENT", "ENOTDIR", "ELOOP", "ENXIO"].includes(error?.code)) throw sessionReadChanged();
+            throw error;
+        }
+    }
     if (!existsSync(resolvedFilePath))
         return [];
     if (options?.readOnly) return loadEntriesUnlocked(resolvedFilePath, false);
     return withSessionWriteLock(resolvedFilePath, () => loadEntriesUnlocked(resolvedFilePath));
 }
-function loadEntriesUnlocked(resolvedFilePath, repair = true) {
+function loadEntriesUnlocked(resolvedFilePath, repair = true, bounds) {
     const entries = [];
     let pending = "";
-    const fd = openSync(resolvedFilePath, "r");
+    const fd = openSync(resolvedFilePath, bounds ? constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK : "r");
     try {
+        if (bounds) verifySessionReadStat(fstatSync(fd, { bigint: true }), bounds.expected);
+        const end = bounds ? Number(bounds.expected.size) : Infinity;
+        let loaded = 0;
         const decoder = new StringDecoder("utf8");
-        const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-        while (true) {
-            const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+        const buffer = Buffer.allocUnsafe(Math.min(SESSION_READ_BUFFER_SIZE, end));
+        const lineParts = [];
+        const acceptLine = line => {
+            const entry = parseSessionEntryLine(line);
+            if (!entry) return;
+            if (bounds && entries.length >= bounds.maxRecords) {
+                throw new SessionReadBoundsError("SESSION_READ_RECORD_LIMIT", "The transcript exceeds the parsed record limit for this read.");
+            }
+            entries.push(entry);
+        };
+        while (loaded < end) {
+            const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, end - loaded), null);
             if (bytesRead === 0)
                 break;
-            pending += decoder.write(buffer.subarray(0, bytesRead));
+            loaded += bytesRead;
+            const chunk = decoder.write(buffer.subarray(0, bytesRead));
             let lineStart = 0;
-            let newlineIndex = pending.indexOf("\n", lineStart);
+            let newlineIndex = chunk.indexOf("\n", lineStart);
             while (newlineIndex !== -1) {
-                const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
-                if (entry)
-                    entries.push(entry);
+                const line = chunk.slice(lineStart, newlineIndex);
+                if (lineParts.length) {
+                    lineParts.push(line);
+                    acceptLine(lineParts.join(""));
+                    lineParts.length = 0;
+                }
+                else acceptLine(line);
                 lineStart = newlineIndex + 1;
-                newlineIndex = pending.indexOf("\n", lineStart);
+                newlineIndex = chunk.indexOf("\n", lineStart);
             }
-            pending = pending.slice(lineStart);
+            if (lineStart < chunk.length) lineParts.push(chunk.slice(lineStart));
         }
-        pending += decoder.end();
-        const finalEntry = parseSessionEntryLine(pending);
-        if (finalEntry)
-            entries.push(finalEntry);
+        lineParts.push(decoder.end());
+        pending = lineParts.join("");
+        acceptLine(pending);
+        if (bounds) {
+            if (loaded !== end) throw sessionReadChanged();
+            verifySessionReadStat(fstatSync(fd, { bigint: true }), bounds.expected);
+            verifySessionReadStat(lstatSync(resolvedFilePath, { bigint: true }), bounds.expected);
+        }
     }
     finally {
         closeSync(fd);
@@ -908,7 +968,12 @@ export class SessionManager {
             parentId: this.leafId,
             timestamp: new Date().toISOString(),
         };
-        this._appendEntry(entry);
+        const recovered = isRecoveredChildCost(entry);
+        if (recovered) {
+            if (data.recoveredForSessionId !== this.sessionId) throw new Error("Recovered child cost belongs to a different session");
+            this.flush();
+        }
+        this._appendEntry(entry, recovered);
         return entry.id;
     }
     /** Persist summary accounting without creating a navigable branch node. */
@@ -1066,7 +1131,8 @@ export class SessionManager {
      * change the leaf pointer. Entries cannot be modified or deleted.
      */
     getEntries() {
-        return this.fileEntries.filter((e) => e.type !== "session");
+        return this.fileEntries.filter(entry => entry.type !== "session" &&
+            (!isRecoveredChildCost(entry) || entry.data.recoveredForSessionId === this.sessionId));
     }
     /** Changes after an accepted append or ledger replacement, not a leaf move. */
     getEntriesRevision() {
@@ -1172,7 +1238,8 @@ export class SessionManager {
                 for (const id of entry.usage.summaryReceiptIds) summaryIds.add(id);
             }
         }
-        return this.getEntries().filter(entry => isAccountingOnlySessionEntry(entry) &&
+        // A filesystem-attested child correction belongs to its originating file.
+        return this.getEntries().filter(entry => isAccountingOnlySessionEntry(entry) && !isRecoveredChildCost(entry) &&
             (branchIds.has(entry.parentId) || summaryIds.has(entry.data?.id)));
     }
     /**

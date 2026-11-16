@@ -1,4 +1,5 @@
 import { readCompletionReplay } from "../runs/background/completion-replay.ts";
+import { recoverRetainedChildCosts } from "@yunuspi/coding-agent/session-accounting";
 import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } from "./session-cost.ts";
 /**
  * Subagent Tool
@@ -967,6 +968,14 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		transitionResultDelivery();
 		try { restoreSubagentCosts(pi, state, ctx.sessionManager.getEntries(), id => readCompletionReplay(DIRS.results, id, {sessionId:state.currentSessionId ?? undefined})); } catch (error) { console.error("Subagent cost restoration failed:", error); }
 		state.parentSessionFile = ctx.sessionManager.getSessionFile();
+		if (recovering && state.parentSessionFile) {
+			try {
+				const entries = [ctx.sessionManager.getHeader(), ...ctx.sessionManager.getEntries()];
+				for (const receipt of recoverRetainedChildCosts(entries, {sessionFile:state.parentSessionFile, statusRoot:DIRS.async}).entries) {
+					pi.appendEntry(receipt.customType, receipt.data);
+				}
+			} catch (error) { console.error("Retained subagent cost reconciliation failed:", error); }
+		}
 		state.trustedSessionFileRoot = state.parentSessionFile ? path.join(getAgentDir(), "sessions") : undefined;
 		state.trustedSessionRoots = [...new Set([
 			...(config.defaultSessionDir ? [path.resolve(expandTilde(config.defaultSessionDir))] : []),

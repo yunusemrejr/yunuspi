@@ -64,6 +64,89 @@ test('paged snapshots notice same-size rewrites and appended history', async t =
   assert.equal(appended.messages[0].content, 'appended');
 });
 
+test('same-revision reopen omits the message payload and stale cursors reset after a change', async t => {
+  const f = fixture(t, { entries: [entry('first', null, 'Original'), entry('next', 'first', 'Next')] });
+  const initial = await readHistory({ ...f, limit: 1 });
+  assert.match(initial.revision, /^[a-f0-9]{64}$/);
+  assert.equal(initial.before, 1);
+  const other = fixture(t, { entries: [entry('other', null, 'Other conversation')] });
+  await readHistory(other);
+  const unchanged = await readHistory({ ...f, revision: initial.revision });
+  assert.equal(unchanged.revision, initial.revision);
+  assert.equal(unchanged.messages, undefined);
+  assert.deepEqual(unchanged.stats, initial.stats);
+
+  const mtime = fs.statSync(f.file).mtime;
+  fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace('Original', 'Replaced'));
+  fs.utimesSync(f.file, mtime, mtime);
+  const reset = await readHistory({ ...f, before: initial.before, revision: initial.revision });
+  assert.equal(reset.reset, true);
+  assert.equal(reset.messages, undefined);
+  const latest = await readHistory({ ...f, revision: initial.revision });
+  assert.notEqual(latest.revision, initial.revision);
+  assert.deepEqual(latest.messages.map(message => message.content), ['Replaced', 'Next']);
+});
+
+test('passive totals refresh without transferring messages after a late saved charge', async t => {
+  const f = fixture(t, { entries: [entry('visible', null, 'Visible conversation')] });
+  const initial = await readHistory(f);
+  fs.appendFileSync(f.file, JSON.stringify({ type: 'custom', id: 'late-charge', parentId: 'visible', accountingOnly: true,
+    customType: 'auxiliary-model-usage-v1', data: { id: 'late-request', owner: 'fixture', provider: 'openrouter', model: 'fixture',
+      status: 'completed', usage: { cost: { total: 0.125, source: 'provider-reported' } } } }) + '\n');
+  const result = await readHistory({ ...f, statsOnly: true });
+  assert.equal(result.messages, undefined);
+  assert.notEqual(result.revision, initial.revision);
+  assert.equal(result.stats.cost, 0.125);
+  assert.deepEqual((await readHistory(f)).messages, initial.messages);
+});
+
+test('passive totals refresh an owned child receipt even when the parent revision stays the same', async t => {
+  await closeHistoryReaders();
+  const previousRoot = process.env.PI_SUBAGENTS_TEMP_ROOT;
+  const f = fixture(t);
+  const tempRoot = path.dirname(f.cwd);
+  const statusRoot = path.join(tempRoot, 'async-subagent-runs');
+  process.env.PI_SUBAGENTS_TEMP_ROOT = tempRoot;
+  t.after(async () => {
+    await closeHistoryReaders();
+    if (previousRoot === undefined) delete process.env.PI_SUBAGENTS_TEMP_ROOT;
+    else process.env.PI_SUBAGENTS_TEMP_ROOT = previousRoot;
+  });
+
+  const runId = 'auto-assist-fixture', timestamp = new Date().toISOString();
+  const childFile = path.join(f.file.slice(0, -'.jsonl'.length), randomUUID(), 'run-0', 'session.jsonl');
+  const statusFile = path.join(statusRoot, runId, 'status.json');
+  const usage = total => ({ input: 10, output: 2, cost: { total, source: 'provider-reported' } });
+  const append = (file, ...records) => fs.appendFileSync(file, records.map(record => JSON.stringify(record) + '\n').join(''));
+  append(f.file, entry('visible', null, 'Visible parent conversation'), {
+    type: 'custom', id: 'child', parentId: 'visible', timestamp, customType: 'subagent-cost-v1',
+    data: { runId, mode: 'single', state: 'complete',
+      results: [{ index: 0, agent: 'automatic-free-assistant', status: 'completed', sessionFile: childFile, usage: usage(0.25) }] },
+  });
+  const hash = digest(f.file), initial = await readHistory(f);
+  assert.equal(initial.stats.cost, 0.25);
+
+  fs.mkdirSync(path.dirname(childFile), { recursive: true });
+  append(childFile, { type: 'session', version: 3, id: randomUUID(), timestamp, cwd: f.cwd }, {
+    type: 'message', id: 'answer', parentId: null, timestamp,
+    message: { role: 'assistant', provider: 'openrouter', model: 'fixture', content: [], usage: usage(0.25) },
+  }, {
+    type: 'custom', id: 'hosted', parentId: 'answer', timestamp, customType: 'auxiliary-model-usage-v1',
+    data: { id: 'hosted-request', owner: 'fixture', provider: 'openrouter', model: 'fixture',
+      status: 'completed', usage: usage(0.125) },
+  });
+  fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+  fs.writeFileSync(statusFile, JSON.stringify({ runId, mode: 'single', state: 'complete', sessionId: f.file,
+    steps: [{ status: 'complete', sessionFile: childFile }] }));
+
+  const refreshed = await readHistory({ ...f, revision: initial.revision });
+  assert.equal(refreshed.revision, initial.revision);
+  assert.equal(refreshed.messages, undefined);
+  assert.equal(refreshed.stats.cost, 0.375);
+  assert.equal((await readHistory({ ...f, statsOnly: true })).stats.cost, 0.375);
+  assert.equal(digest(f.file), hash);
+});
+
 test('passive open includes whole-session charges, including discarded branches outside the page', async t => {
   const priced = (id, parentId, total) => ({
     ...entry(id, parentId, ''),

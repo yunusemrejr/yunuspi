@@ -1,6 +1,7 @@
 /** Pure session accounting shared by the owned footer and harness reports. */
 import { addUsageToTotals, createUsageTotals } from './usage-totals.js';
 import { isFlatPlanProvider } from '@yunuspi/ai/utils/flat-plan';
+export { recoverRetainedChildCosts } from './subagent-cost-recovery.js';
 /** Compact accounting facts; no prompt, endpoint, credential or response text. */
 export function readCostEvidence(usage, provider) {
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -175,6 +176,7 @@ export function collectAuxiliaryModelUsage(entries) {
 
 export function collectSessionCost(entries, subscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries)) {
   entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
+  const sessionId = entries[0]?.type === 'session' ? entries[0].id : undefined;
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const rows = new Map(), nodes = new Map(), aliases = new Map();
@@ -263,6 +265,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     const m = entry.type === 'message' ? entry.message : undefined;
     if (m?.role === 'toolResult' && m.toolName === 'subagent') record(m.details, !m.details?.asyncId && Array.isArray(m.details?.results) && m.details.results.length > 0);
     if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') {
+      if (entry.data?.recoveredForSessionId !== undefined && sessionId !== undefined && entry.data.recoveredForSessionId !== sessionId) continue;
       record(entry.data,true);
       // Helper wrappers (auto-assist, quality-review, ...) carry the native
       // run's usage inside their own cost record; the native id never gets a

@@ -1,3 +1,11 @@
+## 0.56.11 — Atomic edits and current session totals
+
+- Overlapping edits compose only when their replacements agree at the original positions. Conflicting edits and matches that split a Unicode character fail before writing.
+- Stop during turn preparation preserves SDK messages queued for the next turn. They leave the queue once the transcript records delivery.
+- Saved desktop sessions pick up late transcript entries and charges on reopen and in `/cost`. Unchanged history reuses loaded pages, and a stale page cursor refreshes against the current transcript.
+- A retained single-child run can restore a missing charge when its terminal status confirms the exact parent and child transcripts. Reopen, resume, and receipt replay count the charge once.
+- Passive history checks the opened file against its discovered identity and enforces read limits before accepting a snapshot.
+
 ## 0.56.10 — Durable reminder delivery and bounded shell output
 
 - A reminder advances its schedule when the conversation records delivery. Stop before delivery leaves it due. The queue drops cleared or already delivered occurrences.

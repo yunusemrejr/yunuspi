@@ -343,49 +343,70 @@ function getNoChangeError(path, totalEdits) {
 }
 /**
  * Overlapping edits in one batch are resolved only when the intent is
- * unambiguous: an edit whose change the containing edit already makes is
- * dropped, and a partial overlap whose shared text both edits keep unchanged
- * is merged. Anything else is rejected with exact line ranges.
+ * unambiguous: contained edits must reproduce the outer newText when placed
+ * at their original offsets. Partial overlaps must preserve the shared seam.
  */
 function resolveOverlappingEdits(sortedEdits, base, path) {
+    const endOf = edit => edit.matchIndex + edit.matchLength;
     const lineAt = (offset) => base.slice(0, offset).split("\n").length;
-    const describe = (edit) => {
-        const first = lineAt(edit.matchIndex);
-        const last = lineAt(edit.matchIndex + Math.max(0, edit.matchLength - 1));
-        return `edits[${edit.editIndex}] (line${first === last ? ` ${first}` : `s ${first}-${last}`})`;
+    const lines = (start, end) => {
+        const first = lineAt(start), last = lineAt(end - 1);
+        return first === last ? `line ${first}` : `lines ${first}-${last}`;
     };
-    const resolved = [];
-    for (const current of sortedEdits) {
-        const previous = resolved[resolved.length - 1];
-        if (!previous || previous.matchIndex + previous.matchLength <= current.matchIndex) {
-            resolved.push(current);
-            continue;
+    const describe = (edit) => {
+        return `edits[${edit.editIndex}] (${lines(edit.matchIndex, endOf(edit))})`;
+    };
+    const conflict = (previous, current) => {
+        const overlap = lines(current.matchIndex, Math.min(endOf(previous), endOf(current)));
+        const combined = lines(previous.matchIndex, Math.max(endOf(previous), endOf(current)));
+        return new Error(`${describe(previous)} and ${describe(current)} overlap on ${overlap} in ${path}, and their replacements conflict there. Combine them into one edit whose oldText spans ${combined}.`);
+    };
+    const appendSibling = (siblings, current) => {
+        const previous = siblings.at(-1);
+        if (!previous || endOf(previous) <= current.matchIndex) {
+            siblings.push(current);
+            return;
         }
-        const previousEnd = previous.matchIndex + previous.matchLength;
-        const currentEnd = current.matchIndex + current.matchLength;
-        const currentOld = base.slice(current.matchIndex, currentEnd);
-        const previousOld = base.slice(previous.matchIndex, previousEnd);
-        // Contained edit whose result the outer edit already contains.
-        if (currentEnd <= previousEnd && previous.newText.includes(current.newText) && (currentOld === current.newText || !previous.newText.includes(currentOld)))
-            continue;
-        if (current.matchIndex === previous.matchIndex && currentEnd >= previousEnd && current.newText.includes(previous.newText) && (previousOld === previous.newText || !current.newText.includes(previousOld))) {
-            resolved[resolved.length - 1] = current;
-            continue;
-        }
-        // Partial overlap on text both edits leave unchanged at the seam.
-        const shared = base.slice(current.matchIndex, previousEnd);
-        if (currentEnd > previousEnd && shared.length > 0 && previous.newText.endsWith(shared) && current.newText.startsWith(shared)) {
-            resolved[resolved.length - 1] = {
+        const shared = base.slice(current.matchIndex, endOf(previous));
+        if (previous.newText.endsWith(shared) && current.newText.startsWith(shared)) {
+            siblings[siblings.length - 1] = {
                 ...previous,
-                matchLength: currentEnd - previous.matchIndex,
+                matchLength: endOf(current) - previous.matchIndex,
                 newText: previous.newText + current.newText.slice(shared.length),
             };
+            return;
+        }
+        throw conflict(previous, current);
+    };
+    const resolved = [], openRanges = [];
+    const finishRange = () => {
+        const {edit, children} = openRanges.pop();
+        if (children.length) {
+            const original = base.slice(edit.matchIndex, endOf(edit));
+            if (applyReplacements(original, children, edit.matchIndex) !== edit.newText) {
+                if (children.length === 1)
+                    throw conflict(edit, children[0]);
+                const affected = lines(children[0].matchIndex, endOf(children.at(-1)));
+                throw new Error(`${describe(edit)} and its contained edits on ${affected} do not produce the same replacement in ${path}. Combine them into one edit whose oldText spans ${lines(edit.matchIndex, endOf(edit))}.`);
+            }
+        }
+        appendSibling(openRanges.at(-1)?.children ?? resolved, edit);
+    };
+    // Ranges are sorted outer-first at equal starts. Closing each range before
+    // its parent validates every nested edit before it can be coalesced.
+    for (const edit of sortedEdits) {
+        while (openRanges.length && endOf(edit) > endOf(openRanges.at(-1).edit))
+            finishRange();
+        const parent = openRanges.at(-1)?.edit;
+        if (parent && edit.matchIndex === parent.matchIndex && endOf(edit) === endOf(parent)) {
+            if (edit.newText !== parent.newText)
+                throw conflict(parent, edit);
             continue;
         }
-        const overlapStart = lineAt(current.matchIndex);
-        const overlapEnd = lineAt(Math.min(previousEnd, currentEnd) - 1);
-        throw new Error(`${describe(previous)} and ${describe(current)} overlap on line${overlapStart === overlapEnd ? ` ${overlapStart}` : `s ${overlapStart}-${overlapEnd}`} in ${path}, and their replacements conflict there. Combine them into one edit whose oldText spans lines ${lineAt(Math.min(previous.matchIndex, current.matchIndex))}-${lineAt(Math.max(previousEnd, currentEnd) - 1)}, or drop the inner edit if the outer newText already includes its change.`);
+        openRanges.push({edit, children: []});
     }
+    while (openRanges.length)
+        finishRange();
     return resolved;
 }
 /**
@@ -407,6 +428,9 @@ function planEdits(normalizedContent, edits, path) {
     for (let i = 0; i < normalizedEdits.length; i++) {
         if (normalizedEdits[i].oldText.length === 0) {
             throw getEmptyOldTextError(path, i, normalizedEdits.length);
+        }
+        if (!normalizedEdits[i].oldText.isWellFormed()) {
+            throw new Error(`edits[${i}].oldText must be valid Unicode in ${path}.`);
         }
         if (!normalizedEdits[i].newText.isWellFormed()) {
             throw new Error(`edits[${i}].newText must be valid Unicode in ${path}.`);
@@ -441,7 +465,7 @@ function planEdits(normalizedContent, edits, path) {
         }
         matchedEdits.push({ editIndex: i, matchIndex: start, matchLength: end - start, newText: edit.newText });
     }
-    matchedEdits.sort((a, b) => a.matchIndex - b.matchIndex);
+    matchedEdits.sort((a, b) => a.matchIndex - b.matchIndex || b.matchLength - a.matchLength);
     const resolvedEdits = resolveOverlappingEdits(matchedEdits, normalizedContent, path);
     const baseContent = normalizedContent;
     const newContent = applyReplacements(baseContent, resolvedEdits);

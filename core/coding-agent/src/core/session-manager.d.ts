@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import type { AgentMessage } from "@yunuspi/agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage } from "@yunuspi/ai";
 import { type BashExecutionMessage, type CustomMessage } from "./messages.ts";
@@ -172,8 +173,17 @@ export declare function buildContextEntries(entries: SessionEntry[], leafId?: st
  */
 export declare function buildSessionContext(entries: SessionEntry[], leafId?: string | null, byId?: Map<string, SessionEntry>): SessionContext;
 export declare function getDefaultSessionDir(cwd: string, agentDir?: string): string;
-/** Exported for testing */
-export declare function loadEntriesFromFile(filePath: string, options?: { readOnly?: boolean }): FileEntry[];
+export interface SessionReadBounds {
+    /** An earlier lstat of the intended file, with bigint: true. */
+    expected: BigIntStats;
+    maxBytes: number;
+    maxRecords: number;
+}
+/** Bounded read-only mode rejects file changes and limit breaches without returning a partial history. */
+export declare function loadEntriesFromFile(filePath: string, options?: { readOnly?: boolean; bounds?: never } | {
+    readOnly: true;
+    bounds: SessionReadBounds;
+}): FileEntry[];
 /** Exported for testing */
 export declare function findMostRecentSession(sessionDir: string, cwd?: string): string | null;
 export type SessionListProgress = (loaded: number, total: number) => void;

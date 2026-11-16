@@ -211,7 +211,14 @@ try {
   await page.waitForFunction(() => document.getElementById('context-content').textContent.includes('$0.250000 total') && !document.getElementById('workbench').hidden);
   assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
   await page.locator('#workbench-close').click();
-  check('live cost refresh and passive reopen show the recorded total, including /cost on a dormant session');
+  await open(first.id);
+  manager.appendSummaryUsageReceipt({ id: 'late-desktop-cost', owner: 'fixture', provider: 'desktop-example', model: 'metered-helper',
+    status: 'completed', usage: { cost: { total: 0.125, source: 'provider-reported' } } });
+  manager.appendMessage({ role: 'user', content: 'Late saved transcript row', timestamp: Date.now() });
+  await open(history.id);
+  await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$0.375000 total'));
+  assert.match(await page.locator('#messages').innerText(), /Late saved transcript row/);
+  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
   await page.waitForSelector('#load-earlier:not([hidden])');
   let gap = await page.locator('#conversation').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
   assert.ok(gap < 3, `initial history bottom gap ${gap}`);
@@ -224,6 +231,13 @@ try {
   const after = (await page.locator(`[data-key="${anchor}"]`).boundingBox()).y;
   assert.ok(Math.abs(after - before) < 3, `history anchor moved ${after - before}`);
   check('paged long history preserves its visible scroll anchor');
+  manager.appendSummaryUsageReceipt({ id: 'later-desktop-cost', owner: 'fixture', provider: 'desktop-example', model: 'metered-helper',
+    status: 'completed', usage: { cost: { total: 0.0625, source: 'provider-reported' } } });
+  await send('/cost');
+  await page.waitForFunction(() => document.getElementById('context-content').textContent.includes('$0.437500 total'));
+  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
+  await page.locator('#workbench-close').click();
+  check('live cost refresh and passive reopen show the recorded total, including /cost on a dormant session');
   await page.locator('#jump-bottom').click();
   await page.locator('#prompt').fill('A long draft\n'.repeat(35));
   gap = await page.locator('#conversation').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);

@@ -146,8 +146,8 @@ async function newSession(projectId) {
   const session = await api.createSession(projectId);
   await openSession(session.id);
 }
-async function openSession(id) {
-  if (current()?.id === id && !conversationOf(id).error && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
+async function openSession(id, reload = false) {
+  if (!reload && current()?.id === id && !conversationOf(id).error && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
   saveView(); closeCommandMenu();
   const version = ++switchVersion;
   activeId = id; opening = true;
@@ -158,7 +158,8 @@ async function openSession(id) {
   conversationOf(id).error = '';
   renderSidebar(); renderMessages(true); renderChrome(); hideSidebarOnNarrow();
   try {
-    const result = await api.openSession(id, Boolean(conversationOf(id).loaded));
+    const cachedConversation = conversationOf(id);
+    const result = await api.openSession(id, !reload && Boolean(cachedConversation.loaded), reload ? undefined : cachedConversation.historyRevision);
     if (version !== switchVersion || activeId !== id) return;
     // The worker emits during initialization. get_messages is authoritative at
     // its response boundary, and deltas arriving afterwards continue the reducer.
@@ -166,7 +167,9 @@ async function openSession(id) {
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
     if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
     state.loaded = true;
-    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, stats: result.stats ?? previous.stats });
+    state.historyRevision = result.passive ? result.revision : undefined;
+    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
+      stats: result.stats ?? (result.passive && result.messages ? undefined : previous.stats) });
     if (state.busy) {
       const last = [...state.messages].reverse().find(m => m.kind === 'assistant');
       if (last) state.streaming = last.key;
@@ -1080,7 +1083,9 @@ $('load-earlier').onclick = () => tryAction(async () => {
   if (state.hasMore && state.messages.length <= view.limit) {
     $('load-earlier').disabled = true;
     try {
-      const page = await api.history(id, state.historyBefore);
+      const page = await api.history(id, state.historyBefore, state.historyRevision);
+      if (activeId !== id || conversations.get(id) !== state) return;
+      if (page.reset) { await openSession(id, true); return; }
       prependConversation(state, page.messages); state.historyBefore = page.before; state.hasMore = page.hasMore;
     } catch (error) {
       if (activeId !== id) return;

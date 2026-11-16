@@ -165,10 +165,13 @@ function receiveLaunch(context) {
   send({ type: 'open-session', sessionId: session.id });
 }
 
-function savedHistory(id, before) {
-  const session = store.session(id), project = store.project(session.projectId), transcriptRoot = store.transcriptDirectory(id);
-  if (!fs.readdirSync(transcriptRoot).some(file => file.endsWith('.jsonl'))) return Promise.resolve({ messages: [], before: 0, hasMore: false, total: 0, isStreaming: false, streamingMessage: null });
-  return readHistory({ directory: transcriptRoot, sessionId: id, cwd: project.path, before, limit: 80, coreRoot: path.join(root, 'core/coding-agent') });
+async function savedHistory(id, { before, revision, statsOnly } = {}) {
+  const session = store.session(id), project = store.project(session.projectId), transcriptRoot = store.transcriptDirectory(id, false);
+  if (revision === undefined && before === undefined && !statsOnly) {
+    const files = await fs.promises.readdir(transcriptRoot).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    if (!files.some(file => file.endsWith('.jsonl'))) return { messages: [], before: 0, hasMore: false, total: 0, isStreaming: false, streamingMessage: null };
+  }
+  return readHistory({ directory: transcriptRoot, sessionId: id, cwd: project.path, before, revision, statsOnly, limit: 80, coreRoot: path.join(root, 'core/coding-agent') });
 }
 
 async function workerFor(id) {
@@ -332,7 +335,7 @@ async function dispatch(action, input = {}) {
       const previousWorker = workers.get(input.id);
       if (!previousWorker && !starting.has(input.id)) {
         const session = store.session(input.id);
-        return { state: { model: session.model, thinkingLevel: session.thinkingLevel, isStreaming: false }, ...(input.loaded ? {} : await savedHistory(input.id)), sequence: 0, passive: true };
+        return { state: { model: session.model, thinkingLevel: session.thinkingLevel, isStreaming: false }, ...await savedHistory(input.id, { revision: input.revision }), sequence: 0, passive: true };
       }
       const worker = await workerFor(input.id);
       const reuse = input.loaded && previousWorker === worker;
@@ -340,7 +343,7 @@ async function dispatch(action, input = {}) {
       return { state: { ...state, isStreaming: history.data.isStreaming ?? worker.busy }, ...history.data, sequence: history.sequence };
     }
     case 'warm': await workerFor(input.id); return;
-    case 'history': return workers.has(input.id) ? (await workerFor(input.id)).request('get_messages', { projection: 'desktop', limit: 80, before: input.before }) : savedHistory(input.id, input.before);
+    case 'history': return workers.has(input.id) ? (await workerFor(input.id)).request('get_messages', { projection: 'desktop', limit: 80, before: input.before }) : savedHistory(input.id, { before: input.before, revision: input.revision });
     case 'updateSession': {
       if (!input.patch || Object.keys(input.patch).some(k => !['title', 'draft'].includes(k))) throw Error('Invalid session update.');
       if (Object.keys(input.patch).length === 1 && input.patch.draft !== undefined) { store.setDraft(input.id, text(input.patch.draft)); return; }
@@ -382,9 +385,8 @@ async function dispatch(action, input = {}) {
       await worker.request('set_thinking_level', { level: input.level });
       store.update(input.id, { thinkingLevel: input.level }); publish(); return input.level;
     }
-    // Passive open carries saved totals. Refreshing live totals must not
-    // start a worker just to answer /cost.
-    case 'stats': return workers.has(input.id) ? (await workerFor(input.id)).request('get_session_stats') : null;
+    // A passive /cost refresh only reads transcript accounting.
+    case 'stats': return workers.has(input.id) ? (await workerFor(input.id)).request('get_session_stats') : (await savedHistory(input.id, { statsOnly: true })).stats;
     case 'commands': return (await workerFor(input.id)).request('get_commands');
     case 'checkCommand': return checkCommand(input.id, text(input.message));
     case 'extensionResponse': {
